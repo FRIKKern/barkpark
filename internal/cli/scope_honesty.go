@@ -30,11 +30,16 @@ import (
 // another dataset inside the workspace the operator already named. Reporting one
 // at a time also keeps the message a single actionable sentence — fixing the
 // workspace re-runs the command, and the dataset refusal is then right there.
-func refuseUnrepresentableScope(cmd manifest.Command, ctx manifest.Context) string {
+//
+// `roster` is the full command list the CLI was served this invocation. Only the
+// dataset half reads it, and only to DERIVE the remedy it names — see
+// manifest.DatasetCarryingSiblings for why that sentence may not be frozen in
+// prose. A nil roster is legal and simply drops the derived clause.
+func refuseUnrepresentableScope(cmd manifest.Command, ctx manifest.Context, roster []manifest.Command) string {
 	if msg := refuseUnrepresentableWorkspaceScope(cmd, ctx); msg != "" {
 		return msg
 	}
-	return refuseUnrepresentableDataset(cmd, ctx)
+	return refuseUnrepresentableDataset(cmd, ctx, roster)
 }
 
 // refuseUnrepresentableDataset is the -d half. It fires ONLY when the operator
@@ -47,7 +52,7 @@ func refuseUnrepresentableScope(cmd manifest.Command, ctx manifest.Context) stri
 // repo .barkpark.json, the saved active config, a `-s <entry>`'s saved dataset —
 // and for every typed -d that names the floor. Those are the cases that are
 // CORRECT today, and they keep byte-identical behaviour.
-func refuseUnrepresentableDataset(cmd manifest.Command, ctx manifest.Context) string {
+func refuseUnrepresentableDataset(cmd manifest.Command, ctx manifest.Context, roster []manifest.Command) string {
 	if !manifest.StatedDataset(ctx) {
 		return ""
 	}
@@ -61,14 +66,37 @@ func refuseUnrepresentableDataset(cmd manifest.Command, ctx manifest.Context) st
 		why = d.Reason
 	}
 
+	// The remedy, DERIVED from the roster this invocation was served rather than
+	// remembered in the Reason string. The generic `bp capabilities` clause stays
+	// as the answer for a family with no carrying door at all.
+	remedy := ""
+	if siblings := manifest.DatasetCarryingSiblings(roster, cmd.Noun); len(siblings) > 0 {
+		quoted := make([]string, 0, len(siblings))
+		for _, s := range siblings {
+			quoted = append(quoted, "`bp "+s+"`")
+		}
+		remedy = fmt.Sprintf(" In this family %s %s the dataset.",
+			strings.Join(quoted, ", "), pluralCarry(len(siblings)))
+	}
+
 	return fmt.Sprintf(
 		"`bp %s` cannot carry -d %s — %s. Sending it anyway would answer about "+
 			"%q while you asked about %q, and exit 0. Drop the flag to accept the "+
 			"server's default dataset, or use a command whose route carries the "+
-			"dataset (`bp capabilities` marks them).",
+			"dataset (`bp capabilities` marks them).%s",
 		verb, ctx.Dataset, why,
 		manifest.DefaultDefaults().Dataset, ctx.Dataset,
+		remedy,
 	)
+}
+
+// pluralCarry keeps the derived clause grammatical for a one-verb family, which
+// is the common case and the one the frozen prose used to get right by accident.
+func pluralCarry(n int) string {
+	if n == 1 {
+		return "carries"
+	}
+	return "carry"
 }
 
 // refuseUnrepresentableWorkspaceScope is the original -w/-p half, unchanged.

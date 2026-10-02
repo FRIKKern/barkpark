@@ -154,7 +154,7 @@ check "record says phase=restart outcome=applied (written pre-restart)" \
   "grep -q '\"phase\":\"restart\",\"outcome\":\"applied\"' '$HAPPY/.deploy-status.json'"
 check "record carries the sha" "grep -q '\"sha\":\"deadbeefcafe\"' '$HAPPY/.deploy-status.json'"
 check "the post-restart health probe was actually TAKEN" \
-  "grep -q '^curl .*api/schemas' '$CALL_LOG'"
+  "grep -q '^curl .*status[.]json' '$CALL_LOG'"
 check "the probe ran AFTER the restart" \
   "[ \"\$(line_no '$CALL_LOG' '^curl ')\" -gt \"\$(line_no '$CALL_LOG' '^sudo systemctl restart barkpark$')\" ]"
 check "the receipt cites the measured 200, not systemd's acceptance" \

@@ -87,6 +87,29 @@ defmodule Barkpark.Plugins.Quiz do
     ]
   end
 
+  # The desk entry that keeps quizzes authorable. Without it a workspace with no
+  # quiz yet had NO way to create one: the …Rest census only lists types that
+  # already hold documents, and the generic Content group rejects plugin-owned
+  # types. Gated on the schema existing in the dataset (tickets.ex precedent).
+  @impl Barkpark.Plugin
+  def desk_items(dataset) do
+    if schema_present?("quiz", dataset) do
+      [%{type: :document_list, label: "Quizzes", doc_type: "quiz", icon: "help-circle"}]
+    else
+      []
+    end
+  end
+
+  # Failure-safe probe: no DB sandbox / no Repo (boot, registration-time
+  # fingerprint) must never crash the desk — no schema reachable, no entry.
+  defp schema_present?(name, dataset) do
+    match?({:ok, _}, Barkpark.Content.get_schema(name, dataset))
+  rescue
+    _ -> false
+  catch
+    _, _ -> false
+  end
+
   # The `quiz` document type. PRIVATE visibility: the doc stores the correct
   # answer inline, so it must NOT be anonymously readable via the public content
   # API (the Room loads it server-side and broadcasts an answer-stripped

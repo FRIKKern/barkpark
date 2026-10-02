@@ -23,6 +23,7 @@ defmodule Barkpark.Tasks.Query do
   alias Barkpark.Content.Document
   alias Barkpark.Content.Scope
   alias Barkpark.Tasks.Edge
+  alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.TaskResolver
 
   @rows_default_limit 500
@@ -100,6 +101,34 @@ defmodule Barkpark.Tasks.Query do
   def maybe_filter_dataset(query, dataset), do: from(d in query, where: d.dataset == ^dataset)
 
   @doc """
+  The DELTA-READ narrowing behind `GET /v1/tasks?updated_since=<iso8601>`.
+
+  `d.updated_at` is the row's own write watermark — every task mutation
+  re-stamps it (that is what makes the default `desc: updated_at` ordering
+  mean "most recently touched first"), so ">= a timestamp" IS "changed since
+  that moment" with no new column, no new index beyond the ordering one, and
+  no second store.
+
+  The comparison is INCLUSIVE on purpose. Its caller echoes an `as_of`
+  watermark read from the clock BEFORE the query runs, and a client feeds that
+  back on the next poll; an exclusive `>` would drop a row whose `updated_at`
+  landed exactly on the watermark, and a delta read that can silently drop a
+  row is worse than one that occasionally repeats it. The bias is OVERLAP,
+  never GAP.
+
+  WHAT THIS DOES NOT CARRY: a deletion. A row that leaves the corpus has no
+  later `updated_at` to report, so a delta caller learns about disappearance
+  only from a periodic full walk (or from `/v1/tasks/events`, which does carry
+  tombstones). Documented rather than faked.
+  """
+  def maybe_filter_updated_since(query, nil), do: query
+
+  def maybe_filter_updated_since(query, %DateTime{} = since),
+    do: from(d in query, where: d.updated_at >= ^since)
+
+  def maybe_filter_updated_since(query, _), do: query
+
+  @doc """
   Twin collapse (published-wins) — the ONE owner of the "count a twinned task
   once" law for every task READ path.
 
@@ -151,6 +180,162 @@ defmodule Barkpark.Tasks.Query do
           d.project_id
         )
     )
+  end
+
+  # The resolver's TIER for a row: published spelling AND `status: published`
+  # = 2, published spelling = 1, `drafts.` twin = 0. The SAME expression
+  # `Barkpark.Tasks.Queue`'s `@twin_tier_sql` carries, INLINED in the
+  # correlated subqueries below (a module attribute cannot be interpolated into
+  # the middle of a heredoc `fragment/1` literal) and pinned to queue.ex's copy
+  # by `query_cross_dataset_equivalence_test.exs`.
+
+  @doc """
+  CROSS-DATASET twin collapse — `Barkpark.Tasks.TwinResolver` rule 3 at a
+  LISTING, for the child-rail readers.
+
+  Not a second rule: `collapse_twins/1` above is the DRAFT axis (it requires
+  `twin.dataset = d.dataset` by design, because a dataset is a real tenant
+  boundary and a same-id row in another dataset is not a shadow of this one).
+  This is the DATASET axis of the same rule, and it is the predicate
+  `Barkpark.Tasks.Queue.maybe_collapse_cross_dataset_twins/2` applies to the
+  ready page — written here in the fragment form because these bases do not
+  bind `as: :doc`, and pinned to that one by
+  `test/barkpark/tasks/query_cross_dataset_equivalence_test.exs`.
+
+  A row is suppressed when a task of the same `drafts.`-stripped doc_id, same
+  workspace+project, in a DIFFERENT dataset, TIES OR BEATS its tier. Both
+  consequences are the rule:
+
+    * a UNIQUE winning tier leaves exactly ONE row (rules 1+2 — no comparison
+      of dataset STRINGS decides which);
+    * a TIE at the winning tier suppresses BOTH (rule 3 — the reader does not
+      pick a dataset the caller did not name). Use
+      `cross_dataset_ambiguous_ids/1` to NAME what was withheld; a listing that
+      silently drops a row is the same dishonesty as one that silently picks.
+
+  Caller-gated: apply it only when the caller named NO dataset. `?dataset=` IS
+  the disambiguation, so a dataset-scoped read has nothing left to be
+  ambiguous about and must read byte-identically.
+
+  WHY THIS EXISTS (task-49eef068420df918, measured live on guerrilla
+  2026-09-06). `documents` is unique on `(doc_id, type, dataset_id)`, so one
+  task doc_id may live in two datasets of one workspace+project — eleven such
+  pairs, ten of them children of ONE epic. `child_tasks/2` and
+  `batch_child_counts/2` collapsed the DRAFT axis and not this one, so
+  `bp task get <epic>` reported `child_count: 18` for nine children and listed
+  each child TWICE — ids its own by-id door (`fetch_task_exact/4` →
+  `TwinResolver`) refuses with a 409. A listing that serves ids its own by-id
+  reader will not resolve is the ready/claim disagreement one door over.
+  """
+  def collapse_cross_dataset_twins(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  >= (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                           WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        )
+    )
+  end
+
+  @doc """
+  The doc_ids `collapse_cross_dataset_twins/1` WITHHELD from `query`, each with
+  the dataset set it spans — the naming half of rule 3 at a listing, the same
+  shape `GET /v1/tasks/ready` renders in `page.dataset_ambiguous`.
+
+  A by-id door answers rule 3 with a 409 naming every dataset. A listing cannot
+  refuse the whole page over one ambiguous id, so the refusal is scoped to the
+  ROW it is about: the id contributes no row, and appears exactly ONCE here
+  naming the datasets the caller may choose between with `?dataset=`.
+
+  `query` is the SAME base the collapse is applied to (minus the collapse), so
+  the two cannot describe different populations. Returns a doc_id-sorted list
+  of `%{doc_id: String.t(), datasets: [String.t()]}`; `[]` when nothing is
+  ambiguous.
+  """
+  def cross_dataset_ambiguous_ids(query) do
+    from(d in query,
+      where:
+        fragment(
+          """
+          EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  = (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                          WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        ),
+      where:
+        fragment(
+          """
+          NOT EXISTS (
+            SELECT 1 FROM documents AS xtwin
+            WHERE xtwin.type = 'task'
+              AND regexp_replace(xtwin.doc_id, '^drafts\\.', '')
+                  = regexp_replace(?, '^drafts\\.', '')
+              AND xtwin.dataset IS DISTINCT FROM ?
+              AND xtwin.workspace_id IS NOT DISTINCT FROM ?
+              AND xtwin.project_id IS NOT DISTINCT FROM ?
+              AND (CASE WHEN xtwin.doc_id NOT LIKE 'drafts.%' AND xtwin.status = 'published' THEN 2
+                        WHEN xtwin.doc_id NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+                  > (CASE WHEN ? NOT LIKE 'drafts.%' AND ? = 'published' THEN 2
+                          WHEN ? NOT LIKE 'drafts.%' THEN 1 ELSE 0 END)
+          )
+          """,
+          d.doc_id,
+          d.dataset,
+          d.workspace_id,
+          d.project_id,
+          d.doc_id,
+          d.status,
+          d.doc_id
+        ),
+      select: %{
+        doc_id: fragment("regexp_replace(?, '^drafts\\.', '')", d.doc_id),
+        dataset: d.dataset
+      }
+    )
+    |> Repo.all()
+    |> Enum.group_by(& &1.doc_id, & &1.dataset)
+    |> Enum.map(fn {doc_id, datasets} ->
+      %{doc_id: doc_id, datasets: datasets |> Enum.uniq() |> Enum.sort()}
+    end)
+    |> Enum.filter(&(length(&1.datasets) > 1))
+    |> Enum.sort_by(& &1.doc_id)
   end
 
   # ── the id-prefix lookup (cchi-bl-task-get-needs-a-server-side-prefix-lookup) ──
@@ -324,6 +509,13 @@ defmodule Barkpark.Tasks.Query do
 
   @doc "The filtered, scoped, ordered task Documents for a block `query` map."
   def docs_for_query(query, scope) when is_map(query) do
+    query |> docs_query(scope) |> Repo.all()
+  end
+
+  # The unexecuted Ecto query behind `docs_for_query/2` — ONE builder, so the
+  # reference test (`references_any?/4`) runs the exact predicate a paper read
+  # resolves with.
+  defp docs_query(query, scope) do
     ws_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
     limit = clamp_limit(Map.get(query, "limit"))
@@ -331,6 +523,7 @@ defmodule Barkpark.Tasks.Query do
 
     from(d in Document, where: d.type == "task", limit: ^limit)
     |> collapse_twins()
+    |> maybe_published_only(scope)
     |> Scope.scope_to_workspace(ws_id, project_id)
     |> maybe_filter_dataset(Map.get(query, "dataset"))
     |> maybe_filter_kind(Map.get(query, "kind"))
@@ -338,7 +531,85 @@ defmodule Barkpark.Tasks.Query do
     |> apply_labels(Map.get(query, "label") || Map.get(query, "labels"))
     |> apply_statuses(Map.get(query, "status"))
     |> apply_index_order(parent)
-    |> Repo.all()
+  end
+
+  @doc """
+  Could a transition of any task in `task_ids` (document UUIDs) change what a
+  paper block carrying `query` renders? `class` is `:rows` for a task-row block
+  (`query` is the row-query map `rows_for_query/3` reads) or `:agg` for a
+  data-viz block (`query["filter"]` is what `agg_for_query/3` reads).
+
+  Runs the SAME builder the read runs (`docs_query/2` / `agg_query/2`),
+  restricted to `task_ids`, with ONE deliberate relaxation: the `status`
+  predicate is dropped. A CAS transition is precisely a status change, and a
+  task LEAVING a status-filtered board (an `open` board losing the task that
+  just got claimed) is as visible as one entering it — while the post-write row
+  only shows the entering half. Every other predicate (tenancy, twin collapse,
+  dataset, kind, parent, labels) is evaluated exactly. A superset, never a
+  subset: over-matching costs one spurious cache bust, under-matching a stale
+  page.
+  """
+  @spec references_any?(map(), :rows | :agg, keyword(), [Ecto.UUID.t()]) :: boolean()
+  def references_any?(_query, _class, _scope, []), do: false
+
+  def references_any?(query, :rows, scope, task_ids) when is_map(query) do
+    query
+    |> Map.delete("status")
+    |> docs_query(scope)
+    |> restrict_ids(task_ids)
+  end
+
+  def references_any?(query, :agg, scope, task_ids) when is_map(query) do
+    case Map.get(query, "source", "tasks") do
+      "tasks" ->
+        query
+        |> filter_of()
+        |> Map.delete("status")
+        |> agg_query(scope)
+        |> restrict_ids(task_ids)
+
+      _other ->
+        false
+    end
+  end
+
+  def references_any?(_query, _class, _scope, _task_ids), do: false
+
+  defp restrict_ids(q, ids) do
+    from(d in Ecto.Query.exclude(q, :order_by), where: d.id in ^ids)
+    |> Repo.exists?()
+  end
+
+  # D5 published-perspective gate for the LIVE-plan task fetcher — the twin of
+  # `Barkpark.Content.Query.maybe_published_only/2` (wikilinks/values/labels),
+  # keyed off the SCOPE keyword list because that is what every task-block
+  # resolver already threads (`Papers.resolve_tasks_in_blocks/3` takes a scope,
+  # not an opts bag).
+  #
+  # Why it is needed at all: `collapse_twins/1` suppresses a `drafts.<id>`
+  # shadow ONLY when a distinct PUBLISHED twin exists in the same scope — by
+  # its own documented design an UNPAIRED shadow survives. Every task written
+  # through `/v1/data/mutate` (i.e. every `bp task create`) lives at
+  # `drafts.<id>` with no twin, so without this conjunct a task block on a
+  # PUBLISHED paper handed an ANONYMOUS reader the titles/statuses of tasks that
+  # were never published (task-b10e10b944f6f55b).
+  #
+  # `published_only: true` ⇒ published rows only; absent/false ⇒ query untouched,
+  # which is what keeps the AUTHORISED paths (Studio's session-scoped preview,
+  # a preview-JWT / edit-share source read) showing draft tasks exactly as
+  # before. The `drafts.` prefix conjunct mirrors `apply_perspective(:published)`
+  # belt-and-braces: a `drafts.`-prefixed row is never published even if its
+  # status column reads "published".
+  defp maybe_published_only(query, scope) do
+    if Keyword.get(scope, :published_only, false) do
+      prefix = DraftId.drafts_prefix() <> "%"
+
+      from(d in query,
+        where: d.status == "published" and not like(d.doc_id, ^prefix)
+      )
+    else
+      query
+    end
   end
 
   # ── the aggregate/rollup fetcher (v1 = COUNT-ONLY) ──────────────────────────
@@ -556,7 +827,9 @@ defmodule Barkpark.Tasks.Query do
   # Scoped, filtered task Documents for an aggregate — reuses the EXACT same
   # `Scope.scope_to_workspace/3` + `maybe_filter_*` composables as
   # `docs_for_query/2` so the tenancy boundary and filter semantics can't drift.
-  defp agg_docs(filter, scope) do
+  defp agg_docs(filter, scope), do: filter |> agg_query(scope) |> Repo.all()
+
+  defp agg_query(filter, scope) do
     ws_id = Keyword.get(scope, :workspace_id)
     project_id = Keyword.get(scope, :project_id)
 
@@ -568,7 +841,6 @@ defmodule Barkpark.Tasks.Query do
     |> maybe_filter_parent_id(Map.get(filter, "parent_id"))
     |> apply_labels(Map.get(filter, "label") || Map.get(filter, "labels"))
     |> apply_statuses(Map.get(filter, "status"))
-    |> Repo.all()
   end
 
   # ── groupBy / over normalisation (closed-whitelist gate) ────────────────────
@@ -929,12 +1201,19 @@ defmodule Barkpark.Tasks.Query do
   # empty-list shape. LEFT UNGATED (board.ex count-vs-text law): `title`
   # (promoted, `@system_filterable`), `lifecycle_status` (system-filterable),
   # and the two derived COUNTS — `dependency_count` and `criteria_progress` —
-  # which carry no field text, only cardinality.
+  # which carry no field text, only cardinality. `doc_id` joins that ungated set
+  # (PDS-D749, task-b258d691989c7a99): it is the document's ADDRESS, not schema
+  # field text — the same class as `title` — and it is the ONLY carrier of the
+  # `drafts.` spelling this projection can still see. `row_from_task/1` reads it
+  # to derive the row's `draft` boolean; strip it here and no painter downstream
+  # can label a draft even in principle. It is not itself projected onto the
+  # snapshot row.
   defp to_render_map(%Document{} = doc, unmet, readable?) do
     content = doc.content || %{}
 
     %{
       "title" => doc.title,
+      "doc_id" => doc.doc_id,
       "lifecycle_status" => Map.get(content, "lifecycle_status"),
       "priority" => if(readable?.("priority"), do: Map.get(content, "priority")),
       "assignee" => if(readable?.("assignee"), do: Map.get(content, "assignee")),

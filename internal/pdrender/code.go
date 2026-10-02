@@ -3,6 +3,8 @@ package pdrender
 import (
 	"crypto/sha256"
 	"encoding/binary"
+	"math"
+	"strconv"
 	"strings"
 	"sync"
 
@@ -19,8 +21,14 @@ import (
 // the prose renderers this goes through chroma DIRECTLY (not glamour) for full
 // control over the chrome.
 //
-// The portable-doc `code` block has NO `lang` field, so we let chroma's
-// lexers.Analyse(source) guess the language; on a miss we fall back to the
+// The portable-doc `code` block MAY carry a `lang` field — the one spelling the
+// BPML/authoring model uses everywhere (from_markdown code fences, the Studio
+// code-block editor's `Map.get(@block, "lang", "")`, and the canvas code node).
+// It is NOT `language`: that key belongs to `code-tabs` tab entries, a different
+// block type, and a standalone `code` block never carries it (the BPML kernel's
+// @block_attrs["code"] is just `id`, so a round-trip cannot introduce it). When
+// `lang` is present it names the chroma lexer directly; absent, we let
+// lexers.Analyse(source) guess the language, and on a miss we fall back to the
 // plaintext lexer (lexers.Get("text")). The chroma style name is theme-driven
 // (Theme.ChromaStyle: "github" light / "monokai"|"dracula" dark). The FORMATTER
 // is chosen by ctx.Profile so the emitted SGR escapes match the terminal's
@@ -73,33 +81,32 @@ type codeKey struct {
 }
 
 func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
-	// Field-name reconciliation (verified against live Bulldocs JSON): code
-	// blocks emit their source under EITHER `code` (the newer shape, e.g.
-	// {"type":"code","code":"…","language":"bash"}) OR `value` (the legacy/
-	// flat-mode shape render.ex's compose_block reads). Prefer the live `code`
-	// key, fall back to `value`; likewise `language`||`lang`. Without this dual
-	// read a real `code`-shaped block renders as an EMPTY accent bar.
-	source := attrStrFirst(b.Attrs, "code", "value")
-	lang := attrStrFirst(b.Attrs, "language", "lang") // usually absent; tolerated.
+	// THE code-block source-field contract — see codeSource at the bottom of this
+	// file. Both engines read the same four keys in the same order; the shared
+	// fixture ../../api/test/support/fixtures/code-source-aliases.json is the lock.
+	source := codeSource(b.Attrs)
+	lang := attrStrFirst(b.Attrs, "lang") // the one authored spelling (never `language`); usually absent, tolerated.
+	emphasis := codeEmphasis(b.Attrs)     // line-emphasis ranges; see codeEmphasis at the bottom of this file.
 
 	// A blank or whitespace-only source renders NOTHING — no lines, no accent
 	// bar. This mirrors the Elixir composer since #14806 (a sourceless code
 	// block composes to nothing, not an empty box); before this guard the Go
 	// readers painted a lone "▌" where the web rendered nothing, a View/TUI
 	// parity break on the same block (task-841c27ea82903f48). Checked before
-	// the cache key so the empty case never occupies a slot. Re-expressed
-	// through the shared blankAttr leaf reader (blank.go) when the four other
-	// media guards landed, exactly as compose.ex re-expressed
-	// `blank_code_source?/1` through `blank_field?/2` in #14991 — one definition
-	// of blank, applied to code's documented dual-read (`code`||`value`).
-	// Behaviour-identical for every string/nil case; a non-stringish (map) value
-	// now reads as blank, which is what compose.ex has always said.
-	if blankAttr(b.Attrs, "code") && blankAttr(b.Attrs, "value") {
+	// the cache key so the empty case never occupies a slot. Expressed as
+	// "the SELECTED source is blank" so the guard and the emitter can never
+	// disagree about which keys count — the same collapse compose.ex made when
+	// `blank_code_source?/1` became `code_source(b) == ""`. A non-stringish (map)
+	// value reads as blank, which is what compose.ex has always said.
+	if strings.TrimSpace(source) == "" {
 		return nil
 	}
 
 	key := codeKey{
-		hash:    hashStrings(source, lang),
+		// The emphasis ranges are part of the CONTENT axis: two blocks with the
+		// same source and lang but different emphasis render differently, so a
+		// key that ignored them would serve one block's gutter for the other's.
+		hash:    hashStrings(append([]string{source, lang}, emphasisKeyParts(emphasis)...)...),
 		width:   ctx.Width,
 		themeID: ctx.Theme.themeID, // theme identity (ts-w4c)
 		mode:    ctx.Theme.name,    // Theme.name holds the light/dark mode
@@ -115,7 +122,7 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 	cr.misses++
 	cr.mu.Unlock()
 
-	lines := cr.render(source, lang, ctx)
+	lines := cr.render(source, lang, emphasis, ctx)
 
 	cr.mu.Lock()
 	if len(cr.cache) >= maxCodeCacheEntries {
@@ -127,7 +134,7 @@ func (cr *codeRenderer) Render(b Block, ctx RenderCtx) []string {
 }
 
 // render is the un-memoized body: lex → highlight → chrome.
-func (cr *codeRenderer) render(source, lang string, ctx RenderCtx) []string {
+func (cr *codeRenderer) render(source, lang string, emphasis []emphasisRange, ctx RenderCtx) []string {
 	const chrome = 2 // "▌ " bar (2)
 	inner := ctx.Width - chrome
 	if inner < MinWidth {
@@ -146,7 +153,21 @@ func (cr *codeRenderer) render(source, lang string, ctx RenderCtx) []string {
 		header := ctx.Theme.Dim.Render(strings.ToUpper(name))
 		out = append(out, bar+" "+header)
 	}
-	for _, line := range highlighted {
+	for i, line := range highlighted {
+		// LINE EMPHASIS (pe-bl-code-emphasis). The gutter stays exactly 2 cells
+		// wide — the bar glyph plus a separator — so an emphasized block wraps
+		// identically to a plain one; only the two gutter cells change. The
+		// separator carries a tone SIGIL and the bar is restyled through
+		// Theme.Callout, which means the emphasis is legible BOTH in colour and
+		// in the NoColor profile (where lipgloss emits no escapes and the sigil
+		// is all that is left). The code text itself is untouched: chroma has
+		// already coloured it, and layering a lipgloss foreground over its SGR
+		// runs would fight the highlighter rather than annotate it.
+		if tone, ok := emphasisToneAt(emphasis, i+1); ok {
+			toneBar, _ := ctx.Theme.Callout(emphasisCalloutTone[tone])
+			out = append(out, toneBar.Render("▌")+emphasisSigil[tone]+line)
+			continue
+		}
 		out = append(out, bar+" "+line)
 	}
 	return out
@@ -282,4 +303,191 @@ func hashStrings(parts ...string) uint64 {
 	}
 	sum := h.Sum(nil)
 	return binary.BigEndian.Uint64(sum[:8])
+}
+
+// ── THE code-block source-field contract (task-e9af9f95d290307d) ─────
+//
+// A standalone `code` block carries its source under one of FOUR keys. This is
+// not a design; it is the corpus. Measured 2026-09-11 against
+// https://guerrilla.barkpark.cloud, dataset `production`, over all 1050 `paper`
+// and 8671 `task` documents (10,608 block-level `code` nodes):
+//
+//	value    9711   the canonical shape; every first-party producer writes it
+//	code      327   this repo's own mdlite adapter (internal/taskboard/mdlite.go)
+//	                and agent-authored JSON; ALL 219 task-side code blocks
+//	text      460   agent-authored paper JSON
+//	content    30   agent-authored paper JSON, an inline-node ARRAY
+//	both        0   no live row carries two non-blank source keys
+//
+// Before this list, Go read `code`||`value` while compose.ex read `value` ONLY,
+// so 817 authored blocks were hollow on every web/email surface and 327 of them
+// were full here — the same document full in one reader and hollow in another.
+// api/lib/barkpark/portable_doc/render/compose.ex `code_source/1` now reads THIS
+// list in THIS order, and api/test/support/fixtures/code-source-aliases.json is
+// the single file both engines' tests assert against (one file, not a mirror
+// pair: a mirror pair can drift, a shared file cannot).
+//
+// PRECEDENCE is FIRST NON-BLANK, not first-present: a leading key holding "" or
+// whitespace falls through, so a Studio-seeded empty `value` cannot mask a real
+// `code`. That is a deliberate difference from attrStrFirst, which compares
+// against "" untrimmed. `value` leads (it did NOT before) because it is the
+// canonical field and because api bpml/printer.ex has printed exactly
+// ["value","code","content","text"] since it was written — one order, reused.
+// With `both` = 0 in the corpus the order is unobservable on live data.
+//
+// The winning key is returned VERBATIM: trimming is the selection rule, never a
+// transform on the source.
+var codeSourceKeys = []string{"value", "code", "content", "text"}
+
+func codeSource(m map[string]any) string {
+	for _, k := range codeSourceKeys {
+		source := codeSourceText(m, k)
+		if strings.TrimSpace(source) != "" {
+			return source
+		}
+	}
+	return ""
+}
+
+// codeSourceText reads ONE key as source text: a stringish leaf through the
+// shared stringishAttr reader, or an inline-node ARRAY (the `content` shape)
+// flattened to its concatenated text. Mirrors compose.ex `code_source_text/1`.
+func codeSourceText(m map[string]any, key string) string {
+	if m == nil {
+		return ""
+	}
+	if nodes, ok := m[key].([]any); ok {
+		var sb strings.Builder
+		for _, n := range nodes {
+			switch v := n.(type) {
+			case string:
+				sb.WriteString(v)
+			case map[string]any:
+				if s := stringishAttr(v, "value"); s != "" {
+					sb.WriteString(s)
+				} else {
+					sb.WriteString(stringishAttr(v, "text"))
+				}
+			}
+		}
+		return sb.String()
+	}
+	return stringishAttr(m, key)
+}
+
+// ── THE code-block LINE-EMPHASIS contract (pe-bl-code-emphasis) ──────────────
+//
+// A `code` block MAY carry `emphasis`: a JSON ARRAY of {from, to, tone} range
+// objects over the SELECTED source (codeSource above), 1-BASED and INCLUSIVE,
+// with `to` optional and defaulting to `from`. The tone vocabulary is CLOSED —
+// comment / offending / fixed — and a range whose tone is outside it, whose
+// `from` is not a whole number >= 1, or whose `to` is below `from`, is DROPPED.
+// Overlaps resolve FIRST-IN-ARRAY-ORDER.
+//
+// This mirrors compose.ex `code_emphasis/1` clause for clause. The shared
+// fixture ../../api/test/support/fixtures/code-block-emphasis-parity.json is the
+// one file the Go, Elixir and JS legs all assert against — one file, not a
+// mirror trio: a mirror can drift, a shared file cannot.
+//
+// NOTE ON STRICTNESS: line numbers are read with emphasisLine, NOT attrInt.
+// attrInt deliberately coerces a numeric STRING ("3" → 3) because attribute
+// values arrive stringly-typed all over the corpus; emphasis does not get that
+// tolerance, because Elixir's `is_integer(from)` guard does not, and a leg that
+// accepted "3" where the composer dropped it would put the wash on a different
+// line in the TUI than on the web. The fixture carries a `"from": "3"` case for
+// exactly this reason.
+type emphasisRange struct {
+	from, to int
+	tone     string
+}
+
+// emphasisSigil is the separator cell (the second of the gutter's two) per tone.
+// The diff vocabulary is deliberate: a reader who has ever read a patch knows
+// what '-' and '+' mean without a legend, and '~' reads as an aside.
+var emphasisSigil = map[string]string{
+	"comment":   "~",
+	"offending": "-",
+	"fixed":     "+",
+}
+
+// emphasisCalloutTone maps the code-emphasis vocabulary onto the callout tone
+// palette the theme already resolves — the same pairing paper-surface.css makes
+// on the web side (comment→neutral, offending→danger, fixed→success), so the
+// TUI and the reader agree about which tone is a verdict and which is an aside.
+var emphasisCalloutTone = map[string]string{
+	"comment":   "neutral",
+	"offending": "danger",
+	"fixed":     "success",
+}
+
+func codeEmphasis(m map[string]any) []emphasisRange {
+	raw := attrSlice(m, "emphasis")
+	if len(raw) == 0 {
+		return nil
+	}
+	out := make([]emphasisRange, 0, len(raw))
+	for _, entry := range raw {
+		obj, ok := entry.(map[string]any)
+		if !ok {
+			continue
+		}
+		tone := strings.TrimSpace(attrStr(obj, "tone"))
+		if _, known := emphasisSigil[tone]; !known {
+			continue
+		}
+		from, ok := emphasisLine(obj["from"])
+		if !ok || from < 1 {
+			continue
+		}
+		to := from
+		if v, present := obj["to"]; present && v != nil {
+			to, ok = emphasisLine(v)
+			if !ok {
+				continue
+			}
+		}
+		if to < from {
+			continue
+		}
+		out = append(out, emphasisRange{from: from, to: to, tone: tone})
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
+}
+
+// emphasisLine reads ONE line number: a whole JSON number only. A string, a
+// bool, a fraction or a missing key all fail — see the strictness note above.
+func emphasisLine(v any) (int, bool) {
+	switch n := v.(type) {
+	case int:
+		return n, true
+	case int64:
+		return int(n), true
+	case float64:
+		if n == math.Trunc(n) && n >= math.MinInt64 && n < math.MaxInt64 {
+			return int(n), true
+		}
+	}
+	return 0, false
+}
+
+// emphasisToneAt returns the tone for a 1-based line, first range wins.
+func emphasisToneAt(ranges []emphasisRange, line int) (string, bool) {
+	for _, r := range ranges {
+		if line >= r.from && line <= r.to {
+			return r.tone, true
+		}
+	}
+	return "", false
+}
+
+// emphasisKeyParts flattens the ranges into the memo key's content axis.
+func emphasisKeyParts(ranges []emphasisRange) []string {
+	parts := make([]string, 0, len(ranges))
+	for _, r := range ranges {
+		parts = append(parts, r.tone+":"+strconv.Itoa(r.from)+"-"+strconv.Itoa(r.to))
+	}
+	return parts
 }

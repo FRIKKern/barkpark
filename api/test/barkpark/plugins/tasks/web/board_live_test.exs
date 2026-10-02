@@ -289,6 +289,8 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
              )
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the Projects link survives into the built desk tree" do
       tree = Barkpark.Structure.build("projects_desk_probe")
 
@@ -429,7 +431,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
 
     test "the readable? predicate redacts EXACTLY the 7 gated text/PII fields, ungated stays" do
       # A predicate that marks the schema-private text/PII fields unreadable —
-      # the same set `to_card/4` gates. `lifecycle_status`/`github`/
+      # the same set `to_card/5` gates. `lifecycle_status`/`github`/
       # `github_synced`/`blocker_statuses` are NOT in this set (parity law).
       private = ~w(priority parent_id labels assignee claim description design_doc
                    acceptance_criteria)
@@ -681,6 +683,77 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       assert after_repeat == after_two
     end
 
+    # The echo set is fed by the DATASET-GLOBAL topic `documents:production`, so
+    # before the bound every task write anywhere in the dataset left a permanent
+    # `{doc_id, updated_at}` tuple on this socket's heap, and `:refresh` walked
+    # past it. These two tests hold the bound AND the feature it must not eat.
+    test "the seen-set is bounded — many dataset writes cannot grow it past the cap",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      [cap] = BoardLive.__info__(:attributes)[:seen_cap]
+
+      # Well past the cap, each event a DISTINCT key (a fresh doc_id), which is
+      # exactly the shape the global topic delivers under campaign write load.
+      #
+      # The flood is CLOSE events. The seen-set keys on {doc_id, updated_at} and
+      # never looks at the lifecycle, so any distinct-key task event proves the
+      # bound equally. But a CLAIM puts each flood card in the unwindowed
+      # in-progress column, so every one of the cap * 3 re-renders paints every
+      # card before it: quadratic in the flood, 38 s on CI and past ExUnit's
+      # 60 s timeout on a loaded box. Done is the windowed column, so the render
+      # stays bounded and the test measures the set, not the painter.
+      for i <- 1..(cap * 3) do
+        send(view.pid, closed_event("flood-#{i}", "Flood #{i}"))
+      end
+
+      _ = render(view)
+
+      assert Process.alive?(view.pid)
+
+      seen = :sys.get_state(view.pid).socket.assigns.seen
+
+      # RED-BEFORE (unbounded MapSet): size == cap * 3.
+      assert seen.size <= cap,
+             "echo set grew to #{seen.size}, past the #{cap} cap"
+
+      # Non-vacuity: the flood really did reach the seen-set — a bound that
+      # holds because nothing was ever recorded would prove nothing.
+      assert seen.size == cap
+
+      # The bookkeeping is self-consistent: the FIFO and the lookup set never
+      # drift, or eviction would delete a key that is still current.
+      assert MapSet.size(seen.set) == seen.size
+      assert :queue.len(seen.order) == seen.size
+    end
+
+    test "echo suppression survives the bound — a repeat inside the window is still dropped",
+         %{conn: conn} do
+      {:ok, view, _html} = live(conn, "/admin/projects")
+
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      _ = render(view)
+      send(view.pid, closed_event("rt-wip", "Already working"))
+      _ = render(view)
+
+      # A handful of unrelated dataset writes — nowhere near the cap, so the
+      # rt-open key is still held.
+      for i <- 1..10, do: send(view.pid, claimed_event("noise-#{i}", "Noise #{i}"))
+      _ = render(view)
+
+      seen = :sys.get_state(view.pid).socket.assigns.seen
+      assert seen_has?(seen, "rt-open")
+
+      # Re-sending the FIRST event verbatim is still dropped: the flash does not
+      # jump back to rt-open. Compare only the board region that the echo would
+      # disturb — the noise above legitimately changed the rest of the render.
+      before_repeat = render(view)
+      send(view.pid, claimed_event("rt-open", "Claim me"))
+      after_repeat = render(view)
+
+      assert after_repeat == before_repeat
+    end
+
     test "the periodic :refresh re-snapshots without crashing", %{conn: conn} do
       {:ok, view, _html} = live(conn, "/admin/projects")
 
@@ -776,6 +849,70 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       ws = Barkpark.Tenancy.get_default_workspace()
       assert ws, "the Default workspace must be seeded (backfill migration)"
       {:ok, ws: ws}
+    end
+
+    # ── THE THIRD FORK (bp-task-verbs-500-on-cross-dataset-duplicate-slugs) ──
+    # `documents` is unique on `(doc_id, type, dataset_id)`, so a task doc_id can
+    # hold a row in two datasets — eleven such pairs live on guerrilla. The
+    # board's restage fresh-read filtered on doc_id + type + workspace and NOT on
+    # the board's own `@dataset`, so for those ids `Repo.one/1` matched two rows
+    # and raised `Ecto.MultipleResultsError` — the LiveView process dying mid-
+    # drag, not a refusal.
+    #
+    # THE DRAG NEEDS BOTH HALVES, and the read half alone is not enough — which
+    # is why the claim carries `dataset: @dataset` too. Measured by reverting
+    # `board_live.ex` and re-running this file (117 tests, 1 failure, this one):
+    #
+    #   * without the read filter — `Ecto.MultipleResultsError, expected at most
+    #     one result but got 2` out of `fetch_task_exact/2`;
+    #   * with the read filter but without `dataset:` in the restage scope —
+    #     `Barkpark.Tasks.AmbiguousTwinError` out of `Tasks.claim_by_id/3`,
+    #     because `{:claim}` is the one restage arm that re-resolves by doc_id
+    #     (the others carry the uuid).
+    #
+    # Either way the LiveView process EXITS mid-drag. This is the only arm in
+    # the file that depends on either half; the other 116 stay green across both
+    # reverts, which is what makes them the control that nothing narrowed the
+    # ordinary path.
+    test "a cross-dataset TWIN of a board card does not crash the drag — the board's own dataset wins",
+         %{conn: conn, ws: ws} do
+      scoped_task("dr-twin", "Claim me by drag", ws.id,
+        lifecycle: "open",
+        priority: 1,
+        criteria: [
+          %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
+        ]
+      )
+
+      # The same doc_id, same workspace, ANOTHER dataset. It was never a card on
+      # this board (the board subscribes, snapshots and gates on `production`
+      # alone), so it must not be a candidate for this board's write either.
+      twin =
+        Repo.insert!(%Document{
+          doc_id: "dr-twin",
+          type: "task",
+          dataset: "aker-brygge",
+          status: "published",
+          title: "the twin nobody dragged",
+          rev: "rev-dr-twin-aker",
+          workspace_id: ws.id,
+          content: %{"lifecycle_status" => "open"}
+        })
+
+      {:ok, view, _html} = live(conn, "/admin/projects")
+      html = render_hook(view, "restage", %{"doc_id" => "dr-twin", "to_col" => "in_progress"})
+
+      assert html =~ ~s(data-col="in_progress" data-doc-id="dr-twin")
+
+      claimed = Repo.get_by(Document, doc_id: "dr-twin", dataset: "production")
+      assert claimed.content["lifecycle_status"] == "in_progress"
+      assert get_in(claimed.content, ["claim", "worker"]) == "studio:admin"
+
+      # The other dataset's row is untouched — narrowing never writes a second
+      # row as a side effect.
+      untouched = Repo.get!(Document, twin.id)
+      assert untouched.content["lifecycle_status"] == "open"
+      refute untouched.content["claim"]
     end
 
     test "dropping an open card on In Progress claims it through the fenced primitive",
@@ -1821,7 +1958,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       # `acceptance_criteria` values were ALSO leaking via the deck card
       # (`card-desc`, `card-criteria`) and the gantt (`gantt-criteria`) off the
       # SEPARATE `Board.snapshot` list-card reads. That sibling bypass is now
-      # sealed at `Board.to_card/4` (felix W18, task-felix-w13-boardsnapshot-fieldvis-seal)
+      # sealed at `Board.to_card/5` (felix W18, task-felix-w13-boardsnapshot-fieldvis-seal)
       # and proven by the "deck card + gantt field-visibility seal" describe
       # below (and `board_test.exs`). These peek assertions stay scoped to the
       # peek surface.
@@ -1841,12 +1978,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
   end
 
   describe "deck card + gantt field-visibility seal (Board.snapshot Envelope gate)" do
-    # SIBLING of the peek seal: `Board.snapshot`'s `to_card/4` hand-picks the
+    # SIBLING of the peek seal: `Board.snapshot`'s `to_card/5` hand-picks the
     # same content fields for the DECK CARD (and, through the derived family
     # rows, the GANTT). Seed a `task` schema marking `description` +
     # `acceptance_criteria` private plus an in_progress doc carrying them; the
     # rendered board must never paint the private text on the card or in the
-    # gantt. Mutation: strip the `if(readable?...)` gate from `to_card/4` and
+    # gantt. Mutation: strip the `if(readable?...)` gate from `to_card/5` and
     # the SECRET strings reappear → these refutes go RED.
     setup do
       {:ok, _schema} =
@@ -2590,6 +2727,113 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
     end
   end
 
+  describe "the DRAFT marker on the live board (PDS-D749)" do
+    # NAMED FAILURE MODE: measured at origin/main, `grep -i draft` over this
+    # LiveView returned only twin-RESOLUTION code and ZERO display code (control:
+    # 28 `blocked` lines in the same file). An unpaired `drafts.<id>` row — the
+    # row of record for the whole mutate-created population — therefore painted
+    # as an ordinary card, indistinguishable from a published one.
+    #
+    # `Board`'s card now carries `:draft` (its DRAFT LABEL CONTRACT); these arms
+    # prove this reader PAINTS it. They are asymmetric under "delete the
+    # `:if={card[:draft]}` badge": the draft arm reds, the published arm stays
+    # quiet — that one reds instead on a badge painted unconditionally.
+    setup do
+      task("drafts.dl-solo", "Unpublished draft row", lifecycle: "open")
+      task("dl-pub", "An ordinary published row", lifecycle: "open")
+      task("drafts.dl-flight", "Draft in flight", lifecycle: "in_progress")
+      :ok
+    end
+
+    test "a drafts. card paints a visible DRAFT marker in the column grid", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-solo"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      assert card =~ ~s(data-role="draft"), "the draft row painted no marker"
+      assert card =~ "DRAFT", "the marker must be READABLE text, not a bare hook attribute"
+    end
+
+    test "an ordinary published card paints NO marker", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="dl-pub"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      refute card =~ ~s(data-role="draft"),
+             "a published row must not be labelled a draft"
+    end
+
+    test "the deck phone paints the marker too", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects")
+
+      [_, deck] = String.split(html, ~s(data-role="deck"), parts: 2)
+      deck = deck |> String.split("</main>", parts: 2) |> hd()
+
+      [_, phone] = String.split(deck, ~s(data-doc-id="dl-flight"), parts: 2)
+
+      assert phone =~ ~s(data-role="draft"),
+             "the deck is the DEFAULT view — it must label a draft too"
+    end
+  end
+
+  describe "the UNPUBLISHED PAIR marker (task-9d0c7adbbe1a5af1, criterion 2)" do
+    # A logical id whose bucket holds 2+ rows and NO published one used to paint
+    # as an ordinary card. `Board` now flags it (`:twin_unpublished_pair`); this
+    # reader must PAINT it. The control arm reds on a marker painted for every
+    # card; the pair arm reds on a deleted badge or a dropped flag.
+    setup do
+      unpublished("up-bare", "Bare unpublished row")
+      unpublished("drafts.up-bare", "Its drafts. twin")
+      task("up-control", "An ordinary published row", lifecycle: "open")
+      :ok
+    end
+
+    test "an unpublished pair paints a visible marker in the grid and on the deck",
+         %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="up-bare"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      assert card =~ ~s(data-role="twin-unpublished-pair"),
+             "the unpublished pair painted no marker"
+
+      assert card =~ "UNPUBLISHED PAIR"
+
+      {:ok, _view, deck_html} = live(conn, "/admin/projects")
+      [_, deck] = String.split(deck_html, ~s(data-role="deck"), parts: 2)
+      [_, phone] = String.split(deck, ~s(data-doc-id="up-bare"), parts: 2)
+
+      assert phone =~ ~s(data-role="twin-unpublished-pair"),
+             "the deck is the DEFAULT view — it must surface the pair too"
+    end
+
+    test "an ordinary published card paints NO pair marker", %{conn: conn} do
+      {:ok, _view, html} = live(conn, "/admin/projects?group=goal")
+
+      [_, card] = String.split(html, ~s(data-doc-id="up-control"), parts: 2)
+      card = card |> String.split("</article>", parts: 2) |> hd()
+
+      refute card =~ ~s(data-role="twin-unpublished-pair")
+    end
+  end
+
+  # An unpublished (`status: "draft"`) task row — `task/3` always writes
+  # `status: "published"`, which is exactly what an unpublished pair lacks.
+  defp unpublished(doc_id, title) do
+    Repo.insert!(%Document{
+      doc_id: doc_id,
+      type: "task",
+      dataset: "production",
+      status: "draft",
+      title: title,
+      rev: "rev-#{doc_id}",
+      content: %{"lifecycle_status" => "open"}
+    })
+  end
+
   describe "peek roles fail open dim (tlv-s5)" do
     setup do
       t = task("pr-task", "The peeked task", lifecycle: "open")
@@ -2674,6 +2918,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLiveTest do
       content: Keyword.get(opts, :content, %{}),
       updated_at: Keyword.get(opts, :updated_at, ~U[2026-07-07 12:00:00Z])
     }
+  end
+
+  defp seen_has?(seen, doc_id) do
+    Enum.any?(seen.set, fn {id, _updated_at} -> id == doc_id end)
   end
 
   # A full `{:document_changed, msg}` tuple as it arrives on the PubSub topic.

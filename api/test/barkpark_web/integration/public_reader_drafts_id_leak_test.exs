@@ -229,6 +229,51 @@ defmodule BarkparkWeb.Integration.PublicReaderDraftsIdLeakTest do
     end
   end
 
+  # ── /w/:ws/p/:project/papers/:slug (+ /email) — the SCOPED doors ──────────
+  #
+  # The scoped reader and its email twin resolve through `Content.get_paper/3`
+  # with the path's scope — no `published_only`, no `drafts.` clause — and the
+  # :shared_paper_browser pipeline lets an anonymous visitor into the Default
+  # workspace (allow_anonymous_default). So the flat doors above were sealed
+  # while the same draft was one path prefix away: found by r2-lane-b's paper
+  # read-path audit, 2026-09-30.
+
+  describe "GET /w/default/p/default/papers/drafts.<slug> (scoped reader + email, anonymous)" do
+    setup do
+      published_with_dirty_draft!("paper", "pdl-scoped", &paper_content/1)
+      :ok
+    end
+
+    test "the scoped reader still serves the published spelling (positive control)",
+         %{conn: conn} do
+      conn = get(conn, "/w/default/p/default/papers/pdl-scoped")
+      html = html_response(conn, 200)
+
+      assert html =~ @published_body
+      refute html =~ @draft_secret
+    end
+
+    test "the scoped reader 404s the drafts.-prefixed spelling", %{conn: conn} do
+      assert_error_sent 404, fn -> get(conn, "/w/default/p/default/papers/drafts.pdl-scoped") end
+    end
+
+    test "the scoped email door 404s it too", %{conn: conn} do
+      conn = get(conn, "/w/default/p/default/papers/drafts.pdl-scoped/email")
+
+      body = response(conn, 404)
+      refute body =~ @draft_secret
+    end
+
+    test "the scoped email door still renders the published spelling (positive control)",
+         %{conn: conn} do
+      conn = get(conn, "/w/default/p/default/papers/pdl-scoped/email")
+      body = response(conn, 200)
+
+      assert body =~ @published_body
+      refute body =~ @draft_secret
+    end
+  end
+
   # ── /papers/:slug/source — BulldocsSourceController ────────────────────────
   #
   # This door was ALREADY correct — `AnonPerspective.resolve/2` pins an

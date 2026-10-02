@@ -60,8 +60,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # `parse_entry/1` see 4+ segments and fall to its catch-all, and a `;` makes
   # `parse/1` return two shares where `add_share/1` matches only `[%Share{}]`.
   # Both already fail closed with `{:error, :invalid}`.
-  # Moved to `Shared.declarable_scope?/2` (`@canonical
-  # capability:share-scope-tenancy`) so the panel's READ half enforces the same
+  # Moved to `Shared.declarable_scope?/2` (which carries this capability's ONE
+  # canonical marker) so the panel's READ half enforces the same
   # rule as these two write halves. It lived here as a private while
   # `load_share_rows/0` had no clamp at all — the split that let the disclosure
   # direction stay open after the availability direction was closed
@@ -384,9 +384,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Shares do
   # it did not check is the same defect this handler was repaired for.
   defp still_shared_reason(ws, proj, dataset) do
     if in_env_baseline?(ws, proj, dataset) do
-      "the stored share is gone, but this scope is also declared in the BARKPARK_SHARES " <>
-        "environment baseline, which the Studio cannot remove. Change BARKPARK_SHARES and " <>
-        "restart to make it private."
+      "the stored share is gone, but this scope is also declared in " <>
+        BarkparkWeb.StudioComponents.Modals.env_baseline_immutable()
     else
       "the stored share is gone and it is NOT in the BARKPARK_SHARES baseline, so something " <>
         "else is still exposing it. The Studio cannot name the source — check the share " <>

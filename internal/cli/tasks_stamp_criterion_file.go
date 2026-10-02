@@ -126,6 +126,14 @@ func resolveCriterionTextFile(tail []string) ([]string, error) {
 // expansion, no interpretation of any kind — the bytes on disk are the bytes
 // that ride the POST.
 func readCriterionText(path string) (string, error) {
+	return readStampTextFile(path, "the criterion wording")
+}
+
+// readStampTextFile is the one reader behind BOTH stamp text-file doors
+// (--criterion-text-file and --amended-criterion-file), so the two sides of an
+// amendment's CAS — the current wording and its replacement — can never be
+// read under different newline rules. `what` names the text in errors.
+func readStampTextFile(path, what string) (string, error) {
 	var (
 		raw []byte
 		err error
@@ -133,12 +141,12 @@ func readCriterionText(path string) (string, error) {
 	if path == "-" {
 		raw, err = io.ReadAll(stampStdin)
 		if err != nil {
-			return "", fmt.Errorf("reading the criterion wording from stdin: %w", err)
+			return "", fmt.Errorf("reading %s from stdin: %w", what, err)
 		}
 	} else {
 		raw, err = os.ReadFile(path)
 		if err != nil {
-			return "", fmt.Errorf("reading the criterion wording from %s: %w", path, err)
+			return "", fmt.Errorf("reading %s from %s: %w", what, path, err)
 		}
 	}
 	return trimOneTrailingNewline(string(raw)), nil

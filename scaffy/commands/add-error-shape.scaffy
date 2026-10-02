@@ -1,4 +1,4 @@
-COMMAND "Add an API Error Shape" DESCRIPTION "Land a new v1 JSON error code end-to-end: a fix-suggesting @hints entry, a build/1 clause that maps its {:error, :code} tuple to a {code, message, status} envelope, and a unit test — idempotently, accreting behind marks. known_codes/0, the OpenAPI Error.code enum, and the coverage test all self-derive." LAST_UPDATED "17-07-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy", "testing", "scaffold" CONCEPT "error-shape" VARIANT "build-clause" DIRECTION "add" VARIABLES
+COMMAND "Add an API Error Shape" DESCRIPTION "Land a new v1 JSON error code end-to-end: a fix-suggesting @hints entry, a build/1 clause that maps its {:error, :code} tuple to a {code, message, status} envelope, and a unit test — idempotently, accreting behind marks. known_codes/0, the OpenAPI Error.code enum, and the coverage test all self-derive." LAST_UPDATED "17-09-2026-00-00-00" DOMAIN "barkpark" TAGS "scaffy", "testing", "scaffold" CONCEPT "error-shape" VARIANT "build-clause" DIRECTION "add" VARIABLES
   VARIABLE 1 "error_code" OPAQUE TITLE "The stable error code" DESCRIPTION "The snake_case `code` string the envelope carries and callers key on. Also the atom in the {:error, :code} tuple build/1 matches. OPAQUE: never re-cased, one spelling per file (this file uses the kebab joiner-output {{.error-code}} so it is legal inside mark names), exempt from path-casing lints." EXAMPLES "playground_expired", "billing_required", "region_unavailable"
   VARIABLE 2 "Hint" OPAQUE TITLE "Fix-suggesting hint" DESCRIPTION "One imperative line telling the caller what to fix. Registered in @hints and stamped onto the envelope additively (code/message/status stay stable). OPAQUE: verbatim, never re-cased." EXAMPLES "Start a fresh playground session — this one's TTL elapsed and its data was reaped."
   VARIABLE 3 "Message" OPAQUE TITLE "Envelope message" DESCRIPTION "The human-readable `message` field of the error envelope build/1 returns. OPAQUE: verbatim, never re-cased." EXAMPLES "playground session expired", "billing setup required"
@@ -54,17 +54,16 @@ COMMAND "Add an API Error Shape" DESCRIPTION "Land a new v1 JSON error code end-
 #     code (never written INLINE by a controller) simply never appears in
 #     `emitted`, so growing known_codes can never red it.
 #
-# NOT MECHANIZED — one required MANUAL step (see the §9 note at the bottom):
-#   • docs/api-v1.md §9 is a HAND-CURATED human prose list, and it IS gate-locked
-#     by errors_doc_coverage_test.exs (every known code must appear verbatim in
-#     backticks in §9). A generic command cannot mechanize the append: (1) §9 is
-#     editorial prose grouped by category (core / additive / endpoint-specific) —
-#     which bucket a new code belongs to is a human judgment; (2) api-v1.md sits
-#     at its CI-enforced byte budget (13991/14000 B — 9 bytes of headroom), so a
-#     mechanical append overflows check-doc-budgets.sh, and the doc contract
-#     FORBIDS raising the cap. Adding the §9 line (with a compensating prose
-#     trim) is the author's one hand-edit; this command is loud about it rather
-#     than papering over it or falsely claiming self-derivation.
+# NOT MECHANIZED — one required MANUAL step (see the doc note at the bottom):
+#   • The public error vocabulary is HAND-CURATED prose, gate-locked by
+#     errors_doc_coverage_test.exs. Since PDS wave 25 it spans TWO files and the
+#     test reads their UNION, so there are TWO possible targets and picking one
+#     is the human judgment a generic command cannot own:
+#       – docs/api-v1.md §9 — codes ANY v1 endpoint can return.
+#       – docs/api/error-codes.md — the tail: codes only ONE endpoint family
+#         emits. This is where most new codes belong.
+#     A code in EITHER file satisfies the ratchet. The bottom note carries the
+#     routing rule, the measured headroom, and what each gate actually does.
 
 # Token spellings-as-transforms (D3d / A1). error_code is OPAQUE (its VALUE is
 # substituted verbatim, never re-cased). Under D22 an OPAQUE reference uses ONE
@@ -198,25 +197,45 @@ ASSERT FILE "api/test/barkpark/content/errors_test.exs" CONTAINS "MARK:error-tes
 # served-vocabulary coverage guard. Scoped single-file `mix test` is LOCAL-safe
 # with a warm api/_build (charter A2, RESOLVED 2026-07-16: this exact pair runs
 # 27 tests green in ~0.7s warm) — no DB (both are `use ExUnit.Case`), no phx.server.
-# NOTE: errors_doc_coverage_test.exs (the §9 ratchet) is deliberately NOT asserted
-# here — see the §9 manual-step note below; a build/1-only code cannot satisfy it
-# until §9 is hand-edited.
+# NOTE: errors_doc_coverage_test.exs (the vocabulary ratchet) is deliberately NOT
+# asserted here — see the manual-step note below; a build/1-only code cannot
+# satisfy it until one of the two doc files is hand-edited.
 ASSERT CMD "cd api && CC=/usr/bin/clang mix test test/barkpark/content/errors_test.exs test/barkpark_web/contract/error_code_coverage_test.exs"
 
 # ─────────────────────────────────────────────────────────────────────────────
-# §9 — the ONE required MANUAL step (why it is not an op)
+# THE DOC LINE — the ONE required MANUAL step (why it is not an op)
 # ─────────────────────────────────────────────────────────────────────────────
-# docs/api-v1.md §9 lists the public error vocabulary in human prose, and
-# api/test/barkpark/content/errors_doc_coverage_test.exs is the anti-drift RATCHET:
-# it asserts every known_codes/0 code appears verbatim in backticks in §9. So
-# after this command runs, add a line for {{.error-code}} to §9 by hand:
+# api/test/barkpark/content/errors_doc_coverage_test.exs is the anti-drift
+# RATCHET: every known_codes/0 code must appear verbatim in backticks in
+# docs/api-v1.md §9 UNION docs/api/error-codes.md. Add one line by hand:
 #
 #     `{{.error-code}}` {{.Status}} — {{.Message}}
 #
-# placed in the category that fits (additive vs. endpoint-specific), TRIMMING
-# adjacent prose to stay within the 14000-byte budget (check-doc-budgets.sh, an
-# enforced merge gate — api-v1.md currently has ~9 bytes of headroom, and the doc
-# contract forbids raising the cap). This editorial judgment — bucket + budget
-# offset — is why no MARK/REPLACE can own it. Everything the MACHINE consumes
-# (known_codes/0, the OpenAPI Error.code enum, error_code_coverage_test.exs)
-# already self-derives from Op A's @hints entry; §9 is the human contract only.
+# ROUTING RULE — which file, and why it matters (measured 2026-09-17 on
+# origin/main; re-measure with `bash scripts/check-doc-budgets.sh`):
+#
+#   • Only ONE endpoint family emits it  → docs/api/error-codes.md.
+#     1791/1900 B = 109 B headroom, ~8 more codes. Owner: canonical-for
+#     http-api-error-codes. THIS IS THE DEFAULT and it needs no compensating
+#     trim — a probe code routed here left both files inside budget.
+#
+#   • ANY v1 endpoint can return it → docs/api-v1.md §9.
+#     13995/14000 B = 5 B headroom. A minimal append (30 B) measured 14025 B,
+#     over cap. Routing a code here REQUIRES trimming adjacent §9 prose by at
+#     least as many bytes. Owner: canonical-for http-api-v1. NEVER raise the
+#     cap — the doc contract says split or retire content instead.
+#
+# WHAT EACH GATE CAN DO TO YOU. The ratchet runs under `Elixir gate`, which IS
+# in .github/required-checks.json — skip the doc line and your PR CANNOT MERGE.
+# check-doc-budgets.sh runs under `Doc budgets + anchors`, which is an explicit
+# S4 EXCLUSION from the required set (doc-gates.yml is paths-filtered) and so
+# CANNOT block a merge; it reds its own check run only. (Proof that this is not
+# theory: docs/cards/cli.md and docs/cards/js-sdk.md are BOTH over cap on main
+# today.) So the two constraints are not symmetric and there is no merge
+# deadlock: the coverage half is mandatory, the byte half is doc-contract debt
+# you are on your honour to pay with a trim.
+#
+# This routing + trim judgment is why no MARK/REPLACE can own it. Everything the
+# MACHINE consumes (known_codes/0, the OpenAPI Error.code enum,
+# error_code_coverage_test.exs) already self-derives from Op A's @hints entry;
+# the doc line is the human contract only.

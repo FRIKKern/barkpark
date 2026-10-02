@@ -153,7 +153,13 @@ defmodule Barkpark.Structure do
       [include_global: true] ++
         Keyword.take(opts, [:workspace_id, :grant_scoped, :caller_context])
 
-    schemas = Content.list_schemas(dataset, schema_opts)
+    # Named object types (Gyldendal parity E3.6) own no documents and are
+    # inlined into the schemas that reference them; the desk never lists them.
+    schemas =
+      dataset
+      |> Content.list_schemas(schema_opts)
+      |> Enum.reject(&(Map.get(&1, :kind) == "object"))
+
     schema_map = Map.new(schemas, &{&1.name, &1})
 
     %Node{
@@ -264,7 +270,7 @@ defmodule Barkpark.Structure do
     {plugin_main, plugin_plugins} =
       dataset
       |> safe_collect_attributed(collect_opts)
-      |> split_attributed(enablement, schemas, dataset, opts)
+      |> split_attributed(enablement, schemas, owned_type_set(owned_map), opts)
 
     # ── MAIN tier (flat, top-level) ──
     main_groups = host_main ++ [books_main, media_main, plugin_main]
@@ -338,7 +344,7 @@ defmodule Barkpark.Structure do
   # nothing (their types fall into …Rest). `:main` plugins ride the MAIN tier
   # flat (promotion); `:plugins` plugins get one per-plugin group node under the
   # Plugins tier; `:top_menu` plugins are surfaced outside the tree entirely.
-  defp split_attributed(%{plugins: pairs}, enablement, schemas, dataset, opts) do
+  defp split_attributed(%{plugins: pairs}, enablement, schemas, owned_types, opts) do
     Enum.reduce(pairs, {[], []}, fn {name, items}, {main_acc, plugins_acc} ->
       decl = Enablement.for_plugin(enablement, name)
 
@@ -350,7 +356,7 @@ defmodule Barkpark.Structure do
           |> Enum.with_index()
           |> Enum.map(fn {item, idx} -> plugin_item_to_node(item, idx) end)
           |> Enum.reject(&is_nil/1)
-          |> scope_plugin_nodes(schemas, dataset, opts)
+          |> scope_plugin_nodes(schemas, owned_types, opts)
 
         cond do
           nodes == [] -> {main_acc, plugins_acc}
@@ -362,7 +368,8 @@ defmodule Barkpark.Structure do
     end)
   end
 
-  defp split_attributed(_attributed, _enablement, _schemas, _dataset, _opts), do: {[], []}
+  defp split_attributed(_attributed, _enablement, _schemas, _owned_types, _opts),
+    do: {[], []}
 
   # One per-plugin group node under the Plugins tier — "grouped per plugin"
   # (charter Decision 1). A nested :list, so it recurses on every consumer.
@@ -548,18 +555,27 @@ defmodule Barkpark.Structure do
   # frt's game groups, the tasks "Tasks" list) and their `desk_items/1`
   # callbacks are NOT scope-aware, so without this filter every workspace
   # shows every plugin's nodes. Rule: a plugin node is dropped iff it points
-  # at a content type that EXISTS in the catalog but is NOT registered in this
-  # scope. Nodes pointing at no known type (custom plugin pages) and purely
-  # structural nodes (dividers) pass through. Unscoped builds (no
-  # `:workspace_id` — the flat/Default desk) skip filtering entirely, so the
-  # extra catalog read only happens for scoped requests.
-  defp scope_plugin_nodes(nodes, schemas, dataset, opts) do
+  # at a GATEABLE type that is NOT in this scope. Nodes pointing at no
+  # gateable type (custom plugin pages) and purely structural nodes
+  # (dividers) pass through. Unscoped builds (no `:workspace_id` — the
+  # flat/Default desk) skip filtering entirely.
+  #
+  # GATEABLE = the plugin-owned type names (`owned_schema_types/0`, harvested
+  # into `owned_map` — CODE, not tenant rows). It used to be the UNSCOPED
+  # `Content.list_schemas(dataset)` — every workspace's type names in that
+  # dataset string — so whether workspace A saw a plugin node depended on
+  # whether ANOTHER workspace had registered that type: a cross-tenant
+  # existence oracle (task-5ae31d6d9f13965f). The caller's own scoped catalog
+  # cannot replace it — that is exactly `schemas` (in_scope), so the gate
+  # would never fire. Every type a shipped plugin's desk item names is owned
+  # by that plugin; a plugin whose node gates on a type it does not own must
+  # declare `requires_schema` on a type it does.
+  defp scope_plugin_nodes(nodes, schemas, owned_types, opts) do
     if Keyword.get(opts, :workspace_id) do
       in_scope = MapSet.new(Map.keys(schemas))
-      gateable = MapSet.new(Enum.map(Content.list_schemas(dataset), & &1.name))
 
       nodes
-      |> Enum.map(&filter_plugin_node(&1, in_scope, gateable))
+      |> Enum.map(&filter_plugin_node(&1, in_scope, owned_types))
       |> Enum.reject(&is_nil/1)
     else
       nodes
@@ -602,7 +618,7 @@ defmodule Barkpark.Structure do
 
   defp filter_plugin_node(%Node{} = node, _in_scope, _gateable), do: node
 
-  # Keep iff in scope; drop iff a real catalog type absent from scope; keep
+  # Keep iff in scope; drop iff a plugin-owned type absent from scope; keep
   # unknown (non-schema) types — we only gate what we can positively classify.
   defp gate_typed_node(node, type, in_scope, gateable) do
     cond do
@@ -1156,7 +1172,8 @@ defmodule Barkpark.Structure do
   # `over` rows (bounded); an `over` type with no rows yields an empty group.
   #
   #   {"kind":"groupBy","title":"Etter kategori","type":"publication",
-  #    "by":"content.category","over":"category","orderings":[…]}
+  #    "by":"content.category","over":"category","orderings":[…],
+  #    "overFilter":{"_id":{"referencedBy":"publication"}}}
   @group_by_fanout 200
 
   defp declared_item_to_node(%{"kind" => "groupBy"} = item, idx, ctx) do
@@ -1165,11 +1182,18 @@ defmodule Barkpark.Structure do
     by = item["by"]
 
     if is_binary(type) and is_binary(over) and is_binary(by) do
+      # Gyldendal parity E9 — `overFilter`: Sanity's own "Etter kategori" does
+      # not group over EVERY category, it groups over the ones a publication
+      # points at (`count(*[_type == "publication" && references(^._id)]) > 0`).
+      # Without this the desk grows an empty child list per unused category.
+      over_filter = parse_filter(item["overFilter"])
+
       children =
         over
         |> Content.list_documents(
           ctx.dataset,
-          [perspective: :published, limit: @group_by_fanout] ++ ctx.scope
+          [perspective: :published, limit: @group_by_fanout, filter_map: over_filter] ++
+            ctx.scope
         )
         |> Enum.map(fn doc ->
           key = Barkpark.Content.DraftId.published_id(doc.doc_id)

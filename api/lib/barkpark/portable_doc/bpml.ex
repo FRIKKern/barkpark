@@ -34,8 +34,8 @@ defmodule Barkpark.PortableDoc.Bpml do
 
   Block tags: `paper section p pullquote ingress eyebrow h1 h2 h3 byline/item
   ul/li table/tr/th/td code diagram route stats/stat notes/note note steps/step
-  callout`.
-  Inline tags: `b i code u s a` (→ marks `strong em code underline strike`,
+  callout figure asciicast columns/column`.
+  Inline tags: `b i code u s mark sub sup a` (→ marks `strong em code underline strike highlight sub sup`,
   and `<a href>` → a `link` node).
   """
 
@@ -69,6 +69,26 @@ defmodule Barkpark.PortableDoc.Bpml do
   across nodes and moves exactly when the grammar moves (the same
   derive-don't-hand-bump doctrine as the renderer's source digest). Clients
   echo the digest to detect that their generated types have gone stale.
+
+  ### Deliberate grammar moves (the digest moved here on purpose)
+
+    * `<stat verdict>` (task-8bdef19b5acef8a8) — the stat VERDICT shipped in the
+      render leg (`render/data_viz.ex` `stat_html/1` paints `.bp-stat__v--loss` /
+      `--peace`) and its JS mirror, but NOT in BPML: `<stat>` spelled
+      `label value denom` only, so an authored verdict was dropped the moment a
+      document round-tripped through BPML, silently repainting the digits back to
+      `--paper-ink`. `verdict` now rides LAST in the `<stat>` attribute row — a
+      widening, so every pre-existing verdict-free stat prints byte-identically
+      and only clients that want the new key need regenerate. This IS the
+      deliberate decision the printer's comment asked someone to make; it is not
+      a silent widening.
+    * The Run-4 round-trip matrix (`test/barkpark/round_trip_integrity_matrix_test.exs`)
+      found an UNEDITED pull → push of the golden corpus rewriting stored data:
+      a `lineage` node's `unit`/`value`, a `stat`'s `source`, the
+      `sourceDefault` of `stats`/`stat-grid`/`lineage` and an `expandable`'s
+      `open` were not spelled, so they were dropped. Each now rides LAST in its
+      element's row — again a widening: a block without those keys prints
+      byte-identically.
   """
   @spec vocabulary() :: map()
   def vocabulary do
@@ -90,6 +110,10 @@ defmodule Barkpark.PortableDoc.Bpml do
             "lineage-node",
             "series",
             "step",
+            # the flagship taste tier's positional child (task-2957c0caa1ffd1b0)
+            # — a `<column>` missing here silently drops from /v1/capabilities
+            # and a client generating types cannot spell a `columns` block.
+            "column",
             "item",
             "li",
             "tr",

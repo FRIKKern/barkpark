@@ -79,6 +79,8 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # send_update(PaperFieldBlock, tree_value:) → persist/2 → {:paper_op, …};
     # terminates on the paper chokepoint (covered by the paper-op suite)
     {"{:tree_codelist_change, msg}", :write},
+    # Enablement.forget/1 — drops this process's memo (task-c8a87043cb286a2f)
+    {"{:plugin_enablement_changed, ws_id}", :no_write},
     {"(_other, socket)", :no_write}
   ]
 
@@ -122,8 +124,23 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     # READ-ONLY api token. `create_token` auto-memberships it on the Default
     # workspace, so it IS a member and CAN read — its permission array is
     # ["read"], so the write arm of `Caps.derive/1` is false.
-    {:ok, _} = Auth.create_token(@readonly, "pds w42 hi readonly", @dataset, ["read"])
-    {:ok, _} = Auth.create_token(@writer, "pds w42 hi writer", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @readonly,
+        "pds w42 hi readonly",
+        @dataset,
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    {:ok, _} =
+      Auth.create_token(
+        @writer,
+        "pds w42 hi writer",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} =
       Content.create_document(
@@ -220,7 +237,7 @@ defmodule BarkparkWeb.Studio.PdsW42HandleInfoWriteSeamTest do
     test "every StudioLive handle_info head is enumerated and classified" do
       heads = handle_info_heads("lib/barkpark_web/live/studio/studio_live.ex")
 
-      assert length(heads) == 15,
+      assert length(heads) == 16,
              "studio_live.ex handle_info head count moved to #{length(heads)}; " <>
                "classify the new head in @studio_heads and give a :write one a run."
 

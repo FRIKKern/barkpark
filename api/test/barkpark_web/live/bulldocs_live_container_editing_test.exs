@@ -341,7 +341,7 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     })
 
     chart = nested_child(stored_block(ctx, "details"), "nested-chart")
-    assert chart["title"] == "Updated category totals"
+    assert chart["title"] == "Updates by category"
     assert chart["max"] == 900
     assert chart["values"] == true
     assert [%{"label" => "feat", "value" => 203, "color" => "mint"}, _] = chart["bars"]
@@ -361,7 +361,7 @@ defmodule BarkparkWeb.BulldocsLiveContainerEditingTest do
     })
 
     cleared_chart = nested_child(stored_block(ctx, "details"), "nested-chart")
-    assert cleared_chart["title"] == nil
+    assert cleared_chart["title"] == "Updates by category"
     assert cleared_chart["max"] == nil
     assert cleared_chart["source_note"] == "preserve-chart-metadata"
 

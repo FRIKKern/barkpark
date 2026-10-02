@@ -267,7 +267,16 @@ defmodule BarkparkWeb.TasksNonadminLifecycleTest do
 
   defp mint_token!(permissions) do
     raw = "barkpark-test-nonadmin-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "test-nonadmin-lifecycle", "test", permissions)
+
+    {:ok, _} =
+      Auth.create_token(
+        raw,
+        "test-nonadmin-lifecycle",
+        "test",
+        permissions,
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     raw
   end
 

@@ -47,7 +47,7 @@ defmodule Barkpark.PdsDoorCensusTest do
 
   ## The meter blind spot
 
-  PDS-D633/D646 obliges every meter-derived number in this epic to carry the
+  PDS-D633/PDS-D646 obliges every meter-derived number in this epic to carry the
   blind-spot sentence in the instrument's `@moduledoc` AND its printed output.
   A green ExUnit case prints nothing, so the printed half can only land on the
   instrument — and it is asserted here so a copy-paste cannot drop it:
@@ -103,7 +103,20 @@ defmodule Barkpark.PdsDoorCensusTest do
     {check_out, check_rc} =
       System.cmd(bash, [census, "--check"], cd: root, stderr_to_stdout: true)
 
-    {:ok, census: census, bash: bash, root: root, check_out: check_out, check_rc: check_rc}
+    # ONE `--selftest` too, for the same reason: two cases below ran the identical
+    # `--selftest` (4.8 s each on main run 36775391161). It takes no input but
+    # its own fixtures, so both cases read one real run.
+    {selftest_out, selftest_rc} =
+      System.cmd(bash, [census, "--selftest"], cd: root, stderr_to_stdout: true)
+
+    {:ok,
+     census: census,
+     bash: bash,
+     root: root,
+     check_out: check_out,
+     check_rc: check_rc,
+     selftest_out: selftest_out,
+     selftest_rc: selftest_rc}
   end
 
   # Reads one of the census's own printed count lines, e.g. `UNDISPOSED : 0 of 20`.
@@ -118,8 +131,7 @@ defmodule Barkpark.PdsDoorCensusTest do
   end
 
   test "the door census's --selftest is GREEN, and its fraud arm is one of the arms", ctx do
-    {out, rc} =
-      System.cmd(ctx.bash, [ctx.census, "--selftest"], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.selftest_out, ctx.selftest_rc}
 
     assert rc == 0, "expected `bash #{@census_rel} --selftest` to exit 0, got #{rc}:\n#{out}"
 
@@ -156,7 +168,21 @@ defmodule Barkpark.PdsDoorCensusTest do
           "A RETIRED- PRICE IS REFUSED",
           "AN UNANCHORED PREFIX IN FRONT OF CPU= IS REFUSED",
           "THE PARTITION PRINTS THE FULL VOCABULARY INCLUDING ZEROES",
-          "THE SUM IS ASSERTED"
+          "THE SUM IS ASSERTED",
+          "WIRED-CLAIM FIRES",
+          "WIRED-CLAIM CONTROL",
+          "WIRED-CLAIM FAIL-CLOSED",
+          # WAVE 51. The pair that keeps the two halves of leg B apart. When the
+          # dispatcher path set learned to DERIVE `scripts/pds-*` from the glob
+          # pds-door-census.sh itself runs, `--match test` started answering
+          # `true` for every member of the family; DEAD-DECLARATION keyed on
+          # that answer, and 43 ledger-disposed instruments were reclassified in
+          # one commit with every disposition then reading as ORPHANED. The
+          # class means somebody TYPED the path; a derived family member did
+          # not. Delete either arm and the distinction can silently re-merge.
+          "LEG B LITERAL:",
+          "LEG B DERIVED:",
+          "LEG B LITERAL REFUSES:"
         ] do
       assert out =~ arm,
              "the `#{arm}` arm is gone from the selftest. It covers a silence that was live on " <>
@@ -260,9 +286,124 @@ defmodule Barkpark.PdsDoorCensusTest do
     # is the one move this pin exists to refuse. RE-DERIVED by running the census
     # on this tree — it prints `harnesses : 6` and names the file — never by
     # adding this slice's delta to main's figure.
-    assert out =~ ~r/harnesses\s+: 6 /,
-           "the derived harness count moved off 6. Harness-hood is derived from the " <>
-             "*_test.sh / *.test.sh name; if a seventh harness landed, say so on purpose.\n#{out}"
+    #
+    # A SEVENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-11):
+    # scripts/pds-read-preflight-audit_test.sh, the selftest for the anonymous-read
+    # preflight audit (#17651). It is a harness by the same derived *_test.sh rule,
+    # it is wired into shell-harnesses.yml (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. It arrived with no disposition row, so main read UNDISPOSED 3 of
+    # 42 and this pin refuted 6 at 56c290852 — the pin did its job. RE-DERIVED by
+    # running the census on this tree: it prints `harnesses : 7` and names the file.
+    #
+    # AN EIGHTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-11):
+    # scripts/pds-live-hetzner-placement-group_test.sh, the offline harness for
+    # the diagnostic half of the Hetzner placement-group runner (#17687, 9db224f2c).
+    # It is a harness by the same derived *_test.sh rule, it is wired into
+    # shell-harnesses.yml (pds-hetzner-offline job, not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. It arrived with no disposition row, so main read UNDISPOSED 1 of
+    # 44 and this pin refuted 7 — the pin did its job a second time in one day.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 8` and
+    # names the file.
+    #
+    # A NINTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-13):
+    # scripts/pds-threshold-move-guard_test.sh, the offline harness for the
+    # budget-literal move guard (pds-bl-w49-budget-literal-moved-by-its-own-pr).
+    # It is a harness by the same derived *_test.sh rule, it is wired into
+    # shell-harnesses.yml (pds-harnesses job, not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. Landing it WITHOUT the row and this bump is what reddened main
+    # twice before (#17651, #17687): the census would read UNDISPOSED 2 of 47 and
+    # this pin would refute 8. Both halves are paid in the same PR as the harness,
+    # and the count below reads 9 ON PURPOSE.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 9` and
+    # names the file.
+    #
+    # A TENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-13):
+    # scripts/pds-personal-local-smoke_test.sh, the cold-reader smoke for
+    # docs/setup/personal-local.md (pds-bl-personal-local-doc-staleness c2). It is a
+    # harness by the same derived *_test.sh rule, its `--dry-run` arm is wired into
+    # shell-harnesses.yml (pds-harnesses job, not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. UNLIKE the seventh and eighth it did NOT red main first: it
+    # arrived in the same PR as its disposition row and this bump. RE-DERIVED by
+    # running the census on this tree: it prints `harnesses : 10` and names the file.
+    # THREE MORE HARNESSES LANDED IN ONE MORNING, AND THIS LINE SAYS SO ON
+    # PURPOSE (2026-09-16): scripts/pds-artifact-retention.test.sh (#18544,
+    # 983d3d0ac), scripts/pds-citation-precedes-merge_test.sh (#18542,
+    # fa307f490) and scripts/pds-charter-anchors-check_test.sh (#18539,
+    # e01c3c22e). All three are harnesses by the same derived *_test.sh /
+    # *.test.sh rule, none is wired into any workflow and none has a rider
+    # here, so each disposition row is PRICE, not THROUGH — and all three
+    # belong in the WITH-HARNESSES denominator. LIKE the seventh and eighth
+    # and UNLIKE the tenth, they reddened main first: each arrived with no
+    # disposition row, so the census read UNDISPOSED 6 of 55 and this pin
+    # refuted 10 on every PR that dispatched the Elixir matrix. Six rows and
+    # this bump are paid together, and the count below reads 13 ON PURPOSE.
+    # RE-DERIVED by running the census on this tree: it prints
+    # `harnesses : 13` and names all three files.
+    #
+    # A FOURTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-19):
+    # scripts/pds-citation-expand.test.sh, the harness for the compressed-citation
+    # guard scripts/pds-citation-expand.sh (task-b92409dc562dc20c, #19227). It is a
+    # harness by the same derived *.test.sh rule, it is wired into the pds-harnesses
+    # leg via .github/shell-harness-legs.json (not a required context, so its
+    # disposition row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES
+    # denominator. RE-DERIVED by running the census on this tree: it prints
+    # `harnesses : 14` and names the file — never by adding a delta to main's 13.
+    #
+    # A FIFTEENTH HARNESS LANDED, AND THIS LINE SAYS SO ON PURPOSE (2026-09-20):
+    # scripts/pds-secret-scan_test.sh, the first-ever harness for
+    # scripts/pds-secret-scan.sh (#19577, 342c912a7). It is a harness by the same
+    # derived *_test.sh rule, it is wired into the pds-harnesses leg via
+    # .github/shell-harness-legs.json (not a required context, so its disposition
+    # row is PRICE, not THROUGH), and it belongs in the WITH-HARNESSES denominator.
+    # LIKE the seventh, eighth and the 2026-09-16 three, it reddened main first:
+    # #19577 touched no api/** so the diff-scoped Elixir gate never ran this test,
+    # and main's push arm read "moved off 14" from 19:36Z until this bump landed.
+    # RE-DERIVED by running the census on this tree: it prints `harnesses : 15`
+    # and names the file — never by adding a delta to main's 14.
+    assert out =~ ~r/harnesses\s+: 15 /,
+           "the derived harness count moved off 15. Harness-hood is derived from the " <>
+             "*_test.sh / *.test.sh name; if a sixteenth harness landed (or one left), " <>
+             "say so on purpose.\n#{out}"
+
+    assert out =~ "pds-secret-scan_test.sh",
+           "the census stopped naming pds-secret-scan_test.sh among its derived " <>
+             "harnesses. The count above would still read 15 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
+
+    for named <- [
+          "pds-artifact-retention.test.sh",
+          "pds-charter-anchors-check_test.sh",
+          "pds-citation-precedes-merge_test.sh"
+        ] do
+      assert out =~ named,
+             "the census stopped naming #{named} among its derived harnesses. The count " <>
+               "above would still read 13 if a DIFFERENT harness had replaced it, so the " <>
+               "count alone does not pin which files it counted.\n#{out}"
+    end
+
+    assert out =~ "pds-threshold-move-guard_test.sh",
+           "the census stopped naming pds-threshold-move-guard_test.sh among its derived " <>
+             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
+
+    assert out =~ "pds-personal-local-smoke_test.sh",
+           "the census stopped naming pds-personal-local-smoke_test.sh among its derived " <>
+             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
+
+    assert out =~ "pds-live-hetzner-placement-group_test.sh",
+           "the census stopped naming pds-live-hetzner-placement-group_test.sh among its " <>
+             "derived harnesses. The count above would still read 13 if a DIFFERENT harness " <>
+             "had replaced it, so the count alone does not pin which files it counted.\n#{out}"
+
+    assert out =~ "pds-read-preflight-audit_test.sh",
+           "the census stopped naming pds-read-preflight-audit_test.sh among its derived " <>
+             "harnesses. The count above would still read 13 if a DIFFERENT harness had " <>
+             "replaced it, so the count alone does not pin which files it counted.\n#{out}"
 
     assert out =~ "pds-pull-proof_test.sh",
            "the census stopped naming pds-pull-proof_test.sh among its derived harnesses. " <>
@@ -351,6 +492,14 @@ defmodule Barkpark.PdsDoorCensusTest do
        ctx do
     out = ctx.check_out
 
+    # NOT EXPANDED, AND THE COMPRESSION IS THE POINT: this is not prose, it is a
+    # byte-for-byte pin on what scripts/pds-door-census.sh PRINTS, and that
+    # script lives in another lane's fence (scripts/pds-*). The deploy lane
+    # already expanded it once and had to REVERT, because this line is the
+    # contract. Expanding either half alone reds the other; the repair is a
+    # coordinated change in both trees. scripts/pds-citation-expand.sh --check
+    # classifies the script's token BLOCKED by finding this exact literal here,
+    # so re-prefixing it would also blind that guard.
     assert out =~ "METER BLIND SPOT (PDS-D633/D646)",
            "the blind-spot sentence is gone from the census's printed output. D633's own " <>
              "closing clause is that the sentence must ship in the instrument's @moduledoc AND " <>
@@ -414,6 +563,103 @@ defmodule Barkpark.PdsDoorCensusTest do
              "a PRICE row quotes a wall figure as the price. Wall belongs in the column only " <>
                "as an explicitly non-quotable note.\nRow: #{row}"
     end
+  end
+
+  test "the census's OWN price row headlines its GATED arm, and the ungated figure survives as prose",
+       ctx do
+    out = ctx.check_out
+
+    row =
+      out
+      |> String.split("\n")
+      |> Enum.find(&String.match?(&1, ~r{^\s+scripts/pds-door-census\.sh\s}))
+
+    assert row,
+           "the census printed no row for itself, so this assertion has no subject at all.\n#{out}"
+
+    # THE RULE THIS PINS is stated above PDS_DOOR_PRICES: the CPU= field is the
+    # arm a REQUIRED GATE actually runs, and every other figure about the same
+    # instrument is trailing prose in the same cell. This row headlined `--check`
+    # — the one arm no gate runs — for four waves, while naming its gated arm as
+    # prose, and every other row in the ledger headlined its gated arm. A column
+    # whose rows measure different KINDS of thing is not comparable to itself.
+    assert row =~ ~r/load1=[\d.]+ arm=--selftest /,
+           "the census's own price row does not headline its gated arm. `--selftest` is what " <>
+             "api/test/barkpark/pds_door_census_test.exs runs on every required Elixir gate; " <>
+             "`--check` is run by nothing. The headline must be the gated arm; the --check " <>
+             "figure belongs in the same cell as trailing prose.\nRow: #{row}"
+
+    refute row =~ ~r/load1=[\d.]+ arm=--check /,
+           "the headline arm moved back to --check.\nRow: #{row}"
+
+    # AND THE UNGATED FIGURE IS NOT DELETED. A deleted measurement is a fact
+    # destroyed, and this row is the only place either figure is written down.
+    assert row =~ "--check is CPU=",
+           "the --check figure was deleted rather than kept as prose. Moving the headline is " <>
+             "not licence to throw the other measurement away.\nRow: #{row}"
+  end
+
+  test "a price row that carries a content key is FRESH on this tree — the self-pricing fixpoint",
+       ctx do
+    out = ctx.check_out
+
+    # `key=` is emitted by `--measure` immediately after `arm=<argv>`, and
+    # `price_stale_error` reads it from exactly that position. Matching it here
+    # the same way is what keeps this assertion about the token rather than
+    # about any `key=` a row happens to mention in prose.
+    keyed =
+      out
+      |> String.split("\n")
+      |> Enum.filter(&String.match?(&1, ~r/ arm=\S+ key=[0-9a-f]{12} /))
+
+    assert length(keyed) >= 2,
+           "fewer than two keyed price rows. The predicate this test pins can only be shown " <>
+             "working while at least two rows carry a key: one run then demonstrates a fresh " <>
+             "row passing beside whatever a stale one would do, which a single-keyed column " <>
+             "cannot.\n#{out}"
+
+    refute out =~ "PRICE-STALE —",
+           "a price row is PRICE-STALE on an unmutated tree. THE KEY ELIDES BOTH LEDGER " <>
+             "LITERALS, so this did NOT fire because a price was pasted: something else about " <>
+             "the instrument changed and its row was not re-measured. Re-take it with " <>
+             "`--measure <basename> <its gated arm>` and paste the row.\n#{out}"
+
+    refute out =~ "PRICE-STALE KEY MALFORMED",
+           "a price row carries a key nobody can recompute a shape for.\n#{out}"
+
+    assert ctx.check_rc == 0,
+           "the census reds on this tree, so the freshness above was asserted against a run " <>
+             "that already failed for some other reason.\n#{out}"
+  end
+
+  test "EVERY THROUGH price row is graded or explicitly stood down — no row is silently ungraded",
+       ctx do
+    out = ctx.check_out
+
+    # THE HOLE THIS PINS. Before the PRICE-UNGRADED ruling a THROUGH row with no
+    # `key=` was passed over without a word, so the freshness arm graded TWO
+    # rows of NINE while `ERRORS : 0` read as a verdict on all nine. The rule is
+    # now a PREDICATE and not a skip list: a row carries `arm=<argv> key=<12
+    # hex>` or `ungraded-until=<YYYY-MM-DD>` in the field after `load1=<n>`, and
+    # a row with neither reds. A NEW row pasted with neither reds on its first
+    # --check, which a list of known-unkeyed basenames could never do.
+    # MATCHED AS AN ERROR LINE, NEVER AS A BARE SUBSTRING, AND THAT IS A REPAIR
+    # RATHER THAN A STYLE: the census PRINTS each price cell, and a shipped cell
+    # explains its own tokens in trailing prose. The first version of this
+    # assertion was `refute out =~ "PRICE-UNGRADED"` and it reddened on a GREEN
+    # census — the pds-door-census.sh row says "the PRICE-UNGRADED ruling landed
+    # with seven arms" in the prose the table reproduces verbatim. It is the same
+    # defect price_key_token was rewritten to be positional for, arriving one
+    # layer up. The emitted shape is `  <basename>: PRICE-UNGRADED — …` at the
+    # head of a line; prose never is.
+    refute out =~ ~r/^\s+\S+: PRICE-UNGRADED/m,
+           "a THROUGH price row is neither keyed nor stood down with a dated " <>
+             "`ungraded-until=`. Re-take it on a quiet host with `--measure <basename> " <>
+             "<its gated arm>`, or stand it down explicitly.\n#{out}"
+
+    assert ctx.check_rc == 0,
+           "the census reds on this tree, so the assertion above was made against a run that " <>
+             "already failed for some other reason.\n#{out}"
   end
 
   test "the COUNTS block ACCOUNTS FOR every row of the column, zeroes included", ctx do
@@ -490,8 +736,7 @@ defmodule Barkpark.PdsDoorCensusTest do
   end
 
   test "the class vocabulary is D637's five plus HUMAN-GATE, and 'the fence' is not one", ctx do
-    {out, rc} =
-      System.cmd(ctx.bash, [ctx.census, "--selftest"], cd: ctx.root, stderr_to_stdout: true)
+    {out, rc} = {ctx.selftest_out, ctx.selftest_rc}
 
     assert rc == 0
 

@@ -113,7 +113,19 @@ export function captureRefusal(text) {
 // cloud/priv/static/__preview__/*.mjs for exit-2 paths and demands every file it
 // finds be accounted for HERE. A new refusing instrument that nobody taught this
 // reader about fails the test by ARRIVING, not by being noticed.
-export const FENCE_GLOBS = ["cloud/priv/static", "cloud/priv/static/__preview__"];
+// A PREDICATE, NOT A LIST (see the `match` regexes): each entry is a directory
+// plus the rule for which of its files are in this capture's fence, so a file
+// ARRIVING is enough to be scanned. `scripts` is fenced to `console-*` because
+// the rest of scripts/ emits for gates that never route through this capture
+// (studio-desk-*, false-open-sweep, font-zero-advance, boundary-build-cache-
+// tripwire all exit 2 under other lanes' readers); the arm is still scanned on
+// every run, and the test asserts it reached files, so "0 emitters" here is a
+// MEASURED zero and not an enumeration that quietly went empty.
+export const FENCE_GLOBS = [
+  { dir: "cloud/priv/static", match: /\.mjs$/ },
+  { dir: "cloud/priv/static/__preview__", match: /\.mjs$/ },
+  { dir: "scripts", match: /^console-.*\.mjs$/ },
+];
 
 // Emitters normalised by cch-w63-bl: exactly one exit-2 path each, inside their
 // own `refuse2` helper, publishing the shape above on STDERR.
@@ -123,9 +135,11 @@ export const NORMALISED = [
   { file: "cloud/priv/static/__refusal_copy_census.mjs", name: "REFUSAL COPY CENSUS" },
   { file: "cloud/priv/static/__reason_arm_census.mjs", name: "REASON ARM CENSUS" },
   { file: "cloud/priv/static/__me_envelope_census.mjs", name: "ME ENVELOPE CENSUS" },
+  { file: "cloud/priv/static/__envelope_census.mjs", name: "ENVELOPE CENSUS" },
   { file: "cloud/priv/static/__init_wiring_census.mjs", name: "INIT WIRING CENSUS" },
   { file: "cloud/priv/static/__agent_event_vocabulary_census.mjs", name: "AGENT EVENT VOCABULARY CENSUS" },
   { file: "cloud/priv/static/__unknown_census.mjs", name: "UNKNOWN CENSUS" },
+  { file: "cloud/priv/static/__required_label_census.mjs", name: "REQUIRED LABEL CENSUS" },
 ];
 
 // Emitters that ALREADY spoke the shape. Each `sample` is a line copied from the
@@ -162,11 +176,102 @@ export const CONFORMING = [
     name: "PROOF",
     sample: "!! PROOF (exit 2): REFUSED TO MEASURE — the browser never came up",
   },
+  // hashchange-wiring.mjs is a `run:` step of the `modal-oracle` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/hashchange-wiring.mjs`)
+  // and it refuses under THREE names, from three different guards, before and
+  // after Chrome exists. All three already spoke the shape; nothing named them
+  // here, so the DERIVED fence test was red on origin/main.
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "ROSTER GUARD",
+    sample: "!! ROSTER GUARD (exit 2) — refusing to boot Chrome:",
+  },
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  {
+    file: "cloud/priv/static/__preview__/hashchange-wiring.mjs",
+    name: "HASHCHANGE WIRING",
+    sample: "!! HASHCHANGE WIRING (exit 2): REFUSED TO MEASURE",
+  },
+  // adjacency-guard.mjs is the `run:` step of the `adjacency-guard` job added by
+  // #19336 and refuses under TWO names: the roster pre-flight (`!! ROSTER GUARD
+  // (exit 2) — refusing to boot Chrome:`) and every measurement refusal after it
+  // (`!! GUARD (exit 2): REFUSED TO MEASURE — …`, the no-Chrome line, the empty
+  // population, the stale server, the font pin). Both shapes were already spoken;
+  // nothing named them here, so the DERIVED fence test reddened on main's tip.
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "ROSTER GUARD",
+    sample: "!! ROSTER GUARD (exit 2) — refusing to boot Chrome:",
+  },
+  {
+    file: "cloud/priv/static/__preview__/adjacency-guard.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): REFUSED TO MEASURE — the source population is EMPTY.",
+  },
+  // pin-race.mjs is a `run:` step of its own job and refuses through ONE funnel
+  // (`const refuse = async (why)`), which sets `process.exitCode = 2` rather
+  // than calling process.exit(2) — the reason a reader keyed on the call shape
+  // alone would not have found it either.
+  {
+    file: "cloud/priv/static/__preview__/pin-race.mjs",
+    name: "PIN RACE",
+    sample: "!! PIN RACE (exit 2): REFUSED TO MEASURE — no Chrome/Chromium found.",
+  },
+  // accent-role-separation.mjs is the `run:` step of the `accent-role-separation`
+  // job (console-harness.yml, `node cloud/priv/static/__preview__/accent-role-separation.mjs`)
+  // and arrived with #19654 — AFTER #19643 registered adjacency-guard.mjs, which is
+  // why the DERIVED fence test went red again on a tree where the previous fix was
+  // intact and still passing. It refuses under ONE name, through four paths: the
+  // missing global WebSocket, the two no-Chrome paths, and the `refuse()` funnel
+  // that every measurement refusal goes through. All four already speak the shape.
+  {
+    file: "cloud/priv/static/__preview__/accent-role-separation.mjs",
+    name: "ACCENT ROLE SEPARATION",
+    sample: "!! ACCENT ROLE SEPARATION (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  // bidi-isolation.mjs is the `run:` step of the `bidi-isolation` job
+  // (console-harness.yml, `node cloud/priv/static/__preview__/bidi-isolation.mjs`)
+  // and arrived with #20054/#20071. Its vocabulary is 0 clean / 1 defect / 2 refusal
+  // / 3 broken or blind, and its ONE exit-2 path is the no-usable-Chrome refusal in
+  // main(), which already speaks the shape under the name GUARD (two texts: CHROME
+  // set but not executable, or no Chrome at all). Its exit codes are unchanged here;
+  // nothing named it, so the DERIVED fence test was red on main's tip (2026-09-24).
+  {
+    file: "cloud/priv/static/__preview__/bidi-isolation.mjs",
+    name: "GUARD",
+    sample: "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.",
+  },
+  // dwb-stopwatch.mjs is the dwb-12 E2E stopwatch (#20288). The Console gate runs
+  // it from the `tier-floor-render` job (its --selftest, plus the two live-guard
+  // refusals) in console-harness.yml. Its ONE exit-2 path is refuse() in main(),
+  // which already speaks the shape under the name DWB STOPWATCH; every refusal
+  // text rides that one helper. #20288 did not name it here, so the DERIVED fence
+  // test was red on main's tip (e8e627906, 2026-09-25).
+  {
+    file: "cloud/priv/static/__preview__/dwb-stopwatch.mjs",
+    name: "DWB STOPWATCH",
+    sample: "!! DWB STOPWATCH (exit 2): REFUSED — live mode needs BOTH --live and --host <url> (owner item 52).",
+  },
 ];
 
 // Files in the fence that exit 2 and publish NO capturable refusal, each with the
 // reason it is out of scope. An exclusion is a decision, so it is written down.
 export const EXCLUDED = [
+  {
+    file: "cloud/priv/static/__preview__/shoot-guards.mjs",
+    why:
+      "A HAND-RUN REGRESSION HARNESS for shoot.sh's four guards (#18434). NO `run:` line in any " +
+      "workflow invokes it — its own header documents `node cloud/priv/static/__preview__/shoot-guards.mjs` " +
+      "as a manual command — so nothing ever captures its stderr and normalising it would be a shape with " +
+      "no reader. Its two exit-2 paths are a CLI usage error (`!! no check named '<x>'`) and an unhandled " +
+      "crash, neither of which is a gate instrument refusing to measure. This exclusion is not prose: the " +
+      "`no EXCLUDED file is invoked by a workflow` arm in the test derives that reachability from " +
+      ".github/workflows/*.yml on every run, so the day a `run:` line does reach this file, the exclusion reds.",
+  },
   {
     file: "cloud/priv/static/__preview__/serve.mjs",
     why:

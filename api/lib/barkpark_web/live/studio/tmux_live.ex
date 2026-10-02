@@ -28,12 +28,16 @@ defmodule BarkparkWeb.Studio.TmuxLive do
 
   @impl true
   def mount(params, _session, socket) do
-    if TmuxConsole.enabled?() do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    # A live shell on the INSTANCE HOST is the instance owner's alone
+    # (task-6ca882967fd95dda): the platform operator when the allowlist is
+    # armed, else an owner/admin of the Default workspace — not any Studio admin.
+    if TmuxConsole.enabled?() and BarkparkWeb.HostExecutionGate.instance_principal?(principal) do
       {:ok,
        socket
        |> assign(
          page_title: "tmux",
-         nav_section: :tmux,
          dataset: default_dataset(),
          # current_path is owned by StudioChrome's :handle_params hook.
          # Truthful return path (charter D5): a scoped surface links here with
@@ -48,7 +52,13 @@ defmodule BarkparkWeb.Studio.TmuxLive do
     else
       {:ok,
        socket
-       |> put_flash(:error, "The tmux console is not enabled on this instance.")
+       |> put_flash(
+         :error,
+         if(TmuxConsole.enabled?(),
+           do: "The host terminal is reserved for the instance owner (the platform operator).",
+           else: "The tmux console is not enabled on this instance."
+         )
+       )
        |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end

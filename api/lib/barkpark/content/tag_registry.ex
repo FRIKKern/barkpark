@@ -98,7 +98,7 @@ defmodule Barkpark.Content.TagRegistry do
   the raise-on-error contract is directly testable (`register!/1` itself only
   ever feeds it the canonical `schema_attrs/0`).
 
-  ## The pull-provenance guard, on the UPDATE only (PDS-D125/D126)
+  ## The pull-provenance guard, on the UPDATE only (PDS-D125/PDS-D126)
 
   This is the SECOND boot-time writer into `schema_definitions` — it runs
   outside `Plugins.Bootstrap`'s registry walk and outside `SchemaBootstrap`'s
@@ -144,7 +144,11 @@ defmodule Barkpark.Content.TagRegistry do
   end
 
   defp do_register!(attrs, dataset) do
-    case Content.upsert_schema(attrs, dataset) do
+    # CLASS (c), the seeded-Default ruling (task-e6523cc7154304f0): the core
+    # `tag` schema is instance-wide — registered at boot, no principal, no
+    # request, and needed in every tenant. `instance_wide: true` declares the
+    # seeded-Default scope instead of arriving there by fallback.
+    case Content.upsert_schema(attrs, dataset, instance_wide: true) do
       {:ok, schema} ->
         schema
 

@@ -116,14 +116,27 @@ defmodule Barkpark.AuthShareTokenTest do
                Auth.create_share_token("ghost", "ghost", "production", ["docs"])
     end
 
-    test "caps the TTL at one year", %{ws: ws, proj: proj, scope: scope} do
+    # task-a0f8cfd7f4800236: the 1-year cap stands (owner decision 2026-06-09);
+    # a ttl up to it is accepted as before, one OVER it is now REFUSED naming
+    # the max instead of clamped — it mints nothing.
+    test "accepts a TTL up to one year; refuses one over it (never clamps)", %{
+      ws: ws,
+      proj: proj,
+      scope: scope
+    } do
       share!(scope, "docs:edit")
 
-      {:ok, {_raw, token}} =
-        Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"], ttl: 999_999_999)
+      assert {:error, {:expiry_exceeds_max, :share, 365}} =
+               Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"],
+                 ttl: 999_999_999
+               )
 
-      max = DateTime.add(DateTime.utc_now(), 366 * 24 * 3600)
-      assert DateTime.compare(token.expires_at, max) == :lt
+      {:ok, {_raw, token}} =
+        Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"], ttl: 365 * 24 * 3600)
+
+      assert_in_delta DateTime.diff(token.expires_at, DateTime.utc_now(), :second),
+                      365 * 24 * 3600,
+                      5
     end
   end
 

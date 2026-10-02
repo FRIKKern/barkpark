@@ -23,7 +23,14 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
   alias BarkparkCloud.Registry.{Barkpark, ProvisionJob}
   alias BarkparkCloud.Usage.Sample
 
-  @domain "gyldendal.barkpark.cloud"
+  # A hostname label OWNED by this module. Every async module that writes a
+  # hostname claim and takes the `hostname:<fqdn>` advisory lock must use its
+  # own label: sandbox transactions never commit, so two modules racing one
+  # literal (one holding the url claim and wanting the lock, the other holding
+  # the lock and writing the claim) deadlock — Postgres 40P01 on main, run
+  # 36956647851 (`gyldendal.barkpark.cloud` was shared by three modules).
+  @label "attachdom"
+  @domain "attachdom.barkpark.cloud"
 
   ## Fixtures
 
@@ -81,11 +88,11 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       # Mixed case + surrounding whitespace + trailing dot all normalize away —
       # the SAME normalization domain_registered?/1 applies on lookup.
       assert {:ok, %Barkpark{custom_host: @domain}} =
-               Registry.set_custom_host(bp, "  Gyldendal.Barkpark.Cloud. ")
+               Registry.set_custom_host(bp, "  Attachdom.Barkpark.Cloud. ")
 
       assert Registry.get_barkpark(bp.id).custom_host == @domain
       assert Registry.domain_registered?(@domain)
-      assert Registry.domain_registered?("GYLDENDAL.barkpark.cloud.")
+      assert Registry.domain_registered?("ATTACHDOM.barkpark.cloud.")
       refute Registry.domain_registered?("someone-else.barkpark.cloud")
     end
 
@@ -325,8 +332,8 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
     end
 
     test "taken by ANOTHER barkpark's provisioning FQDN (url) → {:error, :taken}; your OWN url is attachable" do
-      # A clean go-live claims gyldendal.barkpark.cloud as its PRIMARY url.
-      {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", "gyldendal")
+      # A clean go-live claims @domain as its PRIMARY url.
+      {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", @label)
       assert live.url == "https://" <> @domain
 
       bp = barkpark_fixture(team_fixture())
@@ -398,7 +405,7 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
     end
 
     test "ANOTHER barkpark's live provisioning FQDN → {:error, :domain_taken}" do
-      {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", "gyldendal")
+      {:ok, live} = Registry.register_managed_barkpark(team_fixture(), "Gyldendal", @label)
       assert live.url == "https://" <> @domain
 
       bp = barkpark_fixture(team_fixture())

@@ -83,15 +83,22 @@ defmodule Barkpark.Tasks.Criteria do
   WHY THE PROSE ARM IS WIDE AND MUST STAY WIDE. The two error directions are
   NOT symmetric: a false positive is a LOUD refusal the caller can override in
   one flag, while a false negative is a SILENT permit that lets a builder
-  fabricate a lead's merge close and nothing ever objects. Measured over the
-  live corpus (31090 criteria, 2026-08-22):
+  fabricate a lead's merge close and nothing ever objects. Re-measured over
+  the live corpus 2026-09-17 (9062 rows, 38004 criteria; first measured
+  2026-08-22 as 65 of 1853 = 3.51%):
 
-    * the wide match hits 1853 criteria, of which **65 merely MENTION**
-      merge-gating — a 3.51% false-POSITIVE rate, all loud, all overridable,
-      and all permanently fixable by the author with `merge_gate: false`.
-    * position does NOT separate the two: of those 65 mentions one LEADS with
-      the marker, while 43 genuine gates carry it mid-sentence
-      ("LEAD-OWNED (merge-gated): PR merged to main"). An anchored/leading-only
+    * 2668 criteria are marker-worded. 1360 carry an explicit `true` and 146
+      an explicit `false` (23 of those marker-worded), so the prose arm alone
+      decides 1587. Read by hand, **66 merely MENTION** merge-gating: 2.47%
+      of the 2668, or 4.16% of the 1587 the prose arm decides (a seeded
+      random 40 of the 1587 found 2, 5.0%, consistent). All loud, all
+      overridable, all fixable by the author with `merge_gate: false` — yet
+      that remedy's take-up is 23 marker-worded rows against 66 that need it.
+      The rate held while structure took over.
+    * position does NOT separate the two: of the 2026-08-22 sample's 65
+      mentions one LEADS with the marker, while 43 genuine gates carry it
+      mid-sentence ("LEAD-OWNED (merge-gated): PR merged to main"). An
+      anchored/leading-only
       predicate would therefore MISS 43 real gates to save 64 loud refusals —
       trading a loud error for a silent one, the wrong way round.
 
@@ -125,6 +132,75 @@ defmodule Barkpark.Tasks.Criteria do
     do: Regex.match?(@merge_gate_worded, text)
 
   defp worded_merge_gate?(_), do: false
+
+  @doc """
+  The COMPACT PER-CRITERION STATE SEQUENCE — one character per acceptance
+  criterion, in checklist order — for a caller that must render the
+  per-criterion ladder without shipping the criteria themselves.
+
+      "m"  MET            — `met` is EXACTLY boolean `true` (`met?/1`)
+      "a"  ATTEMPTED      — unmet, but carrying at least one well-formed
+                            honest-miss entry in `attempts[]` (charter D8)
+      "o"  OPEN           — unmet and untouched
+
+  WHY THIS EXISTS. `progress/1` answers `%{met: m, total: t}` — a FRACTION
+  with no per-item state — and the board's ladder
+  (`internal/taskboard/components.go`, `criteriaLadder`) draws one rung per
+  criterion off each item's own state. A fraction cannot rebuild a ladder, so
+  a projection that drops `content.acceptance_criteria` collapses every row's
+  ladder unless it carries this sequence beside the fraction. It carries NO
+  criterion text, NO evidence and NO attempt notes — which is the entire
+  point: it is bounded at one byte per criterion.
+
+  THE "a" PREDICATE MIRRORS THE CONSUMER EXACTLY. `decodeAttempts`
+  (`internal/taskboard/fetch.go`) keeps an attempt only when the entry is a
+  MAP; a non-list `attempts`, or a list of scalars, decodes to no attempts and
+  therefore to no amber rung. This function applies the same rule, so the
+  sequence and a full-view decode of the same row agree rung for rung.
+
+  Same omission law as `progress/1`: `nil` for absent, empty or non-list
+  criteria — the caller omits the segment, never an empty string.
+  """
+  @spec marks(Document.t() | map() | nil) :: binary() | nil
+  def marks(%Document{content: content}), do: marks(content)
+
+  def marks(%{} = content) do
+    content
+    |> fetch(:acceptance_criteria)
+    |> marks_of_list()
+  end
+
+  def marks(_), do: nil
+
+  @doc """
+  `marks/1` over a raw `acceptance_criteria` value. Same tolerance contract:
+  `nil` for anything but a non-empty list.
+  """
+  @spec marks_of_list(term()) :: binary() | nil
+  def marks_of_list(list) when is_list(list) and list != [] do
+    Enum.map_join(list, "", &mark/1)
+  end
+
+  def marks_of_list(_), do: nil
+
+  defp mark(entry) do
+    cond do
+      met?(entry) -> "m"
+      attempted?(entry) -> "a"
+      true -> "o"
+    end
+  end
+
+  # An attempt counts only when it is a MAP — the exact tolerance of the Go
+  # consumer's decodeAttempts, which skips every non-map element.
+  defp attempted?(%{} = entry) do
+    case fetch(entry, :attempts) do
+      list when is_list(list) -> Enum.any?(list, &is_map/1)
+      _ -> false
+    end
+  end
+
+  defp attempted?(_), do: false
 
   @doc """
   Fetches the entry at `index` from a raw `acceptance_criteria` list, or `nil`

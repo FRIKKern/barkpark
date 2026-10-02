@@ -120,7 +120,7 @@ defmodule Barkpark.Media.ImageMetadataTest do
       assert out["assetId"] == file.id
     end
 
-    test "accepts the asset document id spelling and never overwrites present values" do
+    test "accepts the asset document id spelling, normalises it to the bare blob id, and never overwrites present values" do
       {file, _doc} = fixture()
 
       posted = %{
@@ -132,7 +132,20 @@ defmodule Barkpark.Media.ImageMetadataTest do
         "alt" => ""
       }
 
-      assert ImageMetadata.backfill(posted, @dataset, []) == posted
+      # Gyldendal friction 78: ONE spelling. The metadata is untouched; the key
+      # that names the asset is rewritten to the migration's bare blob id.
+      assert ImageMetadata.backfill(posted, @dataset, []) == %{posted | "assetId" => file.id}
+
+      # The draft twin's id is accepted too, and a bare id is byte-identical.
+      assert ImageMetadata.backfill(
+               %{posted | "assetId" => "drafts.asset-#{file.id}"},
+               @dataset,
+               []
+             ) ==
+               %{posted | "assetId" => file.id}
+
+      bare = %{posted | "assetId" => file.id}
+      assert ImageMetadata.backfill(bare, @dataset, []) == bare
     end
 
     test "probes the blob when the asset document has no dimensions yet" do

@@ -1062,8 +1062,8 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
         site_id: site.id,
         environment: "preview",
         branch: "racy",
-        preview_slug: Registry.preview_slug_for(site.slug, "racy"),
-        preview_host: Registry.preview_host_for(site.slug, "racy"),
+        preview_slug: Registry.preview_slug_for(site.slug, "racy", site.id),
+        preview_host: Registry.preview_host_for(site.slug, "racy", site.id),
         git_ref: sha("r2")
       }
 

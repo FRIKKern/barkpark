@@ -75,6 +75,8 @@ defmodule Barkpark.Plugins.RegistryDeskItemsTest do
       assert log =~ "FakeRaisingDeskPlugin.desk_items/1 raised"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "OnixEdit's Bokbasen items are reachable through the collector" do
       # DESK collectors stay unfiltered on a workspace-less ctx (the consumer,
       # Barkpark.Structure, tiers by enablement itself). Only the TOP-MENU

@@ -110,6 +110,22 @@ try {
   assert.equal(preview.querySelector("svg").dataset.source, "graph LR\n  B-->C",
     "the saved source refreshes the rendered preview");
   assert.deepEqual(renderCalls, ["graph TD\n  A-->B", "graph LR\n  B-->C"]);
+
+  // Click-to-edit census: the painted caption is its own typing surface.
+  assert.equal(caption.getAttribute("contenteditable"), "plaintext-only",
+    "the painted caption edits where it reads");
+  caption.focus();
+  caption.textContent = "Figure 3. Request flow, revised";
+  caption.dispatchEvent(new window.Event("input", { bubbles: true }));
+  assert.equal(caption.textContent, "Figure 3. Request flow, revised", "typing is never repainted under the caret");
+  const enter = new window.KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true });
+  caption.dispatchEvent(enter);
+  assert.equal(enter.defaultPrevented, true, "Enter commits instead of breaking the caption");
+  assert.equal(mounted.current().attrs.caption, "Figure 3. Request flow, revised",
+    "the typed caption saves as the block caption");
+  assert.equal(mounted.current().attrs.source, "graph LR\n  B-->C", "the source is untouched");
+  caption.blur();
+  assert.equal(caption.querySelector("b").textContent, "Figure 3.", "blur repaints the reader's lead");
 } finally {
   mounted.view.destroy();
   mounted.view.dom.remove();

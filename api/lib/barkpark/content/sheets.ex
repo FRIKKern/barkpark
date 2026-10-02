@@ -159,10 +159,17 @@ defmodule Barkpark.Content.Sheets do
         |> Map.put("blocks", blocks)
         |> Projection.project(blocks, render_opts)
 
-      doc
-      |> Document.changeset(%{"content" => content, "rev" => generate_rev()})
-      |> Repo.update()
-      |> Broadcast.tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
+      # task-5e4470a96f0a2e55: the embedder rewrite and its mutation_events row
+      # are ONE write. This runs after the sheet's own write committed, so bare
+      # it auto-committed before `tap_broadcast`'s save_event, and an event
+      # fault left the paper rewritten with no event. `write_atomically/1` also
+      # defers the fan-out until commit.
+      Broadcast.write_atomically(fn ->
+        doc
+        |> Document.changeset(%{"content" => content, "rev" => generate_rev()})
+        |> Repo.update()
+        |> Broadcast.tap_broadcast(doc.dataset, doc.type, "update", doc.rev)
+      end)
 
       :rewritten
     else

@@ -11,11 +11,11 @@ defmodule Barkpark.PortableDoc.Render.Util do
 
   @allowed_scheme ~r/^(?:https?|mailto|tel):/i
 
-  # Control bytes removed from the WHOLE href before any check — the exact set
+  # Control codepoints removed from the WHOLE href before any check — the exact set
   # `isCtrlRune` strips in the Go twin (`internal/pdrender/inline.go`:
-  # `r < 0x20 || r == 0x7f`). Kept as one @-attribute so the two sets are
-  # comparable by eye; see `safe_url/1` for why the strip must be global.
-  @control_bytes ~r/[\x00-\x1F\x7F]/
+  # `r < 0x20 || (r >= 0x7f && r <= 0x9f)`). Unicode mode matches C1
+  # codepoints, not individual UTF-8 bytes, preserving ordinary Unicode.
+  @control_bytes ~r/[\x{00}-\x{1F}\x{7F}-\x{9F}]/u
   # Leading spaces (0x20) only. The Go twin does NOT strip these — a leading
   # space makes `urlScheme` return "" there, so the value passes through as
   # schemeless. Elixir has always trimmed them, and continuing to is a NO-OP
@@ -60,7 +60,7 @@ defmodule Barkpark.PortableDoc.Render.Util do
   Parity twins — keep the permitted set in lockstep:
   `web/lib/safe-href.ts` and `internal/pdrender/inline.go` (`sanitizeURL`).
 
-  ASCII control bytes (0x00-0x1F and 0x7F) are removed from the WHOLE string
+  C0, DEL, and C1 controls (U+0000–U+001F and U+007F–U+009F) are removed from the WHOLE string
   before matching, not just from its head, and the CLEANED string is what gets
   emitted — so the value that was CHECKED is the value that RESOLVES.
 
@@ -75,9 +75,9 @@ defmodule Barkpark.PortableDoc.Render.Util do
   forms; `safe_url/1` returned every one of them unchanged.
 
   The strip set is `internal/pdrender/inline.go`'s `isCtrlRune`
-  (`r < 0x20 || r == 0x7f`) exactly — wider than the JS twins' `[\\t\\n\\r]`,
-  because the Go renderer is the reference implementation for this function and
-  a third behaviour would be a new divergence, not a fix.
+  (`r < 0x20 || (r >= 0x7f && r <= 0x9f)`) exactly — wider than the JS twins'
+  `[\\t\\n\\r]`. C1 removal follows the Go terminal-safety boundary; it does not
+  imply that browsers interpret C1 controls as terminal escapes.
   """
   def safe_url(href) when is_binary(href) do
     trimmed =

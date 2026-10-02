@@ -55,7 +55,20 @@ defmodule Mix.Tasks.Codelists.Staleness do
 
   @impl Mix.Task
   def run(argv) do
-    Mix.Task.run("app.start")
+    # Narrowed boot (task-e2c484370ef8fb51), not `app.start`: a full boot binds
+    # the LIVE slot's port when `PHX_SERVER` is set, and — the part that matters
+    # HERE — re-runs the onixedit codelist seeders against the 60 s
+    # statement_timeout before the report even starts. MEASURED: `--report` is
+    # `Repo.all` + the pure `StalenessChecker.detect_stale/2`; `--revalidate` is
+    # `Content.get_document/3` + one `Repo.all` over `codelists` + the pure
+    # `StalenessChecker.revalidate/2`. No writer, no Oban, no endpoint. The one
+    # thing `:one_shot` changes for this task is that it no longer RE-SEEDS
+    # `codelists` first — the serving node's boot owns that table, and
+    # `current_registry/0` below refuses an empty one rather than diffing
+    # against nothing. Dev corpus: identical BLIND report and identical
+    # 170-entry revalidate diff under both boots (see the PR body).
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     opts =
       try do
@@ -242,10 +255,27 @@ defmodule Mix.Tasks.Codelists.Staleness do
   defp current_registry do
     import Ecto.Query, only: [from: 2]
 
-    from(c in "codelists",
-      select: %{plugin_name: c.plugin_name, list_id: c.list_id, issue: c.issue}
-    )
-    |> Repo.all()
+    rows =
+      from(c in "codelists",
+        select: %{plugin_name: c.plugin_name, list_id: c.list_id, issue: c.issue}
+      )
+      |> Repo.all()
+
+    # NON-VACUITY GATE (task-e2c484370ef8fb51). Under `app.start` the boot
+    # seeders filled this table before the task ran, so an empty registry was
+    # unreachable; under the narrowed boot it is exactly what a never-served
+    # database looks like. `revalidate/2` against `%{}` reports every ref as
+    # "removed" — a diff that reads as drift and is really "nothing to compare
+    # to". Refuse loudly instead.
+    if rows == [] do
+      Mix.raise(
+        "codelists table is EMPTY — nothing to revalidate against. The serving node's " <>
+          "boot (Barkpark.SchemaBootstrap) seeds it; run this task on a box that has " <>
+          "booted the full application at least once."
+      )
+    end
+
+    rows
     |> Enum.reduce(%{}, fn row, acc ->
       key = "#{row.plugin_name}:#{row.list_id}"
 

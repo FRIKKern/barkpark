@@ -2,8 +2,7 @@
 
 # The task claim lifecycle — the fenced contract
 
-Companion to [TASK-SYSTEM.md](../setup/TASK-SYSTEM.md), the human guide (setup,
-Studio, organising work). **This file owns the machine half: what each verb does,
+Companion to [TASK-SYSTEM.md](../setup/TASK-SYSTEM.md), the human guide. **This file owns the machine half: what each verb does,
 what it fences on, every refusal it emits.**
 
 Lifecycle: `open · in_progress · blocked · done · cancelled`.
@@ -12,10 +11,10 @@ Lifecycle: `open · in_progress · blocked · done · cancelled`.
 
 - **Claim** flips to `in_progress`, stamps `{worker, ts_iso, epoch}`, bumps the epoch.
 - **Release** — `POST /v1/tasks/:id/release`, holder `worker_id` + `observed_epoch`: `in_progress`→`open`, clears `claim.worker`+`assignee`, bumps the epoch, stamps `released_by`/`released_at`, emits `task.released`.
-- **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs neither — records one of the last 5 attempts, no `met` flip. Emits `task.criterion`; never trips the work-digest fence. **Real only once the PUBLISHED row holds it:** a draft-only stamp lands where no board reads, and a `bp` predating #13410 prints green for it. `make cli-build`; trust the read-back, not the exit code. **`in_progress` only** — a closed row refuses `not_in_progress:done`; no per-criterion evidence after close.
+- **Stamp** — holder + epoch fenced. `--met` needs evidence **and** `--criterion-text` (exact row wording; index-only met-flip → 409 `criterion_text_required`). `--miss` needs `--note` (→ `attempts[].note`, NOT `.evidence`), last 5, no `met` flip. Emits `task.criterion`; never trips the work-digest fence. **Real only once the PUBLISHED row holds it:** a draft-only stamp lands where no board reads, and a `bp` predating #13410 prints green for it. trust the read-back, not the exit code. **`in_progress` only** — a closed row refuses `not_in_progress:done`; no per-criterion evidence after close.
 - **Withdraw** — `--withdraw --note "<why>"` (+ `--criterion-text`) is the only verb that LOWERS a met flag. Sets `met: false` so `criteria_progress` drops, **leaves the original evidence where it was**, and appends a signed `{note, ts, worker, superseded_evidence}` to the criterion's `withdrawals` list. Refuses an already-unmet criterion (`409 criterion_not_met`); needs no `--merge-gated` on a merge gate. The ONE stamp outcome allowed on a **sealed** row: `in_progress` is holder+epoch fenced like any stamp; done/cancelled/open takes `--observed-rev <the rev you read>` (`409 observed_rev_required`).
 - **Merge gates are the lead's**; PR-body proof dies at merge — close over it, never flip ([ADR 0005](../decisions/0005-pr-body-criteria.md)).
-- **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat: renews the lease, emits `task.pulse`. Takes no epoch arg but **bumps the epoch** (1→2→3→4), so the claim epoch is stale after your first pulse — re-read `claim.epoch` before stamping or closing. `now` caps at **500 bytes** (501 → `now must be at most 500 bytes`).
+- **Pulse** — holder-only `{worker_id, now, criterion?}` heartbeat: renews the lease, emits `task.pulse`. No epoch arg, but it **bumps the epoch**, so re-read `claim.epoch` before stamping or closing. Pulse and renew REWRITE `claim.ts_iso`: the claim's start time lives only in the `task.claimed` event (`bp task events <id>`). `now` caps at **500 bytes**.
 - **Close** needs holder + epoch. Status defaults `done`; reason + criterion updates (`met:true` needs its `criterion` text) commit in one rev-CAS. Brief drift → `doc_changed_since_claim`; `observed_rev` forces strict full-rev CAS.
 - **Leases expire.** A per-minute sweeper releases claims idle past `task_lease_ttl_seconds` (default **2700**, env-tunable), emitting `task.lease_expired` (reap keeps `assignee`). Finish, pulse or re-claim.
 - **Ready** = `lifecycle_status` ∈ {`open`,`blocked`} AND every `blocks` edge points at a `done` task. Closing `done` auto-flips dependents `blocked`→`open` once their whole blocker set is done.
@@ -23,7 +22,7 @@ Lifecycle: `open · in_progress · blocked · done · cancelled`.
 - **Reader order is contractual.** Criteria first, then the purpose dossier; un-dossiered tasks label facts DERIVED. `why` is causal (the problem/risk), never a title/criterion restatement.
 - **Rail awareness (advisory).** Claim/queue-claim/close carry `rail_rev` (ETag of the parent rail: children + `blocks` edges); prime carries `rails: {parent_id → rail_rev}`. `notices`: `blocked_while_claimed`, plus `rail_changed` when body `observed_rail_rev` ≠ current. **Allow-and-fence (L4):** a blocker edge or `move` onto an `in_progress` task bumps its epoch.
 - **Stage** — `POST /v1/tasks/:id/stage`; NO epoch fence. `--note` persists to **`content.disposition_reason`** — DURABLE, unswept. It NEVER rides `content.engagement`: an EPHEMERAL lease of `object`/`holder`/`ts`/`lapse_ttl_seconds`/`lapses_at` and no `note`, deleted wholesale past `task_engagement_ttl_seconds` (900 s). So **`content.engagement.note` has no writer** — a census of it reads 0 and looks like a pass. `task.staged` names the key used as `staged.note_key`. A legacy `engagement.note` is promoted on lapse.
-- **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Bad parent → 409 `invalid_parent`, self/descendant → `cycle`, same-parent → no-op.
+- **Move (re-parent).** `POST /v1/tasks/:id/move` `{new_parent_id}` (null = root) flips `parent_id`, emits `task.reparented` `{from, to}`, returns `rail_rev` (dest) + `from_rail_rev`. Bad parent → 409 `invalid_parent`, self/descendant → `cycle`, same-parent → no-op. Its note: [rules](ledger-notes.md).
 
 ## The refusal vocabulary
 

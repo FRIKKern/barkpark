@@ -21,5 +21,32 @@
   {
     "path": "dist/csp.mjs",
     "limit": "1 KB"
+  },
+  {
+    "name": "Root export (2026-09-18: measured 298 B; 202 B headroom) — tsup builds NINE entries and this file capped FIVE. Measured on this head: bloating src/actions/index.ts grew dist/actions.mjs 6610 B -> 241556 B and `pnpm --filter @barkpark/nextjs size` still exited 0, printing the same five unchanged lines. A cap that does not name an entry is not a cap on it.",
+    "path": "dist/index.mjs",
+    "limit": "500 B"
+  },
+  {
+    "name": "./actions — useOptimisticDocument, a CLIENT bundle every consumer of the subpath ships (2026-09-18: measured 1.5 kB; ~0.5 kB headroom)",
+    "path": "dist/actions.mjs",
+    "limit": "2 KB"
+  },
+  {
+    "name": "./webhook (2026-09-18: measured 1.4 kB; ~0.6 kB headroom)",
+    "path": "dist/webhook.mjs",
+    "limit": "2 KB",
+    "ignore": [
+      "server-only"
+    ]
+  },
+  {
+    "name": "./draft-mode (2026-09-18: measured 918 B; ~360 B headroom). `crypto` is ignored because this entry imports node:crypto — the known ADR-002 violation check-no-node-imports.sh reports ADVISORY — and esbuild cannot resolve it for a browser-platform measurement. Ignoring it keeps the cap on OUR code; it is not an endorsement of the import.",
+    "path": "dist/draft-mode.mjs",
+    "limit": "1.25 KB",
+    "ignore": [
+      "server-only",
+      "crypto"
+    ]
   }
 ]

@@ -6,14 +6,48 @@ defmodule BarkparkWeb.HistoryController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  # [loop-low-history-offset-retention] `?offset=` — history beyond page one.
+  #
+  # The endpoint accepted only `limit` (max 200), so a document with a long
+  # trail had no surfaced path to its OLDER revisions at all: the 201st was
+  # unreachable through the API, however the caller asked. `restore` could
+  # still bring such a revision back — if you already knew its UUID, which
+  # only this listing publishes. Evidence that existed and could not be found.
+  #
+  # OFFSET (not a cursor) because the ordering key is now total
+  # (`{inserted_at, id}` — see `Content.Revisions.list_revisions/4`), so a page
+  # boundary cannot duplicate or skip a row, and callers already hold `limit`.
+  #
+  # `has_more` is derived by asking for ONE row past the page and dropping it,
+  # never by a second COUNT query: the count would be a separate snapshot and
+  # could disagree with the page it describes.
   def index(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     limit = parse_int(params["limit"], 50)
+    offset = parse_offset(params["offset"])
 
+    fetched =
+      Content.list_revisions(
+        doc_id,
+        type,
+        dataset,
+        [limit: limit + 1, offset: offset] ++ scope_opts(conn)
+      )
+
+    has_more = length(fetched) > limit
+    # An erased user's stamped email is never served (Accounts.Privacy).
     revisions =
-      Content.list_revisions(doc_id, type, dataset, [limit: limit] ++ scope_opts(conn))
+      fetched
+      |> Enum.take(limit)
+      |> Barkpark.Accounts.Privacy.redact_actor_labels()
       |> Enum.map(&render_revision/1)
 
-    json(conn, %{revisions: revisions, count: length(revisions)})
+    json(conn, %{
+      revisions: revisions,
+      count: length(revisions),
+      limit: limit,
+      offset: offset,
+      has_more: has_more
+    })
   end
 
   def show(conn, %{"dataset" => dataset, "id" => id}) do
@@ -30,6 +64,7 @@ defmodule BarkparkWeb.HistoryController do
         end
 
       caller_context = CallerContext.from_conn(conn)
+      [rev] = Barkpark.Accounts.Privacy.redact_actor_labels([rev])
       json(conn, %{revision: render_revision_full(rev, schema, caller_context)})
     else
       {:error, :invalid_uuid} -> not_found(conn, "revision not found")
@@ -153,6 +188,21 @@ defmodule BarkparkWeb.HistoryController do
       timestamp: rev.inserted_at
     }
   end
+
+  # Offset has no upper clamp (the page it lands on is bounded by `limit`) and
+  # a floor of 0. A negative, non-numeric, or list-shaped param reads as 0 —
+  # the first page — rather than raising or silently inverting the window.
+  defp parse_offset(nil), do: 0
+
+  defp parse_offset(val) when is_binary(val) do
+    case Integer.parse(val) do
+      {n, _} -> max(n, 0)
+      :error -> 0
+    end
+  end
+
+  defp parse_offset(val) when is_integer(val), do: max(val, 0)
+  defp parse_offset(_), do: 0
 
   defp parse_int(nil, default), do: default
 

@@ -14,8 +14,22 @@ defmodule BarkparkWeb.SchemaController do
   end
 
   def show(conn, %{"dataset" => dataset, "name" => name}) do
-    with {:ok, schema} <- Content.get_schema(name, dataset, scope_opts(conn)) do
-      json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
+    case Content.get_schema(name, dataset, scope_opts(conn)) do
+      {:ok, schema} ->
+        json(conn, %{_schemaVersion: 1, schema: Content.serialize_schema_for_sdk(schema)})
+
+      # The bare {:error, :not_found} renders "document not found" with a hint to
+      # check a document _id; what is missing here is a SCHEMA
+      # (task-8d46c1fe49954697), so name it and point at the listing.
+      {:error, :not_found} ->
+        {:error,
+         {:not_found,
+          "schema not found: no schema named #{inspect(name)} in dataset #{inspect(dataset)}",
+          hint:
+            "Check the schema name and dataset in the URL — GET /v1/schemas/#{dataset} lists the schemas you can read here."}}
+
+      other ->
+        other
     end
   end
 
@@ -98,6 +112,16 @@ defmodule BarkparkWeb.SchemaController do
   # deleting a schema that still has documents is refused with a 409
   # `schema_has_documents` (see Content.Schema.delete_schema/3) so a public type
   # can't be silently removed out from under its now-unreadable documents.
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"dataset" => dataset, "name" => name} = params) do
     opts = Keyword.put(scope_opts(conn), :force, force_param?(params))
 

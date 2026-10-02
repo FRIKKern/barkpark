@@ -30,6 +30,14 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   the five-human-edits-is-one-row invariant.
 
   A row only re-opens as a fresh record once the prior one is `resolve/1`-d.
+
+  ## Tenant attribution
+
+  `record/1` carries an optional `:workspace_id` onto the row (migration
+  20260911120000). A refresh ADOPTS an attribution onto a still-NULL row but
+  never clears one that is already stamped, so a later unscoped write cannot
+  demote an attributed row back into the unattributed population that
+  `Github.Health` shows to every member.
   """
 
   import Ecto.Query
@@ -156,8 +164,20 @@ defmodule Barkpark.Plugins.Github.Conflicts do
   defp refresh(existing, attrs) do
     merged = Map.merge(existing.detail || %{}, Map.get(attrs, :detail) || %{})
 
+    # Only ever ADOPT an attribution, never clear one. A refresh whose caller has
+    # no workspace context (nil) must not blank a `workspace_id` an earlier,
+    # better-scoped write already stamped — that would silently demote an
+    # attributed row back to the NULL (visible-to-every-member) population. A
+    # row that is still NULL takes the incoming id, so an un-backfillable legacy
+    # row heals the first time an attributed write touches it.
+    attrs =
+      case {existing.workspace_id, Map.get(attrs, :workspace_id)} do
+        {nil, ws} when is_binary(ws) -> %{detail: merged, workspace_id: ws}
+        _ -> %{detail: merged}
+      end
+
     existing
-    |> Conflict.changeset(%{detail: merged})
+    |> Conflict.changeset(attrs)
     |> Repo.update()
   end
 
@@ -216,6 +236,13 @@ defmodule Barkpark.Plugins.Github.Conflicts do
       issue: coerce_issue(fetch(attrs, :issue)),
       doc_id: fetch(attrs, :doc_id),
       dataset: fetch(attrs, :dataset),
+      # Tenant attribution (migration 20260911120000). Carried from the caller's
+      # workspace context — `MirrorJob` lifts it out of the Oban args' tenant
+      # scope. Absent → nil = UNATTRIBUTED, which the read path admits only
+      # alongside the caller's own memberships. Never guessed here: inventing a
+      # workspace for an unscoped write is exactly the cross-tenant confusion
+      # this column exists to end.
+      workspace_id: fetch(attrs, :workspace_id),
       kind: fetch(attrs, :kind),
       detail: fetch(attrs, :detail) || %{}
     }

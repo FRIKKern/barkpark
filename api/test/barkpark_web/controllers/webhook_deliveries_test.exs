@@ -281,6 +281,20 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       assert resp.status == 404
     end
 
+    # task-ae096a1b6ef7f5a6: listener presence NEVER leaves for a webhook
+    # (PDF-D18) — dispatch, SSE and SSE replay all drop it, so the replay door
+    # must too. In-scope on every other axis, so only the type can refuse it.
+    test "a listener-presence event cannot be replayed → 404, nothing POSTed", %{conn: conn} do
+      wh = make_webhook(conn)
+      listener = make_event(%{type: "listener", document: %{"_id" => "l1", "machine" => "m"}})
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{listener.id}/replay")
+
+      assert resp.status == 404
+      refute_receive {:webhook_post, _, _, _}, 200
+    end
+
     test "an event from another dataset cannot be replayed to this webhook → 404", %{conn: conn} do
       wh = make_webhook(conn, %{"dataset" => "test"})
       foreign = make_event(%{dataset: "other"})

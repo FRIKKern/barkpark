@@ -24,12 +24,13 @@ import {
   parseViewIds, boundaryWalk, coverageReport, selectCells,
   parseHeightClause, parseThemeMembers, accentIdentities, axisCoverage,
   familyOf, scenarioReport,
-  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
+  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION, cellUrl,
   SHELL_CHROME_SELECTORS, SHELL_CHROME_CEILING, CHROME_PIN_ROW, foldVerdict,
   HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
   RENDER_HEIGHTS_DEFAULT, heightDriveReport, cueAxisOfMask, cueStuckVerdict,
-  selectNames,
+  selectNames, ascendingViolation, nonAscendingRefusal,
   SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
+  RESIDUE_VERDICTS, residueFamily, residueVerdictProblem, residueVerdictReport,
 } from "./breakpoint-sweep.mjs";
 import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
 
@@ -162,7 +163,7 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
   const raw = (APP_CSS.match(/@media/g) || []).length;
   const stripped = parseMediaBreakpoints(APP_CSS).preludes.length;
-  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css:2131 names a breakpoint inside a comment)`);
+  assert.ok(raw > stripped, `raw grep ${raw} must exceed the parsed block count ${stripped} (app.css names a breakpoint inside a comment: grep -n 'NOT TOUCHED, DELIBERATELY' app.css)`);
 });
 
 test("index.html's registered screens are exactly the screens CELLS drives", () => {
@@ -233,12 +234,37 @@ test("an unreadable width in the stylesheet REFUSES the whole run", () => {
 
 // ── the cell table's own invariants ──────────────────────────────────────────
 
-test("every cell carries a scenario, a hash, a view and a SENTINEL", () => {
+test("every cell carries a scenario, a route, a view and a SENTINEL", () => {
   for (const c of CELLS) {
-    for (const k of ["name", "scen", "hash", "view", "sentinel"]) {
+    for (const k of ["name", "scen", "view", "sentinel"]) {
       assert.ok(c[k] && String(c[k]).length, `cell ${c.name}: missing ${k}`);
     }
-    assert.ok(c.hash.startsWith("#"), `cell ${c.name}: the hash is what ROUTES — ?scen= alone renders #overview`);
+    // task-197a30115b0d8a7d: a cell OUTSIDE the shell (/new) routes by its
+    // pathname and declares `shell: false`; every other cell still routes by
+    // hash, and ?scen= alone renders #overview.
+    if (c.shell === false) {
+      assert.ok(typeof c.pathname === "string" && c.pathname.startsWith("/") && c.pathname !== "/",
+        `cell ${c.name}: shell:false must name the document's pathname`);
+      assert.equal(SCENARIOS[c.scen].pathname, c.pathname, `cell ${c.name}: the pathname is the scenario's own`);
+    } else {
+      assert.ok(typeof c.hash === "string" && c.hash.startsWith("#"), `cell ${c.name}: the hash is what ROUTES — ?scen= alone renders #overview`);
+      assert.equal(c.pathname, undefined, `cell ${c.name}: a shell cell loads the SPA root`);
+    }
+  }
+  // cellUrl carries pathname, search and hash in the order the SPA reads them.
+  // (One arm, not a new test: console-harness.yml pins this file's count
+  // EXACTLY, and a route arm belongs beside the route invariant it checks.)
+  assert.equal(cellUrl({ scen: "fleet", hash: "#fleet" }, "dark", "http://h"), "http://h/?scen=fleet&theme=dark#fleet");
+  assert.equal(cellUrl({ scen: "b", hash: "#billing", search: "?billing=portal" }, "light", "http://h"),
+    "http://h/?billing=portal&scen=b&theme=light#billing");
+  assert.equal(cellUrl({ scen: "t", pathname: "/new", search: "?template=x&bp=1" }, "light", "http://h"),
+    "http://h/new?template=x&bp=1&scen=t&theme=light");
+  // every committed cell's URL, parsed back, carries its own scenario and theme
+  for (const c of CELLS) {
+    const u = new URL(cellUrl(c, "dark"));
+    assert.equal(u.searchParams.get("scen"), c.scen);
+    assert.equal(u.searchParams.get("theme"), "dark");
+    assert.equal(u.pathname, c.pathname || "/");
   }
 });
 
@@ -282,6 +308,69 @@ test("a blank member is not an unknown cell called \"\"", () => {
   const r = selectCells(CELLS, "fleet, ,");
   assert.deepEqual(r.unknown, []);
   assert.deepEqual(r.cells.map((c) => c.name), ["fleet"]);
+});
+
+// ── THE GATE'S OWN COMMENT ABOUT `--cell`, PINNED TO THE FLAG IT DESCRIBES ───
+// cch-w24-bl-console-harness-comment-lies-about-cell-flag. console-harness.yml
+// told a reader that `--cell` was single-name-only and that a comma list exits
+// 2. The tests directly above are what REFUTED it — selectCells has split on
+// commas since the typo fix, and the workflow's own roster phone-band leg drives
+// `--cell members,members-member` on every push. So the COMMENT was the wrong
+// half, not the code, and a behavioural test cannot catch prose: nothing in this
+// suite would have reddened while that sentence sat in the gating file.
+//
+// The remedy is not a better sentence. It is a sentence that CANNOT be true on
+// its own: the workflow now QUOTES the sweep's own RUN usage line, and these two
+// tests hold the quote to its source and refuse the retracted claim's return.
+// Both read the real repository files, and both assert they actually READ
+// something before asserting anything is absent — an empty read must never pass
+// for agreement.
+const REPO_ROOT = path.resolve(HERE, "..", "..", "..", "..");
+const CONSOLE_WF = path.join(REPO_ROOT, ".github", "workflows", "console-harness.yml");
+
+// `#`/`//` comment marker off, runs of whitespace collapsed. The same sentence
+// wears YAML indentation in one file and a JS comment in the other; what must
+// agree is the COMMAND, not the gutter it is printed in.
+function commentText(line) {
+  return line.replace(/^\s*(#|\/\/)\s?/, "").replace(/\s+/g, " ").trim();
+}
+
+test("the gate's `--cell` comment QUOTES the sweep's own usage line rather than restating it", () => {
+  assert.ok(fs.existsSync(CONSOLE_WF),
+    "REFUSING TO MEASURE: " + CONSOLE_WF + " is not there. A missing workflow must red this guard, never satisfy it by giving it nothing to disagree with.");
+  const wf = fs.readFileSync(CONSOLE_WF, "utf8");
+  const sweepSrc = fs.readFileSync(path.join(HERE, "breakpoint-sweep.mjs"), "utf8");
+  assert.ok(wf.length > 0 && sweepSrc.length > 0, "both files must be non-empty before either is searched");
+
+  // The usage line is the SOURCE of truth, and it is found by the flag it
+  // documents — not by a line number, which is the drift this row is about.
+  const usage = sweepSrc.split("\n").map(commentText)
+    .filter((t) => t.startsWith("node ") && t.includes("--cell") && t.includes(","));
+  assert.equal(usage.length, 1,
+    "breakpoint-sweep.mjs must carry exactly ONE comma-list usage line for --cell; found " + usage.length + ": " + JSON.stringify(usage));
+
+  const quoted = wf.split("\n").map(commentText).filter((t) => t === usage[0]);
+  assert.equal(quoted.length, 1,
+    "console-harness.yml must quote that usage line verbatim, once. Wanted:\n  " + usage[0] +
+    "\nIf you changed the sweep's RUN block, change the quote in the workflow in the SAME commit — the two are one statement.");
+});
+
+test("no console-harness comment claims `--cell` refuses a comma list", () => {
+  assert.ok(fs.existsSync(CONSOLE_WF), "REFUSING TO MEASURE: " + CONSOLE_WF + " is not there.");
+  const lines = fs.readFileSync(CONSOLE_WF, "utf8").split("\n");
+  // POSITIVE CONTROL FIRST. An absence proves nothing until the haystack is
+  // shown to contain the thing the claim would be ABOUT.
+  assert.ok(lines.some((l) => l.includes("--cell")),
+    "control failed: the workflow mentions no --cell at all, so a clean scan here would measure nothing");
+
+  const retracted = /exact-match SINGLE-NAME|comma list exits 2|single-name only/i;
+  const offenders = lines.map((l, i) => [i + 1, l]).filter(([, l]) => retracted.test(l));
+  assert.deepEqual(offenders, [],
+    "the retracted claim is back in the gating file. It was REFUTED BY RUN: `--render --widths 320 --cell members,members-member` renders 2 cells x 2 themes = 4 and exits 0, while `--cell members,nosuchcell` exits 2 naming the one bad member. Offenders: " + JSON.stringify(offenders));
+  // ...and prove the detector can still say YES, so the deepEqual above is not
+  // a regex that stopped matching anything at all.
+  assert.ok(retracted.test("# `--cell` is exact-match SINGLE-NAME on main: a comma list exits 2."),
+    "the detector no longer recognises the very sentence it exists to refuse");
 });
 
 test("no sentinel is merely the screen's own container", () => {
@@ -692,8 +781,11 @@ test("the DEFAULT loop is ONE height, and the decision carries its own render co
   // instead of quietly stale.
   const one = CELLS.length * THEMES.length * 1 * WIDTHS.length;
   const all = CELLS.length * THEMES.length * HEIGHTS.length * WIDTHS.length;
-  assert.equal(one, 1050);
-  assert.equal(all, 3150);
+  // task-197a30115b0d8a7d (2026-09-24): 26 -> 36 cells moved these from
+  // 1092/3276, RE-DERIVED from the tables (36 x 2 x 21, then x3), and the
+  // HEIGHT_REASONS sentence below was re-written to the new pair.
+  assert.equal(one, 1512);
+  assert.equal(all, 4536);
   const reason = HEIGHT_REASONS[RENDER_HEIGHT];
   assert.ok(reason.includes(String(one)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state the default-loop render count ${one}`);
   assert.ok(reason.includes(String(all)), `HEIGHT_REASONS[${RENDER_HEIGHT}] must state what walking all ${HEIGHTS.length} heights costs (${all})`);
@@ -821,8 +913,8 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   // to cover it; the clamp reding IS the guard working. It also reds on a
   // COMMENT that merely mentions 620px — the parser strips comments and this
   // count does not — and that is the one case where the fix is to reword the
-  // comment (app.css:2131 is the standing precedent for a breakpoint named
-  // inside one).
+  // comment (app.css's own `NOT TOUCHED, DELIBERATELY` line is the standing
+  // precedent for a breakpoint named inside one — grep -n it).
   assert.equal((css.match(/740px/g) || []).length, 0,
     "the 740px mutation left a 740px occurrence behind — app.css names 740 in a form " +
     "`max-width: 740px` does not match (range syntax `(width <= 740px)`, a `min-width` " +
@@ -923,6 +1015,85 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // longer unguarded: the chronicle arm below the residue parsers reads these
 // bytes and reds on a duplicate landing slot, an out-of-order block, or an
 // ordinal past the measured census.
+//
+// ── THE TYPED-COUNTER OWNERSHIP TABLE ────────────────────────────────────────
+//
+// Read this before you move ANY global integer in the console harness. It
+// answers one question — "which single file do I edit, and what re-derives the
+// number?" — because the failure this table exists to stop is a builder moving
+// a copy and leaving the owner, or moving the owner and leaving a copy.
+//
+// THIRTEEN typed global counters live across TWO owner files. (The row that
+// asked for this table said NINE, measured 2026-08-23; that count is stale on
+// both ends — see the two footnotes.) Each number below names exactly ONE
+// owner. Anchors are FUNCTION NAMES AND GREPPABLE STRINGS, never line numbers:
+// under cloud/priv/static a `<file>:<digits>` citation rots within days and
+// reds the Console gate's E11 clause.
+//
+// OWNER 1 — cloud/priv/static/__preview__/breakpoint-sweep.test.mjs, in the
+//   test whose title is BUILT from scenarioReport (grep: `the census
+//   reconciles:`). Six numbers, all from ONE measurement:
+//
+//     r.total            134   grep `assert.equal(r.total, 134)`
+//     r.cells             25   grep `assert.equal(r.cells, 25)`
+//     r.distinctCovered   24   grep `mixed-fleet is used twice`
+//     r.residue          110   grep `110 is the RESIDUE, not the census`
+//     r.families          14   grep `assert.equal(r.families, 14)`
+//     SCENARIO_RESIDUE   110   grep `the COMMITTED literal, counted from the
+//                              committed bytes` — this is residue typed a
+//                              SECOND time, deliberately, against the committed
+//                              bytes rather than the report. Move BOTH or the
+//                              file contradicts itself.
+//
+//   THIS TABLE IS ITSELF UNGUARDED, and cch-w36-bl found it stale rather than
+//   wrong-by-one: on origin/main it read 125 / 101 / 13 while the same tree's
+//   own `>> scenarios` line printed 132 · 108 · 13, so it had been carrying a
+//   seven-scenario, seven-residue drift under a fully green harness. No arm in
+//   this file parses these bytes — the coverage walk above covers the ownership
+//   map in breakpoint-sweep.mjs, NOT this table — which is the same shape the
+//   census five were in before D527, and it deserves the same remedy. Until an
+//   arm reads it, treat every numeral here as a hint and the `>> scenarios`
+//   line as the fact.
+//
+//   RE-DERIVE, never increment: `node cloud/priv/static/__preview__/breakpoint-sweep.mjs`
+//   prints the whole set on its `>> scenarios` line —
+//   `134 scenarios · 24 distinct covered by 25 cells · 110 residue over 14
+//   families (committed literal)`. Read that line and copy from it.
+//
+// OWNER 2 — cloud/priv/static/__binding_census.mjs (NOT under __preview__, and
+//   NOT a node --test file: it is a script that exits 2). Seven numbers in two
+//   separate pins:
+//
+//     EXPECT.total          80   grep `FAIL(2): the PIN no longer sums`
+//     EXPECT.elevated       39   (same pin)
+//     EXPECT.predicated     34   (same pin)
+//     EXPECT.unpredicated    5   (same pin)
+//
+//     EXPECT_POPULATIONS.reachable      0   grep `FAIL(2m): the unpredicated
+//     EXPECT_POPULATIONS.omitted        1   population no longer splits`
+//     EXPECT_POPULATIONS.unobservable   4
+//
+//   RE-DERIVE: `node cloud/priv/static/__binding_census.mjs`. Exit 0 means all
+//   seven agree with the artifact; exit 2 prints `expected …` beside `found …`
+//   for whichever pin moved. Copy from `found`.
+//
+// NOT PINNED ANYWHERE, and do not go looking for a literal to move: the unit
+// count, the smoke count and the me-envelope count. smoke.mjs builds its
+// sentence from `names.length`; .github/workflows/console-harness.yml pins NO
+// counter at all — every integer in that file is comment prose and can be
+// stale without redding anything.
+//
+// FOOTNOTE A (why the table is not "five in this file"): the five integers
+// used to be typed a SIXTH time in this test's TITLE prose. cch-w47-s4 (D527)
+// deleted that copy by BUILDING the title from `scenarioReport` — which is why
+// the `test(\`…\`)` line above is a template literal. There is no sixth copy to
+// keep in step, and re-introducing a literal title would re-create one.
+//
+// FOOTNOTE B (why seven and not four in the census): EXPECT_POPULATIONS did
+// not exist when the ownership row was filed. It is a second, independent pin
+// over the same PIN rows, and it reds on its own die2 with its own `FAIL(2m)`
+// prefix. A builder who moves EXPECT and stops has moved half the owner.
+//
 const census = scenarioReport({ scenarios: SCENARIOS });
 test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered} distinct covered by ${census.cells} cells, ${census.residue} residue over ${census.families} families`, () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
@@ -998,13 +1169,169 @@ test(`the census reconciles: ${census.total} scenarios, ${census.distinctCovered
   // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
   // PRINTED (`125 scenarios · 24 distinct covered by 25 cells · 101 residue over
   // 13 families`), never by adding one to the line above.
-  assert.equal(r.total, 125);
-  assert.equal(r.cells, 25);
-  assert.equal(r.distinctCovered, 24, "mixed-fleet is used twice — 25 cells cover 24 DISTINCT scenarios");
-  assert.equal(r.residue, 101, "101 is the RESIDUE, not the census");
-  assert.equal(r.families, 13);
+  // cch-w38-s1-fu (task-8cf413b005cbcd40) moves it by THREE in ONE commit:
+  // `instance-behind-member`, `instance-remove-failed-member` and
+  // `instance-failed-member` — the MEMBER arm of the three instance states
+  // cch-w45-bl added as owners. Until them, member-authority-sweep.mjs (the
+  // console's only rendered-bytes member instrument) could not reach ANY of the
+  // three offer sites #12996 fenced: measured on origin/main 661e87d9f3, it
+  // exited 0 with 0 findings over both the fenced tree and a tree with #12996's
+  // three app.js hunks reverted. Total 125 -> 128, residue 101 -> 104. CELLS
+  // (25), distinctCovered (24) and families (13) are DELIBERATELY UNMOVED: all
+  // three land in the residue, not a cell, and their familyOf is
+  // `hash:#instance` — a family that already had 26 members, so three more
+  // cannot create a 14th. Both moved integers were RE-DERIVED by RUNNING `node
+  // breakpoint-sweep.mjs` on this branch and reading the `>> scenarios` line it
+  // PRINTED (`128 scenarios · 24 distinct covered by 25 cells · 104 residue over
+  // 13 families`), never by adding three to the line above.
+  // cch-w48-s1-followup added `new-launch-me-unreadable`: the /new launch step in
+  // front of a /v1/me that 500s, so the funnel's own [data-me-retry] — until then
+  // a string asserted in node and rendered by nothing — is instrumented. That
+  // took the corpus 128 -> 129 and the residue 104 -> 105 on main.
+  // cch-r16-w11 moves it by THREE more, in ONE commit (the strict:false hazard
+  // the 104->105 precedent names): `theater-ready-github`,
+  // `theater-ready-github-member` and `theater-failed-member` — the first
+  // fixtures to put ANY actor on the /new ready screen with GitHub connected,
+  // and the first to put a plain MEMBER on either theater screen at all, so
+  // the first able to measure the launch wizard's own team-admin writes both
+  // ways. Total 129 -> 132, residue 105 -> 108. CELLS (25), distinctCovered
+  // (24) and families (13) are DELIBERATELY UNMOVED: all three land in the
+  // residue, not a cell, and their familyOf is `path:/new` — a family that
+  // already had five members, so three more cannot create a 14th. Both moved
+  // integers were RE-DERIVED, AFTER the rebase onto the main that carries
+  // #18064, by RUNNING `node breakpoint-sweep.mjs` on this branch and reading
+  // the `>> scenarios` line it PRINTED (`132 scenarios · 24 distinct covered by
+  // 25 cells · 108 residue over 13 families`), never by adding three to the
+  // line above.
+  // cch-w36-bl moves it by ONE, and it is the first block in this chronicle to
+  // move the FAMILY count: `activity-denied` — a plain MEMBER on #activity whose
+  // /v1/audit is refused, so the first fixture in this corpus able to reach
+  // loadActivity's refusal arm at all — is the corpus's first residue entry in
+  // the `hash:#activity` family. Total 132 -> 133, residue 108 -> 109, families
+  // 13 -> 14. CELLS (25) and distinctCovered (24) are DELIBERATELY UNMOVED: it
+  // lands in the residue, not a cell.
+  //
+  // THE SECOND-ORDER REFUSAL, WHICH THIS BLOCK EXISTS TO WRITE DOWN. Adding the
+  // SCENARIO_RESIDUE entry alone does NOT clear the sweep: `hash:#activity` was
+  // a FOURTEENTH family over a RESIDUE_FAMILY_REASONS that held thirteen keys,
+  // so the sweep went on exiting 2 with `UNEXPLAINED residue family
+  // hash:#activity` until a written reason landed beside the entry — and that
+  // reason is pinned at MORE THAN 60 CHARACTERS by "every residue family has a
+  // written reason". A family-creating residue entry is therefore TWO edits in
+  // breakpoint-sweep.mjs, never one, and the sweep names neither until the
+  // other is done.
+  //
+  // AND IT MOVED A THIRD THING NO EARLIER BLOCK HAD TO. `hash:#activity` was one
+  // of the two ZERO-residue families named by hand below; gaining an entry left
+  // exactly ONE, so the arm's typed pair, this file's regex over the ownership
+  // map's bullet, and that bullet's own wording all moved together. Six tests in
+  // this file refused before these numbers were re-read — 66, 68, 71, 72, 73 and
+  // 76 — alongside the bare sweep (exit 2, twice, for two different reasons) and
+  // smoke.mjs (exit 1, `CENSUS: 1 committed scenario(s) have NO expectation`).
+  // Every integer here was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` on
+  // this branch and reading the `>> scenarios` line it PRINTED (`133 scenarios ·
+  // 24 distinct covered by 25 cells · 109 residue over 14 families`), never by
+  // adding one to the line above.
+  //
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read moved it by ONE:
+  // `instance-sites-unreadable` — the first fixture in this corpus able to FAIL
+  // the /v1/sites read — is the 134th scenario and the 110th residue entry
+  // (family `hash:#instance`). The cell count does NOT move: it paints the
+  // instance-detail layout the five hash:#instance cells already walk at all 18
+  // widths, and what it carries that no width can score is driven by
+  // overflow-guard.mjs's W34-sites-read-failed-bounded leg instead. The three
+  // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
+  // on this branch and reading what it PRINTED: `134 scenarios · 24 distinct
+  // covered by 25 cells · 110 residue over 14 families (committed literal)`.
+  // The sweep refused at exit 2 (`UNLISTED scenario "instance-sites-unreadable"
+  // (family hash:#instance)`) and smoke.mjs at exit 1 (`CENSUS: 1 committed
+  // scenario(s) have NO expectation`) until both were taught — the literal
+  // doing its job, not friction.
+  //
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority moved it
+  // by ONE: `members-self-role-drift` — the acting owner whose OWN roster row
+  // carries a role its resolved `team_authority` disagrees with, the first
+  // fixture in this corpus in which those two values differ at all — is the
+  // 135th scenario and the 111th residue entry (family `hash:#settings`). The
+  // cell count does NOT move: it is the `members` cell's own roster with one
+  // role string changed, so it paints the same .set-row the settings cells
+  // already walk at all 18 widths, and the thing it carries that no width can
+  // score — WHICH of the two values the role chip is painted from — is driven
+  // by smoke.mjs's `members-self-role-drift` expectation instead. The three
+  // numerals below were RE-DERIVED, not incremented, by RUNNING the bare sweep
+  // on this branch and reading what it PRINTED: `137 scenarios · 24 distinct
+  // covered by 25 cells · 113 residue over 14 families (committed literal)`.
+  // The sweep refused at exit 2 (`UNLISTED scenario "members-self-role-drift"
+  // (family hash:#settings)`) until the entry was written — the literal doing
+  // its job, not friction. cch-w45-s5-fu moved it by two: the /v1/me-unreadable
+  // fixtures on a suspended and on a behind box are the 136th and 137th
+  // scenarios and the 112th and 113th residue entries (family hash:#instance),
+  // and the sweep refused the same way until both entries were written.
+  // cch-w20-bl moved it by one: `overview-attention-long-name` — the first
+  // fixture in this corpus to give `.attention-name` a string its column cannot
+  // seat, and so the first able to make that ellipsis ENGAGE — is the 138th
+  // scenario and the 114th residue entry (family hash:#overview), and the sweep
+  // refused the same way until the entry was written.
+  // cch-w47-rv-bl moved it by one: `fleet-archives-member` — the first fixture
+  // to render the archives panel as a plain MEMBER — is the 139th scenario and
+  // the 115th residue entry (family hash:#fleet), and the sweep refused the
+  // same way until the entry was written.
+  // task-5ffdec2b609404bc moved it by two, and for a reason no earlier mover
+  // had: the modal seam stopped being a NAME CONVENTION in shoot.sh and became
+  // a scenarios.mjs `modal` field, so a scenario can finally ask for a dialog
+  // other than the account modal. `tokens-revoke-confirm` (the confirm-sheet
+  // shape, family hash:#settings) and `cmdk-palette` (the .modal-root:has(.cmdk)
+  // arm, family hash:#fleet) are the 140th and 141st scenarios and the 116th and
+  // 117th residue entries. Each is its HOST scenario's fixture deep-copied plus
+  // one field, so what they add to THIS sweep's axis is nothing — the tables
+  // beneath them are the ones the `tokens`/`fleet` cells already walk at all 18
+  // widths — and the sweep refused at exit 2 (`UNLISTED scenario
+  // "tokens-revoke-confirm"`) until both entries were written.
+  // task-499cab525e65018b moved it by two more, for the reason the seam above
+  // exists: `instance-pin-version` and `instance-update-conflict` (both family
+  // hash:#instance) are the first scenarios to reach `openPinModal` and
+  // `openUpdateConflictModal` — the two openModal call sites PR #19581's
+  // enumeration filed as having NO scenario at all. They are the 142nd and
+  // 143rd scenarios and the 118th and 119th residue entries; the sweep refused
+  // at exit 2 (`UNLISTED scenario "instance-pin-version" (family
+  // hash:#instance)`) until both entries were written.
+  // pdf-bl-fleet-group-route moves it by ONE, and unlike the last several it
+  // moves the CELL axis: `fleet-group-view` is the 144th scenario and the FIRST
+  // to reach the PDF-D11 group tab (`#instance/<main>/group`), which the parent
+  // slice shipped with no route at all. It gets a CELL, not a residue entry,
+  // because `.group-table` is a five-column grid collapsing to two at 640 —
+  // geometry none of the 23 hash:#instance residue entries shares, and its
+  // sentinel exists only after the browser-direct roster read lands, so the
+  // cell also walks the route's async paint. Total 143 -> 144, cells 25 -> 26,
+  // distinctCovered 24 -> 25. Residue (119) and families (14) are DELIBERATELY
+  // UNMOVED: a cell is not residue, and a cell creates no family. Every integer
+  // was RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading the
+  // `>> scenarios` line it PRINTED, never by adding one.
+  // task-679663d0bee42b15 moves it by TWO, both residue (family path:/new):
+  // `new-launch-limit-reached` and `new-launch-forbidden`, the Launch press's
+  // two 403 refusals. Total 144 -> 146, residue 119 -> 121; cells (26),
+  // distinctCovered (25) and families (14) are DELIBERATELY UNMOVED — path:/new
+  // already had eight members. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs`
+  // and reading what it PRINTED (`146 scenarios · 25 distinct covered by 26
+  // cells · 121 residue over 14 families`), never by adding two.
+  // task-197a30115b0d8a7d (2026-09-24) moves it by TEN, and it moves
+  // the residue DOWN without deleting a scenario: the five
+  // media gaps task-1ac954ba0db927cb measured became ten cells (provisioning,
+  // fleet-support-provisioning, offload-working, site-deploy-rail-live,
+  // billing-portal-return, inst-usage, account-modal, account-modal-2fa-
+  // badcode, theater-midflight, theater-ready), and the `promoted` refusal took
+  // their entries out of the literal. Total (146) and families (14) are
+  // DELIBERATELY UNMOVED; cells 26 -> 36, distinctCovered 25 -> 35, residue
+  // 121 -> 111. RE-DERIVED by RUNNING `node breakpoint-sweep.mjs` and reading
+  // what it PRINTED (`146 scenarios · 35 distinct covered by 36 cells · 111
+  // residue over 14 families`), never by subtracting ten.
+  assert.equal(r.total, 146);
+  assert.equal(r.cells, 36);
+  assert.equal(r.distinctCovered, 35, "mixed-fleet is used twice — 36 cells cover 35 DISTINCT scenarios");
+  assert.equal(r.residue, 111, "111 is the RESIDUE, not the census");
+  assert.equal(r.families, 14);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 101, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 111, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -1013,22 +1340,122 @@ test("familyOf reads the artifact: pathname, else the deepLink head, else no-dee
   assert.equal(familyOf({ deepLink: "#/invitations/accept?token=x" }), "hash:#");
   assert.equal(familyOf({}), "no-deeplink");
   // and every committed entry still agrees with the artifact it describes
-  for (const [name, family] of Object.entries(SCENARIO_RESIDUE)) {
+  // task-1ac954ba0db927cb: an entry is { family, verdict, why, … } now; the
+  // family is read through residueFamily, the one reader of either shape.
+  for (const [name, entry] of Object.entries(SCENARIO_RESIDUE)) {
+    const family = residueFamily(entry);
     assert.equal(familyOf(SCENARIOS[name]), family, `residue entry ${name} records ${family}`);
   }
 });
 
 test("every residue family has a written reason, and no reason outlives its family", () => {
-  const used = new Set(Object.values(SCENARIO_RESIDUE));
-  assert.equal(used.size, 13);
+  const used = new Set(Object.values(SCENARIO_RESIDUE).map(residueFamily));
+  assert.equal(used.size, 14);
   for (const f of used) assert.ok(RESIDUE_FAMILY_REASONS[f] && RESIDUE_FAMILY_REASONS[f].length > 60, `family ${f} needs a written reason`);
   assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
 });
 
+// ── RESIDUE VERDICTS (task-1ac954ba0db927cb) ─────────────────────────────────
+// Every SCENARIO_RESIDUE entry carries a CONTENT verdict (adjudicated /
+// superseded / genuinely-uncovered) with its reason at its own line. No count
+// is typed below: the population is Object.keys(SCENARIO_RESIDUE) read at run
+// time, and every title that shows a number builds it from the report.
+
+const RV = residueVerdictReport();
+
+test(`every residue entry carries a content verdict: ${RV.verdicted} verdicts over a derived population of ${RV.population}`, () => {
+  assert.equal(RV.population, Object.keys(SCENARIO_RESIDUE).length, "the population is the literal's own keys");
+  assert.deepEqual(RV.unverdicted, [], "every entry is a verdict, not a bare family");
+  assert.equal(RV.verdicted, RV.population, "the verdicted count EQUALS the derived population");
+  assert.equal(RESIDUE_VERDICTS.reduce((a, v) => a + RV.counts[v], 0), RV.population, "the distribution sums to the population");
+  assert.equal(RV.ok, true);
+  // and the sweep's own report carries it, so the bare run refuses on it
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  assert.deepEqual(r.verdicts, RV);
+});
+
+test("a residue entry added WITHOUT a verdict reds by name — in the verdict report and in scenarioReport", () => {
+  // MUTATION: the pre-verdict shape, a bare family string, on a scenario that
+  // exists (so no other refusal fires first).
+  const probe = "probe-unverdicted";
+  const scenarios = { ...SCENARIOS, [probe]: { ...SCENARIOS.empty } };
+  const residue = { ...SCENARIO_RESIDUE, [probe]: "hash:#overview" };
+  const v = residueVerdictReport({ residue });
+  assert.equal(v.ok, false);
+  assert.equal(v.population, Object.keys(residue).length);
+  assert.equal(v.verdicted, v.population - 1);
+  assert.deepEqual(v.unverdicted.map((u) => u.name), [probe]);
+  const r = scenarioReport({ scenarios, residue });
+  assert.deepEqual(r.unlisted, [], "the entry is LISTED — only the verdict refusal may fire");
+  assert.deepEqual(r.drift, [], "the bare string's family is still read correctly while it is refused");
+  assert.equal(r.ok, false, "an unverdicted entry must red the sweep's scenario report");
+  assert.deepEqual(r.verdicts.unverdicted.map((u) => u.name), [probe]);
+});
+
+test("a verdict is a judgment with a reason: each missing part is refused, by name, with what is missing", () => {
+  const base = { family: "hash:#overview" };
+  const cases = [
+    [{ ...base, why: "x".repeat(60) }, /not one of/],
+    [{ ...base, verdict: "adjudicated" }, /no written `why`/],
+    [{ ...base, verdict: "adjudicated", why: "short" }, /no written `why`/],
+    [{ ...base, verdict: "superseded", why: "x".repeat(60) }, /`by` names nothing/],
+    [{ ...base, verdict: "superseded", by: "no-such-cell", why: "x".repeat(60) }, /neither a cell nor a genuinely-uncovered/],
+    [{ ...base, verdict: "genuinely-uncovered", why: "x".repeat(60) }, /`cover` does not name/],
+  ];
+  for (const [entry, re] of cases) {
+    const got = residueVerdictProblem("probe", entry, { residue: SCENARIO_RESIDUE });
+    assert.match(String(got), re, `${JSON.stringify(entry)} should be refused with ${re}`);
+  }
+  // `by` may not chain through a SUPERSEDED entry — only a cell, or the
+  // genuinely-uncovered entry whose gap it shares, so each gap is counted once.
+  const chained = Object.keys(SCENARIO_RESIDUE).find((n) => SCENARIO_RESIDUE[n].verdict === "superseded");
+  assert.ok(chained, "no superseded entry to chain through — this arm went vacuous");
+  assert.match(String(residueVerdictProblem("probe", { ...base, verdict: "superseded", by: chained, why: "x".repeat(60) }, { residue: SCENARIO_RESIDUE })),
+    /neither a cell nor a genuinely-uncovered/);
+  assert.match(String(residueVerdictProblem("probe", { ...base, verdict: "superseded", by: "probe", why: "x".repeat(60) }, { residue: { probe: {} } })),
+    /superseded by itself/);
+});
+
+test("every superseded entry resolves its `by`, and every genuinely-uncovered entry names its cover", () => {
+  const cellNames = new Set(CELLS.map((c) => c.name));
+  const sup = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "superseded");
+  const unc = Object.entries(SCENARIO_RESIDUE).filter(([, e]) => e.verdict === "genuinely-uncovered");
+  // RE-READ, NOT KEPT GREEN (task-197a30115b0d8a7d): this line demanded BOTH
+  // classes non-empty, and genuinely-uncovered went to ZERO by design — each of
+  // its eleven entries either became a cell or (`failed`) is superseded by one.
+  // An empty uncovered class is the goal state, not a lost class, so it is no
+  // longer required; the `cover` loop below is vacuous today and says so here.
+  // What still guards the degenerate case is the uniform-verdict refusal, which
+  // reds a literal that says one word for every entry.
+  assert.ok(sup.length > 0, "the superseded class went empty — re-read, do not keep this green");
+  for (const [name, e] of sup) {
+    assert.ok(cellNames.has(e.by) || (SCENARIO_RESIDUE[e.by] && SCENARIO_RESIDUE[e.by].verdict === "genuinely-uncovered"),
+      `${name} is superseded by "${e.by}", which is neither a cell nor a genuinely-uncovered entry`);
+  }
+  for (const [name, e] of unc) assert.ok(typeof e.cover === "string" && e.cover.length >= 10, `${name} names no cover`);
+  assert.deepEqual(RV.uncovered, unc.map(([n]) => n), "the report's uncovered list is the literal's, in literal order");
+});
+
+test("one verdict stamped on every entry is refused as a label, not a judgment", () => {
+  const stamped = Object.fromEntries(Object.entries(SCENARIO_RESIDUE).map(([n, e]) =>
+    [n, { family: e.family, verdict: "adjudicated", why: e.why }]));
+  const v = residueVerdictReport({ residue: stamped });
+  assert.deepEqual(v.unverdicted, [], "each stamped entry is individually well-formed");
+  assert.equal(v.uniform, true);
+  assert.equal(v.ok, false);
+  // and the committed literal is NOT uniform
+  assert.equal(RV.uniform, false);
+  assert.ok(RESIDUE_VERDICTS.filter((k) => RV.counts[k] > 0).length > 1);
+});
+
 // ── the residue's TYPED numerals: 21 of them, none of which could lose ───────
 //
-// WHAT THESE THREE ARMS OWN (charter D527). The census five (108/25/26/83/13)
-// were already asserted above; what was NOT asserted is every OTHER typed
+// WHAT THESE THREE ARMS OWN (charter D527). The census five were asserted above
+// as a DERIVED report (and their two typed copies in breakpoint-sweep.mjs's
+// prose only from cch-w48-bl onward — D527 wrote that they were owned while
+// they were not, which is how they came to read 120/25/24/96/13 against a
+// measured 125/25/24/101/13 under four green harnesses); what was NOT asserted
+// by D527 is every OTHER typed
 // number the residue carries — the 13 `// <family> — N` group headers inside
 // the SCENARIO_RESIDUE literal, the 8 `These N` clauses inside
 // RESIDUE_FAMILY_REASONS, and the two ZERO-residue family names in
@@ -1069,7 +1496,7 @@ function residueGroupHeaders(src = SWEEP_SRC) {
 
 function derivedFamilyCounts(residue = SCENARIO_RESIDUE) {
   const counts = new Map();
-  for (const family of Object.values(residue)) counts.set(family, (counts.get(family) || 0) + 1);
+  for (const family of Object.values(residue).map(residueFamily)) counts.set(family, (counts.get(family) || 0) + 1);
   return counts;
 }
 
@@ -1104,11 +1531,13 @@ test("every `// <family> — N` header inside SCENARIO_RESIDUE is recounted from
 test("every `These N` clause in RESIDUE_FAMILY_REASONS is recounted from the literal", () => {
   const derived = derivedFamilyCounts();
   // HONEST COVERAGE, STATED RATHER THAN IMPLIED: this arm checks only the
-  // reasons that actually SPELL a count. Five families phrase their reason
+  // reasons that actually SPELL a count. Six families phrase their reason
   // without one ("Routes whose head is a bare `#`…", the modal family,
-  // /activate, /new, #signup) and are SKIPPED here — untouched by this arm, not
+  // /activate, /new, #signup, and cch-w36-bl's #activity — a one-entry family
+  // whose reason names the fixture instead of counting it) and are SKIPPED here
+  // — untouched by this arm, not
   // proven by it. Their membership is still pinned, but by the header arm
-  // above, which covers all 13. A reason that GAINS a `These N` joins this arm
+  // above, which covers all 14. A reason that GAINS a `These N` joins this arm
   // automatically; one that loses it silently leaves — which is the honest cost
   // of guarding prose, and the reason the header arm is the one that counts
   // families.
@@ -1125,18 +1554,270 @@ test("every `These N` clause in RESIDUE_FAMILY_REASONS is recounted from the lit
   assert.ok(checked.length > 0, "no reason spells a count any more — this arm has gone vacuous and should be retired, not kept green");
 });
 
-test("the two ZERO-residue families are named, and 15 families over all scenarios is not 13", () => {
+test("the ONE ZERO-residue family is named, and 15 families over all scenarios is not 14", () => {
   // breakpoint-sweep.mjs's header prose is the ONE place a reader learns that
-  // `familyOf` over all scenarios gives 15 while the residue spans 13. It was
+  // `familyOf` over all scenarios gives 15 while the residue spans 14. It was
   // asserted by nothing. These three lines are that assertion.
+  // cch-w36-bl: this arm USED to name two — `hash:#activity` and `hash:#sites`.
+  // `activity-denied` gave the first of them its first residue entry, and the
+  // typed pair below refused, by name, before it was re-read. That refusal is
+  // the arm working: a family leaving this list is exactly the event it exists
+  // to catch.
   const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
   const residueFamilies = derivedFamilyCounts();
   assert.equal(allFamilies.size, 15, "familyOf over every committed scenario");
   const zeroResidue = [...allFamilies].filter((f) => !residueFamilies.has(f)).sort();
-  assert.deepEqual(zeroResidue, ["hash:#activity", "hash:#sites"],
+  assert.deepEqual(zeroResidue, ["hash:#sites"],
     "the families every one of whose scenarios is rendered by a cell");
-  // the relation, derived rather than typed: 15 - 13 IS the two above
+  // the relation, derived rather than typed: 15 - 14 IS the one above
   assert.equal(allFamilies.size - residueFamilies.size, zeroResidue.length);
+});
+
+// ── the OWNERSHIP-MAP arms: the block that CLAIMS ownership was itself unowned ─
+//
+// (cch-w48-bl-the-scenario-census-five-numerals-cannot-lose.) The block headed
+// "WHICH ARM OWNS WHICH NUMERAL" in breakpoint-sweep.mjs wrote "Every numeral in
+// this block is now named by the arm that reds when it drifts" — and the census
+// five printed one bullet under that sentence were named by NOTHING. They proved
+// it on main, not in theory: both typed copies (that bullet and "THE CENSUS THIS
+// RECONCILES AGAINST:" above it) read 120 / 25 / 24 / 96 / 13 while
+// `scenarioReport` derived 125 / 25 / 24 / 101 / 13, and the bare sweep exited 0
+// while PRINTING 125/101 on its own `>> scenarios` line, and this suite reported
+// 76 pass / 0 fail, over the gap. The census test above asserts the DERIVED
+// report; the header-census arm below owns ONE line of prose; neither reads
+// these two sites.
+//
+// FOUR ARMS, AND THE LAST IS THE POINT. Three recount values (the census five at
+// both sites; the map's own family numerals; its `exits N` against `refuse`).
+// The fourth walks EVERY integer in the block and reds on any one no owning
+// regex consumed — so the next number typed into this block is unowned until an
+// arm claims it, rather than silently inheriting the block's claim of total
+// coverage. Numerals
+// that MUST NOT track today's census (the 104/79 double-claim, the 99/74
+// precedent) sit below an explicit HISTORICAL rule and are COUNTED rather than
+// recounted: the block states how many it is not guarding, and that count is
+// derived by the same walk.
+
+const SWEEP_PROSE = SWEEP_SRC.replace(/^[ \t]*\/\/ ?/gm, "");
+
+// Both committed copies of the census five, each with the axis each numeral
+// spells, so a failure names the numeral AND the site rather than a line number
+// that drifts on every reflow.
+const CENSUS_PROSE_SITES = [
+  {
+    site: '"THE CENSUS THIS RECONCILES AGAINST:"',
+    re: /THE CENSUS THIS RECONCILES AGAINST:\s+(\d+)\s+scenarios\s+·\s+(\d+)\s+cells\s+over\s+(\d+)\s+DISTINCT\s+scenarios[^·]*·\s+residue exactly\s+(\d+)\s+·\s+(\d+)\s+families/g,
+    axes: ["total", "cells", "distinctCovered", "residue", "families"],
+  },
+  {
+    site: 'the ownership map\'s "N / N / N / N / N" bullet',
+    re: /\*\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+\/\s+(\d+)\s+—\s+"the census five/g,
+    axes: ["total", "cells", "distinctCovered", "residue", "families"],
+  },
+];
+
+test("the census five in breakpoint-sweep.mjs's prose are recounted from the derived report", () => {
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  for (const { site, re, axes } of CENSUS_PROSE_SITES) {
+    const matches = [...SWEEP_PROSE.matchAll(re)];
+    // MATCH-COUNT FLOOR, same law as the header-census and chronicle arms: a
+    // wording drift that slid out from under this regex would leave the arm
+    // vacuous-green over the exact rot it exists to catch. Re-point the regex at
+    // the wording on disk; never lower the floor, never delete the site.
+    assert.equal(matches.length, 1,
+      `match-count floor: ${site} in breakpoint-sweep.mjs matched ${matches.length} times, expected exactly 1 — ` +
+      "the census-five wording drifted out from under this regex (or a second copy appeared); re-point it at the bytes on disk");
+    axes.forEach((axis, i) => {
+      assert.equal(Number(matches[0][i + 1]), r[axis],
+        `breakpoint-sweep.mjs, ${site}: types ${axis}=${matches[0][i + 1]}; scenarioReport derives ${r[axis]}`);
+    });
+  }
+});
+
+// The ownership-map block as bytes: from its own heading to the literal it sits
+// above, comment markers stripped so a numeral split across a hard wrap still
+// reads as prose.
+function ownershipMapBlock(src = SWEEP_SRC) {
+  const start = src.indexOf("// WHICH ARM OWNS WHICH NUMERAL");
+  assert.ok(start >= 0,
+    "breakpoint-sweep.mjs no longer carries a `// WHICH ARM OWNS WHICH NUMERAL` heading — this parser has no range to read");
+  const end = src.indexOf("export const SCENARIO_RESIDUE", start);
+  assert.ok(end > start,
+    "the ownership-map block is no longer terminated by `export const SCENARIO_RESIDUE` — the parse range is unbounded");
+  return src.slice(start, end).replace(/^[ \t]*\/\/ ?/gm, "");
+}
+
+// A standalone integer: `cch-w47-s4`, `D527` and `#8849` are identifiers, not
+// numerals, and `104/79` is TWO.
+const BLOCK_NUMERAL = /(?<![\w#.-])\d+(?![\w-])/g;
+
+// Every regex that OWNS a live numeral inside the block, and the arm that reds
+// when it drifts. The coverage walk below consumes these ranges; anything left
+// over above the HISTORICAL rule is, by definition, unowned.
+const OWNED_BLOCK_SITES = [
+  { what: "the census five bullet", owner: "the census five in breakpoint-sweep.mjs's prose are recounted from the derived report", re: /\*\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+\/\s+\d+\s+—\s+"the census five/g },
+  { what: "the ZERO-residue bullet's family total", owner: "the ownership map's own family numerals are recounted from the literal", re: /\*\s+(\d+), and the ONE ZERO-residue name/g },
+  { what: 'the quoted "N families over all scenarios is not N"', owner: "the ownership map's own family numerals are recounted from the literal", re: /(\d+)\s+families over all\s+scenarios is not\s+(\d+)/g },
+  { what: "the header arm's family span", owner: "the ownership map's own family numerals are recounted from the literal", re: /which spans all\s+(\d+)/g },
+  { what: "the `exits N` refusal claim", owner: "the ownership map's `exits N` claim is read from the sweep's refusal helper", re: /exits\s+(\d+)\s+—/g },
+  { what: "the count of HISTORICAL numerals", owner: "every numeral in the ownership-map block is owned by a named arm, or sits below the HISTORICAL rule", re: /(\d+)\s+numerals sit below the rule/g },
+];
+
+const HISTORICAL_RULE = "HISTORICAL — FROZEN QUOTES OF PAST STATES";
+
+test("the ownership map's own family numerals are recounted from the literal", () => {
+  const block = ownershipMapBlock();
+  const allFamilies = new Set(Object.values(SCENARIOS).map((s) => familyOf(s)));
+  const residueFamilies = derivedFamilyCounts();
+  const lead = [...block.matchAll(/\*\s+(\d+), and the ONE ZERO-residue name/g)];
+  assert.equal(lead.length, 1,
+    "match-count floor: the ownership map's ZERO-residue bullet lead matched " +
+    `${lead.length} times, expected exactly 1 — re-point this regex at the wording on disk`);
+  assert.equal(Number(lead[0][1]), allFamilies.size,
+    `the ownership map's ZERO-residue bullet leads with ${lead[0][1]} families over all scenarios; familyOf derives ${allFamilies.size}`);
+  const quoted = [...block.matchAll(/(\d+)\s+families over all\s+scenarios is not\s+(\d+)/g)];
+  assert.equal(quoted.length, 1,
+    `match-count floor: the quoted "N families over all scenarios is not N" matched ${quoted.length} times, expected exactly 1`);
+  assert.equal(Number(quoted[0][1]), allFamilies.size,
+    `the ownership map quotes ${quoted[0][1]} families over all scenarios; familyOf derives ${allFamilies.size}`);
+  assert.equal(Number(quoted[0][2]), residueFamilies.size,
+    `the ownership map quotes "is not ${quoted[0][2]}" for the residue families; the literal holds ${residueFamilies.size}`);
+  const span = [...block.matchAll(/which spans all\s+(\d+)/g)];
+  assert.equal(span.length, 1,
+    `match-count floor: the header arm's "spans all N" matched ${span.length} times, expected exactly 1`);
+  assert.equal(Number(span[0][1]), residueFamilies.size,
+    `the ownership map says the header arm spans all ${span[0][1]} families; the literal holds ${residueFamilies.size}`);
+  // and the names, which are the reason that bullet exists at all
+  for (const family of [...allFamilies].filter((f) => !residueFamilies.has(f))) {
+    assert.ok(block.includes(`\`${family}\``),
+      `${family} has ZERO residue entries but the ownership map does not name it`);
+  }
+
+  // ── the ZERO-residue bullet's NAMES, in the direction nobody guarded ───────
+  //
+  // cch-w36-bl. The loop directly above walks the DERIVED zero-residue families
+  // and asserts the bullet names each one. That is ONE direction, and it is the
+  // direction that cannot rot: a family with zero residue entries is not going
+  // anywhere. The other direction was open — a family the bullet NAMES as
+  // zero-residue, which has since GAINED its first residue entry, was invisible
+  // to every arm in this file. The bullet went on asserting, in prose, a
+  // property the literal no longer had, and the sweep exits 0 over it:
+  // `scenarioReport` derives its report from the object and structurally cannot
+  // read the comment above it. The forward loop cannot catch it either — it
+  // simply stops asking about a family that left its set.
+  //
+  // That is not hypothetical. It is exactly what `activity-denied` does: the
+  // FIRST residue entry in the `hash:#activity` family, a family this bullet had
+  // named as zero-residue since the bullet was written. MEASURED, not argued:
+  // with the entry committed and the bullet left naming both families, the
+  // assertions below are the ONLY ones in this file that red — the other 81 arms
+  // stay green, including every census pin, because none of them reads the
+  // bullet's names. The rule generalises past this wave: it is the same refusal
+  // for every family-creating residue entry after this one.
+  //
+  // THE PARSE IS SCOPED TO THE BULLET'S LEAD — the segment between the words
+  // `ZERO-residue name(s)` and the first em dash — because the prose AFTER that
+  // dash legitimately discusses families that are no longer zero-residue (this
+  // wave's own clause names `hash:#activity` as the family that just left). A
+  // parser that swept the whole bullet would red on its own explanation.
+  // THE MATCH-COUNT FLOOR IS LOAD-BEARING, same law as every other arm here: a
+  // wording drift that slid out from under this regex would leave these
+  // assertions vacuous-green over a bullet nothing reads. If the floor reds,
+  // re-point the regex at the wording on disk — never lower the floor, and never
+  // delete the arm.
+  //
+  // IT LIVES INSIDE THIS TEST RATHER THAN BESIDE IT ON PURPOSE: this file's test
+  // count is pinned EXACTLY (two-sided) at 89 in .github/workflows/
+  // console-harness.yml, and the assertions belong to the bullet this test
+  // already owns. A separate `test()` would have been a clearer failure NAME at
+  // the cost of a workflow bump in a file this change has no business touching.
+  const leads = [...block.matchAll(/ZERO-residue names?\s+([\s\S]*?)\s+—/g)];
+  assert.equal(leads.length, 1,
+    `match-count floor: the ZERO-residue bullet's lead segment matched ${leads.length} times, expected exactly 1 — ` +
+    "re-point this regex at the wording on disk, never lower the floor");
+  const named = [...leads[0][1].matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  assert.ok(named.length > 0,
+    "the ZERO-residue bullet's lead names no family at all — this arm has gone vacuous and should be re-pointed, not kept green");
+
+  // THE DIRECTION THIS ARM EXISTS FOR: nothing the bullet names may carry residue.
+  for (const family of named) {
+    assert.ok(!residueFamilies.has(family),
+      `the ownership map's ZERO-residue bullet names ${family} as having no residue entries, but SCENARIO_RESIDUE now carries ` +
+      `${residueFamilies.get(family)} of them — the bullet is asserting a property the literal lost. Re-read the bullet ` +
+      "(and the singular/plural wording, and the arm title that quotes it) from the literal.");
+  }
+
+  // …and the set is EXACT in both directions, so neither a name that outlived
+  // its property nor one that was never added can hide behind the other.
+  assert.deepEqual(
+    [...named].sort(),
+    [...allFamilies].filter((f) => !residueFamilies.has(f)).sort(),
+    "the families the ZERO-residue bullet names are not the families that HAVE zero residue entries");
+
+  // every name it does carry is a real family, never a typo that would make the
+  // deepEqual above red for the wrong reason
+  for (const family of named) {
+    assert.ok(allFamilies.has(family),
+      `the ZERO-residue bullet names ${family}, which familyOf derives for no committed scenario`);
+  }
+});
+
+test("the ownership map's `exits N` claim is read from the sweep's refusal helper", () => {
+  const block = ownershipMapBlock();
+  const helper = [...SWEEP_SRC.matchAll(/const refuse = \([^)]*\) => \{[\s\S]*?process\.exit\((\d+)\)/g)];
+  assert.equal(helper.length, 1,
+    `match-count floor: breakpoint-sweep.mjs's \`refuse\` helper matched ${helper.length} times, expected exactly 1 — ` +
+    "the refusal helper was renamed or reshaped; re-point this regex, never delete the arm");
+  const claim = [...block.matchAll(/exits\s+(\d+)\s+—/g)];
+  assert.equal(claim.length, 1,
+    `match-count floor: the ownership map's \`exits N\` claim matched ${claim.length} times, expected exactly 1`);
+  assert.equal(Number(claim[0][1]), Number(helper[0][1]),
+    `the ownership map says a stale residue entry exits ${claim[0][1]}; \`refuse\` calls process.exit(${helper[0][1]})`);
+});
+
+test("every numeral in the ownership-map block is owned by a named arm, or sits below the HISTORICAL rule", () => {
+  const block = ownershipMapBlock();
+  const rule = block.indexOf(HISTORICAL_RULE);
+  assert.ok(rule > 0,
+    `the ownership-map block no longer carries its "${HISTORICAL_RULE}" rule — without it this arm cannot tell a live numeral from a frozen quote`);
+  assert.equal(block.split(HISTORICAL_RULE).length - 1, 1,
+    "the HISTORICAL rule appears more than once in the ownership-map block — the live/frozen split is ambiguous");
+
+  // consume every range an owning regex claims, and refuse a regex that claims none
+  const covered = [];
+  for (const { what, owner, re } of OWNED_BLOCK_SITES) {
+    const hits = [...block.matchAll(re)];
+    assert.equal(hits.length, 1,
+      `match-count floor: ${what} matched ${hits.length} times inside the ownership-map block, expected exactly 1 — ` +
+      `the wording drifted out from under "${owner}", which would leave that arm vacuous-green; re-point the regex at the bytes on disk`);
+    assert.ok(hits[0].index < rule,
+      `${what} was found BELOW the HISTORICAL rule — an owned numeral cannot sit in the frozen section`);
+    covered.push([hits[0].index, hits[0].index + hits[0][0].length, what, owner]);
+  }
+
+  const live = [];
+  const frozen = [];
+  for (const m of block.matchAll(BLOCK_NUMERAL)) {
+    (m.index < rule ? live : frozen).push(m);
+  }
+  assert.ok(live.length > 0,
+    "no live numerals parsed out of the ownership-map block at all — this arm has gone vacuous and should be re-pointed, not kept green");
+
+  for (const m of live) {
+    const owner = covered.find(([from, to]) => m.index >= from && m.index < to);
+    const context = block.slice(Math.max(0, m.index - 70), m.index + 70).replace(/\s+/g, " ");
+    assert.ok(owner,
+      `the ownership-map block types the numeral ${m[0]} at block offset ${m.index}, and NO arm owns it: …${context}… ` +
+      "— either give it an owning arm (add its regex to OWNED_BLOCK_SITES) or move it below the HISTORICAL rule, where it is counted rather than recounted. " +
+      "A numeral inside the sentence that claims total coverage is exactly the rot this arm exists to end.");
+  }
+
+  const declared = [...block.matchAll(/(\d+)\s+numerals sit below the rule/g)];
+  assert.equal(declared.length, 1,
+    `match-count floor: the ownership map's HISTORICAL count matched ${declared.length} times, expected exactly 1`);
+  assert.equal(Number(declared[0][1]), frozen.length,
+    `the ownership map states that ${declared[0][1]} numerals sit below the HISTORICAL rule; ${frozen.length} do ` +
+    `(${frozen.map((m) => m[0]).join(", ")}) — the block is overstating or understating its own uncovered set`);
 });
 
 // ── the HEADER-CENSUS arm: the sweep's own summary line can actually lose ────
@@ -1203,7 +1884,15 @@ test("the chronicle's ordinals strictly increase and stay inside the census — 
   const r = scenarioReport({ scenarios: SCENARIOS });
   for (const [file, src] of [["breakpoint-sweep.test.mjs", TEST_SRC], ["breakpoint-sweep.mjs", SWEEP_SRC]]) {
     const ordinals = chronicleOrdinals(src);
-    for (const [axis, ords, ceiling] of [["scenario", ordinals.scenario, r.total], ["residue", ordinals.residue, r.residue]]) {
+    // THE RESIDUE CEILING IS THE SCENARIO TOTAL, NOT TODAY'S RESIDUE
+    // (task-197a30115b0d8a7d). A residue ordinal is the slot an entry landed in
+    // WHEN IT WAS WRITTEN; the residue SHRINKS when an entry gains a cell (ten
+    // did here, 121 -> 111), so the live residue count stopped being a bound on
+    // history — a true chronicle block naming residue slot 119 would read as a
+    // lie. Every residue entry is a scenario, so the total still bounds it. This
+    // is a WEAKER ceiling than the one it replaces, stated rather than hidden;
+    // the strict-increase half of this arm is untouched.
+    for (const [axis, ords, ceiling] of [["scenario", ordinals.scenario, r.total], ["residue", ordinals.residue, r.total]]) {
       assert.ok(ords.length >= 9,
         `${file}: only ${ords.length} ${axis} ordinals matched (floor 9) — the chronicle wording drifted out from under this arm; re-point the regex, never lower the floor`);
       for (let i = 1; i < ords.length; i += 1) {
@@ -1259,4 +1948,186 @@ test("a cell pointed at a scenario that no longer exists refuses", () => {
   });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomCells, ["not-a-scenario"]);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE ORDER PIN (cch-w15-bl-target-reuse-ascending-order-pin)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Target reuse across the WIDTH axis makes the width ORDER part of the
+//  measurement: a reused document carries the previous width's settled
+//  geometry into the next probe. These pin the predicate and the sentence; the
+//  browser half is proven by running the leg both ways and diffing the raw
+//  Q1/Q2/Q3 records byte-for-byte.
+
+test("the shipped width axis is strictly ascending, and boundaryWalk asserts it rather than leaving it to be inferred", () => {
+  assert.equal(ascendingViolation(WIDTHS), null);
+  assert.equal(ascendingViolation(boundaryWalk(BREAKPOINTS)), null);
+});
+
+test("a DESCENDING width list is a violation, named by position and pair", () => {
+  // The exact mutation the row names: `--widths 900,619` under reuse.
+  assert.deepEqual(ascendingViolation([900, 619]), { index: 1, prev: 900, next: 619 });
+  // And the positive control it is a mutation OF — the same two widths, sorted.
+  assert.equal(ascendingViolation([619, 900]), null);
+});
+
+test("EQUAL neighbours violate too — the same width twice measures the second against the first's settled state", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 720, 830]), { index: 2, prev: 720, next: 720 });
+  assert.equal(ascendingViolation([619, 720, 721, 830]), null);
+});
+
+test("a single width, and an empty list, are vacuously ascending — reuse has nothing to inherit from", () => {
+  assert.equal(ascendingViolation([901]), null);
+  assert.equal(ascendingViolation([]), null);
+  // The two lists console-harness.yml actually drives, pinned as ACCEPTED:
+  // a pin that refused a committed CI invocation would red the harness.
+  assert.equal(ascendingViolation([320, 390, 620]), null);
+});
+
+test("the dip in the MIDDLE is caught, not just a reversed pair at the end", () => {
+  assert.deepEqual(ascendingViolation([619, 720, 700, 830, 900]), { index: 2, prev: 720, next: 700 });
+});
+
+test("the refusal PRINTS the list it read and names the escape hatch", () => {
+  const widths = [900, 619];
+  const msg = nonAscendingRefusal(widths, ascendingViolation(widths));
+  assert.match(msg, /--widths 900,619/);            // the offending list, verbatim
+  assert.match(msg, /position 1 goes 900 -> 619/);  // where it broke
+  assert.match(msg, /--fresh-targets/);             // how to drive any order anyway
+  // MUTATION: the sentence is built from the list, not typed. A different list
+  // must produce a different sentence, or the assertions above are satisfied by
+  // a constant string.
+  const other = [830, 720];
+  assert.match(nonAscendingRefusal(other, ascendingViolation(other)), /--widths 830,720/);
+  assert.doesNotMatch(nonAscendingRefusal(other, ascendingViolation(other)), /900/);
+});
+
+// ── cch-w23-bl-real-hetzner-remediation-scenario ─────────────────────────
+// THE CONNECT-REMEDIATION MIRROR LOCK.
+//
+// `connect_remediation/1` lives in cloud/lib/barkpark_cloud/failure_copy.ex and
+// its sentences also appear as LITERALS in scenarios.mjs, because a module the
+// browser loads cannot read the Elixir source at run time. Before this arm the
+// two sides were an UNLOCKED MIRROR: two hand-typed copies of one truth with no
+// shared fixture, each well covered by its own suite. Reword the server and
+// every suite on both sides stays green while the preview corpus certifies a
+// string the server stopped sending — which is exactly how a 168-character
+// "hetzner" sentence that NO clause has ever produced lived in the corpus for a
+// whole wave, and got driven by overflow-guard.mjs's W23 leg as the short cell.
+//
+// NOTHING BELOW IS A HAND-TYPED EXPECTATION. The clauses are extracted from
+// failure_copy.ex; the corpus side is read out of the imported SCENARIOS
+// literal; the assertion is set membership between the two. Re-word the Elixir
+// and this arm probes the NEW wording.
+//
+// IT REFUSES RATHER THAN PASSING. An unreadable or clause-less failure_copy.ex
+// throws by name instead of yielding an empty set that every corpus string
+// would then trivially fail — and, more dangerously, an empty CORPUS side is
+// caught by its own floor, because a rename of `providerConnect` would
+// otherwise leave this lock quiet, and quiet reads exactly like agreement.
+const FAILURE_COPY_EX = path.resolve(ROOT, "..", "..", "lib", "barkpark_cloud", "failure_copy.ex");
+
+// A `def connect_remediation("<kind>") do` (or `(_kind)`) head whose whole body
+// is one string literal on the next line. A clause whose body is anything else
+// is simply not extracted — this reader claims only what it can read.
+const CONNECT_CLAUSE_RE =
+  /def\s+connect_remediation\(\s*(?:"([a-z0-9_]+)"|_kind)\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"\s*\n\s*end/g;
+
+function connectRemediationClauses() {
+  const src = fs.readFileSync(FAILURE_COPY_EX, "utf8");
+  if (!src.trim()) {
+    throw new Error("REFUSED: cloud/lib/barkpark_cloud/failure_copy.ex read empty — " +
+      "the connect-remediation mirror cannot be derived, so this lock will not green");
+  }
+  const out = {};
+  CONNECT_CLAUSE_RE.lastIndex = 0;
+  let m;
+  while ((m = CONNECT_CLAUSE_RE.exec(src))) {
+    out[m[1] || "_kind"] = m[2].replace(/\\"/g, '"').replace(/\\\\/g, "\\");
+  }
+  if (Object.keys(out).length === 0) {
+    throw new Error("REFUSED: no connect_remediation/1 clause matched in failure_copy.ex — " +
+      "the clause shape changed and this reader went blind");
+  }
+  return out;
+}
+
+// Every `remediation` string any scenario can answer POST /v1/providers with,
+// across BOTH fixture shapes: the flat { status, body } response and the
+// per-kind map cch-w23-bl-real-hetzner-remediation-scenario added.
+function corpusConnectRemediations(scenarios) {
+  const rows = [];
+  for (const [name, scen] of Object.entries(scenarios)) {
+    const pc = scen && scen.data && scen.data.providerConnect;
+    if (!pc || typeof pc !== "object") continue;
+    const arms = "status" in pc ? { "": pc } : pc;
+    for (const [key, res] of Object.entries(arms)) {
+      const text = res && res.body && res.body.remediation;
+      if (typeof text === "string") rows.push({ name, key, text });
+    }
+  }
+  return rows;
+}
+
+test("cch-w23: every connect remediation in the corpus is a VERBATIM connect_remediation/1 clause, and the real hetzner one is among them", () => {
+  const server = connectRemediationClauses();
+
+  // POSITIVE CONTROL ON THE SERVER READ, and it fails DIFFERENTLY from the
+  // comparison below: this is the extraction going blind, not the two sides
+  // disagreeing. The two kinds the console can actually connect
+  // (app.js's `available: true` providers) plus the fallback must all resolve.
+  for (const kind of ["hetzner", "azure", "_kind"]) {
+    assert.equal(typeof server[kind], "string",
+      `failure_copy.ex has no literal connect_remediation(${JSON.stringify(kind)}) clause — ` +
+      "the server side of this mirror is not speaking, and a lock that cannot read must RED");
+    assert.ok(server[kind].length > 40,
+      `the extracted ${kind} clause is ${server[kind].length} characters — the regex is matching something that is not the sentence`);
+  }
+  // The clauses must DISCRIMINATE, or set membership below is vacuous: a
+  // failure_copy.ex that had collapsed to one sentence would make every corpus
+  // string "match" whatever it was copied from.
+  assert.equal(new Set(Object.values(server)).size, Object.keys(server).length,
+    "two connect_remediation/1 clauses are byte-identical — per-kind copy has collapsed server-side");
+
+  const rows = corpusConnectRemediations(SCENARIOS);
+
+  // FLOOR ON THE CORPUS READ. A rename of `providerConnect`, or a fixture
+  // restructure, would empty this list and leave the loop below iterating
+  // nothing — green, and blind. Two is the honest floor: `providers-empty`'s
+  // flat response and at least one arm of `providers-unverified`'s kind map.
+  assert.ok(rows.length >= 2,
+    `only ${rows.length} providerConnect remediation(s) found in the corpus — this lock has gone blind, ` +
+    "re-point corpusConnectRemediations() at the fixture shape on disk rather than accepting the green");
+
+  const known = new Set(Object.values(server));
+  for (const row of rows) {
+    assert.ok(known.has(row.text),
+      `scenario "${row.name}" (providerConnect${row.key ? "." + row.key : ""}) answers a remediation string ` +
+      "that NO connect_remediation/1 clause produces — the corpus is certifying copy the server has never " +
+      `sent:\n  corpus: ${JSON.stringify(row.text)}`);
+  }
+
+  // A named kind must answer ITS OWN clause, not merely SOME clause: a map that
+  // gave hetzner the azure sentence would pass set membership alone.
+  for (const row of rows) {
+    if (row.key && row.key !== "_default" && server[row.key] !== undefined) {
+      assert.equal(row.text, server[row.key],
+        `scenario "${row.name}" answers the WRONG clause for kind "${row.key}"`);
+    }
+  }
+
+  // THE CRITERION ITSELF: the real hetzner clause is IN the corpus. Before this
+  // row it was not — the corpus carried azure verbatim and a paraphrase for
+  // hetzner — so this assertion is the one that fails on origin/main's fixture.
+  assert.ok(rows.some((r) => r.text === server.hetzner),
+    "no scenario answers connect_remediation(\"hetzner\") verbatim — the server's real Hetzner remediation " +
+    "is not in the preview corpus, which is the whole subject of cch-w23-bl-real-hetzner-remediation-scenario");
+
+  // NON-VACUITY: the membership rule must actually REJECT. One character off the
+  // real clause — the shape a paraphrase has — must not be accepted.
+  assert.equal(known.has(server.hetzner.slice(0, -1)), false,
+    "the membership set accepts a truncated clause — this lock cannot lose");
+  assert.equal(known.has("We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, " +
+    "revoke the old token, then generate a fresh Read & Write token for this project."), false,
+    "the membership set accepts the retracted 168-character paraphrase — this lock cannot lose");
 });

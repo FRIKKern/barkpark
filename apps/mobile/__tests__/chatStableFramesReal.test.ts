@@ -19,6 +19,9 @@
 // commits them progressively). NOBODY has watched a phone paint one. That
 // residual is a device gate, not a test — it rides mob-hg-device-boot.
 import fixture from '../../../internal/pdrender/testdata/chat_stable_frames_real.json'
+import { createHash } from 'node:crypto'
+import { readFileSync } from 'node:fs'
+import { join } from 'node:path'
 
 import {
   initialChatState,
@@ -156,5 +159,105 @@ describe('a REAL captured turn replayed through the shipped reducer (D59)', () =
     expect(cursor).toBe(fx.committed_bytes)
     const end = fx.frames.find((f) => !isStableEvent(f))
     expect(end?.data.from).toBeGreaterThanOrEqual(cursor)
+  })
+})
+
+// ---------------------------------------------------------------------------
+// THE PRESERVATION GUARD (task-4d809f850c8c322a).
+//
+// Everything above asserts what the capture MEANS. This asserts that it still
+// IS — byte for byte. chat_stable_frames_real.json is not a fixture anyone can
+// re-cut: it is a real 2026-07-28 production turn against the live green slot
+// (session 34a0246f-4acd-4df2-8f8f-bd42fa9624f4, $0.107 of billed provider
+// spend). Nothing regenerates it and nothing could without buying another live
+// paid turn, so a prettifier, a re-serialization or a routine "refresh the
+// stale fixture" pass destroys it exactly as completely as `rm` does — and the
+// diff would look like tidying. Hence a hash over the WHOLE file, not a shape
+// check: the bytes are the artifact.
+//
+// PRESERVATION IS NOT A DRIFT LOCK. A drifting consumer fixture is normally
+// fixed by making its producer regenerate it; that keeps it honest against the
+// emitter. That remedy is unavailable here by construction, so this file gets
+// preservation instead — frozen, explicitly NOT kept current. The staleness
+// that buys is accepted and recorded (the `_preservation.accepted_risk` field
+// in the file itself, and task-4d809f850c8c322a criterion 3): if the emitter
+// renames a frame key, this suite keeps replaying July bytes and stays green.
+// The check that DOES track the emitter is the hand-authored sibling
+// chat_stable_frames.json.
+const CAPTURE_PATH = join(
+  __dirname,
+  '..',
+  '..',
+  '..',
+  'internal',
+  'pdrender',
+  'testdata',
+  'chat_stable_frames_real.json',
+)
+
+/** SHA-256 of the capture as committed. Read the failure message before you
+ * touch this constant. */
+const CAPTURE_SHA256 =
+  'cd82e151344435c2e7a8ccff88bed22886f35f3a9a25d3e06172664add6ef49a'
+
+describe('the capture is PRESERVED, byte for byte (task-4d809f850c8c322a)', () => {
+  it('has not been refreshed, rewritten, prettified or reformatted', () => {
+    const raw = readFileSync(CAPTURE_PATH, 'utf8')
+    const actual = createHash('sha256').update(raw).digest('hex')
+
+    expect(
+      actual === CAPTURE_SHA256
+        ? 'preserved'
+        : [
+            'internal/pdrender/testdata/chat_stable_frames_real.json HAS CHANGED.',
+            `  pinned: ${CAPTURE_SHA256}`,
+            `  actual: ${actual}`,
+            '',
+            'This file is a PRESERVED PRODUCTION CAPTURE, not a regenerable fixture.',
+            'It is a real chat turn recorded on 2026-07-28 against the live green',
+            'production slot and it cost real money. NOTHING regenerates it and',
+            'nothing could without spending another paid live production turn.',
+            'Reformatting it, re-serializing it, prettifying it or "refreshing"',
+            'it is as destructive as deleting it, because the bytes ARE the',
+            'artifact.',
+            '',
+            'REVERT YOUR CHANGE TO THE CAPTURE. Do NOT update this constant.',
+            'Re-pinning the hash is the same irreversible loss with an extra',
+            'step, and it is the exact reaction this guard exists to stop. The',
+            'only legitimate reason to move this pin is a NEW capture bought',
+            'with a NEW paid production turn, added deliberately and reviewed',
+            'as such.',
+          ].join('\n'),
+    ).toBe('preserved')
+  })
+
+  it('names its consumers, so a reducer change knows what depends on it', () => {
+    const note = (fixture as unknown as { _preservation?: Record<string, unknown> })
+      ._preservation
+    expect(note).toBeDefined()
+    const consumers = (note?.consumers ?? []) as string[]
+    // This file, and the function it actually drives the capture through.
+    expect(
+      consumers.some(
+        (c) =>
+          c.includes('apps/mobile/__tests__/chatStableFramesReal.test.ts') &&
+          c.includes('reduce()'),
+      ),
+    ).toBe(true)
+    expect(
+      consumers.some((c) =>
+        c.includes('apps/mobile/__tests__/chatCursorTurnKeyed.test.ts'),
+      ),
+    ).toBe(true)
+    expect(consumers.some((c) => c.includes('internal/chat/stable_test.go'))).toBe(
+      true,
+    )
+    // Preservation is distinguished from a drift lock, and the staleness it
+    // buys is written down rather than silently carried.
+    expect(String(note?.preservation_not_a_drift_lock ?? '')).toContain(
+      'drift lock',
+    )
+    expect(String(note?.accepted_risk ?? '')).toContain('task-4d809f850c8c322a')
+    expect(String(note?.cannot_be_regenerated ?? '')).toContain('paid')
   })
 })

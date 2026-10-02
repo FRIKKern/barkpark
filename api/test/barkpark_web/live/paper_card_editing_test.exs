@@ -28,7 +28,16 @@ defmodule BarkparkWeb.PaperCardEditingTest do
       )
 
     raw = "card-writer-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(raw, "Card editing", @dataset, ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        raw,
+        "Card editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 

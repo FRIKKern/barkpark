@@ -1,4 +1,4 @@
-.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots wasm
+.PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm wasm-siblings-check
 
 SSH_HOST ?= root@89.167.28.206
 PROD_APP_DIR ?= /opt/barkpark
@@ -52,7 +52,7 @@ reset-db: ## Drop, recreate, migrate, and seed the database
 # ── Local development ────────────────────────────────────────────────────────
 
 dev: wasm ## Start tmux dev session (CC + TUI + Phoenix)
-	./dev.sh
+	./scripts/dev/dev.sh
 
 update: ## LOCAL: pull + rebuild bp + deps + migrations + digest of what changed
 	@bash scripts/local-update.sh
@@ -79,7 +79,7 @@ web-build: ## Build the Next.js Vercel demo (web/) for production
 	cd web && pnpm build
 
 run: ## Start Phoenix (if needed) and run TUI
-	./run.sh
+	./scripts/dev/run.sh
 
 build: ## Build Go TUI binary
 	@# bin/barkpark is the TRACKED personal-local launcher script — the compiled
@@ -192,6 +192,29 @@ cli-install: cli-build ## LOCAL: build + install the STAMPED bp onto PATH ($(BIN
 	@command -v bp >/dev/null 2>&1 && [ "$$(command -v bp)" != "$(BINDIR)/bp" ] \
 	  && echo ">> NOTE: PATH resolves bp to $$(command -v bp), not $(BINDIR)/bp — adjust PATH or BINDIR" || true
 
+# THE SHARED BINARY HAS NO UNDO, and that is why a stale fleet bp stays stale.
+# `$(BINDIR)/bp` is ONE file that every concurrent agent session on this host
+# executes for `bp task claim|pulse|stamp|close`. `cli-install` overwrites it in
+# place: `install -m 0755` truncates the target, so the moment it runs the
+# previous binary NO LONGER EXISTS ANYWHERE, and a swap that turns out to be
+# wrong can only be undone by rebuilding from the old commit — which needs that
+# commit, which is exactly what the overwritten binary was carrying. The swap
+# everybody is afraid of is not afraid of the BUILD; it is afraid of the
+# missing undo. This target adds it: the outgoing binary is copied to
+# `$(BINDIR)/bp.prev-<its own stamped commit>` BEFORE anything replaces it, and
+# the one-line restore is printed at the end where the operator can copy it.
+#
+# The backup is keyed on the OUTGOING commit, never on a date or a serial: two
+# runs from the same old binary write the same path (idempotent), and two runs
+# from different ones cannot clobber each other's undo.
+cli-install-safe: cli-build ## LOCAL: back up the installed bp, THEN install (prints the one-line rollback)
+	@mkdir -p "$(BINDIR)"
+	@rm -f "$(BINDIR)/.bp.prev-commit"
+	@if [ -e "$(BINDIR)/bp" ]; then prev="$$("$(BINDIR)/bp" version -o json 2>/dev/null | sed -n 's/.*"commit":"\([^"]*\)".*/\1/p')"; [ -n "$$prev" ] || prev=unstamped; cp -p "$(BINDIR)/bp" "$(BINDIR)/bp.prev-$$prev" || exit 1; printf '%s\n' "$$prev" > "$(BINDIR)/.bp.prev-commit"; echo ">> Backed up the outgoing bp ($$prev) -> $(BINDIR)/bp.prev-$$prev"; else echo ">> No existing $(BINDIR)/bp to back up (first install)"; fi
+	@$(MAKE) --no-print-directory cli-install
+	@prev="$$(cat "$(BINDIR)/.bp.prev-commit" 2>/dev/null)"; if [ -n "$$prev" ]; then echo ">> ROLLBACK (one line): cp -p $(BINDIR)/bp.prev-$$prev $(BINDIR)/bp"; fi
+
+
 # The pdrender→TUI wasm the paper reader lazy-loads (api/.../bulldocs.html.heex
 # fetches /assets/bp-pdrender.wasm.gz). Built from #1357's entry (cmd/pdrender-wasm)
 # with a PINNED toolchain: Go's js/wasm output is not byte-reproducible across
@@ -199,17 +222,48 @@ cli-install: cli-build ## LOCAL: build + install the STAMPED bp onto PATH ($(BIN
 # so we pin rather than diff. The loader (bp-wasm-exec.js) is committed + host-stable
 # text — NOT rebuilt here. Regenerated at dev (make dev prereq) and at deploy
 # (scripts/deploy-rebuild.sh); the CI gate builds + smokes it.
+# BOTH SIBLINGS, ALWAYS. Plug.Static runs with `gzip: true`, which makes the
+# IDENTITY url `/assets/bp-pdrender.wasm` a real, advertised route: a client that
+# sends `Accept-Encoding: gzip` gets the `.gz` bytes under that url, and a client
+# that sends `Accept-Encoding: identity` gets... 404, because for years this
+# target emitted the `.gz` and nothing else. Same url, two answers, decided by a
+# request header — a static plug 404ing a file it advertises (het-bl-wasm-identity-404;
+# live-proven on guerrilla, tooling/grip/ledger/het-w1-s3-residuals-2026-08-08.md e2).
+# So the build now writes the uncompressed blob to its own path FIRST and gzips
+# FROM that exact file, which also makes the two siblings byte-identical by
+# construction rather than by coincidence. Neither is committed (see .gitignore).
+# GUARDED BY: .github/workflows/pdrender-wasm.yml — its `paths:` filter lists
+# `Makefile`, so editing the targets below fires `make wasm` + the node smoke in
+# CI. Before task-519d5ea68ddca27f it did not, and this recipe was unguarded.
 WASM_GO_VERSION ?= 1.25.8
 
+WASM_IDENTITY := api/priv/static/assets/bp-pdrender.wasm
+WASM_GZ       := api/priv/static/assets/bp-pdrender.wasm.gz
+
 wasm: ## Build the pdrender→TUI wasm the paper reader lazy-loads (GOOS=js, pinned toolchain)
-	@echo ">> Building pdrender wasm (go$(WASM_GO_VERSION), js/wasm) -> api/priv/static/assets/bp-pdrender.wasm.gz..."
+	@echo ">> Building pdrender wasm (go$(WASM_GO_VERSION), js/wasm) -> $(WASM_IDENTITY) + $(WASM_GZ)..."
 	@command -v gzip >/dev/null 2>&1 || { echo "!! gzip not found on PATH"; exit 1; }
 	@test -f api/priv/static/assets/bp-wasm-exec.js || { echo "!! api/priv/static/assets/bp-wasm-exec.js (committed loader) missing"; exit 1; }
-	@tmp="$$(mktemp -d)"; \
-	GOTOOLCHAIN=go$(WASM_GO_VERSION) GOOS=js GOARCH=wasm go build -trimpath -ldflags=-buildid= -o "$$tmp/pdrender.wasm" ./cmd/pdrender-wasm && \
-	gzip -9 -c "$$tmp/pdrender.wasm" > api/priv/static/assets/bp-pdrender.wasm.gz && \
-	rm -rf "$$tmp" && \
-	echo ">> Done: api/priv/static/assets/bp-pdrender.wasm.gz ($$(ls -lh api/priv/static/assets/bp-pdrender.wasm.gz | awk '{print $$5}'))"
+	@# Write the identity blob to its FINAL path first, then gzip FROM it. Building
+	@# to a temp dir and compressing that would leave the two siblings related only
+	@# by a convention nobody checks; this way the `.gz` is literally the served
+	@# `.wasm` compressed, and wasm-siblings-check below proves it every build.
+	GOTOOLCHAIN=go$(WASM_GO_VERSION) GOOS=js GOARCH=wasm go build -trimpath -ldflags=-buildid= -o $(WASM_IDENTITY) ./cmd/pdrender-wasm
+	gzip -9 -c $(WASM_IDENTITY) > $(WASM_GZ)
+	@$(MAKE) --no-print-directory wasm-siblings-check
+	@echo ">> Done: $(WASM_IDENTITY) ($$(ls -lh $(WASM_IDENTITY) | awk '{print $$5}')) + $(WASM_GZ) ($$(ls -lh $(WASM_GZ) | awk '{print $$5}'))"
+
+wasm-siblings-check: ## Assert BOTH pdrender wasm siblings exist and the .gz is exactly the .wasm compressed
+	@# The arm for het-bl-wasm-identity-404. It is a SEPARATE target, not inlined in
+	@# the recipe above, so that deleting the identity emission from `wasm` — the
+	@# original defect — reds this check instead of silently taking the old path.
+	@# Three ways to fail, all of them real: no identity sibling (the 404 returns),
+	@# no gz sibling (the reader's own fetch 404s), or the two disagree (Plug.Static
+	@# would then serve DIFFERENT bytes to gzip and identity clients under one url).
+	@test -s $(WASM_IDENTITY) || { echo "!! MISSING $(WASM_IDENTITY) — /assets/bp-pdrender.wasm 404s for Accept-Encoding: identity (het-bl-wasm-identity-404)"; exit 1; }
+	@test -s $(WASM_GZ) || { echo "!! MISSING $(WASM_GZ) — the paper reader fetches this path directly"; exit 1; }
+	@gzip -dc $(WASM_GZ) | cmp -s - $(WASM_IDENTITY) || { echo "!! $(WASM_GZ) is NOT $(WASM_IDENTITY) compressed — one url, two different payloads by Accept-Encoding"; exit 1; }
+	@echo ">> wasm siblings OK: $(WASM_IDENTITY) == gunzip($(WASM_GZ))"
 
 cli-release: cli-assets-sync ## Cross-compile bp for darwin/linux/windows × arm64/amd64 into dist/
 	@echo ">> Cross-compiling bp $(VERSION) for 6 targets into dist/..."
@@ -268,6 +322,15 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	@# outcome gets its own receipt and its own exit code. `@sleep 8` + a
 	@# `|| echo ">> Warming up"` curl is gone: that curl was TAKEN, FAILED, and
 	@# laundered into a reassurance.
+	@#
+	@# THE POLL BELOW PROBES /status.json, NOT /api/schemas. That legacy route is
+	@# mounted through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+	@# `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. This poll gates on the STATUS CODE
+	@# and `exit 1`s when it is not 200, so on removal day a perfectly healthy box
+	@# would fail EVERY deploy closed. /status.json (router.ex
+	@# `get "/status.json", StatusController, :show_json`, :api pipeline only, no
+	@# deprecation scope, no token) has no removal date and is a strictly stronger
+	@# signal: Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500.
 	-@git checkout -- bin/barkpark bin/barkpark-pg go.sum 2>/dev/null
 	@rm -f "$$(git rev-parse --git-dir 2>/dev/null || echo .git)/barkpark-deploy-outcome"
 	git pull
@@ -296,15 +359,15 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 	echo ">> Pulled. The post-merge hook cleaned _build/prod, recompiled and restarted (recorded outcome: $$outcome)."; \
 	code=000; i=0; \
 	while [ "$$i" -lt "$(BP_DEPLOY_POLL_ATTEMPTS)" ]; do \
-	  code="$$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://localhost:4000/api/schemas 2>/dev/null || echo 000)"; \
+	  code="$$(bash -c '. scripts/lib/bp-curl.sh; bp_curl_code -s -o /dev/null --max-time 5 http://localhost:4000/status.json' 2>/dev/null || echo 000)"; \
 	  if [ "$$code" = "200" ]; then break; fi; \
 	  i=$$((i + 1)); \
 	  sleep "$(BP_DEPLOY_POLL_SLEEP)"; \
 	done; \
 	if [ "$$code" = "200" ]; then \
-	  echo ">> API is live (/api/schemas -> HTTP 200)."; \
+	  echo ">> API is live (/status.json -> HTTP 200)."; \
 	else \
-	  echo ">> DEPLOY UNVERIFIED — the rebuild reported success but http://localhost:4000/api/schemas never answered 200 in $(BP_DEPLOY_POLL_ATTEMPTS) attempts (last: '$$code'). Check: make logs"; \
+	  echo ">> DEPLOY UNVERIFIED — the rebuild reported success but http://localhost:4000/status.json never answered 200 in $(BP_DEPLOY_POLL_ATTEMPTS) attempts (last: '$$code'). Check: make logs"; \
 	  exit 1; \
 	fi
 
@@ -357,6 +420,15 @@ format: ## Run mix format on api/ (writes changes)
 
 format-check: ## Run mix format --check-formatted on api/ (read-only, mirrors CI gate)
 	cd api && mix format --check-formatted
+
+# cloud/ IS NOT api/. The Cloud gate (.github/workflows/cloud.yml, compile job)
+# pins Elixir 1.18.1 while this fleet's Macs run 1.19.x, and the two formatters
+# DISAGREE — so `cd cloud && mix format --check-formatted` can exit 0 on bytes
+# the gate reds (task-417026dfc4826971, PR #17482). The target below reads the
+# pin out of cloud.yml, OBTAINS that Elixir, and runs the gate's own command
+# under it. Never restate the version here — one declaration, in the workflow.
+cloud-format-check: ## Run cloud/'s format gate under the Elixir cloud.yml pins (NOT your PATH's)
+	bash scripts/cloud-format-check.sh
 
 # ── Setup ────────────────────────────────────────────────────────────────────
 

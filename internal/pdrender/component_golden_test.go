@@ -80,6 +80,7 @@ type boardProjection struct {
 		Count     int    `json:"count"`
 		Cards     []struct {
 			Title string `json:"title"`
+			Draft bool   `json:"draft"`
 		} `json:"cards"`
 	} `json:"columns"`
 }
@@ -119,12 +120,18 @@ func loadComponentGolden(t *testing.T, typ string) componentGolden {
 // seam (Decode -> RenderDoc, Width 200, NoColor, ansi.Strip).
 func renderComponent(t *testing.T, input json.RawMessage) string {
 	t.Helper()
+	return renderComponentAt(t, input, 200)
+}
+
+// renderComponentAt is renderComponent at an explicit surface width.
+func renderComponentAt(t *testing.T, input json.RawMessage, width int) string {
+	t.Helper()
 	reg := testRegistry()
 	blocks, err := Decode([]byte("[" + string(input) + "]"))
 	if err != nil {
 		t.Fatalf("decode component block: %v", err)
 	}
-	ctx := RenderCtx{Width: 200, Theme: DarkTheme(), Profile: NoColor}
+	ctx := RenderCtx{Width: width, Theme: DarkTheme(), Profile: NoColor}
 	out := ansi.Strip(reg.RenderDoc(blocks, ctx))
 	assertNoUnknownBlock(t, "component golden", out)
 	return out
@@ -133,7 +140,11 @@ func renderComponent(t *testing.T, input json.RawMessage) string {
 // TestTaskBoardGoldenParity proves the TUI task-board renderer realizes the
 // projection: every column label and every card title the Elixir source-of-truth
 // produced survives to the terminal render, and the fixture's per-column card
-// list is self-consistent with its count.
+// list is self-consistent with its count. It also asserts the projection's DRAFT
+// slot (PDS-D749): a card projected with draft:true renders `DRAFT <title>` on its
+// title line, and no other card carries the marker. The board renders at 260
+// columns so every lane is wide enough that no card title (DRAFT chip included)
+// soft-wraps — the title checks are single-line substring checks.
 func TestTaskBoardGoldenParity(t *testing.T) {
 	fx := loadComponentGolden(t, "task-board")
 	var proj boardProjection
@@ -147,8 +158,9 @@ func TestTaskBoardGoldenParity(t *testing.T) {
 		t.Fatalf("projection floor: %d columns, want >= 3", len(proj.Columns))
 	}
 
-	out := renderComponent(t, fx.Input)
+	out := renderComponentAt(t, fx.Input, 260)
 
+	drafts := 0
 	for _, col := range proj.Columns {
 		if !labelSpanRe(col.Label).MatchString(out) {
 			t.Errorf("column label %q missing (as an exact `glyph Label␣␣count` header field) from render:\n%s", col.Label, out)
@@ -160,7 +172,22 @@ func TestTaskBoardGoldenParity(t *testing.T) {
 			if !strings.Contains(out, card.Title) {
 				t.Errorf("card title %q (column %q) missing from render:\n%s", card.Title, col.Role, out)
 			}
+			marked := strings.Contains(out, draftLabel+" "+card.Title)
+			if card.Draft {
+				drafts++
+				if !marked {
+					t.Errorf("draft card %q (column %q) renders without the DRAFT marker:\n%s", card.Title, col.Role, out)
+				}
+			} else if marked {
+				t.Errorf("published card %q (column %q) wrongly carries the DRAFT marker:\n%s", card.Title, col.Role, out)
+			}
 		}
+	}
+	if drafts == 0 {
+		t.Fatalf("fixture floor: the task-board projection carries no draft card — the DRAFT slot is unasserted")
+	}
+	if got := strings.Count(out, draftLabel); got != drafts {
+		t.Errorf("render carries %d DRAFT markers, want exactly %d (one per draft card):\n%s", got, drafts, out)
 	}
 }
 

@@ -92,6 +92,60 @@ on:
       # run on THIS PR to catch a TUI divergence from the new projection.
       - "internal/pdrender/testdata/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/code-block-lang-parity.json"
+      # internal/pdrender/code_block_emphasis_parity_test.go reads this fixture
+      # (pe-bl-code-emphasis — one fixture, three engines); an edit must
+      # dispatch the Go leg even with no .go source change.
+      - "api/test/support/fixtures/code-block-emphasis-parity.json"
+      # PRE-EXISTING RATCHET RED on origin/main 038d310fce (#17729), not
+      # introduced here: internal/pdrender/inline_code_source_parity_test.go
+      # reads this fixture, so an edit to it must dispatch the Go suite.
+      - "api/test/support/fixtures/inline-code-source.json"
+      # internal/pdrender/code_source_alias_parity_test.go reads this fixture
+      # (one fixture, three engines — #17684); an edit must dispatch the Go leg.
+      - "api/test/support/fixtures/code-source-aliases.json"
+      # internal/pdrender/inline_block_wrapper_parity_test.go reads this fixture
+      # (#17759); same rule.
+      - "api/test/support/fixtures/inline-block-wrapper.json"
+      # internal/pdrender/section_boundary_rules_parity_test.go reads this
+      # fixture (task-a4d1ae76fdb2a6b0 — one rule per boundary, three engines);
+      # same rule.
+      - "api/test/support/fixtures/section-boundary-rules.json"
+      # internal/cli/tasks_adjudication_drift_test.go reads this Elixir module
+      # (const serverStagePath) to lock the CLI's adjudication vocabulary fixture
+      # to Stage's @dispositions / @trigger_required / key attrs in BOTH directions
+      # (#17878). An edit to stage.ex with no .go change must dispatch the Go leg
+      # or the lock cannot fire on the PR that breaks it.
+      - "api/lib/barkpark/tasks/stage.ex"
+      # internal/cli/errors_close_refusal_coverage_test.go parses the close/stamp
+      # REFUSAL VOCABULARY out of these two modules and requires every reason they
+      # mint to hold an exit bucket in internal/cli/errors.go codeExit (or a named
+      # exclusion) — the arm that catches a NEW refusal reaching users at exit 2,
+      # the malformed-command-line code (task-d10d9eb47f2cc5e4; five reasons have
+      # arrived in that state one at a time). The reasons are minted HERE with no
+      # .go diff, so an edit must dispatch the Go leg or the arm cannot fire on the
+      # very PR that grows the vocabulary (same rule as stage.ex above).
+      - "api/lib/barkpark/tasks/close.ex"
+      - "api/lib/barkpark/tasks/stamp.ex"
+      # internal/cli/tasks_brief_strip_server_pin_test.go reads this module
+      # (const serverBriefMirrorPath) as the CROSS-FENCE TRIPWIRE on the
+      # purpose-copy strip: the Go reader-side tolerance
+      # briefPurposeStripLegacyThreePass is a COPY of BriefMirror's three-pass
+      # strip_markdown/1, and the arm reds when the shape it imitates changes
+      # (task-8ba550b59141bccb; the remedy lands under task-b641646addba4bdf).
+      # The whole point is that a strip change here with NO .go diff must
+      # dispatch the Go leg, or the tripwire cannot fire on the very PR that
+      # trips it (same rule as stage.ex / close.ex / stamp.ex above).
+      - "api/lib/barkpark/tasks/brief_mirror.ex"
+      # internal/cli/mcp_serve_test.go reads these two Studio-loopback spawn
+      # sites (studioLoopbackSpawnSites) and pushes the `--tools <word>` they
+      # build through the REAL Go parseToolsSelector — the cross-surface lock on
+      # the curated `--tools chat` toolset (task-scc-bl-mcp-chat-toolset). The
+      # word lives on two surfaces with no shared fixture, so an edit to either
+      # .ex with no .go change must dispatch the Go leg or the lock cannot fire
+      # on the very PR that breaks it (same rule as stage.ex above).
+      - "api/lib/barkpark/studio_chat/provider/claude.ex"
+      - "api/lib/barkpark/studio_chat/runtime/codex/session.ex"
       # Taskboard TUI golden frames (internal/taskboard/testdata/*.txt). The
       # compose/render/glyph-budget suites assert the committed frames byte-for-byte
       # and inventory every glyph in them; a golden REGEN (or a hand-added fixture)
@@ -148,6 +202,12 @@ on:
       # #963->#969-class gap as above.
       - "docs/setup/CODEX.md"
       - "docs/setup/AGENTS-MD.md"
+      # Onramp span golden (scripts/onramp-span.golden). Test
+      # TestOnrampSpanGoldenContainsCanonicalBody reads it from DISK and asserts
+      # it still CONTAINS agentsMDCanonicalBody; a --regen-onramp-golden blesses
+      # whatever sits between the markers with NO .go diff, so the Go suite must
+      # run on THIS PR. Same #963->#969-class gap as above (cgsi-s6 follow-up).
+      - "scripts/onramp-span.golden"
       # ── CROSS-TREE READS OUTSIDE internal/ (task-bb930319aeac0266) ─────────
       # Measured 2026-09-06 after TWO Go main-reds in one day, both through the
       # same hole: the Go suite reads source and fixtures under api/ and
@@ -181,6 +241,14 @@ on:
       # tiers.ex: internal/pdrender/elixir_parity_test.go pins the Go renderer's
       # tier table against the Elixir source's.
       - "api/lib/barkpark/portable_doc/tiers.ex"
+      # priv/tasks/dispatch_markers.json: internal/cli/tasks_dispatch_advisory_test.go
+      # reads this file from DISK (const serverDispatchMarkersPath) as the SOURCE OF
+      # TRUTH for the do-not-build vocabulary and its precedence, and refuses when the
+      # byte copy beside the test drifts from it. api/lib/barkpark/tasks/dispatchability.ex
+      # reads the same file at compile time, so an edit here changes both surfaces with
+      # NO .go diff — without this entry the drift refusal cannot fire on the very PR
+      # that breaks it (task-6d190e20dd3e8bb4; same rule as stage.ex above).
+      - "api/priv/tasks/dispatch_markers.json"
       # chat fixtures: internal/chat/fold_test.go + running_fold_test.go read
       # chat_fold_labels.json, rail_glyph_lock_test.go reads
       # chat_rail_agent_glyphs.json, and reduce_test.go reads every transcript
@@ -199,6 +267,26 @@ on:
       - "cloud/lib/barkpark_cloud/telemetry.ex"
       - "cloud/lib/barkpark_cloud/usage.ex"
       - "cloud/lib/barkpark_cloud/web/router.ex"
+      # build_log_bytes.ex: internal/cloudclient/producer_contract_test.go reads
+      # the server's @bytes_keys sigil from DISK (buildLogBytesProducerPath) and
+      # locks the Go struct's tags against it in serializer order, so an edit to
+      # the producer's key set must dispatch the Go job (task-801c6c33769ca01d).
+      - "cloud/lib/barkpark_cloud/sites/build_log_bytes.ex"
+      # box_error_envelope.ex: the SAME producer_contract_test.go resolves
+      # build_log_bytes.ex's `BoxErrorEnvelope.fields(body)` call through to THIS
+      # module and reads the three keys fields/1 emits (box_error,
+      # box_error_message, box_error_request_id), so the Go decoders are locked
+      # against the reducer rather than against a hand-typed copy of it. A key
+      # added or renamed here carries no .go diff, so the edit must dispatch the
+      # Go job or the lock cannot fire on the very PR that breaks it
+      # (task-bb5b44bcc5e233af; same rule as build_log_bytes.ex above).
+      - "cloud/lib/barkpark_cloud/sites/box_error_envelope.ex"
+      # registry/site.ex: internal/cli/cloud_site_prebuilt_nonstatic_predicate_test.go
+      # reads the control plane's OWN `@kinds ~w(...)` from DISK and enrols every
+      # non-static member as a site `bp cloud site deploy --prebuilt` must refuse.
+      # A kind added there is a kind the prebuilt guard will meet, so the edit
+      # that adds it must dispatch the Go job (ssw9-bl-node-prebuilt).
+      - "cloud/lib/barkpark_cloud/registry/site.ex"
       # Onramp corpus: internal/cli/movement_doctrine_test.go reads all ten of
       # these docs from DISK and asserts each carries the movement doctrine
       # verbatim; onramp_cmd_test.go additionally pins the ZED.md json stanza and
@@ -222,6 +310,14 @@ on:
       # build emits. Exact files, never deploy/**.
       - "deploy/site-runtime-install.sh"
       - "deploy/systemd/barkpark-agent.service"
+      # deploy/site-deploy-node.sh: internal/cli/cloud_site_prebuilt_node_abi_test.go
+      # extracts the engine's own abi_decl_value awk reader out of it and runs it
+      # over the packer's emitted .bp-node-abi bytes (task-486a81da02b65557).
+      - "deploy/site-deploy-node.sh"
+      # deploy/azure-base-install.sh: internal/cli/setup/caddy_test.go's
+      # TestCaddyInstallFunc_OneInstallerEverywhere asserts it carries the
+      # install_caddy_pkg block byte-identical to deploy.sh's (task-16e58856f0182596).
+      - "deploy/azure-base-install.sh"
       # Starter manifests: internal/template/template_test.go's TestRealManifests
       # loads and validates every checked-in barkpark.template.json and asserts
       # its referenced schema/seed paths exist. templates/place-directory is
@@ -230,6 +326,27 @@ on:
       - "js/packages/create-barkpark-app/templates/website-starter/barkpark.template.json"
       # A change to the ratchet itself must run the suite it guards.
       - "scripts/go-path-escape-check.sh"
+      # .github/ — doc-gates.yml's own `pull_request: paths:` block is the
+      # AUTHORITY internal/scaffy/anchor_glob_invariant_test.go reads: it
+      # asserts every non-token scaffy `IN` target matches at least one of
+      # those globs, because the scaffy anchor-drift gate only runs on a PR
+      # the filter admits. DELETING a glob is therefore a Go-suite subject
+      # with no .go diff at all, and without this entry the very PR that
+      # narrows the filter dispatches nothing.
+      - ".github/workflows/doc-gates.yml"
+      # `bp make workflow` (internal/cli/make_workflow.go) emits the GitHub
+      # Actions builder TEMPLATE for a user's own repo, and
+      # internal/cli/make_workflow_test.go reads three trees from DISK to keep it
+      # honest: TestWorkflowPatValidityMatchesTheControlPlane reads
+      # user_token.ex's @pat_default_validity_days (the template PRINTS that
+      # number, so a drifted default makes the template lie), and
+      # TestWorkflowTemplateIsNotDuplicated WALKS both starter trees to enforce
+      # the template's single-owner rule. All three change with no .go diff, so
+      # without these entries the guards are unreachable on the very PR that
+      # breaks them — same #963->#969-class gap as the carve-outs above.
+      - "cloud/lib/barkpark_cloud/accounts/user_token.ex"
+      - "cloud/priv/templates/**"
+      - "js/packages/create-barkpark-app/templates/**"
   pull_request:
     # NO `paths:` KEY, EVER — see THE SKIP SHIM above. The path decision for a
     # pull_request is made by the `changes` job below, which derives it from the
@@ -293,6 +410,7 @@ jobs:
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
           # miss it, which this step treats as a hard failure.
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       # THE READ RATCHET (task-bb930319aeac0266). Runs BEFORE the path verdict,
       # in the always-running dispatcher, so it renders on every event and
@@ -384,7 +502,76 @@ jobs:
             exit 0
           fi
 
+          # ── THE DECLARATION MUST MATCH THE PARSER (task-a1d681421c82e995) ─
+          # The HEAD-CHECKOUT ASYMMETRY above is REAL for the ratchet step and
+          # it is real HERE TOO — but not for the reason that comment gives.
+          # Read this step's two halves apart:
+          #
+          #   * the PARSER, the sentinel list and the floor below are TEXT IN
+          #     THIS WORKFLOW FILE, and GitHub takes the workflow file for a
+          #     `pull_request` run from the MERGE REF;
+          #   * the DECLARATION they judge — `on.push.paths` — was read off
+          #     `.github/workflows/go-tests.yml` ON DISK, i.e. out of the PR
+          #     HEAD checkout (the D34 `ref:` above).
+          #
+          # So parser and declaration did NOT travel together: they are two
+          # different commits of the same file. That is exactly the class
+          # #17622 (45c98ae0e) fixed for cloud/console/elixir, and go-tests.yml
+          # was excluded from it on the argument quoted in the ratchet comment
+          # above — "both of the ratchet's inputs come from the head". True of
+          # the RATCHET step (tree and list, both head). NOT true of this one,
+          # whose judge comes from the merge ref.
+          #
+          # It is not hypothetical. The floor below is `-lt 30` and names a
+          # declared list of 44 (task-bb930319aeac0266); the same list was 15
+          # from #15007 until that landed. Any head branched inside that window
+          # parses 15 globs, the merge ref's floor of 30 fires, and `changes`
+          # exits 1 — a RED dispatcher with no defect in the PR, and no path
+          # verdict for the job behind it. The sentinel checks are the same
+          # shape: a sentinel this file learns tomorrow reds every head that
+          # predates the glob it names. A CLASS, not a one-off, and the remedy
+          # is per-PR `update-branch` forever.
+          #
+          # THE SPLIT, same as cloud.yml's. The DIFF still comes from the head
+          # checkout — D34 intact, the changed-file set must describe THIS PR.
+          # The DECLARATION is pinned to the commit this workflow file came
+          # from, so the list and the parser/floor/sentinels that judge it are
+          # matched BY CONSTRUCTION rather than by rebase etiquette. A `git
+          # show` off a fetched ref; the checkout is a partial clone, so this
+          # costs one commit, its trees and one blob, never a second worktree.
+          #
+          # The two DISPATCH_PIN_* hooks are how case 6 of
+          # scripts/go-path-escape-check.test.sh drives this exact block
+          # against a local fixture repo. Actions sets neither; the defaults
+          # below are the real values, so the tested path IS the shipped path.
+          #
+          # This does NOT reopen the ratchet question above: the ratchet keeps
+          # reading the HEAD's script against the HEAD's tree and its absence
+          # stays guard-and-named. Only the DECLARATION this step parses moves.
           wf=".github/workflows/go-tests.yml"
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/go-dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/.github/workflows"
+          pinned="$pinroot/.github/workflows/go-tests.yml"
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/go-pinned" 2>/dev/null \
+             && git show refs/dispatcher/go-pinned:.github/workflows/go-tests.yml >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            wf="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/go-pinned))"
+          else
+            # NAMED, never silent — and deliberately NOT fatal. A merge ref is
+            # absent for a PR with conflicts, and killing the dispatcher there
+            # would leave the gated job with no answer at all, which is the
+            # very failure this whole job exists to end. The fallback is the
+            # head's own copy: the PRE-#17622 behaviour, no worse, and it says
+            # so by name.
+            echo "::warning::dispatcher: could NOT read .github/workflows/go-tests.yml out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy of the declaration, which may predate the floor and sentinels this workflow file checks it against. Degraded read, not a green."
+          fi
+          echo "path-set declaration: ${pin_src}"
+
           if [ ! -f "$wf" ]; then
             echo "::error::dispatcher: $wf is not in this checkout, so the path set cannot be read from its single declaration. Refusing to guess."
             exit 1
@@ -432,7 +619,7 @@ jobs:
             exit 1
           fi
           if [ "$n" -lt 30 ]; then
-            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list is 44 since task-bb930319aeac0266 (was 15 since #15007). A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
+            echo "::error::dispatcher: parsed only ${n} path glob(s) from ${wf}; the declared list is 47, counted 2026-09-11 on task-a1d681421c82e995 (44 at task-bb930319aeac0266; 15 from #15007 until it). A truncated parse makes every PR look Go-free. Refusing to emit a verdict."
             exit 1
           fi
 

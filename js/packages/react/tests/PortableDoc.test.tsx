@@ -202,6 +202,17 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
   { type: 'eyebrow', block: { type: 'eyebrow', text: 'KICKER' }, marker: 'bp-role-eyebrow' },
   { type: 'byline', block: { type: 'byline', items: ['Ada', 'Grace'] }, marker: 'bp-role-byline' },
   {
+    type: 'pre-gate-badge',
+    block: {
+      type: 'pre-gate-badge',
+      label: 'Published before the block gate',
+      title: 'Every block renders.',
+      tone: 'neutral',
+      anchor: 'byline',
+    },
+    marker: 'bp-pregate bp-pregate--neutral bp-pregate--tucked',
+  },
+  {
     type: 'ingress',
     block: { type: 'ingress', content: [{ type: 'text', value: 'Lead.' }] },
     marker: 'bp-role-ingress',
@@ -643,7 +654,8 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type CodeTabs MARK:js-count-code-tabs
     // scaffy:add-block-type Tabs MARK:js-count-tabs
     // + 1: field-number (B085) React emitter (pbw-fix-field-number-react).
-    expect(registered).toHaveLength(75)
+    // + 1: pre-gate-badge (#17199's reader-synthesised badge; docgates-s27).
+    expect(registered).toHaveLength(76)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
@@ -1164,5 +1176,29 @@ describe('field-number block (B085)', () => {
     const html = renderPortableDocument([{ type: 'field-molarity', label: 'M', value: 1 }])
     expect(html).toContain('bp-unknown-block')
     expect(html).toContain('Unsupported block: field-molarity')
+  })
+})
+
+describe('task-detail empty state (parity2-bug-taskdetail-empty-state)', () => {
+  it('an unresolved task-detail renders the bp-tdetail--empty placeholder, not nothing', () => {
+    for (const block of [
+      { type: 'task-detail', task: { title: '' } },
+      { type: 'task-detail', task: { title: '   ' } },
+      { type: 'task-detail', query: { parent_id: 'nope' } },
+      { type: 'task-detail', task: {} },
+    ] as Block[]) {
+      const html = renderPortableDocument([block])
+      expect(html).toContain('<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>')
+      expect(html).not.toContain('bp-tdetail__title')
+    }
+  })
+
+  it('a resolved task-detail is untouched by the empty state', () => {
+    const html = renderPortableDocument([
+      { type: 'task-detail', task: { title: 'real', status: 'ready' } },
+    ] as Block[])
+    expect(html).toContain('<div class="bp-tdetail__title">real</div>')
+    expect(html).not.toContain('bp-tdetail--empty')
+    expect(html).not.toContain('No matching tasks.')
   })
 })

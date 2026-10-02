@@ -15,9 +15,10 @@ defmodule BarkparkWeb.SelfUpdateController do
   use BarkparkWeb, :controller
 
   alias Barkpark.SelfUpdate.Runner
+  alias BarkparkWeb.ErrorResponse
 
-  def trigger(conn, _params) do
-    case Runner.trigger() do
+  def trigger(conn, params) do
+    case Runner.trigger(env: egress_env(params)) do
       {:ok, :started} ->
         conn
         |> put_status(:accepted)
@@ -34,14 +35,36 @@ defmodule BarkparkWeb.SelfUpdateController do
         # could not spawn (missing executable, bad cd). Telling the admin to
         # flip an env var that is already set would be actively wrong.
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "runner_start_failed",
-            message: "self-update runner failed to start — check the server logs"
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "runner_start_failed",
+          message: "self-update runner failed to start — check the server logs"
         })
     end
+  end
+
+  # task-b4b2bb60b63e28ea. The control plane sends its own egress address(es) as
+  # `cloud_egress_ips` so the self-update run hands `BARKPARK_CLOUD_EGRESS_IPS` to
+  # instance-deploy.sh, which backfills `BARKPARK_TRUSTED_PROXIES` the same way
+  # the CD path does. Validated HERE to the shape runtime.exs accepts — a
+  # comma-separated list of BARE IP addresses (a CIDR, a hostname, or any
+  # malformed entry refuses the WHOLE value, which is then simply not passed:
+  # the update still runs, and instance-deploy.sh logs its own no-IPs WARN).
+  # The route is admin-gated, so only the admin-token holder can supply it.
+  @doc false
+  @spec egress_env(map()) :: [{String.t(), String.t()}]
+  def egress_env(%{"cloud_egress_ips" => raw}) when is_binary(raw) do
+    entries = raw |> String.split(",") |> Enum.map(&String.trim/1) |> Enum.reject(&(&1 == ""))
+
+    if entries != [] and Enum.all?(entries, &bare_ip?/1),
+      do: [{"BARKPARK_CLOUD_EGRESS_IPS", Enum.join(entries, ",")}],
+      else: []
+  end
+
+  def egress_env(_params), do: []
+
+  defp bare_ip?(entry) do
+    not String.contains?(entry, "/") and
+      match?({:ok, _}, :inet.parse_strict_address(String.to_charlist(entry)))
   end
 
   @doc """
@@ -90,13 +113,9 @@ defmodule BarkparkWeb.SelfUpdateController do
 
       {:error, {:preflight_failed, _reason}} ->
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "rollback_preflight_failed",
-            message:
-              "rollback preflight could not determine a safe target — check the server logs"
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "rollback_preflight_failed",
+          message: "rollback preflight could not determine a safe target — check the server logs"
         })
     end
   end
@@ -117,12 +136,9 @@ defmodule BarkparkWeb.SelfUpdateController do
 
       {:error, :start_failed} ->
         conn
-        |> put_status(:internal_server_error)
-        |> json(%{
-          error: %{
-            code: "runner_start_failed",
-            message: "rollback runner failed to start — check the server logs"
-          }
+        |> ErrorResponse.emit_fields(:internal_server_error, %{
+          code: "runner_start_failed",
+          message: "rollback runner failed to start — check the server logs"
         })
     end
   end
@@ -160,26 +176,24 @@ defmodule BarkparkWeb.SelfUpdateController do
   # vocabulary — charter W6 D23).
   defp already_running(conn) do
     conn
-    |> put_status(:conflict)
-    |> json(%{error: %{code: "already_running", message: "an update is already running"}})
+    |> ErrorResponse.emit_fields(:conflict, %{
+      code: "already_running",
+      message: "an update is already running"
+    })
   end
 
   defp conflict(conn, code, message) do
     conn
-    |> put_status(:conflict)
-    |> json(%{error: %{code: code, message: message}})
+    |> ErrorResponse.emit_fields(:conflict, %{code: code, message: message})
   end
 
   defp feature_not_configured(conn) do
     conn
-    |> put_status(:service_unavailable)
-    |> json(%{
-      error: %{
-        code: "feature_not_configured",
-        message:
-          "self-update apply is not enabled on this instance " <>
-            "(set BARKPARK_SELF_UPDATE_APPLY=1)"
-      }
+    |> ErrorResponse.emit_fields(:service_unavailable, %{
+      code: "feature_not_configured",
+      message:
+        "self-update apply is not enabled on this instance " <>
+          "(set BARKPARK_SELF_UPDATE_APPLY=1)"
     })
   end
 

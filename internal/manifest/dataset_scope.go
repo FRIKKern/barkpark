@@ -1,6 +1,9 @@
 package manifest
 
-import "sort"
+import (
+	"sort"
+	"strings"
+)
 
 // ── Dataset honesty ──────────────────────────────────────────────────────────
 //
@@ -185,20 +188,20 @@ var datasetDispositions = map[string]ScopeDisposition{
 	"incident":  {Unscoped: true, Reason: "status-page incidents are instance-wide announcements and exist outside any dataset"},
 
 	// ── Refuse: the flag cannot reach the wire and the drop would be silent. ──
-	"access":              {Reason: "the flat /v1/access grants are looked up by grant id and carry no dataset segment; the dataset-filtered form is access.grant, which declares its own `dataset` flag"},
-	"app_token":           {Reason: "the app-token listing and revocation routes are keyed on the calling identity and carry no dataset segment; app_token.create declares its own `dataset` flag"},
+	"access":              {Reason: "the flat /v1/access grants are looked up by grant id and carry no dataset segment"},
+	"app_token":           {Reason: "the app-token listing and revocation routes are keyed on the calling identity and carry no dataset segment"},
 	"bulldocs":            {Reason: "the bulldocs ingest routes address a paper by slug with no dataset segment and declare no dataset flag"},
 	"chat":                {Reason: "chat sessions are addressed by session id with no dataset segment and declare no dataset flag"},
 	"cycle":               {Reason: "the epic-cycle wave routes address a wave by :epic_id/:wave_id under the workspace/project prefix and carry no dataset segment"},
 	"fleet_support_token": {Reason: "fleet support tokens are minted against the instance and carry no dataset segment"},
-	"graph":               {Reason: "graph.show addresses one corpus node by id with no dataset segment; the corpus-wide graph verbs declare their own `dataset` flag"},
+	"graph":               {Reason: "the corpus node route addresses one node by id with no dataset segment"},
 	"secret":              {Reason: "secrets are stored per instance or per workspace/project, never per dataset, and neither the flat nor the scoped secrets routes carry a dataset segment"},
 	"session":             {Reason: "session records are addressed by slug with no dataset segment and declare no dataset flag"},
 	"share":               {Reason: "share grants, links and tokens are addressed by id with no dataset segment and declare no dataset flag"},
-	"task":                {Reason: "the task ledger routes address a task by doc_id with no dataset segment and declare no dataset flag; task.events is the one ledger verb that declares its own `dataset` flag"},
+	"task":                {Reason: "the task ledger routes address a task by doc_id with no dataset segment"},
 	"ticket":              {Reason: "the ticket inbox routes carry no dataset segment and declare no dataset flag"},
 	"ticket-key":          {Reason: "ticket signing keys are minted against the instance and carry no dataset segment"},
-	"token":               {Reason: "the flat /v1/tokens listing and revocation routes carry no dataset segment; token.create declares its own `dataset` flag"},
+	"token":               {Reason: "the flat /v1/tokens listing and revocation routes carry no dataset segment"},
 }
 
 // datasetDispositionOverrides declares a single command whose dataset verdict
@@ -240,4 +243,46 @@ func DatasetFateTally(cmds []Command) map[DatasetFate]int {
 		tally[DatasetFateFor(c)]++
 	}
 	return tally
+}
+
+// ── The remedy a dataset refusal names must be DERIVED ───────────────────────
+//
+// THE DEFECT THIS CLOSES. datasetDispositions' Reason strings used to finish the
+// sentence by ENUMERATING the sibling verbs that do carry a dataset — "task.events
+// is the one ledger verb that declares its own `dataset` flag". That clause was
+// true against the 2026-09-04 capture and is FALSE against guerrilla today: the
+// live manifest declares a `dataset` flag on task.ready as well, so an operator
+// refused on `bp -d aker-brygge task get <id>` reads a refusal that names ONE
+// remedy when there are two. No test could have caught it: the only roster the
+// suite owns is the same frozen fixture the sentence was written from, so the
+// enumeration and its check go stale together.
+//
+// A prose enumeration is a snapshot of a roster that ships from the SERVER on
+// every invocation. The roster is the authority, so the remedy is computed from
+// the roster the CLI already holds and the Reason strings say only why THIS
+// command cannot carry the flag — the half that is a property of the route and
+// does not drift. TestNoDatasetReasonFreezesAVerbEnumeration holds the split.
+
+// DatasetCarryingSiblings returns the commands of `noun`, in the roster the
+// caller was served, whose fate is DatasetCarried — the verbs in this family a
+// typed -d actually reaches the wire on. Rendered "noun verb", sorted, so the
+// refusal can name today's remedy instead of a remembered one.
+//
+// It is deliberately scoped to ONE noun. A refused operator is inside a family
+// and wants the neighbouring door, not a tour of all 207 commands; and the
+// generic "`bp capabilities` marks them" clause the refusal already carries is
+// the answer for the case where the family has no carrying door at all.
+func DatasetCarryingSiblings(cmds []Command, noun string) []string {
+	var out []string
+	for _, c := range cmds {
+		if c.Noun != noun {
+			continue
+		}
+		if DatasetFateFor(c) != DatasetCarried {
+			continue
+		}
+		out = append(out, strings.TrimSpace(c.Noun+" "+c.Verb))
+	}
+	sort.Strings(out)
+	return out
 }

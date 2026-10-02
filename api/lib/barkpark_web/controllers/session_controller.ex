@@ -15,11 +15,31 @@ defmodule BarkparkWeb.SessionController do
 
   def new(conn, params) do
     return_to = sanitize_return_to(params["return_to"])
+    put_locale_for(return_to)
     render(conn, :new, new_assigns(return_to))
   end
 
+  # Gyldendal parity E7: the login page has no workspace of its own, but a
+  # `return_to` that points into `/w/<slug>/…` names one — so the page speaks
+  # that workspace's locale (nb-NO for the twin). Anything else stays English.
+  defp put_locale_for(return_to) when is_binary(return_to) do
+    locale =
+      case Regex.run(~r{^/w/([^/]+)/}, return_to) do
+        [_, slug] ->
+          Barkpark.Tenancy.workspace_locale(Barkpark.Tenancy.get_workspace_by_slug(slug))
+
+        _ ->
+          Barkpark.Tenancy.default_locale()
+      end
+
+    BarkparkWeb.StudioLocale.put_named(locale)
+  end
+
+  defp put_locale_for(_), do: BarkparkWeb.StudioLocale.put_named(nil)
+
   def create(conn, %{"token" => raw_token} = params) when is_binary(raw_token) do
     return_to = sanitize_return_to(params["return_to"])
+    put_locale_for(return_to)
     trimmed = String.trim(raw_token)
 
     case Barkpark.Auth.verify_token(trimmed) do

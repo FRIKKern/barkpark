@@ -5,6 +5,7 @@ import { MapLanding } from "@/components/map-landing";
 import { API_URL_CONFIGURED } from "@/lib/bp-env";
 import { corpusStatusMarker, fetchCorpusGraph } from "@/lib/graph";
 import { fetchListingsResult } from "@/lib/listings";
+import { listingsHealthMarkers } from "@/lib/listings-data";
 import { buildIdentity } from "@/lib/markers";
 
 /**
@@ -58,19 +59,23 @@ async function MapFinderLanding() {
   // replaced by the bundled sample pins — a broken or empty upstream
   // (task-fe4648fa743ab0a6). It is false out of the box, where the samples ARE
   // the intended template content and a warning would be noise.
-  const { listings, substituted, source } = await fetchListingsResult();
-  // bp-doc-id HEALTH marker (content-truth): the first listing's id proves the
-  // SSR rendered a real content document. Empty corpus → empty marker → the
-  // deploy gate fails closed (a lost content link must not go live). A
-  // SUBSTITUTED read has no real document to point at — stamping a bundled
-  // sample id here is precisely the lie this task removed, and it would let a
-  // deploy with a dead `LISTINGS_TYPE` pass the gate on fake content.
-  const docId = substituted ? "" : (listings[0]?.id ?? "");
+  const resolved = await fetchListingsResult();
+  const { listings, substituted, source } = resolved;
+  // The SAME two HEALTH markers the graph landing below emits, through the SAME
+  // shaping function — `bp-doc-id` (content-truth) and, only when that one is
+  // empty, `bp-corpus-status` (cause-truth). Only a LIVE read can anchor a doc
+  // id: stamping a bundled sample id would let a deploy with an unset or dead
+  // `LISTINGS_TYPE` pass the gate on fabricated content. The decision is pure
+  // and lives in `lib/listings-data.ts` so `node --test` can prove it; this
+  // component only renders it.
+  const { docId, corpusStatus } = listingsHealthMarkers(resolved);
 
   return (
     <>
       <meta name="bp-doc-id" content={docId} />
-      {substituted && <meta name="bp-listings-source" content={source} />}
+      {corpusStatus !== "" && (
+        <meta name="bp-corpus-status" content={corpusStatus} />
+      )}
       {/* Desktop: the map fills the pane. The layout's <section> is a definite-
           height flex child, so `h-full` here resolves to a real pixel height —
           the canvas needs that to size itself (no layout shift). The <DesktopOnly>

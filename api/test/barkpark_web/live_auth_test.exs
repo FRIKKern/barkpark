@@ -32,12 +32,20 @@ defmodule BarkparkWeb.LiveAuthTest do
   @settings_path "/w/default/p/default/studio/settings"
 
   setup %{conn: conn} do
-    # Default must exist before the admin token is minted so `Auth.create_token`
-    # auto-binds it as a Default member (the scoped route's LiveScope gate).
+    # The scoped route's LiveScope gate needs this token to be a member of the
+    # Default workspace, so the seat is established first and then NAMED at the
+    # mint. Only the admin token needs it: the ops and reader tokens below are
+    # asserted against flat routes and redirects, so they stay workspace-less.
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "wi5 admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "wi5 admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} = Auth.create_token(@ops_token, "wi5 ops", "production", ["read", "ops"])
     {:ok, _} = Auth.create_token(@reader_token, "wi5 reader", "production", ["read"])

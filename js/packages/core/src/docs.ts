@@ -14,11 +14,21 @@
 import { scopePrefix } from './scope'
 import { buildQueryString, createDocsBuilder, type BuilderState } from './filter-builder'
 import { request } from './transport'
-import type { BarkparkClientConfig, BarkparkDocument, DocsBuilder, Perspective } from './types'
+import type {
+  BarkparkClientConfig,
+  BarkparkDocument,
+  DocsBuilder,
+  Perspective,
+  ResolveSpec,
+} from './types'
 
 export interface DocsOperationOptions {
   perspective?: Perspective
   signal?: AbortSignal
+  /** Server-side block resolution (`?resolve=`) for every page this builder
+   *  reads. `'tasks'` fills query-shaped PortableDoc task blocks with a live
+   *  snapshot; see {@link ResolveSpec}. */
+  resolve?: ResolveSpec
 }
 
 interface QueryResultBody<T> {
@@ -62,6 +72,16 @@ interface QueryResultBody<T> {
  *   point, not an oversight. Consumers that prefer an empty page can guard
  *   in-page (the D72 next-starter precedent).
  */
+const warnedTruncated = new Set<string>()
+
+function warnTruncated(type: string): void {
+  if (warnedTruncated.has(type)) return
+  warnedTruncated.add(type)
+  console.warn(
+    `[barkpark] docs('${type}').find() returned one page; more documents exist. Use .limit(n) (max 1000) or page with .findPage().`,
+  )
+}
+
 export function createDocsOperation<T = BarkparkDocument>(
   config: BarkparkClientConfig,
   type: string,
@@ -73,6 +93,7 @@ export function createDocsOperation<T = BarkparkDocument>(
     const parts: string[] = []
     if (qs.length > 0) parts.push(qs)
     if (perspective !== undefined) parts.push(`perspective=${encodeURIComponent(perspective)}`)
+    if (opts?.resolve !== undefined) parts.push(`resolve=${encodeURIComponent(opts.resolve)}`)
     parts.push(...extra)
     const query = parts.length > 0 ? `?${parts.join('&')}` : ''
     return `${scopePrefix(config)}/v1/data/query/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}${query}`
@@ -104,6 +125,10 @@ export function createDocsOperation<T = BarkparkDocument>(
   return createDocsBuilder<T>(
     async (state: BuilderState) => {
       const data = await read(state, [])
+      // A find() with no .limit() gets ONE server page (default 100). It used to
+      // drop the server's `hasMore`, so a type with 131 documents resolved 100
+      // with nothing said (stranger walk, 2026-10-01). Say it once per type.
+      if (state.limit === undefined && (data.result?.hasMore ?? data.hasMore)) warnTruncated(type)
       return data.result?.documents ?? data.documents ?? []
     },
     // count executor: same filters, but `?count=true` and a minimal page (the

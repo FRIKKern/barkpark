@@ -85,6 +85,21 @@ defmodule Barkpark.Content.Schema do
   end
 
   def list_schemas(dataset, opts \\ []) do
+    # Memoized per request / per Studio callback, like `get_schema_raw/3`: one
+    # connected desk callback built the SAME catalog twice (`Structure`'s
+    # `scope_plugin_nodes/4`, once per attributed plugin). Keyed on the WHOLE opts — the
+    # catalog reads scope, dataset pin and grant narrowing out of them — so two
+    # calls share a result only when they would have run the same query. The
+    # newest 4 catalogs; every schema write in this module resets the memo.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      {:list_schemas, dataset, Keyword.delete(opts, :memoize)},
+      fn -> do_list_schemas(dataset, opts) end,
+      4
+    )
+  end
+
+  defp do_list_schemas(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -106,6 +121,7 @@ defmodule Barkpark.Content.Schema do
     |> order_by([s], asc: s.name, asc_nulls_last: s.dataset_id)
     |> Repo.all()
     |> Enum.uniq_by(& &1.name)
+    |> Enum.map(&inline_named_types(&1, dataset, opts))
   end
 
   # THE ARITY IS THE TENANT FENCE (task-be3b3aa6da5df3a2, instance 1). `opts`
@@ -120,6 +136,37 @@ defmodule Barkpark.Content.Schema do
   # chokepoint with a nil-workspace-only fallback: `get_schema_for_redaction/3`.
   # @canonical capability:schema-resolution-tenant-scoped aka:get_schema,schema definition lookup,type schema doc:docs/contracts/tenancy.md
   def get_schema(name, dataset, opts \\ []) do
+    case get_schema_raw(name, dataset, opts) do
+      {:ok, schema} -> {:ok, inline_named_types(schema, dataset, opts)}
+      other -> other
+    end
+  end
+
+  @doc false
+  # The STORED row, no named-type inlining — the read every WRITE path must use
+  # as its changeset base (an inlined base would persist the expansion on the
+  # next partial update) and the read the inliner itself resolves object types
+  # through. Readers use `get_schema/3`.
+  def get_schema_raw(name, dataset, opts \\ []) do
+    # Memoized per request / per Studio callback (task-43754c756edf2af6): one
+    # `GET /v1/data/query` asked for the same row FOUR times (auth, redaction,
+    # owner scope, count). Every schema write in this module resets the memo in
+    # the writing process — see `WriteScope.request_memo/3` for its lifetime.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      # keyed on exactly what the lookup reads: the scope keys, PRESENCE
+      # included (`resolve_read_dataset_id/2` treats a pinned-but-nil
+      # workspace differently from an absent one); list opts riding along
+      # (limit, perspective, caller context) do not change the row
+      {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
+       Keyword.fetch(opts, :project_id)},
+      fn -> do_get_schema_raw(name, dataset, opts) end,
+      # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
+      8
+    )
+  end
+
+  defp do_get_schema_raw(name, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -277,26 +324,39 @@ defmodule Barkpark.Content.Schema do
            attrs
            |> Map.put("dataset", dataset)
            |> Content.put_scope_attrs(opts) do
-      case name && get_schema(name, dataset, opts) do
+      # FRESH, never the request memo: a write decides insert-vs-update on the
+      # row as it is now (task-43754c756edf2af6).
+      case name && do_get_schema_raw(name, dataset, opts) do
         {:ok, existing} ->
           if owned_by_other_workspace?(existing, attrs) do
-            insert_schema(attrs)
+            insert_schema(attrs, dataset, opts)
           else
             existing
             |> SchemaDefinition.changeset(attrs)
+            |> check_named_types(dataset, opts)
             |> Repo.update()
+            |> reset_read_memo()
           end
 
         _ ->
-          insert_schema(attrs)
+          insert_schema(attrs, dataset, opts)
       end
     end
   end
 
-  defp insert_schema(attrs) do
+  defp insert_schema(attrs, dataset, opts) do
     %SchemaDefinition{}
     |> SchemaDefinition.changeset(attrs)
+    |> check_named_types(dataset, opts)
     |> Repo.insert()
+    |> reset_read_memo()
+  end
+
+  # A schema write drops the calling process's request memo, so the same
+  # request / Studio callback reads the row it just wrote.
+  defp reset_read_memo(result) do
+    Barkpark.Content.WriteScope.reset_request_memo()
+    result
   end
 
   @doc """
@@ -345,7 +405,7 @@ defmodule Barkpark.Content.Schema do
            |> Map.put("dataset", dataset)
            |> Content.put_scope_attrs(opts) do
       base =
-        case name && get_schema(name, dataset, opts) do
+        case name && get_schema_raw(name, dataset, opts) do
           {:ok, existing} ->
             if owned_by_other_workspace?(existing, attrs),
               do: %SchemaDefinition{},
@@ -357,6 +417,7 @@ defmodule Barkpark.Content.Schema do
 
       base
       |> SchemaDefinition.changeset(attrs)
+      |> check_named_types(dataset, opts)
       |> Ecto.Changeset.apply_action(if base.id, do: :update, else: :insert)
     end
   end
@@ -423,15 +484,35 @@ defmodule Barkpark.Content.Schema do
 
             # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
             # stale_error_field turns the race into {:error, :not_found} (rendered 404).
-            case Repo.delete(schema, stale_error_field: :id) do
-              {:error, cs} -> if stale?(cs), do: {:error, :not_found}, else: {:error, cs}
-              ok -> ok
+            case schema |> Repo.delete(stale_error_field: :id) |> reset_read_memo() do
+              {:error, cs} ->
+                if stale?(cs), do: schema_not_found(name, dataset), else: {:error, cs}
+
+              ok ->
+                ok
             end
         end
+
+      # The bare `{:error, :not_found}` renders "document not found" with a hint
+      # to check a document `_id`. What is missing here is a SCHEMA, the same
+      # wrong noun task-8d46c1fe49954697 fixed on `GET /v1/schemas/:ds/:name`,
+      # found on DELETE by the API conformance sweep (task-8bcb0d89c2a1c869's
+      # sibling). Shaped here, not in SchemaController.delete/2, because that
+      # action is an anchored PDS exclusion row whose body must not move.
+      {:error, :not_found} ->
+        schema_not_found(name, dataset)
 
       error ->
         error
     end
+  end
+
+  defp schema_not_found(name, dataset) do
+    {:error,
+     {:not_found,
+      "schema not found: no schema named #{inspect(name)} in dataset #{inspect(dataset)}",
+      hint:
+        "Check the schema name and dataset in the URL — GET /v1/schemas/#{dataset} lists the schemas you can read here."}}
   end
 
   # Count every document of `name` in the dataset scope (all perspectives, all
@@ -608,8 +689,21 @@ defmodule Barkpark.Content.Schema do
   """
   @spec allowed_origins_for_dataset(String.t(), keyword()) :: [String.t()]
   def allowed_origins_for_dataset(dataset, opts \\ []) when is_binary(dataset) do
+    # BOTH confinements, matching `schema_hash_for_dataset/2` below: the
+    # dataset filter AND the workspace/project scope. The dataset filter alone
+    # is not a fence — `scope_to_dataset/3` falls back to a bare
+    # `dataset == <slug>` STRING whenever the slug resolves to no `dataset_id`
+    # in the caller's project, which is precisely the case when the caller's
+    # project owns no dataset of that name. A sibling project's same-named
+    # dataset then answered this read and its CORS allowlist crossed tenants
+    # (task-ab5da5c4faf1a04c).
+    scope_fun = workspace_scope_fun(opts)
+    workspace_id = Keyword.get(opts, :workspace_id)
+    project_id = Keyword.get(opts, :project_id)
+
     SchemaDefinition
     |> scope_to_dataset(dataset, opts)
+    |> scope_fun.(workspace_id, project_id)
     |> select([s], s.cors_origins)
     |> Repo.all()
     |> List.flatten()
@@ -706,6 +800,7 @@ defmodule Barkpark.Content.Schema do
       # read back what took (task-567f0fb2429086df). `|| false` normalises a nil
       # (unloaded/legacy) to the schema's own default rather than leaking nil.
       singleton: schema.singleton || false,
+      kind: schema.kind || "document",
       schemaHash: schema_hash_for_schema(schema),
       fields: Enum.map(schema.fields || [], &serialize_field/1),
       actions: schema.actions || [],
@@ -858,4 +953,218 @@ defmodule Barkpark.Content.Schema do
         where(query, [s], s.dataset == ^dataset)
     end
   end
+
+  # ── Gyldendal parity E3.6 — named object types ────────────────────────────
+  #
+  # A schema row with `kind: "object"` is a COMPOSITE declared once per
+  # dataset (Sanity's reusable `seo`, `banner`, `themeStyling`). A document
+  # schema references it with `{"name": "seo", "type": "seo", …}`. At read
+  # time (`get_schema/3`, `list_schemas/2`, hence `resolve_schema/3`) the
+  # reference is INLINED into a plain composite — `type: "composite"`, the
+  # object's `fields` (and `groups` unless the field declares its own), the
+  # field's own title/description/group kept, and `namedType: "seo"` stamped
+  # so the origin stays visible — so every downstream consumer (the editor's
+  # composite renderer, validation, forms coercion, list_preview) needs no
+  # change. Resolution walks the same three-rung ladder as `resolve_schema/3`
+  # (exact scope → workspace-wide → shared global) against the STORED rows.
+  #
+  # At WRITE time (`upsert_schema/3`, `validate_schema/3`) a field type that is
+  # neither built-in nor a resolvable object type is refused on the changeset
+  # (the controller renders it as the same 422 every other schema refusal
+  # gets), naming the type; a reference chain that reaches the schema being
+  # written (or any cycle) is refused the same way. The inliner is cycle-safe
+  # regardless: a type already on the walk is left as-is.
+
+  # The editor's vocabulary is OPEN at render time (an unknown type falls back
+  # to a text input — see `FieldInputs`), so this list is the platform's
+  # DECLARED vocabulary: every type the editor/validator dispatch on plus the
+  # types shipped templates and plugins declare (`portableDocument` — the
+  # search-starter templates). `shipped_schema_vocabulary_test.exs` walks every
+  # shipped schema JSON through the gate so a new template type cannot be
+  # refused at boot or at workspace import.
+  @builtin_field_types ~w(
+    string text number integer float boolean datetime date time color select
+    richText reference image file slug source url email array object composite
+    arrayOf codelist localizedText json markdown geopoint tags embed paragraph
+    park sheet valueref task paper portableDocument
+  )
+
+  @doc "Every field type the platform renders/validates natively; anything else must name an object type."
+  def builtin_field_types, do: @builtin_field_types
+
+  defp builtin_type?(type) when is_binary(type), do: type in @builtin_field_types
+  defp builtin_type?(_), do: true
+
+  defp object_type?(%SchemaDefinition{kind: "object"}), do: true
+  defp object_type?(_), do: false
+
+  # The stored object type named `name`, through the scope ladder, never
+  # inlined (the inliner recurses itself, with a visited set).
+  defp resolve_object_type(name, dataset, opts) do
+    rungs =
+      if Keyword.has_key?(opts, :workspace_id) do
+        [
+          opts,
+          Keyword.delete(opts, :project_id),
+          Keyword.drop(opts, [:workspace_id, :project_id])
+        ]
+        |> Enum.uniq()
+      else
+        [opts]
+      end
+
+    global = Keyword.drop(opts, [:workspace_id, :project_id])
+
+    Enum.reduce_while(rungs, :error, fn rung, acc ->
+      case get_schema_raw(name, dataset, rung) do
+        {:ok, %SchemaDefinition{workspace_id: nil} = schema} ->
+          if object_type?(schema), do: {:halt, {:ok, schema}}, else: {:halt, :error}
+
+        {:ok, schema} when rung != global ->
+          if object_type?(schema), do: {:halt, {:ok, schema}}, else: {:halt, :error}
+
+        _ ->
+          {:cont, acc}
+      end
+    end)
+  end
+
+  @doc false
+  def inline_named_types(%SchemaDefinition{} = schema, dataset, opts) do
+    fields = schema.fields || []
+
+    if Enum.any?(fields, &references_named_type?/1) do
+      %{schema | fields: inline_fields(fields, dataset, opts, MapSet.new([schema.name]))}
+    else
+      schema
+    end
+  end
+
+  def inline_named_types(other, _dataset, _opts), do: other
+
+  defp references_named_type?(%{} = f) do
+    type = f["type"] || f[:type]
+
+    not builtin_type?(type) or
+      (type == "composite" and Enum.any?(f["fields"] || [], &references_named_type?/1)) or
+      (type == "arrayOf" and references_named_type?(f["of"] || %{}))
+  end
+
+  defp references_named_type?(_), do: false
+
+  defp inline_fields(fields, dataset, opts, visited) when is_list(fields),
+    do: Enum.map(fields, &inline_field(&1, dataset, opts, visited))
+
+  defp inline_fields(other, _dataset, _opts, _visited), do: other
+
+  defp inline_field(%{} = f, dataset, opts, visited) do
+    type = f["type"] || f[:type]
+
+    cond do
+      type == "composite" ->
+        Map.put(f, "fields", inline_fields(f["fields"] || [], dataset, opts, visited))
+
+      type == "arrayOf" ->
+        Map.put(f, "of", inline_field(f["of"] || %{}, dataset, opts, visited))
+
+      builtin_type?(type) ->
+        f
+
+      MapSet.member?(visited, type) ->
+        # A cycle (or the schema referencing itself): leave the reference as the
+        # leaf it was — the apply-time check refuses these before they land.
+        f
+
+      true ->
+        case resolve_object_type(type, dataset, opts) do
+          {:ok, obj} ->
+            inner = inline_fields(obj.fields || [], dataset, opts, MapSet.put(visited, type))
+
+            f
+            |> Map.put("type", "composite")
+            |> Map.put("fields", inner)
+            |> Map.put("namedType", type)
+            |> Map.put_new("title", obj.title)
+            |> maybe_put_groups(obj)
+
+          :error ->
+            f
+        end
+    end
+  end
+
+  defp inline_field(other, _dataset, _opts, _visited), do: other
+
+  defp maybe_put_groups(field, %SchemaDefinition{groups: groups})
+       when is_list(groups) and groups != [] do
+    Map.put_new(field, "groups", groups)
+  end
+
+  defp maybe_put_groups(field, _obj), do: field
+
+  # Apply-time gate: every non-builtin field type must name a resolvable object
+  # type, and no reference chain may come back to the schema being written.
+  defp check_named_types(%Ecto.Changeset{} = changeset, dataset, opts) do
+    name = Ecto.Changeset.get_field(changeset, :name)
+    fields = Ecto.Changeset.get_field(changeset, :fields) || []
+
+    case walk_named_types(fields, dataset, opts, MapSet.new([name])) do
+      :ok ->
+        changeset
+
+      {:unknown, type} ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :fields,
+          "unknown field type #{inspect(type)}: not a built-in type and no object type named #{inspect(type)} is registered in this scope — apply the object type first"
+        )
+
+      {:cycle, type} ->
+        Ecto.Changeset.add_error(
+          changeset,
+          :fields,
+          "object type #{inspect(type)} would reference itself through this schema (a cycle) — named object types must not contain each other recursively"
+        )
+    end
+  end
+
+  defp walk_named_types(fields, dataset, opts, visited) when is_list(fields) do
+    Enum.reduce_while(fields, :ok, fn f, _acc ->
+      case walk_named_type(f, dataset, opts, visited) do
+        :ok -> {:cont, :ok}
+        other -> {:halt, other}
+      end
+    end)
+  end
+
+  defp walk_named_types(_fields, _dataset, _opts, _visited), do: :ok
+
+  defp walk_named_type(%{} = f, dataset, opts, visited) do
+    type = f["type"] || f[:type]
+
+    cond do
+      type == "composite" ->
+        walk_named_types(f["fields"] || [], dataset, opts, visited)
+
+      type == "arrayOf" ->
+        walk_named_type(f["of"] || %{}, dataset, opts, visited)
+
+      builtin_type?(type) ->
+        :ok
+
+      MapSet.member?(visited, type) ->
+        {:cycle, type}
+
+      true ->
+        case resolve_object_type(type, dataset, opts) do
+          {:ok, obj} ->
+            walk_named_types(obj.fields || [], dataset, opts, MapSet.put(visited, type))
+
+          :error ->
+            {:unknown, type}
+        end
+    end
+  end
+
+  defp walk_named_type(_f, _dataset, _opts, _visited), do: :ok
 end

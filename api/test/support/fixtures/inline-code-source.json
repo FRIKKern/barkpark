@@ -1,0 +1,98 @@
+{
+  "_comment": "THE INLINE `code` NODE source contract, as ONE file read by every engine that renders an inline code chip (api/test/barkpark/portable_doc/render/inline_code_source_parity_test.exs, js/packages/react/tests/inline-code-source.parity.test.ts, internal/pdrender/inline_code_source_parity_test.go). Sibling of code-source-aliases.json, which governs the BLOCK-level `code` node; this file governs the INLINE leaf and the two contracts are deliberately different. Law: the chip body is `value` when that is a NON-EMPTY string, else the flattened plain text of `children`. Precedence is FIRST NON-EMPTY, never first-non-blank: a `value` of \" \" WINS and keeps its space (an inline chip is a leaf whose authored value is verbatim). Flattening a child: a string/finite number is itself, a map is `value` || legacy `text` || (recursively) its own `children`, a nested array recurses; anything else contributes \"\". A non-array `children` contributes \"\". Hand-authored; regenerate nothing.",
+  "cases": [
+    {
+      "name": "value-only (the canonical shape every first-party producer writes)",
+      "node": { "type": "code", "value": "alpha_only_value()" },
+      "source": "alpha_only_value()"
+    },
+    {
+      "name": "children-only, one text leaf (66 live paragraphs carry this shape)",
+      "node": { "type": "code", "children": [{ "type": "text", "value": "beta_children()" }] },
+      "source": "beta_children()"
+    },
+    {
+      "name": "children-only, leaf keyed legacy `text` rather than `value`",
+      "node": { "type": "code", "children": [{ "type": "text", "text": "gamma_legacy_text()" }] },
+      "source": "gamma_legacy_text()"
+    },
+    {
+      "name": "conflict: a non-empty `value` wins over children",
+      "node": {
+        "type": "code",
+        "value": "winner_value()",
+        "children": [{ "type": "text", "value": "loser_children()" }]
+      },
+      "source": "winner_value()"
+    },
+    {
+      "name": "an EMPTY-STRING value falls through to children",
+      "node": {
+        "type": "code",
+        "value": "",
+        "children": [{ "type": "text", "value": "delta_fallthrough()" }]
+      },
+      "source": "delta_fallthrough()"
+    },
+    {
+      "name": "a WHITESPACE value does NOT fall through — first non-EMPTY, not first non-blank",
+      "node": {
+        "type": "code",
+        "value": " ",
+        "children": [{ "type": "text", "value": "never_reached()" }]
+      },
+      "source": " "
+    },
+    {
+      "name": "a non-stringish value (a map) coerces to \"\" and falls through",
+      "node": {
+        "type": "code",
+        "value": { "nope": true },
+        "children": [{ "type": "text", "value": "epsilon_coerced()" }]
+      },
+      "source": "epsilon_coerced()"
+    },
+    {
+      "name": "several children concatenate with no separator",
+      "node": {
+        "type": "code",
+        "children": [
+          { "type": "text", "value": "zeta(" },
+          { "type": "text", "value": "arg" },
+          { "type": "text", "value": ")" }
+        ]
+      },
+      "source": "zeta(arg)"
+    },
+    {
+      "name": "a wrapper child recurses into ITS children (markup folds to plain text)",
+      "node": {
+        "type": "code",
+        "children": [
+          { "type": "strong", "children": [{ "type": "text", "value": "eta_nested()" }] }
+        ]
+      },
+      "source": "eta_nested()"
+    },
+    {
+      "name": "a bare string child and a finite number child both coerce",
+      "node": { "type": "code", "children": ["theta_", 42] },
+      "source": "theta_42"
+    },
+    {
+      "name": "a bare ARRAY child (flattened one level too shallow) recurses",
+      "node": { "type": "code", "children": [[{ "type": "text", "value": "iota_array()" }]] },
+      "source": "iota_array()"
+    },
+    {
+      "name": "no value and no children → the empty chip body (unchanged degrade)",
+      "node": { "type": "code" },
+      "source": ""
+    },
+    {
+      "name": "a non-array `children` contributes nothing",
+      "node": { "type": "code", "children": { "type": "text", "value": "not_an_array()" } },
+      "source": ""
+    }
+  ]
+}

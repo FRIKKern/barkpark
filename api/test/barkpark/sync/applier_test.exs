@@ -64,6 +64,40 @@ defmodule Barkpark.Sync.ApplierTest do
     }
   end
 
+  # ── PLUGIN-FREE poison fixtures (task-55cbe43cad2b6968) ──────────────────
+  #
+  # The dead-letter boundary is a CORE invariant, so its bad inputs come from
+  # core, not from a plugin that may be switched off:
+  #
+  #   * TERMINAL — a `post` whose title is longer than `Document.changeset/2`'s
+  #     `validate_length(:title, max: 255)`. The refusal is an
+  #     `%Ecto.Changeset{}`, which `Applier.error_class/1` classes terminal.
+  #   * TRANSIENT — a before_save halt from `HaltingGate`, a fixture module this
+  #     test puts in the plugin load order itself (Hooks runs an unregistered
+  #     module's `lifecycle_hooks/0`). It halts only the doc titled
+  #     @gate_title, so the setup write and every other frame pass untouched.
+  @gate_title "halt-at-the-gate"
+
+  defmodule HaltingGate do
+    @moduledoc false
+    def lifecycle_hooks, do: %{before_save: [&__MODULE__.gate/1]}
+
+    def gate(%{doc: doc}) when is_map(doc) do
+      if (doc["title"] || doc[:title]) == "halt-at-the-gate",
+        do: {:halt, "fixture gate: environment not ready"},
+        else: :ok
+    end
+
+    def gate(_payload), do: :ok
+  end
+
+  defp terminal_poison(id, doc_id) do
+    long_title = String.duplicate("t", 300)
+
+    "id: #{id}\nevent: mutation\n" <>
+      ~s(data: {"result":{"_id":"#{doc_id}","_type":"post","title":"#{long_title}","content":{"body":"x"}},"type":"post"}\n\n)
+  end
+
   # Build the wire event the server would emit for the freshest mutation_events
   # row of `doc_id` — the same format_event → SSE.parse_frames path the setup uses.
   defp latest_event_for(doc_id) do
@@ -323,12 +357,10 @@ defmodule Barkpark.Sync.ApplierTest do
          %{ctx: base_ctx} do
       ctx = Map.put(base_ctx, :max_attempts, 1)
 
-      # POISON: a createOrReplace for a `type:task` doc whose content fails the
-      # task-kind contract (no valid `kind`/`lifecycle_status`) → the public
-      # Content.apply_mutations returns {:error, {:invalid_task_content, _}}.
-      poison =
-        "id: 7\nevent: mutation\n" <>
-          ~s(data: {"result":{"_id":"poison","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+      # POISON: a createOrReplace for a `post` whose title breaks the core
+      # changeset's length bound → Content.apply_mutations returns
+      # {:error, %Ecto.Changeset{}} (terminal), with no plugin involved.
+      poison = terminal_poison(7, "poison")
 
       {results, _rest} = Sync.apply_frames(poison, ctx)
 
@@ -357,11 +389,10 @@ defmodule Barkpark.Sync.ApplierTest do
          %{ctx: base_ctx} do
       ctx = Map.put(base_ctx, :max_attempts, 3)
 
-      poison =
-        "id: 5\nevent: mutation\n" <>
-          ~s(data: {"result":{"_id":"poison2","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+      poison = terminal_poison(5, "poison2")
 
-      {[{5, {:error, _}}], _} = Sync.apply_frames(poison, ctx)
+      # The refusal is the CORE changeset, so no plugin decides this outcome.
+      {[{5, {:error, %Ecto.Changeset{}}}], _} = Sync.apply_frames(poison, ctx)
       assert Cursor.get(ctx.source, ctx.dataset) == 0
       assert DeadLetter.list_dead(ctx.source, ctx.dataset) == []
     end
@@ -375,17 +406,18 @@ defmodule Barkpark.Sync.ApplierTest do
     # (HANDOFF.md P1b follow-up). The two arms are proved in one test so the
     # discrimination itself is the assertion.
     test "a TRANSIENT error (plugin before_save halt) HALTS + replays and NEVER advances; a TERMINAL error still dead-letters",
-         %{ctx: base_ctx} do
+         %{ctx: base_ctx} = test_ctx do
       ctx = Map.put(base_ctx, :max_attempts, 1)
+      :ok = Barkpark.PluginEnv.with_plugins([HaltingGate], test_ctx)
 
-      # TRANSIENT: a createOrReplace for a `type:sheet` doc whose cells map carries
-      # a non-A1 key trips the Sheets before_save gate → {:error, {:halted, _}}.
-      # A before_save gate can fail for ENVIRONMENTAL reasons, so this shape is
-      # transient: even at max_attempts:1 it must NOT dead-letter or advance,
-      # because the mutation could be valid once the gate recovers.
+      # TRANSIENT: a createOrReplace the fixture before_save gate halts →
+      # {:error, {:halted, _}}. A before_save gate can fail for ENVIRONMENTAL
+      # reasons, so this shape is transient: even at max_attempts:1 it must NOT
+      # dead-letter or advance, because the mutation could be valid once the
+      # gate recovers.
       transient =
         "id: 11\nevent: mutation\n" <>
-          ~s(data: {"result":{"_id":"trans","_type":"sheet","_draft":false,"content":{"tabs":[{"cells":{"NOTANADDRESS":{"v":"x"}}}]}},"type":"sheet"}\n\n)
+          ~s(data: {"result":{"_id":"trans","_type":"post","_draft":false,"title":"#{@gate_title}","content":{"body":"x"}},"type":"post"}\n\n)
 
       {results, _rest} = Sync.apply_frames(transient, ctx)
 
@@ -398,12 +430,10 @@ defmodule Barkpark.Sync.ApplierTest do
       # It never reached the bounded dead letter.
       assert DeadLetter.list_dead(ctx.source, ctx.dataset) == []
 
-      # TERMINAL: an invalid `type:task` content violation — the CONTENT can never
-      # apply — DOES dead-letter + advance at the same max_attempts:1 threshold.
+      # TERMINAL: a core changeset refusal — the CONTENT can never apply — DOES
+      # dead-letter + advance at the same max_attempts:1 threshold.
       # (Revert the classification and the transient frame above takes THIS path.)
-      poison =
-        "id: 12\nevent: mutation\n" <>
-          ~s(data: {"result":{"_id":"term","_type":"task","title":"x","content":{"kind":"nope"}},"type":"task"}\n\n)
+      poison = terminal_poison(12, "term")
 
       {[{12, {:ok, :dead_lettered}}], _} = Sync.apply_frames(poison, ctx)
       assert Cursor.get(ctx.source, ctx.dataset) == 12

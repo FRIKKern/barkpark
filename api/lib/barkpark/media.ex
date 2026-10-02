@@ -4,6 +4,7 @@ defmodule Barkpark.Media do
   import Ecto.Query
   alias Barkpark.Repo
   alias Barkpark.Content
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Media.Blobstore
   alias Barkpark.Media.Delivery.{Cdn, Events}
   alias Barkpark.Media.Probe
@@ -63,7 +64,10 @@ defmodule Barkpark.Media do
     * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
   """
-  def upload(plug_upload, dataset, opts \\ []) when is_binary(dataset) do
+  def upload(plug_upload, dataset, opts \\ []),
+    do: Door.admit(fn -> admitted_upload(plug_upload, dataset, opts) end)
+
+  defp admitted_upload(plug_upload, dataset, opts) when is_binary(dataset) do
     %Plug.Upload{filename: original_name, path: temp_path} = plug_upload
 
     # Generate date-based path: 2026/04/filename, under the owning dataset's key
@@ -153,6 +157,9 @@ defmodule Barkpark.Media do
         rejected
 
       {:error, :payload_too_large} = rejected ->
+        rejected
+
+      {:error, {:validation_failed, _subject, _details, _hint}} = rejected ->
         rejected
 
       # put_scope_attrs refused a caller-supplied `dataset` slug. It now runs
@@ -299,11 +306,28 @@ defmodule Barkpark.Media do
   defp validate_upload(mime_type, original_name, size) do
     cfg = Application.get_env(:barkpark, :media_uploads, [])
 
-    with :ok <- check_mime(cfg, mime_type),
+    with :ok <- check_nonempty(size),
+         :ok <- check_mime(cfg, mime_type),
          :ok <- check_extension(cfg, original_name) do
       check_size(cfg, size)
     end
   end
+
+  # A 0-byte file is never a usable asset (task-3221fd45e0f35b16). Stored, it
+  # listed in the Media library as an image whose renditions 404 and rendered
+  # nothing wherever a page picked it. `bp media upload` refused it locally
+  # (#20711), but the SDK's uploadAsset, the Studio picker and raw HTTP all
+  # reached this door and got a 201. This check is NOT config-gated, unlike the
+  # allowlist and size cap below, because no operator setting makes an empty
+  # asset useful. The refusal is a 422 `validation_failed` that names the
+  # upload, and it happens before anything is written.
+  defp check_nonempty(0) do
+    {:error,
+     {:validation_failed, "media upload", %{"file" => ["is empty (0 bytes)"]},
+      "Upload a file with content; a 0-byte file is refused before anything is stored."}}
+  end
+
+  defp check_nonempty(_size), do: :ok
 
   defp check_mime(cfg, mime_type) do
     case Keyword.get(cfg, :allowed_mime_types, []) do
@@ -478,7 +502,7 @@ defmodule Barkpark.Media do
              @asset_type,
              attrs,
              dataset,
-             [source: :api] ++ Assets.file_scope_opts(file)
+             [source: :api] ++ MediaFile.scope_opts(file)
            ) do
         {:ok, updated} -> {:ok, updated}
         error -> error
@@ -542,7 +566,9 @@ defmodule Barkpark.Media do
     project_id = Keyword.get(opts, :project_id)
 
     # Guard the :binary_id cast: a non-UUID id (e.g. GET /v1/media/:ds/garbage)
-    # would raise Ecto.CastError → 500. A malformed id matches no row → not_found.
+    # would raise Ecto.Query.CastError → an opaque 400 (phoenix_ecto maps that
+    # struct to 400; it is NOT Ecto.CastError, which never fires on a binary_id
+    # bind). A malformed id matches no row → not_found.
     case Repo.uuid_or_nil(id) do
       nil ->
         {:error, :not_found}
@@ -686,7 +712,9 @@ defmodule Barkpark.Media do
   connection without telling us, and even THAT may not escape as an unmatched
   tuple (criterion: no code path returns an unmatched `{:error, :rollback}`).
   """
-  def delete_file(id, opts) when is_list(opts) do
+  def delete_file(id, opts), do: Door.admit(fn -> admitted_delete_file(id, opts) end)
+
+  defp admitted_delete_file(id, opts) when is_list(opts) do
     # FIRST statement in the function, BEFORE the row is even read: a caller
     # that omitted the decision must learn so on every id, including one that
     # does not exist, and must NOT get a delete out of the raise.
@@ -822,35 +850,46 @@ defmodule Barkpark.Media do
   # in-transaction plugin hook. `delete_file/2`'s docs above explain, at length,
   # why NO transaction-mode option is passed here — a source pin in
   # media_delete_atomicity_test.exs keeps one from creeping back.
+  #
+  # It also OWNS the content broadcast/webhook queue for the duration
+  # (`with_deferred_queue/1` — a no-op when `Tenancy.delete_workspace/1` already
+  # claimed it upstream). `delete_asset_doc/1` reaches
+  # `Broadcast.tap_broadcast/7` with this transaction open, so without the claim
+  # the `mediaAsset` document's `delete` webhook was queued into a process-dict
+  # slot nothing would ever flush: the row deleted, `mutation_events` committed,
+  # and the dispatch never happened — not even a `webhook_fanout phase=selected`
+  # line to count it by.
   defp delete_row_with_asset_doc(%MediaFile{} = file) do
-    Repo.transaction(fn ->
-      case Repo.delete(file, stale_error_field: :id) do
-        {:ok, deleted} ->
-          case delete_asset_doc(file) do
-            :ok ->
-              # `run_after_media_delete` is a DB write and MUST stay inside the
-              # transaction so it rolls back with the row. HOOK CONTRACT: an
-              # `after_media_delete` plugin callback may only touch the DATABASE
-              # — NO file or HTTP I/O — because it runs before commit and would
-              # otherwise re-open exactly the phantom hole the effect deferral
-              # closes. The media plugin's own callback is now a second,
-              # idempotent pass over an already-deleted document; other plugins
-              # still get theirs.
-              _ =
-                Barkpark.Plugins.Registry.run_after_media_delete(%{
-                  media_file_id: file.id,
-                  dataset: file.dataset
-                })
+    Barkpark.Content.Broadcast.with_deferred_queue(fn ->
+      Repo.transaction(fn ->
+        case Repo.delete(file, stale_error_field: :id) do
+          {:ok, deleted} ->
+            case delete_asset_doc(file) do
+              :ok ->
+                # `run_after_media_delete` is a DB write and MUST stay inside the
+                # transaction so it rolls back with the row. HOOK CONTRACT: an
+                # `after_media_delete` plugin callback may only touch the DATABASE
+                # — NO file or HTTP I/O — because it runs before commit and would
+                # otherwise re-open exactly the phantom hole the effect deferral
+                # closes. The media plugin's own callback is now a second,
+                # idempotent pass over an already-deleted document; other plugins
+                # still get theirs.
+                _ =
+                  Barkpark.Plugins.Registry.run_after_media_delete(%{
+                    media_file_id: file.id,
+                    dataset: file.dataset
+                  })
 
-              deleted
+                deleted
 
-            {:error, reason} ->
-              Repo.rollback({:asset_doc, reason})
-          end
+              {:error, reason} ->
+                Repo.rollback({:asset_doc, reason})
+            end
 
-        {:error, cs} ->
-          Repo.rollback({:row, cs})
-      end
+          {:error, cs} ->
+            Repo.rollback({:row, cs})
+        end
+      end)
     end)
   end
 
@@ -985,12 +1024,13 @@ defmodule Barkpark.Media do
              | :storage_unavailable
              | :not_stored
              | {:storage_mismatch, non_neg_integer(), non_neg_integer()}}
-  def put_blob(relative_path, body, opts \\ [])
+  def put_blob(relative_path, body, opts \\ []),
+    do: Door.admit(fn -> admitted_put_blob(relative_path, body, opts) end)
 
-  def put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
+  defp admitted_put_blob(_relative_path, "", _opts), do: {:error, :empty_body}
 
-  def put_blob(relative_path, body, opts)
-      when is_binary(relative_path) and is_binary(body) and is_list(opts) do
+  defp admitted_put_blob(relative_path, body, opts)
+       when is_binary(relative_path) and is_binary(body) and is_list(opts) do
     with true <- valid_blob_path?(relative_path) or {:error, :invalid_path},
          {:ok, object_key} <- authorize_blob_key(relative_path, opts) do
       # The bytes land at the caller's OWN row's object address, which for every
@@ -1077,9 +1117,15 @@ defmodule Barkpark.Media do
           |> limit(1)
           |> Repo.one()
 
+        # A key is CLAIMED by its published `path` AND by the stored
+        # `object_key` its bytes live at (r2-lane-c authz sweep, 2026-10-01).
+        # A second claimant of a flat path holds its bytes at a tenant SHADOW
+        # key `d/<dataset_id>/<path>` that no row carries as its `path`; asked
+        # only about paths, a third workspace saw that shadow as "unclaimed"
+        # and wrote straight onto another tenant's object.
         foreign? =
           MediaFile
-          |> where([m], m.path == ^relative_path)
+          |> where([m], m.path == ^relative_path or m.object_key == ^relative_path)
           |> where([m], is_nil(m.workspace_id) or m.workspace_id != ^workspace_id)
           |> Repo.exists?()
 

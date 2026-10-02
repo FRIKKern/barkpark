@@ -1,4 +1,5 @@
 defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
+  # sync: spawns concurrent `Task.async` Repo callers; data_case.ex keys `shared:` on the async tag
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
@@ -273,6 +274,8 @@ defmodule Barkpark.Content.Papers.ContextualHistoryActionTest do
   end
 
   test "a committed doc id and type rename after prefetch rejects history on the same row" do
+    Barkpark.DeletedWorkspaceResidue.purge_on_exit()
+
     Ecto.Adapters.SQL.Sandbox.unboxed_run(Repo, fn ->
       workspace = TenancyFixtures.create_workspace!()
       project = TenancyFixtures.create_project!(workspace)

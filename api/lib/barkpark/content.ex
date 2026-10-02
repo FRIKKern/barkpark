@@ -304,6 +304,10 @@ defmodule Barkpark.Content do
   def delete_document(doc_id, type, dataset, opts \\ []),
     do: Lifecycle.delete_document(doc_id, type, dataset, opts)
 
+  @doc "Delete only an exact draft at the caller's opaque revision, retaining recovery evidence."
+  def delete_exact_draft(doc_id, type, dataset, expected_rev, opts \\ []),
+    do: Lifecycle.delete_exact_draft(doc_id, type, dataset, expected_rev, opts)
+
   # ── Batch mutations (extracted → Content.Mutations, concern H) ─────────────
   #
   # `apply_mutations/3` (transaction + broadcast-deferral + per-op dispatch)
@@ -604,6 +608,10 @@ defmodule Barkpark.Content do
       when is_binary(mutation),
       do: Broadcast.broadcast_document_mutation(doc, mutation, opts)
 
+  @doc "See `Barkpark.Content.Broadcast.dispatch_webhook/7`."
+  defdelegate dispatch_webhook(dataset, action, type, doc_id, document, event_id, opts \\ []),
+    to: Broadcast
+
   # ── Search (extracted → Content.Search) ───────────────────────────────────
 
   @doc "Search documents by title using the QueryPipeline. Returns `{docs, count, meta}`."
@@ -710,6 +718,15 @@ defmodule Barkpark.Content do
   @doc "Documents of a type whose title matches a substring. See `Content.Query`."
   def search_documents_by_title(query, type, dataset, opts \\ [], limit_n \\ 20),
     do: Query.search_documents_by_title(query, type, dataset, opts, limit_n)
+
+  @doc """
+  Typeless title search across every type the caller may see — the Studio
+  desk's search box (Gyldendal parity E8). Delegates to
+  `Query.search_documents_across_types/4`, which carries the same tenant,
+  owner, grant and schema-visibility guards as the typeless batch read.
+  """
+  def search_documents_across_types(query, dataset, opts \\ [], limit_n \\ 20),
+    do: Query.search_documents_across_types(query, dataset, opts, limit_n)
 
   @doc "DISTINCT tag values of a type matching a substring (the inverse of docs_with_tag). See `Content.Query`."
   def search_tags_for_type(query, type, dataset, opts \\ [], limit_n \\ 20),

@@ -88,6 +88,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/tasks/query.ex:row_field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/tickets.ex:ticket_schema_present?" => "unscoped 2-arity presence probe",
+    "barkpark/plugins/quiz.ex:schema_present?" =>
+      "unscoped 2-arity presence probe (desk item gate)",
+    "barkpark/plugins/forms.ex:schema_present?" =>
+      "unscoped 2-arity presence probe (desk item gate)",
     "barkpark/plugins/tasks/web/board_live.ex:peek_schema" =>
       "explicit [] — unscoped global read",
     "barkpark/content/edges.ex:disconnect_one_source" => "unscoped 2-arity, edge write path",
@@ -106,8 +110,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds the fail-CLOSED Highlighter, not Envelope",
     "barkpark_web/controllers/schema_controller.ex:show" =>
       "serves the schema itself; a miss is a 404, not a render",
-    "mix/tasks/barkpark.workspace.provision_schemas.ex:provision_one" =>
-      "mix task copying schema rows between scopes",
+    "barkpark_web/controllers/document_ops_controller.ex:apply_op" =>
+      "presence check before a block-op write; a miss is a 404, the schema is never rendered",
+    "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
+      "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",
     "barkpark/content.ex:owner_scoped?" => "reads the owner_scoped flag, not field visibility"
   }
@@ -122,7 +128,10 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/query_controller.ex:fetch_schema",
                               "barkpark_web/controllers/legacy_controller.ex:fetch_schema",
                               # the fourteen that had no fallback at all
-                              "barkpark/content/papers.ex:reader_source",
+                              # reader_source/3's body (task-f967486732a5a366
+                              # moved it verbatim; reader_source/3 and
+                              # reader_html/3 both call it)
+                              "barkpark/content/papers.ex:classify_reader_source",
                               "barkpark_web/live/sheets_reader_live.ex:seal",
                               "barkpark/media/delivery/asset_response.ex:asset_schema",
                               "barkpark_web/controllers/share_link_controller.ex:serve",
@@ -135,7 +144,16 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/tasks_controller.ex:seal_ctx",
                               "barkpark/content/export.ex:fetch_schema",
                               "barkpark/content/mutations.ex:echo_schema",
-                              "barkpark/tasks/query.ex:load_task_schema"
+                              "barkpark/tasks/query.ex:load_task_schema",
+                              # search facets: the schema feeds
+                              # Envelope.field_readable?/3 to drop an author /
+                              # category bucket the caller may not read
+                              # (task-3c68de39a19285c4)
+                              "barkpark/search/documents_retriever.ex:facet_readability",
+                              # backlinks: the source type's schema feeds
+                              # Envelope.field_readable?/3 to drop a private
+                              # description / event_type (task-3c68de39a19285c4)
+                              "barkpark_web/controllers/query_controller.ex:redact_backlink_content"
                             ])
 
   setup_all do

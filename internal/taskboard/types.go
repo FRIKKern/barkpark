@@ -21,6 +21,27 @@ type Task struct {
 	Labels    []string
 	Claim     *Claim
 	Criteria  *Criteria // nil when the envelope omits criteria_progress
+	// Draft is THE DRAFT LABEL CONTRACT's :draft, carried into Go. It is TRUE
+	// exactly when this row's OWN stored doc_id wears the `drafts.` prefix —
+	// the spelling and nothing else. A `drafts.`-spelled row the server stores
+	// with status:"published" is STILL a draft (the Elixir side pins that case
+	// explicitly), so this is never derived from Lifecycle, status, or content.
+	//
+	// It is a PLAIN BOOL, always present, never a pointer: the wire always
+	// carries a doc_id, so the spelling is always readable and there is no
+	// third "unknown" state to model — false means MEASURED not-a-draft, and a
+	// row with an empty doc_id (a malformed envelope) is false for the same
+	// reason the Elixir card emits false rather than omitting the key. The
+	// projection is fixed-shape on both sides.
+	//
+	// It is DERIVED ONCE, at the wire boundary (taskWire.toTask), off the RAW
+	// doc_id and BEFORE any bareID strip, then CARRIED. Downstream the spelling
+	// may already be gone — collapseDraftTwins rewrites ParentID through
+	// bareID — so re-deriving it later reads false for every row. That failure
+	// is silent, which is why the arm in types_draft_test.go builds its task
+	// from a raw `drafts.`-spelled id rather than from a fixture that could
+	// encode the same mistake.
+	Draft bool
 	// TwinOf is the doc id of a suspected near-duplicate (same cluster/parent,
 	// title-token Jaccard >= 0.6), "" when none. Surfacing only — never auto-merged.
 	TwinOf string
@@ -50,6 +71,13 @@ type Claim struct {
 	// written atomically with the lease renewal by `bp task pulse`. Nil when the
 	// claim carries no pulse (every claim written before the pulse verb shipped).
 	Now *ClaimPulse
+	// LeaseSeconds is the SERVER's claim-lease horizon for this row, read off
+	// the read payload (claim.lease_seconds, minted from
+	// `Barkpark.Tasks.QueueGate.lease_ttl_seconds/0`). 0 means the server did
+	// not send one — an older API, or a claim map the producer left untouched —
+	// and the board falls back to defaultClaimLeaseTTL (2700s), the same server
+	// default, NEVER to a client-invented number (task-f30dab8c54c605e6).
+	LeaseSeconds int
 }
 
 // ClaimPulse is the decoded content.claim.now — {"text","ts","criterion"?}
@@ -89,6 +117,14 @@ type CriterionItem struct {
 	// proof was refuted at least once — read it before trusting Evidence, which
 	// is deliberately the SUPERSEDED text on a withdrawn row.
 	Withdrawals []CriterionWithdrawal
+	// MarkedMissed is the honest miss as the BOARD PROJECTION reports it.
+	// `?view=board` carries `content_digest.criteria_marks` — one character per
+	// criterion, "m"/"a"/"o" — instead of the criteria themselves, so a row
+	// decoded from that projection has the miss WITHOUT the attempt notes that
+	// prove it under the full view. The server derives the "a" with the exact
+	// tolerance decodeAttempts applies here (an attempt counts only when it is a
+	// map), so the two routes agree rung for rung.
+	MarkedMissed bool
 }
 
 // CriterionWithdrawal is one recorded withdrawal of a stamped proof (D745's
@@ -120,7 +156,9 @@ type CriterionAttempt struct {
 // met seal — the amber "!" rung on the board's criteria ladder. A met
 // criterion is never "missed" (the seal supersedes the trail), and an
 // untouched one (no attempts) stays the dim ○.
-func (c CriterionItem) Missed() bool { return !c.Met && len(c.Attempts) > 0 }
+func (c CriterionItem) Missed() bool {
+	return !c.Met && (len(c.Attempts) > 0 || c.MarkedMissed)
+}
 
 // Event is one recent task.% mutation from prime.
 type Event struct {
@@ -138,7 +176,15 @@ type Snapshot struct {
 	// clamp maximum (limit=100): the readiness overlay is then honest-but-partial
 	// beyond the top of the queue, so the ready count renders with a "+" suffix.
 	ReadyHeadClamped bool
-	FetchedAt        time.Time
+	// Exhaustive is true when the corpus below was walked to the END of the
+	// route's keyset cursor — every task the server holds, not one
+	// desc:updated_at window of them (task-6c59bff7cb6b36ee). It is false on a
+	// server that does not offer the cursor, on a walk that hit the page cap,
+	// and on any snapshot restored from an older cache file. False is the
+	// CONSERVATIVE value: it keeps mergeForward's absence heuristic armed, so a
+	// row missing from a partial corpus is never mistaken for a closed one.
+	Exhaustive bool
+	FetchedAt  time.Time
 	// EventCursor is the last /v1/tasks/events id the board had accounted for
 	// when this snapshot was cached — the resume point for the cheap keyset poll
 	// (events.go), NOT board data. It rides the snapshot only because the cache

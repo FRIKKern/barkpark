@@ -16,7 +16,7 @@ import (
 //
 //	- bars    [{label, value}], author order preserved. Empty/absent →
 //	          renders nothing (silent empty state; no phantom blank line).
-//	- max     denominator for the meter proportion; else the data max
+//	- max     positive denominator for the meter proportion; else the data max
 //	          (never the sum — bars are categorical counts, not shares).
 //	- values  when true, print the raw value after each bar.
 //
@@ -36,9 +36,10 @@ func (barChartRenderer) Render(b Block, ctx RenderCtx) []string {
 		value float64
 	}, 0, len(bars))
 	max := attrFloat(b.Attrs, "max")
+	inferMax := max <= 0
 	for _, bar := range bars {
 		v := attrFloat(bar, "value")
-		if v > max {
+		if inferMax && v > max {
 			max = v
 		}
 		rows = append(rows, struct {

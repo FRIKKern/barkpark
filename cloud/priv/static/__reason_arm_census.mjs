@@ -176,12 +176,56 @@ const appSrc = read(APP, APP_LABEL);
 // slugs. Anything else is unrecognised → exit 2.
 // ═══════════════════════════════════════════════════════════════════════════
 
-// router.ex: the QUALIFIED call. Group 1 is the argument tail.
-const QUALIFIED_CALL_RE = /Auth\.forbidden\(\s*conn\s*,([^\n]*)/g;
+// router.ex: the QUALIFIED call.
+const QUALIFIED_CALL_RE = /Auth\.forbidden\(\s*conn\s*,/g;
 // auth.ex: the BARE local call. Group 1 is the character before the name (so a
 // qualified `Auth.forbidden(` and any identifier ending in `forbidden` are both
-// refused by the negative class), group 2 is the argument tail.
-const BARE_CALL_RE = /(^|[^A-Za-z0-9_.])forbidden\(\s*conn\s*,([^\n]*)/gm;
+// refused by the negative class).
+const BARE_CALL_RE = /(^|[^A-Za-z0-9_.])forbidden\(\s*conn\s*,/gm;
+
+// THE ARGUMENT TAIL IS THE WHOLE CALL, NOT THE REST OF THE LINE.
+//
+// Both grammars used to capture `([^\n]*)` — everything after `conn,` up to the
+// newline. That reads a one-line call correctly and reads a call `mix format`
+// has wrapped across lines as the EMPTY STRING, which carries neither
+// `required:` nor `reason:` and so lands in the unrecognised-evidence refusal.
+// The refusal then fires on a call that is perfectly well-formed: the census
+// exits 2 because of where the formatter put a newline. A third evidence key
+// pushes a call over the line-length limit, so the very change this census is
+// meant to notice is the change that blinds it.
+//
+// So the tail is now read by balancing parentheses from the call's own opener,
+// skipping over string literals so a `")"` inside a slug cannot close the call
+// early. An unbalanced scan returns null and the caller refuses — it does not
+// silently fall back to a shorter read.
+function argTail(src, openParen) {
+  let depth = 0;
+  for (let i = openParen; i < src.length; i++) {
+    const c = src[i];
+    if (c === '"') {
+      i++;
+      while (i < src.length && src[i] !== '"') i += src[i] === "\\" ? 2 : 1;
+      continue;
+    }
+    if (c === "(") depth++;
+    else if (c === ")") {
+      depth--;
+      if (depth === 0) return src.slice(openParen + 1, i);
+    }
+  }
+  return null;
+}
+
+// EVERY EVIDENCE KEY IS WRITTEN DOWN HERE, OR THE CENSUS REFUSES.
+//
+// `required:` and `reason:` select the arm; `scope:` and `allowlist:` ride
+// along as additive facts the body carries. Classifying the ARM was never the
+// same as accounting for the KEYS: before this list, a call could grow a fifth
+// key and still classify cleanly off its `required:`, and this gate — the one
+// whose stated job is to notice "a third evidence key the console has to
+// answer" — would have gone green over it. The list fails closed: an unknown
+// key is an exit 2, whichever arm the call is on.
+const KNOWN_EVIDENCE_KEYS = new Set(["required", "reason", "scope", "allowlist"]);
 
 // ONE HOP BACK. Walks up from the call site to the nearest `<name> =` binding and
 // collects every string literal in an `if …, do: "A", else: "B"` (the shape at
@@ -205,10 +249,9 @@ function resolveBinding(lines, name, callLine) {
   return [];
 }
 
-// One classifier over both grammars. `argGroup` says which capture holds the
-// argument tail; `bare` turns on the definition-site exclusion, which is the
-// ONLY per-grammar behaviour in this function.
-function censusEmitter({ file, label, re, argGroup, bare }) {
+// One classifier over both grammars. `bare` turns on the definition-site
+// exclusion, which is the ONLY per-grammar behaviour in this function.
+function censusEmitter({ file, label, re, bare }) {
   const src = read(file, label);
   const lines = src.split("\n");
   const lineOf = (index) => src.slice(0, index).split("\n").length;
@@ -220,15 +263,42 @@ function censusEmitter({ file, label, re, argGroup, bare }) {
   while ((m = re.exec(src)) !== null) {
     const line = lineOf(m.index);
     const text = lines[line - 1];
-    const args = m[argGroup];
 
-    // THE DEFINITION IS NOT AN EMISSION. `def forbidden(conn, evidence)` at
-    // auth.ex:658 matches the bare grammar exactly and carries neither
-    // `required:` nor `reason:` — without this it would exit 2 on a healthy
-    // tree, i.e. the refusal path would fire on the absence of a defect.
+    // THE DEFINITION IS NOT AN EMISSION. `def forbidden(conn, evidence)` in
+    // auth.ex matches the bare grammar exactly and carries neither `required:`
+    // nor `reason:` — without this it would exit 2 on a healthy tree, i.e. the
+    // refusal path would fire on the absence of a defect.
     if (bare && /^\s*defp?\s+forbidden\(/.test(text)) {
       definitionSites.push(line);
       continue;
+    }
+
+    const args = argTail(src, m.index + m[0].indexOf("forbidden(") + "forbidden".length);
+    if (args === null) {
+      die2([
+        `FAIL(2): the argument list of the forbidden/2 call at ${label}:${line} does not close.`,
+        `    ${text.trim()}`,
+        "  The paren-balancing read ran to end-of-file without returning to depth zero, so",
+        "  this census cannot see which evidence the call carries. It refuses rather than",
+        "  reading a truncated tail and classifying off whatever happened to fit.",
+      ]);
+    }
+
+    // EVERY KEY ACCOUNTED FOR, BEFORE THE ARM IS CHOSEN. A call classifies off
+    // `required:`/`reason:`, which says nothing about the OTHER keys it carries
+    // — so the key totality is checked first, and on every call, whichever arm
+    // it turns out to be on.
+    const keys = [...args.matchAll(/(?:^|[\s,[({])([a-z][a-z0-9_]*):\s/g)].map((k) => k[1]);
+    const unknown = [...new Set(keys)].filter((k) => !KNOWN_EVIDENCE_KEYS.has(k));
+    if (unknown.length) {
+      die2([
+        `FAIL(2): the forbidden/2 call at ${label}:${line} carries evidence key(s) this`,
+        `  census does not recognise: ${unknown.map((k) => "`" + k + ":`").join(", ")}.`,
+        `    ${text.trim()}`,
+        "  A new evidence key is a new thing the console has to answer, and this gate would",
+        "  be silently blind to it. Add it to KNOWN_EVIDENCE_KEYS here — with the console arm",
+        "  that reads it, or a written note that nothing does — before it ships.",
+      ]);
     }
 
     if (/\brequired:\s*/.test(args)) {
@@ -293,10 +363,10 @@ function censusEmitter({ file, label, re, argGroup, bare }) {
 }
 
 const router = censusEmitter({
-  file: ROUTER, label: ROUTER_LABEL, re: QUALIFIED_CALL_RE, argGroup: 1, bare: false,
+  file: ROUTER, label: ROUTER_LABEL, re: QUALIFIED_CALL_RE, bare: false,
 });
 const auth = censusEmitter({
-  file: AUTH, label: AUTH_LABEL, re: BARE_CALL_RE, argGroup: 2, bare: true,
+  file: AUTH, label: AUTH_LABEL, re: BARE_CALL_RE, bare: true,
 });
 const emissions = [...router.emissions, ...auth.emissions];
 

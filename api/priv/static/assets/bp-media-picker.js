@@ -41,11 +41,24 @@
 // when an asset is set (nothing to remove otherwise). While an upload is in
 // flight (`busy`) every item is DISABLED — the exact mirror of the default
 // chrome, whose _setBusy disables its Upload/Browse/Remove buttons.
-function bpMediaPickerMenuItems({ hasValue, canUpload, busy } = {}) {
+// Gyldendal parity E7: the server stamps the workspace-locale strings on the
+// element as `data-strings` (JSON); every key falls back to the English
+// literal so an element without the attribute renders byte-identically.
+function bpMediaPickerStrings(el) {
+  try {
+    const raw = el && el.dataset ? el.dataset.strings : null;
+    return raw ? JSON.parse(raw) : {};
+  } catch (_e) {
+    return {};
+  }
+}
+
+function bpMediaPickerMenuItems({ hasValue, canUpload, busy, strings } = {}) {
+  const t = (k, fallback) => (strings && typeof strings[k] === "string" ? strings[k] : fallback);
   const items = [];
-  if (canUpload !== false) items.push({ id: "upload", label: "Upload file" });
-  items.push({ id: "browse", label: "Browse library" });
-  if (hasValue) items.push({ id: "remove", label: "Remove image", destructive: true });
+  if (canUpload !== false) items.push({ id: "upload", label: t("upload", "Upload file") });
+  items.push({ id: "browse", label: t("browse", "Browse library") });
+  if (hasValue) items.push({ id: "remove", label: t("remove", "Remove image"), destructive: true });
   if (busy) for (const item of items) item.disabled = true;
   return items;
 }
@@ -89,6 +102,20 @@ function bpLqip(v) {
   return typeof v === "string" && v !== "" ? v : null;
 }
 
+// The CANONICAL assetId spelling is the bare blob id (Gyldendal friction 78):
+// the migration wrote every cover that way, `Barkpark.Media.get_file/2` and the
+// rendition URLs take it, and the asset document is `asset-<blob id>`. The
+// asset browser hands us the DOCUMENT id (`drafts.asset-<id>` / `asset-<id>`),
+// so a fresh pick used to store a second spelling beside the migrated one.
+// Strip both prefixes on the way in; a value already bare is untouched.
+function bpCanonicalAssetId(id) {
+  if (typeof id !== "string") return "";
+  let v = id.trim();
+  if (v.startsWith("drafts.")) v = v.slice("drafts.".length);
+  if (v.startsWith("asset-")) v = v.slice("asset-".length);
+  return v;
+}
+
 function bpParseMediaValue(raw) {
   const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
@@ -98,7 +125,7 @@ function bpParseMediaValue(raw) {
       const o = JSON.parse(trimmed);
       return {
         url: o.url || "",
-        assetId: o.assetId || o.id || "",
+        assetId: bpCanonicalAssetId(o.assetId || o.id || ""),
         alt: typeof o.alt === "string" ? o.alt : "",
         focalX: bpFocalCoord(o.focalX),
         focalY: bpFocalCoord(o.focalY),
@@ -152,6 +179,7 @@ class BpMediaPicker extends HTMLElement {
   }
 
   connectedCallback() {
+    this._strings = bpMediaPickerStrings(this);
     if (this._mounted) return;
     this._mounted = true;
 
@@ -215,6 +243,11 @@ class BpMediaPicker extends HTMLElement {
     } catch (_e) {
       /* preview optional */
     }
+  }
+
+  _t(key, fallback) {
+    const strings = this._strings || {};
+    return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
   disconnectedCallback() {
@@ -310,16 +343,16 @@ class BpMediaPicker extends HTMLElement {
       ? '<input class="bp-mp-file" type="file" accept="image/*" hidden />'
       : '<div class="bp-mp-actions">' +
         '<label class="bp-mp-upload btn btn-sm">' +
-        "<span>Upload</span>" +
+        '<span>' + this._t("upload_button", "Upload") + '</span>' +
         '<input type="file" accept="image/*" hidden />' +
         "</label>" +
-        '<button type="button" class="bp-mp-browse btn btn-sm">Browse library</button>' +
-        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">Remove</button>' +
+        '<button type="button" class="bp-mp-browse btn btn-sm">' + this._t("browse", "Browse library") + '</button>' +
+        '<button type="button" class="bp-mp-clear btn btn-destructive btn-sm">' + this._t("remove", "Remove") + '</button>' +
         "</div>";
 
     const altHtml = this._wantsAlt()
-      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">Alt text</span>' +
-        '<input class="bp-mp-alt" type="text" placeholder="Describe the image for people who cannot see it" /></label>'
+      ? '<label class="bp-mp-alt-row"><span class="bp-mp-alt-label">' + this._t("alt", "Alt text") + '</span>' +
+        '<input class="bp-mp-alt" type="text" placeholder="' + this._t("alt_placeholder", "Describe the image for people who cannot see it") + '" /></label>'
       : "";
 
     this.innerHTML =
@@ -363,7 +396,7 @@ class BpMediaPicker extends HTMLElement {
     // doctrine-sanctioned discoverability affordance (rule 5: hover tooltips +
     // context menus). Never set in the default variant (byte-identical render).
     if (ghost && !this.title) {
-      this.title = "Right-click for image options";
+      this.title = this._t("options", "Right-click for image options");
     }
 
     // Empty-state card = click/keyboard target for the file dialog.
@@ -496,7 +529,7 @@ class BpMediaPicker extends HTMLElement {
     );
     // busy mirrors default chrome's _setBusy: items stay VISIBLE but disabled
     // while an upload is in flight — never a menu item that silently no-ops.
-    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy });
+    const items = bpMediaPickerMenuItems({ hasValue, canUpload: true, busy: this._busy, strings: this._strings });
 
     // Focus-restore anchor: whatever was focused before the menu opened (the
     // empty-state card, usually) so Escape lands the keyboard user back where
@@ -704,7 +737,7 @@ class BpMediaPicker extends HTMLElement {
       });
       this._setClearVisible(true);
     } else {
-      const label = this._busy ? "Uploading…" : "No image selected — drop a file, or click to upload";
+      const label = this._busy ? this._t("uploading", "Uploading…") : this._t("empty", "No image selected — drop a file, or click to upload");
       this._previewEl.innerHTML =
         '<div class="bp-mp-empty" role="button" tabindex="0" aria-label="Add image">' +
         label +
@@ -736,7 +769,7 @@ class BpMediaPicker extends HTMLElement {
     const keptAlt = this._meta.alt && this._meta.alt !== "" ? this._meta.alt : file.alt || "";
     this._meta = {
       url: file.url || "",
-      assetId: file.assetId || "",
+      assetId: bpCanonicalAssetId(file.assetId || ""),
       alt: keptAlt,
       focalX: null,
       focalY: null,
@@ -798,7 +831,7 @@ class BpMediaPicker extends HTMLElement {
     const fi = (detail.asset && detail.asset.fileInfo) || {};
     this._select({
       url: detail.url,
-      assetId: detail.id,
+      assetId: bpCanonicalAssetId(detail.id),
       mime: detail.mime,
       alt: detail.title || "",
       width: fi.width,
@@ -844,7 +877,8 @@ class BpMediaPicker extends HTMLElement {
       this._select({
         url: data.url,
         mime: data.mimeType,
-        assetId: data.assetDocId || "",
+        // The upload receipt names the asset DOCUMENT; store the canonical blob id.
+        assetId: bpCanonicalAssetId(data.assetDocId || ""),
         alt: "",
         width: fi.width || data.width,
         height: fi.height || data.height
@@ -865,6 +899,7 @@ customElements.define("bp-media-picker", BpMediaPicker);
 if (typeof window !== "undefined") {
   window.__bpMediaPickerTestHook = {
     menuItems: bpMediaPickerMenuItems,
+    strings: bpMediaPickerStrings,
     showsActions: bpMediaPickerShowsActions,
     parseValue: bpParseMediaValue,
     serializeValue: bpSerializeMediaValue,

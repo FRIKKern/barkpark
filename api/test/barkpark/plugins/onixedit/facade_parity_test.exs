@@ -108,25 +108,30 @@ defmodule Barkpark.Plugins.OnixEdit.FacadeParityTest do
 
     test "codelist_requirements/0 keeps every list, order intact" do
       reqs = OnixEdit.codelist_requirements()
-      # 2 critical (contributor_role @17, thema @1.6) + 71 issue-73 lists.
+      # 2 critical (contributor_role = ONIX list 17, thema @1.6) + 71 issue-73
+      # lists. Each role name is declared under the id the boot seed WRITES
+      # (task-7c9dafd4a99a8207), with the role name kept as :name.
       assert length(reqs) == 73
 
       assert hd(reqs) == %{
                plugin_name: "onixedit",
-               list_id: "onixedit:contributor_role",
-               issue: "17"
+               list_id: "onixedit:list_17",
+               issue: "73",
+               name: "onixedit:contributor_role"
              }
 
       assert Enum.at(reqs, 1) == %{
                plugin_name: "onixedit",
                list_id: "onixedit:thema",
-               issue: "1.6"
+               issue: "1.6",
+               name: "onixedit:thema"
              }
 
       assert List.last(reqs) == %{
                plugin_name: "onixedit",
-               list_id: "onixedit:price_date_role",
-               issue: "73"
+               list_id: "onixedit:list_173",
+               issue: "73",
+               name: "onixedit:price_date_role"
              }
     end
 

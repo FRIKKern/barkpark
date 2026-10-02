@@ -1,0 +1,37 @@
+window	workflow	run_id	job_id	job_name	job_conclusion	verdict_first_pass	verdict_recheck
+W1	doc-gates.yml	33844907778	100934569999	Doc budgets + anchors	success	NO-BREAKER-OUTPUT	INHERITED-FROM-MAIN
+W1	security.yml	33846858835	100940748349	Sobelow baseline does not swallow its own inline waivers (blocking)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W1	go-format.yml	33867690272	101006180549	gofmt drift ceiling (blocking)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W1	security.yml	33875402740	101031233859	Dependency CVE audit (mix_audit over mix.lock, blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031233958	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031234039	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W1	security.yml	33875402740	101031234134	Sobelow static analysis (regression gate, baseline .sobelow-skips)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W1	compose-smoke.yml	33881300570	101050431871	Smoke arms (census, green boot, refusal boot — one image build)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W1	compose-smoke.yml	33961629855	101295081099	Smoke arms (census, green boot, refusal boot — one image build)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W1	doc-gates.yml	33970236053	101317324815	Doc budgets + anchors	success	NO-BREAKER-OUTPUT	INHERITED-FROM-MAIN
+W1	doc-gates.yml	33975413771	101331128998	Doc budgets + anchors	failure	NO-BREAKER-OUTPUT	THIS-PRS-OWN
+W2	doc-gates.yml	34019235471	101448616312	Doc budgets + anchors	failure	NO-BREAKER-OUTPUT	THIS-PRS-OWN
+W2	compose-smoke.yml	34022158921	101456914489	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W2	doc-gates.yml	34025129204	101464628103	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34391938035	102602106218	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W3	doc-gates.yml	34458255428	102809661803	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34460095236	102816355953	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	compose-smoke.yml	34465392053	102833433058	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34467196645	102838431815	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	doc-gates.yml	34471455015	102852061978	Doc budgets + anchors	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34473230854	102857799286	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34473230854	102859098300	Required-check spec gate	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34506530390	102969978839	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT
+W3	compose-smoke.yml	34522475758	103024091168	Smoke arms (census, green boot, refusal boot — one image build)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686148	Dependency CVE audit (mix_audit over mix.lock, non-blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686314	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686817	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34538150924	103075686848	Sobelow static analysis (regression gate, baseline .sobelow-skips)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34550875583	103113332098	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34550875583	103113795865	Required-check spec gate	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	go-format.yml	34588952666	103229558085	gofmt -l (advisory)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	go-format.yml	34588952666	103229558404	gofmt drift ceiling (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34613813452	103312759482	Sobelow baseline rows still hash to their own fingerprint (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	security.yml	34613813452	103312759512	Sobelow baseline does not swallow its own inline waivers (blocking)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34639782234	103396368363	Head does not silently revert main (stale tree)	cancelled	NO-BREAKER-OUTPUT	NO-BREAKER-OUTPUT
+W3	required-checks-drift.yml	34642504319	103405376596	Head does not silently revert main (stale tree)	success	NO-BREAKER-OUTPUT	GREEN-NO-VERDICT

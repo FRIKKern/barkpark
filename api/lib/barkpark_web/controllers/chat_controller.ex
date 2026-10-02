@@ -78,9 +78,20 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
   alias Barkpark.StudioChat
-  alias Barkpark.StudioChat.{Attachments, FleetHub, PlanPapers, QuestionAnswer, Recorder, Runtime}
+
+  alias Barkpark.StudioChat.{
+    Attachments,
+    FleetHub,
+    HostExecution,
+    PlanPapers,
+    QuestionAnswer,
+    Recorder,
+    Runtime
+  }
+
   alias Barkpark.Tenancy
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.HostExecutionGate
 
   # Wire bounds (charter "Security, validation, and transport verification
   # obligations"). These are the CHAT limits — NOT the endpoint-wide 100 MB
@@ -203,7 +214,7 @@ defmodule BarkparkWeb.ChatController do
   def show(conn, %{"id" => id} = params) do
     with {:ok, since} <- validate_since(params),
          %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
-      messages = id |> StudioChat.list_messages() |> filter_since(since)
+      messages = id |> StudioChat.list_messages(store_scope(scope(conn))) |> filter_since(since)
       json(conn, full_session_json(session, messages))
     else
       nil -> not_found(conn)
@@ -250,7 +261,8 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, content} <- validate_content(body),
-         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = session <- fetch_scoped(id, scope(conn)),
+         :ok <- HostExecutionGate.authorize_turn(conn.assigns[:api_token], session) do
       case ensure_and_send(id, session, content, conn) do
         :ok ->
           # Persist the user's OWN turn (D140). ensure_and_send has already derived
@@ -271,8 +283,16 @@ defmodule BarkparkWeb.ChatController do
       end
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
+  end
+
+  # task-6ca882967fd95dda: a managed turn on the INSTANCE HOST is the instance
+  # owner's alone (`HostExecution`). A permanent 403 that names the reason and
+  # the way out (cloud profile / registered host), never a retryable 503.
+  defp host_refused(conn) do
+    ErrorResponse.emit_custom(conn, 403, HostExecution.reason(), HostExecution.message())
   end
 
   # ── POST /v1/chat/sessions/:id/interrupt ───────────────────────────────────
@@ -311,7 +331,13 @@ defmodule BarkparkWeb.ChatController do
     body = Map.drop(params, ["id"])
 
     with {:ok, {request_id, decision}} <- validate_approval(body),
-         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)) do
+         %StudioChat.Session{} = stored <- fetch_scoped(id, scope(conn)),
+         # An ALLOW lets a host turn act; a deny always passes (task-6ca882967fd95dda).
+         :ok <-
+           if(decision == :allow,
+             do: HostExecutionGate.authorize_turn(conn.assigns[:api_token], stored),
+             else: :ok
+           ) do
       with recorder when is_pid(recorder) <- Recorder.whereis(id),
            {:ok, session} <- Recorder.session_pid(recorder) do
         # Soft-match the delivery (D31 seal). For the claude provider answer_approval
@@ -353,6 +379,7 @@ defmodule BarkparkWeb.ChatController do
       send_resp(conn, :no_content, "")
     else
       nil -> not_found(conn)
+      {:error, :host_execution_not_permitted} -> host_refused(conn)
       {:error, message} -> bad_request(conn, message)
     end
   end
@@ -610,9 +637,13 @@ defmodule BarkparkWeb.ChatController do
   end
 
   defp fleet_chunk_or_stop(conn, data, scope, epoch, boundary) do
-    case chunk(conn, data) do
-      {:ok, conn} -> fleet_stream_loop(conn, scope, epoch, boundary)
-      {:error, _} -> conn
+    if sse_credential_live?(conn) do
+      case chunk(conn, data) do
+        {:ok, conn} -> fleet_stream_loop(conn, scope, epoch, boundary)
+        {:error, _} -> conn
+      end
+    else
+      end_unauthorized(conn)
     end
   end
 
@@ -766,11 +797,47 @@ defmodule BarkparkWeb.ChatController do
   end
 
   defp chunk_or_stop(conn, data) do
-    case chunk(conn, data) do
-      {:ok, conn} -> stream_loop(conn)
-      # Chunk error (client gone) terminates the stream — the try/after stops the
-      # forwarder; Recorder/ClaudeChat are untouched.
-      {:error, _} -> conn
+    if sse_credential_live?(conn) do
+      case chunk(conn, data) do
+        {:ok, conn} -> stream_loop(conn)
+        # Chunk error (client gone) terminates the stream — the try/after stops the
+        # forwarder; Recorder/ClaudeChat are untouched.
+        {:error, _} -> conn
+      end
+    else
+      end_unauthorized(conn)
+    end
+  end
+
+  # ── The chat SSE streams outlive no credential (r4a realtime authz sweep) ──
+  #
+  # Both streams (`events/2`, `fleet_events/2`) authorized ONCE, at connect, and
+  # never shed (D5), so a revoked or expired bearer — including a SCIM bulk
+  # revoke — kept receiving a session's live transcript frames and the fleet
+  # herd until the client chose to disconnect. Before writing each frame (and
+  # each keepalive) the stream re-asks `Auth.token_live?/1`, at most once per
+  # `:chat_sse_reauth_interval_ms` (default 2s); a dead bearer gets one
+  # `unauthorized` frame and the stream ends. The never-shed law is about load,
+  # not about authority.
+  defp sse_credential_live?(conn) do
+    now = System.monotonic_time(:millisecond)
+    interval = Application.get_env(:barkpark, :chat_sse_reauth_interval_ms, 2_000)
+
+    case Process.get(:chat_sse_credential_checked_at) do
+      at when is_integer(at) and now - at < interval ->
+        true
+
+      _ ->
+        live? = Barkpark.Auth.token_live?(conn.assigns[:api_token])
+        if live?, do: Process.put(:chat_sse_credential_checked_at, now)
+        live?
+    end
+  end
+
+  defp end_unauthorized(conn) do
+    case chunk(conn, "event: unauthorized\ndata: {}\n\n") do
+      {:ok, conn} -> conn
+      _ -> conn
     end
   end
 
@@ -807,7 +874,7 @@ defmodule BarkparkWeb.ChatController do
   defp replay(conn, _id, nil), do: conn
 
   defp replay(conn, id, since) do
-    Enum.reduce(replay_events(id, since), conn, fn frame, c ->
+    Enum.reduce(replay_events(id, since, store_scope(scope(conn))), conn, fn frame, c ->
       case chunk(c, frame) do
         {:ok, c2} -> c2
         {:error, _} -> c
@@ -818,10 +885,13 @@ defmodule BarkparkWeb.ChatController do
   @doc false
   # The replay projection (D5) — persisted rows `seq > since` as SSE
   # `event: message` frame strings, seq-ascending. A public seam so the
-  # resume contract is assertable without a live socket.
-  def replay_events(id, since) do
+  # resume contract is assertable without a live socket. `scope` is the STORE
+  # request's chat scope: the stream door already ran fetch_scoped/2, and the
+  # read is scoped again here because list_messages has no default scope
+  # (drafts.task-bb38ed88099c9723).
+  def replay_events(id, since, scope) do
     id
-    |> StudioChat.list_messages()
+    |> StudioChat.list_messages(scope)
     |> filter_since(since)
     |> Enum.map(&sse_message_frame/1)
   end

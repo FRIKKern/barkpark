@@ -80,7 +80,7 @@
 # 127 distinct hashes (the 18-row boilerplate gap), 78 off-vocabulary
 # dispositions. Exit 1.
 #
-# CLAUSE 4 OF THE DONE-CONDITION — LIVE COVERAGE (wave 25, PDS-D346/D347).
+# CLAUSE 4 OF THE DONE-CONDITION — LIVE COVERAGE (wave 25, PDS-D346/PDS-D347).
 # Clauses 1-3 above are CLOSURE-scoped and they are correctly so: distinctness
 # and vocabulary are properties of everything ever written. But they are all
 # satisfiable by a board that says NOTHING. A live row with no disposition lands
@@ -97,7 +97,7 @@
 #   (c) a LIVE `parked` row with no STRUCTURED `reopen_trigger` — a park with
 #       no machine-evaluable way back out is a park nobody will ever revisit.
 #
-# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (wave 27, PDS-D372/D373).
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (wave 27, PDS-D372/PDS-D373).
 # Clause 4 asks whether a live row SAYS anything. It never asks whether what the
 # row says AGREES with what the queue does with it. Measured on the live board
 # 2026-07-31: THIRTEEN closure rows are simultaneously lifecycle-claimable and
@@ -139,7 +139,7 @@
 # 2026-07-30 that is 0 structured against 40 prose-only, and a summed counter
 # would have read 40 and called it coverage.
 #
-# CLAUSE 4(a) IS ROUND-ANCHORED (wave 26, PDS-D364/D365). Clause 4(a) as wave 25
+# CLAUSE 4(a) IS ROUND-ANCHORED (wave 26, PDS-D364/PDS-D365). Clause 4(a) as wave 25
 # shipped it is STRUCTURALLY UNREACHABLE by any round that discovers work: a row
 # is BORN with no disposition, so a round that files a single new row can never
 # satisfy "every live row carries a disposition" at the instant it wants to
@@ -346,6 +346,29 @@
 # `drafts.` row. The perspective is read back off `result.perspective` and
 # PRINTED rather than asserted in a comment: a lens nobody can read back is a
 # claim.
+#
+# ...AND THE DISAGREEMENT IS MEASURED AND ATTRIBUTED, NOT DECLARED (r20). That
+# paragraph was TRUE and INERT for a wave: it said the published read undercounts
+# drafts and attached no number, so nobody could tell a 3-row blind spot from a
+# 300-row one. blind_spots() now re-runs THIS FILE'S OWN lapse_shapes() over the
+# in-scope draft rows of the SAME instant — one function, two lenses, so a second
+# hand-written copy of the keys cannot drift — and the per-shape delta is printed
+# with EVERY id named and CLASSIFIED against its published twin:
+#
+#   never_published -> the row exists on no other lens. THIS is an undercount.
+#   phantom         -> an edit shadow of a TERMINAL twin.
+#   shadow_of_live  -> an edit shadow of a row already in the denominator.
+#
+# A phantom and a shadow are MANUFACTURED, not missed, and folding them into one
+# "+N" is how a drafts read gets quoted as a blind spot it is not. Measured live
+# 2026-09-16 (closure 743 / live 82 / open 47): A 1 -> 11 (+10), B 0 -> 0, C 0 ->
+# 0, and ALL TEN of the +10 are phantoms with `done`/`cancelled` twins —
+# never_published is EMPTY, so the published read's undercount of the lapse is
+# ZERO and the drafts read manufactures ten false lapses. B and C are 0 on both
+# lenses and are UNDISCRIMINATED: their deltas prove nothing either way, and the
+# block says so rather than printing a reassuring 0. THE NUMBER IS NOT PINNED
+# HERE — it is re-derived every run, because a by-hand figure in a header rots
+# and this one already did (2026-08-04 read A 24 -> 27).
 #
 # CLAUSE 8 — THE DENOMINATOR, AND THE REFUSAL BESIDE IT (wave 47)
 #
@@ -2197,6 +2220,7 @@ def blind_spots(corpus, closure, root, drafts, drafts_unread, started, lease_ttl
         "draft_shadows_of_live": [],
         "drafts_in_scope": [],
         "lapse_delta": None,
+        "lapse_delta_attribution": None,
     }
     if drafts is None:
         return report
@@ -2229,6 +2253,44 @@ def blind_spots(corpus, closure, root, drafts, drafts_unread, started, lease_ttl
     # not evidence that the lens agrees, only that neither read found anything.
     draft_rows = [row for _d, _b, row in in_scope]
     report["lapse_delta"] = lapse_shapes(draft_rows, started, lease_ttl)
+
+    # THE DELTA IS ATTRIBUTED, OR IT IS A BARE COUNT (wave 20/r20, PDS-D685).
+    # "+N over the drafts lens" reads as "the published read MISSED N" and that
+    # inference is FALSE in the direction the live board actually points. Each
+    # delta row is classified by the SAME twin lookup the split above performs:
+    #
+    #   never_published  -> the row exists on NO other lens. This, and ONLY
+    #                       this, is an UNDERCOUNT of the published read.
+    #   phantom          -> an unpublished edit shadow of a TERMINAL twin.
+    #   shadow_of_live   -> an edit shadow of a row already IN the denominator.
+    #
+    # A phantom and a shadow are both MANUFACTURED: the drafts read invents a
+    # lapse for a row the published lens already accounts for. Reported split,
+    # never summed -- summing them is how "+N missed" gets said about a number
+    # of which zero was missed.
+    twin_of = {d: corpus.get(b) for d, b, _r in in_scope}
+
+    def _attribute(ids):
+        classes, undercount, manufactured = {}, [], []
+        for doc_id in ids:
+            twin = twin_of.get(doc_id)
+            if twin is None:
+                classes[doc_id] = "never_published"
+                undercount.append(doc_id)
+            elif (twin.get("lifecycle_status") or "") in TERMINAL_LIFECYCLE:
+                classes[doc_id] = "phantom"
+                manufactured.append(doc_id)
+            else:
+                classes[doc_id] = "shadow_of_live"
+                manufactured.append(doc_id)
+        return {"classes": classes,
+                "undercount": sorted(undercount),
+                "manufactured": sorted(manufactured)}
+
+    report["lapse_delta_attribution"] = {
+        shape: _attribute(report["lapse_delta"][shape])
+        for shape in ("shape_a", "shape_b", "shape_c")
+    }
     return report
 
 
@@ -2262,7 +2324,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     # worklist, and a count nobody can turn back into rows is not a worklist.
     #
     # 4(a) IS THE ONE ROUND-ANCHORED LINE, and this is the ONE place the anchor
-    # enters (PDS-D364/D365). A row born AFTER the round started cannot have been
+    # enters (PDS-D364/PDS-D365). A row born AFTER the round started cannot have been
     # adjudicated by it, so it is the NEXT round's inbox -- named, never merely
     # counted. Everything else here, including 4(b) and 4(c), stays whole-live: a
     # row that HAS a disposition owes a reason regardless of when it was born.
@@ -2291,7 +2353,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     live_parked = [r for r in live if disposition_of(r).lower() == PARKED_DISPOSITION]
     live_park_no_trigger = sorted(r["_id"] for r in live_parked if not structured_trigger(r))
 
-    # CLAUSE 6 (PDS-D372/D373): the row is CLAIMABLE and it is adjudicated
+    # CLAUSE 6 (PDS-D372/PDS-D373): the row is CLAIMABLE and it is adjudicated
     # CLOSED. Clause 4(a) counts it as satisfied and `bp task ready` hands it to
     # a worker; the two organs disagree and nothing looks. CLOSED-ONLY (a live
     # park is a park, and clause 4(c) already owns it) and CASE-EXACT against the
@@ -2601,18 +2663,54 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("  lens        /v1/data/query perspective:%s -- the two lenses DISAGREE by construction"
                % report["lens_perspective"])
     out.append("              (a lapsed `drafts.` row is invisible here and visible to `bp task ls --all`).")
-    out.append("              MEASURED 2026-08-04, and the direction is the SURPRISE: shape A 24 -> 27 over a")
-    out.append("              drafts-inclusive read, and the +3 are EXACTLY the three PHANTOMS below -- edit")
-    out.append("              shadows of `done` rows. The published read does not UNDERCOUNT shape A; the")
-    out.append("              drafts read MANUFACTURES three false lapses. Shapes B and C were 0 on BOTH")
-    out.append("              lenses: UNDISCRIMINATED, so their deltas prove nothing either way.")
+    out.append("              THE DIRECTION IS THE SURPRISE, AND IT IS RE-MEASURED EVERY RUN. A `+N` over")
+    out.append("              the drafts lens reads as `the published read MISSED N`, and on this board that")
+    out.append("              inference has been FALSE every time it was checked: the extra rows are EDIT")
+    out.append("              SHADOWS of rows the published lens already holds, so the drafts read")
+    out.append("              MANUFACTURES lapses rather than revealing hidden ones. No number is quoted")
+    out.append("              here -- a by-hand figure in a comment rots (2026-08-04 read A 24 -> 27; it no")
+    out.append("              longer reproduces). The attributed block below is THIS RUN\'s.")
     delta = (report.get("blind_spots") or {}).get("lapse_delta")
+    attrib = (report.get("blind_spots") or {}).get("lapse_delta_attribution")
     if delta is None:
         out.append("              THIS RUN: drafts lens UNREAD, so the per-shape delta is UNMEASURED, not 0.")
     else:
-        out.append("              THIS RUN: drafts-lens delta  A +%d  B +%d  C +%d%s"
-                   % (len(delta["shape_a"]), len(delta["shape_b"]), len(delta["shape_c"]),
-                      _eg(delta["shape_a"])))
+        out.append("              THIS RUN: drafts-lens delta  A +%d  B +%d  C +%d"
+                   % (len(delta["shape_a"]), len(delta["shape_b"]), len(delta["shape_c"])))
+        published_of = {"shape_a": report["lapse_shape_a"],
+                        "shape_b": report["lapse_shape_b"],
+                        "shape_c": report["lapse_shape_c"]}
+        for shape, label in (("shape_a", "A"), ("shape_b", "B"), ("shape_c", "C")):
+            ids = delta[shape]
+            att = (attrib or {}).get(shape) or {"undercount": [], "manufactured": [],
+                                                "classes": {}}
+            if not ids:
+                # A 0 that is 0 on BOTH lenses discriminates nothing: neither read
+                # found a specimen, so "the lenses agree" is not a thing this run
+                # measured. Say which of the two zeroes it is.
+                if published_of[shape]:
+                    out.append("                %s  +0 over %d published -- the drafts lens adds nothing to this shape"
+                               % (label, len(published_of[shape])))
+                else:
+                    out.append("                %s  0 on BOTH lenses -- UNDISCRIMINATED, the delta proves nothing either way"
+                               % label)
+                continue
+            under, manu = att["undercount"], att["manufactured"]
+            out.append("                %s  +%d = %d UNDERCOUNT (never published) + %d MANUFACTURED (edit shadows)"
+                       % (label, len(ids), len(under), len(manu)))
+            # NAMED, NEVER SAMPLED. Criterion: a delta nobody can turn back into
+            # rows is the bare count this block exists to refuse, so every id is
+            # printed with the class that placed it.
+            for doc_id in ids:
+                out.append("                     %s   (%s)" % (doc_id, att["classes"].get(doc_id, "<unclassified>")))
+            if under:
+                out.append("                     => the published read UNDERCOUNTS shape %s by %d: %s"
+                           % (label, len(under), ", ".join(under)))
+            else:
+                out.append("                     => the published read does NOT undercount shape %s; the drafts"
+                           % label)
+                out.append("                        read MANUFACTURES %d false lapse(s) out of rows it already holds"
+                           % len(manu))
     out.append("  shape A  reverted-to-open after expiry   %5d   (%d carrying work evidence)%s"
                % (len(report["lapse_shape_a"]), len(report["lapse_shape_a_work_evidence"]),
                   _eg(report["lapse_shape_a"])))
@@ -2794,7 +2892,7 @@ def round_done_predicate(report):
                         % (len(no_trigger),
                            ", ".join(no_trigger[:8]) + (", ..." if len(no_trigger) > 8 else "")))
 
-    # CLAUSE 6 -- the contradiction (PDS-D372/D373). Beside clause 4, never
+    # CLAUSE 6 -- the contradiction (PDS-D372/PDS-D373). Beside clause 4, never
     # inside it: 4 asks whether a live row SAYS anything, 6 asks whether what it
     # says agrees with the queue that is handing it out.
     lines.append("  live rows NOT dispositioned `%s`           %d/%d    %s   (CLAIMABLE and adjudicated shut)"

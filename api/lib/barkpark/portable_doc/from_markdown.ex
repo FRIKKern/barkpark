@@ -50,13 +50,28 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
     [%{"type" => "paragraph", "content" => inline(children)}]
   end
 
-  defp block({tag, _attrs, children, _meta}) when tag in ["ul", "ol"] do
+  defp block({tag, attrs, children, _meta}) when tag in ["ul", "ol"] do
     items =
       children
       |> Enum.filter(&match?({"li", _, _, _}, &1))
       |> Enum.map(fn {"li", _, li_children, _} -> list_item_inline(li_children) end)
 
-    [%{"type" => "list", "ordered" => tag == "ol", "items" => items}]
+    # GitHub task syntax (`- [ ] ` / `- [x] `) makes the whole list a checklist.
+    tasks = if tag == "ul", do: Enum.map(items, &task_item/1), else: []
+
+    if Enum.any?(tasks, &(&1 != nil)) do
+      checklist_items =
+        Enum.zip_with(items, tasks, fn item, task ->
+          task || %{"content" => item, "checked" => false}
+        end)
+
+      [%{"type" => "list", "ordered" => false, "task" => true, "items" => checklist_items}]
+    else
+      [
+        %{"type" => "list", "ordered" => tag == "ol", "items" => items}
+        |> put_list_start(tag, attrs)
+      ]
+    end
   end
 
   defp block({"pre", _attrs, [{"code", code_attrs, code_children, _} | _], _meta}) do
@@ -116,6 +131,41 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   end
 
   defp block(_other), do: []
+
+  # `[ ] rest` / `[x] rest` at the head of an item's inline → {content, checked}; else nil.
+  defp task_item([%{"type" => "text", "value" => value} = first | rest]) when is_binary(value) do
+    case Regex.run(~r/^\[( |x|X)\]\s+(.*)$/s, value) do
+      [_, mark, tail] ->
+        content =
+          if tail == "" and rest == [] do
+            []
+          else
+            [Map.put(first, "value", tail) | rest]
+          end
+
+        %{"content" => content, "checked" => mark in ["x", "X"]}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp task_item(_), do: nil
+
+  # An ordered list's first number rides the block as `start` (`5. five` → 5).
+  # The parser names it only when it is not 1, so a list numbered from 1 keeps
+  # its shape; every renderer reads a missing `start` as 1.
+  defp put_list_start(block, "ol", attrs) do
+    with {_, raw} <- List.keyfind(attrs, "start", 0),
+         {start, ""} <- Integer.parse(raw),
+         true <- start != 1 do
+      Map.put(block, "start", start)
+    else
+      _ -> block
+    end
+  end
+
+  defp put_list_start(block, _tag, _attrs), do: block
 
   # ── the portabledoc fence (native block escape hatch) ──────────────────
 

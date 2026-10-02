@@ -25,7 +25,7 @@ defmodule Barkpark.Content.BroadcastSavepointIdleTest do
       Seeds.Clean.seed_welcome_paper/1
         -> Papers.BlockOps.persist_blocks_doc/9
         -> BlockOps.save_upsert_revision/5
-        -> Content.Broadcast.save_revision/5   (broadcast.ex:515)
+        -> Content.Broadcast.save_revision/5   (broadcast.ex)
         -> ** (DBConnection.TransactionError) transaction is not started
 
   and it 500'd every paper save on any deployed box AFTER the document write had
@@ -50,6 +50,7 @@ defmodule Barkpark.Content.BroadcastSavepointIdleTest do
   is deleted in an `after` block, unboxed, by the slug it was created under.
   """
 
+  # sync: runs `Sandbox.unboxed_run/2` in a spawned Task — a real connection outside the sandbox
   use Barkpark.DataCase, async: false
 
   import Ecto.Query, only: [from: 2]

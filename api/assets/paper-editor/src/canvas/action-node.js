@@ -37,6 +37,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { safeUrl } from "../safe-url.js";
 
 // The TipTap node NAME is `bpAction`. There is NO StarterKit collision (StarterKit
 // ships no action/button node), so — UNLIKE bpCode / divider — NO StarterKit node is
@@ -185,21 +186,22 @@ export const Action = Node.create({
   //
   // Builds:
   //   <div class="bp-canvas-action" data-bp-type="action" contenteditable="false">
-  //     <a class="bp-button[ bp-button--primary]" …>   ← LIVE PREVIEW (reader classes)
+  //     <a class="bp-button[ bp-button--primary]" …>   ← read-only PREVIEW (reader classes)
+  //     <span contenteditable="false">                  ← editable: the label IN PLACE
+  //       <span class="bp-button[ …]" contenteditable="plaintext-only">label</span>
   //     <div class="bp-canvas-action-controls">
-  //       <input  class="bp-canvas-action-label">      ← the EDIT islands
-  //       <input  class="bp-canvas-action-href">
+  //       <input  class="bp-canvas-action-href">       ← config the reader never paints
   //       <select class="bp-canvas-action-priority">
   //
-  // The controls are the edit surface ProseMirror DOES NOT MANAGE:
+  // Every editable surface is one ProseMirror DOES NOT MANAGE:
   //   * stopEvent:()=>true      — PM never turns their key/input/change/click events
   //     into transactions.
   //   * ignoreMutation:()=>true — PM never reads their DOM mutations into the document.
-  // label & href commit on `input` DEBOUNCED (DEBOUNCE_MS); priority commits on
-  // `change` (immediate). Each handler reads all three controls, builds nextAttrs, and
-  // setNodeMarkup(pos, undefined, nextAttrs) via editor.chain().command → onUpdate →
-  // run-convert emits the patch. The commit is skipped when the canonical action key
-  // is unchanged (a no-op re-select emits nothing, matching the reader's nil≡secondary).
+  // label & href commit on `input` DEBOUNCED (DEBOUNCE_MS; blur and bp-flush-node
+  // flush); priority commits on `change` (immediate). A commit replaces ONLY the
+  // touched keys on the latest attrs and setNodeMarkup(pos, undefined, nextAttrs) →
+  // onUpdate → run-convert emits the patch. The commit is skipped when the canonical
+  // action key is unchanged (a no-op re-select emits nothing, the reader's nil≡secondary).
   addNodeView() {
     return ({ node, editor, getPos }) => {
       const dom = document.createElement("div");
@@ -211,21 +213,32 @@ export const Action = Node.create({
 
       // The LIVE PREVIEW anchor — display-only, byte-matching the reader anchor
       // classes so the editor CSS mirror paints it byte-identical to /papers.
+      // Painted only while the editor is read-only.
       const preview = document.createElement("a");
       preview.setAttribute("tabindex", "-1");
       // A click inside the stopEvent island must never navigate — guard explicitly.
       preview.addEventListener("click", (e) => e.preventDefault());
 
+      // The label edits where it reads (the card action-label precedent, card-node.js):
+      // while editable, a non-link sibling carrying the reader's button classes is the
+      // sole label editor — no navigation, no nested interactive content. A
+      // contentEditable=false boundary makes the plaintext-only host its own browser
+      // editing host, so the caret stays inside the button.
+      const labelBoundary = document.createElement("span");
+      labelBoundary.contentEditable = "false";
+      const labelHost = document.createElement("span");
+      labelHost.setAttribute("data-test-id", "paper-action-label");
+      labelHost.setAttribute("data-placeholder", "Button label");
+      labelHost.setAttribute("role", "textbox");
+      labelHost.setAttribute("aria-label", "Action label");
+      labelHost.setAttribute("aria-multiline", "false");
+      labelHost.tabIndex = 0;
+      labelHost.style.cursor = "text";
+      labelBoundary.appendChild(labelHost);
+
       // The controls row.
       const controls = document.createElement("div");
       controls.className = "bp-canvas-action-controls";
-
-      const labelInput = document.createElement("input");
-      labelInput.type = "text";
-      labelInput.className = "bp-canvas-action-label";
-      labelInput.placeholder = "Button label";
-      labelInput.setAttribute("contenteditable", "false");
-      labelInput.setAttribute("data-test-id", "paper-action-label");
 
       const hrefInput = document.createElement("input");
       hrefInput.type = "url";
@@ -248,12 +261,18 @@ export const Action = Node.create({
         prioritySelect.appendChild(o);
       }
 
-      controls.appendChild(labelInput);
       controls.appendChild(hrefInput);
       controls.appendChild(prioritySelect);
 
       dom.appendChild(preview);
+      dom.appendChild(labelBoundary);
       dom.appendChild(controls);
+
+      // Which surfaces hold an unsaved edit. Only a touched key is written, so a label
+      // edit never materialises an href or priority the author never set.
+      let labelDirty = false;
+      let hrefDirty = false;
+      let composing = false;
 
       // Paint the controls + preview from the node's current attrs. Re-run on every
       // update() so an external attr change (an echo, an undo) reflects. Guard "only
@@ -264,50 +283,57 @@ export const Action = Node.create({
         const href = attrs.href == null ? "" : String(attrs.href);
         const priority = normalizePriority(attrs.priority);
         const editable = editor.isEditable;
+        const variant = priority === "primary" ? "bp-button bp-button--primary" : "bp-button";
 
-        if (labelInput.value !== label) labelInput.value = label;
-        if (hrefInput.value !== href) hrefInput.value = href;
+        if (!composing && !labelDirty && labelHost.textContent !== label) labelHost.textContent = label;
+        if (!hrefDirty && hrefInput.value !== href) hrefInput.value = href;
         if (prioritySelect.value !== priority) prioritySelect.value = priority;
 
-        labelInput.readOnly = !editable;
+        labelHost.className = variant;
+        labelHost.contentEditable = editable ? "plaintext-only" : "false";
+        labelHost.tabIndex = editable ? 0 : -1;
+        labelBoundary.style.display = editable ? "" : "none";
         hrefInput.readOnly = !editable;
         prioritySelect.disabled = !editable;
 
-        // The live preview: text = label || "Button"; class carries the reader
+        // The read-only preview: the reader's anchor, class carries the reader
         // variant; href is display-only.
         preview.textContent = label || "Button";
-        preview.className =
-          priority === "primary" ? "bp-button bp-button--primary" : "bp-button";
-        preview.setAttribute("href", href || "#");
+        preview.className = variant;
+        preview.setAttribute("href", safeUrl(href || "#"));
+        preview.style.display = editable ? "none" : "";
       };
 
       paint(node);
 
-      // Build the next attrs bag from the three controls. href/label ride as their
-      // string value (an EMPTY input stays "" — a user who cleared the field
-      // intentionally emptied it; the coarse re-emit sends "" and the reader shows an
-      // empty label / "#" href, matching a live edit). priority is the select value
-      // ("primary" | "secondary").
-      const buildNextAttrs = (cur) => ({
-        ...cur.attrs,
-        label: labelInput.value,
-        href: hrefInput.value,
-        priority: prioritySelect.value,
-      });
+      // The next attrs bag: the latest attrs with ONLY the touched keys replaced. href
+      // and label ride as their string value (an EMPTY value stays "" — a user who
+      // cleared it intentionally emptied it). priority is the select value
+      // ("primary" | "secondary"); actionKey collapses nil≡secondary, so re-selecting
+      // Secondary on a never-set block stays a zero-op.
+      const buildNextAttrs = (cur, { priority = false } = {}) => {
+        const next = { ...cur.attrs };
+        if (labelDirty) next.label = labelHost.textContent || "";
+        if (hrefDirty) next.href = hrefInput.value;
+        if (priority) next.priority = prioritySelect.value;
+        return next;
+      };
 
       // Write the edited attrs back via setNodeMarkup (a PM transaction that ONLY
       // changes attrs, not the doc structure) → onUpdate → run-convert emits the
       // patch. Skip when getPos()==null / nodeAt==null / the canonical action key is
       // unchanged, so a no-op re-select (e.g. "Secondary" on a never-set block) emits
       // nothing.
-      const commitNow = () => {
-        if (!editor.isEditable) return;
+      const commitNow = (options) => {
+        if (!editor.isEditable || composing) return;
         if (typeof getPos !== "function") return;
         const pos = getPos();
         if (pos == null) return;
         const cur = editor.state.doc.nodeAt(pos);
         if (!cur) return;
-        const nextAttrs = buildNextAttrs(cur);
+        const nextAttrs = buildNextAttrs(cur, options);
+        labelDirty = false;
+        hrefDirty = false;
         if (actionKey(cur.attrs) === actionKey(nextAttrs)) return; // no-op
         editor
           .chain()
@@ -336,10 +362,59 @@ export const Action = Node.create({
         commitNow();
       };
 
-      labelInput.addEventListener("input", scheduleWrite);
-      hrefInput.addEventListener("input", scheduleWrite);
-      prioritySelect.addEventListener("change", commitNow);
-      dom.addEventListener("bp-flush-node", flushPending);
+      const onLabelInput = () => { labelDirty = true; if (!composing) scheduleWrite(); };
+      const onHrefInput = () => { hrefDirty = true; scheduleWrite(); };
+      const onPriorityChange = () => {
+        if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+        commitNow({ priority: true });
+      };
+      // The label host follows the painted-text-inline keyboard contract: Enter ends
+      // the edit, select-all stays inside the button, undo/redo reach canvas history.
+      const onLabelKeydown = (event) => {
+        if (!editor.isEditable || event.isComposing) return;
+        const key = event.key.toLowerCase();
+        if (event.key === "Enter") {
+          event.preventDefault();
+          labelHost.blur();
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey && key === "a") {
+          event.preventDefault();
+          const range = document.createRange();
+          range.selectNodeContents(labelHost);
+          const selection = window.getSelection();
+          selection.removeAllRanges();
+          selection.addRange(range);
+        } else if ((event.metaKey || event.ctrlKey) && !event.altKey && (key === "z" || key === "y")) {
+          event.preventDefault();
+          flushPending();
+          editor.commands[event.shiftKey || key === "y" ? "redo" : "undo"]();
+        }
+      };
+      const onLabelBeforeInput = (event) => {
+        if (event.inputType === "insertParagraph" || event.inputType === "insertLineBreak") event.preventDefault();
+      };
+      const onCompositionStart = () => { composing = true; };
+      const onCompositionEnd = () => { composing = false; labelDirty = true; scheduleWrite(); };
+      const onLabelBlur = () => {
+        composing = false;
+        if (writeTimer) { clearTimeout(writeTimer); writeTimer = null; }
+        if (labelDirty) commitNow();
+        const pos = typeof getPos === "function" ? getPos() : null;
+        const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+        if (cur && cur.type.name === BP_ACTION_NODE_NAME) paint(cur);
+      };
+
+      const listeners = [
+        [labelHost, "input", onLabelInput],
+        [labelHost, "keydown", onLabelKeydown],
+        [labelHost, "beforeinput", onLabelBeforeInput],
+        [labelHost, "compositionstart", onCompositionStart],
+        [labelHost, "compositionend", onCompositionEnd],
+        [labelHost, "blur", onLabelBlur],
+        [hrefInput, "input", onHrefInput],
+        [prioritySelect, "change", onPriorityChange],
+        [dom, "bp-flush-node", flushPending],
+      ];
+      for (const [target, type, listener] of listeners) target.addEventListener(type, listener);
 
       return {
         dom,
@@ -356,10 +431,7 @@ export const Action = Node.create({
         ignoreMutation: () => true,
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
-          labelInput.removeEventListener("input", scheduleWrite);
-          hrefInput.removeEventListener("input", scheduleWrite);
-          prioritySelect.removeEventListener("change", commitNow);
-          dom.removeEventListener("bp-flush-node", flushPending);
+          for (const [target, type, listener] of listeners) target.removeEventListener(type, listener);
         },
       };
     };

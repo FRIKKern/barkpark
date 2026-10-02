@@ -108,6 +108,33 @@ defmodule Barkpark.Audit do
     result
   end
 
+  @doc """
+  Best-effort `emit/1` for a caller whose own change has ALREADY happened and
+  must never be failed by an audit hiccup (a login, logout, lockout, session
+  mint, webhook CRUD). The emit result is discarded and any raise, throw or
+  exit is swallowed; always returns `:ok`. Nothing is logged.
+
+  Swallowing here does NOT make a failed emit survivable inside a transaction:
+  called within an open `Repo.transaction`, a failed emit still dooms it (see
+  `emit/1`). Call it after the audited change has committed.
+
+  A caller that must log the failure, count it, or return something other than
+  `:ok` keeps its own wrapper (`Access`, `Accounts.NotificationWithhold`,
+  `Content.Broadcast`).
+
+  `emit_fun` exists only so a test can drive the throw and exit arms, which a
+  real `emit/1` cannot be made to produce on demand; callers never pass it.
+  """
+  @spec emit_best_effort(map(), (map() -> term())) :: :ok
+  def emit_best_effort(attrs, emit_fun \\ &emit/1) do
+    emit_fun.(attrs)
+    :ok
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
+  end
+
   defp safe_bridge(event) do
     Barkpark.Webhooks.Dispatcher.dispatch_audit_async(event)
   rescue
@@ -164,15 +191,59 @@ defmodule Barkpark.Audit do
 
   # ── internals ──────────────────────────────────────────────────────────
 
+  @doc """
+  Take the workspace's audit-chain advisory lock (`emit/1` takes it too).
+
+  MUST be called inside an open transaction; it is held to commit/rollback and
+  is re-entrant within that transaction. Exposed so a caller that takes another
+  advisory lock AND may emit in the same transaction can take this one FIRST,
+  keeping one global lock order (`DedupWall.lock_publish_scope!/3` does).
+
+  The order against the WORKSPACE ROW runs the other way: any writer that
+  inserts a row referencing `workspaces(ws)` takes FOR KEY SHARE on it (the FK
+  check) and emits afterwards, so the row lock comes BEFORE audit(ws). A
+  transaction holding audit(ws) must therefore never take a row lock on
+  `workspaces(ws)` that conflicts with KEY SHARE — a key-modifying UPDATE
+  (`id`, `slug`) or FOR UPDATE. `lib/` has no such write (no workspace rename);
+  a test that renamed the shared Default after auditing did, and deadlocked the
+  async suite (task-8051eddcd3c9f30f).
+  """
+  @spec lock_chain!(String.t() | nil) :: :ok
+  def lock_chain!(workspace_id) do
+    lock_chain(workspace_id)
+    :ok
+  end
+
   # Transaction-scoped advisory lock keyed on the workspace, so concurrent
   # emits for the SAME workspace serialize on the chain tail (and the empty
   # first-row case is safe) while different workspaces never contend.
   defp lock_chain(workspace_id) do
     # crc32 → 0..2^32-1, which fits a bigint (the single-arg lock form); the
     # two-int4 form would overflow for keys above 2^31.
-    key = :erlang.crc32(@lock_prefix <> (workspace_id || @nil_ws_key))
+    key = :erlang.crc32(@lock_prefix <> lock_scope(workspace_id))
     Repo.query!("SELECT pg_advisory_xact_lock($1::bigint)", [key])
   end
+
+  # The global (nil-workspace) chain and the seeded Default's chain share ONE
+  # lock (task-962637a90e406961). They are separate hash chains — `last_hash/1`
+  # still reads each on its own — but nil-workspace rows are the Default's
+  # back-compat surface, and writers touch both in one transaction: a
+  # workspace-less draft publishing into the Default, a mutate batch over a
+  # legacy row and a Default row. With two locks, each such transaction took
+  # them in whatever order its writes came, and two of them in opposite orders
+  # deadlocked (40P01, advisory 2301988177 = the global chain against the
+  # Default's). One lock has no order to get wrong. It costs nothing between
+  # workspaces: every other workspace keeps its own lock.
+  #
+  # No seated Default (a fresh database, a vacated seat) keeps the global key.
+  defp lock_scope(nil) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: id} when is_binary(id) -> id
+      _ -> @nil_ws_key
+    end
+  end
+
+  defp lock_scope(workspace_id), do: workspace_id
 
   defp last_hash(workspace_id) do
     Repo.one(

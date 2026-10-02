@@ -49,6 +49,11 @@
 #      Drift confined to box-irrelevant paths (docs/, cloud/, web/, js/,
 #      .github/, .claude/, tooling/, *.md — mirroring EnsureFresh's
 #      boxIrrelevantPrefixes in internal/cli/cloud/freshen.go) → exit.
+#      UNLESS the newest bake is older than BAKE_MAX_AGE_DAYS (default 7): the
+#      snapshot's apt index rots with TIME, not with code, and a superseded
+#      package point-release turns an old index into 404s on the next
+#      provision (task-3678bc75656f9a41). So "no code drift" is not "no bake
+#      needed" past the age ceiling — both skip arms defer to it.
 #   3. Boot a bake box FROM the newest snapshot, fast-forward it to
 #      origin/main, run the full deploy-rebuild, pre-run migrations (throwaway
 #      keys, stripped before the snapshot — no secrets ever ship in an image),
@@ -75,13 +80,15 @@ LOCATION="${BARKPARK_SERVER_LOCATION:-nbg1}"
 SSH_KEY_NAME="${BARKPARK_SSH_KEY:-}"
 SSH_KEY_FILE="${BARKPARK_SSH_KEY_FILE:-/root/.ssh/barkpark_indx}"
 KEEP_IMAGES="${BAKE_KEEP_IMAGES:-2}"
+MAX_AGE_DAYS="${BAKE_MAX_AGE_DAYS:-7}"
+LOCK_FILE="${BAKE_LOCK_FILE:-/var/lock/barkpark-image-bake.lock}"
 BOX_NAME="bp-imagebake-$(date -u +%Y%m%d%H%M)"
 
 log() { echo "[image-bake] $*"; }
 py() { python3 -c "$1"; }
 
 # One bake at a time — a slow snapshot must not overlap the next timer firing.
-exec 9>/var/lock/barkpark-image-bake.lock
+exec 9>"$LOCK_FILE"
 flock -n 9 || { log "another bake is running; exiting"; exit 0; }
 
 command -v hcloud >/dev/null || { log "FATAL: hcloud CLI not found"; exit 1; }
@@ -98,16 +105,25 @@ trap cleanup EXIT
 
 # ── 1. The newest labeled bake + its commit ──────────────────────────────────
 IMAGES_JSON="$(hcloud image list --type snapshot --selector role=warm-image -o json)"
-read -r BASE_IMAGE BAKED_COMMIT <<EOF2
+# BAKED_AGE_DAYS is the newest bake's age in whole days off its `created`
+# stamp; "-" when it cannot be read, which the age gate below treats as STALE
+# (an unreadable age must never be the reason a rotting image is kept).
+read -r BASE_IMAGE BAKED_COMMIT BAKED_AGE_DAYS <<EOF2
 $(printf '%s' "$IMAGES_JSON" | py '
-import json, sys
+import json, sys, datetime
 imgs = [i for i in json.load(sys.stdin) if i.get("status") == "available"]
 imgs.sort(key=lambda i: i.get("created", ""), reverse=True)
 if imgs:
     top = imgs[0]
-    print(top["id"], top.get("labels", {}).get("commit", "-"))
+    age = "-"
+    try:
+        created = datetime.datetime.fromisoformat(top.get("created", "").replace("Z", "+00:00"))
+        age = str((datetime.datetime.now(datetime.timezone.utc) - created).days)
+    except Exception:
+        pass
+    print(top["id"], top.get("labels", {}).get("commit", "-"), age)
 else:
-    print("-", "-")
+    print("-", "-", "-")
 ')
 EOF2
 if [ "$BASE_IMAGE" = "-" ]; then
@@ -116,18 +132,31 @@ if [ "$BASE_IMAGE" = "-" ]; then
   [ -n "$BASE_IMAGE" ] || { log "FATAL: no labeled bake and no BARKPARK_SERVER_IMAGE fallback"; exit 1; }
   log "no labeled bake yet — bootstrapping from env image $BASE_IMAGE"
 fi
-log "base image: $BASE_IMAGE (baked commit: $BAKED_COMMIT)"
+log "base image: $BASE_IMAGE (baked commit: $BAKED_COMMIT, age: $BAKED_AGE_DAYS day(s))"
+
+# The age ceiling. STALE=1 overrides both "nothing to do" arms below: a bake
+# that has not moved for MAX_AGE_DAYS is rebaked even when main has not moved
+# or moved only through box-irrelevant paths, because its apt index has.
+STALE=0
+if [ "$BAKED_COMMIT" != "-" ]; then
+  case "$BAKED_AGE_DAYS" in
+    ''|*[!0-9]*) STALE=1 ;;
+    *) [ "$BAKED_AGE_DAYS" -ge "$MAX_AGE_DAYS" ] && STALE=1 ;;
+  esac
+fi
 
 # ── 2. Drift check against origin/main (public repo, unauthenticated API) ────
 MAIN_SHA="$(curl -fsS "https://api.github.com/repos/$REPO/commits/main" | py 'import json,sys; print(json.load(sys.stdin)["sha"])')"
 log "origin/main: $MAIN_SHA"
 
-if [ "$BAKED_COMMIT" = "$MAIN_SHA" ]; then
+if [ "$STALE" = 1 ]; then
+  log "bake is $BAKED_AGE_DAYS day(s) old (ceiling $MAX_AGE_DAYS) — rebaking regardless of code drift (apt index age)"
+elif [ "$BAKED_COMMIT" = "$MAIN_SHA" ]; then
   log "bake is current — nothing to do"
   exit 0
 fi
 
-if [ "$BAKED_COMMIT" != "-" ]; then
+if [ "$BAKED_COMMIT" != "-" ] && [ "$STALE" = 0 ]; then
   # Box-relevant drift filter (mirror of freshen.go boxIrrelevantPrefixes): if
   # every changed file is inert for the box, a bake buys nothing.
   RELEVANT="$(curl -fsS "https://api.github.com/repos/$REPO/compare/$BAKED_COMMIT...$MAIN_SHA" | py '

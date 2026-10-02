@@ -467,9 +467,16 @@ defmodule BarkparkWeb.FinderLive do
     # is exactly how an anonymous /finder visitor got every private type's
     # name and titles in the graph payload while the search clamp on the SAME
     # page held (task-336d22b7722ea71e). Never derive `types` here without it.
+    #
+    # The schema STRUCTS are bound here, not just their names: they are the
+    # PREFETCH threaded into the edge fold below. `extract_edges/2` re-reads
+    # this same invariant list once PER DOCUMENT when it is absent, so the
+    # corpus paid one identical schema query per document on top of everything
+    # else.
+    schemas = Content.list_schemas(dataset, opts)
+
     types =
-      dataset
-      |> Content.list_schemas(opts)
+      schemas
       |> Barkpark.Content.Schema.visible_schemas(caller_context)
       |> Enum.map(& &1.name)
 
@@ -496,9 +503,36 @@ defmodule BarkparkWeb.FinderLive do
 
     node_ids = MapSet.new(real_nodes, & &1.id)
 
+    # THE EDGE FOLD, over the documents ALREADY IN HAND.
+    #
+    # This was `Enum.flat_map(types, &Content.corpus_edges(&1, dataset, opts))`,
+    # which paid three costs this surface does not need, on every connected
+    # mount of the PUBLIC /finder:
+    #
+    #   1. a SECOND full document scan per type — `corpus_edges/3` re-runs the
+    #      very `list_documents/3` whose result is sitting in `doc_lists`;
+    #   2. one schema-list query PER DOCUMENT — `extract_edges/2` re-reads the
+    #      invariant schema list unless a `:schemas` prefetch is supplied;
+    #   3. one un-batched existence round-trip PER REFERENCE VALUE PER DOCUMENT,
+    #      to compute a `dangling` boolean THIS PATH NEVER READS.
+    #
+    # `dangling: :skip` is sound here for the same reason it is sound in the
+    # flat `/v1/graph` twin (`TasksController.derive_graph_corpus/2`): the edge
+    # projection three lines below keeps only from_id/to_id/kind, and the
+    # phantom-node pass answers "does the target exist?" IN MEMORY off
+    # `node_ids`. Nothing downstream of here touches `e.dangling`.
+    #
+    # The flag rides `edge_opts`, NOT `opts`. `opts` is shared with
+    # `list_schemas/2`, `list_documents/3` and `count_documents/3`, and
+    # `Graph.dangling/1` (the `/v1/graph/dangling` report), `EdgeProjector` and
+    # `corpus_edges/3` all read through the unchanged `:resolve` default and
+    # must keep resolving — a default flip would silently EMPTY the dangling
+    # report, which filters on `& &1.dangling` where `nil` is falsy.
+    edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+
     raw_edges =
-      types
-      |> Enum.flat_map(fn type -> Content.corpus_edges(type, dataset, opts) end)
+      doc_lists
+      |> Enum.flat_map(fn docs -> Content.corpus_edges_for_docs(docs, dataset, edge_opts) end)
       |> Enum.uniq_by(fn e -> {e.from_id, e.to_id, e.field} end)
 
     edges =

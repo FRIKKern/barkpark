@@ -39,22 +39,51 @@
 # blocking) (27.0, 1.18.1)` carries a literal `BY HAND` in its reason and is not
 # in ACK_EX, correctly). The renderability predicate is the whole rule.
 #
+# BOTH DIRECTIONS RED (cch-w57-fu). A derived row ACK_EX does not carry is
+# `MISSING ACK_EX` (paste the printed line). An ACK_EX name no derived row needs
+# is `EXTRA ACK_EX` (delete the printed line) — a row that STOPPED being
+# unrenderable, or a name no longer in `.exclusions`. Until this change the
+# second direction printed "note: ... (harmless ...)" and exited 0, so the
+# harness's own stated design — "a row that STOPS being unrenderable reds this
+# file instead of quietly widening a blanket waiver" — held only when someone
+# read the note: #19991 (ef953d587) deleted two such names BY HAND after they
+# had sat unread. An acknowledgement that no longer answers for anything is a
+# waiver waiting for the next row to hide under it, so it reds.
+#
+# WHY THE ACKNOWLEDGEMENT STAYS DERIVED-AND-PASTED rather than auto-applied
+# (the row's option (a), beyond S8). The generator already auto-classifies a
+# pull_request-only job as S8 PULL-REQUEST-ONLY off the workflow tree, which is
+# a static property and cannot be wrong about the sample. A paths-filtered (S4)
+# row is different: whether it renders depends on which paths the SAMPLED HEADS
+# touched, and the frozen fixture pair decides that. Auto-acknowledging it would
+# make a change in the sample — the very thing D130 freezes — invisible. So the
+# gate derives, prints the exact lines, and refuses both a missing and an extra
+# one; the human pastes or deletes and the diff records it.
+#
 # EVERY FAILED READ IS A DISTINCT `CANNOT READ` LINE AND EXIT 2, never a green:
 # a generator that died for some other reason must not read as "nothing lost".
 #
 # USAGE
-#   scripts/required-checks-ack-derive.sh              derive + compare (exit 1 names the gaps)
+#   scripts/required-checks-ack-derive.sh              derive + compare (exit 1 names MISSING and EXTRA)
 #   scripts/required-checks-ack-derive.sh --selftest   the same, plus the mutation proof
 #   --repo-root DIR      read the spec, the harness, the generator and the
 #                        fixtures from DIR (default: this script's repo).
 #                        Used to reproduce the check against a historical tree.
 #   --dump-derived FILE  write the derived name set, one per line, for evidence.
+#   --harness FILE       read ACK_EX from FILE instead of the repo's harness —
+#                        how scripts/required-checks.test.sh feeds a mutated copy.
+#   --derived FILE       skip both generator runs and compare against a set a
+#                        previous --dump-derived wrote. Only the ACK side is
+#                        then under test; the harness uses it so its mutation
+#                        arms cost no extra generator passes.
 set -euo pipefail
 
 SELF="${BASH_SOURCE[0]}"
 REPO_ROOT=""
 SELFTEST=0
 DUMP=""
+HARNESS_ARG=""
+DERIVED_IN=""
 
 cannot_read() { printf 'CANNOT READ: %s\n' "$*" >&2; exit 2; }
 
@@ -63,6 +92,8 @@ while [ $# -gt 0 ]; do
     --repo-root) REPO_ROOT="$2"; shift 2 ;;
     --selftest) SELFTEST=1; shift ;;
     --dump-derived) DUMP="$2"; shift 2 ;;
+    --harness) HARNESS_ARG="$2"; shift 2 ;;
+    --derived) DERIVED_IN="$2"; shift 2 ;;
     -h|--help) sed -n '2,/^set -euo/p' "$SELF" | sed 's/^# \{0,1\}//; $d'; exit 0 ;;
     *) cannot_read "unknown argument: $1 (try --help)" ;;
   esac
@@ -74,7 +105,7 @@ fi
 [ -d "$REPO_ROOT" ] || cannot_read "repo root '$REPO_ROOT' is not a directory"
 
 SPEC="$REPO_ROOT/.github/required-checks.json"
-HARNESS="$REPO_ROOT/scripts/required-checks.test.sh"
+HARNESS="${HARNESS_ARG:-$REPO_ROOT/scripts/required-checks.test.sh}"
 GEN="$REPO_ROOT/scripts/required-checks-generate.sh"
 FIXP="$REPO_ROOT/scripts/fixtures/registration-flip"
 WFD="$REPO_ROOT/.github/workflows"
@@ -149,13 +180,20 @@ GENARGS=(--workflows "$WFD" --fixture-dir "$FIXP" --merge-base "$SPEC"
 # unrenderable_hint() on the same line and is always bracketed at the end.
 strip_lost() { sed -n 's/^  LOST  //p' | sed 's/  \[[^][]*\]$//'; }
 
+DERIVED="$TMP/derived.txt"
+R1RC="-"; R2RC="-"; STALE="-"
+S1NAMES="$TMP/s1.txt"
+: > "$S1NAMES"
+if [ -n "$DERIVED_IN" ]; then
+  [ -r "$DERIVED_IN" ] || cannot_read "--derived $DERIVED_IN is missing or unreadable"
+  grep -v '^$' "$DERIVED_IN" | sort -u > "$DERIVED" || true
+else
 # ── run 1: which committed REQUIRED contexts can this pair not render? ───────
 R1="$TMP/run1.txt"
 set +e
 bash "$GEN" "${GENARGS[@]}" >/dev/null 2>"$R1"
 R1RC=$?
 set -e
-S1NAMES="$TMP/s1.txt"
 if [ "$R1RC" -eq 0 ]; then
   : > "$S1NAMES"
 elif [ "$R1RC" -eq 1 ] && grep -q '^S1 LOSS' "$R1"; then
@@ -178,11 +216,12 @@ if grep -q '^S1 LOSS' "$R2"; then
   cannot_read "run 2 still refused at S1 LOSS after acknowledging every name run 1 reported — the two runs disagree, so nothing below was measured"
 fi
 
-DERIVED="$TMP/derived.txt"
 if grep -q '^EXCLUSION LOSS' "$R2"; then
   awk '/^EXCLUSION LOSS/{f=1} f' "$R2" | strip_lost | sort -u > "$DERIVED"
 else
   : > "$DERIVED"
+fi
+STALE="$(grep -c '^  STALE ' "$R2" || true)"
 fi
 DERN="$(wc -l < "$DERIVED" | tr -d ' ')"
 
@@ -192,27 +231,64 @@ DERN="$(wc -l < "$DERIVED" | tr -d ' ')"
 # EXCLUSION LOSS block, a moved refusal format, a fixture dir that did not load).
 # A zero here must not be byte-identical to a green.
 [ "$DERN" -gt 0 ] \
-  || cannot_read "the frozen pair reproduced ALL $EXCOUNT committed exclusion rows — no EXCLUSION LOSS block at all (run 2 exit $R2RC). That has never been true; refusing to certify a green from a read that produced nothing"
+  || cannot_read "the frozen pair reproduced ALL $EXCOUNT committed exclusion rows — no EXCLUSION LOSS block at all (run 2 exit $R2RC${DERIVED_IN:+, --derived $DERIVED_IN}). That has never been true; refusing to certify a green from a read that produced nothing"
 
 [ -z "$DUMP" ] || cp "$DERIVED" "$DUMP"
-
-STALE="$(grep -c '^  STALE ' "$R2" || true)"
 
 printf 'required-checks-ack-derive — every committed .exclusions row ACK_EX must acknowledge, DERIVED\n'
 printf '  spec       %s  (%s exclusion rows)\n' "$SPEC" "$EXCOUNT"
 printf '  harness    %s  (%s ACK_EX names)\n' "$HARNESS" "$ACKN"
 printf '  generator  %s\n' "$GEN"
 printf '  fixtures   %s  (e34031104 f69cfb1f6)\n' "$FIXP"
-printf '  run 1  exit %s, S1-unrenderable required contexts: %s\n' \
-  "$R1RC" "$(tr '\n' '|' < "$S1NAMES")"
-printf '  run 2  exit %s, exclusion rows this sample could not reproduce: %s (STALE rows: %s)\n' \
-  "$R2RC" "$DERN" "$STALE"
+if [ -n "$DERIVED_IN" ]; then
+  printf '  derived set READ from %s (%s names) — no generator run; only the ACK side is under test\n' \
+    "$DERIVED_IN" "$DERN"
+else
+  printf '  run 1  exit %s, S1-unrenderable required contexts: %s\n' \
+    "$R1RC" "$(tr '\n' '|' < "$S1NAMES")"
+  printf '  run 2  exit %s, exclusion rows this sample could not reproduce: %s (STALE rows: %s)\n' \
+    "$R2RC" "$DERN" "$STALE"
+fi
 
 # ── the comparison, factored so --selftest can re-run it on a mutated copy ───
-compare() { # compare <acked-file> <label>
-  local acked="$1" label="$2" missing
+# `ack_line <name>` — the line as it is typed in ACK_EX. A name carrying a
+# literal `${` is single-quoted so bash does not expand it.
+ack_line() {
+  case "$1" in
+    *'${'*) printf "        --expect-unrendered '%s'\n" "$1" ;;
+    *)      printf '        --expect-unrendered "%s"\n' "$1" ;;
+  esac
+}
+# `delete_line <harness-file> <name>` — the harness line that carries <name>
+# inside ACK_EX, printed as FILE:LINE:TEXT so the operator deletes exactly it.
+# The match is on the QUOTED name, so a name that is a prefix of another does
+# not claim the longer one's line. When the name shares a line with `ACK_EX=(`
+# or the closing paren, only the flag and the name come off that line.
+delete_line() {
+  local src="$1" name="$2" hit
+  hit="$(NAME="$name" awk '
+    /^ACK_EX=\(/{f=1}
+    f && !/^[[:space:]]*#/ && /--expect-unrendered/ \
+      && (index($0, "\"" ENVIRON["NAME"] "\"") || index($0, "\047" ENVIRON["NAME"] "\047")) {
+      printf "%d:%s\n", NR, $0; exit }
+    f && /\)[[:space:]]*$/{exit}' "$src")"
+  if [ -n "$hit" ]; then
+    printf '  %s:%s\n' "$src" "$hit"
+    case "$hit" in
+      *:ACK_EX=\(*|*\)) printf '    (that line opens or closes the array: remove only the flag and the name, keep the paren)\n' ;;
+    esac
+  else
+    printf '  (no single ACK_EX line in %s carries it verbatim — remove this pair:)\n' "$src"
+    ack_line "$name"
+  fi
+}
+
+compare() { # compare <acked-file> <label> [<harness-file-it-was-parsed-from>]
+  local acked="$1" label="$2" src="${3:-$HARNESS}" missing extra rc=0
   missing="$(comm -23 "$DERIVED" "$acked")"
+  extra="$(comm -13 "$DERIVED" "$acked")"
   if [ -n "$missing" ]; then
+    rc=1
     {
       printf 'ACK_EX GAP (%s) — %s committed .exclusions row(s) this tree cannot re-derive are NOT acknowledged.\n' \
         "$label" "$(printf '%s\n' "$missing" | wc -l | tr -d ' ')"
@@ -228,47 +304,114 @@ EOF
       printf '\nPaste into the ACK_EX array in scripts/required-checks.test.sh:\n'
       while IFS= read -r m; do
         [ -n "$m" ] || continue
-        case "$m" in
-          *'${'*) printf "        --expect-unrendered '%s'\n" "$m" ;;
-          *)      printf '        --expect-unrendered "%s"\n' "$m" ;;
-        esac
+        ack_line "$m"
       done <<EOF
 $missing
 EOF
     } >&2
-    return 1
   fi
-  return 0
+  if [ -n "$extra" ]; then
+    rc=1
+    {
+      printf 'ACK_EX EXTRA (%s) — %s ACK_EX name(s) acknowledge NO row this tree fails to re-derive.\n' \
+        "$label" "$(printf '%s\n' "$extra" | wc -l | tr -d ' ')"
+      printf 'Either the row became renderable on the frozen pair, or the name left .exclusions.\n'
+      printf 'An acknowledgement that answers for nothing is a waiver the next row can hide\n'
+      printf 'under, so it reds. Delete each line below from scripts/required-checks.test.sh:\n'
+      while IFS= read -r e; do
+        [ -n "$e" ] || continue
+        printf '  EXTRA ACK_EX  %s\n' "$e"
+      done <<EOF
+$extra
+EOF
+      printf '\nDelete:\n'
+      while IFS= read -r e; do
+        [ -n "$e" ] || continue
+        delete_line "$src" "$e"
+      done <<EOF
+$extra
+EOF
+    } >&2
+  fi
+  return "$rc"
 }
 
 RC=0
 if compare "$ACKED" "this tree"; then
-  printf '  OK  all %s derived rows are acknowledged in ACK_EX\n' "$DERN"
+  printf '  OK  ACK_EX == the derived set: all %s derived rows acknowledged, 0 extra\n' "$DERN"
 else
   RC=1
-fi
-
-EXTRA="$(comm -13 "$DERIVED" "$ACKED" || true)"
-if [ -n "$EXTRA" ]; then
-  printf '  note: %s ACK_EX name(s) this run did not need (harmless; a row that stopped being unrenderable, or a name no longer in .exclusions):\n' \
-    "$(printf '%s\n' "$EXTRA" | wc -l | tr -d ' ')"
-  while IFS= read -r e; do
-    [ -n "$e" ] && printf '        %s\n' "$e"
-  done <<EOF
-$EXTRA
-EOF
 fi
 
 # ── the mutation proof ───────────────────────────────────────────────────────
 # The derivation above is expensive (two generator passes), so the selftest
 # REUSES it and mutates only the cheap half: delete one real ACK_EX line from a
-# scratch copy of the harness and the same comparison must red BY NAME; restore
-# and it must green. Both directions, one derive.
+# scratch copy of the harness and the same comparison must red BY NAME (MISSING);
+# plant one name no row needs and it must red BY NAME (EXTRA); restore and it
+# must reproduce the BASELINE. Both mutation directions, one derive.
+#
+# THE BASELINE IS THE REFERENCE, NOT "GREEN". The restored arm used to demand a
+# green, which is only right on a tree whose real comparison above is green. On
+# a tree that is already red (MEASURED: Elixir run 35889983944, PR 19973 head
+# 8b63ac40e, real gap `console-harness.sh reads CI's pin (it must be able to
+# LOSE)`) the untouched harness IS the red baseline, so re-parsing it reds again
+# and the selftest printed "the mutation was not the only variable" — a false
+# diagnosis stacked on a correct red. So each arm is compared, as a SET, to the
+# baseline's own MISSING and EXTRA sets (EXTRA joined the verdict with
+# cch-w57-fu; a baseline that omitted it would let a red-by-extra tree read as
+# a clean baseline and every arm below would compare against the wrong thing):
+#   deleted   MISSING == baseline MISSING + exactly the victim, EXTRA == baseline EXTRA
+#   planted   EXTRA   == baseline EXTRA + exactly the plant,   MISSING == baseline MISSING
+#   restored  MISSING == baseline MISSING and EXTRA == baseline EXTRA
+# On a red baseline "RED with it deleted" is trivially true; the set equality is
+# what still discriminates. The real verdict ($RC) is untouched and is the exit.
 if [ "$SELFTEST" -eq 1 ]; then
   printf '\n-- selftest: the ACK_EX side, mutated --\n'
+  # missing_set / extra_set <acked-file> <out-file> — the comparison's two sets, as files.
+  missing_set() { comm -23 "$DERIVED" "$1" > "$2"; }
+  extra_set()   { comm -13 "$DERIVED" "$1" > "$2"; }
+  # same_set <want> <got> <what> — refuse unless the two files are identical.
+  same_set() {
+    if ! cmp -s "$1" "$2"; then
+      printf 'SELFTEST FAILED: %s. diff (want vs got):\n' "$3" >&2
+      diff "$1" "$2" >&2 || true
+      exit 1
+    fi
+  }
+  BASEMISS="$TMP/missing-baseline.txt"
+  BASEXTRA="$TMP/extra-baseline.txt"
+  missing_set "$ACKED" "$BASEMISS"
+  extra_set "$ACKED" "$BASEXTRA"
+  BASEN="$(wc -l < "$BASEMISS" | tr -d ' ')"
+  BASEX="$(wc -l < "$BASEXTRA" | tr -d ' ')"
+  if [ "$BASEN" -eq 0 ] && [ "$BASEX" -eq 0 ]; then
+    printf '  baseline: GREEN (0 MISSING, 0 EXTRA) — the arms below are measured against two empty sets\n'
+  else
+    printf '  baseline: RED (%s MISSING, %s EXTRA) — the arms below are measured against those sets, not against green\n' "$BASEN" "$BASEX"
+  fi
   # The victim is drawn from DERIVED ∩ ACKED so the mutation always has a real
   # line to delete, even on a tree this check is currently RED on.
-  VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"
+  # NO PIPE ON THIS LINE, and the reason is the bug it used to carry. The shape
+  # that shipped here was `VICTIM="$(comm -12 "$DERIVED" "$ACKED" | head -1)"`
+  # under `set -euo pipefail` (line 52). `head -1` prints the first line and
+  # CLOSES the pipe; when the intersection is more than one line — it is 166 on
+  # this tree — `comm` then writes into a closed pipe, takes SIGPIPE, and exits
+  # 141. Under pipefail 141 becomes the PIPELINE's status, an assignment's status
+  # IS its substitution's status, and errexit kills the selftest right there. It
+  # is a scheduling race: `head` usually exits after `comm` has already finished
+  # writing 166 short lines into the 64KB buffer, so it passes — until a loaded
+  # runner loses the race. MEASURED on console #19336, where this ratchet went
+  # red on a PR whose diff never touched this file.
+  # scripts/pipefail-sigpipe-scan.sh reports the old form at [high]:
+  #   "truncating reader (head closes the pipe at N) on a producer not provably
+  #    bounded — 141 needs no buffer overrun".
+  # comm writes the whole intersection to a FILE, and one `read` takes the first
+  # line off it. Nothing can close a pipe that does not exist; an empty
+  # intersection leaves VICTIM empty and the refusal below still fires.
+  BOTH="$TMP/derived-and-acked.txt"
+  comm -12 "$DERIVED" "$ACKED" > "$BOTH"
+  VICTIM=""
+  IFS= read -r VICTIM < "$BOTH" || VICTIM=""
   [ -n "$VICTIM" ] || cannot_read "selftest has no derived-and-acknowledged name to delete — DERIVED and ACK_EX share nothing, so the mutation would be vacuous"
   # The mutation is applied to a SCRATCH COPY OF THE HARNESS FILE and then
   # re-parsed by the same extract_acked() above — not to the parsed name list —
@@ -300,7 +443,7 @@ if [ "$SELFTEST" -eq 1 ]; then
     "$((ACKN - 1))" "$ACKN" "$VICTIM"
   MUTOUT="$TMP/mutout.txt"
   set +e
-  compare "$MUT" "SELFTEST mutated copy" 2>"$MUTOUT"
+  compare "$MUT" "SELFTEST mutated copy" "$MUTSRC" 2>"$MUTOUT"
   MRC=$?
   set -e
   if [ "$MRC" -ne 1 ]; then
@@ -312,8 +455,62 @@ if [ "$SELFTEST" -eq 1 ]; then
     cat "$MUTOUT" >&2
     exit 1
   fi
-  printf '  RED with it deleted, and it NAMES the context: %s\n' \
-    "$(grep -F 'MISSING ACK_EX' "$MUTOUT")"
+  MUTMISS="$TMP/missing-mutated.txt"
+  missing_set "$MUT" "$MUTMISS"
+  WANTMUT="$TMP/missing-mutated-want.txt"
+  { cat "$BASEMISS"; printf '%s\n' "$VICTIM"; } | sort -u > "$WANTMUT"
+  same_set "$WANTMUT" "$MUTMISS" "the mutated MISSING set is not the baseline MISSING set plus exactly $VICTIM"
+  MUTEXTRA="$TMP/extra-mutated.txt"
+  extra_set "$MUT" "$MUTEXTRA"
+  same_set "$BASEXTRA" "$MUTEXTRA" "deleting $VICTIM moved the EXTRA set — the deletion was not the only variable"
+  printf '  RED with it deleted, and it NAMES the context: MISSING ACK_EX  %s\n' "$VICTIM"
+  printf '  mutated MISSING set = baseline (%s) + exactly the victim (%s names); EXTRA unchanged (%s)\n' \
+    "$BASEN" "$(wc -l < "$MUTMISS" | tr -d ' ')" "$BASEX"
+
+  # PLANTED: the other direction. One name no .exclusions row carries is added
+  # to a scratch copy, right after the `ACK_EX=(` line, and re-parsed through the
+  # same extractor. It must red as EXTRA, NAME the plant, and print the planted
+  # line (FILE:LINE:TEXT) as the one to delete.
+  PLANT="ack-derive selftest plant — no .exclusions row carries this name"
+  grep -qxF "$PLANT" "$DERIVED" && cannot_read "the selftest plant '$PLANT' is in the derived set — pick another"
+  PLANTSRC="$TMP/harness-planted.sh"
+  PLANT="$PLANT" awk '
+    { print }
+    !done && /^ACK_EX=\(/ { printf "        --expect-unrendered \"%s\"\n", ENVIRON["PLANT"]; done = 1 }
+    END { if (!done) exit 1 }
+  ' "$HARNESS" > "$PLANTSRC" \
+    || cannot_read "selftest found no ACK_EX=( line in $HARNESS to plant after"
+  PLANTED="$TMP/acked-planted.txt"
+  extract_acked "$PLANTSRC" "$PLANTED" "the SELFTEST planted harness copy"
+  if [ "$(wc -l < "$PLANTED" | tr -d ' ')" -ne $((ACKN + 1)) ] || ! grep -qxF "$PLANT" "$PLANTED"; then
+    printf 'SELFTEST FAILED: planting one ACK_EX line did not re-parse to %s names including the plant — the proof below would be vacuous\n' "$((ACKN + 1))" >&2
+    exit 1
+  fi
+  printf '  fixture reached the planted state: 1 ACK_EX line added to a scratch copy, re-parsed to %s names\n' "$((ACKN + 1))"
+  PLANTOUT="$TMP/plantout.txt"
+  set +e
+  compare "$PLANTED" "SELFTEST planted copy" "$PLANTSRC" 2>"$PLANTOUT"
+  PRC=$?
+  set -e
+  if [ "$PRC" -ne 1 ]; then
+    printf 'SELFTEST FAILED: the ACK_EX comparison stayed GREEN with an EXTRA name planted — the extra direction cannot fail\n' >&2
+    exit 1
+  fi
+  if ! grep -qF "EXTRA ACK_EX  $PLANT" "$PLANTOUT" || ! grep -qF "$PLANTSRC:" "$PLANTOUT"; then
+    printf 'SELFTEST FAILED: the comparison reddened but did not NAME the plant and print its line to delete. Output was:\n' >&2
+    cat "$PLANTOUT" >&2
+    exit 1
+  fi
+  PLANTEXTRA="$TMP/extra-planted.txt"
+  extra_set "$PLANTED" "$PLANTEXTRA"
+  WANTPLANT="$TMP/extra-planted-want.txt"
+  { cat "$BASEXTRA"; printf '%s\n' "$PLANT"; } | sort -u > "$WANTPLANT"
+  same_set "$WANTPLANT" "$PLANTEXTRA" "the planted EXTRA set is not the baseline EXTRA set plus exactly the plant"
+  PLANTMISS="$TMP/missing-planted.txt"
+  missing_set "$PLANTED" "$PLANTMISS"
+  same_set "$BASEMISS" "$PLANTMISS" "planting an EXTRA moved the MISSING set — the plant was not the only variable"
+  printf '  RED with it planted, and it NAMES it: EXTRA ACK_EX  %s\n' "$PLANT"
+  printf '  …and prints the line to delete: %s\n' "$(grep -F "$PLANTSRC:" "$PLANTOUT" | sed "s|$PLANTSRC|<planted copy>|")"
   # RESTORED: the untouched harness is re-parsed through the same extractor,
   # so the green arm travels the whole path the red arm did, minus the deletion.
   RESTORED="$TMP/acked-restored.txt"
@@ -323,13 +520,49 @@ if [ "$SELFTEST" -eq 1 ]; then
       "$(wc -l < "$RESTORED" | tr -d ' ')" "$ACKN" >&2
     exit 1
   fi
-  if compare "$RESTORED" "SELFTEST restored" 2>/dev/null; then
+  RESTMISS="$TMP/missing-restored.txt"
+  missing_set "$RESTORED" "$RESTMISS"
+  same_set "$BASEMISS" "$RESTMISS" "the restored MISSING set differs from the baseline MISSING set — the mutation was not the only variable"
+  RESTEXTRA="$TMP/extra-restored.txt"
+  extra_set "$RESTORED" "$RESTEXTRA"
+  same_set "$BASEXTRA" "$RESTEXTRA" "the restored EXTRA set differs from the baseline EXTRA set — the mutation was not the only variable"
+  if [ "$BASEN" -eq 0 ] && [ "$BASEX" -eq 0 ]; then
     printf '  GREEN again with it restored — single-variable, both directions\n'
   else
-    printf 'SELFTEST FAILED: the restored ACK_EX set did not green — the mutation was not the only variable\n' >&2
+    printf '  RED again with it restored, reproducing the baseline red exactly (same %s MISSING, %s EXTRA) — single-variable, both directions\n' "$BASEN" "$BASEX"
+  fi
+  # THE VERDICT WIRING, graded on the whole program (task-92a213f01ca30817).
+  # Every arm above calls compare() IN PROCESS; none executes the final
+  # `exit "$RC"` that IS this step's verdict in CI (the selftest is the live
+  # check), so disarming it kept this selftest green while the step certified
+  # an unacknowledged row. Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE
+  # PROGRAM and assert the PROCESS exit. The re-execs reuse this run's
+  # derivation through the existing --derived flag (no second generator pass)
+  # and point --harness at the scratch copies built above: the deleted-victim
+  # copy must exit 1; the untouched harness must exit the in-process verdict
+  # $RC (0 on a green tree — on an already-red tree 1 is the honest answer).
+  set +e
+  bash "$SELF" --repo-root "$REPO_ROOT" --derived "$DERIVED" --harness "$MUTSRC" >/dev/null 2>&1
+  WRC=$?
+  set -e
+  if [ "$WRC" -ne 1 ]; then
+    printf 'SELFTEST FAILED: the WHOLE PROGRAM exited %s with %s deleted from its harness, not 1 — the verdict never reaches the process exit\n' "$WRC" "$VICTIM" >&2
     exit 1
   fi
-  printf '  selftest OK\n'
+  set +e
+  bash "$SELF" --repo-root "$REPO_ROOT" --derived "$DERIVED" --harness "$HARNESS" >/dev/null 2>&1
+  WRC=$?
+  set -e
+  if [ "$WRC" -ne "$RC" ]; then
+    printf 'SELFTEST FAILED: the WHOLE PROGRAM exited %s over the untouched harness, but the in-process verdict is %s\n' "$WRC" "$RC" >&2
+    exit 1
+  fi
+  printf '  whole program: exit 1 with the victim deleted, exit %s over the untouched harness\n' "$RC"
+  if [ "$RC" -eq 0 ]; then
+    printf '  selftest OK\n'
+  else
+    printf '  selftest OK — the instrument is sound; the exit is the tree'"'"'s own verdict (%s), RED above\n' "$RC"
+  fi
 fi
 
 exit "$RC"

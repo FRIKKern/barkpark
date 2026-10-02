@@ -148,6 +148,17 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 			b.add(titleStyle.Render(ln))
 		}
 	}
+	// THE DRAFT LABEL CONTRACT (#18961): a draft row says so on its OWN line,
+	// directly under the title, before any other fact. It is NOT folded into
+	// the meta line at (2) with lifecycle/priority/kind, because that line is
+	// the row's STATUS and `draft` is emphatically not a status — a
+	// `drafts.`-spelled row the server stores status:"published" is still a
+	// draft, and sitting it beside the status word would invite exactly the
+	// status check the contract forbids. Its own line also cannot be truncated
+	// away by a long title or a narrow pane. Amber, the `blocked` precedent.
+	if chip := draftChip(d.Task); chip != "" {
+		b.add(chip)
+	}
 
 	// (2) Meta line — ONE status health glyph + dim facts. The status word
 	// lives here (and in the timeline's life story) only.
@@ -631,7 +642,7 @@ func (b *detailBuilder) emitClaim(d TaskDetail, width int, now time.Time) {
 		switch {
 		case rem <= 0:
 			b.add(dangerStyle.Render(truncate("       lease expired "+AgeBadge(d.ClaimExpiredAt, now)+" ago", width)))
-		case rem <= leaseTTL*3/10:
+		case rem <= claimLeaseTTL(d.Claim)*3/10:
 			b.add(warnStyle.Render(truncate("       lease expires in "+durToken(rem), width)))
 		default:
 			b.add(dimStyle.Render(truncate("       lease expires in "+durToken(rem), width)))
@@ -761,7 +772,15 @@ func childRow(c Task, selected bool, width int, now time.Time) string {
 	if selected {
 		style = boldStyle
 	}
-	line := bar + glyph + " " + style.Render(truncate(c.Title, titleBudget))
+	titleText := c.Title
+	if chip := draftChip(c); chip != "" {
+		// A child rail row is one line with no meta to spare, so the chip rides
+		// the title — it must survive the SAME truncate the title does rather
+		// than being shed first. truncate/disp are ansi-aware, so the styled
+		// chip costs its VISIBLE columns and titleBudget stays honest.
+		titleText = chip + " " + titleText
+	}
+	line := bar + glyph + " " + style.Render(truncate(titleText, titleBudget))
 	if age != "" {
 		line += "  " + dimStyle.Render(age)
 	}

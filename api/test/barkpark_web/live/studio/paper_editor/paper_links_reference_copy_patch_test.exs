@@ -132,8 +132,70 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
              Blocks.paper_link_reference_copy_admission(
                paper_links([authored_ref(%{"title" => "Before"})]),
                0,
-               "eyebrow"
+               "slug"
              )
+  end
+
+  # task-0b0790fbf00c236d: a card's own copy (eyebrow, chapters meta, default
+  # reason) edits in place whether or not title/description are the linked
+  # paper's live metadata; title/description stay admitted only under
+  # prefer_authored_copy.
+  test "own copy is admitted on every uniquely identified ref, live-competing copy only when preferred" do
+    live_ref = %{
+      "slug" => "target",
+      "eyebrow" => "Week two",
+      "meta" => "12 changes",
+      "reason" => "Keeps its own reason.",
+      "title" => "Fallback",
+      "unknown" => %{"keep" => true}
+    }
+
+    block = paper_links([live_ref])
+
+    assert {:error, :paper_link_reference_copy_unavailable} =
+             Blocks.paper_link_reference_copy_admission(block, 0)
+
+    assert {:ok, %{slug: "target"}} = Blocks.paper_link_reference_card_admission(block, 0)
+
+    for field <- ["eyebrow", "meta", "reason"] do
+      assert {:ok, _} = Blocks.paper_link_reference_copy_admission(block, 0, field)
+    end
+
+    for field <- ["title", "description"] do
+      assert {:error, :paper_link_reference_copy_unavailable} =
+               Blocks.paper_link_reference_copy_admission(block, 0, field)
+
+      assert {:error, {:source_validation, _}} =
+               Blocks.resolve_block_form(
+                 [block],
+                 source(live_ref, %{"paper-link-ref-field" => field})
+               )
+    end
+
+    for {field, value} <- [{"meta", "13 changes"}, {"reason", "A sharper reason."}] do
+      assert {:ok, %{"patch" => %{"refs" => [updated]}}} =
+               Blocks.resolve_block_form(
+                 [block],
+                 source(live_ref, %{
+                   "paper-link-ref-field" => field,
+                   "paper-link-ref-value" => value
+                 })
+               )
+
+      assert updated[field] == value
+      assert Map.delete(updated, field) === Map.delete(live_ref, field)
+    end
+
+    assert {:error, :paper_link_reference_copy_unavailable} =
+             Blocks.paper_link_reference_card_admission(paper_links([live_ref, "target"]), 0)
+  end
+
+  test "meta and reason ride outside the identity guard like the other copy fields" do
+    ref = authored_ref(%{"meta" => "74 changes", "reason" => "Why"})
+    guard = Blocks.paper_link_ref_guard(ref)
+
+    assert Blocks.paper_link_ref_guard(Map.put(ref, "meta", "75 changes")) === guard
+    assert Blocks.paper_link_ref_guard(Map.delete(ref, "reason")) === guard
   end
 
   test "blank deletes only the selected field and exact no-op returns an empty patch" do
@@ -189,7 +251,7 @@ defmodule BarkparkWeb.Studio.PaperEditor.PaperLinksReferenceCopyPatchTest do
       {paper_links([first]), Map.put(base, "paper-link-ref-index", "00")},
       {paper_links([first]), Map.put(base, "paper-link-ref-index", "1")},
       {paper_links([first]), Map.put(base, "paper-link-ref-slug", "other")},
-      {paper_links([first]), Map.put(base, "paper-link-ref-field", "eyebrow")},
+      {paper_links([first]), Map.put(base, "paper-link-ref-field", "slug")},
       {paper_links([first]), Map.put(base, "paper-link-ref-value", 42)},
       {paper_links([first]), Map.put(base, "extra", "forged")},
       {paper_links([Map.put(first, "prefer_authored_copy", false)]), base},

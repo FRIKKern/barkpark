@@ -26,7 +26,13 @@ defmodule BarkparkWeb.Studio.StudioBetaPaperLinksHeaderEditingTest do
     raw = "beta-paper-links-writer-#{System.unique_integer([:positive])}"
 
     {:ok, _token} =
-      Auth.create_token(raw, "Beta Paper links editing", @dataset, ["read", "write"])
+      Auth.create_token(
+        raw,
+        "Beta Paper links editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
@@ -81,6 +87,55 @@ defmodule BarkparkWeb.Studio.StudioBetaPaperLinksHeaderEditingTest do
            |> LazyHTML.from_fragment()
            |> LazyHTML.query(~s([data-test-id="paper-links-title-editor"] textarea[name="title"]))
            |> LazyHTML.text() == "  Studio heading  "
+  end
+
+  # The reader paints the heading as <h2 style={title_style}> under the paper
+  # surface's h2 rule (weight 400 and h2 tracking in the article palette). The
+  # editable heading must carry that rule, not a hard-coded bold: the August
+  # Chronicle's related-paper headings painted 700 in Edit, 400 in View.
+  test "the editable heading carries the reader's h2 typography, never a forced bold",
+       %{conn: conn} do
+    for layout <- [nil, "chapters"] do
+      block =
+        %{
+          "id" => "related",
+          "type" => "paper-links",
+          "title" => "Worth opening next",
+          "refs" => ["legacy-paper"]
+        }
+        |> then(&if(layout, do: Map.put(&1, "layout", layout), else: &1))
+
+      doc = create_document!([block])
+      {:ok, view, _html} = live(conn, studio_path(doc.doc_id))
+      view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+
+      [style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(".bp-paper-links-title-owner")
+        |> LazyHTML.attribute("style")
+
+      refute style =~ "font-weight:bold", "layout #{inspect(layout)}: #{style}"
+      assert style =~ "font-weight:var(--bp-h2-weight)"
+      assert style =~ "letter-spacing:var(--bp-h2-tracking)"
+      assert style =~ "font-family:var(--paper-font-serif)"
+      # the layout's own declarations come AFTER the h2 rule, so they still win
+      [h2_rule, layout_rule] = String.split(style, "text-wrap:balance;", parts: 2)
+      assert h2_rule =~ "font-weight"
+      assert layout_rule =~ "font-size"
+
+      # The resting paint sits inside a real <h2>, which the surface h2 rule
+      # would re-track; it must inherit the owner's (layout-winning) tracking.
+      [h2_style] =
+        view
+        |> render()
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(".bp-paper-links-title-heading")
+        |> LazyHTML.attribute("style")
+
+      assert h2_style =~ "letter-spacing:inherit"
+    end
   end
 
   defp create_document!(blocks) do

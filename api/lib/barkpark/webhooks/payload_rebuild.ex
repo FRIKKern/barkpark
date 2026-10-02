@@ -15,7 +15,8 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
       `%Webhook{}` carrying the snapshotted url/secret re-signs the attempt.
       `endpoint_id` / `event_id` are NULL for these.
 
-  Returns `{:ok, webhook, body}`, or `:gone` when the row is no longer recoverable
+  Returns `{:ok, webhook, body}`, `{:disabled, reason}` when the endpoint was
+  disabled by a person (the caller abandons the row), or `:gone` when the row is no longer recoverable
   — a document row whose webhook/event was cascade-deleted, or a media row with a
   malformed/absent snapshot — in which case the caller skips without delivering.
   """
@@ -25,6 +26,19 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   alias Barkpark.Content.MutationEvent
   alias Barkpark.Repo
   alias Barkpark.Webhooks.{Delivery, Dispatcher, Webhook}
+
+  # An endpoint a PERSON disabled (`active: false` with no `auto_disabled_at`
+  # stamp) must never receive a resumed delivery (task-6c6553bcb157856a). Before
+  # this, rebuild only checked that the webhook ROW still existed, so a retry
+  # scheduled before the operator's disable (up to ~45 s, or 300 s under a
+  # Retry-After) and every stuck-delivery re-drive still POSTed to it. The
+  # caller turns `{:disabled, reason}` into a terminal row via
+  # `Webhooks.abandon_delivery/2` so it does not sit `pending` forever. An
+  # AUTO-disabled endpoint is untouched: its half-open probe owns that exit.
+  defp live_endpoint(%Webhook{active: false, auto_disabled_at: nil}),
+    do: {:disabled, "endpoint_disabled: a person disabled this webhook"}
+
+  defp live_endpoint(%Webhook{}), do: :ok
 
   def rebuild(%Delivery{source_kind: "media"} = delivery) do
     case delivery.payload_snapshot do
@@ -54,9 +68,11 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   # StuckDeliverySweeper instead of resuming.
   def rebuild(%Delivery{source_kind: "chat_blocked"} = delivery) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
+         :ok <- live_endpoint(webhook),
          %{"body" => body} when is_binary(body) <- delivery.payload_snapshot do
       {:ok, webhook, body}
     else
+      {:disabled, _reason} = disabled -> disabled
       _ -> :gone
     end
   end
@@ -74,9 +90,13 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   # audit row would abort recovery for the whole cron batch.
   def rebuild(%Delivery{source_kind: "audit"} = delivery) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
+         :ok <- live_endpoint(webhook),
          snapshot when is_map(snapshot) <- delivery.payload_snapshot do
       {:ok, webhook, Jason.encode!(snapshot)}
     else
+      {:disabled, _reason} = disabled ->
+        disabled
+
       _ ->
         Logger.warning(
           "Audit webhook delivery ##{delivery.id} is unrecoverable (webhook deleted or no usable payload_snapshot); skipping"
@@ -103,6 +123,7 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
   # future untyped kind, would abort the whole StuckDeliverySweeper batch).
   def rebuild(%Delivery{event_id: event_id} = delivery) when is_integer(event_id) do
     with %Webhook{} = webhook <- Repo.get(Webhook, delivery.endpoint_id),
+         :ok <- live_endpoint(webhook),
          %MutationEvent{} = event <- Repo.get(MutationEvent, event_id) do
       body =
         Dispatcher.build_payload(
@@ -118,6 +139,7 @@ defmodule Barkpark.Webhooks.PayloadRebuild do
 
       {:ok, webhook, body}
     else
+      {:disabled, _reason} = disabled -> disabled
       nil -> :gone
     end
   end

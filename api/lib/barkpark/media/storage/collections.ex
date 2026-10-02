@@ -108,7 +108,116 @@ defmodule Barkpark.Media.Storage.Collections do
     |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
     |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
     |> restrict_public_read_tier(dataset, opts)
+    |> exclude_shadowed_drafts()
   end
+
+  # ONE ROW PER FOLDER. A share used to be written through `upsert_document/4`,
+  # which writes `drafts.<id>`, so sharing a PUBLISHED folder forked it into a
+  # draft twin (fixed at the write in task-9289f78cfbe3dd3d). Folders forked
+  # before that fix are still in deployed databases, and the index listed both
+  # rows: the sidebar and the "Add to collection" select showed the folder
+  # twice. Read-side heal, no stored-data change: a draft whose published twin
+  # exists in the same tenancy is not listed; the published row stands for the
+  # folder and `pending_drafts/3` flags it when the draft differs. A folder that
+  # is ONLY a draft (never published) is still listed. The page rows and
+  # `count/2` share this predicate, so `total` agrees with the rows.
+  defp exclude_shadowed_drafts(query) do
+    where(
+      query,
+      [d],
+      not fragment(
+        "(? LIKE 'drafts.%' AND EXISTS (SELECT 1 FROM documents p WHERE p.type = ? AND p.dataset = ? AND 'drafts.' || p.doc_id = ? AND p.workspace_id IS NOT DISTINCT FROM ? AND p.project_id IS NOT DISTINCT FROM ?))",
+        d.doc_id,
+        d.type,
+        d.dataset,
+        d.doc_id,
+        d.workspace_id,
+        d.project_id
+      )
+    )
+  end
+
+  @doc """
+  The published folder ids among `docs` whose draft twin carries different
+  title or content — the "draft pending" indicator for the one row `list/2`
+  shows per forked folder. The draft itself stays readable by its own id
+  (`get/3`, `assets/3`), so an author can still see and edit it.
+  """
+  @spec pending_drafts([Document.t()], String.t(), keyword()) :: MapSet.t(String.t())
+  def pending_drafts(docs, dataset, _opts \\ []) when is_list(docs) and is_binary(dataset) do
+    published =
+      for %Document{doc_id: id} = doc <- docs, not draft_id?(id), into: %{}, do: {id, doc}
+
+    case Map.keys(published) do
+      [] ->
+        MapSet.new()
+
+      ids ->
+        draft_ids = Enum.map(ids, &("drafts." <> &1))
+
+        # Tenancy comes from each PUBLISHED row the caller was already allowed
+        # to list (`list/2`): a draft twin counts only when it sits in exactly
+        # that row's workspace + project — the same pairing `list_query/2`
+        # uses to hide it — so no second tenancy envelope is opened here.
+        Document
+        |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
+        |> where([d], d.doc_id in ^draft_ids)
+        |> Repo.all()
+        |> Enum.flat_map(fn draft ->
+          pub = Map.fetch!(published, Content.published_id(draft.doc_id))
+
+          if same_tenancy?(draft, pub) and differs?(draft, pub),
+            do: [pub.doc_id],
+            else: []
+        end)
+        |> MapSet.new()
+    end
+  end
+
+  @doc """
+  The folder a share link SERVES. A link minted on a draft twin before
+  task-9289f78cfbe3dd3d resolves to that draft row, but membership names the
+  folder's published id, so the link served an empty gallery. When the token's
+  row is a draft whose published twin exists in the same tenancy, the share
+  serves the PUBLISHED folder — its metadata and its assets, never the draft's
+  unpublished state. A draft-only folder serves itself, as before.
+  """
+  @spec shared_folder(Document.t(), String.t()) :: Document.t()
+  def shared_folder(%Document{doc_id: doc_id} = token_row, dataset) when is_binary(dataset) do
+    if draft_id?(doc_id) do
+      Document
+      |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
+      |> where([d], d.doc_id == ^Content.published_id(doc_id))
+      |> same_tenancy(token_row)
+      |> Repo.one()
+      |> case do
+        %Document{} = published -> published
+        nil -> token_row
+      end
+    else
+      token_row
+    end
+  end
+
+  defp same_tenancy(query, %Document{workspace_id: nil, project_id: nil}),
+    do: where(query, [d], is_nil(d.workspace_id) and is_nil(d.project_id))
+
+  defp same_tenancy(query, %Document{workspace_id: ws, project_id: nil}),
+    do: where(query, [d], d.workspace_id == ^ws and is_nil(d.project_id))
+
+  defp same_tenancy(query, %Document{workspace_id: nil, project_id: pj}),
+    do: where(query, [d], is_nil(d.workspace_id) and d.project_id == ^pj)
+
+  defp same_tenancy(query, %Document{workspace_id: ws, project_id: pj}),
+    do: where(query, [d], d.workspace_id == ^ws and d.project_id == ^pj)
+
+  defp same_tenancy?(%Document{} = a, %Document{} = b),
+    do: a.workspace_id == b.workspace_id and a.project_id == b.project_id
+
+  defp draft_id?(id), do: String.starts_with?(id, "drafts.")
+
+  defp differs?(%Document{} = draft, %Document{} = published),
+    do: draft.title != published.title or (draft.content || %{}) != (published.content || %{})
 
   @doc """
   Fetch a collection document by id (workspace-scoped via opts).
@@ -183,7 +292,18 @@ defmodule Barkpark.Media.Storage.Collections do
 
   @doc "Render a collection for API responses."
   @spec render(Document.t()) :: map()
-  def render(%Document{} = doc) do
+  def render(%Document{} = doc), do: render(doc, false)
+
+  @doc """
+  `render/1` plus the draft-pending indicator `list/2`'s one-row-per-folder
+  index carries: `draftPending: true` and the twin's `draftId` when the folder
+  has an unpublished draft that differs (`pending_drafts/3`).
+  """
+  @spec render(Document.t(), boolean()) :: map()
+  def render(%Document{} = doc, true),
+    do: doc |> render(false) |> Map.merge(%{draftPending: true, draftId: "drafts." <> doc.doc_id})
+
+  def render(%Document{} = doc, false) do
     content = doc.content || %{}
 
     %{
@@ -363,7 +483,7 @@ defmodule Barkpark.Media.Storage.Collections do
       @asset_type,
       attrs,
       dataset,
-      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+      [source: :api] ++ MediaFile.scope_opts(file)
     )
   end
 
@@ -393,7 +513,7 @@ defmodule Barkpark.Media.Storage.Collections do
       @asset_type,
       attrs,
       dataset,
-      [source: :api] ++ Barkpark.Plugins.Media.Assets.file_scope_opts(file)
+      [source: :api] ++ MediaFile.scope_opts(file)
     )
   end
 

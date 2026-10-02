@@ -458,11 +458,75 @@ func (m model) getFieldValue(fieldName string) string {
 	case "status":
 		return m.selectedDoc.Status
 	default:
-		if m.selectedDoc.Values != nil {
-			return m.selectedDoc.Values[fieldName]
+		if v, ok := m.selectedDoc.Values[fieldName]; ok {
+			return v
+		}
+		// Values deliberately skips the envelope's reserved keys (apiclient
+		// envelopeMetaKeys: body, blocks, content, …) because on a paper they
+		// carry structured blocks. But a schema may declare its OWN scalar field
+		// under one of those names — `body: text` on a post is the common case —
+		// and then the stored string never reached the editor: the TUI showed
+		// "Enter Body..." over a body that said "x" (stranger walk, 2026-09-30).
+		// A scalar string at that key IS the field's value; anything else
+		// (an array of blocks, an object) is not a string and stays "".
+		var s string
+		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &s) == nil {
+			return s
+		}
+		// A reference stored Sanity-style — {"_ref": id, "_type": "reference"},
+		// the shape the API accepts and ?expand resolves, and what both
+		// create-barkpark-app starters seed — is an object, so it never reaches
+		// Values either. The picker read "" and showed "Select ..." over a
+		// document that HAS an author (stranger walk, 2026-09-30). The id it
+		// names is the field's value, exactly as a bare-id reference reads.
+		var ref struct {
+			Ref string `json:"_ref"`
+		}
+		if raw, ok := m.selectedDoc.Extra[fieldName]; ok && json.Unmarshal(raw, &ref) == nil && ref.Ref != "" {
+			return ref.Ref
+		}
+		// A slug stored Sanity-style — {"current": "…"}, what both starters'
+		// seeds write — read as EMPTY, so the field ghosted a title-derived
+		// slug and enter→enter overwrote the real one (stranger walk,
+		// 2026-10-01). Its `current` is the field's value; saveDocument writes
+		// it back in the same shape (slugObjectFor). Slug fields only: another
+		// object that happens to carry a `current` key is not a slug.
+		if f := m.editorField(fieldName); f != nil && f.Type == FieldSlug {
+			if cur, ok := slugObjectCurrent(m.selectedDoc.Extra[fieldName]); ok {
+				return cur
+			}
 		}
 	}
 	return ""
+}
+
+// slugObjectCurrent returns the `current` of a slug stored as an object, and
+// ok=false for any other shape (a string, null, absent, or an object without a
+// string `current`).
+func slugObjectCurrent(raw json.RawMessage) (string, bool) {
+	var obj map[string]json.RawMessage
+	if len(raw) == 0 || json.Unmarshal(raw, &obj) != nil || obj == nil {
+		return "", false
+	}
+	var cur string
+	if c, ok := obj["current"]; !ok || json.Unmarshal(c, &cur) != nil {
+		return "", false
+	}
+	return cur, true
+}
+
+// slugObjectFor rebuilds a slug that was stored as an object with its new
+// `current`, keeping every other key (e.g. `_type: "slug"`) as it was; ok=false
+// when the stored value was not an object slug, so the caller keeps the string.
+func slugObjectFor(raw json.RawMessage, current string) (map[string]json.RawMessage, bool) {
+	if _, ok := slugObjectCurrent(raw); !ok {
+		return nil, false
+	}
+	var obj map[string]json.RawMessage
+	_ = json.Unmarshal(raw, &obj)
+	b, _ := json.Marshal(current)
+	obj["current"] = b
+	return obj, true
 }
 
 // applyDirtyToDoc updates the in-memory doc with dirty values for display.

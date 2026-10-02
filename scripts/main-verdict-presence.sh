@@ -267,6 +267,27 @@ read_workflow_runs() {
   ' <<<"$body"
 }
 
+# ── the full-oid gate (task-0a44c3bc96baa8cc) ────────────────────────────────
+# `repos/<r>/actions/runs?head_sha=` matches the FULL 40-character oid ONLY.
+# Handed an abbreviation it returns HTTP 200 with an EMPTY workflow_runs list —
+# well-formed, so no transport or shape guard fires — and the caller then reads
+# "no runs on this head" off a query the endpoint simply refused to match. That
+# is the failed-read-equals-zero class; it was MEASURED on main-gate-watch.sh,
+# where `--sha 769c39bd6` said MISSING/exit 1 in the same minute the full oid
+# said WAITING/exit 2. Widen here, before the feed is queried, or refuse.
+# Prints the 40-character oid, or the single token UNRESOLVED.
+full_oid() {
+  local sha="$1" full
+  case "$sha" in
+    ""|*[!0-9a-fA-F]*) echo "UNRESOLVED"; return 0 ;;
+  esac
+  if [ "${#sha}" -eq 40 ]; then printf '%s\n' "$sha" | tr 'A-F' 'a-f'; return 0; fi
+  [ "${#sha}" -ge 4 ] || { echo "UNRESOLVED"; return 0; }
+  full="$(git -C "$REPO_ROOT" rev-parse --verify --quiet "${sha}^{commit}" 2>/dev/null)"
+  [ "${#full}" -eq 40 ] || full="$(gh api "repos/${REPO_OVERRIDE:-$(spec_repo)}/commits/$sha" 2>/dev/null | jq -r '.sha // ""' 2>/dev/null)"
+  if [ "${#full}" -eq 40 ]; then printf '%s\n' "$full"; else echo "UNRESOLVED"; fi
+}
+
 resolve_tip_sha() {
   local repo branch
   repo="${REPO_OVERRIDE:-$(spec_repo)}"
@@ -353,6 +374,24 @@ main() {
   if [ -z "$sha" ]; then
     red "CONFIGURATION FAULT — could not resolve the tip sha of ${BRANCH_OVERRIDE:-$(spec_branch)}."
     return 3
+  fi
+
+  # Widen before ANY head_sha= query. With --runs-file the feed is a recorded
+  # payload and no query is issued, so the gate bites exactly where the endpoint
+  # does. See full_oid above.
+  if [ -z "$RUNS_FILE" ]; then
+    local full; full="$(full_oid "$sha")"
+    if [ "$full" = "UNRESOLVED" ]; then
+      red "CONFIGURATION FAULT — the sha argument '$sha' is not a full 40-character commit oid and could not be widened to one."
+      red "repos/<repo>/actions/runs?head_sha= matches the FULL oid only: an abbreviation returns an EMPTY run list at"
+      red "HTTP 200, and this instrument would then report 'no verdict' on a tip whose runs it never actually asked for."
+      red "Pass the full oid (git rev-parse <ref>). This run FAILS rather than answering off a query it could not satisfy."
+      return 3
+    fi
+    if [ "$full" != "$sha" ]; then
+      say "  resolved the sha argument '$sha' to the full oid $full (the run feed matches the full oid only)"
+      sha="$full"
+    fi
   fi
 
   local runs

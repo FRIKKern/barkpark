@@ -454,11 +454,18 @@ func checkNoRunningServer(baseURL string, plan SetupPlan) error {
 
 // barkparkAnswering reports whether something that LOOKS like Barkpark answers
 // at baseURL: a 2xx JSON body on /v1/capabilities (the same endpoint
-// waitServerUp gates on) or on /api/schemas. A connection refused, a non-2xx,
+// waitServerUp gates on) or on /status.json. A connection refused, a non-2xx,
 // or a non-JSON body all read as "no server".
+//
+// The fallback is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, so after removal an OLDER running
+// server (one that predates /v1/capabilities) would read as "no server" and
+// `bp setup --target local` would run its destructive step into a live DB.
+// /status.json answers a JSON object, so the `{`/`[` body shape still holds.
 func barkparkAnswering(baseURL string) bool {
 	client := &http.Client{Timeout: 2 * time.Second}
-	for _, path := range []string{"/v1/capabilities", "/api/schemas"} {
+	for _, path := range []string{"/v1/capabilities", "/status.json"} {
 		resp, err := client.Get(baseURL + path)
 		if err != nil {
 			continue
@@ -549,7 +556,10 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 		if profile == ProfileClean {
 			seedCmd += " -e BARKPARK_SEED_ADMIN_TOKEN=****"
 			if adminToken != "" {
-				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN="+adminToken)
+				// NAME only: `docker compose exec -e NAME` takes the value from the
+				// docker client's own environment (the step's Env below), so the
+				// admin token never appears in a process command line (ps).
+				seedArgv = append(seedArgv, "-e", "BARKPARK_SEED_ADMIN_TOKEN")
 			}
 		}
 		seedArgv = append(seedArgv, "api", "mix", "ecto.reset")
@@ -574,6 +584,7 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 				Cmd:   seedCmd,
 				Argv:  seedArgv,
 				Dir:   lc.root,
+				Env:   seedEnv, // the docker client reads BARKPARK_SEED_ADMIN_TOKEN from here
 			}, MapErr: wrapEctoResetErr},
 			localStep{
 				step: step{Title: "wait for the API to answer on " + localServerURL},
@@ -630,17 +641,38 @@ func localSteps(plan SetupPlan, lc localContext, envValue string, envSet bool, a
 	)
 }
 
+// openPhxLog opens the dev server's log for append, owner-only: the log carries
+// request logs and any error that echoes parameters, and the server runs with the
+// setup's seed environment. Directory 0700, file 0600 — and an existing file or
+// directory left looser by an older bp is tightened (OpenFile's mode applies only
+// on create).
+func openPhxLog(logPath string) (*os.File, error) {
+	dir := filepath.Dir(logPath)
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("create %s: %w", dir, err)
+	}
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return nil, fmt.Errorf("chmod %s: %w", dir, err)
+	}
+	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
+	if err != nil {
+		return nil, fmt.Errorf("open phx log %s: %w", logPath, err)
+	}
+	if err := f.Chmod(0o600); err != nil {
+		f.Close()
+		return nil, fmt.Errorf("chmod phx log %s: %w", logPath, err)
+	}
+	return f, nil
+}
+
 // startPhoenixBackground starts `mix phx.server` detached (own session, output
 // to ~/.barkpark/phx.log) so it survives bp exiting, and returns immediately —
 // waitServerUp gates the connect chain on the server actually answering.
 func startPhoenixBackground(w writerLike, apiDir string, env []string) error {
 	logPath := phxLogPath()
-	if err := os.MkdirAll(filepath.Dir(logPath), 0o755); err != nil {
-		return fmt.Errorf("create %s: %w", filepath.Dir(logPath), err)
-	}
-	f, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
+	f, err := openPhxLog(logPath)
 	if err != nil {
-		return fmt.Errorf("open phx log %s: %w", logPath, err)
+		return err
 	}
 	defer f.Close()
 

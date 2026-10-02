@@ -77,7 +77,14 @@ defmodule Barkpark.SheetsM1ProofTest do
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
     Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
-    Barkpark.Auth.create_token(@write_token, "m1-proof", @dataset, ["read", "write"])
+
+    Barkpark.Auth.create_token(
+      @write_token,
+      "m1-proof",
+      @dataset,
+      ["read", "write"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     stop_all_sessions()
 
@@ -305,7 +312,14 @@ defmodule Barkpark.SheetsM1ProofTest do
     # ListenController subscribes documents:* and forwards only
     # {:document_changed, …}). Dual-subscribe to prove the topic split live.
     :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, Session.topic(@sheet_id, @dataset, nil))
-    :ok = Phoenix.PubSub.subscribe(Barkpark.PubSub, "documents:#{@dataset}")
+    # The sheet is written by a flat token → Default workspace, so its
+    # document-list frames ride the Default workspace's keyed topic (the bare
+    # `documents:<dataset>` topic is the shared layer's only).
+    :ok =
+      Barkpark.Content.Broadcast.subscribe_documents(
+        @dataset,
+        Barkpark.Tenancy.get_default_workspace().id
+      )
 
     # 3 — ACTORS: two concurrent HTTP clients, interleaved batches, shared D1.
     [receipts_a, receipts_b] =

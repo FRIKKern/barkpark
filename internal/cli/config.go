@@ -36,6 +36,12 @@ type Config struct {
 	Dataset     string `json:"dataset,omitempty"`
 	Output      string `json:"output,omitempty"`
 
+	// Session is the config binding of the session-doc header: the slug of the
+	// type:session document a task close / paper publish logs to, below
+	// --session and BARKPARK_SESSION (session_doc_header.go). A pointer, not a
+	// credential — MarshalJSON leaves it unredacted.
+	Session string `json:"session,omitempty"`
+
 	// Theme is the persisted theme IDENTITY the CLI/TUI renders with (the emitted
 	// skin — "evergreen" today). It is ORTHOGONAL to light/dark MODE (the --theme
 	// flag still selects mode this wave, D30). Empty → the evergreen default.
@@ -366,6 +372,12 @@ func SaveConfig(c *Config) error {
 	}
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fmt.Errorf("mkdir config dir %s: %w", dir, err)
+	}
+	// MkdirAll is a no-op on an existing directory, and other writers (the cmux
+	// hook's <config>/barkpark/cmux) may have created it 0755 first: tighten it
+	// before the token file lands in it.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		return fmt.Errorf("chmod config dir %s: %w", dir, err)
 	}
 	path := filepath.Join(dir, "config.json")
 	// Marshal through configPersist (which has NO MarshalJSON) so the persisted

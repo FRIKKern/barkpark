@@ -1,0 +1,406 @@
+{
+ "measurement": "spd-w18-plus-creates-without-navigating c0 \u2014 BOTH desk steps (Structure row select, and the \"+\") across 10 consecutive COLD runs",
+ "task": "spd-w18-plus-creates-without-navigating",
+ "criterion": "c0 \u2014 Both desk steps (Structure row select, and the \"+\") land on a SINGLE press across 10 consecutive cold runs, and the per-step latencies are quoted.",
+ "taken_utc": "2026-09-22T05:55:49Z..2026-09-22T06:21:47Z",
+ "host": "https://guerrilla.barkpark.cloud",
+ "dataset": "production",
+ "served_sha": "e02e4296d",
+ "served_sha_note": "the harness's own PRE/POST served-commit stamp; pre == post on all 10 runs, and the SAME sha on every run, so no deploy landed mid-measurement. NOT the sibling row's 1b3856eed \u2014 a deploy landed on guerrilla at 2026-09-22T04:44Z.",
+ "viewport": "headless Chrome --headless=new, --window-size=1500,1000 as journey.mjs passes it; Chrome/153.0.8010.53, node v22.22.0, darwin arm64",
+ "instrument": {
+  "path": "tooling/studio-journey/journey.mjs",
+  "invocation": "TMPDIR=<fresh empty dir> node tooling/studio-journey/journey.mjs --report --json --legs a --out run<N>.json",
+  "reused_not_rebuilt": "the harness shipped by PR #16603 (41de602a0). Nothing was built for this criterion. The sibling row spd-w18-desk-click-latency measured the #item-paper half of this with the same instrument (PR #19755, 38c4dfa32); this adds the \"+\" half and requires BOTH.",
+  "reading": "the CREATE beat reports, per step, the latency, the ATTEMPT COUNT from Page.clickUntil, and the three-valued wire verdict off Chrome Network.webSocketFrameSent."
+ },
+ "result": {
+  "runs": 10,
+  "structure_row_single_press": "10/10",
+  "plus_single_press": "10/10",
+  "both_steps_single_press": "10/10",
+  "structure_row_latency_s": {
+   "values": [
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.5,
+    0.6,
+    0.9,
+    0.9,
+    1.1
+   ],
+   "min": 0.5,
+   "median": 0.5,
+   "mean": 0.65,
+   "max": 1.1
+  },
+  "plus_latency_s": {
+   "values": [
+    0.8,
+    0.8,
+    0.8,
+    1.2,
+    1.2,
+    1.4,
+    1.5,
+    1.5,
+    1.9,
+    3.3
+   ],
+   "min": 0.8,
+   "median": 1.3,
+   "mean": 1.44,
+   "max": 3.3
+  },
+  "wire": "SENT with exactly 1 \"type\":\"click\" frame for EACH step on EVERY run (20 steps, 20 frames)",
+  "retries": 0
+ },
+ "controls": [
+  {
+   "name": "COLD is observed, not asserted",
+   "how": "every run got its own directory, created empty by the driver and verified entries_before=0 before launch (recorded per run below). A separately watched 11th run polled the directory at 2 Hz DURING the run.",
+   "observation": "the profile appeared at t=0.0s as studio-journey-tighxU with NO Default/Cookies file present and 0 cache files; the cache climbed 0 -> 31 (t=0.6s) -> 82 (t=1.2s) -> 89 (t=3.5s); dir_entries returned to 0 at t=25.4s after teardown.",
+   "corroboration": "journey.mjs mints a fresh single-use 60s login ticket per run and redeems it; the admin discriminator ([phx-click=shares-open] == 1) passed on every run, so the session cookie is that run's own and not one carried across.",
+   "watched_run": {
+    "structure_row_s": 0.5,
+    "structure_row_presses": 1,
+    "plus_s": 1.2,
+    "plus_presses": 1,
+    "leg_a": "7/7 PASS",
+    "self_clean": "deleted 1/1 [drafts.paper-2e82de645fce2221]"
+   }
+  },
+  {
+   "name": "NO-RETRY \u2014 an absence is never caught by inspection",
+   "mutation": "M-RETRY-PLUS, applied to the OFFLINE self-test fixture's new-document handler: `if ((window.__mSwallowFirstPlus = (window.__mSwallowFirstPlus||0)+1) === 1) return;` so the FIRST \"+\" press is swallowed.",
+   "before": "the + navigates to a NEW document id \u2014 paper-fx2 in 0.2s after 1 press(es)",
+   "after": "the + navigates to a NEW document id \u2014 paper-fx2 in 5.2s after 2 press(es)",
+   "reads": "both the attempt counter and the latency move, on the same clickUntil path that reports the live numbers, so \"1 press(es)\" is a reading and not a constant.",
+   "reverted": "yes \u2014 `git checkout --` then `cmp` against a pre-mutation copy taken before the edit: identical. The mutation does not ship."
+  },
+  {
+   "name": "CAN-IT-FAIL \u2014 a green is only a result if it could have gone red",
+   "offline": "self-test executes 134 assertions (floor 40) and exits good=0, rot=1.",
+   "live": "ONE evaluate_script on the deployed desk \u2014 armed and read in the SAME evaluation, never split across two calls \u2014 set data-phx-ref-src on the \"+\" itself, pressed, polled 8s; then removed the attribute and pressed THE SAME BUTTON ON THE SAME PAGE.",
+   "arm_1": {
+    "data_phx_ref_src": "w6-canitfail",
+    "answered": false,
+    "path_after": "/w/default/p/default/d/production/studio/paper",
+    "waited_s": 8.064,
+    "verdict": "SWALLOWED"
+   },
+   "arm_2": {
+    "data_phx_ref_src": null,
+    "answered": true,
+    "doc_id": "paper-8be087501234ae2d",
+    "waited_s": 1.213,
+    "verdict": "NAVIGATED"
+   },
+   "side_finding_for_c2": "the SWALLOWED ARM 1 press created NOTHING. A drafts-perspective query ordered by _createdAt:desc immediately afterwards shows exactly one new document in that window \u2014 ARM 2's. On e02e4296d the client-side discard is a pure discard, not a silent create."
+  }
+ ],
+ "verdict": {
+  "c0": "the criterion's measurement is satisfied on e02e4296d: 10/10 consecutive cold runs landed BOTH desk steps on a single press, latencies quoted above.",
+  "what_this_does_not_say": "this is a MEASURE case, not a FIX case. Nothing was changed to make it pass. The row's history (6.1s / 15.0s / 20.0s, 2-3 presses, no flash, presses that created drafts without navigating, measured on e4ed31a10 / 4f046cce1 / 25e69158a in July) is not reproducible on e02e4296d. The defect was not fixed by this work; it is not present on the build now served.",
+  "honest_reds": [
+   "run 6's PERSIST beat FAILED \u2014 'Autosave did not reach the server' after 20.1s, 44.0s wall against ~25s typical. That beat is downstream of CREATE; run 6's two desk steps still landed on one press each (1.1s / 3.3s).",
+   "guerrilla's /status.json reported status=degraded (commit e02e4296d) throughout.",
+   "the measuring laptop was at load average 35 from sibling lanes. Two runs hung in Chrome's CDP attach for over 9 minutes and were killed and redone serially under a 120s timeout; a further set of runs was quarantined for having raced a second driver loop. Those are ENVIRONMENT, not product, and none of them contributes a number above."
+  ]
+ },
+ "runs": [
+  {
+   "run": 1,
+   "started_utc": "2026-09-22T05:55:49Z",
+   "ended_utc": "2026-09-22T05:56:12Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 0.8,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-14b4be7a2a2a81ff"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-14b4be7a2a2a81ff"
+   ]
+  },
+  {
+   "run": 2,
+   "started_utc": "2026-09-22T05:56:12Z",
+   "ended_utc": "2026-09-22T05:56:38Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.6,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 0.8,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-6423ac09b7e1f37e"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-6423ac09b7e1f37e"
+   ]
+  },
+  {
+   "run": 3,
+   "started_utc": "2026-09-22T05:56:38Z",
+   "ended_utc": "2026-09-22T05:57:03Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.9,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.9,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-fe619dc1afbd7a11"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-fe619dc1afbd7a11"
+   ]
+  },
+  {
+   "run": 4,
+   "started_utc": "2026-09-22T05:57:03Z",
+   "ended_utc": "2026-09-22T05:57:28Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 0.8,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-e01659b3fa71fa91"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-e01659b3fa71fa91"
+   ]
+  },
+  {
+   "run": 5,
+   "started_utc": "2026-09-22T06:18:47Z",
+   "ended_utc": "2026-09-22T06:19:15Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 1,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.4,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-7e3ef7797863701d"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-7e3ef7797863701d"
+   ]
+  },
+  {
+   "run": 6,
+   "started_utc": "2026-09-22T06:19:15Z",
+   "ended_utc": "2026-09-22T06:20:04Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 1.1,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 3.3,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-a4bff03253bc2495"
+   },
+   "leg_a_7_of_7": false,
+   "self_clean_deleted": [
+    "drafts.paper-a4bff03253bc2495"
+   ]
+  },
+  {
+   "run": 7,
+   "started_utc": "2026-09-22T06:20:04Z",
+   "ended_utc": "2026-09-22T06:20:30Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.2,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-811ce6797e1f8c59"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-811ce6797e1f8c59"
+   ]
+  },
+  {
+   "run": 8,
+   "started_utc": "2026-09-22T06:20:30Z",
+   "ended_utc": "2026-09-22T06:20:57Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-c350d2263660a299"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-c350d2263660a299"
+   ]
+  },
+  {
+   "run": 9,
+   "started_utc": "2026-09-22T06:20:57Z",
+   "ended_utc": "2026-09-22T06:21:23Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 1,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.9,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-6e92009da8dd3863"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-6e92009da8dd3863"
+   ]
+  },
+  {
+   "run": 10,
+   "started_utc": "2026-09-22T06:21:23Z",
+   "ended_utc": "2026-09-22T06:21:47Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir_entries_after": 0,
+   "served_sha_pre": "e02e4296d",
+   "served_sha_post": "e02e4296d",
+   "served_sha_matched": true,
+   "step_structure_row": {
+    "selector": "#item-paper",
+    "latency_s": 0.5,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1
+   },
+   "step_plus": {
+    "selector": "button.pane-add-btn[phx-click=\"new-document\"][phx-value-type=\"paper\"]",
+    "latency_s": 1.2,
+    "presses": 1,
+    "wire_verdict": "SENT",
+    "click_frames": 1,
+    "created_doc_id": "paper-1072e81973890057"
+   },
+   "leg_a_7_of_7": true,
+   "self_clean_deleted": [
+    "drafts.paper-1072e81973890057"
+   ]
+  }
+ ]
+}

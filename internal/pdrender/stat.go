@@ -3,6 +3,8 @@ package pdrender
 import (
 	"math"
 	"strings"
+
+	"github.com/charmbracelet/lipgloss"
 )
 
 // ── stat / KPI block ─────────────────────────────────────────────────────────
@@ -15,7 +17,7 @@ import (
 //
 // CONTRACT (ratified, pbp-tui-creative-slate §3):
 //
-//	stat:  {value, max?, denom?, label?, spark?:[n…]}
+//	stat:  {value, max?, denom?, unit?, label?, body?, verdict?, spark?:[n…], source?}
 //
 //	- value  the headline datum. Rendered as a DISPLAY string (the slate stamps
 //	         pre-formatted values like "1.24M", "$42.10", "73%"), so it is read
@@ -31,9 +33,21 @@ import (
 //	         ctx.Theme.Dim (never Faint); absent/blank → the value stands alone,
 //	         BYTE-IDENTICAL to before. Shared by the singular `stat` and every
 //	         `stats`-grid cell (one statCell body).
+//	- unit   optional dim qualifier after value/denom, separated by a space.
 //	- label  optional caption under the number/bar (dim).
+//	- body   optional dim prose after the label, wrapped without truncation.
+//	- verdict optional JUDGEMENT word, "loss" or "peace". Present and in
+//	         vocabulary → the VALUE DIGITS take the Theme's verdict ink; label,
+//	         body, bar and sparkline keep the page voice, so the number carries
+//	         the judgement and the cell does not become a coloured box. Absent or
+//	         off-vocabulary → BYTE-IDENTICAL to before. MIRROR of data_viz.ex
+//	         stat_html/1 and js/.../dataviz.ts, which stamp
+//	         .bp-stat__v--loss/--peace on exactly the same element: three render
+//	         engines, one vocabulary.
 //	- spark  optional numeric array → an eighth-block sparkline row beneath the
 //	         stat, through the reusable primitive.
+//	- source valid datum provenance, rendered outside the cell as a kilde footer.
+//	         The grid aggregates refs once, with sourceDefault as fallback.
 //
 // The KPI GRID is the plural `stats` block (below): N stat cells laid out N-up
 // through the SHARED Flex solver / joinColumns — zero new width math. Import
@@ -144,6 +158,28 @@ func parseSpark(m map[string]any) []float64 {
 	return out
 }
 
+// ── the verdict ink ──────────────────────────────────────────────────────────
+
+// verdictInk returns `base` re-inked with the Theme's verdict colour when the
+// cell's `verdict` key is in vocabulary ("loss"/"peace"), and `base` untouched
+// otherwise. Only the FOREGROUND moves — weight/bold and every other attribute
+// of the base style survive, so the big-number stays bold and the bullet-bar
+// value stays plain-weight exactly as before.
+//
+// Two ways this is a no-op, both deliberate: a Theme built by a caller that
+// predates the field (Verdict == nil), and an absent/off-vocabulary word. Both
+// return `base`, so an unverdicted stat renders byte-for-byte as it did.
+func verdictInk(m map[string]any, ctx RenderCtx, base lipgloss.Style) lipgloss.Style {
+	if ctx.Theme.Verdict == nil {
+		return base
+	}
+	ink, ok := ctx.Theme.Verdict(strings.TrimSpace(attrStr(m, "verdict")))
+	if !ok {
+		return base
+	}
+	return base.Foreground(ink.GetForeground())
+}
+
 // ── the single stat cell ─────────────────────────────────────────────────────
 
 // statRenderer draws ONE KPI cell. It is the unit the plural `stats` grid lays
@@ -152,12 +188,17 @@ func parseSpark(m map[string]any) []float64 {
 type statRenderer struct{}
 
 func (statRenderer) Render(b Block, ctx RenderCtx) []string {
-	return statCell(b.Attrs, ctx)
+	out := statCell(b.Attrs, ctx)
+	labels := figureSourceLabels([]map[string]any{b.Attrs}, "", func(m map[string]any) bool {
+		return strings.TrimSpace(attrStr(m, "value")) != ""
+	})
+	return append(out, kildeLines(labels, ctx, ctx.Width)...)
 }
 
 // statCell is the shared body: it renders a stat's attrs into lines at ctx.Width.
 // Lifted out so the plural grid re-renders each item at its resolved cell width
 // through exactly the same path — the singular and grid renders never diverge.
+// Cells never emit provenance; the enclosing renderer owns the figure footer.
 func statCell(m map[string]any, ctx RenderCtx) []string {
 	// Degrade: no `value` key at all → the honest dim placeholder (mirrors the
 	// task widgets' resolvedKeyPresent). An explicit empty-string value is still a
@@ -169,6 +210,8 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 	value := sanitizeText(strings.TrimSpace(attrStr(m, "value")))
 	label := sanitizeText(strings.TrimSpace(attrStr(m, "label")))
 	denom := sanitizeText(strings.TrimSpace(attrStr(m, "denom")))
+	unit := sanitizeText(strings.TrimSpace(attrStr(m, "unit")))
+	body := sanitizeText(strings.TrimSpace(attrStr(m, "body")))
 	w := clampWidth(ctx.Width)
 
 	// The KPI denominator: a dim "/<denom>" that rides beside the value so the
@@ -182,6 +225,12 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 		denomSuffix = ctx.Theme.Dim.Render(denomPlain)
 	}
 
+	unitPlain, unitSuffix := "", ""
+	if unit != "" {
+		unitPlain = " " + unit
+		unitSuffix = ctx.Theme.Dim.Render(unitPlain)
+	}
+
 	var out []string
 
 	// Mode branch: `max` present and positive → bullet-bar; else big-number.
@@ -192,23 +241,23 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 			if v, ok := toFloat(m["value"]); ok {
 				proportion = v / maxVal
 			}
-			// Reserve room for the trailing value label (plus the dim denom, if
+			// Reserve room for the trailing value label (plus dim denom/unit, if
 			// any); the bar fills the rest of the cell. This is a FILL computation
 			// over the cell width the Flex solver already resolved — not an N-up
 			// divide.
 			valuePart := "  " + value
-			barW := w - runeWidth(valuePart+denomPlain)
+			barW := w - runeWidth(valuePart+denomPlain+unitPlain)
 			if barW < 1 {
 				barW = 1
 			}
-			out = append(out, statBar(proportion, barW, ctx)+ctx.Theme.Body.Render(valuePart)+denomSuffix)
+			out = append(out, statBar(proportion, barW, ctx)+verdictInk(m, ctx, ctx.Theme.Body).Render(valuePart)+denomSuffix+unitSuffix)
 		} else {
 			// max present but non-positive → degrade to a plain prominent value.
-			out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix)
+			out = append(out, verdictInk(m, ctx, ctx.Theme.Body.Bold(true)).Render(value)+denomSuffix+unitSuffix)
 		}
 	} else {
 		// Big-number: the value stands alone, prominent.
-		out = append(out, ctx.Theme.Body.Bold(true).Render(value)+denomSuffix)
+		out = append(out, verdictInk(m, ctx, ctx.Theme.Body.Bold(true)).Render(value)+denomSuffix+unitSuffix)
 	}
 
 	// Caption under the number/bar. EVERY wrapped line is emitted — the label is
@@ -218,6 +267,10 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 	// joinColumns pads uneven cell heights already.
 	if label != "" {
 		out = append(out, wrapLines(ctx.Theme.Dim.Render(label), w)...)
+	}
+
+	if body != "" {
+		out = append(out, wrapLines(ctx.Theme.Dim.Render(body), w)...)
 	}
 
 	// Inline trend: the eighth-block sparkline, bounded to the cell width.
@@ -272,6 +325,11 @@ func (statsRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 
+	labels := figureSourceLabels(items, strings.TrimSpace(attrStr(b.Attrs, "sourceDefault")), func(m map[string]any) bool {
+		return strings.TrimSpace(attrStr(m, "value")) != ""
+	})
+	footer := kildeLines(labels, ctx, ctx.Width)
+
 	// Side-by-side path: the shared Flex solver owns the divide + the verdict.
 	// Re-render each cell at the resolved cellW so its label/sparkline bound to the
 	// cell, then Arrange. Falls through to the stack when Measure says narrow, or a
@@ -284,7 +342,7 @@ func (statsRenderer) Render(b Block, ctx RenderCtx) []string {
 			nodes[i] = Node{Lines: statCell(item, cellCtx), Width: cellW, Span: 1}
 		}
 		if DefaultFlex.Fits(nodes) {
-			return DefaultFlex.Arrange(nodes)
+			return append(DefaultFlex.Arrange(nodes), footer...)
 		}
 	}
 
@@ -296,5 +354,5 @@ func (statsRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 		out = append(out, statCell(item, ctx)...)
 	}
-	return out
+	return append(out, footer...)
 }

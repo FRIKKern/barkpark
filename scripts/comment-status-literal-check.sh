@@ -290,12 +290,17 @@ defmodule BadTest do
   end
 end
 EX
-  out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline" \
-        bash "$0" 2>&1 || true)"
-  if grep -q "bad_test.exs" <<<"$out"; then
-    arm "ok" "(a) a NEW own-line site reds, naming bad_test.exs"
+  # THE PROCESS EXIT IS PART OF THE VERDICT (task-92a213f01ca30817). (a), (a2),
+  # (c) and (d) re-exec the whole program but used to grade only its OUTPUT
+  # (`|| true`), so flipping the final `exit "$rc"` to `exit 0` kept every arm
+  # green while CI certified a new site: the RED line still printed. Each now
+  # also asserts the exit code; arm (0) is the removed-plant -> 0 half.
+  rc_a=0; out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline" \
+        bash "$0" 2>&1)" || rc_a=$?
+  if grep -q "bad_test.exs" <<<"$out" && [ "$rc_a" = 1 ]; then
+    arm "ok" "(a) a NEW own-line site reds, naming bad_test.exs, and the PROCESS exits 1"
   else
-    arm "FAIL" "(a) a new site did NOT red — the gate is asleep"
+    arm "FAIL" "(a) a new site did NOT red with exit 1 (rc $rc_a) — the gate is asleep"
   fi
 
   # (a2) a TRAILING comment carrying the same literal must RED too. Without
@@ -309,12 +314,12 @@ defmodule TrailingTest do
   end
 end
 EX
-  out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline" \
-        bash "$0" 2>&1 || true)"
-  if grep -q "trailing_test.exs" <<<"$out"; then
-    arm "ok" "(a2) a TRAILING comment with the same literal reds — the wider scope is real"
+  rc_a2=0; out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline" \
+        bash "$0" 2>&1)" || rc_a2=$?
+  if grep -q "trailing_test.exs" <<<"$out" && [ "$rc_a2" = 1 ]; then
+    arm "ok" "(a2) a TRAILING comment with the same literal reds (exit 1) — the wider scope is real"
   else
-    arm "FAIL" "(a2) a trailing comment was not flagged — the header overclaims the scope"
+    arm "FAIL" "(a2) a trailing comment was not flagged with exit 1 (rc $rc_a2) — the header overclaims the scope"
   fi
   rm -f "$TMP/test/trailing_test.exs"
 
@@ -334,22 +339,22 @@ EX
 
   # (c) a count that FELL below baseline must RED, telling you to lower it.
   awk '/^#/{print; next} NF{printf "%d %s\n", $1 + 4, $2}' "$TMP/baseline2" > "$TMP/baseline3"
-  out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline3" \
-        bash "$0" 2>&1 || true)"
-  if grep -qi "lower the baseline\|ratchet" <<<"$out"; then
+  rc_c=0; out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline3" \
+        bash "$0" 2>&1)" || rc_c=$?
+  if grep -qi "lower the baseline\|ratchet" <<<"$out" && [ "$rc_c" = 1 ]; then
     arm "ok" "(c) a FIXED site reds until the baseline is lowered — the ratchet cannot rust"
   else
-    arm "FAIL" "(c) a fallen count did not demand the baseline be lowered — the ratchet goes stale"
+    arm "FAIL" "(c) a fallen count did not demand the baseline be lowered with exit 1 (rc $rc_c) — the ratchet goes stale"
   fi
 
   # (d) an UNPARSEABLE file must RED by name, not be silently skipped.
   printf 'defmodule Broken do\n  test "x" do\n    assert (((\n' > "$TMP/test/broken_test.exs"
-  out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline2" \
-        bash "$0" 2>&1 || true)"
-  if grep -q "broken_test.exs" <<<"$out"; then
+  rc_d=0; out="$(COMMENT_STATUS_LITERAL_SCAN_FLOOR=1 COMMENT_STATUS_LITERAL_SCANDIR="$TMP/test" COMMENT_STATUS_LITERAL_BASELINE="$TMP/baseline2" \
+        bash "$0" 2>&1)" || rc_d=$?
+  if grep -q "broken_test.exs" <<<"$out" && [ "$rc_d" != 0 ]; then
     arm "ok" "(d) an unparseable file REFUSES by name — never a silent skip"
   else
-    arm "FAIL" "(d) an unparseable file was skipped silently — the scanner reports a tree it never read"
+    arm "FAIL" "(d) an unparseable file was skipped silently or exited 0 (rc $rc_d) — the scanner reports a tree it never read"
   fi
 
   # ---- REAL corpus path, on a scratch copy -------------------------------

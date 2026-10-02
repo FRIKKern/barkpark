@@ -23,7 +23,7 @@ defmodule Barkpark.Content.TombstoneFenceTest do
   to enable.
   """
 
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Repo, Tasks, TenancyFixtures}
   alias Barkpark.Content.Document
@@ -94,6 +94,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
   # ── REFUSAL ARM ONE: a reason with no close landing ────────────────────────
 
   describe "minting a tombstone on a row this write does not close" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a close_reason patched onto an OPEN row is REFUSED, and nothing is written",
          %{scope: scope} do
       id = uniq("tomb-open")
@@ -124,6 +126,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       assert content_of(id, scope)["lifecycle_status"] == "open"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a LIVE CLAIMED row is refused too — cch-w36-s6's exact shape", %{scope: scope} do
       # `open -> in_progress` is illegal for ANY document write (the claim
       # primitive owns it), so the only way to stand where cch-w36-s6 stood is to
@@ -149,6 +153,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       refute Map.has_key?(content_of(id, scope), "close_reason")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a task BORN carrying a tombstone it never earned is refused", %{scope: scope} do
       id = uniq("tomb-birth")
 
@@ -169,6 +175,8 @@ defmodule Barkpark.Content.TombstoneFenceTest do
                )
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a BLANK reason is not a value, in either direction", %{scope: scope} do
       id = uniq("tomb-blank")
       _ = mk_task!(id, scope)
@@ -400,13 +408,17 @@ defmodule Barkpark.Content.TombstoneFenceTest do
       # would let a mint through on whichever status the two disagree about.
       root = Path.join([__DIR__, "..", "..", ".."])
       close_src = File.read!(Path.join(root, "lib/barkpark/tasks/close.ex"))
-      writer_src = File.read!(Path.join(root, "lib/barkpark/content/writer.ex"))
+      # The fence moved to `Barkpark.Tasks.ChangeGuards` (task-d91ccf54d43b9800);
+      # its terminal set moved with it.
+      writer_src = File.read!(Path.join(root, "lib/barkpark/tasks/change_guards.ex"))
 
       close_match = Regex.run(~r/@closed_lifecycle_statuses\s+~w\(([^)]+)\)/, close_src)
       assert close_match, "no @closed_lifecycle_statuses in close.ex — re-aim this tripwire"
 
       writer_match = Regex.run(~r/@terminal_lifecycle_statuses\s+~w\(([^)]+)\)/, writer_src)
-      assert writer_match, "no @terminal_lifecycle_statuses in writer.ex — re-aim this tripwire"
+
+      assert writer_match,
+             "no @terminal_lifecycle_statuses in change_guards.ex — re-aim this tripwire"
 
       [_, close_list] = close_match
       [_, writer_list] = writer_match

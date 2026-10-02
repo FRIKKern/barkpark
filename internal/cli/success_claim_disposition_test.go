@@ -184,6 +184,13 @@ var claimDispositions = []claimDisposition{
 	// carries no class at all, so the post-condition the receipt must switch on is
 	// still the box's raw stdout.
 	{Name: "supportAddRun.success/max-class-degraded", Post: []string{"capacity_stdout"}},
+	// The MAIN'S reading. Both paths are LOAD-BEARING and must not be tidied to
+	// one: arm 3 synthesises a single-axis pair through probeVaryingOnly, so
+	// dropping the status from the composer while it still prints the capacity
+	// (or the reverse) reds exactly one of them. The box is not in the probe at
+	// all — it is held fixed at supportSuccessHost outside it — so there is no
+	// identity path to declare here.
+	{Name: "supportAddRun.success/roster-fact", Post: []string{"status", "capacity.max_class"}},
 	{
 		Name:     "supportAddRun.success",
 		Identity: []string{"ID", "Name"},
@@ -242,6 +249,15 @@ var claimDispositions = []claimDisposition{
 		Name:     "renderSiteSettingsUpdated",
 		Identity: []string{"ID", "Name", "Slug", "Dataset"},
 		Post:     []string{"Theme"},
+	},
+	{
+		// ssw10: the same render probed on the field `--prebuilt-enabled`
+		// changes. Theme joins the IDENTITY here — held byte-identical — so the
+		// only thing that can make the two runs print differently is the stored
+		// opt-in itself.
+		Name:     "renderSiteSettingsUpdated/prebuilt-enabled",
+		Identity: []string{"ID", "Name", "Slug", "Dataset", "Theme"},
+		Post:     []string{"PrebuiltEnabled"},
 	},
 
 	// ── cloud_site_doctor.go — the per-substrate receipt (ssw8) ─────────────

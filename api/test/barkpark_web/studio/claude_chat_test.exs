@@ -7,6 +7,11 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   """
   use ExUnit.Case, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.StudioChat.Provider.Claude.Session, as: ClaudeSession
   alias BarkparkWeb.Studio.ClaudeChat
 
@@ -332,11 +337,14 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       refute "--strict-mcp-config" in args
     end
 
-    test "mcp_config/1 shape: bp mcp serve --tools all + a COMPLETE env block" do
+    test "mcp_config/1 shape: bp mcp serve --tools chat + a COMPLETE env block" do
       config = ClaudeChat.mcp_config("bpcs_secret")
       assert %{"mcpServers" => %{"barkpark" => server}} = config
       assert server["command"] == "bp"
-      assert server["args"] == ["mcp", "serve", "--tools", "all"]
+      # The loopback spawns the CURATED chat toolset, never the ~107-command
+      # --tools all bridge (task-scc-bl-mcp-chat-toolset, charter D64).
+      assert server["args"] == ["mcp", "serve", "--tools", "chat"]
+      refute "all" in server["args"]
       # BOTH url and token pinned: the child bp never falls back to the
       # host's saved credentials (no admin inheritance — D63).
       assert %{"BARKPARK_API_URL" => url, "BARKPARK_API_TOKEN" => "bpcs_secret"} =
@@ -954,6 +962,48 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
     end
 
+    # ── both close sites END the child (task-aa975de15eff4e6b) ───────────────
+    #
+    # Closing the port closes the CLI's stdin and sends it NO signal. A CLI
+    # that ignores EOF (this stub: `exec sleep 30` never reads stdin and never
+    # writes, so it cannot die to SIGPIPE either) survived both close sites.
+    # They now go through `Barkpark.PortReaper.reap/1`; revert either one to a
+    # bare `Port.close/1` and its test reds while the port still reads closed.
+    defp eof_ignoring_port do
+      port =
+        Port.open({:spawn_executable, System.find_executable("bash")}, [
+          :binary,
+          args: ["-c", "exec sleep 30"]
+        ])
+
+      {:os_pid, os_pid} = Port.info(port, :os_pid)
+      on_exit(fn -> Barkpark.Test.OsProcess.kill(os_pid) end)
+      {port, os_pid}
+    end
+
+    test "terminate/2 ENDS the CLI's OS process, not just the port" do
+      {port, os_pid} = eof_ignoring_port()
+
+      assert :ok = ClaudeSession.terminate(:normal, %{port: port})
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "claude CLI #{os_pid} survived terminate/2"
+    end
+
+    test "the buffer-overflow close ENDS the CLI's OS process, not just the port" do
+      {port, os_pid} = eof_ignoring_port()
+      chunk = String.duplicate("x", ClaudeChat.max_buffer_bytes() + 1)
+      state = %{port: port, buffer: "", sink: self(), stderr_path: nil}
+
+      assert {:stop, :normal, %{port: nil}} =
+               ClaudeSession.handle_info({port, {:data, chunk}}, state)
+
+      assert_receive {:claude_chat_error, :buffer_overflow, _tail}, 100
+
+      assert Barkpark.Test.OsProcess.gone_within?(os_pid),
+             "claude CLI #{os_pid} survived the buffer-overflow close"
+    end
+
     # Bounded poll (10ms x rounds) for the capture file's creation.
     defp await_file(_path, 0), do: false
 
@@ -1054,8 +1104,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
         ClaudeChat.start_session(%{sink: self(), session_opts: %{session_id: uuid}})
 
       argv = read_lines(argv_file)
-      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--session-id", uuid])
-      refute "--resume" in argv
+
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--session-id", uuid]),
+             "argv did not carry [\"--session-id\", #{uuid}].\nargv=#{inspect(argv, limit: :infinity)}\n#{writers(argv_file)}"
+
+      refute "--resume" in argv,
+             "argv unexpectedly carried --resume.\nargv=#{inspect(argv, limit: :infinity)}"
 
       ClaudeChat.close(session)
     end
@@ -1072,8 +1126,12 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
         })
 
       argv = read_lines(argv_file)
-      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--resume", uuid])
-      refute "--session-id" in argv
+
+      assert Enum.chunk_every(argv, 2, 1) |> Enum.member?(["--resume", uuid]),
+             "argv did not carry [\"--resume\", #{uuid}].\nargv=#{inspect(argv, limit: :infinity)}\n#{writers(argv_file)}"
+
+      refute "--session-id" in argv,
+             "argv unexpectedly carried --session-id.\nargv=#{inspect(argv, limit: :infinity)}"
 
       ClaudeChat.close(session)
     end
@@ -2019,6 +2077,118 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     end
   end
 
+  # WHICH workspace the loopback credential is minted into. Until this slice the
+  # provider passed no `:workspace_id` at all and let `create_claude_session_token/3`
+  # resolve one — minter's home workspace, then the seeded Default workspace. The
+  # last arm is being removed (api #19345): a minter that can name no workspace is
+  # refused rather than handed hands in a tenant nobody chose. Both of this
+  # provider's mints therefore pass the session's OWN workspace explicitly, and
+  # these tests read the BOUND row, not the provider's intent.
+  describe "the mint binds the SESSION's workspace (tenancy — no Default fallback)" do
+    setup do
+      owner = Ecto.Adapters.SQL.Sandbox.start_owner!(Barkpark.Repo, shared: true)
+      on_exit(fn -> Ecto.Adapters.SQL.Sandbox.stop_owner(owner) end)
+
+      n = System.unique_integer([:positive])
+      home = Barkpark.TenancyFixtures.create_workspace!("chat-mint-home-#{n}")
+      session_ws = Barkpark.TenancyFixtures.create_workspace!("chat-mint-session-#{n}")
+
+      # The minter's HOME workspace is `home` — deliberately NOT the workspace
+      # the chat session runs in, so "bound to the session's workspace" and
+      # "bound to whatever the minter happened to carry" are distinguishable.
+      {:ok, minter} =
+        Barkpark.Auth.create_token(
+          "mint-ws-minter-#{n}",
+          "chat admin",
+          "production",
+          ["read", "write"],
+          home.id
+        )
+
+      {:ok, _seat} =
+        Barkpark.Tenancy.Auth.create_membership(session_ws.id, minter.id, "member", "api_token")
+
+      %{home: home, session_ws: session_ws, minter: minter}
+    end
+
+    test "the SPAWN mint binds the session's workspace, not the minter's home workspace", %{
+      home: home,
+      session_ws: session_ws,
+      minter: minter
+    } do
+      put_chat_config(command: {"cat", []})
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: minter, workspace_id: session_ws.id}
+        })
+
+      assert ClaudeChat.task_hands(session) == :minted
+
+      # The BOUND row, not the provider's intent.
+      assert [minted] = session_tokens(uuid)
+      bound = minted.workspace_id
+      assert bound == session_ws.id
+      # Drop `workspace_id:` from setup_mcp's opts and the mint resolves the
+      # minter's home workspace instead — this is the line that reds.
+      home_id = home.id
+      refute bound == home_id
+
+      close_and_reap(session, uuid)
+    end
+
+    test "a session that can name NO workspace is REFUSED — sentinel env, no row, chat still up" do
+      # The principal the removed Default fallback used to serve: a
+      # workspace-LESS minter that happens to hold a seat in the seeded Default
+      # workspace. Pre-fix the mint resolved Default and SUCCEEDED, giving this
+      # chat task rights in a tenant its session never named.
+      Barkpark.TenancyFixtures.ensure_default_scope!()
+      default_ws = Barkpark.Tenancy.get_default_workspace()
+      assert is_binary(default_ws.id)
+
+      n = System.unique_integer([:positive])
+
+      {:ok, {_raw, unbound}} =
+        Barkpark.Auth.create_personal_access_token("unbound-chat-minter-#{n}", ["read", "write"],
+          role: "admin"
+        )
+
+      assert is_nil(unbound.workspace_id)
+
+      {:ok, _seat} =
+        Barkpark.Tenancy.Auth.create_membership(default_ws.id, unbound.id, "member", "api_token")
+
+      # The pre-fix mint would have been AUTHORIZED in Default — so the refusal
+      # below is the provider's, not a permission accident.
+      assert Barkpark.Tenancy.Auth.authorize(unbound, default_ws.id, :write) == :ok
+
+      file = capture_path("env")
+      put_chat_config(command: env_dump_command(file))
+      uuid = Ecto.UUID.generate()
+
+      {:ok, session} =
+        ClaudeChat.start_session(%{
+          sink: self(),
+          session_opts: %{session_id: uuid, minter: unbound}
+        })
+
+      env = read_child_env(file)
+
+      # Poison, never absence (D2) — and the chat is ALIVE, not dead.
+      assert env["BARKPARK_API_TOKEN"] == ClaudeChat.mint_refused_sentinel()
+      assert ClaudeChat.task_hands(session) == :mint_refused
+      assert Process.alive?(session)
+
+      # THE CLAIM: no credential row exists for this session at all.
+      assert session_tokens(uuid) == []
+      refute File.exists?(Path.join(System.tmp_dir!(), "barkpark-claude-#{uuid}.mcp.json"))
+
+      close_and_reap(session, uuid)
+    end
+  end
+
   # Outbound control frames (charter D10/D12), wire-proven against the real
   # binary 2026-07-09. These tests capture the EXACT bytes we write to stdin (a
   # `head -n 1` fake drains the first frame to a file). They prove the frame is
@@ -2359,7 +2529,13 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
       )
 
     File.rm_rf(file)
-    on_exit(fn -> File.rm_rf(file) end)
+    File.rm_rf(file <> ".writers")
+
+    on_exit(fn ->
+      File.rm_rf(file)
+      File.rm_rf(file <> ".writers")
+    end)
+
     file
   end
 
@@ -2369,7 +2545,17 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
     path =
       Path.join(System.tmp_dir!(), "claude_echo_#{System.unique_integer([:positive])}.sh")
 
-    File.write!(path, "#!/bin/sh\nprintf '%s\\n' \"$@\" > '#{argv_file}'\ncat\n")
+    # Every invocation also APPENDS one line to `<argv_file>.writers`. The file
+    # itself is overwritten, so a SECOND spawn reaching the same fake binary
+    # (a session that outlived its test and respawned against the CURRENT
+    # global `:claude_chat` config) silently replaces the argv under the
+    # reader. The sidecar makes that visible instead of leaving a bare
+    # "expected truthy, got false".
+    File.write!(
+      path,
+      "#!/bin/sh\necho \"$$\" >> '#{argv_file}.writers'\nprintf '%s\\n' \"$@\" > '#{argv_file}'\ncat\n"
+    )
+
     File.chmod!(path, 0o755)
     on_exit(fn -> File.rm_rf(path) end)
     path
@@ -2386,6 +2572,15 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   # env-dump test into task_hands). The DOWN alone is not the whole story:
   # Registry sweeps its entry AFTER the process dies, so poll the lookup until
   # it answers [].
+  # Every credential row this chat session ever minted, keyed on the label
+  # `Auth.create_claude_session_token/3` writes. Reading the ROW is what makes
+  # a workspace-binding claim a fact rather than a restatement of the opts.
+  defp session_tokens(sid) do
+    Barkpark.Repo.all(
+      from(t in Barkpark.Auth.ApiToken, where: t.label == ^"claude-session #{sid}")
+    )
+  end
+
   defp close_and_reap(session, sid) do
     ref = Process.monitor(session)
     ClaudeChat.close(session)
@@ -2434,6 +2629,19 @@ defmodule BarkparkWeb.Studio.ClaudeChatTest do
   end
 
   defp read_lines(file), do: file |> wait_for_file() |> String.split("\n", trim: true)
+
+  # How many fake-binary invocations wrote this capture file. More than one
+  # means a foreign spawn clobbered the argv under the assertion.
+  defp writers(file) do
+    case File.read(file <> ".writers") do
+      {:ok, body} ->
+        pids = String.split(body, "\n", trim: true)
+        "fake-binary invocations that wrote this file: #{length(pids)} (pids #{inspect(pids)})"
+
+      _ ->
+        "fake-binary invocation log unavailable"
+    end
+  end
 
   defp read_frame(file), do: file |> wait_for_file() |> String.trim() |> Jason.decode!()
 

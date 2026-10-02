@@ -1,6 +1,87 @@
 #!/usr/bin/env bash
 # Exact live-corpus smoke audit for every published Paper and every reader edge.
 # Emits one JSON summary and exits non-zero if any Paper fails.
+#
+# ── RULING 2026-09-11: the CLI arm `empty_output` IS NOT RETRIED ──────────────
+# Asked (task-cf4c1d8aa8162d8a, opened off PR #15760 / task-3ef7bfabef8c9c73)
+# whether an empty render — `bp paper view` exiting 0 with nothing on stdout —
+# should ride the same 0/0.25/1/4 s ladder as the `"code":"internal_error"`
+# envelope. It should not. Three reasons, in the order the evidence forced them:
+#
+# 1. `empty_output` has never been witnessed. PR #15760 (merged 39adf71208,
+#    2026-09-03) made the leg name its arm. The six paper-readers reds since —
+#    runs 33956981205, 34024640087, 34110681290, 34211257256, 34336441737,
+#    34462179731 — carry 6,274 CLI observations and 0 `empty_output`. Every CLI
+#    red in them is `command_failed` with a NAMED stderr: 5 on 2026-09-06
+#    (exit 4, `… source: status 500: <!DOCTYPE html>`) and 1 on 2026-09-08
+#    (exit 4, `Get "https://guerrilla.barkpark.cloud/…`).
+# 2. The two reds that prompted the question do not support it. Run 33194662611
+#    (2026-08-28) was NOT a CLI red at all — all four failures read
+#    `cli:{ok:true}`, `tui:{max_display_width:80,overflow_lines:0}`, and failed
+#    on curl `status:0` edges (the transport class already retried below). Only
+#    run 33615074664 (2026-09-02) shows `cli:{ok:false}` with tui 0/0, and it
+#    pre-dates the arm witness, so it cannot say whether it was empty or failed.
+#    One unrecoverable observation is not a policy.
+# 3. An empty render is not transient-SHAPED the way a 500 is. The
+#    internal_error envelope is the server ASSERTING "retry shortly"; a clean
+#    exit with empty stdout asserts nothing, and is the exact shape of a real
+#    regression (a Paper whose body renders to nothing). Retrying it four times
+#    would launder that regression into a slow flake — and an audit that retries
+#    a silent wrong answer has stopped looking.
+#
+# The ruling is PINNED, not merely written: the fixtures
+# `BP_FIXTURE_CLI_EMPTY` and `BP_FIXTURE_CLI_EMPTY_ONCE` in
+# scripts/audit-paper-readers-test.sh require `cli.attempts == 1` and
+# `cli.arm == "empty_output"` for a persistently-empty AND a once-empty-then-
+# full render. Adding a retry here reds both. REVISIT only if a witness
+# artifact ever records `cli.arm == "empty_output"` — quote the run id.
+#
+# ── RULING 2026-09-11: a `command_failed` CLI red whose stderr is an HTTP 500
+#    from the box, OR a Go transport error, IS RETRIED ─────────────────────────
+# The separate decision the note above deferred (task-afde65c8c359b163). Both
+# shapes now ride the same 0/0.25/1/4 s ladder; the predicate is
+# `cli_retryable` below. Why, per shape:
+#
+# 1. HTML 500 — the SAME class as the JSON envelope, one layer out. The
+#    internal_error envelope is retried because a 500 from this box is a
+#    dropped DB connection per REQUEST (measured 2026-08-23, ~27%), not a
+#    verdict about the Paper. `… source: status 500: <!DOCTYPE html>` is that
+#    identical crash rendered by an HTML route instead of the JSON one, and the
+#    HTTP legs have retried exactly that page (`500 · Internal Server Error`)
+#    since the narrow-retry block below. The CLI leg was the odd one out.
+#    NOTE the deliberate difference from `retryable_500`: that helper reads a
+#    whole response BODY and can key on the page text; the CLI leg sees only a
+#    one-line Go error string, truncated, which may not carry the card's title
+#    at all. Keying CLI retry on body text would be a rule the real reds could
+#    not hit — which is precisely the bug this ruling fixes. So the CLI
+#    predicate keys on `status 500`, the one token the client always renders.
+#    4xx is untouched: a 422/404 says the request was wrong and stays loud.
+#
+# 2. Go transport error (`Get "https://…": dial tcp … connection refused`) —
+#    the client never reached the box, so there is no answer to judge. This is
+#    verbatim the HTTP legs' own transport policy (see `transport_retryable`,
+#    PR #15811, run 33740962470): retry the codes that mean "no HTTP answer was
+#    produced", and EXCLUDE DNS resolution failure, which is a persistent
+#    config fault we must see immediately. The Go-string equivalents of that
+#    same list: connection refused/reset, i/o timeout, Client.Timeout, context
+#    deadline exceeded, TLS handshake, EOF — retried; every resolver failure
+#    (`dial tcp: lookup <host> …`, whatever its tail) — NOT retried, one
+#    attempt, exactly like curl exit 6.
+#
+# Evidence (the six paper-readers reds since #15760, 6,274 CLI observations —
+# runs 33956981205, 34024640087, 34110681290, 34211257256, 34336441737,
+# 34462179731): every CLI red in them is `command_failed`, exit 4, with stderr
+# `… source: status 500: <!DOCTYPE html>` (5, on 2026-09-06) or
+# `Get "https://guerrilla.barkpark.cloud/…` (1, on 2026-09-08). All six got
+# `attempts == 1` — the ladder existed and never fired once on the shape that
+# actually reds. Zero of them carry the JSON envelope the loop grepped for.
+#
+# This ruling does NOT touch the empty_output ruling above: a clean exit is
+# still a clean exit, retried never. Persistence still fails: a red that never
+# heals spends all four attempts and the paper still FAILS with
+# `arm == "command_failed"`. Pinned by BP_FIXTURE_CLI_HTML500(_ONCE),
+# BP_FIXTURE_CLI_TRANSPORT(_ONCE) and BP_FIXTURE_CLI_DNS in
+# scripts/audit-paper-readers-test.sh.
 set -uo pipefail
 
 server="${BP_AUDIT_SERVER:-guerrilla}"
@@ -45,10 +126,40 @@ inventory_scope=(-s "$server" -d "$dataset")
 if [[ "$workspace" != "default" || "$project" != "default" ]]; then
   inventory_scope+=(-w "$workspace" -p "$project")
 fi
+# cli_retryable <stderr file> — the retry predicate for every leg that runs
+# `bp` (the inventory read below and the CLI reader edge further down). True
+# for the three shapes that mean "the box did not give us a verdict about this
+# Paper", and only those. See the RULING 2026-09-11 block at the top for the
+# run ids and why each shape qualifies.
+cli_retryable() {
+  local err="$1"
+  # 1. the server's internal_error envelope — the original, narrowest case.
+  grep -q '"code":"internal_error"' "$err" 2>/dev/null && return 0
+  # 2. an HTTP 500 from the box, whatever layer rendered the body. The client
+  #    prints `… status 500: <body>`; the body may be the JSON envelope, the
+  #    `500 · Internal Server Error` HTML card, or a truncated `<!DOCTYPE html>`
+  #    — all three are the same crash. 4xx is NOT matched and stays loud.
+  grep -q 'status 500' "$err" 2>/dev/null && return 0
+  # 3. a Go transport error: the client never reached the box. Same classes the
+  #    HTTP legs retry via transport_retryable, minus DNS resolution failure,
+  #    which is persistent by nature and must be seen on attempt 1.
+  #    The exclusion is keyed on `lookup ` — Go renders EVERY resolver failure
+  #    as `dial tcp: lookup <host> …`, and its tail can be `no such host`,
+  #    `server misbehaving` OR `i/o timeout`. Keying only on the first two
+  #    would let a resolver timeout in through clause 3 below; measured on
+  #    fixture BP_FIXTURE_CLI_DNS, which carries that exact wording.
+  if grep -Eq 'no such host|server misbehaving|lookup ' "$err" 2>/dev/null; then
+    return 1
+  fi
+  grep -Eq 'connection refused|connection reset|i/o timeout|Client\.Timeout|context deadline exceeded|TLS handshake|tls: |unexpected EOF|: EOF' \
+    "$err" 2>/dev/null && return 0
+  return 1
+}
+
 # The inventory read gets the same narrow transport retry as the reader edges
 # below (see fetch_route): one dropped DB connection here would abort the whole
-# audit before it audits anything. Retries ONLY on the server's internal_error
-# envelope; every other failure aborts exactly as before.
+# audit before it audits anything. Retries ONLY on the shapes cli_retryable
+# names; every other failure aborts exactly as before.
 inventory_ok=false
 for inventory_delay in 0 0.25 1 4; do
   [[ "$inventory_delay" == 0 ]] || sleep "$inventory_delay"
@@ -57,11 +168,20 @@ for inventory_delay in 0 0.25 1 4; do
     inventory_ok=true
     break
   fi
-  grep -q '"code":"internal_error"' "$inventory_stderr" 2>/dev/null || break
+  cli_retryable "$inventory_stderr" || break
 done
+# `detail` falls back to the command's STDOUT when stderr is empty. Under
+# `-o json` bp prints its error envelope on stdout, so for 14 nights
+# (2026-09-11..24, runs 34585413992..35984636911) this line read `"detail": ""`
+# while the cause sat unprinted: a clean runner has no token, bp falls to its
+# baked dev floor `barkpark-dev-token`, guerrilla resolves that to auth_tier
+# "none", and bp refuses the read as a present-but-refused credential (exit 3,
+# internal/cli/refused_credential.go, #17681). task-c3b8d7a5e1745a17.
 if [[ "$inventory_ok" != true ]]; then
-  jq -n --arg server "$server" --rawfile detail "$inventory_stderr" \
-    '{ok:false,error:"paper inventory query failed",server:$server,detail:($detail|gsub("[[:space:]]+$"; ""))}'
+  jq -n --arg server "$server" --rawfile detail "$inventory_stderr" --rawfile stdout "$inventory" \
+    '{ok:false,error:"paper inventory query failed",server:$server,
+      detail:(($detail|gsub("[[:space:]]+$"; "")) as $e
+              | if $e != "" then $e else ($stdout|gsub("[[:space:]]+$"; "")|.[0:2000]) end)}'
   exit 2
 fi
 
@@ -249,9 +369,14 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   fi
 
   # Same narrow transport retry for the CLI reader edge: retry ONLY when the
-  # command failed AND its stderr carries the server's internal_error envelope.
-  # A CLI failure for any other reason (bad render, empty body, auth, usage)
-  # is never retried.
+  # command failed AND cli_retryable recognises its stderr — the server's
+  # internal_error envelope, an HTTP 500 from the box in any rendering, or a Go
+  # transport error that never reached the box (RULING 2026-09-11 at the top).
+  # A CLI failure for any other reason (bad render, empty body, auth, usage,
+  # any 4xx, an unresolvable host) is never retried. The empty-body half of that sentence was re-examined and
+  # DELIBERATELY KEPT on 2026-09-11 — see the RULING block at the top of this
+  # file for the run ids and the reasoning. The `((cli_exit == 0))` break below
+  # is that ruling: a clean exit ends the loop whether or not stdout was empty.
   # The CLI leg fails three distinguishable ways and the witness used to record
   # only `cli:{ok:false}` for all three — widthcheck on an empty file reports
   # 0/0, so a failed command and an empty render left byte-identical evidence
@@ -271,7 +396,7 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
       [[ -s "$tmp/cli" ]] && cli_reader_ok=true
       break
     fi
-    grep -q '"code":"internal_error"' "$tmp/cli.err" 2>/dev/null || break
+    cli_retryable "$tmp/cli.err" || break
   done
   cli_stderr="$(head -c 600 "$tmp/cli.err" 2>/dev/null)" || cli_stderr=""
 
@@ -349,8 +474,29 @@ done
 structure_input="$tmp/structures.json"
 structure_report="$tmp/structure-report.json"
 jq -s '.' "$structures" >"$structure_input"
+# THE ASYMMETRIC FAILURE MODE. If this python3 cannot produce a report the
+# file is EMPTY, and both ok expressions below fail on `$structure | length
+# == 1` — a loud red that LOOKS like a block-shape violation in the live
+# corpus and reads as flaky.
+#
+# DO NOT branch on the exit code. paper_structure.py's main() RETURNS
+# `1 if report["violations"] else 0`, so exit 1 is the DESIGNED
+# violations-found code with a perfectly intact report; an rc test flags it
+# and cries wolf on the one case the audit exists to report. Measured
+# 2026-09-14: scripts/audit-paper-readers-test.sh's one-violation fixture
+# drives exactly that exit 1.
+#
+# The `|| true` was also never what suppressed anything: this script runs
+# under `set -uo pipefail` with NO `-e`, so a bare failure here continues just
+# the same. What was missing is a CHECK OF THE ARTIFACT. Keep going (the JSON
+# witness for every audited Paper is the artifact's whole point), but say out
+# loud when the report is unusable, so the red below is attributable.
+structure_rc=0
 python3 scripts/paper_structure.py --input "$structure_input" --summary-only \
-  >"$structure_report" || true
+  >"$structure_report" || structure_rc=$?
+if ! jq -e 'type == "object" and has("violations")' "$structure_report" >/dev/null 2>&1; then
+  echo "audit-paper-readers: scripts/paper_structure.py exited ${structure_rc} WITHOUT a usable summary report. The ok expression below therefore fails on the MISSING report, NOT on a block-shape violation in the corpus. Read the python traceback above. Its unit suite is scripts/paper_structure_test.py, wired in shell-harnesses.yml job tooling-harnesses." >&2
+fi
 
 jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" \
   --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" \

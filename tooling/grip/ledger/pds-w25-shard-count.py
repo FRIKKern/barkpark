@@ -21,6 +21,7 @@ import json, os, sys, time, urllib.error, urllib.request
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from census_walk import walk_pages, CensusWalkRefusal  # noqa: E402
+from disposition_owner_registry import classify, load_registry, OK as OWNER_OK  # noqa: E402
 
 PAGE = 500
 EXIT_WALK_REFUSED = 2
@@ -63,6 +64,15 @@ def make_fetch(srv, tok, page=PAGE, attempts=6):
     return fetch
 
 
+_REG = []
+
+
+def _registry():
+    if not _REG:
+        _REG.append(load_registry())
+    return _REG[0]
+
+
 def score(cls, want, rows):
     def s(v):
         return v.strip() if isinstance(v, str) else ""
@@ -78,7 +88,14 @@ def score(cls, want, rows):
         if d not in ("open", "closed", "parked"): prob.append("disposition=%r" % d)
         if not rs: prob.append("no reason")
         if d == "parked" and not tg: prob.append("no reopen_trigger")
-        if d == "open" and (not ow or ow == i): prob.append("owner=%r" % ow)
+        # WAS `if not ow or ow == i` -- non-empty-and-not-self, which greens on
+        # every string a shard invents and did: prose with parentheses (26 rows),
+        # a foreign epic's lead (24), wave-N owners that expire (8) and three
+        # literal task ids. The owner is now adjudicated against
+        # tooling/pds/disposition-owner-registry.json.
+        if d == "open":
+            verdict, detail = classify(ow, i, _registry())
+            if verdict != OWNER_OK: prob.append("%s: %s" % (verdict, detail))
         if prob: bad.append((i, "; ".join(prob)))
         else: ok += 1
     return ok, bad
@@ -145,12 +162,25 @@ def selftest():
 
     # the scorer still discriminates -- a guard-only selftest would not notice.
     ok, badrows = score("c", ["a", "b"], {
-        "a": {"disposition": "open", "disposition_reason": "r", "disposition_owner": "o"},
+        "a": {"disposition": "open", "disposition_reason": "r",
+              "disposition_owner": "pds-harness-maintainer"},
         "b": {"disposition": "parked", "disposition_reason": "r"}})
     if not (ok == 1 and len(badrows) == 1 and "no reopen_trigger" in badrows[0][1]):
         bad.append("scorer control"); print("  FAIL   scorer control", ok, badrows)
     else:
         print("  ok     %-44s parked-without-trigger caught" % "scorer control")
+
+    # THE OWNER ARM. `"o"` is the owner the old control used and it PASSED:
+    # non-empty, not self. It is now refused by name, and the registered slug
+    # above is not. If this arm ever greens on `"o"` the scorer has gone back to
+    # counting emptiness.
+    ok2, bad2 = score("c", ["a"], {
+        "a": {"disposition": "open", "disposition_reason": "r",
+              "disposition_owner": "o"}})
+    if not (ok2 == 0 and bad2 and "UNREGISTERED" in bad2[0][1]):
+        bad.append("owner registry arm"); print("  FAIL   owner registry arm", ok2, bad2)
+    else:
+        print("  ok     %-44s %s" % ("owner registry arm", bad2[0][1][:60]))
 
     print("pds-w25-shard-count selftest: %d failures" % len(bad))
     return 1 if bad else 0

@@ -24,6 +24,59 @@ defmodule Barkpark.ApiTester.Endpoints.Mutate do
     ]
   end
 
+  @doc """
+  The cleanup steps for the documents a Run all SWEEP's mutate scenario
+  touched: one `delete` mutation per touched id, sent TWICE (the first removes
+  the draft or published row a delete resolves to, the second the remaining
+  twin; a 404 on either is harmless and recorded), posted to the SAME mutate
+  path the scenario used, so scope and dataset match.
+
+  Why (stranger walk, 2026-09-30): every Run all left "From the playground"
+  (a FRESH id each run, so they piled up), "Upserted", "Create once", "Revised
+  title", "Publish me" and "Unpublish me" in the author's real Post list. The
+  ids come from the REQUEST — the scenario's own mutations — never from the
+  author's data, and are all `playground-*` fixture ids.
+  """
+  @spec touched_documents_cleanup(map() | nil, String.t()) :: [map()]
+  def touched_documents_cleanup(%{"mutations" => mutations}, path)
+      when is_list(mutations) and is_binary(path) do
+    mutations
+    |> Enum.flat_map(&touched_id_type/1)
+    |> Enum.uniq()
+    |> Enum.flat_map(fn {id, type} ->
+      step = %{
+        method: :post,
+        path: path,
+        headers: %{"content-type" => "application/json"},
+        auth: :admin,
+        body: %{"mutations" => [%{"delete" => %{"id" => id, "type" => type}}]}
+      }
+
+      [step, step]
+    end)
+  end
+
+  def touched_documents_cleanup(_, _), do: []
+
+  @create_ops ~w(create createOrReplace createIfNotExists)
+  @id_ops ~w(patch publish unpublish discardDraft)
+
+  defp touched_id_type(%{} = mutation) do
+    Enum.flat_map(mutation, fn
+      {op, %{"_id" => id, "_type" => type}} when op in @create_ops -> [{published(id), type}]
+      {op, %{"id" => id, "type" => type}} when op in @id_ops -> [{published(id), type}]
+      {"patch", %{"id" => id}} -> [{published(id), "post"}]
+      _ -> []
+    end)
+    |> Enum.filter(fn {id, type} -> is_binary(id) and id != "" and is_binary(type) end)
+  end
+
+  defp touched_id_type(_), do: []
+
+  defp published("drafts." <> id), do: id
+  defp published(id) when is_binary(id), do: id
+  defp published(other), do: other
+
   defp mutate_create(dataset) do
     %{
       id: "mutate-create",

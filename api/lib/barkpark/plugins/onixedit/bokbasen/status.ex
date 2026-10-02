@@ -43,6 +43,7 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
   alias Barkpark.Content
   alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
   alias Barkpark.Repo
 
   @doc """
@@ -88,27 +89,24 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
 
     new_content = Map.put(fresh.content || %{}, "bp_export_status", merged)
 
+    # task-ff162c914cd0653c: the raw update, its mutation_events row and the
+    # fan-out are ONE write under admission, as on the lifecycle paths
+    # (#20671). They used to be three steps: the update committed on its own
+    # (and outside the write-admission door), so a save_event fault or a hold
+    # left the row changed with no event, no SSE frame and no webhook.
+    # `write_atomically/1` defers the fan-out until commit.
     {:ok, updated} =
-      fresh
-      |> Document.changeset(%{"content" => new_content})
-      |> Repo.update()
-
-    # NAMED FAILURE MODE (cross-context write bypassing the Content event path):
-    # the raw Repo.update above is the sanctioned state-preserving write (charter
-    # D170 keeps it — Content.upsert_document would force a draft twin and coerce
-    # a published book row published→draft), but on its own the SSE
-    # /v1/data/listen endpoint, webhooks, and cache revalidation never saw a
-    # bp_export_status write. Rejoin the canonical event spine AFTER commit: a
-    # self-written mutation_events row (the listen controller drops frames whose
-    # msg has no :event_id) + the canonical fan-out on documents:<dataset> +
-    # per-doc + workspace topics. `fresh.rev` is the rev observed before the write.
-    ev =
-      Broadcast.save_event(updated, updated.type, updated.dataset, "update", fresh.rev, :onixedit)
-
-    Content.broadcast_document_mutation(updated, "update",
-      event_id: ev.id,
-      previous_rev: fresh.rev
-    )
+      Door.admit!(fn ->
+        Broadcast.write_atomically(fn ->
+          with {:ok, updated} <-
+                 fresh
+                 |> Document.changeset(%{"content" => new_content})
+                 |> Repo.update() do
+            emit_canonical(updated, fresh.rev)
+            {:ok, updated}
+          end
+        end)
+      end)
 
     # PRESERVED plugin-private broadcast: the Bokbasen AdminLive / StudioLive
     # native-editor consumers subscribe to bokbasen:document:<id> and refresh
@@ -121,6 +119,34 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.Status do
     )
 
     updated
+  end
+
+  # NAMED FAILURE MODE (cross-context write bypassing the Content event path):
+  # the raw Repo.update in write/2 is the sanctioned state-preserving write
+  # (charter D170 keeps it — Content.upsert_document would force a draft twin and
+  # coerce a published book row published→draft), but on its own the SSE
+  # /v1/data/listen endpoint, webhooks, and cache revalidation never saw a
+  # bp_export_status write. Rejoin the canonical event spine: a self-written
+  # mutation_events row (the listen controller drops frames whose msg has no
+  # :event_id) + the canonical fan-out on documents:<dataset> + per-doc +
+  # workspace topics. `previous_rev` is the rev observed before the write. Runs
+  # INSIDE write/2's atomic write, so the fan-out is deferred until commit.
+  defp emit_canonical(%Document{} = updated, previous_rev) do
+    ev =
+      Broadcast.save_event(
+        updated,
+        updated.type,
+        updated.dataset,
+        "update",
+        previous_rev,
+        :onixedit
+      )
+
+    Content.broadcast_document_mutation(updated, "update",
+      event_id: ev.id,
+      previous_rev: previous_rev,
+      webhooks: true
+    )
   end
 
   # ── private ────────────────────────────────────────────────────────────────

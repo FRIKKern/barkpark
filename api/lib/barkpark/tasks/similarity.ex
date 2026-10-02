@@ -19,8 +19,9 @@ defmodule Barkpark.Tasks.Similarity do
   exclusion is the "cross" residue, bucketed by similarity:
 
       sim >= @refuse   → refuse   (near-identical; block the create)
-      @advise..@refuse → advise   (gray zone; surface as a warning — this is the
-                                    band the tier-2 LLM judge will adjudicate)
+      @advise..@refuse → advise   (gray zone; surfaced as a non-blocking
+                                    `possible_duplicate` warning on the create,
+                                    and the band the tier-2 LLM judge adjudicates)
       sim <  @advise   → ignore
 
   Scoring mirrors the calibrated generator exactly:
@@ -46,8 +47,25 @@ defmodule Barkpark.Tasks.Similarity do
   # Calibrated thresholds (tob-w1-judge-calibration). @refuse is deliberately
   # high — on a clean backlog nothing reaches it, so tier-1 hard-refuses only a
   # true near-duplicate; the gray zone is advisory until the judge is wired.
+  #
+  # @advise MOVED 0.30 -> 0.28 (task-a0cd11dd35788460), on a replay rather than
+  # on one pair. Every task create 2026-09-01..09-25 (2,185 rows) was re-scored
+  # through this module against the rows that existed before it, behind the
+  # gate's own trgm pre-filter:
+  #
+  #     advise   creates advised   extra over 0.30
+  #     0.30        49 (2.24%)          —
+  #     0.28        64 (2.93%)       15 (0.69%)
+  #     0.25       115 (5.26%)       66 (3.02%)
+  #
+  # 0.28 still catches the paraphrased pair unique slugs missed — spd-b37 vs
+  # spd-b27, one serif-stack finding filed twice, scoring 0.2833 — while 0.25
+  # would add 3% advisories, most of them same-topic but different findings.
+  # The advise band is now SURFACED on an allowed create as a
+  # `possible_duplicate` warning (Tasks.Dedup), so this number is what an
+  # author sees, not only what the judge is asked about.
   @refuse 0.55
-  @advise 0.30
+  @advise 0.28
 
   # A hard REFUSE additionally requires this many shared title+description
   # tokens. Jaccard over-fires on ultra-thin text — two tasks titled "multi-a"

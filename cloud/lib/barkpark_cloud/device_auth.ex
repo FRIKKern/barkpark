@@ -35,6 +35,18 @@ defmodule BarkparkCloud.DeviceAuth do
   byte-identical to `POST /v1/auth/login` (`{token, team_id}` with
   `team = Accounts.primary_team(user)`) so CLI storage reuse is trivial.
 
+  ## Team binding (cross-workspace approval)
+
+  `start/1` may name the team the login is FOR (`:team_id`). The row then
+  carries `requested_team_id`, and `approve/2` only flips it for a MEMBER of that
+  team — the membership test sits inside the same CAS `UPDATE`, so there is no
+  check-then-act window. An approver from another team gets
+  `{:error, :team_mismatch}` and the row stays `pending` for a rightful
+  approver (or a deny). `poll/1` re-checks the membership at mint time (it may
+  have been revoked in the ≤600s since approve) and mints THAT team, not the
+  approver's primary one. An unbound request (no `:team_id`) keeps the original
+  behaviour: any authenticated user may approve their own login.
+
   ## Expiry
 
   `expires_at` (600s) is enforced IN-BAND by every query (`expires_at > now`,
@@ -44,6 +56,7 @@ defmodule BarkparkCloud.DeviceAuth do
   import Ecto.Query, only: [from: 2]
 
   alias BarkparkCloud.Accounts
+  alias BarkparkCloud.Accounts.TeamMembership
   alias BarkparkCloud.Accounts.UserToken
   alias BarkparkCloud.DeviceAuth.Request
   alias BarkparkCloud.Repo
@@ -77,7 +90,9 @@ defmodule BarkparkCloud.DeviceAuth do
   Start a device-authorization request.
 
   `attrs` carries `:client_name`, `:ip_address`, `:user_agent` (all optional,
-  captured off the CLI's request). Mints a fresh `device_code` + `user_code`,
+  captured off the CLI's request) and an optional `:team_id` binding the login
+  to one team (see "Team binding"); a `:team_id` that is not the UUID of an
+  existing team is `{:error, :invalid_team}`. Mints a fresh `device_code` + `user_code`,
   inserts a `pending` row with a #{@ttl_seconds}s TTL, and returns the PLAINTEXT
   codes (shown once) plus the poll `interval` and `expires_in`:
 
@@ -94,8 +109,20 @@ defmodule BarkparkCloud.DeviceAuth do
              interval: pos_integer(),
              expires_in: pos_integer()
            }}
+          | {:error, :invalid_team}
           | {:error, Ecto.Changeset.t()}
-  def start(attrs \\ %{}), do: do_start(attrs, @max_insert_attempts)
+  def start(attrs \\ %{}) do
+    case Map.get(attrs, :team_id) do
+      blank when blank in [nil, ""] ->
+        do_start(Map.put(attrs, :requested_team_id, nil), @max_insert_attempts)
+
+      team_id ->
+        case Repo.uuid_or_nil(team_id) do
+          nil -> {:error, :invalid_team}
+          tid -> do_start(Map.put(attrs, :requested_team_id, tid), @max_insert_attempts)
+        end
+    end
+  end
 
   defp do_start(attrs, attempts_left) do
     device_code = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
@@ -111,6 +138,7 @@ defmodule BarkparkCloud.DeviceAuth do
         client_name: normalize_client_name(Map.get(attrs, :client_name)),
         ip_address: Map.get(attrs, :ip_address),
         user_agent: Map.get(attrs, :user_agent),
+        requested_team_id: Map.get(attrs, :requested_team_id),
         status: "pending",
         expires_at: expires_at
       })
@@ -129,12 +157,14 @@ defmodule BarkparkCloud.DeviceAuth do
       {:error, changeset} when attempts_left > 1 ->
         # A unique-hash collision (both codes are CSPRNG, so this is essentially
         # never) — draw fresh codes and retry rather than surface a spurious error.
-        if hash_collision?(changeset),
-          do: do_start(attrs, attempts_left - 1),
-          else: {:error, changeset}
+        cond do
+          hash_collision?(changeset) -> do_start(attrs, attempts_left - 1)
+          unknown_team?(changeset) -> {:error, :invalid_team}
+          true -> {:error, changeset}
+        end
 
       {:error, changeset} ->
-        {:error, changeset}
+        if unknown_team?(changeset), do: {:error, :invalid_team}, else: {:error, changeset}
     end
   end
 
@@ -169,25 +199,78 @@ defmodule BarkparkCloud.DeviceAuth do
   (unknown / already-approved / denied / expired) → `{:error, :expired_or_invalid}`.
   A second approve of the same code therefore fails.
 
+  A TEAM-BOUND request (`requested_team_id` set) only flips for a member of that
+  team — the membership subquery is part of the same `UPDATE`. A live, pending
+  request refused on that ground answers `{:error, :team_mismatch}` and stays
+  pending (nothing is stamped).
+
   The caller MUST have already authenticated the browser user (the router's
   `Auth.require_user` Bearer gate) — this function trusts `user_id`.
   """
-  @spec approve(binary(), binary()) :: :ok | {:error, :expired_or_invalid}
+  @spec approve(binary(), binary()) :: :ok | {:error, :expired_or_invalid | :team_mismatch}
   def approve(user_code, user_id) when is_binary(user_code) and is_binary(user_id) do
     now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    hash = user_code_hash(user_code)
 
-    {count, _} =
+    member_teams = from(m in TeamMembership, where: m.user_id == ^user_id, select: m.team_id)
+
+    query =
       from(r in Request,
         where:
-          r.user_code_hash == ^user_code_hash(user_code) and r.status == "pending" and
-            r.expires_at > ^now
+          r.user_code_hash == ^hash and r.status == "pending" and r.expires_at > ^now and
+            (is_nil(r.requested_team_id) or r.requested_team_id in subquery(member_teams))
       )
-      |> Repo.update_all(set: [status: "approved", user_id: user_id, updated_at: now])
 
-    if count == 1, do: :ok, else: {:error, :expired_or_invalid}
+    case stamp_approval(query, user_id, now) do
+      {:ok, 1} -> :ok
+      {:ok, _zero} -> zero_row_refusal(hash, now)
+      {:error, :user_gone} -> {:error, :expired_or_invalid}
+    end
   end
 
   def approve(_, _), do: {:error, :expired_or_invalid}
+
+  # `Repo.update_all` bypasses Request.changeset/2, so its `assoc_constraint(:user)`
+  # never runs and an FK violation would RAISE. Since #18913 that is reachable:
+  # `Erasure.delete_user/2` (DELETE /v1/account) deletes the users row, so an
+  # approve racing an account erasure can stamp a user_id whose row is gone
+  # (task-felix-w20-bl-devauth-approve-bypass-guard). The approver no longer
+  # exists, so the approval is simply invalid — the same undifferentiated 404 as
+  # any other dead code, never a 500. The request stays pending (the UPDATE
+  # aborted) and expires on its own clock.
+  @user_fk "device_auth_requests_user_id_fkey"
+
+  defp stamp_approval(query, user_id, now) do
+    {count, _} =
+      Repo.update_all(query, set: [status: "approved", user_id: user_id, updated_at: now])
+
+    {:ok, count}
+  rescue
+    e in Postgrex.Error ->
+      case e.postgres do
+        %{code: :foreign_key_violation, constraint: @user_fk} -> {:error, :user_gone}
+        _ -> reraise e, __STACKTRACE__
+      end
+  end
+
+  defp zero_row_refusal(hash, now) do
+    if pending_team_bound?(hash, now),
+      do: {:error, :team_mismatch},
+      else: {:error, :expired_or_invalid}
+  end
+
+  # After a zero-row approve: was the code live and pending, but bound to a team
+  # the approver is not in? Only then is the refusal a team mismatch; every other
+  # zero (unknown / approved / expired) stays the undifferentiated 404.
+  defp pending_team_bound?(hash, now) do
+    Repo.exists?(
+      from(r in Request,
+        where:
+          r.user_code_hash == ^hash and r.status == "pending" and r.expires_at > ^now and
+            not is_nil(r.requested_team_id)
+      )
+    )
+  end
 
   @doc """
   Deny a request: delete the row by `user_code`. Idempotent — always `:ok` (a
@@ -245,6 +328,7 @@ defmodule BarkparkCloud.DeviceAuth do
 
     with 1 <- count,
          %{} = user <- Accounts.get_user(row.user_id),
+         {:ok, team} <- mint_team(row, user),
          # ORIGIN "device_link": the only mint site outside the router, and the
          # one the SPA most needs — a session that appeared without anyone
          # typing a password into this browser. The row's own captured IP + UA
@@ -256,9 +340,28 @@ defmodule BarkparkCloud.DeviceAuth do
              user_agent: row.user_agent,
              origin: "device_link"
            ) do
-      {:ok, token, Accounts.primary_team(user)}
+      {:ok, token, team}
     else
       _ -> {:error, :expired_or_invalid}
+    end
+  end
+
+  # The team the minted session answers with. Unbound → the approver's primary
+  # team (the original, /login-identical behaviour). Team-bound → that team, but
+  # ONLY if the approver is still a member at mint time: a membership revoked
+  # between approve and poll fails closed rather than minting into a team the
+  # user has left.
+  defp mint_team(%Request{requested_team_id: nil}, user), do: {:ok, Accounts.primary_team(user)}
+
+  defp mint_team(%Request{requested_team_id: team_id}, user) do
+    member? =
+      Repo.exists?(
+        from(m in TeamMembership, where: m.team_id == ^team_id and m.user_id == ^user.id)
+      )
+
+    case member? && Accounts.get_team(team_id) do
+      %{} = team -> {:ok, team}
+      _ -> {:error, :team_mismatch}
     end
   end
 
@@ -328,6 +431,10 @@ defmodule BarkparkCloud.DeviceAuth do
   end
 
   defp normalize_client_name(_), do: nil
+
+  # The FK on requested_team_id tripped: the named team does not exist.
+  defp unknown_team?(%Ecto.Changeset{errors: errors}),
+    do: Keyword.has_key?(errors, :requested_team)
 
   defp hash_collision?(%Ecto.Changeset{errors: errors}) do
     Enum.any?(errors, fn {field, _} -> field in [:device_code_hash, :user_code_hash] end)

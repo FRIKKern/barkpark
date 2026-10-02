@@ -219,6 +219,8 @@ defmodule BarkparkWeb.Studio.StudioPaperPublishAffordanceTest do
   end
 
   describe "the walk — draft to published, entirely through the UI" do
+    # Plugins-off: the bulldocs plugin (its before_publish hook raises the hollow-body refusal)
+    @tag :requires_plugins
     test "each wall refusal surfaces in plain language, then the publish lands",
          %{conn: conn} do
       register_tag!(@tag_name)

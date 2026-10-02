@@ -5,6 +5,23 @@
 //   • mock.js  — the browser dynamically import()s it and routes window.fetch.
 //   • smoke.mjs — node statically imports it and boots app.js against it.
 //
+// ── OWNERSHIP — THIS TREE HAS EXACTLY ONE OWNING EPIC ────────────────────
+// @owner epic:cloud-console-hardening
+//
+// cloud/priv/static/__preview__/* belongs to the cloud-console-hardening epic.
+// The cession is recorded on the other side by the deploy-reliability charter's
+// D402 — "the fence that IS real: cloud/priv/static/app.js + __app.test.mjs +
+// __preview__/* (ceded to console)" — and the stamp above is the console tree
+// citing that ruling back, so a builder standing in this file learns who owns
+// it without reading a charter. It was undecided until then: this tree is
+// neither the app.js surface nor __fixtures__/, and no text named it.
+//
+// MACHINE-CHECKED, and the check is a PREDICATE, not a list:
+//   mix test test/web/preview_tree_ownership_test.exs   (from cloud/)
+// It sweeps every .mjs in this tree for `@owner epic:` stamps and refuses a
+// tree that carries none, or one that names a SECOND epic. Adding the stamp to
+// another file here is fine; naming a different owner is the failure.
+//
 // ── TWO-WAY CENSUS RULE — READ THIS BEFORE YOU ADD A SCENARIO ────────────────
 // Four committed instruments keep a TWO-WAY census over this file: every
 // scenario here must be accounted for over there, AND every account over there
@@ -277,6 +294,16 @@ export function bpBase(over) {
         slot_units_truncated: null,
         reported_at: null,
       },
+      // dr-w15-s5 — "can this box deploy sites". Always present on the wire:
+      // router.ex merge_capability/2's fallback puts @unmeasured_site_deploy —
+      // THIS all-nil map, key for key. nil is UNMEASURED and never false:
+      // `configured: false` is the box's own refusal, and a box nobody measured
+      // must never read as refusing.
+      site_deploy: {
+        configured: null,
+        runner_alive: null,
+        reported_at: null,
+      },
       // dr-w10-s1 — the per-box deploy vital. Always present on the wire: when
       // a box owns no sites (six of eight prod boxes), router.ex's
       // merge_deploy_rate/2 fallback puts `no_deploy_surface/0` — THIS all-nil
@@ -527,6 +554,20 @@ function site(over) {
       domains: [],
       scale_mode: "always_on",
       port: 3000,
+      // cch-w43-bl (the envelope census, generalized past /v1/me): `theme` and
+      // `url` are stated by `site_json/2` on EVERY site row and READ by app.js
+      // (`themeSel.value = site.theme || ""` and `siteThemeOptionsHtml(site.theme
+      // || "")` preselect the palette; `if (s && s.url) return s.url` is the
+      // Visit door). This producer stated NEITHER, so no preview scenario could
+      // paint either band and every gate downstream of them certified a site the
+      // console had never been shown.
+      //
+      // Null is the honest default for both, and for different reasons: an
+      // unthemed site takes the template default (the select's own "" option),
+      // and the LIST surface calls `site_json/1` → `site_json(s, nil)`, which
+      // makes `url` nil for every row it serves. A row that IS themed overrides.
+      theme: null,
+      url: null,
       // ssw8 (charter D82): the ELEVEN binding fields site_json/2 serializes.
       // The factory emitted 21 fields and NOT ONE of them was a binding field,
       // so no fixture could express binding truth at all. Shape derived from
@@ -600,6 +641,14 @@ const boundSite = site({
   bootstrap_workspace: "acme", bootstrap_project: "site", bootstrap_dataset: "production",
   workspace: "acme", project: "site", dataset: "production",
   content_bound: true,
+  // cch-w43-bl: the corpus's ONE themed site. `site_json/2` sends `theme` on
+  // every row and app.js preselects the site-theme <select> from it, but until
+  // this line NO fixture carried a non-null theme, so the selected-option band
+  // had never been painted by any scenario — the select rendered its "Template
+  // default" arm in 100% of preview renders and the gate certified the other
+  // arm by never rendering it. A site that already declares a template is where
+  // a palette belongs.
+  theme: "ember",
 });
 // `content_bound` is DELETED, not false: a control plane that predates the field
 // says nothing, and "nothing" must not be read as "no".
@@ -632,12 +681,22 @@ const bindingSites = [boundSite, unknownBindingSite, mismatchedBindingSite];
 // gets its own states-complete rows: live / rebuilding / deploy-failed /
 // never-deployed — one per pill role. Real fields only; the invented
 // Marketing/Docs "kind" taxonomy has no field to render.
-const lastDeploy = (status, trigger, ago) => ({
+// cch-w43-bl (the envelope census, generalized): `put_last_deployment/3` folds
+// `last_deployment_json/1` onto every /v1/sites row, and that helper states SIX
+// keys — status, trigger, failure_class, failure_reason, inserted_at,
+// updated_at. This producer stated four. app.js binds the embed to the very
+// identifier the deploy rows use (`var d = s && s.last_deployment`), so the two
+// unstated keys are read off it exactly as they are read off a deployment.
+// Null is the honest default: a last deploy that did not fail has no class and
+// no reason.
+const lastDeploy = (status, trigger, ago, over) => Object.assign({
   status,
   trigger,
+  failure_class: null,
+  failure_reason: null,
   updated_at: tMinus(ago),
   inserted_at: tMinus(ago + 120),
-});
+}, over || {});
 // cch-w16-s4 (charter D199) — THE FIXTURE FIDELITY REPAIR. Until this slice
 // `site()` defaulted `current_deployment_id: null` and NOT ONE list row
 // overrode it, so the corpus asserted a state the SERVER CANNOT PRODUCE: pill
@@ -835,10 +894,15 @@ export const CRUEL_SITE_STRINGS = {
 };
 export const CRUEL_SITE_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000c9";
 export const ONE_LABEL_HOST_ROW_ID = "5b2c1e00-0000-4000-8000-0000000000ca";
+// cch-w16-bl-no-preview-plus-production-console-fixture — THE ROW THE LIST PILL
+// AND THE DETAIL LADDER ARE COMPARED ON. Exported so overflow-guard's leg
+// DERIVES the id it drives instead of transcribing a uuid that can drift (the
+// W14 precedent: a transcribed id renders #overview and prints a phantom table).
+export const FRESHNESS_LADDER_SITE_ID = "5b2c1e00-0000-4000-8000-0000000000c3";
 
 const sitesListRows = [
   site({
-    id: "5b2c1e00-0000-4000-8000-0000000000c3",
+    id: FRESHNESS_LADDER_SITE_ID,
     name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
     framework: "nextjs", github_repo: "acme/web", github_branch: "main",
     github_webhook_configured: true,
@@ -1065,6 +1129,29 @@ function deployment(over) {
       // fail. The key is on the base shape so a fixture that forgets it is a
       // missing key rather than a different wire.
       failure_class: null,
+      // cch-w43-bl (the envelope census, generalized): the THREE remaining keys
+      // `deployment_json/1` states on every row that app.js reads and this
+      // producer did not state.
+      //
+      //   * trigger — `deployTriggerLabel(d.trigger)` is a meta chip on BOTH
+      //     deploy rows (production and preview) and `d.trigger ===
+      //     "content-auto"` gates the auto-deploy copy. Only a handful of
+      //     hand-overridden rows carried it, so the DEFAULT row — the one behind
+      //     most of the corpus — rendered a deploy list with no provenance chip
+      //     at all, which is a shape the server cannot produce: every real row
+      //     has a trigger. "manual" is the honest default (someone pressed
+      //     Deploy); content-auto rows override.
+      //   * failure_code / failure_message — the box's refusal, UNFUSED
+      //     (`{ code: d.failure_code, message: d.failure_message }`). Null on
+      //     every row that is not a typed box refusal, which is the default.
+      trigger: "manual",
+      failure_code: null,
+      failure_message: null,
+      // `stage` rides the same base shape (`DeployLedger` stamps it) and is null
+      // on a row no stage was recorded for. Carried so a fixture that omits it
+      // is a MISSING key rather than a different wire — dr-w1-s2's rule for
+      // `failure_class` above, applied to the sibling it left behind.
+      stage: null,
       became_live_at: null,
       environment: "production",
       branch: null,
@@ -1235,12 +1322,13 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
 // caught the live divergence it exists to catch. That is standing-test clause 4
 // (a fixture that cannot produce the defect), and this constant is the fix.
 //
-// THE PRODUCER, read-only from here: `build_failure_reason()` —
-// deploy/site-deploy.sh:1939 (and its byte-identical node twin,
-// deploy/site-deploy-node.sh:1372). Its FIRST and highest-priority arm is
-// `grep -a 'FATAL' <build-log> | tail -1`, and the FATAL line the header at
-// site-deploy.sh:57 documents (emitted by the e2e's own npm at :935, asserted
-// onto the stage line at :1062) is this one, verbatim. It reaches the rail as
+// THE PRODUCER, read-only from here: `build_failure_reason()` in
+// deploy/site-deploy.sh and its byte-identical node twin
+// deploy/site-deploy-node.sh — re-derive with
+// grep -n 'build_failure_reason()' deploy/site-deploy*.sh. Its FIRST and
+// highest-priority arm is `grep -a 'FATAL' <build-log> | tail -1`, and the
+// FATAL line the stage-protocol header documents (grep -n 'FATAL: 401
+// Unauthorized' deploy/site-deploy.sh) is this one, verbatim. It reaches the rail as
 // `BPSTAGE name=BUILD status=failed detail="…"`.
 //
 // It classifies on its OWN distinctive phrase — `the site read token is
@@ -1468,7 +1556,7 @@ export const DEPLOY_DETAIL_KIND =
 //     module-resolution failure plus its import trace, which is exactly what
 //     `emit()`'s tab/newline collapse does to a multi-line error one surface
 //     over. Word-broken prose, not one unbreakable token: the token-shape
-//     defect is `.status-pill-detail`'s (app.css:3498) and this caption already
+//     defect is `.status-pill-detail`'s (grep -n '^\.status-pill-detail [{]' app.css) and this caption already
 //     carries `word-break`, so LENGTH is the only thing left to bound and the
 //     fixture must not smuggle in the other defect to make its point.
 const deployDetailCruelFrames = [
@@ -1602,6 +1690,7 @@ function verifyEnvelope(over) {
       { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 44, evidence: "GET /v1/capabilities → 200 (API up)" },
       { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 121, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
       { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 316, evidence: "GET /studio → 200 (renders)" },
+      { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 3, skipped: false, evidence: "site plane complete (docker, buildx, nixpacks, go, git; builder + runtime units active) · beat 41s ago" },
     ],
   };
   return Object.assign(base, over);
@@ -1613,6 +1702,7 @@ const verifyOneFail = verifyEnvelope({
     verifyPass.probes[0],
     verifyPass.probes[1],
     { name: "verify.studio", ok: false, reachable: true, status: 502, latency_ms: 5031, evidence: "502 — <html>upstream not ready</html>" },
+    verifyPass.probes[3],
   ],
 });
 
@@ -2092,7 +2182,35 @@ const settingsProviderCapabilities = {
 const connectedProviders = [
   { id: "prov_h1", kind: "hetzner", label: "main", team_id: IDS.team, inserted_at: tMinus(86400 * 9) },
   { id: "prov_a1", kind: "azure", label: "prod-sub", team_id: IDS.team, inserted_at: tMinus(3600 * 5) },
+  // console-w28 — cloudflare is the THIRD connectable kind (router.ex
+  // `@connectable_kinds ~w(hetzner azure cloudflare)`) and it belongs in the
+  // all-connected roster, or this fixture stops being all-connected the moment
+  // the console learns the kind, and the rotation state it exists to paint
+  // silently becomes a first-connect. Its row is the same five-key shape: the
+  // server's provider row has no health field for ANY kind.
+  { id: "prov_c1", kind: "cloudflare", label: "edge", team_id: IDS.team, inserted_at: tMinus(3600 * 2) },
 ];
+
+// ── console-w28: GET /v1/providers/:kind/identity (D899) ─────────────────────
+// WHICH cloud account a connection points at, read out of the ALREADY-STORED
+// credential with zero upstream calls. The per-kind defaults below are
+// `provider_identity/2`'s own arms, so a scenario that carries no
+// `providerIdentity` fixture still gets the answer the live server derives:
+//
+//   hetzner    — a PROJECT-scoped token; the API exposes no project identity
+//                resource, so the absence is permanent and stated.
+//   azure      — the stored subscription_id, absent when none was stored.
+//   cloudflare — the stored account_id. Cloudflare.Client's five callbacks name
+//                no account, so this is an ECHO of what was typed, never a
+//                verified fact — `source: "stored"` says exactly that.
+const PROVIDER_IDENTITY_DEFAULTS = {
+  hetzner: { label: "Project", value: null, source: "unavailable",
+    reason: "Hetzner doesn't report which project this token belongs to." },
+  azure: { label: "Subscription", value: null, source: "unavailable",
+    reason: "This connection didn't store a subscription ID." },
+  cloudflare: { label: "Account", value: null, source: "unavailable",
+    reason: "This connection didn't store an account ID." },
+};
 
 // ── domain status (GET /v1/barkparks/:id/domain-status — a DNS-pending host) ──
 // A platform host mid-propagation: DNS hasn't resolved (the failed front rung
@@ -2152,7 +2270,8 @@ const THEATER_IDS = {
   ready: "5b2c1e00-0000-4000-8000-0000000000e3",
 };
 // Template envelope ⇐ GET /v1/templates (slug/title/description/what_you_get
-// drive the /new card; deployable gates the GitHub affordance on ready).
+// drive the /new card; deployable gates the GitHub affordance on ready;
+// repo + app_dir make the no-token Vercel fallback a live clone link).
 const theaterTemplate = {
   slug: "astro-blog",
   title: "Astro Blog",
@@ -2163,6 +2282,9 @@ const theaterTemplate = {
     "Instant content updates on your live site",
   ],
   deployable: true,
+  repo: "https://github.com/FRIKKern/barkpark",
+  app_dir: "templates/astro-blog",
+  no_app_dir_reason: null,
 };
 // Catalog envelope ⇐ GET /v1/providers/hetzner/catalog (router.ex: regions[] +
 // server_types[].monthly_price + currency). cx22 is the priced row the theater
@@ -2237,7 +2359,8 @@ const stCrash = deployment({
 // bytes. THE FIXTURE IS THE PRECONDITION OF THE LEG, not an extra.
 //
 // THE PRODUCER CHAIN, read-only from here, one hop LONGER than the rail's:
-//   `build_failure_reason` (deploy/site-deploy-node.sh:1372) — the last
+//   `build_failure_reason` (deploy/site-deploy-node.sh; grep -n
+//     'build_failure_reason()' deploy/site-deploy-node.sh) — the last
 //     `npm ERR!|[Ee]rror:` line of the build log, verbatim and unbounded. On a
 //     Next build that is routinely a module-resolution path: ONE unbreakable
 //     run carrying the person's own slug and the release id.
@@ -2498,6 +2621,111 @@ const previewCruelRow = deployment({
   updated_at: tMinus(3600),
 });
 const siteStatesPreviews = [previewCruelRow, previewLiveRow, previewFailedRow];
+
+// ── cch-w16-bl-no-preview-plus-production-console-fixture ────────────────────
+// THE ADVERSARIAL SHAPE #8659 PINNED IN ExUnit, AND THE ONE NO CONSOLE FIXTURE
+// COULD CARRY: a site with a LIVE PRODUCTION deployment and a NEWER CANCELLED
+// PREVIEW. The list embed `last_deployment` is production-only, so the row's
+// freshness pill must read "Live" even though the site's newest deployment row
+// of ANY environment is a cancelled preview 300s old.
+//
+// WHY THE ROW THIS CLOSES EXISTS. The `sites` scenario carried NO per-site
+// deployments payload at all, so every detail ladder driven on it rendered
+// EMPTY (`ladder[0] = null`, `previews = []`) and a list-vs-ladder comparison
+// printed "0 sites disagree" while being STRUCTURALLY unable to disagree. An
+// equality assertion over two empty strings passes and measures nothing; the
+// non-emptiness of the ladder is the half that makes the rest mean anything,
+// which is why the leg that reads these rows asserts it first and refuses.
+//
+// THE LEDGER IS UNSPLIT ON PURPOSE. Every fixture before this line pre-split
+// production from preview BY HAND (`deployments:` vs `previews:`), which means
+// the two halves never met in one array and the production filter was a
+// property of how somebody TYPED the fixture rather than a line of code. The
+// server keeps ONE deployments table and splits it by `environment`
+// — `list_deployments/3`'s `filter_environment/2` clause, which the
+// /v1/sites/:id/deployments handler calls with `environment: "production"`
+// while the previews handler takes the preview side. Re-derive by symbol:
+//   grep -n 'def list_deployments\|defp filter_environment' cloud/lib/barkpark_cloud/registry.ex
+//   grep -n 'get "/v1/sites/:id/deployments"' -A 12 cloud/lib/barkpark_cloud/web/router.ex
+// `siteLedgerBySite` carries the ledger UNSPLIT and the route seam below
+// applies the filter, so defeating that filter is a one-line mutation a proof
+// can actually make — and does.
+//
+// EVERY STAMP AGREES WITH THE LIST EMBED BY CONSTRUCTION: the acme-web row's
+// `lastDeploy("live", "content-auto", 900)` is updated_at T-900 / inserted_at
+// T-1020, and the live production row below carries exactly those two stamps,
+// because on the server they are THE SAME ROW read through two serializers.
+const freshnessLadderLive = deployment({
+  id: depOf(3),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "content-auto",
+  branch: "main",
+  git_ref: "7d41ba06c58e9f2a3b4c5d6e7f8091a2b3c4d5e6",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-7d41ba0.tar.gz",
+  became_live_at: tMinus(900),
+  inserted_at: tMinus(1020),
+  updated_at: tMinus(900),
+});
+// The last good build before it — the row "Roll back to this" is offered on, so
+// the ladder is PLURAL and a head-of-list read is a real choice rather than the
+// only row present.
+const freshnessLadderPrior = deployment({
+  id: depOf(2),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "live",
+  environment: "production",
+  trigger: "manual",
+  branch: "main",
+  git_ref: "1c0d9e8f7a6b5c4d3e2f10293847566a7b8c9d0e",
+  artifact_url: "file:///var/lib/barkpark/artifacts/acme-web-1c0d9e8.tar.gz",
+  became_live_at: tMinus(90000),
+  inserted_at: tMinus(90400),
+  updated_at: tMinus(90000),
+});
+// THE NEWER CANCELLED PREVIEW. Newest row in the ledger by 600 seconds, and the
+// one that must NOT reach the list pill: a torn-down branch preview says
+// nothing about what production is serving. `cancelled` rather than `failed`
+// deliberately — `freshnessModel` spells a cancelled deploy "Cancelled" and
+// `cap(st)` spells the ladder pill "Cancelled", so the two surfaces would read
+// IDENTICALLY if the filter were defeated at only one of them. The disagreement
+// this fixture makes reachable is "Live" vs "Cancelled", which is legible.
+const freshnessLadderCancelledPreview = deployment({
+  id: depOf(6),
+  site_id: FRESHNESS_LADDER_SITE_ID,
+  status: "cancelled",
+  environment: "preview",
+  trigger: "manual",
+  branch: "draft/pricing-table",
+  git_ref: "5a2b3c4d5e6f708192a3b4c5d6e7f8091a2b3c4d",
+  preview_host: previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  preview_url: "https://" + previewHostFor("acme-web", "draft/pricing-table", "3f91ba"),
+  inserted_at: tMinus(360),
+  updated_at: tMinus(300),
+});
+// Newest first — the order /v1/sites/:id/deployments answers in, kept here so
+// the partition below never has to sort and a mis-ordered fixture is visible in
+// the source rather than inferred from a screenshot.
+const freshnessLadderBySite = {
+  [FRESHNESS_LADDER_SITE_ID]: [
+    freshnessLadderCancelledPreview,
+    freshnessLadderLive,
+    freshnessLadderPrior,
+  ],
+};
+// THE PRODUCTION FILTER, AT THE CONSOLE LAYER. One predicate, two call sites,
+// so the rule is a thing that can be defeated by a mutation and re-asserted by
+// a run — not a property of how a fixture was typed.
+const isPreviewDeploy = (d) => !!d && d.environment === "preview";
+// The unsplit ledger for one site, or null when this scenario does not carry
+// one (which is every scenario written before this line — they keep the
+// pre-split `deployments` / `deploymentsBySite` / `previews` seams unchanged).
+function siteLedger(data, siteId) {
+  const all = data && data.siteLedgerBySite;
+  if (!all || !Object.prototype.hasOwnProperty.call(all, siteId)) return null;
+  return all[siteId] || [];
+}
 // The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
 // apex (points_here classified `proxied` — informational, GR27) and a www
 // whose TLS is still issuing, with the server-owned remediation verbatim.
@@ -2709,6 +2937,37 @@ const fleetRosterFixture = [
   },
 ];
 
+// PDF-D11 GROUP VIEW — the roster as the ROUTED group tab reads it. Two rows,
+// and they are deliberately different KINDS: muscle-2 is a provisioned support
+// of this main (the fleet payload knows it), while `pelle-laptop` is a listener
+// session beating into the same workspace that no support accounts for. The
+// second one is the point — Barkpark.Tasks.Fleet's roster is every LISTENER the
+// workspace owns ("a dev-server/agent session running the fleet-listener
+// protocol"), not a list of supports, so an unmatched row is routine and the
+// surface names it under the table WITHOUT letting it move the group's state.
+const groupRosterFixture = [
+  {
+    worker: "muscle-2",
+    agent: "claude",
+    scope: "production",
+    status: "working",
+    capacity: { size_class: "heavy", slots_total: 4, slots_free: 2, budget: 20 },
+    last_seen: tMinus(9),
+    ttl_s: 120,
+    task: { title: "Reindex 400k ONIX records" },
+  },
+  {
+    worker: "pelle-laptop",
+    agent: "claude",
+    scope: "production",
+    status: "idle",
+    capacity: "1 task",
+    last_seen: tMinus(24),
+    ttl_s: 120,
+    task: null,
+  },
+];
+
 // ── MVP-0 offload fixtures (pdf-mvp0-offload-spa, PDF-D87/D92) ───────────────
 // An order is an ASSIGNEE-ROUTED type:task doc filed on the MAIN via the
 // browser-direct mutate seam; the listener (muscle-2, the online support above)
@@ -2810,6 +3069,86 @@ if (cruelName.length !== BARKPARK_NAME_MAX) {
   throw new Error(`cruel fixture: name is ${cruelName.length} chars, the server's cap is ${BARKPARK_NAME_MAX}`);
 }
 
+// ── cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche ────────────────────
+// TWO MORE 255-CAP TEXT HOSTS the corpus had never populated with a maximal
+// value. Both are built the way `CRUEL_SITE_NAME` is — literal concatenation
+// checked by `atLength`, so a corpus edit that quietly shortens either one
+// refuses on LOAD in every consumer of this module instead of passing on a
+// stale literal.
+//
+// 1) `github.account_login` → `.fleet-name` on the GitHub connection card
+//    (app.js `githubCardHtml`, the connected arm: `'GitHub · ' + esc(
+//    g.account_login)`). EFFECTIVE CAP 255, and 255 is the min of the only two
+//    layers that bound it: `validate_length(:account_login, max: 255)`
+//    (github/installation.ex:48) and the `add :account_login, :string` column
+//    (priv/repo/migrations/20260702160000_create_github_installations.exs:18,
+//    i.e. varchar(255)). NOTHING downstream shortens it — app.js `esc()`es and
+//    paints, and the card has no truncation of its own.
+//
+//    REACHABILITY: L2 (a source derivation, no write was run). The value does
+//    NOT come from any Barkpark request field. `POST /v1/github/installations`
+//    (router.ex:5753, `Auth.require_team_admin`) reads only `installation_id`
+//    from the body; `GitHub.record_installation/2` (github.ex:114) then takes
+//    `account_login` from `client().get_installation/1`, which in prod is
+//    `Real.get_installation/1` reading `decoded["account"]["login"]` off
+//    api.github.com (github/real.ex:51-56). So the ledger row below is
+//    INADMISSIBLE-by-derivation and deliberately NOT a reachability claim: it
+//    is an UPPER BOUND on a host whose producer this repo does not bound.
+//    That is precisely why the twin is worth carrying — nothing in Barkpark
+//    would stop a long login if GitHub ever returned one.
+//
+// 2) `barkpark.pinned_release` → `.fleet-meta` (the mono metadata line under a
+//    fleet row's name). EFFECTIVE CAP 255: `validate_length(:pinned_release,
+//    max: 255)` in `autoupdate_changeset/2` (registry/barkpark.ex:981) and the
+//    `add :pinned_release, :string` column (priv/repo/migrations/
+//    20260707110000_add_autoupdate_to_barkparks.exs:20). The changeset's only
+//    other clause is an `update_change` TRIM (barkpark.ex:977-980) — no
+//    format regex, so a length-only cruel string is server-legal here (unlike
+//    `site.domains`, which is FORMAT-LEGAL). The downstream derivation
+//    LENGTHENS rather than shortens: `fleetAutoupdateText` renders
+//    `"pinned " + vRel(pinned_release)` and `vRel` prepends a "v" to anything
+//    that does not already start with one — so the fixture starts with "v" and
+//    the rendered segment is exactly `"pinned " + 255` = 262 characters.
+//
+//    REACHABILITY: L2. `PATCH /v1/barkparks/:id/autoupdate` (router.ex:4271,
+//    `Auth.require_current_team_admin`) casts the body's `pinned_release`
+//    straight into `autoupdate_changeset/2`, and the console writes it from
+//    `#pin-input` (app.js `openPinModal`), an input with NO `maxlength` and no
+//    client-side format check — `value = $("#pin-input").value.trim()`. A team
+//    admin can type 255 characters into that box and have the server keep
+//    them. This one IS a reachability claim.
+//
+//    SINGLE UNBROKEN TOKEN, on purpose: `.fleet-meta`
+//    (grep -n '^\.fleet-meta [{]' app.css) declares
+//    font-size/colour/font-family/margin and NOTHING about wrapping, so a
+//    string with a hyphen or a dot in it would wrap by itself and the row
+//    would be BREAKABLE rather than cruel.
+const cruelAccountLogin = atLength("github account_login",
+  "AcmeEngineeringNorthernEuropeanPlatformInfrastructureGroup" +
+  "ContentDeliveryAndPublishingOperationsOrganisationAccount" +
+  "ForTheWholeNordicForlagsgruppenIncludingEverySubsidiary" +
+  "AndItsSharedDeploymentToolingAndReleaseAutomationTeamAccountForEveryRegionAndImprints", 255);
+const cruelPinnedRelease = atLength("barkpark pinned_release",
+  "vAcmePublishingPlatformProductionReleaseCandidateBuild" +
+  "FromTheNordicForlagsgruppenMonorepoPipelineNumber" +
+  "SevenThousandTwoHundredAndEightyOneRebuiltAfterThe" +
+  "ArchiveMigrationOfEighteenNinetyTwoToTwentyTwentySixAcrossEveryImprintAndSubsidiaryFinalTaggedRebuilds", 255);
+// The cruelty is SHAPE as well as length on both: a break opportunity makes the
+// host wrap itself and the cell can no longer fail (the ledger's BREAKABLE
+// refusal). Asserted here, at load, rather than trusted by eye.
+for (const [what, v] of [["github account_login", cruelAccountLogin], ["barkpark pinned_release", cruelPinnedRelease]]) {
+  if (/[\s\-./_]/.test(v)) {
+    throw new Error("cruel fixture " + what + " carries a line-break opportunity (space, hyphen, dot, slash or underscore) — it would wrap by itself, which is BREAKABLE, not cruel");
+  }
+}
+// vRel() prepends "v" to anything that does not start with one, so a pin that
+// lost its leading "v" would render 256 characters and this fixture's own
+// derivation ("pinned " + 255 = 262) would be a sentence about a different
+// string.
+if (cruelPinnedRelease[0] !== "v") {
+  throw new Error("cruel fixture barkpark pinned_release must start with \"v\" — vRel() prepends one otherwise and the rendered length stops matching the cap this fixture cites");
+}
+
 // The cruel row is a LIVE, healthy, up-to-date box: nothing about its state is
 // unusual, and that is the point — the ONLY variable is the length of two
 // strings a person is allowed to type.
@@ -2836,6 +3175,28 @@ const cruelInstance = bpBase({
   provider: "hetzner",
   provision_status: "succeeded",
 });
+
+// cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE PINNED TWIN, and
+// it is a per-SCENARIO override rather than a field on `cruelInstance` itself,
+// because `cruelInstance` is also the subject of `instance-cruel-detail`.
+//
+// MEASURED, NOT GUESSED. With the pin on the shared row, overflow-guard's
+// W21-detail-url-text-page-bound leg went red 24/24 cells: the instance detail
+// page read documentElement.scrollWidth 2054 against a 320 viewport (2294 at
+// 830-1000, 2378 at 1440), in BOTH themes. The host is a DIFFERENT one from
+// this row's `.fleet-meta` — `autoupdatePolicyLabel()` paints the pin into the
+// detail rail's "Autoupdate" row as a `.badge` inside `.rail-row .v`, and while
+// `.rail-row .v` carries `word-break: break-word` + `min-width: 0` the `.badge`
+// inside it does not break. That is a REAL, REACHABLE defect on a second host
+// and it is deliberately OUT of this slice's fence (which is one host, one CSS
+// rule); it is reported with its numbers rather than half-fixed here.
+//
+// A VALUE ON AN EXISTING ROW, never a new row: smoke.mjs pins this fixture's
+// `barkparks.length` at 3 and reads three rows out of it by predicate
+// (custom_host > 200, provision_error > 200, the one other host-bearing row),
+// so an inserted row is the wave-23 defect this corpus already paid for once.
+// A spread keeps all four of those counts identical.
+const cruelPinnedInstance = { ...cruelInstance, pinned_release: cruelPinnedRelease };
 
 // ── cch-w23-s1 — THE CRUEL PROVISION ERROR (the SHAPE axis, not the length) ──
 // The cruel corpus above bites on two strings a PERSON types. This one bites on
@@ -2869,6 +3230,29 @@ const cruelInstance = bpBase({
 // the total, that sets min-content, so the fixture below is a single unbroken
 // run — and 2000 chars (registry.ex's only known string cap) would only make
 // the same defect louder, never a different one.
+// AND RAISING THIS NUMBER BUYS NOTHING ON `.bp-tl-fail` — MEASURED, so nobody
+// re-derives it (cchi-w25-bl-w21-bp-tl-fail-cell-is-an-identity-under-anywhere).
+// Since wave 24 put `overflow-wrap: anywhere` on that box, its per-element
+// `scrollWidth > clientWidth` test is an IDENTITY: every unbreakable run is
+// broken at the content edge, and the same declaration floors the box's
+// min-content at one glyph so `documentElement.scrollWidth` cannot move either.
+// Driven HERE, 512 -> 5000 (one unbroken alnum run, 39132px of ink against
+// 3993px): the leg's WIDTH half is BYTE-IDENTICAL — the #instance width row,
+// the per-host populations and the "cells clean" line all unchanged, exit 0
+// both times. (Be precise about the half: the TIGHT-FIT HEIGHT lines added
+// after the original finding DO move — `.bp-tl-fail` 398.88px/20 line boxes to
+// 3413.88px/180 at 320 — and stay green, because that bound is a ratio by
+// design (D206), not a pixel. So "the whole table is byte-identical" is now
+// too strong; "the width cell cannot move" is the exact and still-true claim.)
+// The leg's `cruelMin: 512` does not catch that either: it is a `>=`
+// FLOOR, so a 10x LENGTHENING sails through while only a SHORTENING reds.
+// So length is not what that cell measures any more, and the remedy is not a
+// bigger number here — it is the TORN-TOKEN bound the leg now carries beside
+// the width cell (overflow-guard.mjs, the `tokens:` field on the #instance
+// row), which asks the one question `anywhere` can get wrong: was a token that
+// would have FIT its line broken anyway. Leaving this at 512 keeps the fixture
+// at its smallest MEASURED biting length, which is what the paragraph above
+// derived it as.
 const CRUEL_PROVISION_ERROR_LEN = 512;
 // A base64 body echoed back from a provider API is the realistic shape of an
 // error with no break opportunity in it: no space, no hyphen, no slash, no dot.
@@ -3002,6 +3386,68 @@ if (/[^a-z0-9]/.test(cruelMemberLocal)) {
 const teamMembersCruel = teamMembers.concat([
   { user_id: "usr_sol", email: cruelMemberEmail, role: "member", joined_at: tMinus(3 * 86400) },
 ]);
+// cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority — THE
+// DIVERGENCE THE CORPUS COULD NOT REACH. Every other roster fixture agrees with
+// its own me() envelope, so the acting user's row role and their resolved
+// `team_authority.role` were always the same string and NOTHING could tell you
+// which of the two a given line of the row was painted from. Here they DISAGREE:
+// the roster row for the acting user says "member" while the envelope's
+// team_authority says "owner" — the shape a stale roster read, a role changed in
+// another tab, or a team switch mid-flight actually produces on the wire.
+// DERIVED from `teamMembers` by map, never retyped: the disagreement is the ONE
+// field that moves, and the emails/ids/joined_at that every other assertion
+// stands on cannot drift apart from their originals.
+const teamMembersSelfRoleDrift = teamMembers.map((mem) =>
+  mem.user_id === "usr_ada" ? Object.assign({}, mem, { role: "member" }) : mem);
+
+// ── DEFECT-E · THE `drive` FIELD (task-7bd507ea989ef248) ────────────────────
+// Nine scenarios below (fleet-support-*, offload-*, verify-no-credentials) shot
+// BYTE-IDENTICAL to shell-instance in all 20 accent x theme x width cells, in
+// four independent runs. The filing guessed "their data never reaches route()
+// or their screen is gone"; MEASURED, both guesses are wrong. Their data DOES
+// reach route() and their screens DO exist — two other causes were hiding:
+//
+//   BELOW THE FOLD. fleetSupportCardHtml mounts at the TAIL of the instance
+//   Overview main column (after the verify slot, the update panel and the Sites
+//   card). shoot.sh shoots a VIEWPORT (`--window-size="${width},1000"`), so a
+//   card that paints perfectly is simply not in frame. Proof: booted in
+//   smoke.mjs's DOM, #instance-body is 8811 / 9120 / 7304 bytes for
+//   fleet-support-{provisioning,online,failed} against shell-instance's 7049.
+//
+//   CLICK-GATED, and no label said so. `orderTask`/`fleetRoster` are read only
+//   by pollOffloadWatch, which mounts after Offload -> File the order; the
+//   `instanceVerify` 404 is read only by runVerifyNow, i.e. behind [data-vf-run].
+//   Those five scenarios render their PRE-click state, which is shell-instance.
+//
+// `drive` is the declarative repair: an ordered step list mock.js replays after
+// load against the REAL app (nothing is faked into the DOM), so the shot shows
+// the state the label promises. Steps:
+//   { click: sel }           click it — the app's own handler runs
+//   { fill: sel, value: v }  set an input's value
+//   { await: sel }           wait for it to exist (an arrival assertion)
+// Every step waits for its selector; a step that never arrives paints the red
+// PREVIEW DRIVE FAILED banner (mock.js's driveGaveUp), so a drive that did not
+// land can never again collapse back into a byte-identical twin. smoke.mjs
+// reads this field too — see assertDefectEScenariosAreNotShellInstance.
+// And `shotHeight` is the OTHER half of the repair, for the below-the-fold
+// cause: shoot.sh's default viewport is `${width},1000`, so a card mounting at
+// the tail of the instance Overview column is simply not in frame. Scrolling it
+// in was BUILT AND MEASURED FIRST, and rejected: the scroll lands, but the
+// headless capture composites the pre-scroll raster, so the PNG carries a blank
+// band and the subject still off-frame — a shot no reviewer should trust, under
+// a filename promising the state. A taller window has no such race.
+// 2400 is measured, not guessed: at 1440/light the offload ladder's last rung
+// sits at y≈1340 and the 6-rung support theater is taller still.
+const SHOT_TALL = 2400;
+// The offload ladder, driven through the REAL flow: Offload -> the order modal
+// -> File the order -> offloadFiled mounts the watch panel and polls the
+// scenario's own roster + orderTask, so each rung paints its own frame.
+const DRIVE_OFFLOAD_LADDER = [
+  { click: "[data-offload-support]" },
+  { fill: "#offload-title", value: "Summarise the release notes" },
+  { click: "#offload-go" },
+  { await: "[data-offload-watch]" },
+];
 
 export const SCENARIOS = {
   loggedout: {
@@ -3289,6 +3735,14 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: sitesListRows,
       audit: [],
+      // cch-w16-bl-no-preview-plus-production-console-fixture: the acme-web
+      // row's own UNSPLIT deployment ledger — a live production deploy, its
+      // predecessor, and a CANCELLED PREVIEW 600 seconds NEWER than the live
+      // one. Until this key the scenario carried no per-site deployments
+      // payload at all, so its detail ladder rendered EMPTY and any
+      // list-vs-ladder comparison on it was vacuous by construction. The route
+      // seam partitions it by `environment`; see `freshnessLadderBySite`.
+      siteLedgerBySite: freshnessLadderBySite,
     },
   },
 
@@ -3350,6 +3804,41 @@ export const SCENARIOS = {
       // own default Activity fixture was structurally blind to its own Who axis
       // (the cold-boot latch bug lived here undetected for eleven waves).
       // ada is the me() user, so the axis reads Everyone / Just me / lin / rex.
+      members: teamMembers,
+    },
+  },
+
+  // cch-w36-bl: the SAME Activity screen entered by a plain MEMBER, whose
+  // GET /v1/audit is refused. /v1/audit is team-admin-only server-side
+  // (Auth.require_current_team_admin answers `required: "admin", scope: "team"`),
+  // and #activity is the ONE screen whose entire body is that endpoint — so a
+  // member reaching it renders loadActivity's refusal arm (grep app.js for
+  // `Couldn't load activity`), an `.empty-state` built by readFailureCopy. Until
+  // this fixture NO committed scenario could reach that arm at all: the corpus's
+  // only #activity scenario is an OWNER (`activity`, whose me() omits the role
+  // argument and so defaults to "owner"), and the corpus's only auditDenied
+  // fixture (`timeline-events-only`) sits on #instance/:id/timeline, where the
+  // 403 degrades to events-only instead of taking over the view.
+  //
+  // It is a BEFORE/AFTER pin by construction: every field below is `activity`'s
+  // verbatim, except the two that carry the exhibit — me()'s role argument and
+  // the auditDenied flag. A divergence in the rendered bytes is therefore
+  // attributable to the refusal and to nothing else.
+  "activity-denied": {
+    label: "Activity as a plain MEMBER — /v1/audit 403 takes over the whole screen",
+    authed: true,
+    deepLink: "#activity",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      // The trail is POPULATED on purpose. A member denied an EMPTY feed and a
+      // member denied a full one must render identically — the refusal is the
+      // endpoint's answer, never a row count — and an empty fixture here could
+      // pass by accident if the refusal arm ever fell through to the empty state.
+      audit: activityFeed,
+      auditDenied: true, // /v1/audit → 403 (team-admin-only)
       members: teamMembers,
     },
   },
@@ -3451,6 +3940,28 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       members: teamMembersPeerOwner,
+      invitations: teamInvites,
+    },
+  },
+  // cch-w45-followup-self-row-chip-reads-the-roster-not-the-authority: the
+  // acting OWNER whose OWN roster row says "member". memberRowHtml already
+  // decides BOTH controls on the self row from ctx.role (the resolved
+  // team_authority) and not from the row — that is correct, because the server
+  // compares against the actor's real authority — but nothing in the corpus
+  // could show it, and the chip beside those controls was reading the ROW. This
+  // is the fixture in which the two values differ, so the row can be judged on
+  // whether it is internally coherent instead of on a coincidence.
+  "members-self-role-drift": {
+    label: "Members (owner) — the SELF row's roster role DISAGREES with team_authority: chip and controls must name the same rank",
+    authed: true,
+    deepLink: "#settings/members",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "owner"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      members: teamMembersSelfRoleDrift,
       invitations: teamInvites,
     },
   },
@@ -4153,6 +4664,185 @@ export const SCENARIOS = {
       catalog: theaterCatalog,
     },
   },
+  // cch-w48-s1-followup — THE /new LAUNCH STEP'S UNKNOWN ARM, INSTRUMENTED.
+  // cch-w48-s1 gave that step a three-valued band and an exit, and pinned both
+  // in node. Nothing RENDERED the unanswered arm: every committed /new fixture
+  // answers /v1/me, so the funnel's own [data-me-retry] — the one control a
+  // person stuck behind a failed role read can press — existed in the corpus
+  // only as an assertion about a string. It reuses the `meFault` override
+  // (route() in this file) the billing arms already consume rather than minting
+  // a second mechanism, and it sits on the SAME deep link as new-launch, so no
+  // new residue family is created.
+  "new-launch-me-unreadable": {
+    label: "/new — the launch step whose /v1/me 500s: the honest unknown arm with its one Retry, never a form and never a refusal",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      meFault: { status: 500, body: { error: "internal" } },
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
+
+  // task-679663d0bee42b15 — THE LAUNCH BUTTON'S TWO 403s, RENDERED.
+  // newLaunchRefusalToast (`grep -n 'function newLaunchRefusalToast'
+  // cloud/priv/static/app.js`) branches on the refusal's SLUG, never on the
+  // status, and __app.test.mjs pins every arm of it in node. Nothing drove a
+  // Launch press into a 403 in the rendered console: POST /v1/launch was
+  // unmodelled here and fell through to route()'s terminal `/v1/` 200 {}, so
+  // the toast a person sees when the server refuses a launch was reachable
+  // from neither harness. `launchFault` is the per-scenario override, on the
+  // same `{status, body}` contract as `meFault` / `sitesFault`, and it is
+  // POST-guarded and opt-in so no committed fixture moves by a byte.
+  //
+  // BOTH BODIES ARE THE ROUTER'S, NOT INVENTED. `go_live/1` in
+  // cloud/lib/barkpark_cloud/web/router.ex (`grep -n 'defp go_live'`):
+  //   • the QUOTA gate:
+  //       json(conn, 403, %{error: "limit_reached",
+  //                         limit: Billing.barkpark_limit(team),
+  //                         upgrade_path: "/v1/billing/checkout"})
+  //   • the SESSION authority gate (the console signs in with a session, not a
+  //     PAT, so this is the arm a browser meets):
+  //       Auth.forbidden(conn, required: "admin", scope: "team")
+  //     and Auth.forbidden/2 in web/auth.ex is
+  //       json_halt(conn, 403, Enum.into(evidence, %{error: "forbidden"}))
+  //     → {error: "forbidden", required: "admin", scope: "team"}.
+  //
+  // WHY THE FORBIDDEN ACTOR IS AN OWNER. A member never reaches the form — the
+  // /new step's pre-hoc band withholds it — so the post-hoc toast is only ever
+  // painted when the console's role read and the server DISAGREE: the role
+  // changed between /v1/me and the press. That is this fixture: /v1/me says
+  // owner, go_live says admin is required.
+  "new-launch-limit-reached": {
+    label: "/new — Launch pressed on a team at its plan's instance ceiling: POST /v1/launch 403 limit_reached → the plan-limit toast with its billing action",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      launchFault: {
+        status: 403,
+        body: { error: "limit_reached", limit: 1, upgrade_path: "/v1/billing/checkout" },
+      },
+    },
+  },
+  "new-launch-forbidden": {
+    label: "/new — Launch pressed after the caller lost admin: POST /v1/launch 403 forbidden {required: admin, scope: team} → the authority toast, no billing action",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog",
+    data: {
+      me: me("Ada's Lab"),
+      barkparks: [], subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      launchFault: {
+        status: 403,
+        body: { error: "forbidden", required: "admin", scope: "team" },
+      },
+    },
+  },
+
+  // ── cch-r16-w11: THE LAUNCH WIZARD'S OWN ELEVATED WRITES, BOTH WAYS ─────────
+  // Three of the five rows on __binding_census.mjs's UNPREDICATED ELEVATED
+  // WRITES list live on these two screens — the /new ready hero and the /new
+  // failure screen — and until this commit the corpus had no MEMBER actor on
+  // either, so every guard aimed at their fence was green by construction.
+  //
+  // WHY A GITHUB FIXTURE AND NOT A VERCEL ONE. The ready screen offers two
+  // elevated writes. POST /v1/github/repos sits behind GET
+  // /v1/github/installation, which the router gates at `Auth.require_user` —
+  // a plain member READS it, sees connected:true, and is therefore genuinely
+  // offered the create affordance. POST /v1/barkparks/:id/vercel-deploy sits
+  // behind GET /v1/barkparks/:id/bootstrap, which the router gates at
+  // `Auth.require_team_admin` — a member's read 403s, so no actor in this
+  // corpus can paint #new-vercel-claim and asserting its absence for a member
+  // would pass on a DOM that never rendered it. That one is fenced in app.js
+  // all the same (defence in depth: the console must not depend on a sibling
+  // READ's refusal for its own authority) and its bytes are pinned both ways
+  // in __app.test.mjs, where the band can be passed directly. Declared as a
+  // BLIND SPOT in member-authority-sweep.mjs rather than faked here.
+  "theater-ready-github": {
+    label: "/new theater ready with GitHub CONNECTED — the OWNER twin: #new-gh-create renders live (POST /v1/github/repos is team-admin)",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.ready,
+    data: {
+      me: me("Ada's Lab", { instance: true }),
+      barkparks: [bpBase({
+        id: THEATER_IDS.ready,
+        name: "Hugin",
+        slug: "hugin",
+        url: "https://hugin-5b2c1e.barkpark.cloud",
+        host: "hugin-5b2c1e.barkpark.cloud",
+        health_status: "up",
+        agent_status: "online",
+        version: "0.9.2",
+        last_seen_at: tMinus(20),
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "succeeded",
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+      // The envelope GET /v1/github/installation actually answers on a
+      // connected team (github/installation.ex: connected + account_login).
+      github: { connected: true, configured: true, account_login: "ada" },
+    },
+  },
+  "theater-ready-github-member": {
+    label: "/new theater ready with GitHub connected, entered by a plain MEMBER — no live #new-gh-create, the disabled-and-explained arm instead",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.ready,
+    data: {
+      me: me("Ada's Lab", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: THEATER_IDS.ready,
+        name: "Hugin",
+        slug: "hugin",
+        url: "https://hugin-5b2c1e.barkpark.cloud",
+        host: "hugin-5b2c1e.barkpark.cloud",
+        health_status: "up",
+        agent_status: "online",
+        version: "0.9.2",
+        last_seen_at: tMinus(20),
+        provider: "hetzner",
+        region: "fsn1",
+        server_type: "cx22",
+        provision_status: "succeeded",
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+      catalog: theaterCatalog,
+      github: { connected: true, configured: true, account_login: "ada" },
+    },
+  },
+  "theater-failed-member": {
+    label: "/new theater failed, entered by a plain MEMBER — no live #new-retry (POST /v1/barkparks/:id/retry is team-admin), the disabled-and-explained arm instead",
+    authed: true,
+    pathname: "/new",
+    search: "?template=astro-blog&bp=" + THEATER_IDS.failed,
+    data: {
+      me: me("Ada's Lab", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: THEATER_IDS.failed,
+        name: "Munin",
+        slug: "munin",
+        provision_status: "failed",
+        provision_error: "Couldn't secure hugin.barkpark.cloud — the TLS certificate was never issued (DNS didn't propagate). The server exists but isn't serving; nothing else was set up.",
+        provision_steps: theaterFailedSteps,
+        provision_console: theaterFailedConsole,
+      })],
+      subscription: trialSub, sites: [], audit: [],
+      templates: [theaterTemplate],
+    },
+  },
 
   // ── gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview states (tail-append, OC9) ─
   // Three states of the ONE Overview region: the self-healing trial runway, the
@@ -4207,6 +4897,58 @@ export const SCENARIOS = {
           // classifyBp is unchanged by the flip: host set, last_seen_at set,
           // health != "up" -> `degraded`, rank 4, bucket `attention`, role
           // `warn` — the same queue, the same amber card, a longer sentence.
+          health_status: "unknown",
+          agent_status: "offline",
+          version: "0.9.2",
+          last_seen_at: tMinus(1200),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // ── cch-w20-bl: THE LONG INSTANCE NAME, WHICH NO FIXTURE HAD EVER CARRIED ──
+  // `.attention-name` has carried `overflow: hidden; text-overflow: ellipsis;
+  // white-space: nowrap` since cch-w20-s9, and NOTHING in this corpus had ever
+  // made it use them. Every attention-queue fixture names its box in one word
+  // — Reporting, Marketing, Staging — which measure 52-69px at 14px/600, so the
+  // W20-attention-name-column leg's 44 green cells all proved the same thing:
+  // that the ellipsis was never NEEDED. A green that rests on a fixture string
+  // is conditional on that string, and the string was ours, not the server's.
+  //
+  // THIS NAME IS ORDINARY, NOT CRUEL, AND THAT IS THE POINT. `Barkpark.changeset`
+  // validates `name` at max 255 (cloud/lib/barkpark_cloud/registry/barkpark.ex,
+  // `validate_length(:name, min: 1, max: 255)`), and the cruel twins in this
+  // corpus — `fleet-cruel-content`, `members-cruel-content` — sit AT that cap.
+  // This one is 71 characters, well inside it: the shape an operator types when
+  // one word cannot tell two boxes apart. The blind spot was never the 255-char
+  // wall, which overflow-guard already drives elsewhere; it was the ORDINARY
+  // long name, which nothing drove at all.
+  //
+  // Everything else is `overview-attention` verbatim — the same degraded box,
+  // the same production-dominant "Health unknown · Agent offline" pair, the
+  // same `liveInstance` beside it — so the ONE axis between the two fixtures is
+  // the name, and the W20-attention-name-column leg reads them as a pair:
+  // engaged here, never needed there. Registered as breakpoint-sweep RESIDUE
+  // rather than a cell, the same home `overview-attention` and
+  // `overview-never-reported` have: what it exists to measure is one box's
+  // rendered text against its own column, which is overflow-guard's axis.
+  "overview-attention-long-name": {
+    label: "Overview attention — the degraded box wears a 71-character operator name, so .attention-name's ellipsis must engage",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-degraded-long",
+          name: "Reporting — EU customer analytics, billing reconciliation and retention",
+          slug: "reporting-eu",
+          url: "https://reporting-eu-5b2c1e.barkpark.cloud",
+          host: "reporting-eu-5b2c1e.barkpark.cloud",
           health_status: "unknown",
           agent_status: "offline",
           version: "0.9.2",
@@ -4371,10 +5113,23 @@ export const SCENARIOS = {
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: cruelFleetSites,
       audit: [],
+      // cchi-w22-bl-cruel-corpus-uncovered-caps-second-tranche — THE GITHUB
+      // HALF. The connection card's `.fleet-name` is a 255-cap text host
+      // (`installation.account_login`) and every populated `github` fixture in
+      // this file carries the same 16-character "acme-engineering", so no
+      // instrument had ever driven it at the cap. Route-gated exactly like the
+      // other three: `route()` answers /v1/github/installation only when the
+      // scenario carries a `github` key, so no other scenario moves by a byte.
+      // `install_url` rides along so a hypothetical disconnect repaints the
+      // honest reconnect arm rather than "aren't configured yet".
+      github: {
+        connected: true, account_login: cruelAccountLogin, configured: true,
+        install_url: "https://github.com/apps/barkpark-cloud/installations/new",
+      },
     },
   },
   // cchi-w21-bl-cruel-corpus-does-not-cover-three-hosts (absorbing
@@ -4387,12 +5142,15 @@ export const SCENARIOS = {
   // overflows anywhere in the corpus (the w15 measurement: sw == cw == 240 in
   // EVERY cell). Same data, the cruel box's route.
   "instance-cruel-detail": {
-    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, with the copy-btn carrying the full value",
+    label: "Instance detail — cruel content: the 253-char custom host reaches .detail-url-text, and a 255-char pinned_release reaches the Autoupdate rail's .badge",
     authed: true,
     deepLink: "#instance/5b2c1e00-0000-4000-8000-0000000000c1",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
+      // cchi-w22-bl-the-pinned-release-badge-does-not-break: the pinned twin, so
+      // the DETAIL route is driven at the pinned_release cap. Same row, same
+      // order, same 253-char host — one extra field.
+      barkparks: [cruelPinnedInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: [],
       audit: [],
@@ -4752,6 +5510,15 @@ export const SCENARIOS = {
       barkparks: [liveInstance], subscription: activeSub, sites: [], audit: [],
       providers: connectedProviders,
       capabilities: settingsProviderCapabilities,
+      // console-w28 — the Cloudflare connection DID store an account_id, so this
+      // is the one scenario in the corpus where the identity slot can paint its
+      // KNOWN state. `source: "stored"` is the whole honesty of the shape: the
+      // value is the echo of what was typed at connect time, and nothing on the
+      // server ever asks Cloudflare whose account a token belongs to.
+      providerIdentity: {
+        cloudflare: { label: "Account", value: "9f8e7d6c5b4a39281706f5e4d3c2b1a0",
+          source: "stored", reason: null },
+      },
       // cch-w2-revoke-oracle-round2 — THE SAME console-side fixture
       // providers-member already carries (see its comment for why
       // connected:true cannot come from the live control plane), moved onto the
@@ -4798,9 +5565,19 @@ export const SCENARIOS = {
       //
       // IT RIDES AN EXISTING KEY ON PURPOSE. A NEW `SCENARIOS` key is refused
       // by breakpoint-sweep.mjs's census — "UNLISTED scenario … no cell renders
-      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file is
+      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file was
       // outside this slice's fence. Filed as
       // cch-w23-bl-real-hetzner-remediation-scenario.
+      //
+      // RESOLVED (cch-w23-bl-real-hetzner-remediation-scenario) WITHOUT a new
+      // key and WITHOUT touching the census: `route()` now takes the POSTed
+      // body, so `providerConnect` may be a per-KIND map and one scenario can
+      // answer every clause of `connect_remediation/1`. `providers-unverified`
+      // below carries hetzner/azure/_default verbatim; this flat response stays
+      // exactly as it is because it IS the filed reproduction — the azure
+      // sentence on the geometry the defect was measured at — and a fixture
+      // that still answers the old flat shape is the proof that the new arm did
+      // not break the old one.
       providerConnect: {
         status: 422,
         body: {
@@ -4812,7 +5589,7 @@ export const SCENARIOS = {
     },
   },
   "providers-unverified": {
-    label: "Providers — the connect card's verify-before-save remediation (server names the exact console fix)",
+    label: "Providers — the connect card's verify-before-save remediation, PER PROVIDER KIND: the server's real 169-character Hetzner clause, its 275-character Azure clause and the provider-agnostic fallback, all verbatim from connect_remediation/1",
     authed: true,
     deepLink: "#settings/providers",
     data: {
@@ -4823,11 +5600,56 @@ export const SCENARIOS = {
       // POST /v1/providers preflight fails → ALL causes collapse to the single
       // provider_unverified + the server-owned remediation string, rendered
       // verbatim in-card when the operator clicks Verify & connect.
+      //
+      // ── cch-w23-bl-real-hetzner-remediation-scenario: PER KIND, AND EVERY
+      //    SENTENCE IS THE SERVER'S ────────────────────────────────────────────
+      // This key used to carry ONE 168-character string that no clause of
+      // `connect_remediation/1` has ever produced — a paraphrase of the hetzner
+      // sentence, invented by the corpus and then driven by
+      // overflow-guard.mjs's W23 leg as if it were the server's copy. It was
+      // honestly LABELLED as a paraphrase, which is why nothing was certified
+      // falsely; it was still a made-up string standing in for a real one.
+      //
+      // It could not simply be corrected, because a fixture carried ONE
+      // `providerConnect` response and `route()` never saw the POST body — so
+      // the string was a property of the SCENARIO, not of the KIND, and the
+      // 275-character azure clause already had to ride `providers-empty`. The
+      // 5th `body` argument of `route()` (this file) plus mock.js's parse of
+      // `init.body` removes that limit; this map is the first consumer.
+      //
+      // The three sentences below are `connect_remediation/1` VERBATIM
+      // (cloud/lib/barkpark_cloud/failure_copy.ex). They are NOT free to drift:
+      // breakpoint-sweep.test.mjs extracts the clauses from that file and reds
+      // if any `providerConnect` remediation in this corpus is not one of them,
+      // so this is a locked mirror rather than a second hand-typed copy.
+      // Re-derive the lengths, never quote them:
+      //   node -e 'const s=require("fs").readFileSync("cloud/lib/barkpark_cloud/failure_copy.ex","utf8");
+      //            const re=/def\s+connect_remediation\(\s*(?:"([a-z0-9_]+)"|_kind)\s*\)\s+do\s*\n\s*"((?:[^"\\]|\\.)*)"/g;
+      //            let m; while((m=re.exec(s))) console.log(m[1]||"_kind", m[2].length)'
       providerConnect: {
-        status: 422,
-        body: {
-          error: "provider_unverified",
-          remediation: "We couldn't verify this token. In the Hetzner Cloud console open Security → API tokens, revoke the old token, then generate a fresh Read & Write token for this project.",
+        hetzner: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("hetzner") — 169 chars, VERBATIM. The kind this scenario's connect card arms first, and the string the W23 overflow leg now drives as its SHORT cell.
+            remediation: "We couldn't reach Hetzner with that API token. Create a fresh Read & Write token in the Hetzner Cloud Console \u2192 your project \u2192 Security \u2192 API tokens, then paste it here.",
+          },
+        },
+        azure: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("azure") — 275 chars, VERBATIM. The LONGEST clause the server can send; `providers-empty` carries the same sentence as the filed reproduction geometry.
+            remediation: "We couldn't authenticate to Azure with those details. In the Azure Portal \u2192 App registrations \u2192 your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired \u2014 then reconnect.",
+          },
+        },
+        _default: {
+          status: 422,
+          body: {
+            error: "provider_unverified",
+            // connect_remediation("_kind") — 88 chars, VERBATIM. The provider-agnostic fallback: an unknown kind, or a body this harness could not parse, gets the sentence the server gives it — never a silent 201.
+            remediation: "We couldn't verify those credentials with the provider. Double-check them and try again.",
+          },
         },
       },
     },
@@ -5163,6 +5985,11 @@ export const SCENARIOS = {
     label: "Account modal — identity, sessions, password on demand, 2FA OFF (the not-enrolled state)",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5179,6 +6006,11 @@ export const SCENARIOS = {
     label: "Account modal — the NINE-session shape (the one that broke on live); escape hatches sit below the list",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5209,6 +6041,11 @@ export const SCENARIOS = {
     label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5238,6 +6075,11 @@ export const SCENARIOS = {
     label: "Account modal — the CRUEL identity: a 158-character email local part, the longest name a person can actually own (validate_length(:email, max: 160))",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: cruelAccountMe,
       barkparks: [liveInstance],
@@ -5251,6 +6093,11 @@ export const SCENARIOS = {
     label: "Account modal — enrollment rejected: 422 invalid_otp, inline in the #pw-error grammar (never a toast)",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account-2fa-badcode",
     data: {
       me: me("Guerrilla"),
       barkparks: [liveInstance],
@@ -5265,6 +6112,11 @@ export const SCENARIOS = {
     label: "Account modal — 2FA already ON: the on-row, read free from /v1/me's two_factor_enabled",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: (function () {
         const m = me("Guerrilla");
@@ -5307,6 +6159,11 @@ export const SCENARIOS = {
     label: "Account modal — /v1/me never lands: the two-factor row reads Unknown, offers Retry, and never offers setup",
     authed: true,
     deepLink: "",
+    // THE MODAL SEAM, DECLARED (task-5ffdec2b609404bc). Was a NAME
+    // CONVENTION in shoot.sh (`case "$scen" in account-modal*`); it is a FIELD
+    // now, so a scenario reaches a dialog by SAYING SO, not by being named
+    // a certain way. mock.js dispatches on this string.
+    modal: "account",
     data: {
       me: me("Guerrilla"),
       meFault: { status: 500, body: { error: "internal" } },
@@ -5319,7 +6176,8 @@ export const SCENARIOS = {
   },
   // ── MVP-0 Personal Dev Fleet (PDF-D84/D88/D92): the fleet card states ──────
   "fleet-support-provisioning": {
-    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main",
+    label: "Fleet card — a support mid-provision: the SUPPORT theater (6 rungs, secure included) under the main [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5331,7 +6189,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-online": {
-    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step",
+    label: "Fleet card — a support ONLINE (roster presence chip + capacity) with the BYO-model-key step [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5344,7 +6203,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-failed": {
-    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online)",
+    label: "Fleet card — stuck provisioning renders honestly FAILED (never lies online) [below the fold — driven into frame]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5356,7 +6216,8 @@ export const SCENARIOS = {
     },
   },
   "fleet-support-empty": {
-    label: "Fleet card — no supports yet: the add-a-support CTA on a live main (+ nested #fleet list)",
+    label: "Fleet card — no supports yet: the add-a-support CTA on a live main [below the fold — driven into frame; its DOM IS shell-instance's, the shot is not]",
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5367,12 +6228,33 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── PDF-D11 GROUP VIEW — the ROUTED surface (#instance/<main>/group) ────────
+  // The tab the group surface was missing. It renders from the LIVE roster
+  // plane: the app-token mint + the browser-direct GET /v1/fleet/roster both
+  // land on mock.js's existing arms, and `wireGroupView` hands those documents
+  // straight to the shipped renderer. Nothing here is a group-view fixture
+  // module — this is the real console reading the real (mocked) wire.
+  "fleet-group-view": {
+    label: "Group tab — the main's supports under ONE group state, read live off the roster, with the unmatched listener session named but not counted",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance + "/group",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance, supportOnlineRow],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      fleetRoster: groupRosterFixture,
+    },
+  },
   // ── MVP-0 OFFLOAD (pdf-mvp0-offload-spa, PDF-D87/D92): the order watch ladder ─
   // The offload action renders on the ONLINE support (muscle-2); the watch folds
   // the task read + the roster read into filed -> claimed -> working -> done with
   // honest blocked/failed terminals. Each scenario pins one rung.
   "offload-filing": {
-    label: "Offload — the order is filed (open), waiting for the support to claim it",
+    label: "Offload — the order is filed (open), waiting for the support to claim it [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5384,7 +6266,9 @@ export const SCENARIOS = {
     },
   },
   "offload-working": {
-    label: "Offload — the support has claimed AND is WORKING the order (roster beats working)",
+    label: "Offload — the support has claimed AND is WORKING the order (roster beats working) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5396,7 +6280,9 @@ export const SCENARIOS = {
     },
   },
   "offload-done": {
-    label: "Offload — the order is DONE (terminal success; the poll stops)",
+    label: "Offload — the order is DONE (terminal success; the poll stops) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5408,7 +6294,9 @@ export const SCENARIOS = {
     },
   },
   "offload-blocked": {
-    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps)",
+    label: "Offload — the support hit a BLOCKER (honest terminal; the ladder snaps) [click-gated: the ladder mounts only after File the order]",
+    drive: DRIVE_OFFLOAD_LADDER,
+    shotHeight: SHOT_TALL,
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5473,8 +6361,33 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED SITES READ,
+  // rendered. THE FIXTURE IS BYTE-IDENTICAL TO A GENUINELY-EMPTY INSTANCE — same
+  // owner, same live box, the same `sites: []` — and ONE field differs: the read
+  // does not succeed. That is deliberate, and it is the whole discriminator.
+  // Charter D382's rule is that a failed read is never reported as an empty one;
+  // with the failed arm folded into the empty default (as loadInstanceSites did
+  // before cch-w34-s1) this screen and a true empty render the SAME BYTES, and
+  // no instrument in the repo could tell them apart. `liveInstance` carries a
+  // `host`, so the pre-fix bytes are not blank-and-ambiguous — they are the
+  // confident sentence "No sites yet", an assertion about an instance whose
+  // sites we never received.
+  "instance-sites-unreadable": {
+    label: "Instance workspace — /v1/sites 500s: the Sites section says it couldn't READ them, and never claims the instance has none",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      sitesFault: { status: 500, body: { error: "internal" } },
+    },
+  },
   "verify-no-credentials": {
-    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision",
+    label: "Verify card — the box predates verification: POST /verify answers 404 no_admin_token and the note offers its ONE recovery, Re-provision [click-gated: the 404 is read only by runVerifyNow, behind Run first check]",
+    drive: [{ click: "[data-vf-run]" }, { await: "[data-vf-reprovision]" }],
     authed: true,
     deepLink: "#instance/" + IDS.liveInstance,
     data: {
@@ -5489,6 +6402,148 @@ export const SCENARIOS = {
       // so verifyNoteHtml("no_admin_token", …) — and the [data-vf-reprovision]
       // mount inside it — was unreachable from this harness at all.
       instanceVerify: { status: 404, body: { error: "no_admin_token" } },
+    },
+  },
+
+  // ── cch-w38-s1-fu (task-8cf413b005cbcd40): THE MEMBER ARM OF THE THREE STATES
+  // ABOVE. The three owner fixtures directly above exist so #inst-update,
+  // #inst-remove-retry and [data-tl-retry] can render AT ALL; their comment says
+  // the member arm "is already pinned in __app.test.mjs's cch-w38-s1 eleven-offer
+  // table". That is a unit-level pin over a hand-built markup string — and
+  // member-authority-sweep.mjs, the console's ONLY rendered-bytes instrument for
+  // "what is a plain member actually OFFERED", could not see any of the three:
+  // MEASURED on origin/main 661e87d9f3 by booting all 125 committed scenarios
+  // through smoke.mjs's shim and scanning every registry entry's innerHTML,
+  //   id="inst-update"        1 hit  (instance-behind,        actor OWNER)
+  //   id="inst-remove-retry"  1 hit  (instance-remove-failed, actor OWNER)
+  //   data-tl-retry           1 hit  (failed,                 actor OWNER)
+  //   data-vf-reprovision     0 hits (see the note on the last scenario below)
+  // so the sweep's verdict over PR #12996 did not move across the defect and its
+  // repair: it exited 0 with 0 findings BOTH ways. An unlosable green.
+  //
+  // Each of these three is byte-identical to the owner fixture it sits beside
+  // except for the ONE moved axis — me(…, "member", …) — which is the same shape
+  // `site-member` and `panel-overview-member` use. The deepLink is deliberately
+  // IDENTICAL to the owner fixture's, because member-authority-sweep pairs every
+  // member screen with a PRIVILEGED TWIN on the same deep link and reds if the
+  // twin does not out-render the member; these three fixtures ARE those twins.
+  "instance-behind-member": {
+    label: "Instance header as a plain MEMBER — the behind box's self-update CTA is disabled-and-explained, never offered (POST /v1/barkparks/:id/self-update is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
+      barkparks: [liveInstance, behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  "instance-remove-failed-member": {
+    label: "Instance header as a plain MEMBER — the failed teardown's Retry removal is disabled-and-explained, never offered (DELETE /v1/barkparks/:id is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.removeFailedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member", "usr_rex"),
+      barkparks: [liveInstance, removeFailedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+  // The timeline's docked Retry setup. Its owner twin is `failed` (the solo
+  // failed box), so this fixture carries `failed`'s OWN barkpark row rather than
+  // failedInstanceRow — the deepLink must match the twin's for the sweep's
+  // per-screen positive control to bind.
+  //
+  // THE FOURTH SITE IS NOT HERE, AND THAT IS DECLARED RATHER THAN SKIPPED.
+  // [data-vf-reprovision] is painted by verifyNoteHtml's no_admin_token arm,
+  // which runVerifyNow reaches only after a CLICK on [data-vf-run] issues
+  // POST /verify and collects a 404. member-authority-sweep BOOTS scenarios; it
+  // never drives them. So the control renders in ZERO of the 125 committed
+  // scenarios — `verify-no-credentials` included, which is the fixture that
+  // exists for it — and no member fixture can make it reachable to this
+  // instrument. It is unreachable HERE by construction, and it is named in the
+  // sweep's own BLIND SPOTS list (B5) for that reason. Its member arm is scored
+  // by smoke.mjs's `verify-no-credentials` drive, which does click.
+  "instance-failed-member": {
+    label: "Provision timeline as a plain MEMBER — the docked Retry setup is disabled-and-explained, never offered (POST /v1/barkparks/:id/retry is team-admin)",
+    authed: true,
+    deepLink: "#instance/" + IDS.soloFailed,
+    data: {
+      me: me("Acme Inc", { instance: true }, "member", "usr_rex"),
+      barkparks: [bpBase({
+        id: IDS.soloFailed,
+        name: "Reporting",
+        slug: "reporting",
+        provision_status: "failed",
+        provision_error: "verify.login: 500 — Studio never came up",
+        provision_steps: failedSteps,
+        provision_console: failedConsole,
+      })],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // ── cch-w45-s5-fu · THE INSTANCE SCREEN WITH /v1/me UNANSWERED ─────────────
+  // The corpus had never booted the instance screen on a FAILED /v1/me at all
+  // (meFault appeared only on #billing and the operator console), so every
+  // claim about the instance screen's unknown arm — including "the still-
+  // checking control has an exit" — was argued from the render conditions and
+  // never measured.
+  //
+  // THE ACTOR IS AN OWNER. The role is irrelevant here on purpose: the read
+  // never lands, so instanceAdminAuthority() answers "unknown" for everybody
+  // and the arm under test is the one that claims NOTHING about the role.
+  //
+  // THE BOX IS SUSPENDED AND HOSTED, which is the whole point. The Updates
+  // panel renders for every box with a host, while the header's actions strip
+  // draws only the CLI disclosure in the suspended arm — no adminWriteControlHtml
+  // control at all, so the strip emits no group reason and therefore no exit.
+  // (The filing named a live box with a custom host as the reachable case. It is
+  // not: Connect agent is gated on lc.live ALONE, so a live box always draws a
+  // grouped control and always gets the header exit. The lifecycle arms that
+  // draw no grouped control while still rendering the Updates panel are the
+  // reachable ones, and `suspended` is the committed fixture that is both.)
+  //
+  // times: 1 — the fault is ONE-SHOT (the billing-me-recovers precedent), so the
+  // same fixture measures both halves: the first read fails and the panel paints
+  // the still-checking Rollback, and the exit's re-read can then LAND, which is
+  // the only way to prove the exit exits rather than merely renders.
+  "instance-suspended-me-unreadable": {
+    label: "Instance Updates panel with /v1/me unanswered on a SUSPENDED box — the still-checking Roll back needs an exit the header strip cannot provide (its suspended arm draws no grouped control)",
+    authed: true,
+    deepLink: "#instance/" + IDS.suspendedInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [suspendedInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
+
+  // THE TWIN THAT MAKES THE BINDING LOAD-BEARING. Same one-shot /v1/me fault,
+  // but a LIVE box one release behind: its header strip DOES draw grouped
+  // controls (Update / Connect agent), so the header carries an exit AND the
+  // Updates strip now carries its own — two [data-me-retry] in one subtree,
+  // which is exactly the shape the old first-match binding made impossible to
+  // ship. Without this fixture "bind every match" is a change no committed
+  // scenario can tell apart from the code it replaced.
+  "instance-behind-me-unreadable": {
+    label: "Instance screen with /v1/me unanswered on a LIVE behind box — TWO still-checking strips, TWO exits, and the second one must not be dead bytes",
+    authed: true,
+    deepLink: "#instance/" + IDS.behindInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      meFault: { status: 500, body: { error: "internal" }, times: 1 },
+      barkparks: [behindInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
     },
   },
 
@@ -5694,6 +6749,163 @@ export const SCENARIOS = {
       secondIdentity: { me: betaMe, members: teamMembersBeta },
     },
   },
+  // ── cch-w47-rv-bl: the FIRST member x archives scenario in this corpus ─────
+  //
+  // The Archives panel's refuse arm had exactly one instrument before this: the
+  // pure helper, called with the string "refuse" by hand in __app.test.mjs. No
+  // scenario anywhere booted an actor whose own GET /v1/me answers role
+  // "member" onto #fleet with bundles in the store, so nothing proved that the
+  // authority answer the DOM mount reads (instanceAdminAuthority, at the
+  // loadArchives render site) ever reaches those helpers at all. A helper that
+  // is correct and never called is the vacuous green this epic keeps finding.
+  //
+  // It is the OWNER twin of `fleet-archives-stored`, field for field, with ONE
+  // difference: the third argument to me(). Same two bundles, same fqdns, same
+  // providers, same spec — so a diff of the two rendered panels isolates the
+  // authority answer and nothing else, which is what makes the grant arm's
+  // byte-identity assertable rather than asserted.
+  "fleet-archives-member": {
+    label: "Fleet Archives as a plain member — no live Resurrect, the CLI chip kept, and the server's own role sentence above the list",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      archives: {
+        status: 200,
+        body: {
+          ok: true,
+          archives: [
+            {
+              fqdn: "shop-9f2c1.barkpark.cloud", slug: "shop", source_provider: "hetzner",
+              created_at: tMinus(3 * 86400), bundle_ref: "s3://bundles/shop.tar.zst",
+              spec: { region: "fsn1", server_type: "cx22" },
+            },
+            {
+              fqdn: "blog-1a4d7.barkpark.cloud", slug: "blog", source_provider: "azure",
+              created_at: tMinus(9 * 86400), bundle_ref: "s3://bundles/blog.tar.zst",
+              spec: { region: "hel1", server_type: "cx32" },
+            },
+          ],
+        },
+      },
+    },
+  },
+};
+
+// ── THE MODAL SEAM'S FIRST TWO NEW SCREENS (task-5ffdec2b609404bc) ──────────
+// Until the `modal` field above existed, the ONLY dialog any PNG in this
+// harness could show was the account modal, because shoot.sh derived
+// `?modal=account` from the `account-modal*` NAME. Re-derive the scale of that
+// blind spot yourself — the number is not a memory:
+//
+//   grep -n 'openModal(' cloud/priv/static/app.js
+//
+// 31 hits, of which THREE are not calls (two prose lines and the
+// `function openModal(html)` definition) => 28 call sites, ONE of which the
+// matrix reached.
+//
+// These two are the first two it could not. They are deliberately NOT new
+// fixtures: each is its HOST scenario's data, deep-copied, plus one field. That
+// is the whole point of the comparison the task asks for — if the shot of
+// `tokens-revoke-confirm` differs from the shot of `tokens-revoke`, the ONLY
+// thing that can have made the difference is the dialog, because every other
+// byte of the scenario is the same by construction.
+//
+// JSON round trip, not a shared reference: route() mutates `data` through the
+// per-boot state bag (the revoke DELETE splices the token list), and a shared
+// object would let one scenario's drive rewrite the other's fixture inside a
+// single smoke.mjs process. Everything in `data` is plain JSON.
+const copyData = (name) => JSON.parse(JSON.stringify(SCENARIOS[name].data));
+
+// confirmRevokeToken — the CONFIRM-SHEET shape: a short, action-bearing dialog
+// built from an inline HTML string with no model object behind it. Reached by a
+// REAL click on a REAL row's Revoke button (mock.js's "revoke-token" driver),
+// never by calling the function, so the delegation renderTokens() installs is
+// part of what the shot certifies.
+SCENARIOS["tokens-revoke-confirm"] = {
+  ...SCENARIOS["tokens-revoke"],
+  label:
+    "API tokens — the REVOKE CONFIRM SHEET itself, opened by a real click on a real row: the typed-danger dialog over its own list",
+  data: copyData("tokens-revoke"),
+  modal: "revoke-token",
+};
+
+// openCommandPalette — the `.modal-root:has(.cmdk)` family. app.css carries
+// modal-scoped `:has(.cmdk)` rules that NO image in this corpus exercised at
+// ANY accent; this scenario is the first one that does. Reached by the REAL
+// Cmd/Ctrl+K keydown path (mock.js's "cmdk" driver), which means the shot also
+// passes through the handler's four no-op guards rather than around them.
+SCENARIOS["cmdk-palette"] = {
+  ...SCENARIOS["mixed-fleet"],
+  label:
+    "The command palette over a real estate — the .modal-root:has(.cmdk) arm, opened by the real Cmd/Ctrl+K keydown",
+  data: copyData("mixed-fleet"),
+  modal: "cmdk",
+};
+
+// ── THE TWO CALL SITES WITH NO SCENARIO AT ALL (task-499cab525e65018b) ──────
+// PR #19581 derived every `openModal(` call site in app.js — re-derive it, the
+// number is not a memory:
+//
+//   grep -n 'openModal(' cloud/priv/static/app.js
+//
+// 31 hits, THREE of which are not calls (two prose lines and the
+// `function openModal(html)` definition) => 28 call sites. Twenty-six of them
+// have a host screen somewhere in this corpus, so widening the oracle to one is
+// a planFor() branch. TWO had no scenario at ALL:
+//
+//   openUpdateConflictModal   the pin-conflict sheet
+//   openPinModal              the pin-version form
+//
+// `pin-race.mjs` tests the pin LOGIC and renders nothing, so no PNG in this
+// harness has ever contained either dialog and the CSSOM oracle could not
+// certify them. These two scenarios are what closes that.
+//
+// BOTH RIDE `instance-behind`, and neither invents a fixture: that scenario is
+// already the corpus's only owner-actor box whose Updates panel paints both the
+// live `#inst-update` CTA and the live `[data-au="pin"]` policy control
+// (`behindInstance` carries `pinned_release: null`, so autoupdateActions'
+// `showPin` is true). Same deep-copy discipline as the two above: whatever the
+// two shots differ by is the dialog, because every other byte is the host's.
+SCENARIOS["instance-pin-version"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates panel — the PIN VERSION form itself, opened by a real click on the panel's own Pin version control: a release-tag input over the box it freezes",
+  data: copyData("instance-behind"),
+  modal: "pin-version",
+};
+
+// The conflict sheet needs a REFUSAL, and it is the ONE thing these two do not
+// share. `instanceSelfUpdate` is the only key added to the host's fixture, and
+// it changes NOTHING that renders before the click: it answers a POST that no
+// scenario issues until a person presses Update.
+//
+// The box is deliberately NOT pinned in its own fixture. That is not an
+// oversight, it is the state this dialog exists FOR: the console's copy of the
+// row was read before the pin landed, so the operator is looking at a box that
+// offers "Update to v0.9.2" and the plane refuses with a pin they cannot see.
+// Pinning the fixture would move the Autoupdate rail's badge and the panel's
+// buttons, and the host screen under the sheet would stop being the one
+// `instance-behind` already pins.
+SCENARIOS["instance-update-conflict"] = {
+  ...SCENARIOS["instance-behind"],
+  label:
+    "Instance Updates — the PIN-CONFLICT sheet: the plane answers the self-update 409 pinned, and the refusal names the freeze and offers the explicit override rather than dying into a toast",
+  data: {
+    ...copyData("instance-behind"),
+    // The typed envelope app.js's updateConflict() reads: `data.error.code`,
+    // with the tag on `pinned_release`. `kind: "pinned"` on a non-forced call
+    // is the ONLY branch that reaches openUpdateConflictModal.
+    instanceSelfUpdate: {
+      status: 409,
+      body: { error: { code: "pinned", pinned_release: "v0.8.4" } },
+    },
+  },
+  modal: "update-conflict",
 };
 
 export const SCENARIO_NAMES = Object.keys(SCENARIOS);
@@ -5748,6 +6960,23 @@ function githubOf(d, state) {
   return state.github;
 }
 
+// cch-bl-preview-selector-residue — the account's two-factor FLAG, as a
+// per-boot value. Same contract as githubOf (opt-in on `state`, never written
+// back to the module-level fixture), for a resource that is one boolean. Until
+// DELETE /v1/account/two-factor writes `state.twoFactorEnabled` the fixture's
+// own `me.user.two_factor_enabled` is the answer, so every scenario that never
+// turns 2FA off is served its /v1/me byte-for-byte (the SAME object, not a copy).
+function twoFactorOf(d, state) {
+  if (state && typeof state.twoFactorEnabled === "boolean") return state.twoFactorEnabled;
+  return !!(d.me && d.me.user && d.me.user.two_factor_enabled);
+}
+function meWithTwoFactor(d, state) {
+  if (!(state && typeof state.twoFactorEnabled === "boolean") || !d.me || !d.me.user) return d.me;
+  return Object.assign({}, d.me, {
+    user: Object.assign({}, d.me.user, { two_factor_enabled: state.twoFactorEnabled }),
+  });
+}
+
 // route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
@@ -5756,12 +6985,19 @@ function githubOf(d, state) {
 //   change something (see sessionsOf). Omitting it keeps every route stateless.
 //   CORRECTED (wave 11 review): this used to say stateless "is what the browser
 //   harness (mock.js) does". It has not been true since
-//   cch-bl-mockjs-revoke-stateless — mock.js:124 passes a `fixtureState` on
+//   cch-bl-mockjs-revoke-stateless — mock.js passes a `fixtureState` on
 //   every call, exactly as smoke.mjs does. NO CALLER OMITS IT TODAY, so the
 //   stateless arm of every `if (state)` is dead code that only a new caller can
 //   revive, and a route added on the assumption that the browser is stateless
 //   will be wrong in the browser first.
-export function route(name, method, path, state) {
+//   `body` is an OPTIONAL 5th arg: the PARSED request body
+//   (cch-w23-bl-real-hetzner-remediation-scenario). Before it, route() never
+//   saw what the caller POSTed, so an answer could only ever be a property of
+//   the SCENARIO — one `providerConnect` response per fixture — and the corpus
+//   could hold exactly one of `connect_remediation/1`'s four clauses. Callers
+//   that omit it keep every existing arm's behaviour unchanged; the only arm
+//   that reads it is /v1/providers POST.
+export function route(name, method, path, state, body) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
   // Strip any absolute origin first (mock.js extracts pathname; smoke passes
@@ -5959,7 +7195,7 @@ export function route(name, method, path, state) {
   if (p === "/v1/me" && state && state.secondIdentity && d.secondIdentity) {
     return { status: 200, body: d.secondIdentity.me };
   }
-  if (p === "/v1/me") return d.me ? { status: 200, body: d.me } : { status: 401, body: { error: "unauthorized" } };
+  if (p === "/v1/me") return d.me ? { status: 200, body: meWithTwoFactor(d, state) } : { status: 401, body: { error: "unauthorized" } };
   // gr-p5-account-2fa: the account modal's session list. Defaults to [] rather
   // than 404 so every scenario answers HONESTLY ("No active sessions") instead
   // of the modal's couldn't-load state.
@@ -6043,11 +7279,23 @@ export function route(name, method, path, state) {
   if (p === "/v1/account/two-factor/recovery-codes" && method === "POST") {
     return d.twoFactorRegen || { status: 200, body: { recovery_codes: RECOVERY_CODES } };
   }
-  if (p === "/v1/account/two-factor" && method === "DELETE") return { status: 200, body: { ok: true } };
+  // cch-bl-preview-selector-residue — THE FLAG THE DISABLE FLIPS. This arm
+  // used to answer 200 {ok: true} and change nothing, so /v1/me kept serving
+  // `two_factor_enabled: true` after a successful turn-off and no oracle could
+  // tell the disable from a no-op. The router's clause is IDEMPOTENT (it nulls
+  // the columns whether or not 2FA was on, and answers 200 {ok: true} either
+  // way), so there is deliberately NO 404 arm here — that would be a refusal
+  // the server never sends. The flag lives on the per-boot state bag
+  // (`twoFactorEnabled`), and BOTH reads go through it: the GET below and the
+  // /v1/me envelope (twoFactorOf).
+  if (p === "/v1/account/two-factor" && method === "DELETE") {
+    if (state) state.twoFactorEnabled = false;
+    return { status: 200, body: { ok: true } };
+  }
   if (p === "/v1/account/two-factor" && method === "GET") {
     // Modelled for completeness; the SPA never calls it (two_factor_enabled
     // rides /v1/me, so the on-state costs zero extra fetches).
-    return { status: 200, body: { enabled: !!(d.me && d.me.user && d.me.user.two_factor_enabled) } };
+    return { status: 200, body: { enabled: twoFactorOf(d, state) } };
   }
   // gr-p2 HOME TRIAGE (C-02): the onboarding fold is member-readable on GET
   // (mirrors /v1/me's fold, so the runway self-heals on refetch); the mutating
@@ -6084,6 +7332,21 @@ export function route(name, method, path, state) {
     return d.instanceRollback ||
       { status: 202, body: { status: "rolling_back", target_sha: "9f2c1a7", pinned_release: "v0.9.0" } };
   }
+  // task-499cab525e65018b — POST /v1/barkparks/:id/self-update, the seam the
+  // Update CTA presses. UNMODELLED until now: it fell through to the terminal
+  // `/v1/` 200 {} at the bottom of route(), and a 200 is not the 202 the plane
+  // answers, so every preview click on Update took updateInstance's REFUSAL
+  // branch, classified `{}` as the unnamed `other` kind and died into a toast.
+  // The consequence is the one this row was filed for: `openUpdateConflictModal`
+  // — reached ONLY from `c.kind === "pinned" && !opts.force` — was structurally
+  // unreachable from this harness, at any width, theme or accent.
+  // Same shape as the rollback arm directly above: default 202, and a scenario
+  // drives one named refusal through `d.instanceSelfUpdate`.
+  const bpSelfUpdate = p.match(/^\/v1\/barkparks\/([^/]+)\/self-update$/);
+  if (bpSelfUpdate && method === "POST") {
+    return d.instanceSelfUpdate ||
+      { status: 202, body: { status: "updating" } };
+  }
   // cch-w49-s7 — the plane puts D554's `billing_capability` on this 200 as a
   // TOP-LEVEL SIBLING (router.ex: `%{subscription: …, billing_capability:
   // billing_capability_json()}`). It is OPT-IN here rather than defaulted:
@@ -6112,6 +7375,46 @@ export function route(name, method, path, state) {
   // (today: DELETE /v1/sites/:id/github) is visible to the very next read. The
   // no-state arm is the old `d.sites` verbatim, and listOf's per-boot copy makes
   // the collection and the drill-down below answer the SAME objects.
+  // cch-w34-bl-preview-scenario-for-a-failed-sites-read — THE FAILED READ,
+  // which no committed fixture could express. This arm answered a flat 200 in
+  // EVERY scenario, so app.js's failed-read branch in loadInstanceSites — the
+  // one charter D382 ratified, where a failed read is never reported as an
+  // empty one (re-derive: `grep -n "Couldn.t load sites"
+  // cloud/priv/static/app.js`) — was unreachable from BOTH harnesses, and every
+  // DOM-geometry assertion over `#instance-sites` was on the happy path.
+  //
+  // `sitesFault` is a per-scenario override with the same shape route() already
+  // honours for `meFault` above: `{status, body}`, forwarded VERBATIM by
+  // mock.js's jsonResponse (`grep -n 'function jsonResponse'
+  // cloud/priv/static/__preview__/mock.js`) and by smoke.mjs's fetch stub, so
+  // ONE mechanism drives both copies of loadInstanceSites's failed arm — a 403
+  // body reaches the forbidden copy, a 5xx the transport copy.
+  //
+  // GET-GUARDED: the 200 arm below carries no method guard, so an unguarded
+  // fault would also refuse the site-creation POST that falls through to it —
+  // a scenario asking for a failed READ must not silently break a WRITE.
+  //
+  // ── THE TWO RESIDUALS THIS MECHANISM DOES NOT REACH ───────────────────────
+  // Stated here rather than left to be rediscovered, because both are about
+  // THIS route and neither is expressible by any status code:
+  //
+  //  (1) A NEVER-SETTLING READ is inexpressible in BOTH harnesses. Every arm of
+  //      route() RESOLVES — there is no hang, no reject and no abort arm
+  //      anywhere in this file — and both consumers are total over that: mock.js
+  //      wraps the return in a resolved promise, and smoke.mjs's stub does the
+  //      same (`grep -n 'fetchStub' cloud/priv/static/__preview__/smoke.mjs`).
+  //      So `loadInstanceSites`'s PENDING state — the "Loading sites…" box that
+  //      never settles, which is what a real hung control plane paints — cannot
+  //      be reached from either harness at all. Reaching it needs a fixture that
+  //      returns a promise nobody resolves, which would change route()'s
+  //      contract for every caller; it is deliberately not done here.
+  //  (2) SSE DEATH is not contrastable in the browser. mock.js's
+  //      PreviewEventSource reports `readyState = 1 // OPEN — but silent` and
+  //      never fires, so a stream that DIES and a stream that is merely quiet
+  //      render identically. Separating them needs a `__preview.drop()` seam
+  //      beside the existing `__preview.push()` — it does not exist, and this
+  //      row did not add it.
+  if (p === "/v1/sites" && method === "GET" && d.sitesFault) return d.sitesFault;
   if (p === "/v1/sites") return { status: 200, body: { sites: listOf(d, state, "sites") } };
 
   // G-05 API tokens (GR34). GET → the caller's PATs (newest-first as fixtured);
@@ -6143,7 +7446,8 @@ export function route(name, method, path, state) {
   // bag was supplied.
   //
   // THIS DOES CHANGE THE BROWSER TWIN, and saying otherwise would be the same
-  // class of lie. mock.js:124 passes a per-boot `fixtureState` on EVERY call
+  // class of lie. mock.js passes a per-boot `fixtureState` on EVERY call
+  // (grep -n 'fixtureState' mock.js)
   // (cch-bl-mockjs-revoke-stateless), so the 4-arg stateful path is the only
   // one either harness takes and the `if (state)` splice always fires. Two
   // consequences, both in the honest direction: the browser preview's token
@@ -6293,6 +7597,7 @@ export function route(name, method, path, state) {
           { name: "verify.api", ok: true, reachable: true, status: 200, latency_ms: 38, evidence: "GET /v1/capabilities → 200 (API up)" },
           { name: "verify.login", ok: true, reachable: true, status: 401, latency_ms: 102, evidence: "POST /v1/auth/login → 401 (auth stack answered; bad creds rejected)" },
           { name: "verify.studio", ok: true, reachable: true, status: 200, latency_ms: 288, evidence: "GET /studio → 200 (renders)" },
+          { name: "verify.siteplane", ok: true, reachable: true, status: null, latency_ms: 2, skipped: true, evidence: "skipped — this box hosts no sites (site plane not required)" },
         ],
       },
     };
@@ -6318,8 +7623,14 @@ export function route(name, method, path, state) {
     // 404 on a miss AND on an already-unlinked site — destroyFrom's rule: a
     // no-op must never be indistinguishable from real work.
     if (!s || !s.github_repo) return { status: 404, body: { error: "not_found" } };
-    if (state) { s.github_repo = null; s.github_branch = null; s.github_webhook_configured = false; }
-    return { status: 200, body: { ok: true } };
+    const unlinked = { github_repo: null, github_branch: null, github_webhook_configured: false };
+    if (state) Object.assign(s, unlinked);
+    // cch-bl-preview-selector-residue — THE SERVER'S BODY. The router's
+    // `delete "/v1/sites/:id/github"` clause answers
+    // `json(conn, 200, %{site: site_json(updated)})` — the UNLINKED row, not
+    // `{ok: true}` (that is the installation DELETE's shape, a different
+    // clause). Copied, so a stateless caller never sees its fixture mutate.
+    return { status: 200, body: { site: Object.assign({}, s, unlinked) } };
   }
   // The repo picker openSiteGithub reads before it can paint anything at all.
   // Gated on the fixture so every scenario without one keeps falling through to
@@ -6337,13 +7648,28 @@ export function route(name, method, path, state) {
   // the census/residue blast radius twice for one measurement.
   const depMatch = p.match(/^\/v1\/sites\/([^/]+)\/deployments$/);
   if (depMatch) {
+    // cch-w16-bl: THE PRODUCTION FILTER. A scenario carrying an UNSPLIT ledger
+    // for this site gets the production partition here and the preview
+    // partition at /previews below — the split `list_deployments/3` does with
+    // `filter_environment/2`. Checked FIRST and returned FROM, so the two
+    // pre-split seams below keep their exact bytes for every scenario written
+    // before this line.
+    const ledger = siteLedger(d, depMatch[1]);
+    if (ledger) return { status: 200, body: { deployments: ledger.filter((x) => !isPreviewDeploy(x)) } };
     const bySite = d.deploymentsBySite || null;
     const own = bySite && Object.prototype.hasOwnProperty.call(bySite, depMatch[1]) ? bySite[depMatch[1]] : null;
     return { status: 200, body: { deployments: own || d.deployments || [] } };
   }
   // gr-p3: branch previews now come from the scenario (d.previews) so the
   // preview-rows section is observable; absent → the honest empty list.
-  if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
+  const prevMatch = p.match(/^\/v1\/sites\/([^/]+)\/previews$/);
+  if (prevMatch) {
+    // cch-w16-bl: the OTHER half of the same partition — see the deployments
+    // seam above. Same ledger, opposite side of `isPreviewDeploy`.
+    const ledger = siteLedger(d, prevMatch[1]);
+    if (ledger) return { status: 200, body: { previews: ledger.filter(isPreviewDeploy) } };
+    return { status: 200, body: { previews: d.previews || [] } };
+  }
   // gr-p3: the site domain-status checklist (same envelope as the instance
   // sibling, CF-mode-aware). MUST precede the /v1/ catch-all (its 200 {} would
   // read as "no domains" and no scenario could pin the rungs). Absent fixture →
@@ -6370,7 +7696,27 @@ export function route(name, method, path, state) {
     return { status: 200, body: { providers: listOf(d, state, "providers") } };
   }
   if (p === "/v1/providers" && method === "POST") {
-    return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
+    // cch-w23-bl-real-hetzner-remediation-scenario — PER-KIND, because the
+    // server's remediation is a property of the PROVIDER KIND and of nothing
+    // else. `connect_remediation/1` (cloud/lib/barkpark_cloud/failure_copy.ex)
+    // has four clauses; until route() was handed the POSTed body a fixture
+    // could carry exactly ONE of them, so the corpus held the azure clause
+    // verbatim and, for hetzner, a 168-character string the server has never
+    // emitted. That is the limit this arm removes.
+    //
+    // `providerConnect` is EITHER a flat { status, body } response — the shape
+    // every earlier fixture uses, still honoured verbatim — OR a map keyed by
+    // provider kind with an optional `_default`. The discriminator is `status`:
+    // a response always carries one, a kind map never does. An unmatched kind
+    // with no `_default` falls to the benign 201, exactly as an absent fixture
+    // always has.
+    const pc = d.providerConnect;
+    if (pc && typeof pc === "object" && !("status" in pc)) {
+      const kind = (body && typeof body === "object" && body.kind) || "";
+      return pc[kind] || pc._default ||
+        { status: 201, body: { provider: { kind: kind || "hetzner", label: "main" } } };
+    }
+    return pc || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
   }
   // Disconnect is a per-KIND destroy (the server deletes every credential of that
   // kind), so the roster shrinks by the row whose kind matches — not by id.
@@ -6397,6 +7743,25 @@ export function route(name, method, path, state) {
   // honest 404 no_provider (a managed launch) → the line is OMITTED, exactly as
   // live. MUST precede the /v1/ catch-all (its 200 {} would also omit, but then
   // no scenario could pin the priced state).
+  // console-w28: the identity read. It must precede the /v1/ catch-all, whose
+  // 200 {} the console reads as "this control plane doesn't report which account
+  // a connection points at" — honest, but it makes every scenario unable to
+  // paint a KNOWN identity. A scenario carries `providerIdentity` keyed by kind,
+  // EITHER as a full {status, body} response (so a 502 credential_unreadable is
+  // expressible) or as the bare identity map; absent → the per-kind default
+  // above, which is the arm the live server derives.
+  const provIdentity = p.match(/^\/v1\/providers\/([^/]+)\/identity$/);
+  if (method === "GET" && provIdentity) {
+    const kind = provIdentity[1];
+    const row = (listOf(d, state, "providers") || []).filter((x) => (x.kind || "") === kind)[0];
+    if (!row) return { status: 404, body: { error: "no_provider" } };
+    const fixture = (d.providerIdentity || {})[kind];
+    if (fixture && typeof fixture === "object" && "status" in fixture) return fixture;
+    const identity = fixture || PROVIDER_IDENTITY_DEFAULTS[kind] || null;
+    return { status: 200,
+      body: { provider: { kind: row.kind, label: row.label, identity: identity } } };
+  }
+
   if (method === "GET" && /^\/v1\/providers\/[^/]+\/catalog$/.test(p)) {
     return d.catalog
       ? { status: 200, body: d.catalog }
@@ -6534,10 +7899,53 @@ export function route(name, method, path, state) {
       // be distinguishable from disconnecting something.
       if (!inst.connected) return { status: 404, body: { error: "not_found" } };
       if (state) { inst.connected = false; delete inst.account_login; }
-      return { status: 200, body: { connected: false } };
+      // cch-bl-preview-selector-residue — THE SERVER'S BODY, not a GET's. The
+      // router's `delete "/v1/github/installation"` clause answers
+      // `json(conn, 200, %{ok: true})`; this arm used to answer
+      // `{connected: false}`, the GET envelope's shape, which no DELETE in the
+      // control plane has ever sent. disconnectGithub reads only `r.ok`, so
+      // the flag the verb flips is read back off the GET below, never here.
+      return { status: 200, body: { ok: true } };
     }
     if (method === "GET") return { status: 200, body: inst };
   }
+
+  // cch-w73-bl — THE INSTALL RETURN LEG'S WRITER, and the arm that lets this
+  // corpus PRODUCE the connected state rather than merely be handed it.
+  // app.js's handleGithubInstallReturn reads ?installation_id&setup_action off
+  // the boot URL and POSTs the id here; before this arm the plural path fell to
+  // the terminal `/v1/` 200 {}, whose body carries no `installation` key, so the
+  // console's own "only a 201 carrying installation.connected may claim a
+  // connection" rule would have read the round trip as UNCONFIRMED — a fixture
+  // that could never show the success arm.
+  //
+  // STATEFUL, on the same githubOf bag the DELETE arm already mutates, so the
+  // pair composes into the real journey: disconnect (connected:false) → the App
+  // install redirect → POST → connected again, with the GET reading through it
+  // at every step. GATED ON THE `github` FIXTURE exactly like its sibling, so no
+  // scenario without one moves by a byte.
+  //
+  // NO BODY VALIDATION, because route() takes no body: the two refusal shapes
+  // (installation_id_required, installation_not_found) are node-pinned in
+  // __app.test.mjs against hand-built answers instead. This arm models the
+  // ACCEPTED write only, which is the one thing a fixture can prove.
+  if (p === "/v1/github/installations" && method === "POST" && d.github) {
+    const inst = githubOf(d, state);
+    if (state) {
+      inst.connected = true;
+      inst.account_login = (d.github && d.github.account_login) || "acme-engineering";
+    }
+    return {
+      status: 201,
+      body: { installation: { connected: true, account_login: inst.account_login } },
+    };
+  }
+
+  // task-679663d0bee42b15 — POST /v1/launch's refusal, opt-in per scenario via
+  // `launchFault` ({status, body}, forwarded verbatim like meFault). With no
+  // fault declared the press keeps falling through to the terminal 200 below,
+  // exactly as before, so no committed fixture moves.
+  if (method === "POST" && p === "/v1/launch" && d.launchFault) return d.launchFault;
 
   // Anything else under /v1 answers a benign empty 200 so a stray read never
   // trips the 401→logout path or throws mid-render.

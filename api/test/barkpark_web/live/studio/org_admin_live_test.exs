@@ -28,6 +28,64 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
 
   defp admin_conn(conn), do: init_test_session(conn, %{"api_token" => @admin_token})
 
+  # task-05cf6cbd1b0460fe: every org's SCIM mint and identity policy is
+  # instance-wide authority. With the operator allowlist armed, a non-operator
+  # admin token must not mount the portal or fire its events.
+  describe "operator tier (allowlist armed)" do
+    setup do
+      prev_emails = Application.get_env(:barkpark, :operator_emails)
+      prev_ids = Application.get_env(:barkpark, :operator_token_ids)
+
+      on_exit(fn ->
+        if prev_emails,
+          do: Application.put_env(:barkpark, :operator_emails, prev_emails),
+          else: Application.delete_env(:barkpark, :operator_emails)
+
+        if prev_ids,
+          do: Application.put_env(:barkpark, :operator_token_ids, prev_ids),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      op_raw = "org-admin-operator-#{System.unique_integer([:positive])}"
+      {:ok, op} = Auth.create_token(op_raw, "operator", "production", ["read", "write", "admin"])
+      Application.put_env(:barkpark, :operator_emails, [])
+      %{op_raw: op_raw, op_id: op.id}
+    end
+
+    test "a non-operator admin token is refused at mount", %{conn: conn, op_id: op_id} do
+      Application.put_env(:barkpark, :operator_token_ids, [op_id])
+      org_with_ws("armedco")
+
+      assert {:error, {:redirect, %{to: "/studio"}}} = live(admin_conn(conn), "/studio/org-admin")
+    end
+
+    test "the named operator still mounts and mints", %{conn: conn, op_raw: op_raw, op_id: op_id} do
+      Application.put_env(:barkpark, :operator_token_ids, [op_id])
+      {org, _ws} = org_with_ws("opco")
+
+      {:ok, view, _html} =
+        live(init_test_session(conn, %{"api_token" => op_raw}), "/studio/org-admin")
+
+      view |> element(~s([data-mint-scim="opco"])) |> render_click()
+      assert Repo.aggregate(from(t in Token, where: t.organization_id == ^org.id), :count) == 1
+    end
+
+    test "a socket mounted before the allowlist was armed cannot mint after", %{
+      conn: conn,
+      op_id: op_id
+    } do
+      Application.put_env(:barkpark, :operator_token_ids, [])
+      {org, _ws} = org_with_ws("lateco")
+      {:ok, view, _html} = live(admin_conn(conn), "/studio/org-admin")
+
+      Application.put_env(:barkpark, :operator_token_ids, [op_id])
+      html = view |> element(~s([data-mint-scim="lateco"])) |> render_click()
+
+      assert html =~ "reserved for the platform operator"
+      assert Repo.aggregate(from(t in Token, where: t.organization_id == ^org.id), :count) == 0
+    end
+  end
+
   describe "admin gate" do
     test "redirects to /studio when no session token", %{conn: conn} do
       conn = init_test_session(conn, %{})

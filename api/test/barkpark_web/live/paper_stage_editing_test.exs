@@ -24,7 +24,16 @@ defmodule BarkparkWeb.PaperStageEditingTest do
       )
 
     token = "stage-writer-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(token, "Stage editing", "production", ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        token,
+        "Stage editing",
+        "production",
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => token})}
   end
 

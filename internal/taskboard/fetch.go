@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -87,7 +88,174 @@ func composeSnapshot(tasks []Task, extras primeExtras, fetchedAt time.Time) Snap
 // lifecycle_counts do not, D115). The filter param is read optionally by the
 // controller — an older server ignores it and answers the full window, which
 // the union dedup (mergeInflight) degrades to window-truth, never garbage.
-const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=1000"
+const inflightFetchPath = "/v1/tasks?lifecycle_status=in_progress&limit=" + taskListLimitToken
+
+// ─── `?view=board` — the projection the LIST/POLL path asks for ──────────
+//
+// boardViewParam is the query fragment appended to every list GET a LIVE board
+// makes (corpusCache.listView; a one-shot CLI verb keeps the default shape —
+// see that method for why the cache's own lifetime is the right discriminator).
+//
+// WHAT IT BUYS, measured 2026-09-23T11:11Z against guerrilla, back-to-back full
+// cursor walks with `&cursor=` spelled EMPTY on the first request (a bare
+// `?limit=N` with no `&cursor=` returns no `next_cursor`, so the walk stops
+// after ONE page and reports a number that is not a walk at all):
+//
+//	default        105,755,961 B over 10 pages
+//	?view=board     13,035,765 B over 10 pages  — 12.33% of default
+//
+// WHAT IT COSTS, and what pays for it. The projection is the full card with
+// `content` DELETED and one bounded key, `content_digest`, put in its place
+// (api .../tasks_controller/params.ex, `render_doc(doc, :board)`). The two
+// things this package reads out of `content` on the ROW path both survive:
+// `criteriaLadder`'s per-rung state comes from `content_digest.criteria_marks`
+// and `completenessBadge`'s three missing rubric inputs from the digest's
+// booleans (decodeContentDigest / criteriaItemsFromMarks above). What does NOT
+// survive is the TaskDetail reading model's prose — description, evidence,
+// code_refs, purpose, the disposition strips — which is why the board hydrates
+// an OPEN detail pane from the always-full row route (FetchTaskDetailByID).
+//
+// `content.design_doc` — the paper slug the paper→tasks inversion reads
+// (`DrivenTasks` / `TaskDetail.PaperRefs`, detail_data.go) over the WHOLE
+// corpus — now ARRIVES on the board card as `content_digest.design_doc`
+// (task-cf0395706361aa2e): the stored slug unchanged, omitted when absent or
+// when it contains whitespace. toDetail reads it where `content` is absent, so
+// a live board's FramePaper lists tasks that name the paper in `design_doc` as
+// well as in `papers` (which is lifted to the top level and always survived).
+const boardViewParam = "&view=board"
+
+// ─── exhaustive keyset paging (task-6c59bff7cb6b36ee) ────────────────────
+//
+// listFetchPath is the board's corpus GET. It is the ONE place the window
+// limit is spelled, so the paging walk below and the limit can never disagree.
+const (
+	taskListLimit      = 1000
+	taskListLimitToken = "1000"
+	listFetchPath      = "/v1/tasks?limit=" + taskListLimitToken
+)
+
+// maxTaskPages bounds the walk. A cursor walk is skip-free over a stable
+// corpus, but the key it seeks on (updated_at) is MUTABLE: a row written
+// mid-walk re-stamps updated_at and rotates ahead of the cursor, so a server
+// under continuous write load could in principle hand out tokens forever.
+// 64 pages x 1000 rows is ~64k tasks — two orders of magnitude above the live
+// corpus — and hitting it does NOT truncate silently: the walk reports
+// exhaustive=false, which keeps mergeForward's conservative absence heuristic
+// armed for exactly the rows the walk may have missed.
+const maxTaskPages = 64
+
+// fetchTaskPages walks GET /v1/tasks to EXHAUSTION over the route's keyset
+// cursor, and reports whether the corpus it returns is complete.
+//
+// WHY (task-6c59bff7cb6b36ee). The board used to issue ONE `?limit=1000` GET
+// and take the answer as the whole world. Over a corpus bigger than the clamp
+// the fetch is desc:updated_at truncated, so a quiet open/ready/blocked row
+// simply ROTATES OUT of the window — indistinguishable, from this side, from a
+// close. main's merge.go already refuses to call that a close (it KEEPS the
+// non-terminal row and counts it as aged-out), so the board has not been
+// lying; what it has been is BLIND — it could not tell "rotated out" from
+// "closed", only guess conservatively, and every guess costs a stale row on
+// screen and an "N aged out of the window" notice nobody can act on.
+//
+// The api half (PR #16052, bl-api-tasks-stable-cursor) removed the need to
+// guess: `?cursor=` opts the response into a `page.next_cursor` keyset token
+// that walks PAST the 1000-row cap. The manifest declares it as the task.ls
+// `cursor` arg (api/lib/barkpark/plugins/tasks.ex). This walks it.
+//
+// CAPABILITY DETECTION IS THE RESPONSE ITSELF, not a separate manifest fetch.
+// The server adds the `next_cursor` KEY to `page` if and only if the caller
+// spelled `?cursor=` and the route honours it (tasks_controller.ex page_block/2
+// — presence, not truthiness: the value is legitimately null on the last
+// page). A server predating the cursor ignores the unknown param and answers
+// the pre-cursor envelope, which has no such key. So the first page's own
+// envelope answers "does this server page?" at the moment of use, with no
+// staleness window and no fourth round-trip — and a server that does not, or
+// one whose walk we had to cut short, comes back exhaustive=false and keeps
+// the heuristic.
+//
+// Ordering: pages are appended in walk order, so the returned slice keeps the
+// route's own desc:updated_at ordering across the seam.
+func fetchTaskPages(ctx context.Context, c *apiclient.Client, base string) ([]Task, DetailIndex, bool, error) {
+	var (
+		all     []Task
+		details DetailIndex
+		cursor  string
+	)
+	for page := 0; page < maxTaskPages; page++ {
+		body, err := getJSONCtx(ctx, c, base+"&cursor="+url.QueryEscape(cursor))
+		if err != nil {
+			return nil, nil, false, err
+		}
+		tasks, idx, err := decodeTaskListFull(body)
+		if err != nil {
+			return nil, nil, false, err
+		}
+		all = append(all, tasks...)
+		if details == nil {
+			details = idx
+		} else {
+			for id, d := range idx {
+				if _, ok := details[id]; !ok {
+					details[id] = d
+				}
+			}
+		}
+		next, capable := decodeNextCursor(body)
+		if !capable {
+			// Pre-cursor server: this one window is all there is, and we cannot
+			// tell a rotated-out row from a closed one. Say so honestly.
+			return all, details, false, nil
+		}
+		if next == "" {
+			// A null token on a cursor-capable server PROVES the walk finished
+			// (the server mints one only while has_more).
+			return all, details, true, nil
+		}
+		cursor = next
+	}
+	// Cap hit. The corpus we hold is real but possibly short of the tail, so it
+	// is NOT authoritative about an absence.
+	return all, details, false, nil
+}
+
+// decodeNextCursor reads `page.next_cursor` off a task-list body. The second
+// return is the CAPABILITY signal — whether the key was present at all — and
+// it is deliberately separate from the token: a cursor-capable server sends
+// `"next_cursor": null` on the last page, which is "the walk is done", not
+// "this server cannot page". A body whose `page` block is missing or malformed
+// reads as NOT capable, which is the conservative answer (the heuristic stays
+// armed) rather than an error that would blank the whole board.
+func decodeNextCursor(body []byte) (string, bool) {
+	var env struct {
+		Page *struct {
+			NextCursor *string `json:"next_cursor"`
+		} `json:"page"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil || env.Page == nil {
+		return "", false
+	}
+	if env.Page.NextCursor == nil {
+		// The key is absent OR explicitly null. Both decode to nil here, so this
+		// alone cannot separate "finished" from "not capable" — the raw-key probe
+		// below does.
+		return "", pageHasCursorKey(body)
+	}
+	return *env.Page.NextCursor, true
+}
+
+// pageHasCursorKey answers the one question the typed decode above cannot: was
+// `next_cursor` SPELLED inside `page`, even as null? Presence is the server's
+// opt-in acknowledgement; absence is a pre-cursor server.
+func pageHasCursorKey(body []byte) bool {
+	var env struct {
+		Page map[string]json.RawMessage `json:"page"`
+	}
+	if err := json.Unmarshal(body, &env); err != nil {
+		return false
+	}
+	_, ok := env.Page["next_cursor"]
+	return ok
+}
 
 // mergeInflight unions the in-flight fetch's rows into the window list, deduped
 // by doc_id with the LIST (window) copy winning on overlap — two copies of one
@@ -234,6 +402,7 @@ func getJSONAttempt(ctx context.Context, c *apiclient.Client, path string) ([]by
 		retry := resp.StatusCode >= http.StatusInternalServerError && resp.StatusCode <= 599
 		return nil, retry, &httpStatusError{Path: path, StatusCode: resp.StatusCode, Hint: bodyHint(body)}
 	}
+	recordWire(path, len(body))
 	return body, false, nil
 }
 
@@ -292,8 +461,28 @@ func bodyHint(body []byte) string {
 // overlay covers the top of the queue only, which composeSnapshot flags). The
 // context carries FetchSnapshotFull's shared snapshot budget, so both halves of
 // one snapshot expire together.
-func fetchPrime(ctx context.Context, c *apiclient.Client) (primeExtras, error) {
-	body, err := getJSONCtx(ctx, c, fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit))
+//
+// THE `brief` PROJECTION (task-ac9e7dd0d4e53d24). decodePrime reads exactly four
+// things out of this body — `ok`, `counts`, `recent_events` and each ready
+// entry's `doc_id` — and throws the entire rendered CARD away. At the default
+// (full) view the server renders `ready` and `in_progress` as full render_docs
+// with edge counts, which is where the money goes: measured against guerrilla
+// 2026-09-17, one and the same minute, `?limit=100` = 1,301,149 wire bytes and
+// `?limit=100&view=brief` = 41,762 — a 96.8% cut for a body the board consumes
+// IDENTICALLY, because the brief card still carries doc_id.
+//
+// WHAT BRIEF COSTS, stated rather than discovered: the controller ALSO trims
+// `recent_events` to 5 on the brief arm (tasks_controller.ex, `Enum.take(events,
+// 5)`), while the full arm returns `limit` of them — 100 here. s.Events is not
+// decoration: buildEvAt sorts the ready head on it and computeResumables finds
+// dropped claims in it. So the projection is asked for ONLY where the tail can be
+// rebuilt over time — see primeView and corpusCache.mergeEventTail.
+func fetchPrime(ctx context.Context, c *apiclient.Client, view string) (primeExtras, error) {
+	path := fmt.Sprintf("/v1/tasks/prime?limit=%d", primeReadyLimit)
+	if view != "" {
+		path += "&view=" + view
+	}
+	body, err := getJSONCtx(ctx, c, path)
 	if err != nil {
 		return primeExtras{}, err
 	}
@@ -455,6 +644,81 @@ type taskWire struct {
 	// content is a non-object, or whose fields are oddly shaped, degrades to
 	// zero values rather than failing the whole list decode.
 	Content json.RawMessage `json:"content"`
+	// ContentDigest is what `?view=board` sends INSTEAD of Content: the bounded
+	// stand-in for the two things this file reads out of the echo on the ROW
+	// path — the per-criterion ladder states and the completeness booleans.
+	// Absent on the full view (where Content itself is the better source) and
+	// absent from any server too old to emit it, and in both cases the Content
+	// path below is unchanged. RawMessage + a tolerant decode for the same
+	// reason as every field above it: one oddly-shaped digest must never fail
+	// the whole list decode.
+	//
+	// PRODUCER: api/lib/barkpark_web/controllers/tasks_controller/params.ex,
+	// `put_content_digest/2` (read its `:board` header before changing either
+	// side — the two are asserted against each other by
+	// api/test/barkpark_web/contract/tasks_board_view_test.exs).
+	ContentDigest json.RawMessage `json:"content_digest"`
+}
+
+// contentDigest is the decoded `content_digest` object — see taskWire's field.
+type contentDigest struct {
+	CriteriaMarks   string `json:"criteria_marks"`
+	HasDescription  bool   `json:"has_description"`
+	HasDependencies bool   `json:"has_dependencies"`
+	HasPaper        bool   `json:"has_paper"`
+	// DesignDoc is content.design_doc's paper slug, stored spelling (a
+	// "drafts." prefix included — namesPaper/PaperRefs compare on bareID).
+	// Omitted by the producer when absent or not slug-shaped.
+	DesignDoc string `json:"design_doc"`
+}
+
+// decodeContentDigest reads the board projection's content_digest, or nil when
+// the row carries none (the full view, or a pre-digest server). Tolerant like
+// every other decoder in this file: a null, a scalar, a list or an
+// oddly-typed member yields nil rather than an error, so the row keeps every
+// other field and the Content path decides alone.
+func decodeContentDigest(raw json.RawMessage) *contentDigest {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return nil
+	}
+	var d contentDigest
+	if json.Unmarshal(raw, &d) != nil {
+		return nil
+	}
+	return &d
+}
+
+// criteriaItemsFromMarks rebuilds the ladder's per-rung state from the board
+// projection's compact `criteria_marks` string — one character per criterion,
+// in checklist order:
+//
+//	"m"  met
+//	"a"  an honest recorded miss (attempts, which the projection does not ship)
+//	"o"  untouched — and so is anything else, because an unknown character from
+//	     a newer server must read as "no claim about this rung", never as a
+//	     seal or a miss.
+//
+// The items carry NO Criterion text, NO Evidence and NO Attempts, because the
+// projection ships none: this is exactly enough for criteriaLadder, which
+// switches on Met/Missed() only, and for the HasCriteria rubric input. A
+// detail pane wanting the text asks for the row (GET /v1/tasks/:doc_id, always
+// full) — the thing the board card's comment used to claim it already did.
+func criteriaItemsFromMarks(marks string) []CriterionItem {
+	if marks == "" {
+		return nil
+	}
+	items := make([]CriterionItem, 0, len(marks))
+	for _, r := range marks {
+		switch r {
+		case 'm':
+			items = append(items, CriterionItem{Met: true})
+		case 'a':
+			items = append(items, CriterionItem{MarkedMissed: true})
+		default:
+			items = append(items, CriterionItem{})
+		}
+	}
+	return items
 }
 
 // claimWire is content.claim. The engine writes the lease timestamp as
@@ -473,10 +737,19 @@ type claimWire struct {
 	// are detail fields and ride the frozen tolerance contract.
 	PreviousWorker json.RawMessage `json:"previous_worker"`
 	ExpiredAt      json.RawMessage `json:"expired_at"`
+	// ClosedBy is claim.closed_by, read under the SAME tolerant coercion: it is
+	// a detail field feeding the enrichment control's stratification, so a
+	// malformed value must degrade to "" rather than fail the whole list decode.
+	ClosedBy json.RawMessage `json:"closed_by"`
 	// Now is the D9 pulse — content.claim.now {"text","ts","criterion"?}.
 	// RawMessage + decodePulse's tolerance so a malformed pulse degrades to
 	// no-pulse instead of failing the whole list decode.
 	Now json.RawMessage `json:"now"`
+	// LeaseSeconds is the server-minted claim-lease horizon (claim.lease_seconds).
+	// RawMessage + tolerant coercion, same law as the two fields above: a string,
+	// a float or a null degrades to 0 (= "absent", fall back to the server
+	// default) rather than failing the whole list decode.
+	LeaseSeconds json.RawMessage `json:"lease_seconds"`
 }
 
 // decodeLabels coerces a task's `labels` value into the []string the board
@@ -542,7 +815,11 @@ type eventWire struct {
 
 func (w taskWire) toTask() Task {
 	t := Task{
-		DocID:           w.DocID,
+		DocID: w.DocID,
+		// THE DRAFT LABEL CONTRACT: derived HERE, off the RAW wire doc_id,
+		// before anything in this package strips the prefix. Carried from here
+		// on — never re-derived downstream, where the spelling may be gone.
+		Draft:           isDraftID(w.DocID),
 		Rev:             w.Rev,
 		Title:           w.Title,
 		Lifecycle:       w.Lifecycle,
@@ -561,7 +838,7 @@ func (w taskWire) toTask() Task {
 			at = w.Claim.ClaimedAt
 		}
 		t.Claim = &Claim{Worker: w.Claim.Worker, Epoch: w.Claim.Epoch, ClaimedAt: at,
-			Now: decodePulse(w.Claim.Now)}
+			Now: decodePulse(w.Claim.Now), LeaseSeconds: decodeLeaseSeconds(w.Claim.LeaseSeconds)}
 	}
 	// criteria_progress is OMITTED when absent (wire contract), so a nil
 	// pointer stays a nil Criteria — never a misleading 0/0.
@@ -574,14 +851,33 @@ func (w taskWire) toTask() Task {
 	if len(papers) == 0 {
 		papers = strList(rawList(w.Papers))
 	}
+	// THE BOARD PROJECTION'S STAND-IN, read only where the echo is absent.
+	// `?view=board` deletes `content` and sends `content_digest` in its place,
+	// so on that route the two reads below — the per-criterion ladder and the
+	// completeness booleans — have no source unless this runs. Every arm is
+	// additive: with `content` present the digest cannot change an answer, so
+	// the full view decodes exactly as it did before.
+	digest := decodeContentDigest(w.ContentDigest)
+	if len(t.CriteriaItems) == 0 && digest != nil {
+		t.CriteriaItems = criteriaItemsFromMarks(digest.CriteriaMarks)
+	}
+	hasDependencies := t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0
+	hasPaper := strField(m, "design_doc") != "" || len(papers) > 0
+	hasDescription := false
+	if digest != nil {
+		hasDescription = digest.HasDescription
+		hasDependencies = hasDependencies || digest.HasDependencies
+		hasPaper = hasPaper || digest.HasPaper
+	}
 	t.Completeness = ScoreCompleteness(CompletenessInput{
 		Title:           t.Title,
 		Description:     strField(m, "description"),
+		HasDescription:  hasDescription,
 		HasCriteria:     len(t.CriteriaItems) > 0,
 		Placement:       t.ParentID,
 		Priority:        t.Priority,
-		HasDependencies: t.DependencyCount > 0 || len(strList(m["dependencies"])) > 0,
-		HasPaper:        strField(m, "design_doc") != "" || len(papers) > 0,
+		HasDependencies: hasDependencies,
+		HasPaper:        hasPaper,
 	})
 	return t
 }
@@ -702,6 +998,27 @@ func decodeWithdrawals(v any) []CriterionWithdrawal {
 // names no criterion, so no ladder rung spins); a malformed ts → zero time
 // (which renders as maximally stale — an undatable pulse must never read
 // fresh).
+// decodeLeaseSeconds reads claim.lease_seconds off the wire into whole seconds,
+// tolerantly (the frozen wave-5 field contract): a JSON number decodes, a
+// float truncates, and ANY other shape — a string, null, an object, an absent
+// key — decodes to 0, which claimLeaseTTL reads as "the server sent no
+// horizon" and answers with the 2700s server default. A negative value is
+// clamped to 0 for the same reason: a horizon of zero or less would paint
+// every claim danger the instant it landed (task-f30dab8c54c605e6).
+func decodeLeaseSeconds(raw json.RawMessage) int {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return 0
+	}
+	var n float64
+	if err := json.Unmarshal(raw, &n); err != nil {
+		return 0
+	}
+	if n <= 0 {
+		return 0
+	}
+	return int(n)
+}
+
 func decodePulse(raw json.RawMessage) *ClaimPulse {
 	if len(bytes.TrimSpace(raw)) == 0 {
 		return nil
@@ -754,6 +1071,15 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.BriefRaw = rawPortableDoc(m["brief"])
 	d.Design = strField(m, "design")
 	d.DesignDoc = strField(m, "design_doc")
+	if d.DesignDoc == "" {
+		// The board projection deletes `content`; the slug rides the digest
+		// instead. Only read where content has none, so the full view is
+		// unchanged. Stored raw like the content read above — the drafts.
+		// prefix is stripped at comparison (bareID), identically on both views.
+		if digest := decodeContentDigest(w.ContentDigest); digest != nil {
+			d.DesignDoc = digest.DesignDoc
+		}
+	}
 	d.Papers = strList(m["papers"])
 	if len(d.Papers) == 0 {
 		// The server also lifts papers to the envelope top level (live the two
@@ -774,6 +1100,7 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	if w.Claim != nil {
 		d.PreviousWorker = rawString(w.Claim.PreviousWorker)
 		d.ClaimExpiredAt = rawTime(w.Claim.ExpiredAt)
+		d.ClosedBy = rawString(w.Claim.ClosedBy)
 	}
 	return d
 }

@@ -85,6 +85,19 @@ defmodule Barkpark.Plugins.Manifest do
   Raises on JSON decode failure or validation failure.
   """
   @spec parse_and_validate!(Path.t()) :: map()
+  # `File.read!/1` reads `path`. THIS FUNCTION HAS NO CALLER IN `lib/` — measured
+  # 2026-09-22, the only call sites are test/barkpark/plugins/manifest_test.exs
+  # :200 and :209, which pass a tmp path they wrote themselves. (Control: the
+  # same grep finds the sibling `validate!/1` called at lib/barkpark/plugin.ex
+  # :1027, so the absence is real, not a broken search.) `validate!/1` takes an
+  # already-decoded map and does no file I/O, so no production path reaches this
+  # `File.read!`. The waiver is therefore about the ONLY input this function can
+  # receive today, and a future production caller must re-reason it: it is safe
+  # only while `path` is engine-derived (a plugin dir from
+  # `Discovery.plugin_dirs_in/1`), never request input.
+  # Inline rather than a line-pinned `.sobelow-skips` row: the fingerprint is
+  # `type,file:line,HASH` and shifts on any edit above the call.
+  # sobelow_skip ["Traversal.FileModule"]
   def parse_and_validate!(path) when is_binary(path) do
     path
     |> File.read!()

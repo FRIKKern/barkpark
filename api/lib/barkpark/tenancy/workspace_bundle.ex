@@ -19,6 +19,51 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.ExportScopeError do
   @type t :: %__MODULE__{code: String.t(), message: String.t()}
 end
 
+defmodule Barkpark.Tenancy.WorkspaceBundle.ImportLockError do
+  @moduledoc """
+  The import transaction could NOT take the table locks its FK/trigger DDL
+  needs, and said so instead of waiting (or deadlocking) in silence.
+
+  The import brackets its `ALTER TABLE` passes with a bounded `SET LOCAL
+  lock_timeout` (see `WorkspaceBundle`'s `with_ddl_lock_timeout/2`). When some
+  other session holds a conflicting lock on a member table for longer than
+  that, Postgres refuses OUR statement and this exception names the phase and
+  the SQLSTATE rather than surfacing a raw `Postgrex.Error` — an import that
+  hit contention and an import that hit a corrupt bundle are different
+  operational stories and must not read the same.
+
+  `code` is a stable, machine-branchable reason:
+
+    * `"ddl_lock_not_available"` — 55P03, our statement timed out on the lock
+    * `"ddl_deadlock_detected"`  — 40P01, Postgres picked us as the victim
+
+  Both are RETRYABLE: nothing was committed (the whole import is one
+  transaction), so the import simply runs again. It DOES run again — the engine
+  retries the whole transaction a bounded number of times before this exception
+  ever reaches a caller (`:bundle_import_ddl_lock_attempts`, default 3), so an
+  `ImportLockError` in the wild means the contending session held its lock for
+  the entire budget, not that it blinked once. `attempts` carries how many the
+  engine spent, and the message names it.
+
+  The ONE case the engine will not retry: a refusal in the
+  `:restore_member_fks` phase of a FILE-STREAMED import (`import_bundle_file/2`).
+  That phase runs after the COPY loop, and the COPY loop deletes each extracted
+  member the moment it lands (`release_member/1`), so the inputs a second
+  attempt would need are already gone. Such an error carries
+  `retried?: false`; the caller must re-extract the bundle.
+  """
+  defexception [:code, :phase, :timeout, :attempts, :retried?, :message]
+
+  @type t :: %__MODULE__{
+          code: String.t(),
+          phase: atom(),
+          timeout: String.t(),
+          attempts: pos_integer(),
+          retried?: boolean(),
+          message: String.t()
+        }
+end
+
 defmodule Barkpark.Tenancy.WorkspaceBundle do
   @moduledoc """
   Export ANY workspace into one complete, self-describing bp-export-v1 bundle
@@ -56,7 +101,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   nil to a fully-unscoped, all-tenant read → a cross-tenant leak into a
   single-workspace bundle).
 
-  ## Export profiles + dataset grain (PDS-D3/D4/D5/D7 · D27/D28/D29/D31)
+  ## Export profiles + dataset grain (PDS-D3/PDS-D4/PDS-D5/PDS-D7 · D27/D28/D29/D31)
 
   `export/2` takes two scope opts, both defaulting to today's behavior so the
   full-fidelity backup path is BYTE-IDENTICAL to before (the md5-parity suite
@@ -98,7 +143,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   and INTERSECT it with the target slug — a shared slug therefore yields the
   empty set, fail-closed.
 
-  ## `dataset_slugs` names the EXCLUSIVE set, and `declared_loss` says what that cost (PDS-D45/D46/D74)
+  ## `dataset_slugs` names the EXCLUSIVE set, and `declared_loss` says what that cost (PDS-D45/PDS-D46/PDS-D74)
 
   Two manifest keys that are easy to misread, so read them together:
 
@@ -132,7 +177,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   zero-byte `shares` member and said nothing. `shares` now travels; the rows that
   still cannot are counted out loud.
 
-  ## Import (charter D7 · PDS-D8/D9 · task-7889645a51769a36)
+  ## Import (charter D7 · PDS-D8/PDS-D9 · task-7889645a51769a36)
 
   The import needs NO superuser privilege. It used to run under
   `SET session_replication_role = replica` — a superuser-only parameter, which
@@ -220,7 +265,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     Archive,
     BundleIoError,
     Catalog,
+    DatasetRemap,
     ExportScopeError,
+    ImportLockError,
     InvalidBundleError
   }
 
@@ -229,7 +276,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   @type stats :: %{
           tables: %{optional(String.t()) => non_neg_integer()},
           total_rows: non_neg_integer(),
-          manifest: map()
+          manifest: map(),
+          attempts: pos_integer()
         }
 
   @doc """
@@ -356,6 +404,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       derive this itself. Defaults to `nil` (no expectation, every arm
       unchanged) — which is every non-HTTP caller: mix tasks and round-trip
       tests have no operator to have named a target.
+    * `:into_dataset` — `[workspace_id: uuid, project_id: uuid, slug: string]`.
+      Import a DATASET-scoped bundle (exported with `:dataset`) as a NEW dataset
+      under that project, with a fresh dataset id, the given slug, and fresh row
+      ids, rewriting every stored pointer to the source dataset. Refuses with
+      `DatasetRemapError` (`dataset_slug_conflict` when the slug is taken in that
+      project; the other codes are listed on the exception). Only `:clean` mode;
+      `:grant_admin_to` does not apply, because the target workspace already
+      exists. See `Barkpark.Tenancy.WorkspaceBundle.DatasetRemap` for the table
+      of what is rewritten and what is not. Defaults to `nil` (the byte-for-byte
+      restore above, unchanged).
 
   In `:merge` mode a same-slug/different-id root collision returns
   `{:error, {:workspace_slug_conflict, %{slug, existing_id, bundle_id}}}`
@@ -473,7 +531,25 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # keeps its arity (it is named as `run_import/4` in `Barkpark.Repo`'s
   # statement-timeout docs).
   defp import_ctx!(opts) do
-    %{grant: grant_admin_to!(opts), expected_root_slug: expected_root_slug!(opts)}
+    ctx = %{
+      grant: grant_admin_to!(opts),
+      expected_root_slug: expected_root_slug!(opts),
+      into_dataset: DatasetRemap.target!(Keyword.get(opts, :into_dataset))
+    }
+
+    if ctx.into_dataset do
+      # A remap creates a new dataset inside a workspace that already exists:
+      # there is nothing to merge into and no workspace to grant.
+      if Keyword.get(opts, :mode, :clean) != :clean do
+        raise ArgumentError, ":into_dataset imports only in :clean mode"
+      end
+
+      if ctx.grant do
+        raise ArgumentError, ":grant_admin_to does not apply to an :into_dataset import"
+      end
+    end
+
+    ctx
   end
 
   # THE CALLER'S STATED TARGET (task-b8218812cee2e4cc). The engine cannot derive
@@ -526,8 +602,30 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # import_failed — task-96d8ab2b582818a4) is provable over the wire without
     # mocking the engine. `nil` in every non-test env.
     case Application.get_env(:barkpark, :import_fault) do
-      {:error, _term} = fault -> fault
-      nil -> run_import(manifest, dumps, mode, ctx)
+      {:error, _term} = fault ->
+        fault
+
+      nil ->
+        result =
+          if ctx.into_dataset do
+            # The remap stages every member it needs before writing, so it
+            # needs the same membership refusal the restore path runs first.
+            assert_member_tables!(manifest)
+            sources = Map.new(dumps, fn {table, dump} -> {table, copy_source(dump)} end)
+            DatasetRemap.run(manifest, sources, ctx.into_dataset)
+          else
+            run_import(manifest, dumps, mode, ctx)
+          end
+
+        # The workspaces row arrives by raw COPY, past every `Tenancy` write
+        # that announces a change; announce it here, AFTER the transaction has
+        # committed, so a Studio socket memoizing this workspace's plugin
+        # enablement reads the imported row (task-c8a87043cb286a2f).
+        with {:ok, _} <- result, ws_id when is_binary(ws_id) <- manifest["workspace_id"] do
+          Barkpark.Plugins.Enablement.announce(ws_id)
+        end
+
+        result
     end
   end
 
@@ -545,7 +643,90 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   defp warn_declared_loss(_manifest), do: :ok
 
+  # ── The import is retried as a WHOLE TRANSACTION on a lock refusal ──────────
+  #
+  # A 55P03/40P01 refusal aborts the transaction: nothing is committed, no
+  # sequence is consumed, no blob is pushed (the blob push is the caller's, and
+  # only on {:ok, _}). So the only honest response to "someone else held the
+  # lock" is to wait a moment and run the SAME transaction again — which is
+  # what the pre-lock_timeout code effectively did, except it waited forever
+  # and could lose a deadlock coin-flip instead of choosing to wait.
+  #
+  # The retry MUST wrap `Repo.transaction/2` and not just the DDL pass: after
+  # 55P03 the transaction is in the aborted state, where every further
+  # statement — including the `SET LOCAL` that would re-arm the timeout — is a
+  # 25P02. There is nothing to salvage inside; the whole block has to re-run,
+  # `SET LOCAL statement_timeout = 0` and all.
+  #
+  # Both entry points funnel through here: `import_bundle/2` (members as
+  # binaries) and `import_bundle_file/2` (members as `{:file, path}`) both call
+  # `import_unpacked/4` → `run_import/4`. See `retryable_refusal?/2` for the
+  # one shape that must NOT be retried.
   defp run_import(manifest, dumps, mode, ctx) do
+    run_import_attempt(manifest, dumps, mode, ctx, 1)
+  end
+
+  # `attempts` on the way OUT, mirroring `ImportLockError.attempts` on the way
+  # out of a refusal: a successful import that was refused once and retried is
+  # otherwise indistinguishable from one that took the lock first try, and the
+  # only thing a caller (or a test) could measure was elapsed wall time — which
+  # under CI load measures the machine, not the retry. This is the observable
+  # that makes the retry ASSERTABLE without a clock.
+  defp run_import_attempt(manifest, dumps, mode, ctx, attempt) do
+    case run_import_once(manifest, dumps, mode, ctx) do
+      {:ok, stats} -> {:ok, Map.put(stats, :attempts, attempt)}
+      other -> other
+    end
+  rescue
+    e in ImportLockError ->
+      budget = import_lock_attempts()
+
+      cond do
+        not retryable_refusal?(e, dumps) ->
+          reraise finalize_lock_error(e, attempt, false), __STACKTRACE__
+
+        attempt >= budget ->
+          # `attempt`, not `budget`: the count is a MEASUREMENT of what was
+          # spent, not a restatement of the configured ceiling.
+          reraise finalize_lock_error(e, attempt, true), __STACKTRACE__
+
+        true ->
+          backoff = import_lock_backoff_ms(attempt)
+
+          Logger.warning(
+            "workspace bundle import: attempt #{attempt}/#{budget} refused by " <>
+              "#{e.code} during #{e.phase}; retrying in #{backoff}ms"
+          )
+
+          # THE REFUSAL IS OBSERVABLE, and it is observable HERE — after the
+          # refusal is final for this attempt and BEFORE the backoff sleep, so
+          # a handler runs strictly between "attempt N was refused" and
+          # "attempt N+1 starts". Nothing in production attaches to it (a
+          # `:telemetry.execute` with no handlers is a single ETS lookup), and
+          # nothing about the import's behaviour depends on it. It exists
+          # because the ALTERNATIVE — a test that guesses, on a clock, when the
+          # import is parked and when it has given up — is a wall-clock race
+          # that CI load wins (run 34584565394: the contending holder released
+          # after the THIRD refusal and the import had already, correctly, given
+          # up). Handlers run synchronously in THIS process, so a contending
+          # session released from a handler is released before the sleep below
+          # even begins — an ORDER, not a duration.
+          #
+          # Emitted on retryable refusals only: the terminal one already has a
+          # raised, named `ImportLockError`, which is a louder observable than
+          # any event.
+          :telemetry.execute(
+            [:barkpark, :workspace_bundle, :import, :lock_refused],
+            %{attempt: attempt, backoff_ms: backoff},
+            %{phase: e.phase, code: e.code, budget: budget, timeout: e.timeout}
+          )
+
+          Process.sleep(backoff)
+          run_import_attempt(manifest, dumps, mode, ctx, attempt + 1)
+      end
+  end
+
+  defp run_import_once(manifest, dumps, mode, ctx) do
     Repo.transaction(
       fn ->
         # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs): each
@@ -608,8 +789,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # ORIGINAL exception propagates untouched (no after-clause exists to
         # replace it with a 25P02 — the blindfold class of
         # task-63a199c0a0ce2a06 cannot recur).
-        member_fks = drop_member_fks!(live)
-        alter_user_triggers!(live, "DISABLE")
+        # BRACKETED BY A BOUNDED lock_timeout — see with_ddl_lock_timeout/2.
+        # These two passes are the only statements in the import that need
+        # AccessExclusiveLock, and they are where a background session holding
+        # AccessShareLock on a member table used to park this transaction
+        # forever (statement_timeout is 0 here) or lose a 40P01 coin-flip.
+        member_fks =
+          with_ddl_lock_timeout(:drop_member_fks, fn ->
+            fks = drop_member_fks!(live)
+            alter_user_triggers!(live, "DISABLE")
+            fks
+          end)
 
         stats =
           manifest["tables"]
@@ -627,8 +817,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
             %{tables: tables, total_rows: total, manifest: manifest}
           end)
 
-        alter_user_triggers!(live, "ENABLE")
-        restore_member_fks!(member_fks)
+        with_ddl_lock_timeout(:restore_member_fks, fn ->
+          alter_user_triggers!(live, "ENABLE")
+          restore_member_fks!(member_fks)
+        end)
 
         # The manifest's declared root slug is a CLAIM; the workspaces COPY
         # member carries the actual slug. Re-read the seats that were vacant at
@@ -660,6 +852,196 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       end,
       timeout: :infinity
     )
+  end
+
+  # ── The DDL lock window (pds-bl-import-ddl-deadlock-flake) ──────────────────
+  #
+  # The import runs under `SET LOCAL statement_timeout = 0` because the COPY
+  # loop may legitimately take hours. That opt-out applies to LOCK WAITS too,
+  # and the FK/trigger passes below want AccessExclusiveLock on every member
+  # table. So any other session merely READING a member table (an ordinary
+  # background GenServer on its own pooled connection — `Barkpark.Pulse.Metrics`
+  # was the one caught doing it) parks this transaction indefinitely, and when
+  # that session then queues behind a lock WE already hold, Postgres closes the
+  # cycle and shoots one of us with 40P01 deadlock_detected.
+  #
+  # `lock_timeout` is the separate knob for exactly this: it bounds how long a
+  # statement waits FOR A LOCK without bounding how long it may RUN. Whatever
+  # the bound, the refusal is honest, named and retryable — and BOTH SQLSTATEs
+  # translate to the same named error, because which one Postgres hands us is
+  # decided by a race against `deadlock_timeout`, not by anything about the
+  # import:
+  #
+  #   * bound BELOW `deadlock_timeout` (1 s by default) — our ALTER gives up
+  #     with 55P03 before the detector can even form a cycle.
+  #   * bound ABOVE it — a genuine cycle is detected first and one party gets
+  #     40P01. That is still a bounded, named, retried refusal; the deadlock
+  #     victim's transaction is rolled back by Postgres, which is exactly the
+  #     state the retry needs. A NON-cycle wait still ends at `lock_timeout`.
+  #
+  # THE DEFAULT IS 2 s, above `deadlock_timeout`, and that is deliberate. The
+  # first cut of this fix shipped 750 ms and reddened CI on its own module:
+  # an ordinary background reader in the test app held AccessShareLock on a
+  # member table for longer than 750 ms, so a bound chosen to dodge the
+  # deadlock detector turned a RARE 40P01 into a FREQUENT 55P03 — honest, but
+  # a worse trade. 2 s clears the observed reader, and the cycle case it
+  # re-admits is the 40P01 this row was filed about, which is now caught,
+  # named and retried rather than crashing the import.
+  #
+  # SET LOCAL, and reset to unbounded the moment the pass returns: the COPY
+  # loop between the two passes writes into tables this transaction already
+  # holds exclusively, so a lock bound there could only ever fire spuriously.
+  @ddl_lock_timeout_default "2s"
+  @lock_timeout_shape ~r/^\d+(us|ms|s|min|h|d)?$/
+
+  # Attempts INCLUDING the first, so 1 disables the retry entirely. The backoff
+  # list is consulted by attempt number and its last element repeats, so a
+  # budget larger than the list is well-defined rather than a crash.
+  @import_lock_attempts_default 3
+  @import_lock_backoff_ms_default [250, 500]
+
+  defp with_ddl_lock_timeout(phase, fun) do
+    set_local_lock_timeout!(ddl_lock_timeout())
+    result = run_ddl_pass(phase, fun)
+    # Only on the success path: a refusal has already aborted the transaction,
+    # where any further statement — this one included — is a 25P02.
+    set_local_lock_timeout!("0")
+    result
+  end
+
+  defp run_ddl_pass(phase, fun) do
+    fun.()
+  rescue
+    e in Postgrex.Error ->
+      case lock_refusal_code(e) do
+        nil ->
+          reraise e, __STACKTRACE__
+
+        code ->
+          # attempts: 1 is PROVISIONAL. run_import_attempt/5 owns the budget and
+          # rewrites both the count and the message through the same formatter
+          # before this ever escapes the engine, so the two can never diverge.
+          reraise lock_error(code, phase, 1, true), __STACKTRACE__
+      end
+  end
+
+  defp lock_error(code, phase, attempts, retried?) do
+    error = %ImportLockError{
+      code: code,
+      phase: phase,
+      timeout: ddl_lock_timeout(),
+      attempts: attempts,
+      retried?: retried?
+    }
+
+    %{error | message: format_lock_message(error)}
+  end
+
+  defp finalize_lock_error(%ImportLockError{} = error, attempts, retried?) do
+    error = %{error | attempts: attempts, retried?: retried?}
+    %{error | message: format_lock_message(error)}
+  end
+
+  defp format_lock_message(%ImportLockError{} = e) do
+    tail =
+      if e.retried? do
+        "Nothing was committed — retry the import once that session has finished."
+      else
+        "Nothing was committed, and this import was NOT retried in place: its " <>
+          "streamed members were consumed by the COPY loop before the #{e.phase} " <>
+          "pass, so a second attempt has nothing to read. Re-run the import from " <>
+          "the bundle file."
+      end
+
+    "workspace bundle import could not lock its member tables during " <>
+      "#{e.phase} within #{e.timeout} after #{e.attempts} " <>
+      "attempt(s) (#{e.code}): another session holds a conflicting lock. " <> tail
+  end
+
+  # THE ONE NON-RETRYABLE SHAPE. `import_bundle_file/2` hands members as
+  # `{:file, path}` and `release_member/1` deletes each one the moment its COPY
+  # lands — that is the whole point of the streaming path (peak disk is one
+  # member, not the whole bundle). The `:drop_member_fks` pass runs BEFORE the
+  # COPY loop, so a refusal there leaves every member file on disk and the
+  # retry is sound. The `:restore_member_fks` pass runs AFTER it, by which time
+  # the files are gone: re-running the transaction would COPY nothing and
+  # "succeed" with zero rows. Refuse loudly instead.
+  #
+  # Binary members (`import_bundle/2`) are never destroyed, so every phase is
+  # retryable there.
+  defp retryable_refusal?(%ImportLockError{phase: :drop_member_fks}, _dumps), do: true
+
+  defp retryable_refusal?(%ImportLockError{}, dumps) do
+    not Enum.any?(dumps, fn
+      {_table, {:file, _path}} -> true
+      {_table, _binary} -> false
+    end)
+  end
+
+  defp import_lock_attempts do
+    case Application.get_env(
+           :barkpark,
+           :bundle_import_ddl_lock_attempts,
+           @import_lock_attempts_default
+         ) do
+      n when is_integer(n) and n > 0 ->
+        n
+
+      other ->
+        raise ArgumentError,
+              "invalid :bundle_import_ddl_lock_attempts #{inspect(other)}: expected a " <>
+                "positive integer (attempts INCLUDING the first, so 1 means no retry)"
+    end
+  end
+
+  defp import_lock_backoff_ms(attempt) do
+    case Application.get_env(
+           :barkpark,
+           :bundle_import_ddl_lock_backoff_ms,
+           @import_lock_backoff_ms_default
+         ) do
+      [_ | _] = list ->
+        if Enum.all?(list, &(is_integer(&1) and &1 >= 0)) do
+          # The list repeats its LAST element rather than running off the end,
+          # so raising the attempt budget alone never crashes the import.
+          Enum.at(list, attempt - 1) || List.last(list)
+        else
+          raise ArgumentError,
+                "invalid :bundle_import_ddl_lock_backoff_ms #{inspect(list)}: expected a " <>
+                  "non-empty list of non-negative integer milliseconds"
+        end
+
+      other ->
+        raise ArgumentError,
+              "invalid :bundle_import_ddl_lock_backoff_ms #{inspect(other)}: expected a " <>
+                "non-empty list of non-negative integer milliseconds, e.g. [250, 500]"
+    end
+  end
+
+  defp lock_refusal_code(%Postgrex.Error{postgres: %{code: :lock_not_available}}),
+    do: "ddl_lock_not_available"
+
+  defp lock_refusal_code(%Postgrex.Error{postgres: %{code: :deadlock_detected}}),
+    do: "ddl_deadlock_detected"
+
+  defp lock_refusal_code(_error), do: nil
+
+  defp ddl_lock_timeout do
+    Application.get_env(:barkpark, :bundle_import_ddl_lock_timeout, @ddl_lock_timeout_default)
+  end
+
+  # Gated by @lock_timeout_shape, so what reaches SQL is digits plus an optional
+  # unit keyword and nothing else. `SET` takes no bind parameters.
+  # sobelow_skip ["SQL.Query"]
+  defp set_local_lock_timeout!(value) when is_binary(value) do
+    unless Regex.match?(@lock_timeout_shape, value) do
+      raise ArgumentError,
+            "invalid :bundle_import_ddl_lock_timeout #{inspect(value)}: expected a bare " <>
+              "integer (milliseconds) or an integer with a us|ms|s|min|h|d unit, e.g. \"2s\""
+    end
+
+    Repo.query!("SET LOCAL lock_timeout = '#{value}'", [])
+    :ok
   end
 
   # ── Owner-privilege import mechanics (task-7889645a51769a36) ─────────────────
@@ -813,7 +1195,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     slug_partition = partition_dataset_slugs_for(ws.id)
     dataset_slugs = narrow_slugs(slug_partition.exclusive, target)
     # NOT fed to `export_ctx/4`: the bare-slug copy predicates must keep keying on
-    # the EXCLUSIVE half only (PDS-D21/D46). This half exists to be NAMED in the
+    # the EXCLUSIVE half only (PDS-D21/PDS-D46). This half exists to be NAMED in the
     # manifest, so a consumer can tell "this bundle carries no such dataset" from
     # "this bundle carries it, attributed by column, under a slug the exclusive
     # set is required to drop" (PDS-D75).
@@ -856,6 +1238,31 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     # a boot-time sweep and a live concurrent export.
     Enum.each(Map.values(spills), &Janitor.own/1)
 
+    # pds-bl-export-pool-starvation: one dedicated connection for THIS export's
+    # COPY streams, so no unrelated checkout can queue behind a 9 s hold on the
+    # shared pool. Started here (once per export, not once per member table) and
+    # stopped in the `after` below; `:disabled`/`{:error, _}` both degrade to
+    # `nil`, which `Repo.with_export_repo/2` reads as "use the default repo" —
+    # this is a contention remedy, never a correctness precondition, so an
+    # export must never FAIL because it could not get its own pool. Full
+    # derivation (and why a checkout timeout / a bounded COPY hold are not
+    # remedies) in `Barkpark.Repo.start_export_pool/1`.
+    export_pool_pid =
+      case Repo.start_export_pool() do
+        {:ok, pid} ->
+          pid
+
+        other ->
+          if match?({:error, _}, other) do
+            Logger.warning(
+              "workspace export could not start its dedicated pool (#{inspect(other)}); " <>
+                "falling back to the shared pool"
+            )
+          end
+
+          nil
+      end
+
     try do
       {members, files} =
         Enum.reduce(specs, {[], %{}}, fn {table, partition, kind}, {members, files} ->
@@ -863,7 +1270,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
           order_cols = Catalog.order_columns(Repo, table)
           sql = copy_out_sql(table, kind, cols, order_cols, ctx)
           spill = Map.fetch!(spills, table)
-          {row_count, md5} = run_copy_out(sql, spill)
+          {row_count, md5} = run_copy_out(sql, spill, export_pool_pid)
 
           member = %{
             "name" => table,
@@ -897,7 +1304,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # reason `declared_loss` is: a key that appears only on collision cannot
         # be told apart from an engine too old to have one.
         "dataset_slugs_shared" => shared_dataset_slugs,
-        # PDS-D45/D74: what this bundle could NOT carry, said out loud. ALWAYS
+        # PDS-D45/PDS-D74: what this bundle could NOT carry, said out loud. ALWAYS
         # present (`[]` on the overwhelmingly common no-collision path) — a key
         # that appears only on loss cannot be told apart from an engine too old
         # to have one, which is the same silence in a new costume.
@@ -919,6 +1326,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
       # failure path too, where the point is to leave nothing claimed by a pid
       # that is about to stop existing.
       Enum.each(Map.values(spills), &Janitor.disown/1)
+      # And the dedicated pool with them — the box carries no extra connections
+      # between exports. Runs on the failure path too, and on the PDS-D218 path
+      # where the client has already gone away.
+      if export_pool_pid, do: Repo.stop_export_pool(export_pool_pid)
     end
   end
 
@@ -1008,7 +1419,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     |> List.flatten()
   end
 
-  # ── Profile + dataset scope resolution (PDS-D28/D29) ─────────────────────────
+  # ── Profile + dataset scope resolution (PDS-D28/PDS-D29) ─────────────────────────
 
   defp normalize_profile!(nil), do: :full
   defp normalize_profile!(profile) when profile in [:full, :dev], do: profile
@@ -1074,7 +1485,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   defp narrow_slugs(slugs, nil), do: slugs
   defp narrow_slugs(slugs, %{slug: slug}), do: Enum.filter(slugs, &(&1 == slug))
 
-  # ── Declared loss (PDS-D45/D74) ──────────────────────────────────────────────
+  # ── Declared loss (PDS-D45/PDS-D74) ──────────────────────────────────────────────
 
   # THE RULE THIS ENFORCES: a `:full` bundle that cannot carry something must SAY
   # SO. `Catalog.e3_dataset_unattributable/0` names the tables whose only tenant
@@ -1262,6 +1673,73 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     end
   end
 
+  @typedoc """
+  The tenant literals a string-keyed member's membership predicate is built
+  from: the workspace UUID literal, its slug literal, and the
+  workspace-EXCLUSIVE dataset slug set (`dataset_slugs_for/1`). The export ctx
+  is a SUPERSET of this shape, so it satisfies the type as-is.
+  """
+  @type tenant_scope :: %{
+          required(:ws_lit) => String.t(),
+          required(:ws_slug_lit) => String.t(),
+          required(:slugs) => [String.t()],
+          optional(any()) => any()
+        }
+
+  @doc """
+  THE ONE SOURCE OF TRUTH for a string-keyed member's tenant-membership
+  predicate: the `WHERE …` clause naming exactly the rows of `table` that belong
+  to the workspace described by `scope`.
+
+  Both halves of the lockstep read it — the exporter's `copy_where/3` (a thin
+  delegation for the `:e3_doc` / `:e3_dataset` / `:allowlist` kinds) and
+  `Tenancy.delete_workspace/1`'s string-keyed sweep. Before this function
+  existed the two built the same SQL independently and a COMMENT asserted they
+  agreed; a prototype desynchronized them for `shares` and 98 tests stayed green
+  while a row the bundle carried survived its own workspace's teardown
+  (`pds-bl-export-teardown-lockstep-untested`). A predicate that exists ONCE
+  cannot desynchronize; `export_teardown_lockstep_test.exs` holds the seam shut
+  for every table in the three catalog classes, including future ones.
+
+  `anchor_narrowing` is appended INSIDE the `:e3_doc` semi-join's `EXISTS`
+  anchor (the profile/dataset narrowing a dataset-scoped export adds). It is
+  `""` on the whole-workspace path BOTH sides take, so the emitted SQL — and
+  therefore every dump byte and every teardown `DELETE` — is unchanged.
+
+  For `:e3_doc` the teardown appends its own sibling-guard `NOT EXISTS` AFTER
+  this clause: extraction and destruction are deliberately asymmetric there
+  (charter D7) because a `(doc_id, dataset)` row a SECOND workspace also owns
+  travels in this workspace's bundle but must SURVIVE its teardown. That
+  asymmetry is a strict EXTENSION of this predicate, never a rewrite of it —
+  which is exactly what the structural test asserts.
+  """
+  @spec tenant_scope_where(
+          String.t(),
+          :e3_doc | :e3_dataset | :allowlist,
+          tenant_scope(),
+          String.t()
+        ) :: String.t()
+  def tenant_scope_where(table, kind, scope, anchor_narrowing \\ "")
+
+  def tenant_scope_where(_table, :e3_doc, scope, anchor_narrowing) do
+    "WHERE EXISTS (SELECT 1 FROM documents d " <>
+      "WHERE d.workspace_id = #{scope.ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset" <>
+      anchor_narrowing <> ")"
+  end
+
+  def tenant_scope_where(table, :e3_dataset, scope, _anchor_narrowing) do
+    case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
+      {:ok, col} -> "WHERE t.#{qi(col)} = #{scope.ws_slug_lit}"
+      :error -> "WHERE t.dataset = ANY(#{Catalog.text_array_literal(scope.slugs)})"
+    end
+  end
+
+  def tenant_scope_where(table, :allowlist, scope, _anchor_narrowing) do
+    prefix = Map.fetch!(Catalog.allowlist(), table)
+    scopes = Enum.map(scope.slugs, &(prefix <> &1))
+    "WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})"
+  end
+
   defp e3_kind(table) do
     cond do
       table in Catalog.e3_doc_keyed() ->
@@ -1342,11 +1820,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # which would fan out on the (doc_id, dataset) → 2-document case (charter D6).
   # The dataset grain and the dev type-deny both narrow the ANCHOR (the document
   # the row hangs off), because the member itself carries no such column.
-  defp copy_where(_table, :e3_doc, ctx) do
-    "WHERE EXISTS (SELECT 1 FROM documents d " <>
-      "WHERE d.workspace_id = #{ctx.ws_lit} AND d.doc_id = t.doc_id AND d.dataset = t.dataset" <>
-      doc_anchor_narrowing(ctx) <> ")"
-  end
+  defp copy_where(table, :e3_doc, ctx),
+    do: tenant_scope_where(table, :e3_doc, ctx, doc_anchor_narrowing(ctx))
 
   # E3 dataset-keyed, ATTRIBUTED arm (PDS-D74). A table that carries its own
   # workspace slug column is scoped by THAT, never by the bare `dataset` slug:
@@ -1361,20 +1836,11 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # includes ours. The dataset GRAIN is re-applied separately, in
   # `dataset_predicates/3` — without it this predicate would widen a
   # dataset-scoped pull to every dataset the workspace shares.
-  defp copy_where(table, :e3_dataset, ctx) do
-    case Map.fetch(Catalog.e3_dataset_workspace_slug_column(), table) do
-      {:ok, col} -> "WHERE t.#{qi(col)} = #{ctx.ws_slug_lit}"
-      :error -> "WHERE t.dataset = ANY(#{Catalog.text_array_literal(ctx.slugs)})"
-    end
-  end
+  defp copy_where(table, :e3_dataset, ctx), do: tenant_scope_where(table, :e3_dataset, ctx)
 
   # data_keys.scope = "dataset:" <> slug (search_surface_config left the allowlist
   # in Wave 5 Slice A — it is now a plain E1 workspace_id table, charter D45/D49).
-  defp copy_where(table, :allowlist, ctx) do
-    prefix = Map.fetch!(Catalog.allowlist(), table)
-    scopes = Enum.map(ctx.slugs, &(prefix <> &1))
-    "WHERE t.scope = ANY(#{Catalog.text_array_literal(scopes)})"
-  end
+  defp copy_where(table, :allowlist, ctx), do: tenant_scope_where(table, :allowlist, ctx)
 
   # Both narrowings are "" on the default full/whole-workspace path, so the
   # emitted SQL — and therefore every dump byte — is identical to before.
@@ -1519,8 +1985,18 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # fetch_env! spill dir) and SQL.stream runs `sql`, a COPY ... TO STDOUT built
   # by copy_out_sql from catalog-derived table/columns (Catalog.live_e*,
   # information_schema); neither carries request input. PR #5083 security review.
+  #
+  # PUBLIC ONLY SO THE DETECTOR CAN DRIVE THE REAL HOLD.
+  # `test/barkpark/tenancy/workspace_bundle_export_pool_test.exs` reproduces the
+  # starvation by running THIS function with a `COPY (SELECT pg_sleep(…)) TO
+  # STDOUT` while an unrelated client probes the shared pool. Calling it through
+  # a re-implemented copy of its body would prove nothing about the code that
+  # ships, so the seam is here instead of in the test. `export_repo` defaults to
+  # `nil`, which is byte-for-byte the pre-fix behaviour.
+  @doc false
+  @spec run_copy_out(String.t(), Path.t(), pid() | nil) :: {non_neg_integer(), String.t()}
   # sobelow_skip ["Traversal.FileModule", "SQL.Stream"]
-  defp run_copy_out(sql, spill_path) do
+  def run_copy_out(sql, spill_path, export_repo \\ nil) do
     inject_copy_fault!()
 
     # INSPECTED, not `File.open!` (PDS-D209): the spill is where a full disk
@@ -1530,42 +2006,55 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
     {row_count, digest} =
       open_spill!(spill_path, fn io ->
         {:ok, acc} =
-          Repo.transaction(
-            fn ->
-              # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs):
-              # ONE `COPY … TO STDOUT` is one statement, run-proven at 9.34 s
-              # (mutation_events, 478 MB) on a WARM cache and longer cold, so the
-              # wall would cancel a legitimate export mid-dump. SET LOCAL, so it
-              # dies with this transaction and never rides the pooled connection
-              # back out. Issued INSIDE the existing transaction rather than by
-              # wrapping it in `with_statement_timeout/2`: an outer transaction
-              # would make the `timeout: copy_out_timeout()` below a savepoint
-              # option and INERT — the precise PDS-D42 trap two paragraphs up.
-              Repo.set_local_statement_timeout!(0)
+          Repo.with_export_repo(export_repo, fn ->
+            Repo.transaction(
+              fn ->
+                # OPT-OUT from the pool-wide 30 s statement_timeout (runtime.exs):
+                # ONE `COPY … TO STDOUT` is one statement, run-proven at 9.34 s
+                # (mutation_events, 478 MB) on a WARM cache and longer cold, so the
+                # wall would cancel a legitimate export mid-dump. SET LOCAL, so it
+                # dies with this transaction and never rides the pooled connection
+                # back out. Issued INSIDE the existing transaction rather than by
+                # wrapping it in `with_statement_timeout/2`: an outer transaction
+                # would make the `timeout: copy_out_timeout()` below a savepoint
+                # option and INERT — the precise PDS-D42 trap two paragraphs up.
+                Repo.set_local_statement_timeout!(0)
 
-              Repo
-              |> Ecto.Adapters.SQL.stream(sql, [])
-              |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->
-                # `rows: nil` is defensive; the terminal chunk carries [].
-                rows = chunk.rows || []
-                # iodata all the way down — never flattened into a binary.
-                # INSPECTED: `IO.binwrite/2` RETURNS `{:error, :enospc}` on a
-                # full disk (it does not raise), and the `:ok = …` match this
-                # replaces made that a MatchError -> bare 500.
-                case IO.binwrite(io, rows) do
-                  :ok ->
-                    :ok
+                # `Repo.get_dynamic_repo/0`, NOT the bare `Repo` module.
+                # `Ecto.Adapters.SQL.stream/4` calls `Ecto.Adapter.lookup_meta/1`
+                # on WHATEVER it is handed and does NOT resolve the process's
+                # dynamic repo — hand it the module and the stream's adapter
+                # meta is the DEFAULT pool's while `Repo.transaction/2` above
+                # (which does resolve it) checked the connection out of the
+                # export pool. The two then key the process dictionary on
+                # different pool pids and `Ecto.Adapters.SQL.reduce/6` raises
+                # "cannot reduce stream outside of transaction". Run-proven both
+                # ways while building the detector. On the default path this is
+                # exactly `Barkpark.Repo`, so nothing changes without a pool.
+                Repo.get_dynamic_repo()
+                |> Ecto.Adapters.SQL.stream(sql, [])
+                |> Enum.reduce({0, :crypto.hash_init(:md5)}, fn chunk, {count, hash} ->
+                  # `rows: nil` is defensive; the terminal chunk carries [].
+                  rows = chunk.rows || []
+                  # iodata all the way down — never flattened into a binary.
+                  # INSPECTED: `IO.binwrite/2` RETURNS `{:error, :enospc}` on a
+                  # full disk (it does not raise), and the `:ok = …` match this
+                  # replaces made that a MatchError -> bare 500.
+                  case IO.binwrite(io, rows) do
+                    :ok ->
+                      :ok
 
-                  {:error, reason} ->
-                    raise BundleIoError,
-                      message: "could not write the spill #{spill_path}: #{inspect(reason)}"
-                end
+                    {:error, reason} ->
+                      raise BundleIoError,
+                        message: "could not write the spill #{spill_path}: #{inspect(reason)}"
+                  end
 
-                {count + length(rows), :crypto.hash_update(hash, rows)}
-              end)
-            end,
-            timeout: copy_out_timeout()
-          )
+                  {count + length(rows), :crypto.hash_update(hash, rows)}
+                end)
+              end,
+              timeout: copy_out_timeout()
+            )
+          end)
 
         acc
       end)

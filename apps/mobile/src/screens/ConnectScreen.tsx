@@ -35,6 +35,7 @@ type ConnectState =
   | { phase: 'resolving'; name: string }
   | { phase: 'paste'; request: PasteRequest; token: string; submitting: boolean }
   | { phase: 'provisioning'; name: string }
+  | { phase: 'insecure'; name: string; address: string }
   | { phase: 'error'; message: string }
 
 export function ConnectScreen({
@@ -69,6 +70,9 @@ export function ConnectScreen({
             return
           case 'provisioning':
             setState({ phase: 'provisioning', name: outcome.name })
+            return
+          case 'insecure':
+            setState({ phase: 'insecure', name: outcome.name, address: outcome.address })
             return
         }
       } catch {
@@ -224,6 +228,21 @@ export function ConnectScreen({
       {state.phase === 'provisioning' && (
         <View style={styles.centerBlock}>
           <Text style={[styles.body, { color: theme.text }]}>“{state.name}” has no address yet — it&apos;s still provisioning.</Text>
+          <Pressable accessibilityRole="button" onPress={loadFleet}>
+            <Text style={[styles.link, { color: theme.accent }]}>Check again</Text>
+          </Pressable>
+        </View>
+      )}
+
+      {state.phase === 'insecure' && (
+        <View style={styles.centerBlock}>
+          <Text style={[styles.body, { color: theme.danger }]}>
+            “{state.name}” reports an unencrypted address ({state.address}).
+          </Text>
+          <Text style={[styles.muted, { color: theme.textMuted }]}>
+            Barkpark only connects over HTTPS, so your credentials were not sent. Ask a team owner to check this
+            Barkpark&apos;s address in the Cloud console.
+          </Text>
           <Pressable accessibilityRole="button" onPress={loadFleet}>
             <Text style={[styles.link, { color: theme.accent }]}>Check again</Text>
           </Pressable>

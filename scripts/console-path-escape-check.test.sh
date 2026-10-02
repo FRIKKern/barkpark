@@ -10,6 +10,9 @@
 # The cases that matter are the ones that prove the instruments can FAIL:
 #   * an uncovered repo-root read must red                  (case 3)
 #   * an uncovered read in an UNTRACKED file must red       (case 4)
+#   * an ARGV token that collides with a repo-root filename
+#     must NOT be a read, while the SAME word inside a
+#     join(...) call still is                                (case 4c)
 #   * a neutered scanner must red rather than report clean  (case 5)
 #   * the aggregator must red on every not-a-pass result    (case 9)
 #   * the dispatcher must red rather than emit all-false    (case 10)
@@ -500,6 +503,83 @@ fi
 rm -f "$FXB/.git"
 echo
 
+# ── case 4c: AN ARGV ARRAY IS NOT A PATH READ ──────────────────────────────
+# The literal-join grep used to be a bare TOKEN PAIR — `(REPO_ROOT|REPO)` then a
+# comma then a quoted string — and that is also the shape of an ARGV ARRAY:
+# `execFileSync('git', ['-C', REPO, 'rev-parse', …])`. Measured on origin/main,
+# __preview__/seal-predicate.mjs and its test fed `rev-parse`, `show`,
+# `merge-base`, `--guard-cmd`, `--successor`, `--epic`, `--ladder-only`, `.git`
+# and `.github` into the literal-join idiom. All harmless — but harmless BY
+# COINCIDENCE: each was dropped by the `[ -f ]` existence filter or by the
+# explicit `.git` exclusion, never by the extractor refusing to see it.
+#
+# THE COINCIDENCE HAS A DEADLINE, and it is the bare-word rule. literal-join is
+# one of the three idioms allowed to admit a literal with no `/`, which is what
+# makes a read of `Makefile` / `README.md` / `mix.lock` representable at all. A
+# git subcommand is spelled exactly like a repo-root filename, so the first argv
+# token that collides with one reds this ratchet on a path NOTHING READS — and
+# the obvious remedy (an exemption) would enshrine a read that does not exist.
+#
+# So: the match must sit inside a `join(...)` CALL. Both arms below run on the
+# SAME fixture and differ in ONE thing — the shape the bare word is written in —
+# so neither arm can pass for a reason foreign to what this case measures.
+echo "case 4c: an argv array is not a path read, a join() of the same word is"
+FXV="$TMPROOT/argv"
+make_fixture "$FXV"
+: >"$FXV/Makefile"   # a REAL repo-root file, so the existence filter admits it
+# ARM 1 — the argv shape. `Makefile` here is the third element of a list, not a
+# path segment under REPO. It must not enter the census at all.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const out = execFileSync('git', ['-C', REPO, 'Makefile'], { encoding: 'utf8' });
+JS
+census_argv="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_argv" 'Makefile'; then
+  no "an ARGV token entered the census as a repo-root read — literal-join is matching token pairs, not join() calls"
+else
+  ok "an argv token colliding with a repo-root filename is not a read"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "exit 0 — the ratchet does not red on a path nothing reads"
+else
+  no "RED on an argv token (exit $rc) — this is the false red the join() shape exists to prevent: $out"
+fi
+# ARM 2 — THE CONTROL, and it is the half that keeps arm 1 from being vacuous.
+# Same fixture, same bare word, same file: written as a join() it IS a read, so
+# it must enter the census and red as UNCOVERED. If this arm ever goes quiet,
+# arm 1 is passing because bare words died, not because argv stopped matching.
+cat >"$FXV/cloud/priv/static/__preview__/argv-probe.mjs" <<'JS'
+const p = path.join(REPO_ROOT, "Makefile");
+JS
+census_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | cut -f1 | sort -u)"
+if has_line "$census_join" 'Makefile'; then
+  ok "CONTROL: the SAME bare word inside join(REPO_ROOT, …) is still a read"
+else
+  no "CONTROL FAILED: join(REPO_ROOT, \"Makefile\") is invisible — the bare-word rule died, and arm 1 proves nothing"
+fi
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "CONTROL: exit $rc (non-zero) — an undeclared bare-word read still reds"
+else
+  no "CONTROL FAILED: PASSED with an uncovered join(REPO_ROOT, \"Makefile\") read"
+fi
+if has "$out" "UNCOVERED repo-root read: Makefile"; then
+  ok "CONTROL: names the uncovered bare-word path"
+else
+  no "CONTROL FAILED: did not name the uncovered bare-word read: $out"
+fi
+# …and the idiom that admitted it is literal-join, not one of the others. The
+# bare-word rule is keyed on the TAG, so a row arriving under a different tag
+# would mean the control passed through a door this case is not measuring.
+tagged_join="$(CONSOLE_PATH_ESCAPE_ROOT="$FXV" "$SCRIPT" --list-escapes | awk -F'\t' '$1 == "Makefile" { print $3 }' | sort -u)"
+if has_line "$tagged_join" 'literal-join'; then
+  ok "CONTROL: the bare-word read is tagged literal-join"
+else
+  no "CONTROL FAILED: Makefile arrived tagged '$tagged_join', not literal-join"
+fi
+rm -f "$FXV/cloud/priv/static/__preview__/argv-probe.mjs"
+echo
+
 # ── case 5: a neutered scanner reds on the floor, never reports clean ───────
 echo "case 5: the min-escapes floor catches a neutered scanner"
 FX3="$TMPROOT/thin"
@@ -872,7 +952,15 @@ def job_can_exit_2(j):
     bodies = "\n".join(str(s.get("run", "")) for s in j.get("steps", []))
     if re.search(r"(^|\n)\s*exit 2\b", bodies):
         return True
-    refs = re.findall(r"(?:bash|sh)\s+(scripts/[\w./-]+\.sh)", bodies)
+    # ANY scripts/*.sh TOKEN, not only one at a call site. A dispatcher that
+    # pins its path-set script to the merge ref shells `bash "$pin_script"`, so
+    # the literal name lives in the ASSIGNMENT — and matching `bash scripts/…`
+    # alone made this detector go BLIND the day cloud/console/elixir pinned
+    # theirs (task-3a81e68f7027ca98): `changes` dropped out of `exit2_jobs` and
+    # the drop-dispatcher-channel mutant below stopped being named at all. The
+    # broader token can only ADD jobs to the exit-2 set — the direction that
+    # demands a verdict channel rather than excusing one.
+    refs = re.findall(r"scripts/[\w./-]+\.sh", bodies)
     refs += re.findall(r"node\s+([\w./-]+\.mjs)", bodies)
     return any(file_can_exit_2(r) for r in refs)
 
@@ -1383,7 +1471,13 @@ gate_denies() {
 # the first `%0A` belongs to a later clause (the measured-defect list).
 gate_names() {
   local ann named nl='%0A'
-  ann="$(grep '^::error' "$GATE_OUT" | tr '\n' ' ')"
+  # `|| true` IS LOAD-BEARING under `set -euo pipefail`: a green step output has
+  # no `::error` line, grep exits 1, pipefail propagates it and `set -e` kills
+  # the whole harness MID-RUN — no summary line, so the very branch below that
+  # exists to say "the annotation names no job at all" could never be reached.
+  # That branch was dead until the (s2) adjacency cases first drove a mutation
+  # that greened the gate; keep it reachable or the crash replaces the verdict.
+  ann="$( { grep '^::error' "$GATE_OUT" || true; } | tr '\n' ' ')"
   named="${ann#*NOT IN THE ALLOW-SET: }"
   if [ -z "$ann" ] || [ "$named" = "$ann" ]; then
     no "  …but the annotation names no job at all: ${ann:-<no ::error:: line>}"
@@ -1402,25 +1496,25 @@ gate_names() {
 
 # (a) the happy path: a console PR, everything ran and passed
 gate "full run, all green" 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, console jobs legitimately skipped" 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=false
 gate_says "legitimately not dispatched" "…and says so, rather than claiming the harness passed"
 
 # (c) an upstream FAILURE reds it — 720 red harness tests may never merge green
 gate "console-unit failed" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_names "console-unit" "cssom-parity"
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: cssom-parity `skipped` only because
 #     its dependency died, while the dispatcher said it WAS needed.
 gate "cssom-parity skipped behind a live gate (upstream died)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
 # …and the SKIP arm accumulates too, not just the failure arm: this red never
@@ -1430,32 +1524,32 @@ gate_names "cssom-parity" "console-unit"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, output empty" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=
 
 # (f) the unfiltered ratchet may never skip
 gate "path-escape skipped" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=skipped \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=skipped \
   O_CONSOLE=true
 
 # (g) cancelled is not success
 gate "a cancelled upstream" 1 \
-  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
-  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (i) an EMPTY result (a job silently dropped from `needs`) is red
 gate "an empty result string" 1 \
-  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (j) a garbage gate value must not license a skip
 gate "skip against a garbage gate value" 1 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE=maybe
 
 # (k1) THE SILENT OMISSION, MADE LOUD (D209). Adding a job to `needs:` and to
@@ -1465,7 +1559,7 @@ gate "skip against a garbage gate value" 1 \
 #      demands the gate go red AND name it — delete the `decide "overflow-guard"`
 #      line and this test is the thing that notices.
 gate "overflow-guard failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "overflow-guard: failure" "…and names overflow-guard (its decide line is really invoked)"
 #      (The arithmetic half of that invariant — one `decide` per `needs:` entry
@@ -1488,7 +1582,7 @@ gate_says "overflow-guard: failure" "…and names overflow-guard (its decide lin
 
 # (l) A REFUSAL IS NAMED AS A REFUSAL — and names a cause SET, never one cause.
 gate "cssom-parity REFUSED (a verdict is published)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the instrument refused, not that CSS is broken"
 gate_says "ONE code over MANY causes" "…and says exit 2 is one code over many causes"
@@ -1510,7 +1604,7 @@ gate_denies "ENVIRONMENT REFUSAL" "…and no longer labels every refusal an envi
 #     workflow's `env:`, or the 4th argument from its `decide` line, and this
 #     case is what notices.
 gate "console-unit REFUSED (the refusal the gate could not see)" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED
 gate_says "console-unit: failure" "…and names console-unit"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal rather than a bare failure"
@@ -1526,7 +1620,7 @@ gate_says "(exit 2): console-unit" "…and carries it into the refusals tally by
 #      MEASURED an uncovered read. The structural half of this is the
 #      exit2_without_verdict_output fact in case 8; this is the behavioural half.
 gate "path-escape REFUSED (the last unwired refusal)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=failure \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=failure \
   O_CONSOLE=true V_ESCAPE=REFUSED
 gate_says "path-escape ratchet: failure" "…and names the ratchet"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a measured coverage defect"
@@ -1545,7 +1639,7 @@ gate_says "(exit 2): path-escape ratchet" "…and carries it into the refusals t
 #      NOTE THE GATE VALUE: the dispatcher is a NEVER-gated job, so this run also
 #      exercises the refusal arm on a job that can never legitimately skip.
 gate "changes (dispatcher) REFUSED (the exemption this slice deleted)" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_MODAL=skipped R_ADJACENCY=skipped R_ESCAPE=success \
   O_CONSOLE= V_CHANGES=REFUSED
 gate_says "changes (dispatcher): failure" "…and names the dispatcher"
 gate_says "REFUSED TO MEASURE" "…and classifies it as a refusal, not a bare dispatcher death"
@@ -1554,7 +1648,7 @@ gate_names "changes (dispatcher)" "path-escape ratchet"
 
 # (n) …and BOTH refusals in one run are both named, in decide order.
 gate "console-unit and cssom-parity both REFUSED" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_UNIT=REFUSED V_CSSOM=REFUSED
 gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refusals, not one"
 
@@ -1564,7 +1658,7 @@ gate_says "(exit 2): console-unit cssom-parity" "…and the tally names two refu
 #     the un-wrapped steps in console-unit (node --check, the two --test runs,
 #     smoke, the css gate) are precisely that case.
 gate "cssom-parity failed, no verdict published" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "cssom-parity: failure" "…and still names the failing job"
 gate_denies "REFUSED TO MEASURE" "…and does NOT manufacture a refusal out of an absent verdict"
@@ -1573,21 +1667,21 @@ gate_says "not in the allow-set" "…and reaches the plain red conclusion"
 # (p) a MEASURED defect is the opposite claim, and must not borrow the
 #     refusal's words.
 gate "tier-floor-render MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=failure R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_TIER=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured defect a refusal"
 
 # (q) a verdict outside the published vocabulary is "cannot tell", not a pass.
 gate "overflow-guard publishes an unknown verdict" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_OVERFLOW=BANANA
 gate_says "outside the published vocabulary" "…and refuses to interpret it"
 
 # (r) verdict=OK on a FAILED job — the instrument said clean and the job died
 #     anyway. Still red, and still says why it cannot tell.
 gate "cssom-parity publishes OK but the job failed" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=failure R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_CSSOM=OK
 gate_says "the instrument said clean and the job" "…and names the contradiction"
 
@@ -1599,17 +1693,41 @@ gate_says "the instrument said clean and the job" "…and names the contradictio
 #     exit 2 are indistinguishable at the aggregator by design, so each arm is
 #     told apart ONLY by the verdict the job publishes; drive both.
 gate "modal-oracle MEASURED_DEFECT" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=MEASURED_DEFECT
 gate_says "This one IS about the console's own bytes" "…and says the modal defect is real and console-side"
 gate_denies "REFUSED TO MEASURE" "…and does not call a measured modal defect a refusal"
 gate_names "modal-oracle" "cssom-parity"
 
 gate "modal-oracle REFUSED" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=failure R_ADJACENCY=success R_ESCAPE=success \
   O_CONSOLE=true V_MODAL=REFUSED
 gate_says "REFUSED TO MEASURE" "…and says the oracle refused, not that the modal is broken"
 gate_names "modal-oracle" "cssom-parity"
+
+# (s2) THE ADJACENCY GUARD'S TWO ARMS, BOTH DRIVEN, AND THE MUTATION THEY EXIST
+#      FOR. Modelled on (s) above, and added for the same reason one commit
+#      later: `adjacency-guard` was wired into `needs:`, `env:` and the decide
+#      ladder, but until these two cases `R_ADJACENCY` was EQUAL to `R_MODAL`
+#      on every fixture line in this file. Under that equality the decide line
+#      could read "${R_MODAL}" by mistype and EVERY case here would still pass
+#      — the Console gate would then green over a failed adjacency-guard, which
+#      is the whole failure this job was added to prevent. These two are the
+#      only lines where the two variables DISAGREE, so they are what turns that
+#      mistype red. Same verdict-channel discipline as (s): exit 1 and exit 2
+#      are indistinguishable at the aggregator, so drive both arms by verdict.
+gate "adjacency-guard MEASURED_DEFECT" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=MEASURED_DEFECT
+gate_says "This one IS about the console's own bytes" "…and says the adjacency defect is real and console-side"
+gate_denies "REFUSED TO MEASURE" "…and does not call a measured adjacency defect a refusal"
+gate_names "adjacency-guard" "cssom-parity"
+
+gate "adjacency-guard REFUSED" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_MODAL=success R_ADJACENCY=failure R_ESCAPE=success \
+  O_CONSOLE=true V_ADJACENCY=REFUSED
+gate_says "REFUSED TO MEASURE" "…and says the guard refused, not that the adjacency is broken"
+gate_names "adjacency-guard" "cssom-parity"
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
@@ -1626,15 +1744,42 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point CONSOLE_DISPATCH_WF at another copy
+# of this workflow — `git show origin/main:.github/workflows/<f>.yml > /tmp/f` —
+# and the SAME fixtures below are driven through THAT file's dispatcher. It is
+# how the version-skew arm is quoted red on the pre-fix shape rather than
+# asserted about.
+DISP_WF="${CONSOLE_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim, bash
+# dies on it with `bad substitution`, and the reader sees every arm below fail
+# with no clue that the EXTRACTION is what went stale.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/cloud/priv/static" "$DR/docs" "$DR/.github/workflows" "$DR/scripts"
@@ -1650,12 +1795,24 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — not the fallback. An arm that
+# wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
 # dispatch <label> <expected-rc> <expected-console> <event> <base>
 dispatch() {
   local label="$1" want="$2" wc="$3" ev="$4" bs="$5"
   local rc gotc
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -1732,6 +1889,90 @@ git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md cloud/priv/static/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: CONSOLE_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+# The console set is `dir/**` trees and exact literals only, so NO in-set path
+# can be skipped by a split (the false skip is reachable in elixir's two-ended
+# families, not here). What a split CAN do here is misclassify the other way:
+#   (4b) cloud/priv/static/li<LF>b/x.js — in the set, console=true on both
+#        producers; the TRUE this row asks for.
+#   (4c) cloud/priv/static<LF>foo/x.js is NOT under cloud/priv/static/ (that
+#        directory is `static<LF>foo`), so the true answer is console=false.
+#        The tr producer answered true off its `cloud/priv/static` fragment —
+#        RED on the pre-fix workflow.
+#   (4d) THE --null SKEW: a pinned copy without MATCH-INPUT-NUL would IGNORE
+#        `--null` and read the NUL stream as ONE line (a silent false). This
+#        dispatcher's polarity is to REFUSE out loud.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static/li"$'\n'"b"
+printf 'x\n' >"$DR/cloud/priv/static/li"$'\n'"b/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (cloud/priv/static/li<LF>b/x.js)' 0 true pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/cloud/priv/static"$'\n'"foo"
+printf 'x\n' >"$DR/cloud/priv/static"$'\n'"foo/x.js"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) cloud/priv/static<LF>foo/x.js is NOT under the static tree — one record, not two' 0 false pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b prenul "$BASE_SHA"
+grep -v MATCH-INPUT-NUL "$HERE/console-path-escape-check.sh" >"$DR/scripts/console-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm prenul >/dev/null 2>&1
+if grep -q MATCH-INPUT-NUL "$DR/scripts/console-path-escape-check.sh"; then
+  no "(4d) the fixture head still carries MATCH-INPUT-NUL — the skew arm measures nothing"
+else
+  ok "(4d) the fixture head's copy carries no MATCH-INPUT-NUL token"
+fi
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch '(4d) a copy that predates --null: refuses out loud, never a silent false' 1 - pull_request "$BASE_SHA"
+gate_says "predates '--match … --null'" "  …and names the --null skew"
+gate_says "dispatcher REFUSED" "  …as a classified REFUSAL"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (D34), so main's invocation used to run against
+# the BRANCH's older script. Measured in cloud.yml's twin on PR #17575
+# (2026-09-11, job 103113143741): exit 2, `unknown path set`, a RED required gate
+# with no defect in the PR. The fixture head below carries a script that does NOT
+# know the `console` set; the pin points at a ref that does.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    console) ;;$/    xconsole) ;;/' \
+  "$HERE/console-path-escape-check.sh" >"$DR/scripts/console-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from it. A sed
+# that matched nothing leaves the CURRENT script on the head and the arm below
+# passes having measured no skew at all.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/console-path-escape-check.sh --match console <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'console'"; then
+  ok "the fixture head's script REFUSES --match console (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match console (rc=$skew_rc, '$skew_out') — the arm below cannot fail for the right reason"
+fi
+
+# The changed file is scripts/console-path-escape-check.sh, which IS in the
+# console set, so the pinned answer is console=true. The load-bearing half is
+# the EXIT CODE: without the pin this dispatcher exits 1 on the refusal and
+# emits no verdict at all.
+dispatch "version skew: the head's script predates the console set name" 0 true pull_request "$BASE_SHA"
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+
+# THE NEGATIVE CONTROL for the pin: an unreadable pin ref (a conflicted PR has no
+# merge ref) must NOT be silent. It warns by name and falls back to the head's own
+# copy — which here is the skewed one — so this dispatcher still REFUSES out loud
+# (exit 1, the console polarity) instead of emitting a verdict nothing measured.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns, falls back, refuses out loud" 1 - pull_request "$BASE_SHA"
+gate_says "could NOT read scripts/console-path-escape-check.sh out of" "  …names the pin read that failed"
+gate_says "dispatcher REFUSED" "  …and still classifies the refusal rather than dying bare"
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
@@ -1904,6 +2145,49 @@ if has "$out" "stub cssom-parity.mjs, exiting 0"; then
   ok "the injected exit code really came from the stub"
 else
   no "the stub never ran — cases (b) measured something else entirely"
+fi
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match console --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: cloud/priv/static/li<LF>b/x.js is IN the set -> true"
+else
+  no "--null: cloud/priv/static/li<LF>b/x.js answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "cloud/priv/static"$'\n'"foo/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: cloud/priv/static<LF>foo/x.js is ONE record, not in the set -> false"
+else
+  no "--null: cloud/priv/static<LF>foo/x.js answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match console --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "cloud/priv/static/li"$'\n'"b/x.js" | bash "$SCRIPT" --match console 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "control: the same bytes read as LINES answer true — newline mode is unchanged"
+else
+  no "control: newline mode answered '$nul_out', wanted true"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match console --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
 fi
 echo
 

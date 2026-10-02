@@ -2,19 +2,20 @@ import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { barkparkMetadata } from '@barkpark/nextjs'
-import { getDocBySlug, getDocs } from '../../../lib/barkpark'
+import { POST_ORDER, getAllDocs, getDocBySlug } from '../../../lib/barkpark'
+import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Tag {
   _id: string
   title: string
   description?: string
-  slug?: { current: string }
+  slug?: SlugValue
 }
 
 interface Post {
   _id: string
   title: string
-  slug?: { current: string }
+  slug?: SlugValue
   excerpt?: string
   publishedAt?: string
   tags?: Array<{ _ref: string }>
@@ -43,7 +44,9 @@ export default async function TagPage({
   const tag = await getDocBySlug<Tag>('tag', slug)
   if (!tag) notFound()
 
-  const allPosts = await getDocs<Post>('post')
+  // Every post, not one page: getDocs reads the query route's default page
+  // (100 rows), so filtering it here dropped every match past the first 100.
+  const allPosts = await getAllDocs<Post>('post', POST_ORDER)
   const posts = allPosts.filter((p) => p.tags?.some((t) => t._ref === tag._id))
 
   return (
@@ -62,7 +65,7 @@ export default async function TagPage({
         ) : (
           <ul className="space-y-3">
             {posts.map((post) => {
-              const postSlug = post.slug?.current ?? post._id
+              const postSlug = slugOf(post.slug) ?? post._id
               return (
                 <li key={post._id}>
                   <Link href={`/posts/${postSlug}`} className="underline">

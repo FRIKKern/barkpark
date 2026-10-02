@@ -51,6 +51,8 @@ defmodule Barkpark.SeedsCleanTest do
     |> Enum.filter(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "seeds ONLY plugin schemas + welcome paper — no demo rows, no dev token" do
     output = run_clean()
 
@@ -74,6 +76,18 @@ defmodule Barkpark.SeedsCleanTest do
     docs = Repo.all(Document)
     assert [%Document{doc_id: "welcome", type: "paper"} = paper] = docs
     assert is_list(get_in(paper.content, ["blocks"]))
+
+    # The welcome code block is the first set of commands a new install shows.
+    # A bare `bp doc ls` (no <type>) exits 2 — the stranger walk of 2026-09-30
+    # (task-5ab7c2de5dcd0b27) hit it as the very first command typed.
+    [code] = Enum.filter(paper.content["blocks"], &(&1["type"] == "code"))
+
+    for line <- String.split(code["value"], "\n"),
+        [cmd | _] = String.split(line, "#"),
+        String.trim(cmd) in ["bp doc ls", "bp paper", "bp media"] do
+      flunk("the welcome paper suggests `#{String.trim(cmd)}`, a usage error (exit 2)")
+    end
+
     assert paper.title == "Welcome to Barkpark"
     # Article typography, so /papers/welcome shows off the article palette.
     assert get_in(paper.content, ["style"]) == "article"
@@ -122,6 +136,30 @@ defmodule Barkpark.SeedsCleanTest do
     assert Auth.has_permission?(token, "admin")
   end
 
+  # pds-bl-owner-walk-reaches-the-mint AC#3. The banner is a COPY-PASTEABLE
+  # instruction; a hardcoded http://localhost:4000 cannot work on any box not on
+  # the default port (observed against a :47016 personal box) — the same defect
+  # class as a vacuous green.
+  #
+  # WHAT THIS TEST CANNOT DO, stated so nobody reads more into it. The suite's
+  # own endpoint IS on 4000: config/runtime.exs runs in EVERY env and sets
+  # `http: [port: PORT || 4000]`, overriding test.exs's 4002. So in-process the
+  # old literal and the derived value are the same string, and no assertion here
+  # can tell them apart. The differential is run OUT of process, where PORT can
+  # differ, and is recorded on the task row:
+  #
+  #     PORT=47016 MIX_ENV=test mix run -e \
+  #       'IO.puts(Barkpark.Seeds.Clean.connect_url())'   # => http://localhost:47016
+  #
+  # What this DOES pin is that the banner never re-acquires a literal of its
+  # own: it must print exactly what connect_url/0 returns, whatever that is.
+  test "the connect line prints connect_url/0 — never a literal of its own" do
+    output = run_clean()
+
+    assert output =~ "--server #{Barkpark.Seeds.Clean.connect_url()} --token <token>"
+    assert Barkpark.Seeds.Clean.connect_url() =~ ~r{\Ahttps?://[^:/]+:\d+\z}
+  end
+
   test "second run is a no-op: mints no second token, never clobbers the paper" do
     run_clean()
 
@@ -140,5 +178,39 @@ defmodule Barkpark.SeedsCleanTest do
     paper_after = Content.get_paper("welcome", @dataset)
     assert get_in(paper_after.content, ["rev"]) == rev_before
     assert paper_after.rev == paper_before.rev
+  end
+
+  # task-aa0e0b0a993b6435 — a DEV instance (config :dev_browser_token set, as
+  # config/dev.exs does) gets that token installed by the clean profile too,
+  # with the demo profile's exact grant; without the config (release, deploy
+  # box, test env) nothing is minted — the test above pins that half.
+  describe "the dev Studio browser token" do
+    setup do
+      prev = Application.get_env(:barkpark, :dev_browser_token)
+      Application.put_env(:barkpark, :dev_browser_token, "r2d-dev-browser-token")
+
+      on_exit(fn ->
+        if prev,
+          do: Application.put_env(:barkpark, :dev_browser_token, prev),
+          else: Application.delete_env(:barkpark, :dev_browser_token)
+      end)
+
+      :ok
+    end
+
+    test "is installed with read/write/admin and a workspace membership, idempotently" do
+      run_clean()
+
+      assert {:ok, token} = Auth.verify_token("r2d-dev-browser-token")
+      assert Enum.sort(token.permissions) == ["admin", "read", "write"]
+      ws_id = Barkpark.Tenancy.get_default_workspace().id
+      assert token.workspace_id == ws_id
+      assert TenancyAuth.member?(token, ws_id)
+
+      # A re-seed mints nothing new (the token row is found, not duplicated).
+      count = Repo.aggregate(Barkpark.Auth.ApiToken, :count)
+      run_clean()
+      assert Repo.aggregate(Barkpark.Auth.ApiToken, :count) == count
+    end
   end
 end

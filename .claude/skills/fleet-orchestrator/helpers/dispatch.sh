@@ -2,11 +2,14 @@
 # dispatch.sh <orders.json> — the LIVE dispatch glue: cap gate → roster → transform → route → file.
 #
 # One batch, every decision printed with its reason:
-#   1. CAP GATE first, before anything else: re-read the orchestrator spend ledger
-#      (${FLEET_HOME:-$HOME/.barkpark-fleet}/orchestrator/spend.jsonl) ON EVERY INVOCATION —
-#      never cached (the cap proof's R6 control zeroes the file mid-run and expects the freeze
-#      to lift on the next batch). A malformed ledger row is a NAMED ABORT, never coerced
-#      (PDF-D37): a ledger you cannot read is a brake you cannot trust.
+#   1. CAP GATE first, before anything else: re-read the spend ledger SET ON EVERY
+#      INVOCATION through tooling/fleet/spend-aggregate.py — every
+#      ${FLEET_HOME:-$HOME/.barkpark-fleet}/<worker>/spend.jsonl that record_spend actually
+#      writes, plus the orchestrator's own orchestrator/spend.jsonl when it exists. Never
+#      cached (the cap proof's R6 control zeroes a ledger mid-run and expects the freeze to
+#      lift on the next batch). A malformed row is a NAMED ABORT, never coerced (PDF-D37),
+#      and NO readable ledger is CANNOT READ (exit 13) — never a compliant $0.00, because a
+#      ledger you cannot read is a brake you cannot trust (PDF-D105).
 #   2. Fetch the live roster (`bp fleet roster -o json`) and print every excluded-offline row
 #      BY NAME before routing — route.py cannot distinguish no-such-box from
 #      sole-box-offline (PDF-D38), so the exclusions must be visible at the edge.
@@ -23,51 +26,76 @@
 #      FLEET_ROSTER_JSON      read the roster from this file instead of `bp fleet roster`
 #                             (stub rosters for proofs/tests — no live server needed)
 #      FLEET_FILE_ORDER_BIN   override the filing helper (stubbed in proofs)
+#      FLEET_SPEND_AGGREGATE_BIN  path to tooling/fleet/spend-aggregate.py (default: resolved
+#                             relative to this skill's checkout / the enclosing git toplevel)
+# Exits: 10 no orders file · 12 malformed ledger row · 13 no readable ledger (CANNOT READ,
+#        with a cap set) · 14 the aggregator failed for another reason.
 set -euo pipefail
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ORDERS_FILE="${1:?usage: dispatch.sh <orders.json>}"
 FLEET_HOME="${FLEET_HOME:-$HOME/.barkpark-fleet}"
-LEDGER="$FLEET_HOME/orchestrator/spend.jsonl"
 FILE_ORDER="${FLEET_FILE_ORDER_BIN:-$SCRIPT_DIR/file-order.sh}"
 
 [ -f "$ORDERS_FILE" ] || { echo "ABORT: orders file not found: $ORDERS_FILE"; exit 10; }
 
-# ---- 1. cap gate — RE-READ the ledger every invocation, malformed row = named abort ----
-SPENT="0"
-if [ -f "$LEDGER" ]; then
-  SPENT=$(python3 - "$LEDGER" <<'PY'
-import json, sys
-total = 0.0
-for n, line in enumerate(open(sys.argv[1]), 1):
-    line = line.strip()
-    if not line:
-        continue
-    try:
-        row = json.loads(line)
-    except ValueError:
-        sys.stderr.write(f"ABORT: MALFORMED_SPEND_LEDGER_ROW line {n}: not JSON: {line[:100]}\n")
-        sys.exit(12)
-    # PDF-D37 ONE row format: {ts, order_id, agent, cost_usd|null, ...} — the SAME
-    # key record_spend writes. cost_usd:null is a CANONICAL row (an honest
-    # "couldn't price it"): skipped, matching the runner's measure_budget (fails
-    # slightly open, documented). A MISSING key or non-numeric value is malformed.
-    usd = row.get("cost_usd", "MISSING") if isinstance(row, dict) else "MISSING"
-    if usd is None:
-        continue
-    if isinstance(usd, bool) or not isinstance(usd, (int, float)):
-        sys.stderr.write(f"ABORT: MALFORMED_SPEND_LEDGER_ROW line {n}: missing/non-numeric 'cost_usd': {line[:100]}\n")
-        sys.exit(12)
-    total += usd
-print(f"{total:.4f}")
-PY
-  ) || { echo "ABORT: MALFORMED_SPEND_LEDGER at $LEDGER — refusing to coerce a brake input (PDF-D37)"; exit 12; }
+# ---- 1. cap gate — RE-READ the ledger set every invocation via the AGGREGATING READER ----
+# SPENT comes from tooling/fleet/spend-aggregate.py, which sums every ledger that
+# actually HAS a producer ($FLEET_HOME/<worker>/spend.jsonl, written by record_spend
+# in tooling/fleet/fleet-run.sh) plus the orchestrator's own
+# $FLEET_HOME/orchestrator/spend.jsonl when it exists. The old inline reader here read
+# ONLY the orchestrator path, which nothing ever writes — so it summed a missing file
+# to $0.00 and printed "dispatch allowed" forever: a brake with no input (PDF-D105).
+# THREE exit codes, three DISTINCT verdicts — never collapsed:
+#   0  a real total (a present-but-empty ledger is a real, readable 0.0000)
+#  12  MALFORMED row — the named abort, never coerced to 0 (brake off) or inf (brake stuck)
+#  13  NO readable ledger — CANNOT READ. With a cap set this REFUSES the batch; it must
+#      never fall through to "dispatch allowed", because an unreadable brake input is not
+#      evidence of $0.00 spent (same shape as the unreadable-hold-label defect, PR #18893).
+SPEND_AGGREGATE="${FLEET_SPEND_AGGREGATE_BIN:-}"
+if [ -z "$SPEND_AGGREGATE" ]; then
+  REPO_ROOT_GUESS="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || true)"
+  for cand in "$SCRIPT_DIR/../../../../tooling/fleet/spend-aggregate.py" \
+              ${REPO_ROOT_GUESS:+"$REPO_ROOT_GUESS/tooling/fleet/spend-aggregate.py"}; do
+    if [ -f "$cand" ]; then SPEND_AGGREGATE="$cand"; break; fi
+  done
+fi
+
+SPENT=""
+SPEND_STATE="ok"
+SPEND_ERR="$(mktemp "${TMPDIR:-/tmp}/fleet-spend-err.XXXXXX")"
+trap 'rm -f "$SPEND_ERR"' EXIT
+
+if [ -z "$SPEND_AGGREGATE" ] || [ ! -f "$SPEND_AGGREGATE" ]; then
+  # The reader itself is missing: that is CANNOT READ too, not a zero.
+  echo "ABORT: CANNOT_READ_SPEND — tooling/fleet/spend-aggregate.py not found (set FLEET_SPEND_AGGREGATE_BIN); a spend total that cannot be computed is NOT \$0.00 spent" >&2
+  SPEND_STATE="cannot_read"
+else
+  set +e
+  SPENT="$(python3 "$SPEND_AGGREGATE" --fleet-home "$FLEET_HOME" --total 2>"$SPEND_ERR")"
+  AGG_RC=$?
+  set -e
+  case "$AGG_RC" in
+    0)  : ;;
+    12) cat "$SPEND_ERR" >&2
+        echo "ABORT: MALFORMED_SPEND_LEDGER under $FLEET_HOME (orchestrator/spend.jsonl and/or a per-worker spend.jsonl, cost_usd dialect) — refusing to coerce a brake input (PDF-D37)"
+        exit 12 ;;
+    13) cat "$SPEND_ERR" >&2
+        SPEND_STATE="cannot_read" ;;
+    *)  cat "$SPEND_ERR" >&2
+        echo "ABORT: SPEND_AGGREGATE_FAILED rc=$AGG_RC — the cap gate has no trustworthy total; refusing"
+        exit 14 ;;
+  esac
 fi
 
 CAP_REACHED=0
 CAP_FLAG=()
 if [ -n "${FLEET_SPEND_CAP:-}" ]; then
+  if [ "$SPEND_STATE" = "cannot_read" ]; then
+    echo "cap gate: CANNOT READ the spend ledger set under $FLEET_HOME — dispatch REFUSED, 0 orders placed (an unreadable ledger is NOT \$0.00 spent; PDF-D37/D105)"
+    exit 13
+  fi
   CAP_REACHED=$(python3 -c "import sys; print(1 if float(sys.argv[1]) >= float(sys.argv[2]) else 0)" "$SPENT" "$FLEET_SPEND_CAP")
   if [ "$CAP_REACHED" = "1" ]; then
     CAP_FLAG=(--cap-reached)
@@ -76,11 +104,14 @@ if [ -n "${FLEET_SPEND_CAP:-}" ]; then
   fi
 else
   echo "cap gate: no FLEET_SPEND_CAP set — batch cap gate off (route.py per-listener budgets still apply)"
+  if [ "$SPEND_STATE" = "cannot_read" ]; then
+    echo "cap gate: note — NO readable spend ledger under $FLEET_HOME, so NO total was computed (CANNOT READ, not \$0.00)"
+  fi
 fi
 
 # ---- 2. the live roster; excluded-offline rows printed BY NAME before routing ----
 WORKDIR=$(mktemp -d "${TMPDIR:-/tmp}/fleet-dispatch.XXXXXX")
-trap 'rm -rf "$WORKDIR"' EXIT
+trap 'rm -rf "$WORKDIR"; rm -f "$SPEND_ERR"' EXIT
 ROSTER_FILE="$WORKDIR/roster.json"
 if [ -n "${FLEET_ROSTER_JSON:-}" ]; then
   cat "$FLEET_ROSTER_JSON" > "$ROSTER_FILE"

@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Airdrop,
     Bulk,
     Delete,
+    DeskSearch,
     Discard,
     Doc,
     FieldBlocks,
@@ -51,7 +52,8 @@ defmodule BarkparkWeb.Studio.StudioLive do
     Schema,
     Scope,
     Secondary,
-    Shares
+    Shares,
+    Views
   }
 
   # The in-Studio paper view + Studio shell function components live in
@@ -77,14 +79,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ ->
           :ok
       end
+
+      # PERF ONLY (task-c8a87043cb286a2f): this socket's renders resolve plugin
+      # enablement several times each, and presence re-renders every open
+      # socket. Read the workspace's overrides once, keep them until a workspace
+      # write announces a change (handle_info below). Same answer, fewer reads.
+      case socket.assigns[:current_workspace] do
+        %{id: ws_id} when is_binary(ws_id) -> Barkpark.Plugins.Enablement.memoize!(ws_id)
+        _ -> :ok
+      end
     end
 
     # ag-studio-capability-hide: the LOAD-BEARING server-side deny-gate. Attach
     # on EVERY Studio socket (member/anonymous/share/grant) so a forged event
     # for a hidden affordance is server-DENIED (hidden ≠ denied). The gate
     # re-derives caps per event → mid-session grant expiry denies at once.
+    # PERF ONLY (task-dbfa7f69abb3b2ed): one mount resolved the same dataset,
+    # project and schema rows ~7x each. The CONNECTED socket memoizes those
+    # reads; its memo is reset before every handle_params / handle_event /
+    # handle_info, so it never outlives one callback and its render — the
+    # barkpark-sknf guarantee that a long-lived socket never pins a changed row.
+    # Writes in this process reset it too. The dead render does NOT opt in: it
+    # runs in the request process, which goes on to other work after this
+    # mount (the next keep-alive request; in tests, the test itself), and a
+    # mount that redirects never reaches a hook that could switch it off.
+    if connected?(socket), do: Barkpark.Content.WriteScope.enable_process_memo()
+
     socket =
       socket
+      |> reset_read_memo_per_callback()
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
@@ -92,6 +115,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> schedule_access_expiry()
 
     {:ok, socket}
+  end
+
+  # The read memo's lifetime is ONE callback (task-dbfa7f69abb3b2ed): each hook
+  # empties it before its callback runs. Only connected sockets memoize at all
+  # (see mount); on the dead render this is a cheap no-op.
+  defp reset_read_memo_per_callback(socket) do
+    if connected?(socket) do
+      socket
+      |> attach_hook(:read_memo_reset_params, :handle_params, fn _params, _uri, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+      |> attach_hook(:read_memo_reset_event, :handle_event, fn _event, _params, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+      |> attach_hook(:read_memo_reset_info, :handle_info, fn _msg, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+    else
+      socket
+    end
   end
 
   # ── Access grants + live expiry (airdrop-grants slice 3) ────────────────────
@@ -226,6 +272,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     socket = Shared.ensure_tenancy_scope(socket)
 
+    # Studio chrome locale (Gyldendal parity E7): process-local, so it rides
+    # every handle_params — the workspace is resolved just above, and a
+    # mid-session scope switch re-stamps it exactly like the log metadata.
+    BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
+
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this
     # long-lived LiveView process, and handle_params re-runs on every navigation /
@@ -238,6 +289,20 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
     case Shared.redirect_dataset_leaf(socket, dataset) do
       {:redirect, slug} ->
+        # SAY SO (stranger walk, 2026-09-30): the redirect used to be silent, so a
+        # typo'd or foreign dataset in the URL landed the human in `slug` —
+        # usually production — with nothing but a badge to tell them they are
+        # not editing the dataset they asked for.
+        socket =
+          put_flash(
+            socket,
+            :info,
+            gettext("This project has no dataset named “%{asked}”, so Studio opened “%{opened}”.",
+              asked: dataset,
+              opened: slug
+            )
+          )
+
         {:noreply, push_patch(socket, to: Shared.studio_path(socket, path, slug, desk: desk))}
 
       :ok ->
@@ -339,6 +404,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Fall-through: a stray PubSub message must not FunctionClauseError-crash the
   # session (mirrors bulldocs_live.ex). Keep LAST among handle_info/2 clauses.
+  # A workspace write (plugin toggle, rename, archive, delete): forget the
+  # memoized enablement so the next render reads the row, exactly as an
+  # unmemoized socket would. Nothing is re-rendered here — the same as before
+  # the memo, when a settings change surfaced on the socket's next render.
+  def handle_info({:plugin_enablement_changed, ws_id}, socket) do
+    Barkpark.Plugins.Enablement.forget(ws_id)
+    {:noreply, socket}
+  end
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # ── handle_event/3 routing heads ────────────────────────────────────────────
@@ -346,6 +420,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   @impl true
   def handle_event("select", params, socket), do: Scope.select(params, socket)
   def handle_event("select-group", params, socket), do: Scope.select_group(params, socket)
+  def handle_event("select-view", params, socket), do: Views.select(params, socket)
   def handle_event("select-desk", params, socket), do: Scope.select_desk(params, socket)
   def handle_event("switch-workspace", params, socket), do: Scope.switch_workspace(params, socket)
   def handle_event("switch-project", params, socket), do: Scope.switch_project(params, socket)
@@ -354,6 +429,22 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("create-workspace", params, socket), do: Scope.create_workspace(params, socket)
   def handle_event("create-project", params, socket), do: Scope.create_project(params, socket)
   def handle_event("expand-pane", params, socket), do: Scope.expand_pane(params, socket)
+
+  def handle_event("desk-search", params, socket), do: DeskSearch.search(params, socket)
+  def handle_event("desk-search-clear", _params, socket), do: DeskSearch.clear(socket)
+
+  # "Show more" on a truncated desk list: grow THAT type's page by one desk
+  # page, up to the query layer's 1000-row cap, and rebuild the panes.
+  def handle_event("desk-list-more", %{"type" => type}, socket) when is_binary(type) do
+    page = BarkparkWeb.Studio.PaneBuilder.desk_page()
+    limits = socket.assigns[:desk_list_limits] || %{}
+    next = min(Map.get(limits, type, page) + page, 1000)
+
+    {:noreply,
+     socket
+     |> assign(:desk_list_limits, Map.put(limits, type, next))
+     |> Shared.rebuild_panes()}
+  end
 
   def handle_event("new-document", params, socket), do: Fields.new_document(params, socket)
   def handle_event("save", params, socket), do: Fields.save(params, socket)
@@ -532,6 +623,21 @@ defmodule BarkparkWeb.Studio.StudioLive do
   def handle_event("paper-op", %{"op" => _} = op, socket), do: Paper.paper_op(op, socket)
   def handle_event("paper-op", params, socket), do: Paper.paper_op(params, socket)
   def handle_event("paper-ops", params, socket), do: Paper.paper_ops(params, socket)
+
+  # Paper masters (task-3b6e562e916c8ce4): save a block as a master, insert a
+  # detached copy from the slash picker. Both ride this socket (no HTTP route).
+  def handle_event("paper-save-master", params, socket),
+    do: Paper.paper_save_master(params, socket)
+
+  def handle_event("paper-insert-master", params, socket),
+    do: Paper.paper_insert_master(params, socket)
+
+  # Linked master instances (task-59f078a2fd248698): Detach and Pin.
+  def handle_event("paper-detach-master", params, socket),
+    do: Paper.paper_detach_master(params, socket)
+
+  def handle_event("paper-pin-master", params, socket),
+    do: Paper.paper_pin_master(params, socket)
 
   def handle_event("paper-history-step", params, socket),
     do: Paper.paper_history_step(params, socket)

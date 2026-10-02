@@ -92,10 +92,12 @@ func TestWriteReceiptsCarryTheirOutcome(t *testing.T) {
 		{
 			// HTTP 200 by design — the controller returns the delivery VERDICT in
 			// the body. The command exists to tell you whether an endpoint works.
+			// The server's REAL body for a refused endpoint: its status set is
+			// pending | ok | failed_giveup, so "failed" never reaches the wire.
 			verb:    "webhook test-send (delivery failed)",
-			payload: `{"delivery":{"id":"d1","status":"failed","attempts":1,"last_error_text":"connection refused"}}`,
+			payload: `{"delivery":{"attempts":1,"created_at":"2026-09-30T19:07:04.232726Z","endpoint_id":null,"event_id":null,"id":277,"last_error_text":"%Req.TransportError{reason: :econnrefused}","last_latency_ms":0,"last_status_code":null,"status":"failed_giveup","updated_at":"2026-09-30T19:07:04.235703Z"}}`,
 			before:  "ok",
-			want:    []string{"failed", "connection refused"},
+			want:    []string{"delivery: failed_giveup", "econnrefused"},
 		},
 	}
 
@@ -185,5 +187,24 @@ func TestReceiptsWithoutAnOutcomeAreUnchanged(t *testing.T) {
 	}
 	if got := minimalOf(t, `{"status":"queued"}`); got != "ok" {
 		t.Errorf("a payload with no id, rev or outcome should still be %q, got %q", "ok", got)
+	}
+}
+
+// `bp webhook rotate` answers {"secret": …, "webhook": {…}} and the server
+// never shows that secret again. The receipt used to be a bare "ok": the
+// rotation happened, the new secret was lost (stranger walk, 2026-09-30).
+func TestWebhookRotateReceiptKeepsTheOneTimeSecret(t *testing.T) {
+	got := minimalOf(t, `{"secret":"whsec_ERgddAW7NLUqOxq0yQoKwKHzjwl-yieI","webhook":{"active":true,"id":"9aca8f5d-9da5-4f38-a233-168fe461b335","name":"r2d-rot","events":[],"url":"http://127.0.0.1:4699/hook"}}`)
+	want := "id: 9aca8f5d-9da5-4f38-a233-168fe461b335\nsecret: whsec_ERgddAW7NLUqOxq0yQoKwKHzjwl-yieI"
+	if got != want {
+		t.Errorf("webhook rotate receipt = %q, want %q", got, want)
+	}
+	// A body that is not a wrapped row never has a `secret` field printed —
+	// a document's own field of that name is content, not a credential.
+	if got := minimalOf(t, `{"_id":"post-1","_type":"post","secret":"plot twist"}`); strings.Contains(got, "plot twist") {
+		t.Errorf("a document's own secret field was printed as a one-time secret: %q", got)
+	}
+	if got := minimalOf(t, `{"secret":"s","webhook":{"id":"w1"},"extra":1}`); strings.Contains(got, "secret:") {
+		t.Errorf("a secret beside more than one top-level key was printed: %q", got)
 	}
 }

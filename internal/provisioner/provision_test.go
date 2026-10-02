@@ -31,6 +31,13 @@ func greenGate(_ context.Context, base, _ string) (setup.HealthReport, error) {
 type recordingRunner struct {
 	cmds   []string
 	failOn string
+	// failOut, when set, is the captured output a failOn step reports instead of
+	// the generic line — e.g. an installer's apt/nixpacks error lines.
+	failOut string
+	// sitePlaneOut is what the post-failure site-plane component probe
+	// (SITEPLANE_PROBE) prints; sitePlaneErr makes that probe fail outright.
+	sitePlaneOut string
+	sitePlaneErr error
 
 	// freshen (dwb-17) capture controls, mirroring the cloud-package recordingRunner.
 	// Default (zero value) → the box is CURRENT, so freshen is a no-op. Set `behind`
@@ -52,6 +59,9 @@ func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
 		// is scrubbed before the error is wrapped. The runner mirrors the real
 		// SSHStepRunner: it scrubs s.Redact from captured output BEFORE fmt.Errorf.
 		out := "remote failed; captured output for step " + s.Title
+		if r.failOut != "" {
+			out = r.failOut
+		}
 		for _, secret := range s.Redact {
 			out += " token=" + secret
 		}
@@ -64,6 +74,9 @@ func (r *recordingRunner) Run(_ context.Context, s cloud.CaddyStep) error {
 // step type-asserts. It scripts the cheap-check output (current by default, behind
 // when r.behind) and the rebuild.
 func (r *recordingRunner) RunOutput(_ context.Context, script string) (string, error) {
+	if strings.Contains(script, "SITEPLANE_PROBE") {
+		return r.sitePlaneOut, r.sitePlaneErr
+	}
 	if strings.Contains(script, "apply-update.sh") {
 		r.rebuildRan = true
 		if r.rebuildErr != nil {
@@ -161,7 +174,7 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 	}
 
 	// ── the Caddy steps ran with PHX_HOST set + migrate ran ──
-	var sawPHX, sawSelfUpdate, sawMigrate bool
+	var sawPHX, sawSelfUpdate, sawShape, sawMigrate bool
 	for _, c := range runner.cmds {
 		if contains(c, "PHX_HOST=acme.barkpark.cloud") {
 			sawPHX = true
@@ -169,9 +182,16 @@ func TestProvisionWithRunsTheChainAgainstFakes(t *testing.T) {
 		if contains(c, "BARKPARK_SELF_UPDATE_APPLY=1") {
 			sawSelfUpdate = true
 		}
+		if contains(c, "BARKPARK_SHAPE=cloud") {
+			sawShape = true
+		}
 		if contains(c, "ecto.migrate") {
 			sawMigrate = true
 		}
+	}
+	// A managed box declares its shape, reported in /status.json.
+	if !sawShape {
+		t.Errorf("provision steps did not declare BARKPARK_SHAPE=cloud; ran: %v", runner.cmds)
 	}
 	if !sawPHX {
 		t.Errorf("Caddy steps did not set PHX_HOST=acme.barkpark.cloud; ran: %v", runner.cmds)

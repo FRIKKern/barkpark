@@ -6,9 +6,13 @@
         "cards": [
           {
             "title": "Backlog groom"
+          },
+          {
+            "draft": true,
+            "title": "Unpublished draft row"
           }
         ],
-        "count": 1,
+        "count": 2,
         "glyph_role": "open",
         "label": "Open",
         "role": "open"
@@ -59,6 +63,17 @@
         "glyph_role": "done",
         "label": "Done",
         "role": "done"
+      },
+      {
+        "cards": [
+          {
+            "title": "Abandoned spike"
+          }
+        ],
+        "count": 1,
+        "glyph_role": "cancel",
+        "label": "Cancelled",
+        "role": "cancel"
       }
     ],
     "container_role": "board"
@@ -94,6 +109,15 @@
       {
         "status": "ready",
         "title": "Second ready row"
+      },
+      {
+        "status": "cancelled",
+        "title": "Abandoned spike"
+      },
+      {
+        "draft": true,
+        "status": "open",
+        "title": "Unpublished draft row"
       }
     ],
     "type": "task-board"

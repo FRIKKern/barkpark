@@ -124,6 +124,7 @@ const cellOrder = (v) => strictInt(v);
 export const BP_SECTION_CONTENT =
   "(paragraph | heading | bulletList | orderedList | divider | callout | bpCard | bpStage | " +
   "bpCode | bpDiagram | bpField | bpSheet | bpEmbed | bpFleet | " +
+  "bpImage | bpEquation | bpFootnote | bpToc | bpVideo | " +
   "eyebrow | byline | ingress | pullquote | bpOpaque)+";
 
 export const Section = Node.create({
@@ -383,6 +384,10 @@ export const Section = Node.create({
         dom.classList.toggle(
           "bp-section--wide",
           (n.attrs && n.attrs.variant) === "wide",
+        );
+        dom.classList.toggle(
+          "bp-section--declaration",
+          (n.attrs && n.attrs.variant) === "declaration",
         );
         // ── STEP-2: paint the body layout. Grid mode swaps the body to the SHARED
         // `bp-section__grid` class + sets --bp-tracks/--bp-grid-gap; stack mode keeps

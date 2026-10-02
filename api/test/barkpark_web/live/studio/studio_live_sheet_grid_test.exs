@@ -1786,6 +1786,33 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
 
   # ── tab strip ──────────────────────────────────────────────────────────────
 
+  # Found live (run-4 lane C dogfood): '+' added "Sheet 2" but left Sheet 1
+  # active, so the editor's next keystrokes overwrote the tab they had left.
+  test "adding a tab makes the new tab active, and the next edit lands on it", %{conn: conn} do
+    create_sheet!("sg-add-follow", [%{"name" => "Sheet 1", "cells" => %{"A1" => %{"v" => 10}}}])
+    {view, target, _html} = open!(conn, "sg-add-follow")
+
+    view |> element(~s([data-test-id="sheet-tab-add"])) |> render_click()
+    html = render(view)
+
+    assert html =~ "Sheet 2"
+
+    assert html =~ ~r/aria-selected="true"[^>]*data-test-id="sheet-tab-1"/,
+           "the new tab must be the active tab after '+'"
+
+    assert html =~ ~r/aria-selected="false"[^>]*data-test-id="sheet-tab-0"/
+
+    refute html =~ ~s(data-v="10"), "Sheet 1's cells must no longer be on screen"
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "new tab", "move" => "none"})
+
+    {:ok, content} = Session.peek("sg-add-follow", @dataset)
+    [first, second] = content["tabs"]
+    assert first["cells"]["A1"]["v"] == 10, "the edit must not overwrite the tab just left"
+    assert second["cells"]["A1"]["v"] == "new tab"
+  end
+
   test "tab switch, add, rename and delete", %{conn: conn} do
     tabs = [
       %{"name" => "T0", "cells" => %{"A1" => %{"v" => "alpha"}}},
@@ -1814,9 +1841,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     render_submit(target, "tab-rename", %{"tab" => "0", "name" => "Budget"})
     assert render(view) =~ "Budget"
 
-    # Delete the added tab.
+    # Delete the added tab. (Since tab-add follows the new tab, this deletes the
+    # ACTIVE tab; the assertion reads the tab strip, not the whole page, whose
+    # polite status line may still name the tab the viewer was on.)
     render_click(target, "tab-delete", %{"tab" => "2"})
-    refute render(view) =~ "Sheet 3"
+    refute has_element?(view, ~s([data-test-id="sheet-tab-2"]))
+    refute has_element?(view, ~s([role="tab"]), "Sheet 3")
 
     {:ok, content} = Session.peek("sg-tabs", @dataset)
     assert content["tabs"] |> Enum.map(& &1["name"]) == ["Budget", "T1"]

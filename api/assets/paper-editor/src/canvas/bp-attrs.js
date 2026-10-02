@@ -10,9 +10,9 @@
 // every block as new (mints fresh ids, removes the old) and mis-diffs the whole
 // run. WITH it, the ids survive the DOM round-trip and runToOps diffs correctly.
 //
-// Mechanism: addGlobalAttributes registers bpId + bpType on the four TOP-LEVEL
+// Mechanism: addGlobalAttributes registers bpId + bpType on the TOP-LEVEL
 // block node types a prose run can hold (paragraph | heading | bulletList |
-// orderedList — see run-convert.js PROSE_TYPES + convert.js blockToTiptap). The
+// orderedList | taskList — see run-convert.js and convert.js blockToTiptap). The
 // parseHTML/renderHTML pair persists each attr as a data-* DOM attribute so it
 // survives ProseMirror's serialize→parse cycle inside setContent/getJSON. We
 // deliberately DON'T register on listItem: a list is ONE top-level run-node
@@ -27,7 +27,7 @@ import { Extension } from "@tiptap/core";
 // The block node types runToTiptap stamps as top-level run-nodes. A heading and
 // a paragraph project to themselves; a `list` block projects to a bulletList or
 // orderedList. listItem is intentionally absent (see header).
-const BP_BLOCK_TYPES = ["paragraph", "heading", "bulletList", "orderedList"];
+const BP_BLOCK_TYPES = ["paragraph", "heading", "bulletList", "orderedList", "taskList"];
 
 export const BpAttrs = Extension.create({
   name: "bpAttrs",

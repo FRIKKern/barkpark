@@ -1,6 +1,9 @@
 defmodule Barkpark.Plugins.CycleCapabilitiesTest do
   use ExUnit.Case, async: true
 
+  # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+  @moduletag :requires_plugins
+
   alias Barkpark.Plugins.Capabilities
 
   test "cycle.open exposes correction inputs without requiring standard-open inputs" do

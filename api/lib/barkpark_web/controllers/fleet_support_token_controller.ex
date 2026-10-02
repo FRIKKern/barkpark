@@ -71,6 +71,7 @@ defmodule BarkparkWeb.FleetSupportTokenController do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.ErrorResponse
 
   # A support token exists to work the ledger: read to poll ready tasks, write to
   # claim/pulse/stamp/close them. NOT admin — it can never mint more tokens.
@@ -88,8 +89,12 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   Body: `{"name": string}` (required, non-empty). The stored label is
   `fleet-support-<name>`; the token is bound to the admin's resolved workspace
-  (falling back to the seeded Default via `Auth.create_token/5`) on the
-  `production` dataset.
+  on the `production` dataset. That resolution happens UPSTREAM, in the
+  pipeline: `DeriveWorkspaceFromToken` reads the caller's own workspace off
+  their token and `AssignDefaultScope` stamps the seeded Default only when the
+  caller's token carries none. `Auth.create_token/5` itself no longer has any
+  Default fallback (task-e0e6454b8b2045ae) — it binds exactly the workspace it
+  is handed, and a `nil` there mints WORKSPACE-LESS with no membership.
 
   201 → `{"token": raw, "token_id": id, "name": name}`.
   """
@@ -127,6 +132,16 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   200 → `{"token_id": id, "revoked": true}`.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"token_id" => token_id}) do
     case revocable_target(conn, token_id) do
       {:ok, %ApiToken{} = target} ->
@@ -169,9 +184,10 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   # (2) OBJECT AUTHZ, through the canonical chokepoint. Deliberately NOT a
   # `target.workspace_id == caller_workspace_id` equality: a token's
-  # `workspace_id` is a BACKFILL DEFAULT (`Auth.create_token/5` falls back to the
-  # seeded Default when none is supplied), so equality would read as a tenancy
-  # statement it does not make. Membership ROLE is the grant.
+  # `workspace_id` is, on a great many rows, a BACKFILL DEFAULT stamped by the
+  # pipeline's `AssignDefaultScope` (and, before task-e0e6454b8b2045ae, by a
+  # fallback inside `Auth.create_token/5` that is now gone), so equality would
+  # read as a tenancy statement it does not make. Membership ROLE is the grant.
   defp workspace_admin?(conn, workspace_id) do
     actor = conn.assigns[:api_token]
 
@@ -192,13 +208,11 @@ defmodule BarkparkWeb.FleetSupportTokenController do
 
   defp unprocessable(conn, message) do
     conn
-    |> put_status(:unprocessable_entity)
-    |> json(%{error: %{code: "unprocessable", message: message}})
+    |> ErrorResponse.emit_fields(:unprocessable_entity, %{code: "unprocessable", message: message})
   end
 
   defp not_found(conn, message) do
     conn
-    |> put_status(:not_found)
-    |> json(%{error: %{code: "not_found", message: message}})
+    |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
 end

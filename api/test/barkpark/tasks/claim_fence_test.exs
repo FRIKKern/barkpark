@@ -75,6 +75,13 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
       assert {:error, :task_not_found} = Tasks.verify_claim_fence("not-a-uuid", %{})
     end
 
+    test "a non-binary task_id hits the fallback clause and is :task_not_found, not a FunctionClauseError" do
+      # task-888cded6b75503ee: `verify/2`'s catch-all clause had no witness —
+      # delete it and this call raised with every suite green.
+      assert {:error, :task_not_found} = ClaimFence.verify(nil, %{})
+      assert {:error, :task_not_found} = Tasks.verify_claim_fence(42, %{})
+    end
+
     test "a well-formed but absent UUID still runs the query (guard did not swallow the real path)" do
       absent = Ecto.UUID.generate()
       assert {:error, :task_not_found} = ClaimFence.verify(absent, %{})
@@ -125,6 +132,161 @@ defmodule Barkpark.Tasks.ClaimFenceTest do
       }
 
       assert {:error, :stale_claim} = ClaimFence.verify(doc.id, expected)
+    end
+  end
+
+  # ─── tenancy refusals: exactly ONE expected field off ────────────────────
+  #
+  # The cond in verify_task/2 is SEQUENTIAL: doc_id -> workspace_id ->
+  # project_id -> dataset_id. A fixture that mismatches two of them only ever
+  # reaches the first, so each test below starts from a fully-matching
+  # expectation and overrides exactly ONE key. Deleting that arm from
+  # claim_fence.ex must red that test and only that test.
+
+  describe "tenancy refusals" do
+    setup %{scope: scope} do
+      task = mk_task!(uniq("cf-tenancy"), scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-tenancy", scope)
+
+      doc = Repo.get!(Document, claimed.id)
+      claim = doc.content["claim"]
+
+      matching = %{
+        doc_id: doc.doc_id,
+        worker_id: claim["worker"],
+        epoch: claim["epoch"],
+        work_digest: claim["work_digest"],
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        dataset_id: doc.dataset_id
+      }
+
+      # Control: the un-perturbed expectation verifies, so every red below is
+      # caused by the ONE overridden key and not by the fixture.
+      assert {:ok, _} = ClaimFence.verify(doc.id, matching)
+
+      %{doc: doc, matching: matching}
+    end
+
+    test "a doc_id that is not the task's returns {:error, :task_doc_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | doc_id: matching.doc_id <> "-other"}
+
+      assert {:error, :task_doc_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a workspace_id that is not the task's returns {:error, :task_workspace_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | workspace_id: Ecto.UUID.generate()}
+
+      refute expected.workspace_id == matching.workspace_id
+      assert {:error, :task_workspace_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a project_id that is not the task's returns {:error, :task_project_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | project_id: Ecto.UUID.generate()}
+
+      refute expected.project_id == matching.project_id
+      assert {:error, :task_project_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a dataset_id that is not the task's returns {:error, :task_dataset_mismatch}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | dataset_id: Ecto.UUID.generate()}
+
+      refute expected.dataset_id == matching.dataset_id
+      assert {:error, :task_dataset_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+  end
+
+  # ─── lease refusals: exactly ONE field off ───────────────────────────────
+  #
+  # console-w31 / task-c9361be669b85c74. Reachability was DERIVED by mutation,
+  # not by grepping for atom names: with each cond arm deleted in turn, this
+  # file alone stayed at "8 tests, 0 failures" for :task_not_claimed,
+  # :foreign_claim and :work_digest_mismatch. Those three arms had no subject
+  # HERE — the module's own suite — and were reached only indirectly, from
+  # studio_chat/runtime_usage_test.exs via CycleFleet/RuntimeUsage. A distant
+  # integration test is not coverage of this module: refactor either caller and
+  # these arms lose their only witness silently.
+  #
+  # The cond in verify_task/2 is SEQUENTIAL:
+  #   task_not_claimed -> doc_id -> workspace -> project -> dataset ->
+  #   foreign_claim (worker) -> stale_claim (epoch) -> work_digest_mismatch
+  # so each test below starts from a fully-matching expectation (asserted {:ok,_}
+  # in setup) and perturbs exactly ONE thing. A fixture off by two fields would
+  # land on the earlier arm and pass for the wrong reason.
+
+  describe "lease refusals" do
+    setup %{scope: scope} do
+      task = mk_task!(uniq("cf-lease"), scope)
+      {:ok, claimed} = Tasks.claim_by_id(task.doc_id, "worker-lease", scope)
+
+      doc = Repo.get!(Document, claimed.id)
+      claim = doc.content["claim"]
+
+      matching = %{
+        doc_id: doc.doc_id,
+        worker_id: claim["worker"],
+        epoch: claim["epoch"],
+        work_digest: claim["work_digest"],
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        dataset_id: doc.dataset_id
+      }
+
+      # Control: the un-perturbed expectation verifies, so every red below is
+      # caused by the ONE perturbation and not by the fixture.
+      assert {:ok, _} = ClaimFence.verify(doc.id, matching)
+
+      %{doc: doc, matching: matching}
+    end
+
+    test "a worker that is not the claim holder returns {:error, :foreign_claim}",
+         %{doc: doc, matching: matching} do
+      expected = %{matching | worker_id: matching.worker_id <> "-other"}
+
+      refute expected.worker_id == matching.worker_id
+      assert {:error, :foreign_claim} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a work_digest that is not the claim's returns {:error, :work_digest_mismatch}",
+         %{doc: doc, matching: matching} do
+      # epoch and worker still match, so the cond cannot stop at :foreign_claim
+      # or :stale_claim — this fixture can only land on the digest arm.
+      expected = %{matching | work_digest: "0000000000000000"}
+
+      refute expected.work_digest == matching.work_digest
+      assert {:error, :work_digest_mismatch} = ClaimFence.verify(doc.id, expected)
+    end
+
+    test "a task whose lease is gone returns {:error, :task_not_claimed}",
+         %{doc: doc, matching: matching} do
+      # Disjunct A — lifecycle_status leaves "in_progress". The expectation is
+      # untouched: the TASK changed, not the caller's claim.
+      {:ok, released} = Tasks.release(doc.id, matching.worker_id, observed_epoch: matching.epoch)
+      refute released.content["lifecycle_status"] == "in_progress"
+
+      assert {:error, :task_not_claimed} = ClaimFence.verify(doc.id, matching)
+
+      # Disjunct B — lifecycle_status says "in_progress" but claim.worker is not
+      # a binary. Without the `is_binary` half of the arm this row reaches
+      # Map.fetch!(claim, "worker") in the {:ok,_} arm on a claim that has none.
+      widowed =
+        doc
+        |> Repo.reload!()
+        |> Ecto.Changeset.change(
+          content:
+            doc.content
+            |> Map.put("lifecycle_status", "in_progress")
+            |> Map.put("claim", Map.put(doc.content["claim"] || %{}, "worker", nil))
+        )
+        |> Repo.update!()
+
+      assert widowed.content["lifecycle_status"] == "in_progress"
+      refute is_binary(widowed.content["claim"]["worker"])
+      assert {:error, :task_not_claimed} = ClaimFence.verify(doc.id, matching)
     end
   end
 end

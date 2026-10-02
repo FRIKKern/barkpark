@@ -1,7 +1,7 @@
 package taskboard
 
 // criterion_readback.go — the typed SECOND READ behind the PDS success-claim
-// law (charter PDS-D359/D361): a ledger writer may not report a write it never
+// law (charter PDS-D359/PDS-D361): a ledger writer may not report a write it never
 // read back. `bp task stamp` POSTs its criterion flip and then calls
 // FetchCriterion to ask the STORE what that row now holds, so a write dropped
 // by a transport ceiling, a holder gate, or a bad minute on the box cannot be

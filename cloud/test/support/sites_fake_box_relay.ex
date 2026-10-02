@@ -56,6 +56,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
     * `:rollback` — the reply to `rollback/2` (default: a successful flip)
     * `:build_record` — the reply to `build_record/3` (default: a definite
       `never_recorded`, the answer a real box gives for a build it never saw)
+    * `:build_log_bytes` — the reply to `build_log_bytes/3` (same default shape)
   """
   def program(opts) when is_list(opts) do
     ensure_store()
@@ -71,6 +72,7 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
         rollback: Keyword.get(opts, :rollback, {:ok, 200, %{"status" => "rolled_back"}}),
         teardown: Keyword.get(opts, :teardown, {:ok, 200, %{"status" => "torn_down"}}),
         build_record: Keyword.get(opts, :build_record),
+        build_log_bytes: Keyword.get(opts, :build_log_bytes),
         calls: []
       })
     end)
@@ -138,28 +140,105 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
   argument and every other key has a plausible default.
   """
   def terminal_record(slug, build_id, log_state, opts \\ []) do
-    {:ok, 200,
-     %{
-       "slug" => slug,
-       "build_id" => build_id,
-       "record" => Keyword.get(opts, :record, "present"),
-       "log_state" => log_state,
-       "log_path" =>
-         Keyword.get(opts, :log_path, "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log"),
-       "log_bytes" => Keyword.get(opts, :log_bytes, 31_402),
-       "exit_code" => Keyword.get(opts, :exit_code, 12),
-       "failure_reason" => Keyword.get(opts, :failure_reason, "BUILD failed (exit 12)"),
-       "stages" => Keyword.get(opts, :stages, [%{"name" => "BUILD", "status" => "failed"}]),
-       "unit_name" => Keyword.get(opts, :unit_name, "barkpark-site@#{slug}.service"),
-       "journal_command" =>
-         Keyword.get(opts, :journal_command, "journalctl -u barkpark-site@#{slug}"),
-       "mode" => Keyword.get(opts, :mode, "deploy"),
-       "runtime_target" => Keyword.get(opts, :runtime_target, "static"),
-       "started_at" => Keyword.get(opts, :started_at, "2026-08-06T01:00:00Z"),
-       "finished_at" => Keyword.get(opts, :finished_at, "2026-08-06T01:04:00Z"),
-       "evicted_at" => Keyword.get(opts, :evicted_at)
-     }}
+    # KEYED BY ATOM, CONVERTED TO STRING — never the reverse. An earlier version
+    # kept these as string keys and reached the caller's opts through
+    # `String.to_existing_atom(key)`. That made the fixture's correctness depend
+    # on whether some OTHER module happening to be loaded in the same run had
+    # already interned `:finished_at` — true for the full suite, FALSE for
+    # `mix test test/barkpark_cloud/web/` or either RouterBuildLog file alone,
+    # where all 11 tests calling this helper died with "1st argument: not an
+    # already existing atom". The opt names are literals right here, so write
+    # them as atoms and derive the string: no run-order dependency left.
+    defaults = [
+      record: "present",
+      log_path: "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log",
+      log_bytes: 31_402,
+      exit_code: 12,
+      failure_reason: "BUILD failed (exit 12)",
+      stages: [%{"name" => "BUILD", "status" => "failed"}],
+      unit_name: "barkpark-site@#{slug}.service",
+      journal_command: "journalctl -u barkpark-site@#{slug}",
+      mode: "deploy",
+      runtime_target: "static",
+      started_at: "2026-08-06T01:00:00Z",
+      finished_at: "2026-08-06T01:04:00Z",
+      evicted_at: nil,
+      route_status: nil,
+      route_detail: nil
+    ]
+
+    # THE KEY SET IS READ, NOT TYPED. `record_body/1` names every key
+    # `render_build_record/1` emits, straight out of the shared JSON, so a key
+    # added to the box's record door arrives in this fake automatically —
+    # carrying a sentinel until somebody gives it a default above. That is the
+    # whole point: a hand-authored body is a snapshot of the producer that can
+    # rot while both suites stay green.
+    body =
+      BarkparkCloud.BoxStatusPayloadFixture.record_body(%{
+        "slug" => slug,
+        "build_id" => build_id,
+        "log_state" => log_state
+      })
+
+    body =
+      Enum.reduce(defaults, body, fn {key, value}, acc ->
+        Map.put(acc, Atom.to_string(key), Keyword.get(opts, key, value))
+      end)
+
+    {:ok, 200, body}
   end
+
+  @doc """
+  A FULL status body — every key `render_status/1` emits, one distinct sentinel
+  per key, read out of the shared JSON. For tests that need to prove what the
+  control plane does with a complete box report rather than the three-key
+  sketch `walk/2` returns.
+  """
+  def full_status(overrides \\ %{}) do
+    {:ok, 200, BarkparkCloud.BoxStatusPayloadFixture.status_body(overrides)}
+  end
+
+  @doc """
+  The box's `record=1&bytes=1` answer, as
+  `BarkparkWeb.SiteDeployController.render_build_log_bytes/2` renders it
+  (`dr-bl-recorder-http-read-path` c1).
+
+  THIS FIXTURE IS LOCKED TO THE REAL EMITTER, not hand-agreed with it:
+  `BarkparkCloud.Sites.BuildLogBytesProducerLockTest` reads the api controller's
+  own key list out of source and reds if this map's keys drift from it. A
+  hand-typed copy on each side of a seam is an UNLOCKED MIRROR — both sides stay
+  self-consistent while the wire moves underneath them.
+
+  `status` and `log_state` are the required arguments because they are what the
+  control plane keys its answers on; every other key has a plausible default.
+  """
+  def build_log_bytes_payload(slug, build_id, status, log_state, opts \\ []) do
+    tail = Keyword.get(opts, :tail)
+
+    body =
+      %{
+        "slug" => slug,
+        "build_id" => build_id,
+        "record" => Keyword.get(opts, :record, "terminal"),
+        "log_state" => log_state,
+        "log_scrub" => Keyword.get(opts, :log_scrub, 1),
+        "log_path" =>
+          Keyword.get(opts, :log_path, "/var/lib/barkpark/site-runs/#{slug}-#{build_id}.log"),
+        "log_bytes" => Keyword.get(opts, :log_bytes, 31_402),
+        "tail_bytes" => Keyword.get(opts, :tail_bytes, tail && byte_size(tail)),
+        "truncated" => Keyword.get(opts, :truncated, false),
+        "tail" => tail,
+        "evicted_at" => Keyword.get(opts, :evicted_at)
+      }
+      |> maybe_error(Keyword.get(opts, :error))
+
+    {:ok, status, body}
+  end
+
+  defp maybe_error(body, nil), do: body
+
+  defp maybe_error(body, {code, message}),
+    do: Map.put(body, "error", %{"code" => code, "message" => message})
 
   ## ---------------------------------------------------------------------------
   ## BoxRelay behaviour
@@ -197,6 +276,28 @@ defmodule BarkparkCloud.Sites.FakeBoxRelay do
          "build_id" => build_id,
          "record" => "absent",
          "log_state" => "never_recorded"
+       }}
+    )
+  end
+
+  # The BYTES read (`dr-bl-recorder-http-read-path` c1). Default is
+  # `never_recorded` with a null tail for the same reason `build_record/3`'s is:
+  # an unprogrammed fake must never hand back an invented log.
+  @impl true
+  def build_log_bytes(_bp, slug, build_id) do
+    record({:build_log_bytes, %{slug: slug, build_id: build_id}})
+
+    fetch(
+      :build_log_bytes,
+      {:ok, 200,
+       %{
+         "slug" => slug,
+         "build_id" => build_id,
+         "record" => "none",
+         "log_state" => "never_recorded",
+         "log_scrub" => nil,
+         "tail" => nil,
+         "truncated" => false
        }}
     )
   end

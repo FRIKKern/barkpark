@@ -41,8 +41,27 @@
 // Deliberately NOT claimed: an efficacy multiplier. Attempt independence on the
 // SAME VM is unproven, so this file logs the attempt number and outcome and
 // lets the conversion ratio be READ off real runs rather than asserted here.
+//
+// ── THE RATIO, READ (task-6011ad2747b65b7b, 2026-09-11) ─────────────────────
+// Off this helper's own attempt lines in real console-harness runs, SAMPLE
+// n=188 bring-up episodes across 96 browser jobs in 47 runs (2026-09-10/11):
+// 20 attempt-1 refusals (10.6%), every one "Chrome never wrote
+// DevToolsActivePort — it did not start"; 15 converted on attempt 2 (75%);
+// 5 double refusals (2.7% of episodes) reached the merge button as a red
+// REQUIRED Console gate. Conditional refusal on attempt 2 given attempt 1
+// refused is 25% against the 10.6% base — attempts on one VM are correlated,
+// but far from deterministic — so a THIRD attempt is expected to clear ~3.75
+// of every 5 double refusals (2.7% → ~0.7%) for one more DEVTOOLS_CAP on 2.7%
+// of jobs (~0.4 s amortised per job). That is why the bound below is 3. A
+// backoff is still NOT added: the loop's 15 s poll already is the delay, and
+// the fresh profile per attempt already removes the only shared-state race.
+// All four causes the filing named (Chrome binary, Node 22, a port squatter,
+// SERVER_CAP) were eliminated against the captured stderr; 7 of 11 failing
+// Chromes wrote nothing at all. Re-read the ratio after this has run for a
+// day (the row's third criterion) — if the third attempt converts nothing,
+// put the bound back.
 
-const DEFAULT_ATTEMPTS = 2;
+const DEFAULT_ATTEMPTS = 3;
 
 /** How many bring-up attempts each instrument makes. Bounded on purpose: an
  *  unbounded retry converts a dead runner into a job that burns its timeout
@@ -89,14 +108,20 @@ export function captureStderr(child, cap = STDERR_TAIL_CAP) {
   return () => tail;
 }
 
-/** One tidy block of an attempt's captured stderr, or an honest statement that
+/** One tidy block of a child's captured stderr, or an honest statement that
  *  there was none — silence is itself a finding (a Chrome that never execed
- *  writes nothing). */
-export function formatStderrTail(tail, { indent = "   " } = {}) {
+ *  writes nothing; a serve.mjs killed by the OS writes nothing either).
+ *
+ *  `who` names the child whose stderr this is. It defaults to "chrome" so the
+ *  bring-up loop below is unchanged byte for byte; the three instruments that
+ *  also spawn a preview server pass "serve.mjs", because a block labelled
+ *  "chrome stderr" holding node's EADDRINUSE is the same false map this
+ *  helper exists to abolish. */
+export function formatStderrTail(tail, { indent = "   ", who = "chrome" } = {}) {
   const text = (tail || "").replace(/\s+$/, "");
-  if (!text) return `${indent}chrome stderr: (empty — the process wrote nothing before it went away)\n`;
+  if (!text) return `${indent}${who} stderr: (empty — the process wrote nothing before it went away)\n`;
   const lines = text.split("\n");
-  return `${indent}chrome stderr (last ${lines.length} line(s)):\n` +
+  return `${indent}${who} stderr (last ${lines.length} line(s)):\n` +
     lines.map((l) => `${indent}  | ${l}\n`).join("");
 }
 

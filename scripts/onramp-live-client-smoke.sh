@@ -64,8 +64,17 @@ command -v python3 >/dev/null 2>&1 || { echo "REFUSE: 'python3' not found." >&2;
 # --- pass/fail counters (cmux-smoke.sh / media-smoke.sh style) ------------------
 pass=0
 fail=0
-ok()  { echo "  ✓ $1"; pass=$((pass + 1)); }
-bad() { echo "  ✗ $1"; fail=$((fail + 1)); }
+# A SKIP IS NOT A PASS, AND IT IS NOT NOTHING (pds-w30-anonymous-read-preflight-audit).
+# The handshake arm below is token-gated and legitimately skippable, but it used
+# to be counted as neither pass nor fail — so a run that never tested the
+# handshake at all printed "N passed, 0 failed" and a clean PASS banner,
+# indistinguishable from a run that tested it and it worked. The counter and the
+# named skip list exist so the summary reports what was NOT measured.
+skipped=0
+SKIPPED_WHAT=""
+ok()   { echo "  ✓ $1"; pass=$((pass + 1)); }
+bad()  { echo "  ✗ $1"; fail=$((fail + 1)); }
+skip() { echo "  ⏸ $1"; skipped=$((skipped + 1)); SKIPPED_WHAT="${SKIPPED_WHAT}${SKIPPED_WHAT:+; }$2"; }
 die() { echo "FATAL: $1" >&2; exit 1; }
 
 # strip ANSI SGR colour codes claude emits, so substring asserts are stable
@@ -188,7 +197,8 @@ if [ -z "$HS_TOKEN" ] && [ -f "$REAL_CFG" ]; then
 fi
 
 if [ -z "$HS_TOKEN" ]; then
-  echo "  ⏸ handshake SKIPPED — no manifest-capable token (set BARKPARK_API_TOKEN or configure ~/.config/barkpark)."
+  skip "handshake SKIPPED — no manifest-capable token (set BARKPARK_API_TOKEN or configure ~/.config/barkpark)." \
+       "the bp mcp serve JSON-RPC handshake (no manifest-capable token)"
   echo "     Detection half above stands on its own; the handshake is token-gated by design."
 else
   # Drive the server over real pipes: initialize → notifications/initialized →
@@ -283,10 +293,19 @@ AFTER_CLAUDE_STATE="$(sha_of "$REAL_CLAUDE_STATE")"
 
 # =================================================================================
 echo
-echo "=== summary: $pass passed, $fail failed ==="
+echo "=== summary: $pass passed, $fail failed, $skipped skipped ==="
+if [ "$skipped" -ne 0 ]; then
+  echo "NOT MEASURED BY THIS RUN: $SKIPPED_WHAT"
+fi
 if [ "$fail" -eq 0 ]; then
-  echo "LIVE-CLIENT PROOF PASSED — the claude CLI reads bp's emitted .mcp.json byte-correct,"
-  echo "detection is file-bound, and bp mcp serve answers a real JSON-RPC handshake."
+  if [ "$skipped" -eq 0 ]; then
+    echo "LIVE-CLIENT PROOF PASSED — the claude CLI reads bp's emitted .mcp.json byte-correct,"
+    echo "detection is file-bound, and bp mcp serve answers a real JSON-RPC handshake."
+  else
+    echo "LIVE-CLIENT PROOF PASSED IN PART — the claude CLI reads bp's emitted .mcp.json"
+    echo "byte-correct and detection is file-bound. The handshake half was NOT run, so this"
+    echo "output is not evidence that bp mcp serve answers anything."
+  fi
   echo "(Residual interactive approve+connect eyeball: ao-backlog-claude-code-connect-eyeball.)"
 fi
 [ "$fail" -eq 0 ]

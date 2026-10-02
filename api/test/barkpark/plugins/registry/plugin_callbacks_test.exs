@@ -204,7 +204,7 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
       # default would restore an EXPLICIT `[]` — the discovery kill switch.
       prior = Barkpark.PluginEnv.capture()
       :ok = Registry.register(AssetDocPlugin, %{"plugin_name" => name})
-      Application.put_env(:barkpark, :plugins, [name])
+      Barkpark.PluginEnv.put!([name])
       on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert "asset-doc-123" =
@@ -217,7 +217,7 @@ defmodule Barkpark.Plugins.Registry.PluginCallbacksTest do
       # default would restore an EXPLICIT `[]` — the discovery kill switch.
       prior = Barkpark.PluginEnv.capture()
       :ok = Registry.register(AssetDocPlugin, %{"plugin_name" => name})
-      Application.put_env(:barkpark, :plugins, [name])
+      Barkpark.PluginEnv.put!([name])
       on_exit(fn -> Barkpark.PluginEnv.restore(prior) end)
 
       assert nil == PluginCallbacks.asset_doc_id_for_media_file("unknown-file", "production")

@@ -279,6 +279,42 @@ defmodule Barkpark.Plugins.Registry do
   end
 
   @doc """
+  The declared codelist roster across every registered plugin — the supplier
+  side of the INVERTED codelist-requirements seam
+  (`:codelist_requirements_collector`, installed by
+  `Barkpark.Application.start/2` and read by `Barkpark.Content.CodelistHealth`).
+
+  `codelist_requirements/0` is a plugin-local declaration, not a
+  `Barkpark.Plugin` callback, so each plugin is PROBED with
+  `function_exported?/3` rather than assumed. A plugin that raises contributes
+  `[]`; the roster feeds a health probe, which must never be the thing that
+  takes the node down. Malformed entries are dropped by the reader.
+  """
+  @spec collect_codelist_requirements() :: [map()]
+  def collect_codelist_requirements do
+    all()
+    |> Enum.flat_map(&plugin_codelist_requirements/1)
+  rescue
+    _ -> []
+  catch
+    _, _ -> []
+  end
+
+  defp plugin_codelist_requirements(%{module: module}) when is_atom(module) do
+    Code.ensure_loaded?(module)
+
+    if function_exported?(module, :codelist_requirements, 0) do
+      module.codelist_requirements() |> List.wrap()
+    else
+      []
+    end
+  rescue
+    _ -> []
+  end
+
+  defp plugin_codelist_requirements(_), do: []
+
+  @doc """
   Drives the `resolve_extract_edges/2` chain — the content-graph edge
   collector. `Barkpark.EdgeProjector.Projector` seeds `:baseline` with the
   document's CORE reference-field edges and `ctx = %{doc, dataset}`; each
@@ -292,6 +328,49 @@ defmodule Barkpark.Plugins.Registry do
     ctx = Keyword.get(opts, :ctx, %{})
     ResolverChain.reduce_resolvers(:resolve_extract_edges, baseline, ctx)
   end
+
+  @doc """
+  The pre-write fences the writer will run, in load order — a read of
+  `Barkpark.Content.PreWriteFences.list/0`, which this Registry PUBLISHES to
+  on every register / reset and at init (see `publish_pre_write_fences/1`).
+  The writer reads the content-side holder directly; this delegate exists for
+  callers already holding the Registry (boot checks, release eval).
+  """
+  @spec collect_pre_write_fences() :: [Barkpark.Plugin.pre_write_fence()]
+  defdelegate collect_pre_write_fences, to: Barkpark.Content.PreWriteFences, as: :list
+
+  @doc """
+  The pre-publish fences the publish lifecycle will run, in load order — a
+  read of `Barkpark.Content.PrePublishFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_publish_fences/1`). The lifecycle reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_publish_fences() :: [Barkpark.Plugin.pre_publish_fence()]
+  defdelegate collect_pre_publish_fences, to: Barkpark.Content.PrePublishFences, as: :list
+
+  @doc """
+  The pre-write transforms the writer will run over a write's attrs, in load
+  order — a read of `Barkpark.Content.PreWriteTransforms.list/0`, which this
+  Registry PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_pre_write_transforms/1`). The writer reads the content-side holder
+  directly; this delegate exists for callers already holding the Registry
+  (boot checks, release eval).
+  """
+  @spec collect_pre_write_transforms() :: [Barkpark.Plugin.pre_write_transform()]
+  defdelegate collect_pre_write_transforms, to: Barkpark.Content.PreWriteTransforms, as: :list
+
+  @doc """
+  The mutate-door fences `Content.apply_mutations/3` will run, in load order —
+  a read of `Barkpark.Content.MutateDoorFences.list/0`, which this Registry
+  PUBLISHES to exactly as it does the pre-write fences (see
+  `publish_mutate_door_fences/1`). The mutate door reads the content-side
+  holder directly; this delegate exists for callers already holding the
+  Registry (boot checks, release eval).
+  """
+  @spec collect_mutate_door_fences() :: [Barkpark.Plugin.mutate_door_fence()]
+  defdelegate collect_mutate_door_fences, to: Barkpark.Content.MutateDoorFences, as: :list
 
   @doc """
   Drives the `resolve_api_tests/2` chain → flat list of `api_test_spec()` maps
@@ -316,8 +395,73 @@ defmodule Barkpark.Plugins.Registry do
   def collect_cli_commands(opts \\ []) do
     baseline = Keyword.get(opts, :baseline, [])
     ctx = Keyword.get(opts, :ctx, %{})
-    ResolverChain.reduce_resolvers(:resolve_cli_commands, baseline, ctx)
+
+    :resolve_cli_commands
+    |> ResolverChain.reduce_resolvers(baseline, ctx)
+    |> Enum.map(&declare_dataset_on_task_doc_id_route/1)
   end
+
+  # ── THE `?dataset=` DISAMBIGUATOR, KEYED ON THE ROUTE, OVER THE ASSEMBLED
+  #    MANIFEST ─────────────────────────────────────────────────── (#18611's
+  #    rule, moved to where every plugin's declaration passes through —
+  #    task-4968634c648cda54)
+  #
+  # `TasksController.find_task_by_doc_id/2` refuses a doc_id that lives in two
+  # datasets of one workspace+project with a 409 `ambiguous_dataset` whose
+  # message names the remedy: "?dataset=<name> on the task route". The CLI can
+  # type that remedy only for a command whose manifest DECLARES a dataset flag
+  # (`commandDeclaresFlag`, internal/cli/run.go, gating `globalQueryForwards`
+  # in internal/cli/globals.go). So every command that can RECEIVE that refusal
+  # must declare it, or the refusal names a remedy the caller cannot follow.
+  #
+  # WHY HERE AND NOT IN THE TASKS PLUGIN. #18611 derived exactly this rule, but
+  # applied it with `Enum.map/2` over the tasks plugin's OWN `cli_commands/0`
+  # list. The predicate is about the ROUTE; the application was about the LIST.
+  # A command that targets a `/v1/tasks/:doc_id` route but is DECLARED IN
+  # ANOTHER PLUGIN therefore escaped it for free. Measured on the served
+  # manifest: `session.link-task` (POST /v1/tasks/:doc_id/sessions, declared in
+  # `Barkpark.Plugins.Bulldocs`) was the one such command, and its route is
+  # `TasksController.sessions/2` — which resolves through
+  # `find_task_by_doc_id/2` and CAN answer the 409. A hand-written exception
+  # for it would have been the same stale-by-construction shape the derived
+  # rule exists to avoid, so the rule moved to the chokepoint instead: this
+  # collector is what the `/v1/capabilities` controller folds into
+  # `commands[]`, so EVERY plugin's declaration passes through it.
+  #
+  # THE PREFIX GUARD IS NOT COSMETIC. The predicate is ":doc_id UNDER
+  # /v1/tasks", not ":doc_id anywhere": the twin resolver is the task family's
+  # rule, and a `:doc_id` route some other plugin mounts elsewhere would get a
+  # flag its route never reads. No such route exists today (every `:doc_id`
+  # path_template in `lib/barkpark/plugins/` is under `/v1/tasks`), which is
+  # exactly why the guard is written now rather than after one appears.
+  #
+  # IDEMPOTENT: a command that already declares `dataset` (task.ready,
+  # task.events, task.ls, and the eleven the tasks plugin declares on its own
+  # list) is left verbatim — the clause never appends a second copy.
+  #
+  # Tolerant on shape by design: only a command with an atom-keyed
+  # `http.path_template` + `flags` list is rewritten; anything else falls to
+  # the catch-all unchanged rather than raising inside a boot-time collector.
+  @doc """
+  Declare the `?dataset=` disambiguator on a command whose ROUTE is a
+  `/v1/tasks/:doc_id` route, whichever plugin declared the command.
+
+  Public so a test can assert the predicate directly. THE RULE ITSELF — the
+  flag literal and the route predicate — lives in
+  `Barkpark.Tenancy.CliDatasetFlag`, the tenancy KERNEL module, because it has
+  a second application point: `Barkpark.Plugins.Tasks.cli_commands/0` applies
+  it to its own list so that list is self-consistent read directly. Two
+  FEATURE concepts needing one rule must both reach INWARD for it; the tasks
+  plugin delegating here instead was a sideways `tasks>registry` edge that
+  reddened the architecture boundary gate on every PR (task-9a90596e9194f370).
+  This clause is the registry's own door onto that one definition, not a
+  second copy of it.
+  """
+  @spec declare_dataset_on_task_doc_id_route(Barkpark.Plugin.cli_command()) ::
+          Barkpark.Plugin.cli_command()
+  defdelegate declare_dataset_on_task_doc_id_route(cmd),
+    to: Barkpark.Tenancy.CliDatasetFlag,
+    as: :declare_on_task_doc_id_route
 
   # ─── Delegations ────────────────────────────────────────────────────────
   # Public surface preserved verbatim; canonical docs live on each delegated
@@ -401,7 +545,175 @@ defmodule Barkpark.Plugins.Registry do
       top_menu_entries: ResolverChain.compute_top_menu_entries([], %{})
     })
 
+    publish_pre_write_fences(plugins)
+    publish_pre_publish_fences(plugins)
+    publish_pre_write_transforms(plugins)
+    publish_paper_task_resolvers(plugins)
+    publish_mutate_door_fences(plugins)
+
     state
+  end
+
+  # Publish every registered plugin's `pre_write_fences/0` declaration to the
+  # content-owned holder the writer reads (task-e5baaaa14ddf2e1c). Content
+  # never names this Registry (kernel→feature); the Registry writes INTO
+  # content instead. Load order is applied at read time by the holder.
+  #
+  # NOT routed through `reduce_resolvers/3`: that chain rescues a raising
+  # plugin back to the accumulator, which here would silently drop an
+  # integrity fence. A raising declaration or a malformed entry raises.
+  #
+  # EVERY registered plugin is published, one declared entry each — with an
+  # EMPTY list (or a `nil` resolver) when it declares nothing for this holder
+  # (task-a67de91e32edf1a4). The holder hands its declarations to
+  # `Content.PluginLoadOrder.plugins/3` as the plugins it KNOWS, so publishing
+  # only the declarers made an explicit load order naming any other registered
+  # plugin warn "names no plugin this reader knows" / "not a registered
+  # plugin" — false. An empty entry adds no step, so the fences, steps and
+  # resolver a holder yields are unchanged; a module that never registered is
+  # still unknown to the holder and still warned about by name. All five
+  # publishers below follow this one rule.
+  defp publish_pre_write_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_write_fences/1)
+    |> Barkpark.Content.PreWriteFences.publish()
+  end
+
+  defp declared_pre_write_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_write_fences, 0) do
+      fences = Enum.map(mod.pre_write_fences(), &validate_pre_write_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_pre_write_fence!({mod, fun} = fence, _name)
+       when is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_write_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write fence " <>
+            "#{inspect(other)}; expected {module, function}"
+  end
+
+  # The publish-door twin of `publish_pre_write_fences/1`
+  # (task-8273f2f1b24a6de1): every registered plugin's `pre_publish_fences/0`
+  # declaration, into the content-owned holder the publish lifecycle reads.
+  # Same rules — not routed through `reduce_resolvers/3`, a raising
+  # declaration or a malformed entry raises.
+  defp publish_pre_publish_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_publish_fences/1)
+    |> Barkpark.Content.PrePublishFences.publish()
+  end
+
+  defp declared_pre_publish_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_publish_fences, 0) do
+      fences = Enum.map(mod.pre_publish_fences(), &validate_pre_publish_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_pre_publish_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:door, :in_transaction] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_pre_publish_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-publish fence " <>
+            "#{inspect(other)}; expected {:door | :in_transaction, module, function}"
+  end
+
+  # The attrs-shaping twin of `publish_pre_write_fences/1`
+  # (task-aed4f02e57d3a760): every registered plugin's `pre_write_transforms/0`
+  # declaration, into the content-owned holder the writer reads. Same rules —
+  # not routed through `reduce_resolvers/3`, a raising declaration or a
+  # malformed entry raises.
+  defp publish_pre_write_transforms(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_pre_write_transforms/1)
+    |> Barkpark.Content.PreWriteTransforms.publish()
+  end
+
+  defp declared_pre_write_transforms(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :pre_write_transforms, 0) do
+      steps = Enum.map(mod.pre_write_transforms(), &validate_pre_write_transform!(&1, name))
+      [%{name: name, module: mod, steps: steps}]
+    else
+      [%{name: name, module: mod, steps: []}]
+    end
+  end
+
+  defp validate_pre_write_transform!({kind, mod, fun} = step, _name)
+       when kind in [:transform, :check] and is_atom(mod) and is_atom(fun),
+       do: step
+
+  defp validate_pre_write_transform!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed pre-write transform " <>
+            "#{inspect(other)}; expected {:transform | :check, module, function}"
+  end
+
+  # Every registered plugin's `paper_task_resolver/0` declaration, into the
+  # content-owned holder papers read for task chips and task query blocks
+  # (task-9c59aa555e1e015e). Content never names this Registry; the Registry
+  # writes INTO content. Load order is applied at read time by the holder. Same
+  # rules as the fence publishers: a raising declaration or a malformed entry
+  # raises rather than silently dropping the resolver.
+  defp publish_paper_task_resolvers(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_paper_task_resolver/1)
+    |> Barkpark.Content.PaperTaskResolver.publish()
+  end
+
+  defp declared_paper_task_resolver(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :paper_task_resolver, 0) do
+      case mod.paper_task_resolver() do
+        resolver when is_atom(resolver) ->
+          [%{name: name, module: mod, resolver: resolver}]
+
+        other ->
+          raise ArgumentError,
+                "plugin #{inspect(name)} declared a malformed paper task resolver " <>
+                  "#{inspect(other)}; expected a module or nil"
+      end
+    else
+      [%{name: name, module: mod, resolver: nil}]
+    end
+  end
+
+  # The mutate-door twin of `publish_pre_publish_fences/1`
+  # (task-b04cbe7823d084a6): every registered plugin's `mutate_door_fences/0`
+  # declaration, into the content-owned holder `Content.Mutations` reads. Same
+  # rules — not routed through `reduce_resolvers/3`, a raising declaration or
+  # a malformed entry raises.
+  defp publish_mutate_door_fences(plugins) do
+    plugins
+    |> Enum.flat_map(&declared_mutate_door_fences/1)
+    |> Barkpark.Content.MutateDoorFences.publish()
+  end
+
+  defp declared_mutate_door_fences(%{module: mod, name: name}) do
+    if Code.ensure_loaded?(mod) and function_exported?(mod, :mutate_door_fences, 0) do
+      fences = Enum.map(mod.mutate_door_fences(), &validate_mutate_door_fence!(&1, name))
+      [%{name: name, module: mod, fences: fences}]
+    else
+      [%{name: name, module: mod, fences: []}]
+    end
+  end
+
+  defp validate_mutate_door_fence!({phase, mod, fun} = fence, _name)
+       when phase in [:before_rev, :after_claim] and is_atom(mod) and is_atom(fun),
+       do: fence
+
+  defp validate_mutate_door_fence!(other, name) do
+    raise ArgumentError,
+          "plugin #{inspect(name)} declared a malformed mutate-door fence " <>
+            "#{inspect(other)}; expected {:before_rev | :after_claim, module, function}"
   end
 
   # ─── GenServer ──────────────────────────────────────────────────────────
@@ -414,6 +726,16 @@ defmodule Barkpark.Plugins.Registry do
     # as a safety net for callers that skip discovery entirely (e.g. tests
     # that set the kill-switch env before any reset). See
     # `handle_call(:capture_baseline, …)` and `handle_call(:reset, …)`.
+    #
+    # A fresh Registry has no plugins, so it publishes NO pre-write fences, NO
+    # pre-publish fences, NO pre-write transforms and NO mutate-door fences —
+    # the kill-switch boot never registers, and a `:persistent_term` left by a
+    # previous start of the app in the same VM must not survive it.
+    publish_pre_write_fences([])
+    publish_pre_publish_fences([])
+    publish_pre_write_transforms([])
+    publish_paper_task_resolvers([])
+    publish_mutate_door_fences([])
     {:ok, %{plugins: %{}, baseline_plugins: nil}}
   end
 

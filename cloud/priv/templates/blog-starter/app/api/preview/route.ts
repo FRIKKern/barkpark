@@ -1,5 +1,4 @@
 import { draftMode } from 'next/headers'
-import { NextResponse } from 'next/server'
 import { constantTimeEqual } from '../../../lib/constant-time-equal'
 
 // `constantTimeEqual` uses `node:crypto`, and this route is the boundary in
@@ -16,7 +15,10 @@ export const runtime = 'nodejs'
  * signed-URL flow, use `createDraftModeRoutes` from `@barkpark/nextjs/draft-mode`.
  *
  * The redirect target is same-origin only — external and protocol-relative paths
- * are rejected to prevent open redirects.
+ * are rejected to prevent open redirects. It is sent as a RELATIVE `Location`, the
+ * way `createDraftModeRoutes` does: under a self-hosted `next start`, `req.url`
+ * carries the server's bind host (localhost:<port>), so an absolute URL built from
+ * it sent every editor behind a real host or proxy to localhost.
  *
  * The secret comparison is CONSTANT-TIME (`lib/constant-time-equal.ts`). A plain
  * `!==` compares length first and then bytes with an early exit, leaking both
@@ -28,11 +30,7 @@ export const runtime = 'nodejs'
  */
 export async function GET(req: Request): Promise<Response> {
   const url = new URL(req.url)
-  const raw = url.searchParams.get('path')
-  const redirectPath =
-    typeof raw === 'string' && raw.startsWith('/') && !raw.startsWith('//') && !raw.startsWith('/\\')
-      ? raw
-      : '/'
+  const redirectPath = safeRedirectPath(url.searchParams.get('path'))
 
   const secret = process.env.BARKPARK_PREVIEW_SECRET
   if (secret) {
@@ -49,5 +47,24 @@ export async function GET(req: Request): Promise<Response> {
   const dm = await draftMode()
   dm.enable()
 
-  return NextResponse.redirect(new URL(redirectPath, url.origin), { status: 307 })
+  return new Response(null, { status: 307, headers: { Location: redirectPath } })
+}
+
+// Same-origin relative paths only. A browser strips ASCII tab / LF / CR from a
+// URL and reads `\` as `/` before it resolves a Location, so `/\t/evil.example`
+// becomes `//evil.example` — another host — although it passes any prefix check
+// on the raw string. Refuse control characters and backslashes outright, then
+// require that the path resolves on our own origin.
+function safeRedirectPath(raw: string | null): string {
+  if (typeof raw !== 'string' || !raw.startsWith('/') || /[\u0000-\u001f\u007f\\]/.test(raw)) {
+    return '/'
+  }
+  const base = 'http://redirect.invalid'
+  let target: URL
+  try {
+    target = new URL(raw, base)
+  } catch {
+    return '/'
+  }
+  return target.origin === base ? target.pathname + target.search + target.hash : '/'
 }

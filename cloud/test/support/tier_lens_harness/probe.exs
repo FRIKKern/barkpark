@@ -16,6 +16,12 @@
 # So: read this one when you suspect the lens is under-resolving, and rows.exs
 # when you need a specific row named. A bucket far larger than its siblings is
 # the tell.
+#
+# DO NOT RENAME THIS TO ANYTHING ENDING IN `_test.exs`. It calls System.halt
+# at top level; `mix test` discovers `test/**/*_test.exs` and this directory is
+# under test/, so a matching name takes the ENTIRE cloud suite down (the
+# incident PR #14496 fixed). Enforced by cloud/test/barkpark_cloud/
+# support_halt_guard_test.exs, which runs under the required `Cloud gate`.
 
 lens = System.argv() |> Enum.at(0)
 router = System.argv() |> Enum.at(1)

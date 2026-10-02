@@ -4,6 +4,7 @@ defmodule Barkpark.EpicFleet.Benchmark do
   import Ecto.Query, warn: false
 
   alias Barkpark.EpicFleet.{Attempt, CanonicalJSON, Experiment}
+  alias Barkpark.Redaction
   alias Barkpark.Repo
 
   @format "barkpark-epic-benchmark-v1"
@@ -38,18 +39,6 @@ defmodule Barkpark.EpicFleet.Benchmark do
   @task_fence_keys ~w(doc_id worker_id claim_epoch work_digest)
   @trial_keys ~w(trial_id sensitivity_of assignments)
   @trial_assignment_keys ~w(assignment_id attribution usage vui)
-  @sensitive_exact ~w(
-    token api_token access_token refresh_token auth_token id_token session_token api_key apikey secret
-    client_secret webhook_secret secret_key password authorization cookie set_cookie private_key
-    signing_key bearer credential credentials dsn database_url database_uri connection_string
-  )
-  @sensitive_suffixes ~w(
-    _api_token _access_token _refresh_token _auth_token _id_token _session_token _api_key _client_secret
-    _webhook_secret _secret_key _secret _password _private_key _signing_key _credential _credentials
-    _dsn _database_url _database_uri _connection_string
-  )
-  @sensitive_exact_compact Enum.map(@sensitive_exact, &String.replace(&1, "_", ""))
-  @sensitive_suffixes_compact Enum.map(@sensitive_suffixes, &String.replace(&1, "_", ""))
 
   @spec create_experiment(map()) ::
           {:ok, Experiment.t()} | {:error, Ecto.Changeset.t() | atom()}
@@ -222,6 +211,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   end
 
   @doc "Atomically replace a benchmark artifact with exact canonical JSON bytes."
+  # Artifact paths are operator-supplied benchmark output locations, not
+  # request data; the temporary name is derived here, not passed in.
+  # sobelow_skip ["Traversal.FileModule"]
   @spec write_json_file(Path.t(), binary()) :: :ok | {:error, File.posix()}
   def write_json_file(path, json) when is_binary(path) and is_binary(json) do
     temporary_path =
@@ -955,6 +947,9 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp unwrap_attempt({:ok, %Attempt{} = attempt}), do: {:ok, attempt}
   defp unwrap_attempt({:error, reason}), do: {:error, reason}
 
+  # `fields` is a compile-time literal list of known column names supplied by
+  # this module's own callers, never user input, so the atom table is bounded.
+  # sobelow_skip ["DOS.StringToAtom"]
   defp select_attrs(attrs, fields) do
     Map.new(fields, fn field ->
       {field, Map.get(attrs, field, Map.get(attrs, String.to_atom(field)))}
@@ -962,29 +957,13 @@ defmodule Barkpark.EpicFleet.Benchmark do
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
+  # Secret scrubbing is NOT owned here: `Barkpark.Redaction`
+  # (@canonical capability:secret-redaction) holds the table and the predicate.
+  # This module only chooses WHEN to scrub — never HOW.
   defp sanitize_map(term) do
     term
     |> CanonicalJSON.stringify_keys()
-    |> sanitize()
-  end
-
-  defp sanitize(map) when is_map(map) do
-    Map.new(map, fn {key, value} ->
-      if sensitive_key?(key), do: {key, "[REDACTED]"}, else: {key, sanitize(value)}
-    end)
-  end
-
-  defp sanitize(list) when is_list(list), do: Enum.map(list, &sanitize/1)
-  defp sanitize(value), do: value
-
-  defp sensitive_key?(key) do
-    normalized = key |> String.downcase() |> String.replace(~r/[^a-z0-9]+/u, "_")
-    compact = String.replace(normalized, "_", "")
-
-    normalized in @sensitive_exact or
-      Enum.any?(@sensitive_suffixes, &String.ends_with?(normalized, &1)) or
-      compact in @sensitive_exact_compact or
-      Enum.any?(@sensitive_suffixes_compact, &String.ends_with?(compact, &1))
+    |> Redaction.redact_sensitive()
   end
 
   defp valid_replacement_ancestry?(attempts) do
@@ -1034,6 +1013,8 @@ defmodule Barkpark.EpicFleet.Benchmark do
   defp exact_keys?(map, expected) when is_map(map),
     do: Map.keys(map) |> Enum.sort() == Enum.sort(expected)
 
+  # `path` is the temporary name minted by `write_json_file/2` above.
+  # sobelow_skip ["Traversal.FileModule"]
   defp cleanup_temporary_file(path, error) do
     _ = File.rm(path)
     error

@@ -59,6 +59,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   alias Barkpark.Plugins.Settings
   alias Barkpark.Plugins.Settings.Masking
   alias Barkpark.Structure
+  alias Barkpark.StudioChat.HostExecution
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
@@ -99,6 +100,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       if connected?(socket) do
         socket
         |> assign(:bp_theme, Tenancy.workspace_theme(socket.assigns[:current_workspace]))
+        |> assign(:bp_locale, Tenancy.workspace_locale(socket.assigns[:current_workspace]))
         |> assign(
           :execution_profile,
           workspace_execution_profile(socket.assigns[:current_workspace])
@@ -127,6 +129,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # Workspace theme picker (ts-w4e). `current_workspace` + `bp_theme` are
       # resolved by LiveScope + StudioChrome (nil on an unseeded tenancy).
       known_themes: Tenancy.known_themes(),
+      # Workspace Studio locale (Gyldendal parity E7) — same bag, same guards.
+      known_locales: Tenancy.known_locales(),
       # A scope switch fired from Settings re-opens Settings under the NEW
       # scope, not the desk (chrome D16 seam) — StudioChrome appends this to
       # the target's studio_root.
@@ -134,6 +138,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
       # Empty defaults for the dead render — the connected `handle_params`
       # loads the real theme + plugin rows once, on connect (see there).
       bp_theme: nil,
+      bp_locale: nil,
       # Per-workspace chat execution profile (connectors W23-2/D207). Seeded
       # `nil` for the dead render; `handle_params` projects the persisted
       # `settings["chat"]["execution_profile"]` once on connect. `nil`/anything
@@ -208,6 +213,36 @@ defmodule BarkparkWeb.Studio.SettingsLive do
     guard_bound_ws(socket, params, fn ->
       guard_ws_admin(socket, "theme", fn ->
         do_set_workspace_theme(socket, theme)
+      end)
+    end)
+  end
+
+  # Workspace Studio locale (Gyldendal parity E7): the language the chrome
+  # speaks — Publish/History/Generate/the error card — for every editor of
+  # this workspace. Same fail-closed guards as the theme.
+  def handle_event("set_workspace_locale", %{"locale" => locale} = params, socket) do
+    guard_bound_ws(socket, params, fn ->
+      guard_ws_admin(socket, "locale", fn ->
+        case socket.assigns[:current_workspace] do
+          %{id: _} = ws ->
+            case Tenancy.set_workspace_locale(ws.id, locale) do
+              {:ok, updated} ->
+                {:noreply,
+                 socket
+                 |> assign(:current_workspace, updated)
+                 |> assign(:bp_locale, Tenancy.workspace_locale(updated))
+                 |> put_flash(:info, "Studio language set to #{locale}.")}
+
+              {:error, :unknown_locale} ->
+                {:noreply, put_flash(socket, :error, "Unknown locale #{inspect(locale)}.")}
+
+              {:error, _} ->
+                {:noreply, put_flash(socket, :error, "Could not save the Studio language.")}
+            end
+
+          _ ->
+            {:noreply, put_flash(socket, :error, "No workspace in scope.")}
+        end
       end)
     end)
   end
@@ -502,6 +537,17 @@ defmodule BarkparkWeb.Studio.SettingsLive do
            "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
          )}
 
+      # The REST twin (GET|PUT|DELETE /v1/plugins/settings/:name) sits behind
+      # RequirePlatformOperator; this LiveView door applies the same tier, so an
+      # armed operator allowlist cannot be walked around through Studio.
+      not BarkparkWeb.Plugs.RequirePlatformOperator.permits?(principal) ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Plugin credentials are installation-wide — viewing or managing them requires the platform operator."
+         )}
+
       true ->
         fun.()
     end
@@ -569,23 +615,37 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         chat = Tenancy.workspace_chat_settings(ws)
         next = if chat["execution_profile"] == "cloud", do: "self_hosted", else: "cloud"
 
-        if next in ~w(cloud self_hosted) do
-          merged = Map.put(chat, "execution_profile", next)
+        cond do
+          # task-6ca882967fd95dda: `self_hosted` runs this workspace's chat on
+          # the INSTANCE HOST — selectable only for the Default workspace, by the
+          # instance owner (`HostExecution`). `cloud` stays every admin's choice.
+          next == "self_hosted" and
+              not (HostExecution.workspace_may_host_exec?(ws.id) and
+                       BarkparkWeb.HostExecutionGate.instance_principal?(principal)) ->
+            {:noreply, put_flash(socket, :error, HostExecution.message())}
 
-          case Tenancy.set_workspace_chat_settings(ws.id, merged) do
-            {:ok, updated} ->
-              {:noreply,
-               socket
-               |> assign(:current_workspace, updated)
-               |> assign(:execution_profile, next)
-               |> put_flash(:info, execution_profile_flash(next))}
+          next in ~w(cloud self_hosted) ->
+            save_execution_profile(socket, ws, chat, next)
 
-            {:error, _} ->
-              {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
-          end
-        else
-          {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
+          true ->
+            {:noreply, put_flash(socket, :error, "Unknown execution profile.")}
         end
+    end
+  end
+
+  defp save_execution_profile(socket, ws, chat, next) do
+    merged = Map.put(chat, "execution_profile", next)
+
+    case Tenancy.set_workspace_chat_settings(ws.id, merged) do
+      {:ok, updated} ->
+        {:noreply,
+         socket
+         |> assign(:current_workspace, updated)
+         |> assign(:execution_profile, next)
+         |> put_flash(:info, execution_profile_flash(next))}
+
+      {:error, _} ->
+        {:noreply, put_flash(socket, :error, "Could not save the execution profile.")}
     end
   end
 
@@ -730,6 +790,22 @@ defmodule BarkparkWeb.Studio.SettingsLive do
               <% else %>
                 Saved server-side and stamped on the first byte — no flash.
               <% end %>
+            </:hint>
+          </.bp_field_row>
+        </form>
+        <form phx-change="set_workspace_locale">
+          <input type="hidden" name="ws" value={@current_workspace.id} />
+          <.bp_field_row label="Studio language" for="workspace-locale">
+            <.bp_select
+              id="workspace-locale"
+              name="locale"
+              value={to_string(@bp_locale)}
+              options={@known_locales}
+            />
+            <:hint>
+              The language of the Studio chrome (buttons, cards, row fallbacks) for
+              <strong>{@current_workspace.name}</strong>. Schema titles and descriptions
+              are never translated — they are yours.
             </:hint>
           </.bp_field_row>
         </form>

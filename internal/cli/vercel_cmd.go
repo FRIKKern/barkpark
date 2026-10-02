@@ -172,9 +172,18 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 		readQuery := fmt.Sprintf("%s/v1/data/query/%s/<type>?filter[status]=published", scopedBase, dataset)
 		out.progressf("▸ --no-deploy — Barkpark provisioned, skipping Vercel")
 		out.progressf("  read API:  %s", readQuery)
-		// The read token is the single intended secret surface — print it once
-		// so the operator can wire BARKPARK_TOKEN by hand.
-		out.progressf("  read token (server-only env BARKPARK_TOKEN): %s", readToken)
+		// A freshly MINTED read token is the single intended secret surface —
+		// print it once so the operator can wire BARKPARK_TOKEN by hand: on stdout
+		// in machine mode, on the progress stream otherwise, never both. A token the
+		// operator SUPPLIED with --read-token is already in their hands; it is never
+		// echoed back, only its last four characters.
+		shown := readToken
+		if opt.readToken != "" {
+			shown = vercelTokenHint(readToken)
+		}
+		if !machine {
+			out.progressf("  read token (server-only env BARKPARK_TOKEN): %s", shown)
+		}
 		if machine {
 			out.emitStructured(map[string]any{
 				"ok":         true,
@@ -182,7 +191,7 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 				"dataset":    dataset,
 				"api_url":    scopedBase,
 				"read_query": readQuery,
-				"read_token": readToken,
+				"read_token": shown,
 				"deployed":   false,
 			})
 		}
@@ -195,14 +204,15 @@ func runVercelQuickSetup(out *writer, g globals, args []string) int {
 	}
 	if machine {
 		out.emitStructured(map[string]any{
-			"ok":             true,
-			"site":           opt.site,
-			"dataset":        dataset,
-			"api_url":        scopedBase,
-			"read_token":     readToken,
-			"url":            liveURL,
-			"vercel_project": vercelProject,
-			"deployed":       true,
+			"ok":      true,
+			"site":    opt.site,
+			"dataset": dataset,
+			"api_url": scopedBase,
+			// Already stored in the Vercel project's env: name it, never print it.
+			"read_token_hint": vercelTokenHint(readToken),
+			"url":             liveURL,
+			"vercel_project":  vercelProject,
+			"deployed":        true,
 		})
 	}
 	return exitOK
@@ -580,7 +590,15 @@ func vercelMintReadToken(out *writer, scopedBase, dataset, adminToken, site stri
 	}
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, respBody)
-		return "", fmt.Errorf("mint token: status %d: %s", status, ae.errorMessage())
+		msg := ae.errorMessage()
+		// The instance's 403 hint names the role the :scoped_admin gate wanted
+		// ("Use a token with write/admin permission that is a member of this
+		// workspace."). This error is a flat string, so the runner's second
+		// hint line never prints it; carry the SERVER's sentence inline.
+		if ae.code == "forbidden" && ae.serverHint != "" {
+			msg += " — " + ae.serverHint
+		}
+		return "", fmt.Errorf("mint token: status %d: %s", status, msg)
 	}
 	var resp struct {
 		Token string `json:"token"`
@@ -927,4 +945,12 @@ func usageVercel(out *writer, toStdout bool) {
 	p("  --no-deploy             provision Barkpark only, skip Vercel")
 	p("")
 	p("the admin token + server come from -s/--token/--server or the saved active server.")
+}
+
+// vercelTokenHint names a token by its last four characters, never its value.
+func vercelTokenHint(tok string) string {
+	if len(tok) <= 4 {
+		return "****"
+	}
+	return "…" + tok[len(tok)-4:]
 }

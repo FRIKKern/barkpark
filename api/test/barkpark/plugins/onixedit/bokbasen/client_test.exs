@@ -3,6 +3,9 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.ClientTest do
   # mutate Application env for credentials.
   use ExUnit.Case, async: false
 
+  # Plugins-off: the onixedit plugin starts Bokbasen.Auth and owns the book schemas
+  @moduletag :requires_plugins
+
   import ExUnit.CaptureLog
 
   alias Barkpark.Plugins.OnixEdit.Bokbasen.Auth

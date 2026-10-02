@@ -1,0 +1,165 @@
+ci-measure.sh --selftest — THREE CONSECUTIVE INVOCATIONS, 2026-09-20
+Tree: origin/main e922f67e6cb0af763c75210e1e12ba19370644d1 (worktree gates/r21l-breaker-measure, no local edits to ci-measure.sh).
+Host: darwin 24.5.0. Command, verbatim, each time:  bash scripts/ci-measure.sh --selftest
+
+THE COUNT IS 43, NOT THE 27 THE ROW'S c0 TEXT NAMES. 27 was true of an older
+instrument; arms were added since (the b*/j* families below). The criterion's
+number is STALE WORDING, not a failing instrument — what c0 actually asks for
+is that the selftest print its FULL pass count deterministically, which it does.
+
+================================================================
+=== SELFTEST RUN 1 (plain, no concurrent load) ===
+2026-09-20T20:07:46Z
+  ok   a1 zero-step cancelled job contributes NO compute (total 1.0 min = the one real job)
+  ok   a2 the zero-step job is COUNTED and reported, not silently dropped
+  ok   a3 the wall-span answer (7.4) is NOT what we report
+  ok   a4 a window spanning the GitHub Pro ceiling change is flagged as not comparable
+  ok   a5 non-vacuous: 1 executed job was parsed (an empty parse cannot pass a1 by accident)
+  ok   a6 a sample that came back 9-of-60 is flagged AND exits non-zero
+  ok   a7 a full 60-of-60 sample is NOT flagged (the guard discriminates)
+  ok   v1 a rerun-green on the SAME sha counts as a flake and NOT as a catch
+  ok   v1b an in-place rerun (run_attempt 2, green) is a flake — the shape that actually occurs
+  ok   v1c a rerun of a CANCELLED attempt is counted apart from a rerun of a FAILED one
+  ok   v1d enrich_prior attaches prior_concl on the LIVE path (gh stubbed, real function)
+  ok   v2 a green on a LATER sha is a catch CANDIDATE, not a flake (the two buckets discriminate)
+  ok   v3 an all-green workflow is NEVER-RED with zero catches (a green streak proves nothing)
+  ok   p1 a 27-day-old queued run is NOT counted in elixir.yml's run total (1, not 2) — the denominator holds only runs that ran
+  ok   p2 the report states 'phantom queued runs ignored: 1' — the ignored count is printed, not swallowed
+  ok   p3 …and under a 100000h cutoff the SAME row is kept (runs=2) — the threshold is doing the work
+  ok   p4 a run queued ONE HOUR ago is kept (runs=2) — the filter discriminates by age, it does not delete the queue
+  ok   p5 a queued row with an UNPARSEABLE created_at is kept (runs=2) — only a PROVABLE phantom leaves
+  ok   t1 a capped workflow prints a loud truncation notice naming the workflow, the cap and the real span — a reader cannot reach the table without walking past it
+  ok   t2 an uncapped workflow prints no truncation block — the notice is driven by the marker, not by the template
+  ok   t3 the collector walks until a SHORT page (40 rows, one call) and emits the cap marker only when the ceiling page comes back FULL
+  ok   v7 a workflow whose inputs are NOT in the sha is verdicted INPUTS-OUTSIDE-SHA, and its same-sha greens print as NOT FLAKE EVIDENCE
+  ok   v7b identical rows with no external-input metadata still read FLAKE-DOMINANT — v7 measures the discrimination, not a suppressed verdict
+  ok   v7c the external-input property is DERIVED from the workflow file ('github.event.pull_request.body'), and a workflow that only reads the code yields nothing
+  ok   d1 a 4-day window over a workflow that fires every ~6 days REFUSES the dormancy verdict and says what window it would need
+  ok   d2 a workflow with zero runs across the whole lookback IS called dormant, and the verdict names both windows inline
+  ok   d3 a window that DOES clear 3x the observed firing period yields DORMANT — the guard is keyed on the ratio, not on a blanket refusal
+  ok   b1 the breaker job list is DERIVED from the workflow YAML (2 jobs, and the job without a Decide step is not among them)
+  ok   b2 a workflows dir with no Decide step REFUSES (exit 1) instead of printing zeroes
+  ok   b3 a RAW job log reads INHERITED-FROM-MAIN, and a FAIL log of the same job reads NONE (the two verdicts discriminate)
+  ok   b4 breaker_after_enrich attaches the verdict on the LIVE path (gh stubbed, real function, raw row in)
+  ok   b5 a historical red whose failing step main already fails replays as INHERITED — decided by main-red-breaker.sh itself, not a second copy of the rule
+  ok   b6 a red on a step main does NOT fail is not inherited — the BEFORE arm discriminates instead of waving everything through
+  ok   b7 the table reports BEFORE 1 / AFTER 1, names both run ids, and discloses '1 job logs read'
+  ok   b8 642 sampled PR runs with ZERO jobs examined REFUSES (exit 1) instead of printing a tidy 0/0
+  ok   b9 a window that WAS read reports normally (exit 0) even when the count is genuinely zero — the guard fires on the instrument, not on the answer
+
+  ok   j1 the job prefix discriminates — 3 jobs seen, 2 selected, and the 20-min sibling job in the SAME run contributes 0 (10.0 job-minutes, not 30.0)
+  ok   j2 a skipped job's -1s wall is NOT pooled into the median (n=1, median 600.0s = the one job that ran)
+  ok   j3 the pooled-with--1s answer (299.5s) is NOT what we report
+  ok   j4 the probe tally separates a step that RAN from a job that never carried the step
+  ok   j5 a chunk that listed 1000 of 1400 is flagged as short of its own total_count, and a complete chunk is NOT (the guard discriminates)
+  ok   j6 a FAILED probe step names its run id (900004) instead of vanishing into a tally
+  ok   j7 a zero-job feed REFUSES (rc 1) with a CANNOT READ line — an empty collection never prints as a measured zero
+SELFTEST: 43 passed, 0 failed.
+exit rc=0
+2026-09-20T20:07:53Z
+
+================================================================
+=== SELFTEST RUN 2 (plain, no concurrent load) ===
+2026-09-20T20:07:53Z
+  ok   a1 zero-step cancelled job contributes NO compute (total 1.0 min = the one real job)
+  ok   a2 the zero-step job is COUNTED and reported, not silently dropped
+  ok   a3 the wall-span answer (7.4) is NOT what we report
+  ok   a4 a window spanning the GitHub Pro ceiling change is flagged as not comparable
+  ok   a5 non-vacuous: 1 executed job was parsed (an empty parse cannot pass a1 by accident)
+  ok   a6 a sample that came back 9-of-60 is flagged AND exits non-zero
+  ok   a7 a full 60-of-60 sample is NOT flagged (the guard discriminates)
+  ok   v1 a rerun-green on the SAME sha counts as a flake and NOT as a catch
+  ok   v1b an in-place rerun (run_attempt 2, green) is a flake — the shape that actually occurs
+  ok   v1c a rerun of a CANCELLED attempt is counted apart from a rerun of a FAILED one
+  ok   v1d enrich_prior attaches prior_concl on the LIVE path (gh stubbed, real function)
+  ok   v2 a green on a LATER sha is a catch CANDIDATE, not a flake (the two buckets discriminate)
+  ok   v3 an all-green workflow is NEVER-RED with zero catches (a green streak proves nothing)
+  ok   p1 a 27-day-old queued run is NOT counted in elixir.yml's run total (1, not 2) — the denominator holds only runs that ran
+  ok   p2 the report states 'phantom queued runs ignored: 1' — the ignored count is printed, not swallowed
+  ok   p3 …and under a 100000h cutoff the SAME row is kept (runs=2) — the threshold is doing the work
+  ok   p4 a run queued ONE HOUR ago is kept (runs=2) — the filter discriminates by age, it does not delete the queue
+  ok   p5 a queued row with an UNPARSEABLE created_at is kept (runs=2) — only a PROVABLE phantom leaves
+  ok   t1 a capped workflow prints a loud truncation notice naming the workflow, the cap and the real span — a reader cannot reach the table without walking past it
+  ok   t2 an uncapped workflow prints no truncation block — the notice is driven by the marker, not by the template
+  ok   t3 the collector walks until a SHORT page (40 rows, one call) and emits the cap marker only when the ceiling page comes back FULL
+  ok   v7 a workflow whose inputs are NOT in the sha is verdicted INPUTS-OUTSIDE-SHA, and its same-sha greens print as NOT FLAKE EVIDENCE
+  ok   v7b identical rows with no external-input metadata still read FLAKE-DOMINANT — v7 measures the discrimination, not a suppressed verdict
+  ok   v7c the external-input property is DERIVED from the workflow file ('github.event.pull_request.body'), and a workflow that only reads the code yields nothing
+  ok   d1 a 4-day window over a workflow that fires every ~6 days REFUSES the dormancy verdict and says what window it would need
+  ok   d2 a workflow with zero runs across the whole lookback IS called dormant, and the verdict names both windows inline
+  ok   d3 a window that DOES clear 3x the observed firing period yields DORMANT — the guard is keyed on the ratio, not on a blanket refusal
+  ok   b1 the breaker job list is DERIVED from the workflow YAML (2 jobs, and the job without a Decide step is not among them)
+  ok   b2 a workflows dir with no Decide step REFUSES (exit 1) instead of printing zeroes
+  ok   b3 a RAW job log reads INHERITED-FROM-MAIN, and a FAIL log of the same job reads NONE (the two verdicts discriminate)
+  ok   b4 breaker_after_enrich attaches the verdict on the LIVE path (gh stubbed, real function, raw row in)
+  ok   b5 a historical red whose failing step main already fails replays as INHERITED — decided by main-red-breaker.sh itself, not a second copy of the rule
+  ok   b6 a red on a step main does NOT fail is not inherited — the BEFORE arm discriminates instead of waving everything through
+  ok   b7 the table reports BEFORE 1 / AFTER 1, names both run ids, and discloses '1 job logs read'
+  ok   b8 642 sampled PR runs with ZERO jobs examined REFUSES (exit 1) instead of printing a tidy 0/0
+  ok   b9 a window that WAS read reports normally (exit 0) even when the count is genuinely zero — the guard fires on the instrument, not on the answer
+
+  ok   j1 the job prefix discriminates — 3 jobs seen, 2 selected, and the 20-min sibling job in the SAME run contributes 0 (10.0 job-minutes, not 30.0)
+  ok   j2 a skipped job's -1s wall is NOT pooled into the median (n=1, median 600.0s = the one job that ran)
+  ok   j3 the pooled-with--1s answer (299.5s) is NOT what we report
+  ok   j4 the probe tally separates a step that RAN from a job that never carried the step
+  ok   j5 a chunk that listed 1000 of 1400 is flagged as short of its own total_count, and a complete chunk is NOT (the guard discriminates)
+  ok   j6 a FAILED probe step names its run id (900004) instead of vanishing into a tally
+  ok   j7 a zero-job feed REFUSES (rc 1) with a CANNOT READ line — an empty collection never prints as a measured zero
+SELFTEST: 43 passed, 0 failed.
+exit rc=0
+2026-09-20T20:07:59Z
+
+================================================================
+=== SELFTEST RUN 3 (UNDER CONCURRENT LOAD: 8x `yes >/dev/null` burners) ===
+2026-09-20T20:08:07Z
+burner pids: 23920 23921 23922 23923 23924 23925 23926 23927 
+22:08  up 2 days,  4:57, 20 users, load averages: 84.11 70.98 73.41
+  ok   a1 zero-step cancelled job contributes NO compute (total 1.0 min = the one real job)
+  ok   a2 the zero-step job is COUNTED and reported, not silently dropped
+  ok   a3 the wall-span answer (7.4) is NOT what we report
+  ok   a4 a window spanning the GitHub Pro ceiling change is flagged as not comparable
+  ok   a5 non-vacuous: 1 executed job was parsed (an empty parse cannot pass a1 by accident)
+  ok   a6 a sample that came back 9-of-60 is flagged AND exits non-zero
+  ok   a7 a full 60-of-60 sample is NOT flagged (the guard discriminates)
+  ok   v1 a rerun-green on the SAME sha counts as a flake and NOT as a catch
+  ok   v1b an in-place rerun (run_attempt 2, green) is a flake — the shape that actually occurs
+  ok   v1c a rerun of a CANCELLED attempt is counted apart from a rerun of a FAILED one
+  ok   v1d enrich_prior attaches prior_concl on the LIVE path (gh stubbed, real function)
+  ok   v2 a green on a LATER sha is a catch CANDIDATE, not a flake (the two buckets discriminate)
+  ok   v3 an all-green workflow is NEVER-RED with zero catches (a green streak proves nothing)
+  ok   p1 a 27-day-old queued run is NOT counted in elixir.yml's run total (1, not 2) — the denominator holds only runs that ran
+  ok   p2 the report states 'phantom queued runs ignored: 1' — the ignored count is printed, not swallowed
+  ok   p3 …and under a 100000h cutoff the SAME row is kept (runs=2) — the threshold is doing the work
+  ok   p4 a run queued ONE HOUR ago is kept (runs=2) — the filter discriminates by age, it does not delete the queue
+  ok   p5 a queued row with an UNPARSEABLE created_at is kept (runs=2) — only a PROVABLE phantom leaves
+  ok   t1 a capped workflow prints a loud truncation notice naming the workflow, the cap and the real span — a reader cannot reach the table without walking past it
+  ok   t2 an uncapped workflow prints no truncation block — the notice is driven by the marker, not by the template
+  ok   t3 the collector walks until a SHORT page (40 rows, one call) and emits the cap marker only when the ceiling page comes back FULL
+  ok   v7 a workflow whose inputs are NOT in the sha is verdicted INPUTS-OUTSIDE-SHA, and its same-sha greens print as NOT FLAKE EVIDENCE
+  ok   v7b identical rows with no external-input metadata still read FLAKE-DOMINANT — v7 measures the discrimination, not a suppressed verdict
+  ok   v7c the external-input property is DERIVED from the workflow file ('github.event.pull_request.body'), and a workflow that only reads the code yields nothing
+  ok   d1 a 4-day window over a workflow that fires every ~6 days REFUSES the dormancy verdict and says what window it would need
+  ok   d2 a workflow with zero runs across the whole lookback IS called dormant, and the verdict names both windows inline
+  ok   d3 a window that DOES clear 3x the observed firing period yields DORMANT — the guard is keyed on the ratio, not on a blanket refusal
+  ok   b1 the breaker job list is DERIVED from the workflow YAML (2 jobs, and the job without a Decide step is not among them)
+  ok   b2 a workflows dir with no Decide step REFUSES (exit 1) instead of printing zeroes
+  ok   b3 a RAW job log reads INHERITED-FROM-MAIN, and a FAIL log of the same job reads NONE (the two verdicts discriminate)
+  ok   b4 breaker_after_enrich attaches the verdict on the LIVE path (gh stubbed, real function, raw row in)
+  ok   b5 a historical red whose failing step main already fails replays as INHERITED — decided by main-red-breaker.sh itself, not a second copy of the rule
+  ok   b6 a red on a step main does NOT fail is not inherited — the BEFORE arm discriminates instead of waving everything through
+  ok   b7 the table reports BEFORE 1 / AFTER 1, names both run ids, and discloses '1 job logs read'
+  ok   b8 642 sampled PR runs with ZERO jobs examined REFUSES (exit 1) instead of printing a tidy 0/0
+  ok   b9 a window that WAS read reports normally (exit 0) even when the count is genuinely zero — the guard fires on the instrument, not on the answer
+
+  ok   j1 the job prefix discriminates — 3 jobs seen, 2 selected, and the 20-min sibling job in the SAME run contributes 0 (10.0 job-minutes, not 30.0)
+  ok   j2 a skipped job's -1s wall is NOT pooled into the median (n=1, median 600.0s = the one job that ran)
+  ok   j3 the pooled-with--1s answer (299.5s) is NOT what we report
+  ok   j4 the probe tally separates a step that RAN from a job that never carried the step
+  ok   j5 a chunk that listed 1000 of 1400 is flagged as short of its own total_count, and a complete chunk is NOT (the guard discriminates)
+  ok   j6 a FAILED probe step names its run id (900004) instead of vanishing into a tally
+  ok   j7 a zero-job feed REFUSES (rc 1) with a CANNOT READ line — an empty collection never prints as a measured zero
+SELFTEST: 43 passed, 0 failed.
+exit rc=0
+22:08  up 2 days,  4:57, 20 users, load averages: 85.06 71.39 73.54
+2026-09-20T20:08:14Z
+

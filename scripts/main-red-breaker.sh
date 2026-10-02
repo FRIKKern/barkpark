@@ -211,21 +211,18 @@
 #     crashing main is a thing to see, not to excuse), and the log-recovery
 #     parser reads exactly one wording out of main's log.
 #
-# ── WHY A FAILED SOBELOW JOB DOES NOT RED THE SECURITY GATE ─────────────────
-# Recorded, NOT changed (task-e65c78b1cd214237 criterion c3). The `Security
-# gate` aggregator in .github/workflows/security.yml lists, in its `needs`,
-# [changes, gate-shape, sobelow-inline-overlap, sobelow-baseline-fingerprint,
-# mix-audit] — and NOT `sobelow`. That omission is BY DESIGN, not a fail-open
-# hole: security.yml's header declares Sobelow ADVISORY because its fingerprints
-# are derived from compiled AST and are not stable across Elixir toolchains, so
-# a blocking gate would red the fleet on baseline drift rather than on real
-# regressions; and scripts/security-gate-shape.test.sh (the 'Security gate shape
-# ratchet' job) ENFORCES that every continue-on-error job stays OUT of the
-# aggregator's needs. So a FAILED Sobelow job sitting inside a GREEN required
-# `Security gate` context is the documented posture, and main accepted it again
-# on 2026-09-05 14:15Z. Whether that posture should change is a RULING FOR MAIN,
-# never a silent edit from a breaker PR: this script only decides WHOSE red it
-# is, never whether a red blocks.
+# ── HOW A FAILED SOBELOW JOB REACHES THE SECURITY GATE (history, corrected) ─
+# Recorded 2026-09-05 (task-e65c78b1cd214237 criterion c3), when `sobelow` was
+# continue-on-error and absent from `Security gate`'s needs. Both have changed:
+# since 2026-09-17 the aggregator judges `sobelow` on `outputs.verdict`, and
+# since 2026-09-25 (task-f248c4889c3322fd, a ruling from main) the job carries
+# no continue-on-error, so a failed Sobelow job reds its own run and the gate.
+# The reason once given here for the advisory posture — fingerprints "derived
+# from compiled AST", unstable across toolchains — was false: Sobelow 0.14.1
+# hashes phash2([type, vuln_source, filename, vuln_line_no]) and parses source,
+# it never compiles it. security.yml's header states what was measured (the
+# Config.* family only). This script still only decides WHOSE red it is, never
+# whether a red blocks.
 #
 # DECISION (in order)
 #   no step failed                          -> exit 0 (nothing to decide)
@@ -754,25 +751,47 @@ log_marked = False      # main used the unambiguous one-name-per-line markers
 log_ambiguous = False   # only the legacy ';'-joined sentence was available AND it
                         # held a ';' — so the split may have shredded a step name
                         # that legitimately contains one (M4).
-head = "main-red-breaker: FAIL — '%s' failed on" % want
-mark = "main-red-breaker: MAIN-FAILED-STEP in '%s': " % want
-green = "main-red-breaker: no gate step failed in '%s'" % want
+# THE QUOTED JOB NAME, and why it is a pattern rather than a literal
+# (task-658971cd9db61621). These three lines are the READ side of a wire format
+# whose WRITE side is the `say` calls near the top of this file, on main's push
+# run. Both sides take the name from the Decide step's JOB_NAME env, not from the
+# jobs API, so today they agree for every breaker job INCLUDING the security.yml
+# matrix jobs: JOB_NAME there carries no ' (27.0, 1.18.1)' tuple on either side
+# (main job 107532012469, 2026-09-24: "no gate step failed in 'Sobelow static
+# analysis (regression gate, baseline .sobelow-skips)'", parsed). The optional
+# ' (…)' tail is M1's matrix-leg convention applied to the one name-matching
+# site that lacked it, so a JOB_NAME that someday carries the tuple on the
+# writer's side and not the reader's still round-trips. It is NOT a second
+# spelling of the name: the leading part is re.escape()d and must match whole.
+NAMED = r"'%s(?: \([^()']*\))?'" % re.escape(want)
+head = re.compile(r"main-red-breaker: FAIL — " + NAMED + r" failed on")
+mark = re.compile(r"main-red-breaker: MAIN-FAILED-STEP in " + NAMED + r": ")
+green = re.compile(r"main-red-breaker: no gate step failed in " + NAMED)
 legacy = set()
+# LIVENESS (task-658971cd9db61621 c1/c4). log_parsed going false is SILENT: the
+# classifier just stops finding PASSED and every red reads UNDETERMINED. So the
+# reader also records whether it READ a log at all and whether that log held ANY
+# line this script writes — the difference between "main's Decide did not run"
+# and "main's Decide wrote something this reader no longer understands".
+decide_lines_read, breaker_seen = 0, []
 try:
     for raw in open(log_path, errors="replace"):
         line = raw.rstrip("\r\n")
-        if green in line:
+        decide_lines_read += 1
+        if "main-red-breaker: " in line and len(breaker_seen) < 3:
+            breaker_seen.append(line[line.find("main-red-breaker: "):][:160])
+        if green.search(line):
             log_green = True; log_parsed = True
-        k = line.find(mark)
-        if k >= 0:
-            name = line[k + len(mark):].strip()
+        km = mark.search(line)
+        if km:
+            name = line[km.end():].strip()
             if name:
                 log_failed.add(name); log_marked = True; log_parsed = True
             continue
-        i = line.find(head)
-        if i < 0:
+        hm = head.search(line)
+        if not hm:
             continue
-        m = re.search(r":\s*(.*?)\.\s+(?:This is not a pull_request run|\(Main run |Main's newest)", line[i + len(head):])
+        m = re.search(r":\s*(.*?)\.\s+(?:This is not a pull_request run|\(Main run |Main's newest)", line[hm.end():])
         if not m:
             continue
         log_parsed = True
@@ -993,12 +1012,25 @@ else:
 # every all-green, clean-log job as newly accusable without checking whether the
 # job ALREADY had a proof — and an all-green main job makes the breaker print
 # "no gate step failed in '<job>'" into its own log, which sets `log_green` ->
-# `log_parsed` -> already a pass. The 10 that remain are real: they are the
-# security.yml matrix jobs (Sobelow, Dependency CVE audit), whose Decide line
-# does not round-trip under their matrix-suffixed job names. A denominator
-# derived from the property being measured cannot detect that property's
-# absence; log_parsed had to be READ out of the log, exactly as this script
-# reads it.
+# `log_parsed` -> already a pass. A denominator derived from the property being
+# measured cannot detect that property's absence.
+#
+# AND THE "10 THAT REMAIN" WERE ALSO AN INSTRUMENT ERROR — RE-MEASURED
+# 2026-09-24 (task-658971cd9db61621 c0). They were the security.yml matrix jobs
+# (Sobelow, Dependency CVE audit), said not to round-trip under their
+# matrix-suffixed names. They do round-trip: main's writer and this reader both
+# take the name from JOB_NAME, which carries no tuple. The 2026-09-08 pass read
+# the log with the jobs API's RENDERED name ("… (27.0, 1.18.1)"), which this
+# script never does. Re-derived by running THIS classifier (fixture mode +
+# MAIN_RED_BREAKER_REPORT_OUT) over 377 executed breaker jobs in 203 main push
+# runs, 2026-09-10..09-24, all 10 breaker jobs:
+#     api_trusted 0/377 · log_parsed 377/377 · job_trusted 252/377 · none 0/377
+#     log_parsed the ONLY proof: 125/377 (every red main job, plus 24 green
+#     CVE-audit jobs whose ##[error] the masking detector reads as AMBIG)
+# Handing the reader the rendered name instead reproduces the old claim
+# exactly: Sobelow + CVE audit drop to log_parsed 0/88, the rest unchanged.
+# THE SINGLE-LEG DEPENDENCY IS REAL; ITS KNOWN CRACK WAS NOT. The DECIDE-LINE
+# UNREADABLE line below exists because the leg can still break silently.
 job_trusted = job_all_success and mask_state == "NOERR"
 
 print("STATUS=%s" % status)
@@ -1007,6 +1039,13 @@ print("JOBCONCL=%s" % ",".join(str(c) for c in job_concls))
 print("LOGPARSED=%d" % int(log_parsed))
 print("LOGGREEN=%d" % int(log_green))
 print("LOGAMBIGUOUS=%d" % int(log_ambiguous))
+print("LOGMARKED=%d" % int(log_marked))
+# PARSED: a Decide line for this job was read. NOLOG: there was no log to read.
+# UNREADABLE: a log WAS read and none of the three lines parsed — the silent
+# global failure this state exists to make loud.
+print("DECIDESTATE=%s" % ("PARSED" if log_parsed else ("NOLOG" if decide_lines_read == 0 else "UNREADABLE")))
+print("DECIDESEEN=%s" % " | ".join(x.replace("\t", " ") for x in breaker_seen))
+print("APITRUSTED=%d" % int(api_trusted))
 print("MASKSTATE=%s" % mask_state)
 print("MASKEDSTEPS=%s" % ";".join(sorted(masked_steps)))
 print("JOBTRUSTED=%d" % int(job_trusted))
@@ -1098,6 +1137,32 @@ case "$MASKSTATE" in
 esac
 cls_of() { awk -F'\t' -v c="$1" '$1=="STEP" && $2==c {print $3}' "$TMPD/report.txt"; }
 NOTREACHED="$(cls_of NOTREACHED)"; PASSED="$(cls_of PASSED)"; UNKNOWN="$(cls_of UNKNOWN)"; FAILEDONMAIN="$(cls_of FAILED)"
+
+# ── DECIDE-LINE LIVENESS (task-658971cd9db61621 c1/c4) ──────────────────────
+# The accusing path rests on main's own Decide line round-tripping: api_trusted
+# is unreachable by construction (every gate step is continue-on-error, see its
+# comment) and job_trusted needs an all-green, error-free main job. If that line
+# stops parsing — its wording changes, a workflow stops emitting it, JOB_NAME
+# drifts between main and the PR — log_parsed goes false for EVERY breaker job
+# at once and nothing reds: every red simply reads OWNERSHIP-UNDETERMINED. That
+# is a guard failing by going quiet. So when main's log WAS read and no Decide
+# line for this job parsed, say so on its own line and its own annotation,
+# distinct from the UNDETERMINED verdict that may follow. It is a SIGNAL, not a
+# verdict: nothing below changes because of it, and it can never make the
+# breaker more accusing (it only ever fires when a pass proof is MISSING).
+# The harness pins it both ways (arms 27a-27h, and the writer->reader round trip
+# that reds when either side's wording moves).
+DECIDESTATE="$(get DECIDESTATE)"
+if [ "$DECIDESTATE" = "UNREADABLE" ]; then
+  DECIDESEEN="$(get DECIDESEEN)"
+  if [ -n "$DECIDESEEN" ]; then
+    _dl_why="main's log DOES carry main-red-breaker line(s), so its Decide step ran and wrote something this reader cannot parse for this job — the marker FORMAT or the JOB_NAME has drifted between writer and reader, which silences the accusing path for every breaker job at once. First line(s) seen: ${DECIDESEEN}"
+  else
+    _dl_why="main's log carries NO main-red-breaker line at all, so main's Decide step did not run or printed nothing (job cancelled or timed out before it, or the step was removed or renamed)."
+  fi
+  say "DECIDE-LINE UNREADABLE — main's job log for '${JOB_NAME}' was READ but none of the lines main's Decide step writes for this job parsed. Looked for: \"main-red-breaker: MAIN-FAILED-STEP in '${JOB_NAME}': <step>\", \"main-red-breaker: FAIL — '${JOB_NAME}' failed on: …\", \"main-red-breaker: no gate step failed in '${JOB_NAME}'\". ${_dl_why} Without it the breaker cannot use main's own verdict as a pass proof, so it will accuse only on other evidence. ${MAIN_RUN_DESC}" >&2
+  echo "::warning title=Main-red breaker: Decide line unreadable::main's log for '${JOB_NAME}' was read but its Decide line did not parse (looked for MAIN-FAILED-STEP / FAIL / no gate step failed in '${JOB_NAME}'). ${_dl_why}"
+fi
 
 # M3: four states that used to share one confident "GREEN or absent" sentence.
 if [ "$STATUS" = "NOJSON" ]; then
@@ -1249,6 +1314,169 @@ else
     exit 1
   fi
   SIG_NOTE=" Signature matched too: all $(wc -l < "$TMPD/our-sigs.txt" | tr -d ' ') normalised error line(s) of this red also appear in main's."
+
+  # ── the DISCRIMINATION test (task-501a3f6f34d5aa20) ────────────────────────
+  # A SUBSET TEST IS ONLY AS STRONG AS THE SET IT COMPARES. Everything above
+  # compares the FINDING SET, not the step name — that has been true since
+  # #15842. What it could not see is a step whose red SET IS A CONSTANT: for a
+  # per-file or per-finding gate (a byte-budget cap, a census, a path-escape
+  # ratchet) the red is one breach among many, and if the step prints the SAME
+  # sentence for every breach then `comm -23` finds nothing our side has that
+  # main's lacks NO MATTER WHAT WE BROKE. The subset test degrades, silently and
+  # exactly, to the v1 step-name verdict this file's header exists to bury.
+  #
+  # THE REAL SPECIMEN (PR #17984, job 103556399633, 2026-09-12). `Doc byte
+  # budgets` runs `check-doc-budgets.sh --selftest` before the gate itself under
+  # `bash -e`, and arm (i) of that selftest RUNS THE FULL GATE AND EXPECTS IT TO
+  # PASS. So the moment the tree is over cap the selftest reds, the step aborts,
+  # and the per-file `FAIL: <doc> is <n>B, cap is <m>B` lines never reach the
+  # log. The step's entire captured red is one line that names no document:
+  #   check-doc-budgets --selftest: FAILED — the full gate did not pass with DOC_BUDGETS_SPAN_ONLY set
+  # Main printed it. The PR printed it. The breaker said "Signature matched too:
+  # all 13 normalised error line(s)" and reported neutral at exit 0 — for a
+  # genuinely new breach (docs/setup/TASK-SYSTEM.md, 16450B -> 16532B against a
+  # 16000B cap). That is the defect: not a step-name match, a VACUOUS set.
+  #
+  # HOW THE CLASS IS DERIVED, AND WHY IT IS NOT A LIST. There is no enumeration
+  # of "per-file gates" here and there must not be: the class is open (39 capped
+  # docs, a growing discovery census, several ratchets) and a two-item skip list
+  # for an open class expires the day someone adds the third. The question is
+  # answered from the OUTPUT SHAPE instead, per failing step:
+  #
+  #     a red that reports a FINDING names the finding.
+  #
+  # A locator is ONE shape that sentence takes, and for a long time it was the
+  # only one this file could see — which made "does this red name a FILE?" stand
+  # in for "does this red name its FINDINGS?". Those are different questions, and
+  # for a whole class of gates the first is permanently NO however well the gate
+  # reports: a gate whose findings are BARE IDENTIFIERS — block type names,
+  # capability slugs, atoms, colour tokens — has no slash and no dot anywhere in
+  # its red. Two REAL specimens on main (measured 2026-09-14, head d4177ca6b):
+  #   scripts/pd-parity-completeness.sh  ->  FAIL: no golden fixture for in-scope type(s): delta num spark
+  #   scripts/docs-anchors-check.sh      ->  FAIL: @canonical capability:field-encryption claimed by >1 impl (a copy-paste that kept the marker?)
+  # Both name exactly what they found; both matched the locator test ZERO times,
+  # so both routed to OWNERSHIP-UNDETERMINED under an ACTION line telling the
+  # author to make the step print what it found — when the step already did.
+  #
+  # SO THE QUESTION IS ASKED ABOUT THE SLOT, NOT THE VOCABULARY. A red that
+  # reports a finding puts the thing it found in a PAYLOAD SLOT — a position the
+  # program FILLED. A constant sentence has no slot: it is byte-identical whether
+  # one document is over its cap or twenty, which is precisely why subtracting it
+  # from main's proves nothing. Three slot shapes are recognised, and each is
+  # carried by a real specimen in scripts/main-red-breaker.test.sh:
+  #   (1) LOCATOR   a path, or a bare filename with an extension.   (lineref-sweep)
+  #   (2) WELD      `label:value` with NO space, the value lowercase and carrying
+  #                 an internal separator — `capability:field-encryption`. A space
+  #                 after the colon starts a SENTENCE, not a value, which is why
+  #                 `--selftest: FAILED — the full gate did not pass …` has none.
+  #   (3) ITEM-SET  a `: `-terminated tail that is two or more BARE item tokens
+  #                 (lowercase, no punctuation) — AND corroborated by a SECOND
+  #                 such tail elsewhere in the same block sharing a token with it
+  #                 (`in-scope types: … delta … num … spark …` above
+  #                 `type(s): delta num spark`). One list alone is not enough: on
+  #                 shape alone `delta num spark` and `something went wrong` are
+  #                 the same thing, and this file refuses rather than guesses, so
+  #                 an uncorroborated list stays OPAQUE — the SAFE direction.
+  #
+  # WHY THAT IS A PREDICATE AND NOT AN ENUMERATION. It names no gate, no file and
+  # no finding vocabulary; it asks of ANY line "is there a slot here a program
+  # filled?". A gate added tomorrow is classified the first time it reds with no
+  # edit here — which is the same property the locator arm always had, just no
+  # longer restricted to findings that happen to be filenames.
+  #
+  # AND IT MUST NOT BE WIDENED UNTIL THE CONSTANT PASSES. Widening the locator
+  # regex until pd-parity matched would also match the doc-budget sentence above,
+  # and that sentence MUST keep reading OPAQUE — it is the specimen this whole
+  # test was built for. Arms 26h/26i prove BOTH halves in ONE run against the
+  # SAME classifier for exactly that reason.
+  #
+  # AND IT REFUSES RATHER THAN GUESSES. An opaque block does not become "the
+  # author's" — we genuinely cannot tell, and this file's founding rule is that
+  # "I cannot tell" is never folded into either answer. It routes to
+  # OWNERSHIP-UNDETERMINED (exit 1, ::warning) under its own CANNOT READ
+  # sentence, which is nothing like the neutral notice. The cost is bounded: the
+  # doc-gates job is advisory and cannot block a merge, so refusing costs a
+  # warning, while guessing cost two over-cap merges (#17878, #17984) nobody
+  # could see.
+  #
+  # THE FENCES COME FROM scripts/breaker-capture.sh. A capture written by an
+  # older copy has none; such a file is ONE block — the pre-fence behaviour —
+  # and the sentence says which shape it read rather than pretending.
+  BLOCK_AUDIT="$(python3 - "$OUR_LOG" 2>/dev/null <<'BLKPY'
+import re, sys
+BEGIN, END = "##[breaker-block]begin ", "##[breaker-block]end"
+# The only property this test needs is "does any line fill a PAYLOAD SLOT with
+# the thing it found". Digits are NOT a payload: the signature normaliser erases
+# them (`<sha>`, `#`), so a line whose only variation is a number is already
+# indistinguishable downstream and must not count as detail.
+# (1) LOCATOR.
+LOC = re.compile(r'[A-Za-z0-9_.~-]+/[A-Za-z0-9_./~-]+|\b[A-Za-z0-9_~-]+\.[A-Za-z][A-Za-z0-9]{0,6}\b')
+# (2) WELD: label:value, no space, value lowercase WITH an internal separator.
+#     The separator requirement is what keeps `MIX_ENV=test` and a bare English
+#     `note:see` out; the no-space requirement is what keeps a sentence out.
+WELD = re.compile(r'\b[A-Za-z][A-Za-z0-9_-]*:[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)+\b')
+# (3) ITEM-SET: a `: `-terminated tail of >=2 bare item tokens. Corroboration is
+#     applied per BLOCK below, not per line.
+ITEM = re.compile(r'^[a-z][a-z0-9]*(?:[-_.][a-z0-9]+)*$')
+TAIL = re.compile(r':[ \t]+')
+def item_sets(body):
+    out = []
+    for l in body:
+        for m in TAIL.finditer(l):
+            toks = l[m.end():].split()
+            if len(toks) >= 2 and all(ITEM.match(t) for t in toks):
+                out.append(set(toks))
+    return out
+def names_a_finding(body):
+    for l in body:
+        if LOC.search(l) or WELD.search(l):
+            return True
+    sets = item_sets(body)
+    for i in range(len(sets)):
+        for j in range(i + 1, len(sets)):
+            if sets[i] & sets[j]:
+                return True
+    return False
+try:
+    raw = open(sys.argv[1], errors="replace").read().split("\n")
+except Exception as e:
+    print("READFAIL\t%s" % e); raise SystemExit
+blocks, cur, label, fenced = [], [], "(unfenced capture - an older breaker-capture.sh wrote it)", False
+for line in raw:
+    if line.startswith(BEGIN):
+        fenced = True
+        if cur and any(l.strip() for l in cur): blocks.append((label, cur))
+        label, cur = line[len(BEGIN):].strip() or "(step command unreadable)", []
+    elif line.strip() == END:
+        blocks.append((label, cur)); label, cur = "(output after a closing fence)", []
+    else:
+        cur.append(line)
+if cur and any(l.strip() for l in cur): blocks.append((label, cur))
+print("SHAPE\t%s\t%d" % ("fenced" if fenced else "unfenced", len(blocks)))
+for label, body in blocks:
+    if not any(l.strip() for l in body): continue
+    if not names_a_finding(body):
+        print("OPAQUE\t%s\t%s" % (label, " / ".join(l.strip() for l in body if l.strip())[:300]))
+BLKPY
+)"
+  if [ -z "$BLOCK_AUDIT" ]; then
+    undetermined "CANNOT READ the finding set: the per-step block audit of ${OUR_LOG} produced no output at all, so a 'signature matched' cannot be told apart from a signature that says nothing. No red is waved through on an instrument that did not run."
+  fi
+  AUDIT_SHAPE="$(printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "SHAPE" { print $2 ", " $3 " block(s)" }')"
+  if printf '%s\n' "$BLOCK_AUDIT" | grep -q '^READFAIL'; then
+    undetermined "CANNOT READ the finding set: the per-step block audit of ${OUR_LOG} failed ($(printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "READFAIL" { print $2 }')). No red is waved through on an instrument that could not read its input."
+  fi
+  OPAQUE_N="$(printf '%s\n' "$BLOCK_AUDIT" | grep -c '^OPAQUE' || :)"
+  if [ "${OPAQUE_N:-0}" -gt 0 ]; then
+    say "OPAQUE-RED — CANNOT READ the finding set of this red, so 'main fails it too' cannot be checked against WHAT main fails:" >&2
+    # awk, not sed: BSD sed does not read `\t` in a pattern nor emit `\n` in a
+    # replacement, so a sed version of this printed NOTHING on macOS while the
+    # verdict above still reddened — a refusal that names no step is half a
+    # refusal. (Caught by arm 26c, which asserts the step and its output appear.)
+    printf '%s\n' "$BLOCK_AUDIT" | awk -F'\t' '$1 == "OPAQUE" { print "    step: " $2; print "      its entire captured red: " $3 }' >&2
+    undetermined "CANNOT READ the finding set: ${OPAQUE_N} of the failing step(s) printed a red that NAMES NOTHING — no path, no file, no finding (capture shape: ${AUDIT_SHAPE:-unknown}). For a per-file or per-finding gate that sentence is a CONSTANT: byte-identical whether one document is over its cap or twenty, so matching it against main's proves only that both sides failed the same step — the v1 verdict this breaker replaced. The step(s) and their captured output are printed above. ACTION: READ THAT BLOCK FIRST — this verdict says the red carries no per-finding SUBJECT, and there are three different reasons for that, with three different fixes. (a) THE STEP ABORTED BEFORE REPORTING: a --selftest or pre-flight that runs the full gate first and dies under 'bash -e', which is exactly what the doc-budget gate does — its per-file 'FAIL: <doc> is <n>B' lines are never printed, so fix the abort, not the reporting. (b) THE RED IS A CONSTANT SENTENCE that says only that something failed — then, and only then, make the step print what it found. (c) THE STEP DID NAME WHAT IT FOUND and this refusal is still firing — then the defect is HERE, in this classifier, not in your step: it recognises a payload slot in three shapes (a path or dotted filename; a 'label:value' welded with no space; a ': '-terminated list of bare item tokens corroborated by a second such list in the same block), and a gate whose findings sit in none of them reads opaque however well it reports. Add your specimen and a new arm to scripts/main-red-breaker.test.sh and widen the slot test — never by relaxing it until the constant sentence in (b) passes too, which would delete this test. Or fix main's red so there is nothing to inherit."
+  fi
+  SIG_NOTE="${SIG_NOTE} Every failing step's red also NAMES what it found (capture shape: ${AUDIT_SHAPE:-unknown}), so the subset test compared findings and not merely the fact of failure."
 fi
 
 MSG="INHERITED-FROM-MAIN — '${JOB_NAME}' failed only on step(s) main's newest completed run (${MAIN_RUN_ID}) already fails: ${OURS_1L}.${SIG_NOTE} This is main's defect, not this PR's; the main watcher owns it. This job reports neutral (exit 0). ${MAIN_RUN_DESC}"

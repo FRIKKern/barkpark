@@ -7,6 +7,7 @@ import (
 	"text/template"
 
 	"github.com/FRIKKern/barkpark/internal/caddyfile"
+	"github.com/FRIKKern/barkpark/internal/cli/setup/assets"
 )
 
 // CaddyOpts parameterises the Caddy/TLS provisioning step generator for ONE
@@ -151,42 +152,46 @@ func CaddySteps(opts CaddyOpts) []step {
 	)
 }
 
-// caddyInstallStep installs Caddy from its official apt repository — the
-// documented Debian/Ubuntu path (keyring + sources.list, apt-get update, then
-// `apt-get install -y caddy`). It is one shell beat: a single `bash -lc` of the
-// documented script so the keyring/sources/install run atomically as a unit
-// (the rendered Cmd shows the same line the operator would paste).
+// caddyInstallFunc is the install_caddy_pkg shell function, cut out of
+// the go:embedded deploy.sh between its BEGIN/END markers — ONE installer for
+// deploy.sh, deploy/azure-base-install.sh and this step, so a fix to the Caddy
+// install path (2026-10-01: the official apt repo signs with an EXPIRED subkey,
+// caddyserver/caddy issue 8095, task-8fcdc94b07a9dc60) cannot land in one copy and
+// miss another. Empty only if the markers vanish, which caddy_test.go reds on.
+func caddyInstallFunc() string {
+	const begin, end = "# install_caddy_pkg BEGIN\n", "# install_caddy_pkg END\n"
+	src := string(assets.DeployScript)
+	i := strings.Index(src, begin)
+	if i < 0 {
+		return ""
+	}
+	j := strings.Index(src[i:], end)
+	if j < 0 {
+		return ""
+	}
+	return src[i : i+j+len(end)]
+}
+
+// caddyInstallStep installs Caddy with install_caddy_pkg: the official apt
+// repo first (a box keeps apt-managed updates), and — when that repo cannot be
+// used — the same official package from the pinned GitHub release, verified
+// against a pinned sha512. It is one shell beat: a single `bash -lc` that
+// defines the function and calls it.
 func caddyInstallStep() step {
-	// DEBIAN_FRONTEND=noninteractive stops apt from blocking on a tzdata/config
-	// prompt over the non-interactive ssh shell (which would hang the step until
-	// the ServerAlive ceiling). Exported once at the head of the script so it
-	// applies to every apt-get below.
-	//
-	// `command -v caddy ||` short-circuits the whole apt round when the box
+	// `command -v caddy ||` short-circuits the whole install when the box
 	// already has Caddy — the baked warm-pool image ships it, so on every managed
-	// go-live this step is a no-op probe instead of a keyring + apt-get update
-	// round trip (seconds per provision, and immune to an apt-mirror hiccup). A
-	// bare-ubuntu box still takes the full documented install path.
-	script := "command -v caddy >/dev/null 2>&1 || { export DEBIAN_FRONTEND=noninteractive && " + strings.Join([]string{
-		// REFRESH FIRST (D-caddy-apt-404). A stock Hetzner Ubuntu image ships a
-		// STALE apt index: it pins curl/libcurl4 at a point release the mirror has
-		// already superseded and deleted, so the very first `apt-get install`
-		// resolves 7.81.0-1ubuntu1.26, asks mirror.hetzner.com for a .deb that is
-		// no longer published, and dies `404 Not Found` → exit 100 → the whole
-		// go-live fails at this step with a bare box. Three managed provisions died
-		// exactly here on 2026-09-02. The `apt-get update` below is NOT this: it
-		// exists to pick up the Caddy repo just added, and runs far too late to
-		// save the install above. A refresh must lead.
-		"apt-get update",
-		"apt-get install -y debian-keyring debian-archive-keyring apt-transport-https curl",
-		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg",
-		"curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list",
-		"apt-get update",
-		"apt-get install -y caddy",
-	}, " && ") + "; }"
+	// go-live this step is a no-op probe. A bare-ubuntu box takes the full path.
+	//
+	// REFRESH FIRST (D-caddy-apt-404): a stock Hetzner Ubuntu image ships a STALE
+	// apt index (curl/libcurl4 pinned at a deleted point release → 404 → exit
+	// 100; three managed provisions died exactly here on 2026-09-02). The
+	// function's first act is `apt-get update`, before any install.
+	// DEBIAN_FRONTEND=noninteractive is exported inside the function so apt never
+	// blocks on a prompt over the non-interactive ssh shell.
+	script := caddyInstallFunc() + "command -v caddy >/dev/null 2>&1 || install_caddy_pkg"
 	argv := []string{"bash", "-lc", script}
 	return step{
-		Title: "install Caddy (skip when baked; else the official apt repo)",
+		Title: "install Caddy (skip when baked; else the official apt repo, else the pinned verified release)",
 		Cmd:   shJoin(argv),
 		Argv:  argv,
 	}

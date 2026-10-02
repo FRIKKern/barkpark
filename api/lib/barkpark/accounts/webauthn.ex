@@ -210,7 +210,7 @@ defmodule Barkpark.Accounts.Webauthn do
           {:ok, WebauthnCredential.t()} | {:error, :not_found}
   def delete_credential(%User{id: uid}, id) do
     # Guard the :binary_id cast: a non-UUID :id (e.g. DELETE …/credentials/garbage)
-    # would raise Ecto.CastError → 500 inside get_by. A malformed id matches no
+    # would raise Ecto.Query.CastError → 400 inside get_by. A malformed id matches no
     # row → not_found. Bind the CAST value, not the raw string.
     case Repo.uuid_or_nil(id) do
       nil ->

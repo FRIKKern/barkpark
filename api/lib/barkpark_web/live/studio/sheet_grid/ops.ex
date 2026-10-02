@@ -3,11 +3,14 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   Commit + persistence plumbing for `BarkparkWeb.Studio.SheetGrid` — every
   edit becomes a `Session.apply_ops/3` call (no HTTP hop) and the component
   NEVER applies an op to its own assigns; the session broadcasts the delta
-  back through `apply_delta/2`. Read-only hosts drop every mutation in
-  `send_ops/2` (the server-side half of stripping the affordances), ops are
-  stamped with the studio identity's `user_id` for per-user undo, and big
-  batches chunk to the session's per-call bound. Presence meta merges ride
-  `push_presence/2`. Each function takes `socket` as the explicit first arg.
+  back through `apply_delta/2`. Hosts without write capability drop every
+  mutation in `send_ops/2` (the server-side half of stripping the
+  affordances), ops are stamped with the studio identity's `user_id` for
+  per-user undo, and big batches chunk to the session's per-call bound.
+  Presence meta merges ride `push_presence/2`, which is OUTSIDE that wall by
+  design — presence is advisory per-socket state, not persisted document
+  state, and a write-denied member is still entitled to navigate and be seen
+  (pds-w42; the per-event verdicts are in the SheetGrid moduledoc). Each function takes `socket` as the explicit first arg.
   """
 
   import Phoenix.Component, only: [assign: 2]
@@ -35,6 +38,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
       # frame N+1 onto content missing 1..N: permanent grid divergence.
       epoch != nil and socket.assigns.epoch != epoch ->
         socket |> assign(epoch: epoch) |> refetch(rev)
+
+      # A SIBLING frame of the flush we just applied: a cross-tab edit settles
+      # as ONE recompute that broadcasts one delta per dirty tab, every one
+      # stamped with the SAME rev (Sheets.Session.Ops.flush_whole_doc/1). The
+      # edited tab's frame lands first; dropping the rest as duplicates left
+      # every DEPENDENT tab showing its pre-edit values until a remount.
+      # Merge it once per tab — a second frame for a tab already merged at
+      # this rev is a true duplicate and falls through to the drop below.
+      rev == socket.assigns.rev and not Map.has_key?(payload, :structure) and
+        is_integer(Map.get(payload, :tab)) and
+          not MapSet.member?(rev_tabs(socket), payload.tab) ->
+        merge_changed(socket, payload)
 
       # Stale or duplicate frame (our own op's echo after a refetch).
       rev <= socket.assigns.rev ->
@@ -68,9 +83,20 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           end)
 
         tabs = List.replace_at(tabs, tab_idx, Map.put(tab, "cells", cells))
-        assign(socket, content: Map.put(content, "tabs", tabs), rev: rev)
+
+        # The tabs merged at THIS rev — what tells a sibling frame of the same
+        # flush (merge it) from a true duplicate (drop it). Resets per rev.
+        applied =
+          if rev == socket.assigns.rev,
+            do: MapSet.put(rev_tabs(socket), tab_idx),
+            else: MapSet.new([tab_idx])
+
+        assign(socket, content: Map.put(content, "tabs", tabs), rev: rev, rev_tabs: applied)
     end
   end
+
+  # Read with `[]` so a socket built before this assign existed reads empty.
+  defp rev_tabs(socket), do: socket.assigns[:rev_tabs] || MapSet.new()
 
   defp refetch(socket, rev), do: refetch(socket, rev, nil)
 
@@ -115,7 +141,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
     clamped = min(remapped, max(length(GridData.tabs(socket)) - 1, 0))
 
     socket
-    |> assign(tab: clamped)
+    # A refetch replaces the content wholesale, so no tab counts as merged at
+    # this rev any more; a sibling frame after it re-merges idempotently.
+    |> assign(tab: clamped, rev_tabs: MapSet.new())
     |> clear_editing_if_clamped(clamped, remapped)
     |> remap_selection(structure)
     |> refresh_find_hits()
@@ -420,8 +448,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # per-op semantics (individual rejection, LWW) are unchanged.
   def send_ops(socket, []), do: socket
 
-  # THE LAST WALL — the authorization axis, and the only site here that reads
-  # it. Everything above may be forged by a client; nothing gets past this.
+  # THE LAST WALL for PERSISTED document state — the authorization axis, and
+  # the only site here that reads it. Everything above may be forged by a
+  # client; no op gets past this. It is NOT a wall for all state:
+  # `push_presence/2` below writes collaborator meta and is called outside it
+  # ON PURPOSE (pds-w42) — see the SheetGrid moduledoc's presence table for
+  # the per-event verdicts, enumerated by run in presence_wall_test.exs.
   def send_ops(%{assigns: %{write_capable: false}} = socket, _ops), do: socket
 
   def send_ops(socket, ops) do
@@ -506,7 +538,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # Merge `updates` into this user's meta on the sheet presence topic. The
   # hosting StudioLive tracked the entry (resub_sheet_presence) on THIS pid —
   # LiveComponents run in the LV process, so the update binds correctly.
-  # No-op when presence isn't wired (disconnected render, read-only hosts).
+  # No-op when presence isn't wired (disconnected render, the `/sheets/:slug`
+  # reader — it passes no `presence_topic`). NOT gated on `write_capable`:
+  # see the moduledoc above and the SheetGrid presence table (pds-w42).
   def push_presence(socket, updates) do
     with topic when is_binary(topic) <- socket.assigns[:presence_topic],
          user_id when is_binary(user_id) <- socket.assigns[:user_id] do

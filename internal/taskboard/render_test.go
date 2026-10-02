@@ -1075,6 +1075,25 @@ func TestRenderSyncingStateIsHonest(t *testing.T) {
 	}
 }
 
+// The SSE stream usually pulses before the first snapshot lands, lifting Conn
+// to ConnLive. With no snapshot yet the empty spine must still read
+// "syncing…", never "All clear — no open tasks." (r4-lane-c dogfood: the TUI
+// flashed All clear on every launch until the first fetch returned).
+func TestRenderSyncingSurvivesALivePulseBeforeTheFirstSnapshot(t *testing.T) {
+	m := newModel(nil, "", Config{})
+	m, _ = m.handlePulse()
+	if m.ui.Conn != ConnLive {
+		t.Fatalf("precondition: a pulse lifts Conn to ConnLive, got %v", m.ui.Conn)
+	}
+	frame := ansi.Strip(Render(Board{Counts: map[string]int{}}, m.ui, 80, 20, fixedNow))
+	if !strings.Contains(frame, "syncing") {
+		t.Errorf("a live pulse before the first snapshot lost the syncing state:\n%s", frame)
+	}
+	if strings.Contains(frame, "All clear") {
+		t.Errorf("the board claims all clear before any snapshot landed:\n%s", frame)
+	}
+}
+
 // firstPaintHeight is a compact pane the first-paint frames fit whole into, so
 // the goldens show the full header + spine a first launch presents.
 const firstPaintHeight = 24

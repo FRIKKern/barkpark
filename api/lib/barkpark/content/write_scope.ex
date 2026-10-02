@@ -68,13 +68,20 @@ defmodule Barkpark.Content.WriteScope do
   # silent dataset_id=NULL stamp on a dataset string the row nominally names.
   # Scope-id keys a client must never choose — dropped (string AND atom form)
   # before the scope is resolved from server-authoritative opts / Default.
+  #
+  # `scope_source` (task-b389fe352e013dce) is in this list for the same reason
+  # the ids are: it is a MEASUREMENT of what the server's resolver did, not a
+  # claim a caller gets to make. A write that could assert its own provenance
+  # would make the column worthless for exactly the count it exists to answer.
   @client_scope_keys [
     "workspace_id",
     "project_id",
     "dataset_id",
+    "scope_source",
     :workspace_id,
     :project_id,
-    :dataset_id
+    :dataset_id,
+    :scope_source
   ]
 
   def put_scope_attrs(attrs, opts) do
@@ -88,7 +95,7 @@ defmodule Barkpark.Content.WriteScope do
     # may assign ownership; a non-admin user write is forced to the acting user).
     attrs = Map.drop(attrs, @client_scope_keys)
 
-    with {:ok, {ws_id, project_id}} <- resolve_write_scope(opts),
+    with {:ok, {ws_id, project_id}, scope_source} <- resolve_write_scope_with_source(opts),
          {:ok, dataset_id} <- resolve_dataset_id_for_write(attrs, project_id) do
       owner_id = resolve_owner_id_for_write(attrs, opts)
 
@@ -98,6 +105,14 @@ defmodule Barkpark.Content.WriteScope do
         |> maybe_put_scope_attr("project_id", project_id)
         |> maybe_put_scope_attr("dataset_id", dataset_id)
         |> maybe_put_scope_attr("owner_id", owner_id)
+        # PROVENANCE, bound to the id it explains (task-b389fe352e013dce). The
+        # stamp is gated on `ws_id` being non-nil for a reason: on a pre-backfill
+        # DB with no seeded Default, `seeded_default_write_scope/0` yields
+        # `{nil, nil}` and stamps no workspace_id — a `scope_source` written
+        # there would describe a workspace that is not on the row, which is
+        # exactly the disagreeing-surface failure this column is supposed to
+        # prevent. No workspace stamped, no provenance stamped.
+        |> maybe_put_scope_attr("scope_source", ws_id && scope_source)
 
       {:ok, attrs}
     end
@@ -263,12 +278,49 @@ defmodule Barkpark.Content.WriteScope do
   #   * `workspace_id: :shared_only` — a REQUEST arrived and the routing layer
   #     resolved no tenant (`ScopeHelpers.put_workspace_scope/3`'s `:sentinel`
   #     arm; only an HTTP conn can produce it). THE RULING APPLIES.
-  #   * the key ABSENT or nil — an internal, legitimately-unattributed writer:
-  #     seeds, mix tasks, Oban workers, plugin bootstrap, LiveView/channel
-  #     sockets (whose `:legacy` arm omits the key by design). They carry no
-  #     principal that could name a workspace, so refusing them would refuse a
-  #     write nobody can ever scope. They keep the seeded-Default fallback,
-  #     byte-identical.
+  #   * the key ABSENT or nil — an internal writer: seeds, mix tasks, Oban
+  #     workers, plugin bootstrap, LiveView/channel sockets (whose `:legacy` arm
+  #     omits the key by design). That population was EXCLUDED by the 6fa0 ruling
+  #     and is governed by the follow-on ruling below.
+  #
+  # ── THE SEEDED-DEFAULT RULING (task-e6523cc7154304f0, main 2026-09-13) ─────
+  #
+  # The 6fa0 ruling's excluded population was enumerated: 30 seats across 22
+  # files reach the `true ->` arm, plus 5 that bypass WriteScope entirely. They
+  # are not one population but three, and the arm below is now a CLASSIFIED
+  # DOOR that makes a caller say which one it is:
+  #
+  #   (a) A PRINCIPAL EXISTS but no scope was resolved. That is the fail-open
+  #       scoping class — the write is attributable and was attributed to a
+  #       tenant nobody chose. It now takes the SAME infer-or-refuse path the
+  #       6fa0 ruling built for `:shared_only`: exactly one candidate workspace
+  #       is used, anything else is `{:error, :workspace_scope_required}`.
+  #       (Studio LiveView `Shared.hook_opts/1` carries `user_id:`; any write
+  #       opts carrying a `:caller_context` with a user/token id are in here.)
+  #
+  #   (b) ANONYMOUS-BY-DESIGN seats (anonymous ticket submission via
+  #       `Plugins.Tickets.Thread`) must derive scope from the ROUTE's
+  #       site/workspace context and refuse when it is absent. They are fixed at
+  #       the SEAT (there is no principal for the funnel to infer from), and a
+  #       seat that fails to thread it lands in the residual arm below rather
+  #       than silently in Default.
+  #
+  #   (c) BOOT-TIME, INSTANCE-WIDE seats — plugin `upsert_schema` in
+  #       `Plugins.Bootstrap`, `Content.TagRegistry.do_register!/2`, seeds,
+  #       `mix onix.import` — legitimately belong to the whole instance. They
+  #       KEEP the seeded Default, but must now SAY SO by passing the explicit
+  #       `instance_wide: true` declaration. A declaration is auditable; an
+  #       omission is not. Each such seat carries a comment naming this ruling.
+  #
+  # THE RESIDUAL. An opts list with no scope key AND no principal AND no
+  # `instance_wide: true` declaration still resolves to the seeded Default, because that
+  # population is dominated by fixtures and internal helpers that predate any of
+  # this and refusing them wholesale would refuse writes nobody can scope. It is
+  # NO LONGER the same arm as (a) or (c) though: it is reached only after the
+  # door has ruled out an attributable caller, so the fail-open class — a write
+  # that COULD have named a tenant and didn't — can no longer reach Default.
+  # Tightening the residual to a refusal is the next ratchet step and needs its
+  # own row; the door is the seam that makes it a one-line change.
   #
   # This is the write-side reading of "degrade to vacancy, never to capture":
   # for a WRITE, vacancy is REFUSAL, not an unowned row. Writing a nil-workspace
@@ -278,25 +330,147 @@ defmodule Barkpark.Content.WriteScope do
   # read via that scope. Refusal
   # degrades to nothing existing; a shared-layer write degrades to everyone
   # holding it.
-  defp resolve_write_scope(opts) do
+  #
+  # PUBLIC, deliberately (task-893cf2751bac7428). A READ that must scan exactly
+  # the rows a WRITE through these same opts will land among cannot resolve the
+  # tenant by a second, independent rule: `Barkpark.Tasks.Dedup`'s candidate scan
+  # read `opts[:workspace_id]` RAW, so on a path that threads no tenant (the
+  # GitHub webhook pipeline carries no scope plug) it handed `nil` to
+  # `Content.Scope.scope_to_workspace/3` — whose nil arm fails CLOSED — and
+  # scanned zero rows while the write beside it landed in the seeded Default
+  # resolved HERE. The gate reported success having never run. Binding the read
+  # to this function is what keeps the two halves of a find-or-create looking at
+  # one tenant. It RESOLVES; it never widens: every arm below yields a single
+  # workspace id (or nil, when no Default is seeded) or a typed refusal — never
+  # a cross-tenant set. Dedup calls it ONLY for the key-absent case, so the
+  # `:shared_only` arm below is not on that caller's path.
+  @doc false
+  @spec resolve_write_scope(keyword()) ::
+          {:ok, {binary() | nil, binary() | nil}} | {:error, term()}
+  def resolve_write_scope(opts) do
+    case resolve_write_scope_with_source(opts) do
+      {:ok, scope, _source} -> {:ok, scope}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  @doc """
+  `resolve_write_scope/1` plus the NAME OF THE ARM that produced the scope —
+  the provenance `put_scope_attrs/2` stamps into `documents.scope_source`
+  (task-b389fe352e013dce).
+
+  The arms below are the whole vocabulary; `Content.Document.scope_sources/0`
+  is the same list on the schema side, and its `validate_inclusion` is what
+  stops a sixth value silently splitting a bucket.
+
+    * `"explicit"`         — the caller NAMED a `:workspace_id`.
+    * `"inferred"`         — no scope key (or `:shared_only`), but a principal
+                             with exactly one workspace membership.
+    * `"instance_wide"`    — an `instance_wide: true` DECLARATION.
+    * `"default_fallback"` — the residual: no key, no principal, no
+                             declaration.
+
+  WHY THIS EXISTS AS STORED BYTES rather than as something a reader could
+  recompute: `"explicit"` naming the seeded Default and `"default_fallback"`
+  land the IDENTICAL `{workspace_id, project_id}` pair. Recomputing the answer
+  would need the opts list at the instant of the write, which is the one thing
+  no reader has. `task-e6523cc7154304f0` closed its criterion 1 UNMEASURABLE on
+  exactly that: 527 of 3,959 documents (13.31%) carry the Default workspace,
+  and that number is `fallback UNION deliberate-Default` — a ceiling, not a
+  measurement. Rows written before migration 20260923120000 carry
+  `scope_source IS NULL` and stay permanently AMBIGUOUS; there is no join key
+  to backfill from, so there is no method to state.
+
+  The returned source is a STRING, not an atom, because its destination is a
+  varchar column and a `GROUP BY` over it — round-tripping through atoms would
+  buy nothing and invite `String.to_atom/1` on DB-read values.
+  """
+  @spec resolve_write_scope_with_source(keyword()) ::
+          {:ok, {binary() | nil, binary() | nil}, binary()} | {:error, term()}
+  def resolve_write_scope_with_source(opts) do
     opt_ws = Keyword.get(opts, :workspace_id)
     opt_proj = Keyword.get(opts, :project_id)
 
     cond do
       opt_ws == :shared_only ->
-        resolve_unscoped_request_write_scope(opts)
+        with_source(resolve_unscoped_request_write_scope(opts), "inferred")
 
       not is_nil(opt_ws) and is_nil(opt_proj) ->
-        {:ok, {opt_ws, default_project_id_for_workspace(opt_ws)}}
+        {:ok, {opt_ws, default_project_id_for_workspace(opt_ws)}, "explicit"}
 
       not is_nil(opt_ws) ->
-        {:ok, {opt_ws, opt_proj}}
+        {:ok, {opt_ws, opt_proj}, "explicit"}
 
       true ->
-        ws = Tenancy.get_default_workspace()
-        proj = Tenancy.get_default_project()
-        {:ok, {ws && ws.id, proj && proj.id}}
+        resolve_key_absent_write_scope(opts)
     end
+  end
+
+  # Attach the arm's name to a successful resolution; a typed refusal passes
+  # through with no source, because a refused write stamps nothing.
+  defp with_source({:ok, scope}, source), do: {:ok, scope, source}
+  defp with_source({:error, _reason} = error, _source), do: error
+
+  # THE CLASSIFIED DOOR for a key-absent write (see the ruling block above).
+  #
+  #   1. `instance_wide: true` — the class-(c) DECLARATION. Checked first, so a
+  #      boot seat that happens to carry a principal (a console-run seed, say)
+  #      still lands instance-wide because it SAID so.
+  #   2. an attributable caller — class (a) — takes infer-or-refuse.
+  #   3. the residual keeps the seeded Default.
+  #
+  # WHY A SEPARATE KEY and not a second `:workspace_id` atom next to
+  # `:shared_only`: `:shared_only` is understood across the READ side too
+  # (`Content.Scope`, `Tasks.Queue`, `Tasks.Fleet`, `Tasks.Events`, `Media`),
+  # because a request that resolved no tenant must narrow reads as well as
+  # writes. An instance-wide DECLARATION has no read meaning at all — it says
+  # only "stamp the seeded Default on this write" — so putting it in
+  # `:workspace_id` would force every one of those read consumers to learn an
+  # atom that means nothing to them, and a missed one would widen a read.
+  defp resolve_key_absent_write_scope(opts) do
+    cond do
+      Keyword.get(opts, :instance_wide) == true ->
+        with_source(seeded_default_write_scope(), "instance_wide")
+
+      ctx = attributable_caller_context(opts) ->
+        with_source(
+          resolve_unscoped_request_write_scope(Keyword.put(opts, :caller_context, ctx)),
+          "inferred"
+        )
+
+      true ->
+        with_source(seeded_default_write_scope(), "default_fallback")
+    end
+  end
+
+  # The class-(a) predicate, written as a PREDICATE and not a seat list: does
+  # this opts list name a principal that could have named a workspace? Either an
+  # explicit `:caller_context` carrying a user/token id, or a bare `:user_id`
+  # (what the Studio LiveView hook opts carry). A `:caller_context` that is
+  # anonymous names no principal and is NOT class (a) — it is class (b)/residual.
+  defp attributable_caller_context(opts) do
+    case Keyword.get(opts, :caller_context) do
+      %CallerContext{principal_type: :user, user_id: uid} = ctx when is_binary(uid) ->
+        ctx
+
+      %CallerContext{principal_type: :api_token, token_id: tid} = ctx when is_binary(tid) ->
+        ctx
+
+      _ ->
+        case Keyword.get(opts, :user_id) do
+          uid when is_binary(uid) -> %CallerContext{principal_type: :user, user_id: uid}
+          _ -> nil
+        end
+    end
+  end
+
+  # Class (c) + the residual: the instance-wide seeded scope. Degrades to nil
+  # when the backfill has not run yet (fresh test sandbox before seed) — never
+  # crashes.
+  defp seeded_default_write_scope do
+    ws = Tenancy.get_default_workspace()
+    proj = Tenancy.get_default_project()
+    {:ok, {ws && ws.id, proj && proj.id}}
   end
 
   defp resolve_unscoped_request_write_scope(opts) do
@@ -415,6 +589,52 @@ defmodule Barkpark.Content.WriteScope do
 
   def resolve_read_dataset_id(_dataset, _opts), do: nil
 
+  @doc """
+  Does the read's project know the dataset leaf `dataset`?
+  (task-8b96938b28964500)
+
+  `GET /v1/data/query/nosuchds/post` used to answer an admin an ordinary empty
+  page (200) and an anonymous caller a generic 404 "document not found". So a
+  typo'd dataset read as "no content yet" to every SDK client with a token. The
+  query and doc doors now ask this first, for every principal.
+
+  The project is resolved exactly as `resolve_read_dataset_id/2` resolves it.
+  When there is no project to ask (a workspace pinned without a project, which
+  reads on the legacy string path, or an install with no Default project), the
+  leaf is not judged: `true`. Otherwise the leaf is known when the project has
+  the `datasets` row, or when any document the read could return carries that
+  dataset string (this project's, or project-less rows such as task-substrate
+  writes and pre-W2 content). A real dataset therefore always passes.
+  """
+  @spec read_dataset_known?(String.t(), keyword()) :: boolean()
+  def read_dataset_known?(dataset, opts) when is_binary(dataset) do
+    project_id =
+      cond do
+        pid = Keyword.get(opts, :project_id) -> pid
+        Keyword.has_key?(opts, :workspace_id) -> nil
+        true -> read_default_project_id(opts)
+      end
+
+    cond do
+      is_nil(project_id) -> true
+      resolve_read_dataset_id(dataset, opts) -> true
+      true -> legacy_dataset_rows?(project_id, dataset)
+    end
+  end
+
+  def read_dataset_known?(_dataset, _opts), do: true
+
+  # Rows the read could still return under this dataset STRING: this project's,
+  # or project-less ones (task-substrate writes and pre-W2 rows carry no
+  # project_id, and the flat read path shows them). Existence only, no data.
+  defp legacy_dataset_rows?(project_id, dataset) do
+    Barkpark.Repo.exists?(
+      from(d in Document,
+        where: d.dataset == ^dataset and (d.project_id == ^project_id or is_nil(d.project_id))
+      )
+    )
+  end
+
   # The Default project id is immutable within a request; memoize it so the
   # no-`:project_id` (flat/back-compat) route resolves get_default_project once
   # — collapsing get_default_workspace + get_default_project (2 reads) that
@@ -440,12 +660,36 @@ defmodule Barkpark.Content.WriteScope do
   # "cached nil" from "not yet computed" via a private sentinel so a
   # legitimately-nil resolution is not recomputed.
   @memo_miss :"$barkpark_memo_miss"
-  defp memoize?(opts, key, fun) do
-    if Keyword.get(opts, :memoize, false) do
+  @process_memo_flag :barkpark_process_memo
+  defp memoize?(opts, key, fun), do: request_memo(opts, key, fun)
+
+  @doc """
+  The per-request / per-callback read memo (barkpark-5znv, gated by
+  barkpark-sknf; widened by task-dbfa7f69abb3b2ed / task-43754c756edf2af6).
+
+  Memoizes `fun.()` under `key` in the calling process's dictionary when the
+  caller opted in — an HTTP controller via `memoize: true` in its scope opts,
+  or a connected Studio LiveView via `enable_process_memo/0` — and calls `fun`
+  fresh otherwise. The memo NEVER outlives the unit of work it was built for:
+
+    * `reset_request_memo/0` runs at the top of every HTTP request
+      (`BarkparkWeb.Endpoint`): Bandit serves a keep-alive connection's
+      requests in ONE process, so without the reset a memo built by request 1
+      answered request 2 on the same connection;
+    * the Studio LiveView resets it at the start of every callback
+      (`handle_params`, `handle_event`, `handle_info`), so one callback and its
+      render share it and the next callback reads fresh — sknf's guarantee
+      that a long-lived LiveView never pins a deleted dataset id;
+    * a write in the SAME process that can change a memoized answer — a schema
+      upsert/delete, a dataset create, any workspace write — resets it at once.
+  """
+  def request_memo(opts, key, fun, cap \\ :infinity) do
+    if Keyword.get(opts, :memoize, false) or Process.get(@process_memo_flag, false) do
       case Process.get({:barkpark_request_memo, key}, @memo_miss) do
         @memo_miss ->
           value = fun.()
           Process.put({:barkpark_request_memo, key}, value)
+          if is_integer(cap), do: evict_beyond(key, cap)
           value
 
         value ->
@@ -454,6 +698,52 @@ defmodule Barkpark.Content.WriteScope do
     else
       fun.()
     end
+  end
+
+  # A CAPPED bucket keeps only its `cap` newest entries. The gain is a REPEAT
+  # (one request asking for the same schema row four times); a caller walking
+  # every type once (`/v1/graph`'s corpus fold) gains nothing from the memo,
+  # and holding every schema it touched raised that request's peak heap past
+  # its one-type bound (GraphCorpusHeapBoundTest). The bucket is the key's tag.
+  defp evict_beyond(key, cap) do
+    bucket = {:barkpark_request_memo_lru, elem(key, 0)}
+    keys = Process.get(bucket, []) ++ [key]
+
+    keys =
+      if length(keys) > cap do
+        [oldest | rest] = keys
+        Process.delete({:barkpark_request_memo, oldest})
+        rest
+      else
+        keys
+      end
+
+    Process.put(bucket, keys)
+  end
+
+  @doc "Opt the calling process into `request_memo/3` without a `memoize:` opt (a Studio LiveView, either leg)."
+  def enable_process_memo do
+    Process.put(@process_memo_flag, true)
+    :ok
+  end
+
+  @doc """
+  Start a fresh HTTP request: empty the memo AND drop a process opt-in. The
+  Studio dead render opts its request process in; the next request served by
+  the same keep-alive process must start as an ordinary request.
+  """
+  def begin_request do
+    Process.delete(@process_memo_flag)
+    reset_request_memo()
+  end
+
+  @doc "Drop every `request_memo/3` entry in the calling process."
+  def reset_request_memo do
+    for {k, _v} <- Process.get(),
+        match?({:barkpark_request_memo, _}, k) or match?({:barkpark_request_memo_lru, _}, k),
+        do: Process.delete(k)
+
+    :ok
   end
 
   # Apply the W2 dataset scope to a read query. When the dataset string resolves
@@ -494,20 +784,81 @@ defmodule Barkpark.Content.WriteScope do
   # public papers-backlinks / graph leak MEDIUM-5 names). `maybe_put_scope_attr`
   # skips nil, so a non-owner_scoped draft (owner_id NULL) still publishes to a
   # NULL owner_id row — byte-identical for unowned types.
+  #
+  # scope_source (task-b389fe352e013dce): the provenance TRAVELS WITH the
+  # workspace_id it explains. Copying `workspace_id` without it would leave the
+  # destination row carrying a workspace resolved one way and a provenance
+  # string describing a different resolution — a second surface that disagrees
+  # with the first, which is worse than no surface at all. Gated on the SOURCE's
+  # workspace_id being present, so a nil-workspace source (the
+  # `inherit_or_resolve_scope_attrs/3` door's case) copies nothing and the
+  # freshly-resolved stamp stands. A source row that predates the column carries
+  # nil provenance and yields `"inherited"` — true, and honest about being
+  # second-hand.
   def inherit_scope_attrs(attrs, %Document{
         workspace_id: ws_id,
         project_id: project_id,
         dataset_id: dataset_id,
-        owner_id: owner_id
+        owner_id: owner_id,
+        scope_source: scope_source
       }) do
     attrs
     |> maybe_put_scope_attr("workspace_id", ws_id)
     |> maybe_put_scope_attr("project_id", project_id)
     |> maybe_put_scope_attr("dataset_id", dataset_id)
     |> maybe_put_scope_attr("owner_id", owner_id)
+    |> maybe_put_scope_attr("scope_source", ws_id && (scope_source || "inherited"))
   end
 
   def inherit_scope_attrs(attrs, _), do: attrs
+
+  @doc """
+  THE TRANSITION-SEAT DOOR (task-d507d3d83476b57d, the seeded-Default ruling's
+  clause (d)).
+
+  `inherit_scope_attrs/2` is nil-skipping BY CONSTRUCTION
+  (`maybe_put_scope_attr(attrs, _key, nil) -> attrs`), which is right when the
+  source row carries a scope and WRONG when it does not: a nil-workspace source
+  produced a nil-workspace destination row, and
+  `Content.Scope.scope_to_workspace_including_global/3` is
+  `workspace_id == ^ws or is_nil(...)`, so that row is readable by EVERY tenant
+  through `Content.Analytics` and `Content.TagRegistry`.
+
+  This is the seat-side half of the classified door: INHERIT when the source has
+  a workspace (byte-identical to `inherit_scope_attrs/2` — the door is not
+  consulted at all, so a scoped publish/unpublish/seed is unchanged), otherwise
+  RESOLVE through `put_scope_attrs/2` and therefore through
+  `resolve_key_absent_write_scope/1` — an attributable caller is inferred or
+  REFUSED (`{:error, :workspace_scope_required}`), an `instance_wide: true`
+  declaration keeps the seeded Default, and only the residual (no scope key, no
+  principal — fixtures, internal helpers) lands in Default.
+
+  WHY RESOLVE AND NOT REFUSE OUTRIGHT at these seats: the source row is itself
+  already nil-workspace, so refusing the transition strands it with no verb that
+  can fix it. Resolving ATTRIBUTES the destination row, which is the outcome the
+  ruling asks for; a caller that cannot be attributed unambiguously is still
+  refused, by the door, in one place.
+
+  The resolved attrs are re-inherited from the source afterwards, so any
+  NON-workspace key the source did carry (`project_id`, `dataset_id`,
+  `owner_id`) still wins over the freshly-resolved one. Callers pass only
+  `%{"dataset" => dataset}` — deliberately NOT the row's `type` — so
+  `resolve_owner_id_for_write/2` takes its `not is_binary(type)` arm and the
+  destination's ownership comes from the SOURCE, never from the publisher.
+  """
+  @spec inherit_or_resolve_scope_attrs(map(), Document.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def inherit_or_resolve_scope_attrs(attrs, %Document{} = source, opts) do
+    inherited = inherit_scope_attrs(attrs, source)
+
+    if is_nil(Map.get(inherited, "workspace_id")) do
+      with {:ok, resolved} <- put_scope_attrs(inherited, opts) do
+        {:ok, inherit_scope_attrs(resolved, source)}
+      end
+    else
+      {:ok, inherited}
+    end
+  end
 
   def fire_after({:ok, doc}, event, payload) do
     after_payload = %{payload | event: event, doc: doc}

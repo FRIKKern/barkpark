@@ -25,9 +25,22 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLiveTest do
 
   setup %{conn: conn} do
     {:ok, _} =
-      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "test admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "test junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "test junior",
+        "production",
+        ["read"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, conn: conn}
   end

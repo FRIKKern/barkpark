@@ -75,7 +75,15 @@ defmodule Barkpark.SheetsM0ProofTest do
     # Register the weighted tags this file's ingest payload carries — the
     # publish wall (E3) rejects unknown tags.
     Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
-    Barkpark.Auth.create_token(@write_token, "m0-proof", @dataset, ["read", "write"])
+
+    Barkpark.Auth.create_token(
+      @write_token,
+      "m0-proof",
+      @dataset,
+      ["read", "write"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     :ok
   end
 
@@ -272,6 +280,8 @@ defmodule Barkpark.SheetsM0ProofTest do
     assert html =~ ">Q3-lansering utsatt</td>"
   end
 
+  # Plugins-off: the sheets plugin owns the sheet schema and its before_save gate
+  @tag :requires_plugins
   test "a structurally malformed sheet is rejected at the write gate with a 4xx",
        %{conn: conn} do
     # cells as a LIST instead of an A1-keyed map.

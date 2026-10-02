@@ -226,6 +226,12 @@ defmodule BarkparkWeb.TicketsTwoMinuteStoryTest do
     assert paused.status == 403, "a paused key is a distinguishable 403, not a silent 401"
     assert json_response(paused, 403)["error"]["message"] =~ "key paused"
 
+    # The hint is for the key-holder, not the generic "use a write/admin token"
+    # advice a ticket key can never follow (r4-lane-c dogfood).
+    paused_hint = json_response(paused, 403)["error"]["hint"]
+    assert paused_hint =~ "paused"
+    refute paused_hint =~ "write/admin"
+
     # Revoke the key → indistinguishable from presenting no token at all:
     # SAME status AND byte-identical body.
     assert admin_conn() |> delete("/v1/plugins/tickets/keys/#{key_id}") |> response(200)

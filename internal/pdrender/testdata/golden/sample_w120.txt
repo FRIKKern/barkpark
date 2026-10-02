@@ -4,6 +4,11 @@ BULLDOCS TERMINAL RENDER
 This paragraph mixes bold, italic, inline code() and a link (https://barkpark.cloud) so wrapping at the target width can
 be eyeballed across several lines of running prose.                                                                     
                                                                                                                         
+                                                                                                                        
+                                                                                                                        
+                                                                                                                        
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+                                                                                                                        
 A level-two heading                                                                                                     
                                                                                                                         
 • first bullet, short                                                                                                   

@@ -1,5 +1,6 @@
 import "server-only";
 import {
+  BODY_CHARS,
   DOC_TYPES,
   type FindResponse,
   type SearchEngine,
@@ -12,6 +13,7 @@ import {
 } from "@/lib/find-shape";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
 import { DATASET, SCOPE } from "@/lib/config";
+import { MAX_HITS } from "@/lib/search-limits";
 
 /**
  * Shared upstream search — the one place that talks to the Barkpark search API.
@@ -55,9 +57,6 @@ const ORIGIN = new URL(API_URL).origin;
  * serves both engines.
  */
 const SEARCH_BASE = TOKEN ? `${ORIGIN}${SCOPE}` : ORIGIN;
-
-/** Cap the working set; the client facets + sorts + paginates over it. */
-const MAX_HITS = 100;
 
 /**
  * Upstream column projection: everything `normalizeHit` actually reads —
@@ -151,6 +150,10 @@ function searchUrl(engineUsed: SearchEngine, q: string, browse: boolean): string
     perspective: "published",
     limit: String(MAX_HITS),
     fields: SEARCH_FIELDS,
+    // Ask the server for exactly the prose  keeps. Without it the
+    // browse seed ships every hit's whole block tree (14.65 MB at limit=100)
+    // for the ~100 KB this app can use.
+    bodyChars: String(BODY_CHARS),
   });
   return `${SEARCH_BASE}/v1/data/search/${DATASET}?${params.toString()}`;
 }

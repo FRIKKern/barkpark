@@ -19,11 +19,15 @@
 #          PLAN_MODE=build (npm on this box), PLAN_MODE=prebuilt (bytes built
 #          ELSEWHERE and uploaded — BUILD is skipped, STAGE still runs) or
 #          PLAN_MODE=staged (the release dir is already there — re-gate it).
-#   BUILD  npm ci && npm run build in the site source dir, wrapped in
-#          `systemd-run --scope -p MemoryMax=1500M -p CPUQuota=150%` and a
-#          SCRUBBED env — only the injected BARKPARK_* build vars, NOTHING
-#          inherited.  Vite gives process.env precedence over .env, so an ambient
-#          BARKPARK_TOKEN/URL silently shadows the per-site token (live-proven
+#   BUILD  npm ci && npm run build in the site source dir.  The resource cap is
+#          NOT taken here: the inner `systemd-run --scope` was retired
+#          (stw6-deployrunner-reattach) and the OUTER transient unit DeployRunner
+#          mints — `bp-site-build-<slug>-<tag>-<ms>.service`, MemoryMax=1500M
+#          CPUQuota=150% — carries it, which is also the only place charter D118
+#          permits a memory bound to sit (D611).  The env IS scrubbed — only the
+#          injected BARKPARK_* build vars, NOTHING inherited.  Vite gives
+#          process.env precedence over .env, so an ambient BARKPARK_TOKEN/URL
+#          silently shadows the per-site token (live-proven
 #          failure mode) — hence the scrub.
 #   STAGE  copy ONLY dist/ (12-16K) into releases/<build_id>/; node_modules
 #          (~148M) stays in the ephemeral build sandbox.  In PREBUILT mode the
@@ -117,6 +121,12 @@
 set -uo pipefail
 
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
+# Absolute path to the docs neighbour, resolved HERE while the cwd is still the
+# invocation's, so the --self-test README count guard at the foot of the selftest
+# block can find it after blocks below have cd'd into tmpdirs. Resolves to a
+# non-existent path when this engine was extracted without its directory, and the
+# guard then skips cleanly - which is the point.
+SELFTEST_README="$(cd "$(dirname "$SELF")" 2>/dev/null && pwd || true)/README.md"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
 # meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy-node.sh
@@ -141,6 +151,21 @@ HEALTH_FAIL_MARK=".bp-health-failed"
 # template (that rebuild passes HEALTH on genuine markers and goes live with the
 # WRONG bytes), and purge_failed_release refuses to delete it into one.
 PREBUILT_MARK=".bp-prebuilt-sha256"
+# Dropped inside EVERY release dir this engine stages, box-build and prebuilt
+# alike: the sha256 of the staged tree itself (charter D188).  It is a RECEIPT of
+# WHICH BYTES this release carries, never an identity key — one content_rev has
+# produced four distinct artifacts, so the build is not reproducible and no
+# digest here is a content address.  It is deliberately NOT $PREBUILT_MARK:
+# that file's recorded meaning is "these bytes arrived from an UPLOAD, and this
+# is the digest the CP verified for the tarball", and two decisions read its mere
+# PRESENCE (PLAN refuses to rebuild such a release from the provisioned template;
+# purge_failed_release refuses to delete it).  Writing a box-build digest there
+# would silently reclassify every box-build release as un-rebuildable, and would
+# put a TARBALL digest and a TREE digest in one filename.
+BUILD_MARK=".bp-build-sha256"
+# The digest stage_dir_into_release measured for THIS run's staged tree, "" when
+# it could not be taken.  Narrated on STAGE; re-measured independently at SWITCH.
+STAGED_SHA=""
 # THE file_server HIDE LIST — ONE definition, read by the fresh arm AND by the
 # in-place upgrade, so the two can never drift (a value on two surfaces needs one
 # lock). Caddy matches each pattern with path.Match against the request path and,
@@ -152,7 +177,8 @@ PREBUILT_MARK=".bp-prebuilt-sha256"
 # and Caddy's hide has no "except" — a blanket dotfile rule would 404 it with no
 # way back. Named classes only, and the reason for each:
 #
-#   .bp-prebuilt-sha256 / .bp-health-failed — this engine's own release markers.
+#   .bp-prebuilt-sha256 / .bp-build-sha256 / .bp-health-failed — this engine's own
+#                release markers.
 #   .DS_Store  — the packing machine's directory listing, INCLUDING the names of
 #                files that were never shipped.
 #   ._*        — a macOS AppleDouble sidecar: the file's resource fork and its
@@ -165,7 +191,7 @@ PREBUILT_MARK=".bp-prebuilt-sha256"
 # Barkpark.Sites.PrebuiltArtifact), so nothing NEW stages them. This hide is for
 # what is ALREADY on disk: a refusal is not retroactive, and every release staged
 # before that change is still live and still fetchable.
-HIDE_LIST="$PREBUILT_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
+HIDE_LIST="$PREBUILT_MARK $BUILD_MARK $HEALTH_FAIL_MARK .DS_Store ._* PaxHeader .git .env"
 # log() and emit() (the BPSTAGE machine protocol) live in the common lib.
 
 # ---- Mode dispatch ---------------------------------------------------------
@@ -239,10 +265,61 @@ has_site_route_marker() { grep -qE "$(site_route_marker_re)" "$1"; }
 # runs (no fixture fork — the test proves the real primitives).
 # ---------------------------------------------------------------------------
 
+# ---------------------------------------------------------------------------
+# FENCE TWO — A RELEASE THAT CONTAINS ANY SYMLINK NEVER GOES LIVE (task-63877435cf4ad70a).
+#
+# WHY IT IS HERE AND NOT IN THE CADDYFILE. A staged symlink is a SERVED file:
+# `root * $ROOT/current` + `file_server` dereferences it, so `leak.txt ->
+# /opt/barkpark/.env` is an HTTP-reachable secret (site-spawner charter D90).
+# The web-server-side defence everyone reaches for -- `disable_symlinks` -- is
+# DECLINED ON PURPOSE, and the reason is not taste:
+#
+#   1. IT IS NOT A CADDY DIRECTIVE AT ALL. Measured on caddy v2.11.4
+#      (2026-09-11, transcript in the PR): `disable_symlinks` is rejected as an
+#      unknown file_server SUBDIRECTIVE, as an unrecognized SITE directive, as
+#      an unrecognized GLOBAL option, and as an unknown field on the
+#      `http.handlers.file_server` JSON module. It is an NGINX directive. So
+#      emitting it does not weaken or harden serving -- it makes the Caddyfile
+#      UNPARSEABLE, and this Caddyfile is SHARED: one bad block and `caddy run`
+#      refuses the whole file, taking every other site AND the slot
+#      reverse_proxy down with it.
+#   2. EVEN IF IT EXISTED, the served root IS the `current` symlink this very
+#      function repoints (D11). A "refuse anything reached through a symlink"
+#      rule refuses the root itself, so it would refuse EVERY request to EVERY
+#      static site. Caddy's file_server has no root-only exemption.
+#
+# So the second layer lives at the FLIP, where the tree is on disk, fully
+# staged, and still not reachable: walk the candidate release and refuse to
+# repoint `current` at it if it contains any symlink. Fence one is the packer's
+# client-side refusal (charter D120, internal/cli/sites_tarball.go); fence two
+# is this. `find -type l` LSTATS, so it sees the link itself and never follows
+# it, and it is scoped to the candidate dir, so a symlink elsewhere on the box
+# is none of its business. A refusal leaves the live symlink UNMOVED -- the old
+# release keeps serving, which is the safe direction.
+#
+# NOT COVERED, on purpose: --rollback (do_rollback) repoints at a release that
+# already passed THIS fence on the run that first published it, and re-walking
+# it would turn a recovery path into a second place to fail.
+# ---------------------------------------------------------------------------
+SWITCH_REFUSED_LINKS=""
+release_symlinks() { # <release-dir> -> prints each symlink found, one per line
+  [ -d "$1" ] || return 0
+  find "$1" -type l 2>/dev/null
+}
+
 # SWITCH: atomic current -> releases/<BUILD_ID>.  Records the build we flip away
 # from in .previous so --rollback (and a forward re-rollback) is a pure pointer.
+#
+# Returns 2 (not 1) when the symlink fence above bites, so the caller can tell
+# "the rename failed" from "we refused to publish these bytes" and word it
+# honestly to the operator.
 do_switch() {
   local prev=""
+  local links; links="$(release_symlinks "$RELEASES/$BUILD_ID")"
+  if [ -n "$links" ]; then
+    SWITCH_REFUSED_LINKS="$(printf '%s\n' "$links" | head -5 | tr '\n' ' ')"
+    return 2
+  fi
   [ -L "$CURRENT" ] && prev="$(basename "$(readlink "$CURRENT")")"
   ln -sfn "releases/$BUILD_ID" "$CURRENT.tmp" || return 1
   atomic_symlink_swap "$CURRENT.tmp" "$CURRENT" || { rm -f "$CURRENT.tmp"; return 1; }
@@ -625,6 +702,74 @@ purge_failed_release() {
   log "HEALTH: purged releases/$BUILD_ID — a redeploy of this build_id rebuilds from source instead of re-gating broken bytes"
 }
 
+# ---------------------------------------------------------------------------
+# THE RELEASE RECEIPT (charter D188).  Every release this engine stages records
+# the sha256 of its own served tree, so "which bytes went live" is answerable
+# from the box AND comparable against the control-plane row.  Before this, only
+# the PREBUILT arm kept any receipt at all and it recorded the UPLOADED TARBALL,
+# not the tree — so for a box build (30,627 of 30,633 rows) a wrong artifact
+# could be served and no instrument anywhere would disagree with itself.
+#
+# NOT an identity key, and never to be used as one: one content_rev has produced
+# four distinct artifacts on this fleet.  This digest answers "are the bytes I
+# staged the bytes that are live", nothing more.
+#
+# sha256_stdin: the box is Linux (coreutils sha256sum), the SELF-TEST runs on
+# stock macOS bash 3.2 (shasum).  Both, or the digest is empty and every caller
+# degrades to "not measured" rather than to a wrong answer.
+sha256_stdin() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum | cut -d' ' -f1
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 | cut -d' ' -f1
+  else
+    printf ''
+  fi
+}
+
+# release_tree_digest <dir> — 64 hex over the tree's FILES, names included, or ""
+# when the dir is gone or no sha256 tool exists.  The engine's OWN markers are
+# excluded: they are written INTO the tree after it is measured (and $BUILD_MARK
+# would otherwise hash itself), so excluding them is what makes the STAGE-time
+# read and the SWITCH-time re-read the same quantity.
+#
+# `-exec … +` then a text sort (rather than find -print0 | sort -z | xargs -0):
+# BSD sort has no -z on the macOS the self-test runs on, and sha256sum/shasum both
+# escape a newline-bearing name rather than emitting a raw newline.
+release_tree_digest() { # <dir>
+  local dir="$1"
+  [ -d "$dir" ] || { printf ''; return 0; }
+  ( cd "$dir" 2>/dev/null || exit 0
+    find . -type f \
+      ! -name "$PREBUILT_MARK" ! -name "$BUILD_MARK" ! -name "$HEALTH_FAIL_MARK" \
+      -exec "$SHA_CMD" {} + 2>/dev/null \
+    | LC_ALL=C sort \
+    | sha256_stdin )
+}
+
+# The per-file digest command release_tree_digest hands to find(1).  Resolved
+# once, because `find -exec` needs a program name, not a shell function.
+if command -v sha256sum >/dev/null 2>&1; then SHA_CMD=sha256sum
+elif command -v shasum >/dev/null 2>&1; then SHA_CMD="shasum"
+else SHA_CMD=""
+fi
+
+# write_release_receipt <reldir> — measure the staged tree and drop $BUILD_MARK
+# in it.  Best-effort in BOTH directions: a box with no sha256 tool, or a
+# read-only release dir, costs the receipt and never the deploy.  Echoes the
+# digest (empty when it could not be taken) so the caller can narrate it.
+write_release_receipt() { # <reldir>
+  local reldir="$1" sha=""
+  [ -n "$SHA_CMD" ] || { printf ''; return 0; }
+  sha="$(release_tree_digest "$reldir")"
+  # Here-string, not `printf | grep -q`: under pipefail the reader's early exit
+  # SIGPIPEs the producer and 141 comes back, so a VALID digest would be
+  # discarded and the receipt silently skipped.
+  grep -qE '^[0-9a-f]{64}$' <<<"$sha" || { printf ''; return 0; }
+  printf '%s\n' "$sha" > "$reldir/$BUILD_MARK" 2>/dev/null || true
+  printf '%s' "$sha"
+}
+
 # STAGE's one copy idiom, shared by the two arms that produce bytes (a local
 # build's dist/, and an uploaded prebuilt tree).  Stage into a .partial dir, then
 # swap it in, so a crash mid-copy never leaves a half-populated
@@ -680,6 +825,11 @@ stage_dir_into_release() { # <srcdir> <what> [prebuilt_sha256]
   # must not sort on the builder's clock. Best-effort: a stamp that cannot be
   # written costs the ordering precision, never the deploy.
   stamp_release_staged "$RELEASES" "$BUILD_ID"
+  # THE RECEIPT (D188).  Taken AFTER the rename, over the tree that is now the
+  # release, and for BOTH arms — a prebuilt release's $PREBUILT_MARK names the
+  # uploaded TARBALL, which is not the quantity a "did the live tree change"
+  # comparison needs.  STAGED_SHA is read by the STAGE narration below.
+  STAGED_SHA="$(write_release_receipt "$RELDIR")"
   return 0
 }
 
@@ -728,8 +878,12 @@ if [ "$MODE" = selftest ]; then
   # and the staging-time RETIRE key (D80). 36 of the 44 are unit rows outside
   # every optional block, so BOTH floors move by those; the remaining 8 need a
   # real caddy(1) and land in FULL only.
-  SELFTEST_FLOOR_MIN=112
-  SELFTEST_FLOOR_FULL=502
+  # 2026-09-11: +27 (112->123, 502->529) for the symlink flip fence
+  # (task-63877435cf4ad70a) — 11 primitive rows on do_switch (always run, so BOTH
+  # floors move) and 16 e2e rows driving the real engine with a staged
+  # `leak.txt -> /opt/barkpark/.env` plus its clean-release control (FULL only).
+  SELFTEST_FLOOR_MIN=123
+  SELFTEST_FLOOR_FULL=529
   TESTS=0; FAILS=0
   check() { # <label> <cond-cmd...>
     local label="$1"; shift
@@ -756,6 +910,42 @@ if [ "$MODE" = selftest ]; then
   check "current -> releases/b2"        [ "$(live_build)" = b2 ]
   check ".previous records b1"          [ "$(cat "$ROOT/.previous")" = b1 ]
   check "no current.tmp residue"        [ ! -e "$CURRENT.tmp" ]
+
+  # -------------------------------------------------------------------------
+  # FENCE TWO, AT THE PRIMITIVE (task-63877435cf4ad70a). The e2e block below
+  # proves this end to end through the real engine, but e2e is OPTIONAL (it needs
+  # the fake-bin fixtures), so the fence is ALSO pinned here, in the always-run
+  # tier, on the same do_switch the deploy path calls. Its own tmp site keeps the
+  # b1..b7 fixture state below untouched.
+  # -------------------------------------------------------------------------
+  echo "[selftest] SWITCH refuses a release containing a symlink (disable_symlinks is declined; this is the fence)"
+  SLS="$TD/symlink-fence"
+  mkdir -p "$SLS/releases/leak" "$SLS/releases/clean" "$SLS/releases/deep/assets"
+  printf 'x' > "$SLS/releases/leak/index.html"
+  printf 'x' > "$SLS/releases/clean/index.html"
+  printf 'x' > "$SLS/releases/deep/index.html"
+  ln -sfn /opt/barkpark/.env "$SLS/releases/leak/leak.txt"
+  ln -sfn ../../../../etc/passwd "$SLS/releases/deep/assets/pw"
+  sl_save_root="$ROOT"; sl_save_rel="$RELEASES"; sl_save_cur="$CURRENT"; sl_save_bid="${BUILD_ID:-}"
+  ROOT="$SLS"; RELEASES="$SLS/releases"; CURRENT="$SLS/current"
+  # A clean release goes live first, so "the live link never moved" has a subject.
+  BUILD_ID=clean; do_switch; sl_clean_rc=$?
+  check "a CLEAN release flips (rc 0)"              [ "$sl_clean_rc" = 0 ]
+  check "…and current really points at it"          [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "precondition: the leak fixture really holds a symlink (non-vacuous)" \
+    [ -L "$SLS/releases/leak/leak.txt" ]
+  BUILD_ID=leak; do_switch; sl_leak_rc=$?
+  check "a release with a ROOT symlink is REFUSED (rc 2, not 0 and not 1)" [ "$sl_leak_rc" = 2 ]
+  refused_names() { case "$SWITCH_REFUSED_LINKS" in *"$1"*) return 0;; *) return 1;; esac; }
+  check "…the refusal NAMES the link"               refused_names leak.txt
+  check "…the LIVE symlink never moved"             [ "$(readlink "$CURRENT")" = releases/clean ]
+  check "…and no current.tmp residue was left"      [ ! -e "$CURRENT.tmp" ]
+  BUILD_ID=deep; do_switch; sl_deep_rc=$?
+  check "a NESTED symlink is refused too (the walk is not root-only)" [ "$sl_deep_rc" = 2 ]
+  check "…and that refusal names the nested path"   refused_names assets/pw
+  check "…live still on clean after the nested refusal" [ "$(readlink "$CURRENT")" = releases/clean ]
+  ROOT="$sl_save_root"; RELEASES="$sl_save_rel"; CURRENT="$sl_save_cur"; BUILD_ID="$sl_save_bid"
+  check "the fence block restored the fixture globals" [ "$(live_build)" = b2 ]
 
   echo "[selftest] ROLLBACK repoints to the previous release, forward-rollable"
   do_rollback
@@ -866,7 +1056,9 @@ if [ "$MODE" = selftest ]; then
     SITE_SLUG="$__save"; return "$__rc"
   }
   bp_verdict() { bp_rw "$1" "$2" "$3"; echo $?; }
-  # (1) THE PRE-FIX STATIC SHAPE, byte for byte as guerrilla carries it.
+  # (1) THE PRE-FIX STATIC SHAPE, byte for byte as guerrilla carries it. Like
+  #     every emitted block it carries NO `disable_symlinks` — declined, see
+  #     release_symlinks/do_switch; the fixtures mirror what the arm emits.
   { printf 'example.com {\n'
     printf "\t# BARKPARK_SITE_ROUTE:bare1 — static site 'bare1' served from its immutable current release.\n"
     printf '\thandle_path /sites/bare1/* {\n'
@@ -1509,6 +1701,11 @@ mkdir -p dist
   [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>hello</h1></body></html>\n'
 } > dist/index.html
+# THE SYMLINK-LEAK FIXTURE (task-63877435cf4ad70a). A build that drops a symlink
+# into dist/ — the charter-D90 shape verbatim. STAGE's `cp -a` preserves it, so
+# the release tree really carries a link pointing outside itself and the flip
+# fence is measured on the genuine article, not on a mock.
+[ -f ./.leak-symlink ] && ln -sfn /opt/barkpark/.env dist/leak.txt
 exit 0
 FAKENPM
     chmod +x "$FAKEBIN"/*
@@ -1549,6 +1746,91 @@ FAKENPM
     check "RETIRE ok (a retire that removes NOTHING still speaks)" saw RETIRE ok e1
     check "current -> releases/e1"             [ "$(livenow)" = releases/e1 ]
     check "npm really ran"                     grep -q 'npm run build' "$SRC/.npm-calls"
+
+    echo "[selftest] e2e: a BOX-BUILD release records WHICH bytes it carries (D188)"
+    # Before this, only the PREBUILT arm kept a receipt, and it recorded the
+    # uploaded TARBALL — so for a box build (30,627 of 30,633 prod rows) nothing
+    # on the box or on the row could name the served bytes, and a wrong artifact
+    # could be served with no instrument anywhere disagreeing with itself.
+    E1_SHA="$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null || true)"
+    check "the box-build release wrote .bp-build-sha256" \
+      sh -c "printf '%s' '$E1_SHA' | grep -qE '^[0-9a-f]{64}$'"
+    check "STAGE narrates the digest on stdout" \
+      grep -q "BPSTAGE name=STAGE status=ok build_id=e1 .*bp-build-sha256=$E1_SHA" "$E2E/out.log"
+    check "SWITCH narrates an INDEPENDENT re-read of the LIVE tree" \
+      grep -q "BPSTAGE name=SWITCH status=ok build_id=e1 .*bp-served-sha256=$E1_SHA" "$E2E/out.log"
+    # The receipt is a receipt, not an identity key: it must be a function of the
+    # BYTES, and the two readings agree only because nothing moved between them.
+    check "the digest is REPRODUCIBLE over the same tree" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+    # MUTATION, in the direction that matters: change one served byte and the
+    # digest must MOVE.  A digest that survives an edit certifies nothing.
+    cp "$E2E_SITE/releases/e1/index.html" "$E2E/e1-index.bak"
+    printf '<!--tamper-->' >> "$E2E_SITE/releases/e1/index.html"
+    E1_SHA_AFTER="$(cd "$E2E_SITE/releases/e1" && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)"
+    check "one tampered byte MOVES the digest"  [ "$E1_SHA_AFTER" != "$E1_SHA" ]
+    check "the RECORDED receipt still names the ORIGINAL bytes — i.e. the tamper is DETECTABLE" \
+      [ "$(cat "$E2E_SITE/releases/e1/.bp-build-sha256" 2>/dev/null)" != "$E1_SHA_AFTER" ]
+    cp "$E2E/e1-index.bak" "$E2E_SITE/releases/e1/index.html"
+    check "the tree is restored (the digest comes back)" \
+      sh -c "[ \"\$(cd '$E2E_SITE/releases/e1' && find . -type f ! -name '.bp-build-sha256' ! -name '.bp-prebuilt-sha256' ! -name '.bp-health-failed' -exec $SHA_CMD {} + | LC_ALL=C sort | $SHA_CMD | cut -d' ' -f1)\" = '$E1_SHA' ]"
+
+    # -----------------------------------------------------------------------
+    # FENCE TWO, E2E (task-63877435cf4ad70a): A RELEASE CARRYING A SYMLINK IS
+    # REFUSED AT THE FLIP, AND A CLEAN ONE STILL FLIPS.
+    #
+    # `disable_symlinks` is DECLINED (it is not a Caddy directive at any level —
+    # measured on caddy 2.11.4 — and the served root IS the current symlink), so
+    # this is the ONLY server-side layer behind the packer's refusal. It is
+    # driven through the REAL engine end to end: the fake npm stages
+    # `dist/leak.txt -> /opt/barkpark/.env`, STAGE's `cp -a` preserves it, and
+    # SWITCH must refuse rather than publish an HTTP-reachable secret.
+    #
+    # BOTH directions are asserted, and the CLEAN arm is the control: delete the
+    # `find -type l` refusal in do_switch and the leak rows go red BY NAME while
+    # the clean rows stay green — which is what separates "the fence works" from
+    # "the deploy happens to fail here".
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: SWITCH REFUSES a release containing a symlink; a clean release still flips"
+    E2E_LIVE_BEFORE="$(livenow)"
+    check "precondition: a previous release IS live before the refusal (non-vacuous)" \
+      [ "$E2E_LIVE_BEFORE" = releases/e1 ]
+    : > "$SRC/.leak-symlink"
+    rc="$(e2e_deploy sl1)"
+    check "the fixture really staged a symlink (control on the FIXTURE, not the verdict)" \
+      [ -L "$E2E_SITE/releases/sl1/leak.txt" ]
+    check "…and it really points outside the release" \
+      [ "$(readlink "$E2E_SITE/releases/sl1/leak.txt")" = /opt/barkpark/.env ]
+    check "leak release: the deploy exits 16 (SWITCH failed)"  [ "$rc" = 16 ]
+    check "leak release: SWITCH is narrated as FAILED"         saw SWITCH failed sl1
+    check "leak release: the refusal NAMES the offending link" \
+      grep -q 'leak.txt' "$E2E/out.log"
+    check "leak release: the refusal says the release contains symlink(s)" \
+      grep -q 'the staged release contains symlink(s)' "$E2E/out.log"
+    check "leak release: it is NOT reported as a swap/permissions failure" \
+      no_log_match 'atomic swap of current -> releases/sl1 failed'
+    check "leak release: the LIVE symlink never moved"         [ "$(livenow)" = "$E2E_LIVE_BEFORE" ]
+    # `-e` is FALSE for a DANGLING link, so it would pass even after a bad flip
+    # on a box with no /opt/barkpark/.env — measured: it stayed green under the
+    # mutation. Test for the LINK itself.
+    check "leak release: leak.txt is NOT present under the served root at all" \
+      sh -c "[ ! -L '$E2E_SITE/current/leak.txt' ] && [ ! -e '$E2E_SITE/current/leak.txt' ]"
+    check "leak release: RETIRE never ran (the run stopped at the flip)" \
+      no_log_match '^BPSTAGE name=RETIRE .*build_id=sl1'
+    # THE CONTROL ARM — the fence must not be a blanket "SWITCH now fails".
+    # `npm run build` never cleans dist/, so the staged link survives the
+    # sentinel — remove both, or every LATER deploy inherits it.
+    rm -f "$SRC/.leak-symlink" "$SRC/dist/leak.txt"
+    rc="$(e2e_deploy cl1)"
+    check "clean release: the deploy still exits 0"            [ "$rc" = 0 ]
+    check "clean release: SWITCH ok"                           saw SWITCH ok cl1
+    check "clean release: the flip really happened"            [ "$(livenow)" = releases/cl1 ]
+    check "clean release: it carries NO symlink (control)" \
+      sh -c "[ -z \"\$(find '$E2E_SITE/releases/cl1' -type l)\" ]"
+    # Restore the state the following blocks were written against: e1 live.
+    E2E_REV=rev-1 rc="$(e2e_deploy e1)"
+    check "state restored for the blocks below: e1 is live again" \
+      [ "$(livenow)" = releases/e1 ]
 
     echo "[selftest] e2e: a no-op redeploy of the live build speaks on every stage"
     : > "$SRC/.npm-calls"
@@ -1829,7 +2111,7 @@ FAKENPM
       grep -qE '^BPSTAGE name=BUILD status=skipped build_id=pb1 detail="prebuilt bytes \(.*, sha256 0123456789ab\) - no build ran on this box"' "$E2E/pb.out"
     check "STAGE genuinely RAN (started)"             pb_saw STAGE started pb1
     check "STAGE ok names the prebuilt digest" \
-      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\)"' "$E2E/pb.out"
+      grep -qE '^BPSTAGE name=STAGE status=ok build_id=pb1 detail="prebuilt bytes -> releases/pb1 \(.*sha256 0123456789ab\) bp-build-sha256=[0-9a-f]{64}"' "$E2E/pb.out"
     check "HEALTH ok"                                 pb_saw HEALTH ok pb1
     check "SWITCH ok"                                 pb_saw SWITCH ok pb1
     check "current -> releases/pb1"                   [ "$(pb_livenow)" = releases/pb1 ]
@@ -2443,6 +2725,30 @@ FAKECP
     # result through a REAL caddy on a real port with real requests. Re-widen
     # either side and rows 4/5/6 go red.
     # -----------------------------------------------------------------------
+    # THE PIN ABOVE GUARDS TWO FILES OUT OF FIVE. Its two static checks read
+    # deploy/instance-deploy.sh and deploy/caddy/barkpark-maintenance.caddy, and
+    # they were green for the whole life of the fix while three other renderers
+    # (internal/caddyfile/caddyfile.go's MaintenanceHandler,
+    # internal/cli/setup/assets/deploy.sh, and its byte-identical twin at the
+    # repo root) went on emitting the bare form. A guard that looks at two of
+    # five reads as present and is blind. The check below is a PREDICATE over
+    # every tracked file instead of a list anyone has to remember to extend, so
+    # a renderer written tomorrow is covered the day it lands.
+    check "no BARE handle_errors is emitted anywhere in the tree (repo-wide predicate)" \
+      bash "$(cd "$(dirname "$SELF")" && pwd)/caddy-handle-errors-scope-check.sh"
+
+    # The predicate above is a GREP: it proves the shape, never the behaviour.
+    # Nothing in this tree had ever OBSERVED a bare handle_errors eating a
+    # file_server 404 — the filing row (task-d06e8a2a42f1ed2f) says so itself:
+    # "I did not walk a live box." This drives a REAL caddy twice on one rig
+    # (dead upstream + an armed handle_path /sites/demo/* file_server) and
+    # measures BOTH arms: bare -> 503 on a static miss, scoped -> 404, with two
+    # controls that must agree under both arms so a green can never be "the
+    # scoped config serves less". It fails rather than skips under
+    # BARKPARK_SELFTEST_REQUIRE_E2E=1, which CI sets.
+    check "a bare handle_errors EATS a static 404 and the scoped one does not (real caddy, both arms)" \
+      bash "$(cd "$(dirname "$SELF")" && pwd)/caddy-handle-errors-behaviour-proof.sh"
+
     echo "[selftest] e2e: a miss on a spawned static site 404s through REAL caddy (the maintenance 503 no longer eats it)"
     MS="$E2E/misscode"; mkdir -p "$MS/bin" "$MS/root"
     printf '#!/usr/bin/env bash\nexit 0\n' > "$MS/bin/systemctl"; chmod +x "$MS/bin/systemctl"
@@ -2699,6 +3005,8 @@ FAKECP
       HUROOT="$HU/sites/hideup/current"
       # THE PRE-HIDE SHAPE, byte for byte as guerrilla carries it: this engine's
       # own marker comment, the handle_path, the root, and a BARE file_server.
+      # (Bare of `hide`, not of `disable_symlinks` — that one is declined on
+      # every site; the flip fence release_symlinks/do_switch covers it.)
       { printf 'example.com {\n'
         printf "\t# BARKPARK_SITE_ROUTE:hideup — static site 'hideup' served from its immutable current release.\n"
         printf '\t# handle_path strips the /sites/hideup prefix; root follows the symlink.\n'
@@ -3135,6 +3443,41 @@ GATENPM
 
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
+  # --- deploy/README.md count guard (ssw8-selftest-count-guard) -------------
+  # deploy/README.md publishes this engine's check count in prose, and until now
+  # NOTHING read it back, so it drifted freely (110 -> 128 -> the number this
+  # guard landed with). Direction matters: the README number is the ASSERTED
+  # value and $TESTS, which this run just measured, is the MEASUREMENT, so the
+  # guard only ever READS the README. A guard that learned its expected value
+  # from the thing it guards would have agreed with every drifted number.
+  # Skips cleanly when the README is absent, so a box that ships only the
+  # engines without the docs tree is unaffected.
+  if [ ! -f "$SELFTEST_README" ]; then
+    echo "[selftest] README count guard: SKIPPED - no $SELFTEST_README (engine shipped without the docs tree)"
+  elif [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" != 1 ]; then
+    # Asserted only on the COMPLETE run - the same condition SELFTEST_FLOOR_FULL
+    # uses. A bare run may honestly skip the optional blocks, so its $TESTS is a
+    # lower bound, and equality there would red on the runner's toolchain rather
+    # than on the drift this guard is looking for.
+    echo "[selftest] README count guard: NOT ASSERTED - bare run (the optional blocks may skip honestly, so $TESTS is a lower bound); it is asserted under BARKPARK_SELFTEST_REQUIRE_E2E=1, which is how CI runs this engine"
+  else
+    # The anchor is this engine's own invocation followed by its count, which
+    # occurs exactly once in the README. Zero matches, or more than one, is a
+    # FAILURE and not a pass: a reworded sentence must red here rather than
+    # quietly disarm the guard by matching nothing.
+    SELFTEST_README_RE='deploy/site-deploy\.sh --self-test[^0-9]{1,12}[0-9]+ checks'
+    SELFTEST_README_HITS="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | wc -l | tr -d ' ')"
+    if [ "$SELFTEST_README_HITS" != 1 ]; then
+      echo "[selftest] FAILED (1) - README count guard, deploy/site-deploy.sh: expected exactly ONE 'deploy/site-deploy.sh --self-test ... <N> checks' anchor in $SELFTEST_README, found $SELFTEST_README_HITS. The guard reads that sentence to learn the published count; if you reworded it, restore the anchor (the invocation, then the number, then the word 'checks', all on one line) in the SAME commit."
+      exit 1
+    fi
+    SELFTEST_README_COUNT="$(grep -oE "$SELFTEST_README_RE" "$SELFTEST_README" | sed -E 's/.*[^0-9]([0-9]+) checks$/\1/')"
+    if [ "$SELFTEST_README_COUNT" != "$TESTS" ]; then
+      echo "[selftest] FAILED (1) - README count drift in deploy/site-deploy.sh: deploy/README.md publishes $SELFTEST_README_COUNT checks, this run measured $TESTS. The run is the truth - update the number in deploy/README.md to $TESTS in the SAME commit that changed the check count, or the two drift apart again."
+      exit 1
+    fi
+    echo "[selftest] README count guard: deploy/README.md publishes $SELFTEST_README_COUNT checks for deploy/site-deploy.sh, this run measured $TESTS - agreed"
+  fi
   # The floor (see SELFTEST_FLOOR_* at the top of this block). `FAILED (1)` is
   # the shape internal/cli/cloud_site_preflight.go recognises as terminal.
   if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
@@ -3592,7 +3935,7 @@ if [ "$PLAN_MODE" = build ]; then
   stage_dir_into_release "$SITE_SRC/dist" "dist/"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: dist/ -> releases/$BUILD_ID/ ($staged_size)"
-  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size)"
+  emit STAGE ok "dist/ -> releases/$BUILD_ID ($staged_size) bp-build-sha256=${STAGED_SHA:-none}"
 elif [ "$PLAN_MODE" = prebuilt ]; then
   # THE BUILD LEFT THE BOX (D88).  No npm, no node_modules, no CPU contention
   # with the API that serves this site — just the shippable output, staged.
@@ -3602,7 +3945,7 @@ elif [ "$PLAN_MODE" = prebuilt ]; then
   stage_dir_into_release "$PREBUILT_DIR" "prebuilt bytes" "$PREBUILT_SHA256"
   staged_size="$(du -sh "$RELDIR" 2>/dev/null | cut -f1 || echo '?')"
   log "STAGE: prebuilt bytes -> releases/$BUILD_ID/ ($staged_size, sha256 $PREBUILT_SHORT)"
-  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT)"
+  emit STAGE ok "prebuilt bytes -> releases/$BUILD_ID ($staged_size, sha256 $PREBUILT_SHORT) bp-build-sha256=${STAGED_SHA:-none}"
 else
   # An already-staged redeploy used to emit NEITHER a BUILD nor a STAGE line — the
   # second path that hung a stage-watching orchestrator forever.
@@ -3695,6 +4038,10 @@ arm_caddy_site_route() {
     # Idempotent by construction: the awk demands EXACTLY ONE bare `file_server`
     # inside this site's block, so an already-hidden block (and every node-route
     # block, which has no file_server at all) rewrites nothing.
+    # The upgrade adds `hide` and NOTHING ELSE — no `disable_symlinks`, on
+    # purpose (task-63877435cf4ad70a): it is not a Caddy directive at any level
+    # and the served root IS the current symlink; the fence is at the flip, in
+    # release_symlinks/do_switch above.
     # ---------------------------------------------------------------------
     local upgraded=0
     local utmp; utmp="$(mktemp)"
@@ -3800,6 +4147,10 @@ arm_caddy_site_route() {
 		# is packaging junk and repo/secret shapes: a staged file is a SERVED file,
 		# and a release staged before the extractor learned to refuse junk still
 		# has \`.DS_Store\` and \`._*\` sidecars sitting in its root.
+		# NO \`disable_symlinks\` HERE, ON PURPOSE (task-63877435cf4ad70a): it is not a
+		# Caddy directive at any level (measured, caddy 2.11.4) and even if it were,
+		# \`root\` above IS the current symlink, so it would refuse every request. The
+		# symlink threat is fenced at the FLIP instead — see release_symlinks/do_switch.
 		file_server {
 			hide $HIDE_LIST
 		}
@@ -3884,14 +4235,32 @@ fi
 
 # ---- SWITCH (D11) — atomic symlink flip, no Caddy reload -------------------
 emit SWITCH started
-if ! do_switch; then
+do_switch; switch_rc=$?
+if [ "$switch_rc" = 2 ]; then
+  # FENCE TWO bit (see release_symlinks above): the staged tree contains a
+  # symlink, and a staged symlink is a SERVED file. Refuse the flip rather than
+  # publish it — `disable_symlinks` is not available to us (it is not a Caddy
+  # directive at any level), so this is where that threat is closed.
+  DETAIL="refusing to publish releases/$BUILD_ID — the staged release contains symlink(s): ${SWITCH_REFUSED_LINKS}— a symlink under the served root is dereferenced by file_server, so it would be an HTTP-reachable file outside the release (charter D90). The live release is UNTOUCHED and still serving. Re-pack without symlinks (the packer refuses them too, charter D120) and re-deploy"
+  log "SWITCH REFUSED for build $BUILD_ID — symlink in the staged release, live release untouched: $DETAIL"
+  emit SWITCH failed "$DETAIL"
+  exit 16
+elif [ "$switch_rc" != 0 ]; then
   DETAIL="atomic swap of current -> releases/$BUILD_ID failed — healthy but couldn't go live; check $ROOT is writable and 'current' isn't a dir or an immutable file"
   log "SWITCH failed for build $BUILD_ID — live release untouched (fail closed): $DETAIL"
   emit SWITCH failed "$DETAIL"
   exit 16
 fi
 log "SWITCH: '$SITE_SLUG' current -> releases/$BUILD_ID (atomic)"
-emit SWITCH ok "current -> releases/$BUILD_ID"
+# THE SERVED RECEIPT (D188).  An INDEPENDENT re-measurement, taken through the
+# `current` symlink AFTER the flip committed — not a re-print of STAGED_SHA.  It
+# is the only reading in this script taken over the tree Caddy is actually
+# serving, and the control plane compares the two: a SWITCH digest that differs
+# from the STAGE digest means the bytes that went live are not the bytes this run
+# staged, which is precisely the disagreement no instrument could raise before.
+SERVED_SHA="$(release_tree_digest "$CURRENT")"
+log "SWITCH: serving bp-served-sha256=${SERVED_SHA:-none} (staged ${STAGED_SHA:-none})"
+emit SWITCH ok "current -> releases/$BUILD_ID bp-served-sha256=${SERVED_SHA:-none}"
 
 # ---- RETIRE (D8) — keep newest N=5 ----------------------------------------
 # Emits even when it removes nothing — measured SILENT on 3 of 6 live deploys,

@@ -41,7 +41,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               Shared.paper_top_level_blocks(socket),
               socket.assigns.dataset,
               ScopeHelpers.scope_opts(socket),
-              Shared.paper_doc_id(socket.assigns[:paper_doc])
+              socket.assigns[:paper_doc]
             ),
             reset: true
           )
@@ -203,8 +203,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     painted_closed? = open? and not asked? and not wide?
     next_open? = if painted_closed?, do: true, else: not open?
 
-    {:noreply, assign(socket, sidebar_open: next_open?, sidebar_user_opened: next_open?)}
+    socket
+    |> assign(sidebar_open: next_open?, sidebar_user_opened: next_open?)
+    |> remember_inspector_pref(wide?, next_open?)
+    |> then(&{:noreply, &1})
   end
+
+  # spd-b1-pane-state-persistence — the one place the inspector preference is
+  # WRITTEN. Only a press at `wide` records it: there the inspector is a docked
+  # peer of the document, so open/closed is a standing layout choice. Below
+  # `wide` the default is already painted-closed and an open is a per-visit
+  # summon (D91; the Tier-3 destination at narrow/phone), so those presses
+  # change nothing remembered — which is what keeps a narrow/phone reload from
+  # painting a destination the user did not summon on this visit.
+  #
+  # The `inspector-pref` push reaches the body script's `phx:inspector-pref`
+  # window listener (root.html.heex), which writes localStorage and keeps the
+  # `data-inspector-pref` stamp on <html> in step, so the next reload's
+  # pre-paint agrees with what the socket now holds.
+  defp remember_inspector_pref(socket, true = _wide?, next_open?) do
+    socket
+    |> assign(inspector_pref_closed: not next_open?)
+    |> push_event("inspector-pref", %{closed: not next_open?})
+  end
+
+  defp remember_inspector_pref(socket, _not_wide, _next_open?), do: socket
 
   @doc """
   Collapse / expand ONE sidebar section, toggling its key in the
@@ -354,6 +377,111 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     end
   end
 
+  # ── Paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
+  #
+  # `paper-save-master` {block_id, title?}: save a block of the open paper as a
+  # `paper_master` document (the canvas block menu and the boundary toolbar
+  # push it). `paper-insert-master` {master_id, after_id, request_id, if_rev}:
+  # insert a DETACHED copy through the same request-identified op path as
+  # `paper-ops`, so a retry with the same request_id replays its receipt. The
+  # reply mirrors `paper_ops/2`'s so the save coordinator settles it the same.
+  def paper_save_master(%{"block_id" => block_id} = params, socket)
+      when is_binary(block_id) and block_id != "" do
+    case SharedPaper.paper_save_master(socket, block_id, params["title"]) do
+      {:ok, socket, master} ->
+        {:reply, %{saved: true, master: master}, socket}
+
+      {:error, socket, reason} ->
+        {:reply, %{saved: false, rejected: to_string(reason)}, socket}
+    end
+  end
+
+  def paper_save_master(_params, socket),
+    do: {:reply, %{saved: false, rejected: "invalid_master_request"}, socket}
+
+  def paper_insert_master(
+        %{"master_id" => master_id, "request_id" => request_id} = params,
+        socket
+      )
+      when is_binary(master_id) and master_id != "" and is_binary(request_id) do
+    after_id =
+      case params["after_id"] do
+        id when is_binary(id) and id != "" -> id
+        _ -> nil
+      end
+
+    # `mode: "linked"` inserts a LINKED instance (a `master-ref` block that
+    # follows the master, task-59f078a2fd248698); anything else a detached copy.
+    mode = if params["mode"] == "linked", do: :linked, else: :detached
+
+    socket
+    |> SharedPaper.paper_insert_master(master_id, after_id, request_id, params["if_rev"], mode)
+    |> master_op_reply(request_id)
+  end
+
+  def paper_insert_master(params, socket) do
+    request_id = if is_map(params), do: params["request_id"]
+    {:reply, %{saved: false, request_id: request_id, rejected: "invalid_master_request"}, socket}
+  end
+
+  # ── Linked master instances: Detach / Pin (task-59f078a2fd248698) ──────────
+  #
+  # `paper-detach-master` {block_id, request_id?, if_rev?} replaces a linked
+  # instance with a detached copy of what it shows; `paper-pin-master`
+  # {block_id, pin: "true"|"false", request_id?, if_rev?} freezes it to the
+  # master's latest PUBLISHED revision or back to latest. Both ride the request-
+  # identified op path (`paper_ops/5`). The boundary toolbar's buttons are
+  # plain phx-clicks with no client request id, so one is minted here — a
+  # client that sends its own gets replay on retry.
+  def paper_detach_master(%{"block_id" => block_id} = params, socket)
+      when is_binary(block_id) and block_id != "" do
+    request_id = linked_request_id(params)
+
+    socket
+    |> SharedPaper.paper_detach_master(block_id, request_id, params["if_rev"])
+    |> master_op_reply(request_id)
+  end
+
+  def paper_detach_master(params, socket), do: invalid_linked_request(params, socket)
+
+  def paper_pin_master(%{"block_id" => block_id, "pin" => pin} = params, socket)
+      when is_binary(block_id) and block_id != "" and pin in ["true", "false", true, false] do
+    request_id = linked_request_id(params)
+
+    socket
+    |> SharedPaper.paper_pin_master(block_id, pin in ["true", true], request_id, params["if_rev"])
+    |> master_op_reply(request_id)
+  end
+
+  def paper_pin_master(params, socket), do: invalid_linked_request(params, socket)
+
+  defp linked_request_id(%{"request_id" => id}) when is_binary(id) and id != "", do: id
+  defp linked_request_id(_params), do: Ecto.UUID.generate()
+
+  defp invalid_linked_request(params, socket) do
+    request_id = if is_map(params), do: params["request_id"]
+    {:reply, %{saved: false, request_id: request_id, rejected: "invalid_master_request"}, socket}
+  end
+
+  # The reply every master op sends — the same shape as `paper-ops`, so the
+  # save coordinator settles it the same way.
+  defp master_op_reply({:ok, socket, receipt, outcome}, request_id) do
+    {:reply,
+     %{
+       saved: true,
+       changed: SharedPaper.receipt_changed?(receipt),
+       request_id: request_id,
+       replayed: outcome == :replayed,
+       rev: receipt.rev,
+       history_step: SharedPaper.receipt_history_step(receipt, request_id)
+     }, socket}
+  end
+
+  defp master_op_reply({:error, socket}, request_id) do
+    reply = socket.assigns[:last_paper_save_result] || %{saved: false}
+    {:reply, Map.put_new(reply, :request_id, request_id), socket}
+  end
+
   @history_step_keys ~w(action history_ref if_rev request_id)
 
   def paper_history_step(params, socket) when is_map(params) do
@@ -489,7 +617,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def valueref_accept_baseline(_params, socket), do: {:noreply, socket}
 
   def paper_add_block(%{"block-type" => type} = params, socket) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     op =
       case params["after-id"] do
@@ -500,10 +628,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           %{"op" => "append-block", "block" => new}
       end
 
-    paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
+    socket
+    |> Shared.paper_op(write_meta(server_minted_block(op), params))
+    |> focus_new_block(new)
+    |> paper_reply()
   end
 
   def paper_add_block(params, socket), do: failed_reply(socket, params)
+
+  # A freshly added or materialized EMPTY paragraph is invisible at rest: the
+  # canvas collapses empty paragraph/ingress scaffolds unless the caret is in
+  # them (resting-scaffolds.js). Without a caret the author clicked Add (or the
+  # Ingress ghost), saw nothing, and typed into the void. On an accepted write,
+  # ask the canvas to put the caret in the new block — the canvas focuses it if
+  # the block is in its run, so the scaffold opens where the author is looking.
+  defp focus_new_block(socket, %{"id" => id, "type" => "paragraph"}) when is_binary(id) do
+    if socket.assigns[:last_paper_save_ok?] == true,
+      do: push_event(socket, "bp:focus-block", %{id: id}),
+      else: socket
+  end
+
+  defp focus_new_block(socket, _block), do: socket
 
   @doc """
   pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
@@ -517,7 +662,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   unknown kind / missing anchor is a calm no-op.
   """
   def paper_materialize_slot(%{"kind" => kind} = params, socket) do
-    case materialize_slot_block(kind) do
+    case materialize_slot_block(kind, Blocks.new_block_id(params["request_id"])) do
       nil ->
         failed_reply(socket, params)
 
@@ -531,7 +676,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               %{"op" => "append-block", "block" => block}
           end
 
-        paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
+        socket
+        |> Shared.paper_op(write_meta(server_minted_block(op), params))
+        |> focus_new_block(block)
+        |> paper_reply()
     end
   end
 
@@ -541,25 +689,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # (the seeded featured block, now birthed on demand); ingress is an unlocked
   # role:ingress paragraph. Both carry the role the reader + template validate key
   # on. Unknown kinds mint nothing.
-  defp materialize_slot_block("featured") do
+  defp materialize_slot_block("featured", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "image",
       "role" => "featured",
       "locked" => true
     }
   end
 
-  defp materialize_slot_block("ingress") do
+  defp materialize_slot_block("ingress", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "paragraph",
       "role" => "ingress",
       "content" => []
     }
   end
 
-  defp materialize_slot_block(_), do: nil
+  defp materialize_slot_block(_, _id), do: nil
 
   def paper_slash_insert(%{"type" => type, "fieldName" => fname} = params, socket)
       when is_binary(fname) and fname != "" do
@@ -568,7 +716,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       |> put_flash(:error, "That field is already at its limit.")
       |> failed_reply(params)
     else
-      new = Map.put(Blocks.default_block(type, Blocks.new_block_id()), "fieldName", fname)
+      new =
+        Map.put(
+          Blocks.default_block(type, Blocks.new_block_id(params["request_id"])),
+          "fieldName",
+          fname
+        )
 
       paper_reply(
         Shared.paper_op(
@@ -583,7 +736,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # `> [!type]` gesture; merge them onto the seeded default block. Ordered ABOVE
   # the generic clause (a more specific head must match first).
   def paper_slash_insert(%{"type" => "callout"} = params, socket) do
-    id = Blocks.new_block_id()
+    id = Blocks.new_block_id(params["request_id"])
 
     new =
       "callout"
@@ -599,7 +752,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   end
 
   def paper_slash_insert(%{"type" => type} = params, socket) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     paper_reply(
       Shared.paper_op(
@@ -643,7 +796,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
         case Enum.find(Shared.paper_all_descriptors(socket), fn d -> d.name == fname end) do
           %{type: type, label: label} ->
             new =
-              Blocks.default_block(type, Blocks.new_block_id())
+              Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
               |> Map.put("fieldName", fname)
               |> Map.put("label", label)
 
@@ -972,7 +1125,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           Shared.paper_top_level_blocks(socket),
           socket.assigns.dataset,
           ScopeHelpers.scope_opts(socket),
-          Shared.paper_doc_id(socket.assigns[:paper_doc])
+          socket.assigns[:paper_doc]
         ),
         reset: true
       )

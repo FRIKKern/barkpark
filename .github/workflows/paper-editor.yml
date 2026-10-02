@@ -41,6 +41,33 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
+      # corpus 1 of the rendered sweep below — a golden fixture added or
+      # re-frozen here is a new block this workflow must render, and without
+      # this line the job that renders it cannot see it.
+      - "js/packages/react/tests/fixtures/pd-golden/**"
+      # Every other file a suite under src/ READS from outside this tree
+      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
+      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
+      # read, add its sink here in BOTH arms. Re-derive the list with
+      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
+      # plus the join(REPO, "...") literals, and diff it against these lines.
+      - "api/priv/static/assets/bp-paper-editor-hooks.js"
+      - "api/priv/static/assets/bp-media-picker.js"
+      - "api/priv/static/assets/bp-media-picker.css"
+      - "api/priv/static/assets/bp-reference-picker.js"
+      - "api/priv/static/assets/bp-asset-browser.js"
+      - "api/priv/static/assets/bp-search-intel.js"
+      - "api/priv/static/assets/phoenix.js"
+      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
+      - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/paper-editor/**"
+      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "web/public/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -53,6 +80,33 @@ on:
       # of root.html.heex and main was red for 14 h with no run to say so.
       - "api/priv/static/assets/bp-paper-editor-shell.css"
       - "api/lib/barkpark_web/layouts/root.html.heex"
+      # __callout_parity.test.mjs derives the callout tone VOCABULARY from the
+      # reader's own clauses every run, so a tone added here must run this job.
+      - "api/lib/barkpark/portable_doc/render/walk.ex"
+      # corpus 1 of the rendered sweep below — a golden fixture added or
+      # re-frozen here is a new block this workflow must render, and without
+      # this line the job that renders it cannot see it.
+      - "js/packages/react/tests/fixtures/pd-golden/**"
+      # Every other file a suite under src/ READS from outside this tree
+      # (task-acfdeb338f8ef86e: bulldocs.html.heex went 26 of 60 commits without a
+      # run). HAND-KEPT, not derived by a check: when a suite adds a cross-tree
+      # read, add its sink here in BOTH arms. Re-derive the list with
+      #   grep -rhoE '"(\.\./)+[^"]+"' api/assets/paper-editor/src | sort -u
+      # plus the join(REPO, "...") literals, and diff it against these lines.
+      - "api/priv/static/assets/bp-paper-editor-hooks.js"
+      - "api/priv/static/assets/bp-media-picker.js"
+      - "api/priv/static/assets/bp-media-picker.css"
+      - "api/priv/static/assets/bp-reference-picker.js"
+      - "api/priv/static/assets/bp-asset-browser.js"
+      - "api/priv/static/assets/bp-search-intel.js"
+      - "api/priv/static/assets/phoenix.js"
+      - "api/priv/static/assets/phoenix_live_view.js"
+      - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+      - "api/lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex"
+      - "api/test/support/fixtures/nested-list-carriers.json"
+      - "api/test/support/fixtures/paper-editor/**"
+      # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
+      - "web/public/bp-paper-editor.bundle.js"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -98,3 +152,146 @@ jobs:
             stale=1
           fi
           exit "$stale"
+
+  # ── the RENDERED half of the narrow-viewport sweep ──────────────────────────
+  #
+  # `npm test` above runs four `__narrow_*_guards.test.mjs` suites, and all four
+  # are SOURCE guards: they read api/assets/paper-surface/paper-surface.css and
+  # regex-match declarations out of it. That catches a deleted declaration. It
+  # cannot tell you whether the page actually scrolls sideways on a phone, and
+  # it cannot find a block whose overflow nobody has thought about yet.
+  # `src/__narrow_render.mjs` is the half that measures — it renders every
+  # golden fixture, plus long unbreakable author tokens injected one field at a
+  # time, in headless Chromium and asserts documentElement.scrollWidth against
+  # the viewport at 390px and 320px.
+  #
+  # WHY IT IS ITS OWN JOB. The harness needs a browser; `npm test` must stay
+  # runnable on a machine that has none, which is why the harness is not in the
+  # `test` script (its own header: "a gate that cannot run everywhere is a gate
+  # people learn to ignore"). Here a browser is installed on purpose, so the
+  # measurement runs where it can.
+  #
+  # NO CHROMIUM, NO FAILURE — AND THAT IS THE TRAP THIS JOB DISARMS. Run with no
+  # browser, the harness prints SKIP and exits 0. A job that let that through
+  # would be green for the rest of its life having measured nothing. So the run
+  # step below asserts on the OUTPUT, not just the exit code: a SKIP line fails
+  # the job, and so does any run that did not print all four measured
+  # assertions (two corpora x two widths). Green here means it measured.
+  #
+  # NOT IN THE REQUIRED SET (.github/required-checks.json), and no
+  # continue-on-error: it reds its own check run honestly and cannot block a
+  # merge. That is the same advisory shape as the doc-budget job.
+  narrow-render:
+    name: Narrow-viewport rendered sweep
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: api/assets/paper-editor
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Cache chrome-headless-shell
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/puppeteer
+          key: ${{ runner.os }}-puppeteer-chrome-headless-shell-stable
+
+      # chrome-headless-shell, not full Chrome: the harness only dumps the DOM
+      # after a virtual-time budget, so it needs no window server and no codecs.
+      # `install` prints "<browser>@<buildId> <absolute path>", and pinning
+      # BP_CHROME from that path is exact — it does not depend on the harness
+      # guessing a cache directory layout.
+      - name: Install chrome-headless-shell
+        run: |
+          set -euo pipefail
+          npx --yes @puppeteer/browsers install chrome-headless-shell@stable \
+            --path "$HOME/.cache/puppeteer" | tee "$RUNNER_TEMP/chrome-install.txt"
+          # The last line is "chrome-headless-shell@<buildId> <absolute path>".
+          bin="$(tail -1 "$RUNNER_TEMP/chrome-install.txt")"
+          bin="${bin##* }"
+          if [ ! -x "$bin" ]; then
+            echo "::error::chrome-headless-shell reported '$bin', which is not an executable. Refusing to run the sweep without a browser — it would SKIP and pass vacuously."
+            exit 1
+          fi
+          echo "BP_CHROME=$bin" >> "$GITHUB_ENV"
+
+      - name: Render the sweep at 390px and 320px
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/narrow-render.txt"
+          status=0
+          BP_NARROW_WIDTHS=390,320 BP_NARROW_VERBOSE=1 \
+            node src/__narrow_render.mjs > "$out" 2>&1 || status=$?
+          cat "$out"
+
+          # PROVE IT MEASURED. Everything below fails a run that produced a
+          # green exit code without rendering anything.
+          if grep -q '^SKIP  __narrow_render.mjs' "$out"; then
+            echo "::error::the harness found no browser and skipped. A skipped sweep is not a passing sweep."
+            exit 1
+          fi
+          if grep -q '^SKIP  golden corpus' "$out"; then
+            echo "::error::the golden corpus (js/packages/react/tests/fixtures/pd-golden) was absent, so corpus 1 measured nothing."
+            exit 1
+          fi
+          golden=$(grep -c '^\(PASS\|FAIL\)  no golden fixture scrolls the page sideways at ' "$out" || true)
+          blocks=$(grep -c '^\(PASS\|FAIL\)  no block overflows on a token plain prose survives, at ' "$out" || true)
+          if [ "$golden" -ne 2 ] || [ "$blocks" -ne 2 ]; then
+            echo "::error::expected 2 golden-corpus and 2 hostile-token assertions (one per width in BP_NARROW_WIDTHS=390,320); got $golden and $blocks. The run did not measure what this job claims to measure."
+            exit 1
+          fi
+
+          exit "$status"
+
+      # ── the generic canvas harness, wired at last ────────────────────────────
+      #
+      # `src/canvas/__harness_generic_run.mjs` proves four things no other gate
+      # measures: a real published capture mounts clean and round-trips, five
+      # malformed fixture shapes are REJECTED VISIBLY, a mutated block reds the
+      # same way, and Chromium contacted nothing but the in-process static
+      # server. Until this step it was invoked by NOTHING — not a workflow, not
+      # a script, not an npm chain (`grep -rn __harness_generic .github scripts
+      # tooling` matched zero lines on origin/main at b73585c3f). Its own header
+      # explains why it is not in `npm test` (the suite must run without a
+      # browser) and points at __harness_lock.test.mjs as the always-on half —
+      # but the always-on half is a BYTE LOCK on __harness.html; it says nothing
+      # about whether the generic harness still validates anything.
+      #
+      # MEASURED, 2026-09-18 on this branch, node v22.22.0, system Chrome:
+      #   RED ARM   — gut __harness_generic.html's empty-`blocks` refusal
+      #               (line 171, `return "…nothing to mount."` -> `return null`):
+      #               __harness_generic_run.mjs -> "1 FAILING", exit 1, while
+      #               __harness_lock.test.mjs -> OK exit 0 and
+      #               __test_chain_census.mjs -> "0 drift" exit 0. Every
+      #               CI-reachable guard stayed green on a harness that had
+      #               stopped refusing an empty document.
+      #   QUIET ARM — the same tree unmutated: 8 PASS arms, "OK
+      #               __harness_generic_run.mjs", exit 0.
+      #
+      # It runs here rather than in its own job because this job already
+      # installs chrome-headless-shell and exports BP_CHROME, and a SKIP is
+      # failed below for the same reason the sweep above fails one.
+      - name: Drive the generic canvas harness in the browser
+        run: |
+          set -uo pipefail
+          out="$RUNNER_TEMP/harness-generic.txt"
+          status=0
+          node src/canvas/__harness_generic_run.mjs > "$out" 2>&1 || status=$?
+          cat "$out"
+
+          if grep -q '^SKIP  browser arms' "$out"; then
+            echo "::error::the generic harness found no browser and skipped its browser arms. A skipped run is not a passing run."
+            exit 1
+          fi
+          arms=$(grep -c '^\(PASS\|FAIL\)  ' "$out" || true)
+          if [ "$arms" -lt 8 ]; then
+            echo "::error::expected at least 8 harness arms (1 clean mount + 1 network isolation + 5 malformed shapes + 1 mutated block); got $arms. The run did not measure what this step claims to measure."
+            exit 1
+          fi
+
+          exit "$status"

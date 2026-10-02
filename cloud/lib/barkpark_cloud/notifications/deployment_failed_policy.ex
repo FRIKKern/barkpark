@@ -59,6 +59,57 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedPolicy do
   independently-written "is this site up" query is two definitions of one
   cohort, and the one a human is shown then depends on which producer fired.
 
+  ## THE VOLUME RULING — one notice per site per episode (task-2db350610ca0a168)
+
+  The narrowing above decided WHICH failures are worth an email. It did not
+  decide HOW MANY. Those are different questions and the second one outlived the
+  first: `destroyed_content?/1` reads `not content_on_web?(site)`, which is a
+  fact about the SITE, not about the attempt — so while a site has nothing on
+  the web EVERY attempt passes, and a site that fails 135 times in an hour earns
+  135 emails from a gate that is working exactly as specified. The narrowing
+  moved the flood off the fleet's serving sites and left it, undiminished, on
+  the sites that have never launched — which is the worst audience for it, being
+  a team's first week.
+
+  FOUR OPTIONS WERE ON THE ROW: leave it, latch it per site, default it off, or
+  digest it. THE LATCH IS CHOSEN, and the other three are declined here on the
+  record rather than left unmentioned:
+
+    * LEAVE IT was declined because the quantity is the defect. No reader was
+      named who wants the 135th email about one site.
+    * DEFAULT IT OFF was declined because it is a silent flip of a switch 22
+      teams have ON. A default change is a decision those teams get to see; a
+      migration that turns their alerts off while they sleep is a different
+      defect wearing this one's clothes.
+    * DIGEST IT was declined because the FIRST failure on a site with nothing on
+      the web is the one moment this alert is genuinely urgent — a team's
+      content is not on the web and nobody has told them. Holding that for the
+      morning digest trades the flood for a delay on the only email in the set
+      that was worth interrupting someone about.
+
+  WHAT THE LATCH COSTS AND WHO CARRIES IT. Exactly one `:deployment_failed`
+  email per site per dark episode; failures 2..N are silent. The ongoing signal
+  is NOT dropped, it is carried by the three instruments that did not exist when
+  this alert was designed and which are all episode-keyed already:
+  `SitePublishWaitingAlert` (the wait itself, re-armed every episode),
+  `DeployRateAlert` (the failure rate), and `:deployment_abandoned` (the chain
+  the fleet gave up on) — and that last one is dispatched ABOVE this gate in
+  `Registry.dispatch_deployment_failed/1`, so it is never latched by it.
+
+  NO DEFAULT MOVES AND NO TOGGLE MOVES. The 22 teams that have
+  `deployment_failed` ON still have it ON, still on the same checkbox, with no
+  migration and no new vocabulary. What changes is only how often the event has
+  anything to say.
+
+  THE PROJECTION, AND ITS HONEST LIMIT. Post-latch volume is bounded by the
+  number of sites recording their FIRST production failure that day, not by
+  attempts — the ceiling is sites/day, and the per-site term is 1 instead of
+  unbounded. The BASELINE that ratio should be quoted against is the 2026-08
+  series (340/446/625/870) and that series is stale; re-measuring it needs the
+  control-plane database, which this change's author cannot read. The shape of
+  the bound is proven by test; the arithmetic against a fresh baseline is owed
+  by whoever can run the count.
+
   ## Which way the doubt falls
 
   TWO DIRECTIONS, AND THEY ARE NOT THE SAME DIRECTION.
@@ -103,4 +154,60 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedPolicy do
 
   # UNKEYABLE IS NOT QUIET (charter D3).
   defp decide(_site_id, _environment), do: true
+
+  @doc """
+  Whether this failed attempt earns a `:deployment_failed` email — the WHOLE
+  decision, narrowing and volume together.
+
+  Both halves must say yes: the attempt destroyed content AND it is the notice
+  for its episode. Producers call THIS, never one half, so a future producer
+  cannot pick up the narrowing and miss the latch.
+  """
+  @spec alarm?(Deployment.t() | map()) :: boolean()
+  def alarm?(attempt) do
+    destroyed_content?(attempt) and first_notice_of_episode?(attempt)
+  end
+
+  @doc """
+  Whether this attempt is the ONE notice its dark episode gets.
+
+  See `DeployLedger.first_production_failure_id/1` for why the earliest failed
+  row IS the latch and why no flag has to be stored or cleared.
+
+  BOTH ABSENCES ANSWER `true`, which is the loud direction and charter D3: an
+  attempt with no site id, or with no id of its own, is one this function cannot
+  key, and a suppression must be earned by a reading rather than granted by a
+  missing field. `destroyed_content?/1` makes the same call on the same shape.
+  """
+  @spec first_notice_of_episode?(Deployment.t() | map()) :: boolean()
+  def first_notice_of_episode?(%Deployment{id: id, site_id: site_id}),
+    do: latch(site_id, id)
+
+  def first_notice_of_episode?(%{} = attempt),
+    do: latch(Map.get(attempt, :site_id), Map.get(attempt, :id))
+
+  def first_notice_of_episode?(_attempt), do: true
+
+  @doc """
+  The id of the attempt that is this site's episode notice, or `nil` when the
+  site has no failed production row. Exposed because the reaper judges a whole
+  sweep at once and asks this ONCE PER DISTINCT SITE rather than once per row.
+  """
+  @spec episode_notice_id(binary() | nil) :: binary() | nil
+  def episode_notice_id(site_id) when is_binary(site_id),
+    do: DeployLedger.first_production_failure_id(site_id)
+
+  def episode_notice_id(_site_id), do: nil
+
+  defp latch(site_id, id) when is_binary(site_id) and is_binary(id) do
+    case episode_notice_id(site_id) do
+      # A site with no failed production row at all cannot have sent an earlier
+      # notice. This is not the expected shape — the caller's own row is already
+      # committed by the time any producer asks — so it is the loud answer.
+      nil -> true
+      notice_id -> notice_id == id
+    end
+  end
+
+  defp latch(_site_id, _id), do: true
 end

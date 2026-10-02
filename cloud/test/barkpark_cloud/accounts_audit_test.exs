@@ -209,7 +209,9 @@ defmodule BarkparkCloud.AccountsAuditTest do
       [_newest, older] = Accounts.list_audit_events(team)
       page = Accounts.list_audit_events(team, before: older.inserted_at)
       # Nothing is older than the first row.
-      assert page == [] or Enum.all?(page, &(&1.inserted_at < older.inserted_at))
+      assert page == [] or
+               Enum.all?(page, &(DateTime.compare(&1.inserted_at, older.inserted_at) == :lt))
+
       assert first.id == older.id
     end
 

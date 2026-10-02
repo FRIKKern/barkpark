@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"strings"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -38,6 +39,17 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	if g.help {
 		printTaskCreateHelp(out)
 		return exitOK
+	}
+
+	// THE NON-EVALUATING PROSE DOOR (prose_text_file.go). `--description-file`
+	// and `--title-file` are resolved FIRST, into the inline `--description=…`
+	// / `--title=…` spelling, so every stage after this line —
+	// parseTaskCreateArgs, the publish wall, the mutation body, the POST — sees
+	// the ordinary flag and can never drift from it. The same pass screens an
+	// implausible INLINE payload against the population-derived ceiling.
+	tail, perr := resolveProseTextFiles(tail, nil, out.errf)
+	if perr != nil {
+		return useError(out, proseTextSourceCode, perr.Error(), exitValidation)
 	}
 
 	body, publish, err := parseTaskCreateArgs(tail)
@@ -102,7 +114,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 	// ("plausible tag names") into a SECOND phantom, so it is checked here — the
 	// last point at which refusing still costs the server nothing.
 	if publish {
-		ref, blind := checkTagRegistry(ctx, body)
+		ref, blind, empty := checkTagRegistry(ctx, body)
 		if ref != nil {
 			return renderPublishWallRefusal(out, ref)
 		}
@@ -124,6 +136,9 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// The blast radius is bounded by checkTagRegistry itself: `blind` is
 			// only ever true when the body carries weighted tags AND the read was
 			// non-authoritative. A create with no tags never reaches here.
+			if empty {
+				return renderTagRegistryEmptyRefusal(out, ctx, body)
+			}
 			return renderTagRegistryUnreadableRefusal(out, body)
 		}
 	}
@@ -284,7 +299,7 @@ func runTaskCreate(out *writer, g globals, ctx manifest.Context, tail []string) 
 			// on a never-published document, i.e. the guard's --delete-unpublished
 			// semantics (discard_draft_guard.go): here the absence of a twin is not
 			// probed but KNOWN, because this process created the draft.
-			return discardCreatedTaskDraft(out, ctx, draftID, bareID)
+			return discardCreatedTaskDraft(out, ctx, draftID, bareID, publishRefusalCode(pBody))
 		}
 		// PDS wave 48: "published" used to be asserted here off the 2xx alone.
 		// It is now read off the record the publish mutation returned, so a
@@ -388,13 +403,18 @@ func renderTaskCreateResidue(out *writer, class, draftID, bareID string) {
 // Returns the process exit code: non-zero either way (the create --publish did
 // not do what was asked), but the two paths differ in what is left on the
 // server, and both say which.
-func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID string) int {
-	if why := discardCreatedTaskDraftQuiet(ctx, bareID); why != "" {
+func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID, refusalCode string) int {
+	why, byServer := discardCreatedTaskDraftQuiet(ctx, bareID, refusalCode)
+	if why != "" {
 		out.errf("  %s", why)
 		renderTaskCreateResidue(out, residueDiscardFailed, draftID, bareID)
 		return exitGeneric
 	}
-	out.errf("  discarded %s — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	if byServer {
+		out.errf("  the server already discarded %s when it refused the publish — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	} else {
+		out.errf("  discarded %s — the refused publish left NO draft behind (nothing to claim, nothing on the queue).", draftID)
+	}
 	out.errf("  nothing was kept: re-file with the refusal above fixed, e.g. bp task create --publish …")
 	return exitGeneric
 }
@@ -405,14 +425,37 @@ func discardCreatedTaskDraft(out *writer, ctx manifest.Context, draftID, bareID 
 // output shapes need the same side effect and DIFFERENT renderings — stderr
 // prose for a human, a `discard_error` key inside one JSON envelope for a
 // script — and doing the discard in two places is how the two drift.
-func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID string) string {
+//
+// ALREADY GONE IS GONE (task-9a97e96c35fba472). On a duplicate_of refusal the
+// SERVER deletes the refused draft itself (Lifecycle.discard_refused_duplicate_draft/5,
+// re-run after the batch rollback by Mutations.compensating_discard/4) and says
+// so in the refusal message, so this discard answers 404 not_found. That 404 is
+// the cleanup having already happened, not a failure of it: the second return
+// is true and no reason is given. The exemption is keyed on BOTH codes — the
+// refusal's duplicate_of and the discard's not_found — so a 404 after any other
+// refusal (where no server-side discard ran) is still residue, as is any other
+// discard failure after a duplicate_of. A duplicate_of refusal on a CLAIMED
+// draft keeps the draft server-side; the discard then finds it, so that path
+// never reaches the exemption.
+func discardCreatedTaskDraftQuiet(ctx manifest.Context, bareID, refusalCode string) (string, bool) {
 	op := map[string]any{"discardDraft": map[string]any{"id": bareID, "type": "task"}}
 	status, body, err := sendTaskMutations(ctx, []map[string]any{op}, "")
 	switch {
 	case err != nil:
-		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err)
+		return fmt.Sprintf("the follow-up discard never reached the server (%v)", err), false
+	case refusalCode == "duplicate_of" && status == http.StatusNotFound && classifyErrorBody(status, body).code == "not_found":
+		return "", true
 	case status < 200 || status >= 300:
-		return "the follow-up discard was refused: " + mutateErrorMessage(status, body)
+		return "the follow-up discard was refused: " + mutateErrorMessage(status, body), false
+	}
+	return "", false
+}
+
+// publishRefusalCode is the server's error.code on a refused publish ("" when
+// the body carries no canonical envelope).
+func publishRefusalCode(body []byte) string {
+	if env, ok := apierr.Parse(body); ok {
+		return env.Code
 	}
 	return ""
 }
@@ -434,7 +477,7 @@ func renderCreatePublishRefusalEnvelope(out *writer, ctx manifest.Context, statu
 		return 0, false
 	}
 	ae := classifyError(status, body)
-	discardErr := discardCreatedTaskDraftQuiet(ctx, bareID)
+	discardErr, _ := discardCreatedTaskDraftQuiet(ctx, bareID, publishRefusalCode(body))
 
 	payload := map[string]any{
 		"draft_id":        draftID,
@@ -487,6 +530,38 @@ func renderTagRegistryUnreadableRefusal(out *writer, body map[string]any) int {
 	return exitUsage
 }
 
+// renderTagRegistryEmptyRefusal is the same fail-closed refusal for a registry
+// that READ fine and holds no published tag. Calling that "could not be read"
+// sent a fresh install chasing a read failure: the fix is to register the tag
+// (or point at the dataset that has them), not to retry.
+func renderTagRegistryEmptyRefusal(out *writer, ctx manifest.Context, body map[string]any) int {
+	names := wallTagNames(body)
+	first := "<tag>"
+	if len(names) > 0 {
+		first = names[0]
+	}
+	register := fmt.Sprintf("bp doc create tag --set _id=%s --set title=%s && bp doc publish tag %s", first, first, first)
+	msg := fmt.Sprintf("task create --publish: refused before writing anything — the tag registry in dataset %q is EMPTY: no type:tag doc is published there, so no tag on this row can pass the publish wall", ctx.Dataset)
+	if renderErrorEnvelopeDetailed(out, tagRegistryEmptyCode, msg, "",
+		"nothing was created — no draft was left behind. Register each tag first (`"+register+"`), or check -s/-d if this dataset should already have tags.",
+		tagRegistryUnreadableDetails(body)) {
+		return exitUsage
+	}
+	out.userErr("%s", msg)
+	out.errf("  code:  %s", tagRegistryEmptyCode)
+	if len(names) > 0 {
+		out.errf("  tags:  %s", strings.Join(names, ", "))
+	}
+	out.errf("  why:   the server publishes a tagged row only when every weighted tag is ALREADY a published type:tag doc.")
+	out.errf("  fix:   register each tag, then retry —")
+	out.errf("           bp doc create tag --set _id=%s --set title=%s", first, first)
+	out.errf("           bp doc publish tag %s", first)
+	out.errf("         expected tags here? check the server and dataset (-s / -d): %s lists what this one holds", tagRegistryCommand)
+	out.errf("         or file it as a draft now (`bp task create …` without --publish) and publish later.")
+	out.errf("  nothing was created — no draft was left behind.")
+	return exitUsage
+}
+
 // tagRegistryUnreadableDetails is the machine payload for the fail-closed
 // registry refusal: the tag names that could NOT be checked. A caller cannot
 // re-derive them from the exit code, and they are exactly the list to re-check
@@ -508,6 +583,10 @@ func tagRegistryUnreadableDetails(body map[string]any) json.RawMessage {
 // ever raises it, and borrowing one of theirs would make a client-side "we could
 // not ask" indistinguishable from a server-side "we asked and the answer was no".
 const tagRegistryUnreadableCode = "tag_registry_unreadable"
+
+// tagRegistryEmptyCode names the refusal for a registry that read cleanly with
+// no published tag. Client-only for the same reason as the code above.
+const tagRegistryEmptyCode = "tag_registry_empty"
 
 // wallTagNames lists the weighted tag names on body, for the refusal above. A
 // malformed tags field yields nothing — the spine check upstream owns that
@@ -741,7 +820,82 @@ func ensureTaskPortableBrief(body map[string]any) {
 	}
 	title, _ := body["title"].(string)
 	description, _ := body["description"].(string)
-	description = strings.TrimSpace(strings.NewReplacer("**", "", "__", "", "`", "").Replace(description))
+	// THE ONE-PASS STRIP IS THE CANONICAL RULE, and this is the site that owns
+	// it (task-8ba550b59141bccb). strings.Replacer makes ONE non-overlapping
+	// left-to-right pass considering all three patterns at once. That is not a
+	// stylistic choice over three sequential ReplaceAll calls: a rescanning form
+	// destroys literal characters that only became ADJACENT when a delimiter was
+	// removed, so `foo_**_bar` strips to `foobar` instead of `foo__bar`, and a
+	// description that is ONLY that shape strips to "" and is replaced wholesale
+	// by the auto-stub below — not different prose, NO prose.
+	//
+	// THE MIRROR IS THE OTHER SITE. Barkpark.Tasks.BriefMirror.strip_markdown/1
+	// (api/lib/barkpark/tasks/brief_mirror.ex) declares it mirrors this line
+	// EXACTLY and today does not: it reduces String.replace/3 over @stripped,
+	// three passes each over the previous result. Re-measured on origin/main
+	// 3ce12ab02 by cli-r21-w22 on the real Elixir 1.19.5 runtime over the whole
+	// shared corpus: 19 of 1,313 inputs diverge, the mismatch set SET-EQUAL to
+	// the fixture's `divergent` column, and 10 of them land in the auto-stub
+	// class. The routed one-line remedy on the server side,
+	// `:binary.replace(text, @stripped, "", [:global])`, takes that to 0/1,313;
+	// a control mutation (a 4th token in @stripped) produced 761 mismatches the
+	// harness was not written against, so the run discriminates. The remedy is
+	// task-b641646addba4bdf's — api/ is another lane's fence.
+	//
+	// ENFORCED, not asserted: testdata/brief_strip_corpus.json is the shared
+	// fixture BOTH suites read, pinned here by TestComposerMatchesSharedStripCorpus
+	// and TestComposerStripsMarkdownInOneNonOverlappingPass. Rewriting this line
+	// as sequential ReplaceAll calls reds both on exactly the divergent rows.
+	// THE RULE ITSELF NOW LIVES ONCE, in briefPurposeStripOnePass
+	// (tasks_brief_mirror_warn.go), because a READ-TIME warning compares
+	// mirrored blocks against it: if the composer that WRITES the block and the
+	// warning that JUDGES it could drift, the warning would eventually lie. The
+	// shape is unchanged — strings.NewReplacer, one non-overlapping pass — and
+	// both corpus tests below still run through ensureTaskPortableBrief, so
+	// rewriting it as sequential ReplaceAll calls still reds them.
+	//
+	// LOSSY, ON PURPOSE: the purpose block is a display rendering of
+	// `description` that drops every "**", "__" and "`" — code spans lose their
+	// backticks. body["description"] itself is never touched here and is sent
+	// byte-verbatim. The full statement lives beside briefPurposeDroppedSequences.
+	description = briefPurposeStripOnePass(description)
+	// THE AUTO-STUB RULING (task-23c70e97c90809c6, ruling B: THE STUB STAYS).
+	// tooling/grip/ledger/brief-purpose-drift-2026-08-20.md counted 122 published
+	// rows (76 of them open, 2026-08-20 count) whose brief purpose is this stub
+	// and whose description says something else. A later sweep WILL find that
+	// table again and be tempted to re-file it as CLI drift. It is not drift, and
+	// the stub is not to be removed or turned into a refusal. Four reasons, each
+	// checkable at the cited line:
+	//
+	//  1. THE STUB CANNOT REACH A PUBLISHED ROW. checkWallDescription
+	//     (tasks_publish_wall.go) refuses `--publish` when `description` is absent
+	//     or under wallMinDescription = 20 runes, and the server re-refuses at
+	//     EVERY publish door -- Barkpark.Content.LabelSpine.check_description/1,
+	//     api/lib/barkpark/content/label_spine.ex, @min_description 20 -- so
+	//     `bp doc publish task <id> --yes` on a description-less draft is refused
+	//     too. A body that takes this branch is a DRAFT and stays one.
+	//  2. REFUSING HERE WOULD MAKE THE CLI STRICTER THAN ITS STORE. label_spine.ex
+	//     is explicit that "a draft may legitimately carry no `description` and no
+	//     `tags` at all" and that "drafts stay free; publish is the wall".
+	//     Refusing a description-less create breaks the scaffold-a-draft-then-fill
+	//     -it-in path the store deliberately allows -- a worse defect than the
+	//     purposeless drafts it would prevent.
+	//  3. THE 122 ARE HISTORY, NOT A LEAK. They predate that wall; repairing them
+	//     is a ledger backfill (gr-bl-brief-drift-backfill-714, done 5/5), not a
+	//     change to this composer.
+	//  4. DROPPING THE PURPOSE BLOCK INSTEAD WOULD BE PERMANENT. The resync path
+	//     keys on this block by id (@purpose_block_id, Barkpark.Tasks.BriefMirror
+	//     .resync_blocks/3, api/lib/barkpark/tasks/brief_mirror.ex) and only ever
+	//     MAPS over existing blocks -- it never appends a missing one. Omit the
+	//     block and a later `--set description=...` has nothing to resync into, so
+	//     the brief is purposeless forever. The stub is a placeholder the resync
+	//     overwrites the moment a real description lands; an absent block is not.
+	//
+	// The same stub string is composed on the Elixir side by BriefMirror.stub_for/2
+	// for the resync path. Both sites are intentional; keep the wording identical.
+	// Pinned by TestAutoStubRulingStubSurvivesOnlyOnDrafts,
+	// TestAutoStubRulingKeepsThePurposeBlockAsTheResyncAnchor and
+	// TestAutoStubRulingIsRecordedAtTheStubSite in tasks_create_cmd_test.go.
 	if description == "" {
 		description = "Complete the work described by “" + strings.TrimSpace(title) + "” and record verifiable evidence."
 	}
@@ -981,6 +1135,28 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["execution_policy"] = policy
 			i = ni
+		case key == "--disposition" || key == "--reopen-trigger" || key == "--disposition-rerun":
+			// The adjudication triple as FIRST-CLASS flags. The three content
+			// keys are read from the shared vocabulary fixture, never spelled
+			// here — see tasks_adjudication.go. An unreadable fixture refuses
+			// the flag rather than writing a key it cannot name.
+			v, ni, err := takeValue(i, key, inline, hasInline)
+			if err != nil {
+				return nil, false, err
+			}
+			vocab, verr := loadTaskAdjudicationVocabulary()
+			if verr != nil {
+				return nil, false, fmt.Errorf("%s: %w", key, verr)
+			}
+			switch key {
+			case "--disposition":
+				body[vocab.DispositionKey] = v
+			case "--reopen-trigger":
+				body[vocab.ReopenTriggerKey] = v
+			default:
+				body[vocab.DispositionRerunKey] = v
+			}
+			i = ni
 		case key == "--set":
 			v, ni, err := takeValue(i, "--set", inline, hasInline)
 			if err != nil {
@@ -1000,8 +1176,15 @@ func parseTaskCreateArgs(tail []string) (map[string]any, bool, error) {
 			}
 			body["title"] = a
 		default:
-			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --set k=v, --publish)", a)
+			return nil, false, fmt.Errorf("unknown flag %q (task create accepts --title, --description, --execution-policy JSON, --disposition, --reopen-trigger, --disposition-rerun, --set k=v, --publish)", a)
 		}
+	}
+
+	// The adjudication screen runs on the FINISHED body, so it covers the
+	// legacy `--set disposition=…` spelling too — the door this row exists to
+	// close — and not only the flags above.
+	if err := screenTaskAdjudication(body); err != nil {
+		return nil, false, err
 	}
 	return body, publish, nil
 }
@@ -1093,6 +1276,9 @@ func validateTaskPolicyEnum(policy map[string]any, field string, allowed []strin
 // caller's explicit escape hatch — type is never sniffed from the value.
 func applyTaskSet(body map[string]any, kv string) error {
 	if eq := strings.Index(kv, ":="); eq >= 0 && !strings.Contains(kv[:eq], "=") {
+		if err := checkSetKeyEmpty(kv, kv[:eq]); err != nil {
+			return err
+		}
 		var typed any
 		if err := json.Unmarshal([]byte(kv[eq+2:]), &typed); err != nil {
 			return fmt.Errorf("invalid --set %q: %q is not valid JSON (key:=value sends raw JSON; use key=value for strings)", kv, kv[eq+2:])
@@ -1103,6 +1289,9 @@ func applyTaskSet(body map[string]any, kv string) error {
 	eq := strings.IndexByte(kv, '=')
 	if eq < 0 {
 		return fmt.Errorf("invalid --set %q (want key=value, or key:=json for typed values)", kv)
+	}
+	if err := checkSetKeyEmpty(kv, kv[:eq]); err != nil {
+		return err
 	}
 	body[kv[:eq]] = kv[eq+1:]
 	return nil
@@ -1168,6 +1357,19 @@ flags:
                    does both — it writes the array AND generates the brief's
                    Criteria section from it, e.g.
                      --set 'acceptance_criteria:=[{"criterion":"gates green","met":false,"evidence":""}]'
+  --disposition <term>
+                   Adjudication term for the row being filed: open | parked |
+                   closed (the vocabulary the api's Barkpark.Tasks.Stage
+                   screens against; an off-vocabulary or mis-cased term is
+                   refused here, before the write).
+  --reopen-trigger <when>
+                   The durable when-reconsidered. REQUIRED alongside
+                   --disposition parked — a parked row with no trigger is a
+                   hollow park and the api refuses it 422.
+  --disposition-rerun <cmd>
+                   One command an auditor can run to try to prove the
+                   disposition wrong. Optional; an absent rerun is an honest
+                   "this cannot be checked".
   --publish        Publish the new task immediately (draft → published).
                    A PUBLISHED row must clear the publish wall, so --publish
                    also requires --description (20+ chars) and 1-12 weighted
@@ -1195,6 +1397,10 @@ with the drafts. prefix — bp doc get task drafts.<id> --perspective raw. A bar
 bp doc get task <id> reads the PUBLISHED perspective and 404s (or shows the
 pre-write row) for an unpublished draft: that draft-vs-published asymmetry is
 why a successful write can look like it "read back unchanged" until you publish.`)
+	out.outf("")
+	for _, line := range proseFileHelpLines(nil) {
+		out.outf("%s", line)
+	}
 }
 
 // mutateWarning is ONE advisory off a mutate success envelope. The wire carries

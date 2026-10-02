@@ -11,17 +11,18 @@ import { getDocBySlug, getDocById } from '../../../lib/barkpark'
 import { formatDate } from '../../../lib/format-date'
 import { DraftModePreview } from './draft-preview'
 import { PortableDocSurface } from './portable-doc-surface'
+import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Author {
   _id: string
   name: string
-  slug?: { current: string }
+  slug?: SlugValue
 }
 
 interface Tag {
   _id: string
   title: string
-  slug?: { current: string }
+  slug?: SlugValue
 }
 
 interface Post {
@@ -30,7 +31,7 @@ interface Post {
   title: string
   excerpt?: string
   publishedAt?: string
-  slug?: { current: string }
+  slug?: SlugValue
   // The canonical, type-keyed PortableDocument block array (Barkpark's own
   // block grammar) — rendered by `@barkpark/react`'s `PortableDoc`, NOT Sanity
   // PortableText.
@@ -95,7 +96,7 @@ export default async function PostPage({
           {tags.map((t) => (
             <Link
               key={t._id}
-              href={`/tags/${t.slug?.current ?? t._id}`}
+              href={`/tags/${slugOf(t.slug) ?? t._id}`}
               className="rounded bg-slate-100 px-2 py-0.5 dark:bg-slate-800"
             >
               #{t.title}

@@ -31,7 +31,11 @@ defmodule BarkparkWeb.LiveAuth do
       (era-w8-sso-mfa-binding), defence-in-depth behind the session-mint
       chokepoints: a `user_session` cookie resolving to a user who is
       governed by a `require_mfa` org and has NO factor enrolled is halted
-      to `/login` with enrolment guidance. Covers cookie reuse — a session
+      to `/login` with enrolment guidance — carrying the requested Studio
+      destination as a validated `?return_to=` when there is one
+      (era-bl-mfa-returnto-parity), so enrolling and signing in lands on
+      the deep link the notifier email pointed at rather than `/studio`.
+      Covers cookie reuse — a session
       minted before the org flipped `require_mfa` on, or the deliberately
       flagged `POST /v1/auth/login` enrolment session (which the API
       surface gates via `RequireOrgMfaEnrolment`, but LiveViews never ran
@@ -79,10 +83,27 @@ defmodule BarkparkWeb.LiveAuth do
   # would reopen the hole). Fronts the `:scoped_plugin_admin` and
   # `:scoped_admin_studio` live_sessions (router.ex); the flat sessions and the
   # global-registry `:scoped_admin_studio_dataset` stay on `:admin`.
+  #
+  # The decision is RE-RUN on every live patch that moves the URL to another
+  # workspace (r4a LiveView authz sweep). `on_mount` runs once per socket, but a
+  # client may `live_patch` to any URL that routes to the SAME LiveView in the
+  # SAME live_session — and `/w/:workspace_slug/...` is a param of that route.
+  # Without the hook an owner/admin of workspace A (any workspace; they can
+  # create their own) who is a plain member of B mounted `/w/A/.../settings`
+  # and patched to `/w/B/.../settings`: `LiveScope` re-checks READ for B and
+  # passes, so the page ran as an admin page for B (B's settings, B's chat
+  # sessions). The hook attaches here, FIRST in the on_mount chain, so it runs
+  # before `LiveScope`'s own handle_params hook and before the LiveView's.
   def on_mount(:scoped_admin, params, session, socket) do
     case scoped_target_workspace(params) do
-      %{id: _} = ws -> scoped_admin_authorize(socket, session, ws)
-      nil -> scoped_admin_deny(socket)
+      %{id: _} = ws ->
+        case scoped_admin_authorize(socket, session, ws) do
+          {:cont, socket} -> {:cont, arm_scoped_admin_reauth(socket, session, ws)}
+          halted -> halted
+        end
+
+      nil ->
+        scoped_admin_deny(socket)
     end
   end
 
@@ -97,7 +118,7 @@ defmodule BarkparkWeb.LiveAuth do
           {:halt,
            socket
            |> put_flash(:error, BarkparkWeb.SessionIssuer.org_mfa_enrolment_message())
-           |> redirect(to: "/login")}
+           |> redirect(to: mfa_denial_target(socket))}
         else
           {:cont, socket}
         end
@@ -140,7 +161,8 @@ defmodule BarkparkWeb.LiveAuth do
             {:cont,
              socket
              |> assign(:api_token, api_token)
-             |> assign(:api_token_raw, token)}
+             |> assign(:api_token_raw, token)
+             |> arm_revocation_teardown(api_token)}
 
           _ ->
             {:cont,
@@ -221,10 +243,48 @@ defmodule BarkparkWeb.LiveAuth do
       end)
 
     case granted do
-      nil -> authorize_user(socket, session, denial_flash)
-      api_token -> {:cont, assign(socket, :api_token, api_token)}
+      nil ->
+        authorize_user(socket, session, denial_flash)
+
+      api_token ->
+        {:cont, socket |> assign(:api_token, api_token) |> arm_revocation_teardown(api_token)}
     end
   end
+
+  # ── Revocation reaches an OPEN LiveView too (r4a realtime authz sweep) ─────
+  #
+  # `Auth.revoke_token/1` (and SCIM's bulk revoke) broadcast "disconnect" on
+  # `UserSocket.disconnect_topic/1`, but only the search WebSocket listened. A
+  # LiveView verified its bearer once, at mount, so a revoked token kept a
+  # Studio socket reading — panes, navigation, live document pushes — until
+  # the browser reconnected. A connected socket now subscribes to the same
+  # topic and, on that broadcast, leaves through a full redirect to /login
+  # (where the dead token no longer verifies). Idempotent per process.
+  defp arm_revocation_teardown(socket, %Barkpark.Auth.ApiToken{id: id}) when is_binary(id) do
+    if connected?(socket) and not Map.get(socket.assigns, :revocation_teardown_armed?, false) do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, BarkparkWeb.UserSocket.disconnect_topic(id))
+
+      socket
+      |> assign(:revocation_teardown_armed?, true)
+      |> attach_hook(:live_auth_revocation, :handle_info, &revocation_teardown/2)
+    else
+      socket
+    end
+  end
+
+  defp arm_revocation_teardown(socket, _token), do: socket
+
+  defp revocation_teardown(
+         %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:" <> _},
+         socket
+       ) do
+    {:halt,
+     socket
+     |> put_flash(:error, "Your access token was revoked — sign in again")
+     |> redirect(to: "/login")}
+  end
+
+  defp revocation_teardown(_msg, socket), do: {:cont, socket}
 
   # studio-user-login: the account-session arm of the admin/ops gates. Users
   # carry no permissions[] — the grant is the membership ROLE, and the flat
@@ -276,9 +336,40 @@ defmodule BarkparkWeb.LiveAuth do
       end)
 
     case granted do
-      nil -> scoped_admin_authorize_user(socket, session, ws)
-      api_token -> {:cont, assign(socket, :api_token, api_token)}
+      nil ->
+        scoped_admin_authorize_user(socket, session, ws)
+
+      api_token ->
+        {:cont, socket |> assign(:api_token, api_token) |> arm_revocation_teardown(api_token)}
     end
+  end
+
+  # Same-workspace patches (ChatLive switching sessions, the settings tabs) are
+  # the hot path and cost nothing: the URL slug is compared with the slug that
+  # was admitted. Only a slug CHANGE re-runs the full gate, with the SAME
+  # session the mount used, so the token/user/dev-root arms are identical.
+  defp arm_scoped_admin_reauth(socket, session, ws) do
+    socket
+    |> assign(:scoped_admin_workspace_slug, ws.slug)
+    |> attach_hook(:scoped_admin_reauth, :handle_params, fn params, _uri, socket ->
+      if params["workspace_slug"] == socket.assigns[:scoped_admin_workspace_slug] do
+        {:cont, socket}
+      else
+        case scoped_target_workspace(params) do
+          %{id: _} = target ->
+            case scoped_admin_authorize(socket, session, target) do
+              {:cont, socket} ->
+                {:cont, assign(socket, :scoped_admin_workspace_slug, target.slug)}
+
+              halted ->
+                halted
+            end
+
+          nil ->
+            scoped_admin_deny(socket)
+        end
+      end
+    end)
   end
 
   defp scoped_admin_candidates(session) do
@@ -332,6 +423,39 @@ defmodule BarkparkWeb.LiveAuth do
       ReturnTo.with_return_to("/login", dest)
     else
       _ -> "/studio"
+    end
+  end
+
+  # era-bl-mfa-returnto-parity — the `:require_org_mfa` twin of `denial_target/2`.
+  # The halt is UNCHANGED (`/login`, same flash, same population); this only
+  # decides whether the requested destination rides along as a validated
+  # `?return_to=`, so an MFA-required-but-unenrolled admin who followed a
+  # notifier deep link lands back on it after enrolling instead of `/studio`.
+  #
+  # `ReturnTo.sanitize_dest/1` is the ONE validator — the same open-redirect
+  # guard `denial_target/2` uses. No second validator was written: external
+  # URLs, `//host` authority tricks, `/studioevil` prefix tricks and
+  # dot-segment traversal all return nil here and leave the halt at bare
+  # `/login`, whose `@default_return_to` is `/studio`.
+  #
+  # It deliberately does NOT reuse `denial_target/2` itself: that function's
+  # first clause is `anonymous?(session)`, and this population is exactly the
+  # complement (a `user_session` is present by construction), so it would
+  # always funnel to `/studio` — and `/studio` is a DIFFERENT place from the
+  # `/login` this hook must keep sending people.
+  #
+  # The allow-list here is `sanitize_dest/1`'s full grammar (flat `/studio…`
+  # plus the scoped `/w/:ws/p/:proj[/d/:ds]/studio…`), not `denial_target/2`'s
+  # narrower `@chat_deep_link`. That narrowing is a property of the ANONYMOUS
+  # arm — it keeps the pre-D69 `/studio` funnel byte-stable for every other
+  # anonymous denial — and it has no counterpart here, where the pre-fix
+  # target was `/login` for every path alike.
+  defp mfa_denial_target(socket) do
+    with %URI{path: path} = uri when is_binary(path) <- requested_uri(socket),
+         dest when is_binary(dest) <- ReturnTo.sanitize_dest(path <> query_suffix(uri.query)) do
+      ReturnTo.with_return_to("/login", dest)
+    else
+      _ -> "/login"
     end
   end
 

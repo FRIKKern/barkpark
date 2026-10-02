@@ -205,13 +205,24 @@ func runLoginCloud(out *writer, args []string) int {
 		}
 	}
 
-	email, password, url, device, deviceStart, devicePollCode, perr := parseLoginArgs(args)
+	la, perr := parseLoginArgs(args)
 	if perr != nil {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
-	devicePollCode = strings.TrimSpace(devicePollCode)
+	email, password, url, device, deviceStart := la.email, la.password, la.url, la.device, la.deviceStart
+	devicePollCode := strings.TrimSpace(la.devicePoll)
+	team := strings.TrimSpace(la.team)
 	if deviceStart && devicePollCode != "" {
 		return useError(out, "usage", "pass EITHER --device-start OR --device-poll <code>, not both", exitUsage)
+	}
+	// --team binds the BROWSER login (device/start carries it); the password
+	// login mints the account's primary team and a --device-poll code was bound
+	// when it was started, so --team beside either would be silently dropped.
+	if team != "" && (email != "" || password != "") {
+		return useError(out, "usage", "--team binds the browser login — drop --email/--password (or log in by password, then 'bp team use <slug|id>')", exitUsage)
+	}
+	if team != "" && devicePollCode != "" {
+		return useError(out, "usage", "--team goes on --device-start; a --device-poll code is already bound to the team it started with", exitUsage)
 	}
 
 	cfg, err := LoadConfig()
@@ -235,8 +246,17 @@ func runLoginCloud(out *writer, args []string) int {
 	// the code pair and exits; --device-poll <code> does exactly ONE poll and
 	// exits (no 15-min loop). Both emit a single JSON envelope; neither blocks and
 	// neither auto-registers a fleet (that is the human-TTY tail below).
+	teamID := ""
+	if team != "" {
+		id, code, msg := resolveLoginTeam(cfg, base, team)
+		if msg != "" {
+			return useError(out, code, msg, exitUsage)
+		}
+		teamID = id
+	}
+
 	if deviceStart {
-		return runDeviceStartStep(out, base)
+		return runDeviceStartStep(out, base, teamID)
 	}
 	if devicePollCode != "" {
 		return runDevicePollStep(out, cfg, base, devicePollCode)
@@ -247,8 +267,12 @@ func runLoginCloud(out *writer, args []string) int {
 	// a browser — or when forced with --device. Every other combination (any
 	// credential input, a piped/CI run) falls through to the password path
 	// VERBATIM below, so `bp login --email x` and BARKPARK_PASSWORD are unchanged.
-	if deviceRequested(device, email, password) {
-		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName()); derr != nil {
+	if deviceRequested(device || teamID != "", email, password) {
+		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName(), teamID); derr != nil {
+			var te *deviceTeamError
+			if errors.As(derr, &te) {
+				return useError(out, "invalid_team", derr.Error(), exitUsage)
+			}
 			if asDeviceAuthError(derr) {
 				return useError(out, "auth", derr.Error(), exitAuth)
 			}
@@ -376,15 +400,9 @@ func finishLoginConnect(out *writer, cfg *Config) int {
 // server, we do NOT silently re-point it — we report the barkpark and how to
 // connect, leaving the active server untouched (exit 0). When the active server IS
 // this barkpark, it's a reconnect: we fall through and re-save with a FRESH admin
-// token (GetCredentials always mints/returns the current one).
+// token (GetCredentialsForTeam always mints/returns the current one).
 func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient.Barkpark) int {
 	target := fleetTarget(only.URL, only.Host)
-	if only.Team != nil && strings.EqualFold(strings.TrimSpace(only.Team.Role), "member") {
-		out.outf("")
-		out.outf("You're logged in. %q belongs to %s, where your member role cannot retrieve its admin token.", only.Name, fleetTeamName(only))
-		out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
-		return exitOK
-	}
 
 	if active, ok := activeSavedServer(); ok && strings.TrimSpace(active.Server) != "" {
 		if normalizeServerURL(active.Server) != normalizeServerURL(target) {
@@ -397,18 +415,40 @@ func finishSingleBarkpark(out *writer, client cloudFleetClient, only cloudclient
 		// Same server → a reconnect: fall through to fetch a fresh token + re-save.
 	}
 
+	// AUTHORITY IS THE SERVER'S. bp does not pre-judge the caller's role here (it
+	// used to, on a local "not member" test that failed open on a nil Team and on
+	// an empty Role — see fleet_credential_refusal.go). Every role asks; the
+	// answer decides, and the three answers are told apart by the TYPED refusal,
+	// not by matching prose.
 	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), only.ID, fleetTeamID(only))
 	if gerr != nil {
-		if strings.Contains(gerr.Error(), "no_admin_token") {
+		switch outcome, refusal := classifyFleetCredentialError(gerr); outcome {
+		case fleetCredNoAdminToken:
 			// No stored admin token (an older / ip-only provision): fall back to the
 			// manual-paste path — never a dead end.
 			out.outf("")
 			out.outf("%q has no stored admin token (an older or ip-only provision).", only.Name)
 			out.outf("Connect by pasting an admin token:  bp setup --target cloud")
 			return exitOK
+		case fleetCredForbidden:
+			// The server REFUSED this account. Say what the server said, and never
+			// restate it as a role bp inferred.
+			out.outf("")
+			out.outf("You're logged in. %s", fleetRefusalSentence(only, refusal))
+			if req := fleetRefusalRequirement(refusal); req != "" {
+				out.outf("%s", req)
+			}
+			if hint := fleetRefusalCLIHint(refusal); hint != "" {
+				out.outf("%s", hint)
+			}
+			out.outf("Ask a team owner or admin for access, or connect with your own token:  bp setup --target cloud")
+			return exitOK
+		default:
+			// Nothing was decided about authority: a blip, and it must not read as
+			// a refusal.
+			out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
+			return exitOK
 		}
-		out.errf("logged in, but couldn't fetch credentials for %q (%v) — try `bp setup --target cloud`.", only.Name, gerr)
-		return exitOK
 	}
 
 	connectTarget := fleetTarget(creds.URL, creds.Host)
@@ -778,9 +818,39 @@ func cloudBarkparkRow(b cloudclient.Barkpark) map[string]any {
 		"health_status": b.HealthStatus,
 		"agent_status":  b.AgentStatus,
 		"last_seen_at":  b.LastSeenAt,
-		"version":       b.Version,
-		"git_commit":    b.GitCommit,
-		"team_id":       b.TeamID,
+		// The registry `version` field is deliberately NOT here under any name,
+		// and this is the SECOND projection of the same struct to say so —
+		// rankedBarkparkRow (cloud_status_cmd.go) wrote the decision down first
+		// and this row contradicted it for the whole time both existed. It is
+		// the AGENT BINARY version (internal/agent/report.go `const Version =
+		// "0.1.0"`), a compile-time constant reading 0.1.0 fleet-wide while the
+		// boxes serve 0.2.25.164 … 0.2.25.2628, so `bp barkparks -o json` told
+		// every script the fleet was version-homogeneous. A number that can
+		// never move, sitting beside one that does (git_commit, right below),
+		// reads as freshness.
+		//
+		// It does NOT ship as `agent_version` either, which is the name the
+		// first decision reserved for it: `agent_version` is a REAL field on
+		// the beat (internal/agent/report.go, json tag "agent_version",
+		// resolved from the -X build stamp, else the embedded VCS revision,
+		// else the explicit AgentVersionUnknown marker — never ""), and the
+		// control plane does not surface it on GET /v1/barkparks (no
+		// `agent_version` anywhere in cloud/, and cloudclient.Barkpark has no
+		// such field to project). Emitting the 0.1.0 constant under that name
+		// would put the honest name on the dishonest number. When the plane
+		// starts serving agent_version, decode it and emit it under its own
+		// name, ALWAYS present and never "" — the honesty rule the agent side
+		// already keeps.
+		//
+		// The WIRE key is untouched: internal/agent/report.go still marshals
+		// Version under the json tag "version" and the plane still stores it
+		// (cloud/lib/barkpark_cloud/registry/barkpark.ex `field :version`).
+		// This is a PROJECTION change, never a payload change.
+		//
+		// TestCloudAndStatusRowsAgreeOnVersionKey (cloud12_cmd_test.go) reds if
+		// the two projections diverge on this key again.
+		"git_commit": b.GitCommit,
+		"team_id":    b.TeamID,
 	}
 	if b.Team != nil {
 		row["team"] = map[string]any{
@@ -1240,59 +1310,69 @@ const (
 // so `bp login --password --device-start` errors instead of silently binding
 // the password to the literal "--device-start" and leaving --device-start's
 // own bool false with no error.
-var loginKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagURL, flagDevice, flagDeviceStart, flagDevicePoll}
+var loginKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagURL, flagDevice, flagDeviceStart, flagDevicePoll, flagTeam}
 var signupKnownFlags = []string{flagEmail, flagUser, flagPasswd, flagPass, flagTeam, flagURL}
 
+// loginArgs is the parsed `bp login` flag set.
+type loginArgs struct {
+	email, password, url string
+	device, deviceStart  bool
+	devicePoll           string
+	team                 string // --team <id|slug>: bind the browser login to one team
+}
+
 // parseLoginArgs splits `bp login` flags: --email/--user, --password/--pass,
-// --url, the bare boolean --device (force the browser device-link flow), and the
+// --url, the bare boolean --device (force the browser device-link flow), the
 // two non-interactive device-login steps --device-start (bare bool) and
-// --device-poll <device_code> (BP-ONB-13). Each value-flag accepts both
-// `--flag value` and `--flag=value`. Any positional or unknown flag is a usage error.
-func parseLoginArgs(args []string) (email, password, url string, device, deviceStart bool, devicePoll string, err error) {
-	fail := func(e error) (string, string, string, bool, bool, string, error) {
-		return "", "", "", false, false, "", e
-	}
+// --device-poll <device_code> (BP-ONB-13), and --team <id|slug> (bind the
+// browser login to one team). Each value-flag accepts both `--flag value` and
+// `--flag=value`. Any positional or unknown flag is a usage error.
+func parseLoginArgs(args []string) (la loginArgs, err error) {
 	for i := 0; i < len(args); i++ {
 		a := args[i]
 		switch {
 		case a == flagEmail || a == flagUser:
-			email, i, err = nextFlagValue(args, i, loginKnownFlags...)
+			la.email, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagEmailEq):
-			email = a[len(flagEmailEq):]
+			la.email = a[len(flagEmailEq):]
 		case strings.HasPrefix(a, flagUserEq):
-			email = a[len(flagUserEq):]
+			la.email = a[len(flagUserEq):]
 		case a == flagPasswd || a == flagPass:
-			password, i, err = nextFlagValue(args, i, loginKnownFlags...)
+			la.password, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagPwEq):
-			password = a[len(flagPwEq):]
+			la.password = a[len(flagPwEq):]
 		case strings.HasPrefix(a, flagPassEq):
-			password = a[len(flagPassEq):]
+			la.password = a[len(flagPassEq):]
 		case a == flagURL:
-			url, i, err = nextFlagValue(args, i, loginKnownFlags...)
+			la.url, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagURLEq):
-			url = a[len(flagURLEq):]
+			la.url = a[len(flagURLEq):]
+		case a == flagTeam:
+			la.team, i, err = nextFlagValue(args, i, loginKnownFlags...)
+		case strings.HasPrefix(a, flagTeamEq):
+			la.team = a[len(flagTeamEq):]
 		case a == flagDeviceStart:
 			// Bare boolean — the non-interactive first leg: mint a code pair and
 			// exit without polling.
-			deviceStart = true
+			la.deviceStart = true
 		case a == flagDevicePoll:
-			devicePoll, i, err = nextFlagValue(args, i, loginKnownFlags...)
+			la.devicePoll, i, err = nextFlagValue(args, i, loginKnownFlags...)
 		case strings.HasPrefix(a, flagDevicePollEq):
-			devicePoll = a[len(flagDevicePollEq):]
+			la.devicePoll = a[len(flagDevicePollEq):]
 		case a == flagDevice:
 			// Bare boolean — no value consumed. Forces the browser device-link
 			// flow even when a credential or non-tty would otherwise route to the
 			// password path. Matched AFTER the --device-* flags so it never shadows
 			// them (exact-equality cases, so order is belt-and-braces).
-			device = true
+			la.device = true
 		default:
-			return fail(fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--device-start] [--device-poll <code>] [--url <url>])", a))
+			return loginArgs{}, fmt.Errorf("unexpected argument %q (usage: bp login [--email <addr>] [--password <pw>] [--device] [--team <id|slug>] [--device-start] [--device-poll <code>] [--url <url>])", a)
 		}
 		if err != nil {
-			return fail(err)
+			return loginArgs{}, err
 		}
 	}
-	return email, password, url, device, deviceStart, devicePoll, nil
+	return la, nil
 }
 
 // parseSignupArgs splits `bp signup` flags: --email/--user, --password/--pass,
@@ -1472,6 +1552,7 @@ func printLoginHelp(out *writer) {
 
 USAGE
   bp login [--email <addr>] [--password <pw>] [--device] [--url <url>]
+  bp login --team <id|slug>                 # browser login only a member of that team may approve
   bp login --device-start -o json           # mint a code pair, exit (no polling)
   bp login --device-poll <device_code> -o json   # ONE poll, exit (script owns cadence)
 
@@ -1497,6 +1578,10 @@ FLAGS
   --device            force the browser device-link flow (even with a credential)
   --device-start      mint a device code pair as JSON and exit (no polling)
   --device-poll <c>   perform ONE device poll for code <c> and exit
+  --team <id|slug>    bind the browser login to one team: an approver outside it
+                      is refused (team_mismatch) and the session lands in that
+                      team. A slug resolves only from a signed-in session; else
+                      pass the UUID ('bp teams'). Implies the browser flow.
   --email <addr>      your account email (prompted when omitted) — password path
   --password <pw>     your password (prompted, not echoed; or BARKPARK_PASSWORD)
   --url <url>         control-plane URL (default https://api.barkpark.cloud)

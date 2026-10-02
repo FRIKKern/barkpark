@@ -306,7 +306,7 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert nfb["error"]["message"] == "link not found"
     assert is_binary(nfb["error"]["request_id"])
 
-    # A malformed (non-UUID) link id is a clean 404, not an Ecto CastError 500 —
+    # A malformed (non-UUID) link id is a clean 404, not an Ecto.Query.CastError 400 —
     # Links.revoke queries ShareLink by :binary_id and now guards the cast.
     garbage = conn |> admin() |> delete("/v1/shares/links/not-a-uuid")
     assert json_response(garbage, 404)["error"]["code"] == "not_found"
@@ -404,6 +404,28 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert [ct] = get_resp_header(resp, "content-type")
     refute ct =~ "image/svg+xml"
     assert ct =~ "application/octet-stream"
+  end
+
+  # task-43f7a77dbb264559: the object-storage arm used to sign only the type and
+  # disposition, so bucket-served bytes carried whatever cache-control the bucket
+  # sends. The SAME link is served through BOTH arms, and the signed value must
+  # EQUAL the header the file arm actually sent — never a literal.
+  test "a MEDIA link's presigned URL signs the file arm's cache policy", %{
+    conn: conn,
+    scope_str: scope,
+    media: media
+  } do
+    %{"token" => token} = mint(conn, %{scope: scope, kind: "media", ref_id: media.id})
+
+    file_arm = get(scoped_conn(), "/s/#{token}")
+    assert file_arm.status == 200
+    assert [file_policy] = get_resp_header(file_arm, "cache-control")
+
+    use_s3_backend!()
+    redirect = get(scoped_conn(), "/s/#{token}")
+
+    assert redirect.status == 302
+    assert signed_cache_control(redirect) == file_policy
   end
 
   # ── revoke + invalid ──────────────────────────────────────────────────────
@@ -774,5 +796,37 @@ defmodule BarkparkWeb.ShareLinkTest do
       _ ->
         conn.resp_body
     end
+  end
+
+  # The `response-cache-control` value signed into a 302's Location.
+  defp signed_cache_control(conn) do
+    [location] = get_resp_header(conn, "location")
+    assert location =~ "X-Amz-Signature="
+
+    location
+    |> URI.parse()
+    |> Map.fetch!(:query)
+    |> URI.decode_query()
+    |> Map.get("response-cache-control")
+  end
+
+  # `:media_storage` is process-GLOBAL VM state (this module is async: false).
+  # No network: `S3.serve_strategy/2` only SIGNS a URL.
+  defp use_s3_backend! do
+    previous = Application.get_env(:barkpark, :media_storage)
+
+    Application.put_env(:barkpark, :media_storage,
+      backend: :s3,
+      s3: [
+        endpoint: "https://test.r2.example.com",
+        bucket: "bp-share-link-test",
+        region: "auto",
+        access_key_id: "test-access-key",
+        secret_access_key: "test-secret-key"
+      ]
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :media_storage, previous) end)
+    :ok
   end
 end

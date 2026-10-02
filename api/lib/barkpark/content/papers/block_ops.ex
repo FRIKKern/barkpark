@@ -39,6 +39,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   }
 
   alias Barkpark.Content.CallerContext
+  alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.CanvasRunContext
@@ -46,11 +47,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
   alias Barkpark.PortableDoc.TableEditing
-  alias Barkpark.Preview
   alias Barkpark.Repo.IdempotencyStore
 
   @paper_type "paper"
   @paper_default_dataset "production"
+
+  # [blockops-revless-cas] A revision-LESS op (no `:if_rev`) keeps its API: it
+  # needs no revision and is never refused for a stale one. It no longer loses a
+  # concurrent write: `fenced_or_plain_paper_update/3` compare-and-sets on the row
+  # rev the attempt read, and a lost race re-runs the whole op on the fresh row
+  # (bounded, `serialize_revless/2`). No lock is taken, so no lock order is added
+  # beside the audit-chain locks. The last attempt falls back to the legacy plain
+  # write: a pathologically hot paper degrades to last-writer-wins, never to an error.
+  @revless_cas :__revless_cas
+  @revless_attempts 8
   @html_conversion_message "HTML-only papers are read-only until an explicit revision-fenced conversion preserves the authored HTML preimage."
 
   # The closed blocks-type whitelist — the SOLE copy (compile-time module
@@ -59,6 +69,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # `Barkpark.Content.blocks_types/0` both delegate here rather than keeping
   # an independent literal, so there is exactly one place to widen the list.
   @blocks_types ["paper", "session"]
+
+  # Process-dictionary key for the deferred blocks-doc tail — see
+  # `with_deferred_blocks_doc_tail/1`. Holds a list of queued tail arg tuples
+  # while a caller-owned transaction is open; absent (nil) otherwise.
+  @blocks_doc_tail_owner_key :barkpark_blocks_doc_tail
 
   @doc "The closed whitelist of document types that ride the blocks-doc write path."
   def blocks_types, do: @blocks_types
@@ -112,13 +127,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   `paper_topic(slug, dataset)` and returns `{:ok, %Document{}}`. Returns
   `{:error, changeset}` on validation/constraint failure.
   """
-  def upsert_blocks_doc(type, attrs, opts \\ [])
+  def upsert_blocks_doc(type, attrs, opts \\ []),
+    do: Door.admit(fn -> admitted_upsert_blocks_doc(type, attrs, opts) end)
 
-  def upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
+  defp admitted_upsert_blocks_doc(type, _attrs, _opts) when type not in @blocks_types,
     do: {:error, :not_a_blocks_type}
 
   # PAPER leg — unchanged, unlocked, byte-identical to the pre-fix path.
-  def upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
+  defp admitted_upsert_blocks_doc(@paper_type, attrs, opts) when is_map(attrs) and is_list(opts),
     do: do_upsert_blocks_doc(@paper_type, attrs, opts)
 
   # NON-PAPER leg (today: "session") — SERIALIZED against the OTHER writer of
@@ -140,25 +156,122 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # waits behind its commit (and appends to the freshly-written content).
   # `pg_advisory_xact_lock` is released at commit/rollback — no unlock path to
   # leak. A slug-less write (no row to race on) skips the lock entirely.
-  def upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
+  defp admitted_upsert_blocks_doc(type, attrs, opts) when is_map(attrs) and is_list(opts) do
     case attrs["slug"] || attrs[:slug] do
       slug when is_binary(slug) and slug != "" ->
-        Repo.transaction(fn ->
-          _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
-          do_upsert_blocks_doc(type, attrs, opts)
+        # OWNERSHIP OF THE TAIL, not merely of the lock (task-c352740ae6b0f72a).
+        # This clause opens a BARE `Repo.transaction`, so the
+        # `Broadcast.write_atomically/1` inside `persist_blocks_doc_serialized/9`
+        # NESTS and runs its function as is — which means `persist_blocks_doc_tail/7`
+        # used to run with this transaction STILL OPEN, exactly the pre-commit
+        # posture the comment block above `persist_blocks_doc_serialized/9`
+        # enumerates as deliberately avoided (a raw pre-commit
+        # `broadcast_paper_update/1`, an `Oban.insert/1` riding the lock).
+        # `with_deferred_blocks_doc_tail/1` registers this clause as the tail's
+        # owner: the tail is QUEUED while the lock is held and RUN once this
+        # transaction has returned, so the tail's own contract — "reached only on
+        # a committed row" — is true on this leg too.
+        with_deferred_blocks_doc_tail(fn ->
+          Repo.transaction(fn ->
+            _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", ["#{type}:#{slug}"])
+            do_upsert_blocks_doc(type, attrs, opts)
+          end)
+          |> case do
+            # The inner result IS the return value — errors are NOT rolled back
+            # because every failure leg returns before (or IS) the single Repo
+            # write, so there is nothing partial to undo, and rolling back would
+            # rewrite `{:error, reason}` into `{:error, reason}` via a different
+            # code path for no gain.
+            {:ok, inner} -> inner
+            {:error, reason} -> {:error, reason}
+          end
         end)
-        |> case do
-          # The inner result IS the return value — errors are NOT rolled back
-          # because every failure leg returns before (or IS) the single Repo
-          # write, so there is nothing partial to undo, and rolling back would
-          # rewrite `{:error, reason}` into `{:error, reason}` via a different
-          # code path for no gain.
-          {:ok, inner} -> inner
-          {:error, reason} -> {:error, reason}
-        end
 
       _ ->
         do_upsert_blocks_doc(type, attrs, opts)
+    end
+  end
+
+  # ── THE DEFERRED TAIL (task-c352740ae6b0f72a) ──────────────────────────────
+  #
+  # A process-dictionary owner flag, shaped exactly like
+  # `Broadcast.with_deferred_queue/1`'s: the clause that opens a transaction of
+  # its own around the blocks-doc write CLAIMS the tail, `persist_blocks_doc_tail/7`
+  # is queued instead of run while an owner is registered, and the owner runs the
+  # queue AFTER its transaction has returned.
+  #
+  # NESTING is a no-op by design, for the same reason `with_deferred_queue/1`'s
+  # is: an inner owner that re-claimed would run — or discard — an outer owner's
+  # queued tails while the OUTER transaction is still open, which is the bug this
+  # closes, one level up.
+  #
+  # The queue is only drained when the write actually produced a document. Any
+  # other term (`{:error, changeset}`, `{:error, {:halted, _}}`) means no row was
+  # written, so there is no tail to run; an exception or throw clears it on the
+  # way out.
+  defp with_deferred_blocks_doc_tail(fun) when is_function(fun, 0) do
+    if Process.get(@blocks_doc_tail_owner_key) do
+      fun.()
+    else
+      Process.put(@blocks_doc_tail_owner_key, [])
+
+      try do
+        fun.()
+      rescue
+        e ->
+          clear_deferred_blocks_doc_tails()
+          reraise e, __STACKTRACE__
+      catch
+        kind, reason ->
+          clear_deferred_blocks_doc_tails()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, %Document{}} = ok ->
+          run_deferred_blocks_doc_tails()
+          ok
+
+        other ->
+          clear_deferred_blocks_doc_tails()
+          other
+      end
+    end
+  end
+
+  defp run_deferred_blocks_doc_tails do
+    (Process.delete(@blocks_doc_tail_owner_key) || [])
+    |> Enum.reverse()
+    |> Enum.each(fn {doc, attrs, type, dataset, slug, existing, opts} ->
+      persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+    end)
+
+    :ok
+  end
+
+  defp clear_deferred_blocks_doc_tails do
+    Process.delete(@blocks_doc_tail_owner_key)
+    :ok
+  end
+
+  # Run the tail now, or hand it to the registered owner. Deferral requires BOTH
+  # an owner AND an open transaction: an owner with no transaction open (nothing
+  # on main reaches that shape today) would otherwise postpone a tail that is
+  # already safe to run.
+  defp run_or_defer_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
+    case Process.get(@blocks_doc_tail_owner_key) do
+      queued when is_list(queued) ->
+        if Repo.in_transaction?() do
+          Process.put(
+            @blocks_doc_tail_owner_key,
+            [{doc, attrs, type, dataset, slug, existing, opts} | queued]
+          )
+
+          {:ok, doc}
+        else
+          persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+        end
+
+      nil ->
+        persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
     end
   end
 
@@ -204,7 +317,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           stamped_scope_attrs(dataset, [])
       end
 
-    with {:ok, scope_attrs} <- scope_attrs_result do
+    with {:ok, scope_attrs} <- scope_attrs_result,
+         :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
       upsert_blocks_doc_stamped(type, attrs, opts, dataset, slug, existing, scope_attrs)
     end
   end
@@ -375,6 +489,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     render_opts =
       Labels.paper_render_opts(dataset, style, paper_scope(existing, scope_attrs))
 
+    # A write that sends neither blocks nor body_html (a title or metadata
+    # patch) on a doc that already HAS blocks: the cache is re-rendered from
+    # those stored blocks instead of carried forward. A carried cache may come
+    # from an older renderer, and the `{:paper_updated, …}` frame for this
+    # write is built from the row it commits, so a write-capable Studio socket
+    # would paint the old bytes (task-0d3b2cd020238663). The stored blocks are
+    # already sealed, exactly what the original render saw, so this is the
+    # same render a blocks write makes. nil (no stored blocks, or an explicit
+    # `clear_blocks`) keeps the byte-for-byte carry-over of an HTML-only doc,
+    # whose cache is its only source.
+    carried_blocks = carried_blocks(blocks, attrs, existing)
+
     body_html =
       cond do
         is_list(blocks) -> Render.render_blocks(blocks, render_opts)
@@ -383,6 +509,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # a <script>/onerror= payload never persists (defensive; the reader CSP
         # is the second layer). See Barkpark.PortableDoc.HtmlSanitizer.
         is_binary(attrs["body_html"]) -> HtmlSanitizer.sanitize(attrs["body_html"])
+        is_list(carried_blocks) -> Render.render_blocks(carried_blocks, render_opts)
         true -> (existing && get_in(existing.content || %{}, ["body_html"])) || ""
       end
 
@@ -402,13 +529,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     #     routes it into the OVERWRITE branch and discards the caller's HTML.
     #     Absent is the legacy class readers already fail closed on.
     #
-    #   carry-over — a metadata-only update rewrites the EXISTING body_html
-    #     byte-for-byte, so an existing stamp still describes exactly those
-    #     bytes and stays TRUE. Deleting here would demote a coherent paper into
-    #     the fail-closed unknown class and manufacture false 422s.
+    #   carry-over — a metadata-only update of a doc with NO stored blocks
+    #     rewrites the EXISTING body_html byte-for-byte, so an existing stamp
+    #     still describes exactly those bytes and stays TRUE. Deleting here
+    #     would demote a coherent paper into the fail-closed unknown class and
+    #     manufacture false 422s. (With stored blocks the cache is re-rendered
+    #     above, so it takes the fresh stamp like a blocks write.)
     content =
       cond do
-        is_list(blocks) ->
+        is_list(blocks) or is_list(carried_blocks) ->
           put_body_html(base_content, body_html)
 
         is_binary(attrs["body_html"]) ->
@@ -504,8 +633,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # exists yet for the other to see) and both then commit the duplicate pair
   # the wall exists to refuse.
   #
-  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s non-paper
-  # leg does NOT cover this: two different slugs hash to two different keys, so
+  # The per-slug `pg_advisory_xact_lock` on `upsert_blocks_doc/3`'s slug-keyed
+  # leg (reached by every non-paper blocks type — papers have their own earlier,
+  # unlocked clause) does NOT cover this: two different slugs hash to two different keys, so
   # the two writers never meet. The key here is the SCOPE, not the row —
   # `DedupWall.publish_scope_lock_key/3`, shared byte-for-byte with the
   # lifecycle publish path so a paper born through ingest and one born through
@@ -579,17 +709,58 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (the non-paper leg's per-slug lock) it runs the function as is.
     written =
       Broadcast.write_atomically(fn ->
-        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts) do
-          write_blocks_doc_row(type, content, existing, dataset, slug, scope_attrs, title)
+        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
+             :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
+          row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
+
+          # The history row is written INSIDE the row write's transaction (Run-4
+          # concurrent-writer matrix). In the after-commit tail, a concurrent
+          # ingest that committed in between made the revision snapshot differ
+          # from the document, the snapshot trigger RAISED ("revision snapshot
+          # does not exactly match its document"), and the caller got a 500 for
+          # a write that had already landed — with its history row lost. Here
+          # the UPDATE still holds the row, so the snapshot is exactly what was
+          # written; `save_revision` takes the savepoint path in a transaction.
+          with {:ok, %Document{} = doc} <-
+                 write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title) do
+            save_upsert_revision(doc, type, dataset, row, opts)
+            {:ok, doc}
+          end
         end
       end)
 
     case written do
       {:ok, %Document{} = doc} ->
-        persist_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
+        # NOT `persist_blocks_doc_tail/7` directly: when an enclosing clause owns
+        # a transaction of its own (the slug-keyed advisory lock on
+        # `upsert_blocks_doc/3`), `write_atomically/1` above NESTED and this row
+        # is not durable yet. `run_or_defer_blocks_doc_tail/7` hands the tail to
+        # that owner, which runs it after its transaction returns.
+        run_or_defer_blocks_doc_tail(doc, attrs, type, dataset, slug, existing, opts)
 
       other ->
         other
+    end
+  end
+
+  # Create-only callers never enter the update branch. Recheck after the
+  # publish-scope lock as well as before content preparation; the unique row
+  # constraint remains the final guard against writers outside that lock.
+  defp require_new_paper(type, slug, dataset, attrs, opts) do
+    if Keyword.get(opts, :create_only, false) do
+      cond do
+        not is_binary(slug) or slug == "" or DraftId.draft?(slug) ->
+          {:error, :invalid_create_slug}
+
+        get_existing_blocks_doc_for_write(type, slug, dataset, attrs) ||
+            get_existing_blocks_doc_for_write(type, DraftId.draft_id(slug), dataset, attrs) ->
+          {:error, :paper_exists}
+
+        true ->
+          :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -647,8 +818,21 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # `write_atomically/1` has returned, so `Repo.in_transaction?()` is false here
   # and every one of these runs against durable state, exactly as it did before
   # the publish-scope lock existed.
+  #
+  # THAT SENTENCE IS LOAD-BEARING AND IT USED TO BE FALSE on the slug-keyed
+  # advisory-lock leg of `upsert_blocks_doc/3`, where `write_atomically/1` nested
+  # inside a bare `Repo.transaction` and returned with it still open
+  # (task-c352740ae6b0f72a). `run_or_defer_blocks_doc_tail/7` now keeps it true
+  # on every leg, and the telemetry below makes it MEASURABLE rather than merely
+  # asserted: `[:barkpark, :content, :blocks_doc, :tail]` carries the answer
+  # `Repo.in_transaction?/0` gives at this exact point, so a future caller that
+  # re-opens a transaction around this path reds a test instead of silently
+  # firing a pre-commit broadcast. Wrapped: telemetry can never fail a write.
   defp persist_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
-    save_upsert_revision(doc, type, dataset, existing, opts)
+    emit_tail_boundary_telemetry(type, dataset, slug)
+    # The history row is no longer written here: it rides the row write's own
+    # transaction in `persist_blocks_doc` (see the note there).
+    _ = {existing, opts}
     broadcast_paper_update(doc)
     enqueue_edge_projection(doc)
     # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
@@ -661,6 +845,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # applied to the doc above) so a goal's events share the goal's scope.
     maybe_append_paper_event(attrs, slug, doc)
     {:ok, doc}
+  end
+
+  defp emit_tail_boundary_telemetry(type, dataset, slug) do
+    :telemetry.execute(
+      [:barkpark, :content, :blocks_doc, :tail],
+      %{count: 1},
+      %{type: type, dataset: dataset, slug: slug, in_transaction: Repo.in_transaction?()}
+    )
+  rescue
+    _ -> :ok
+  catch
+    _, _ -> :ok
   end
 
   # [paper-upsert-unlogged-clobber] Record the version-history row for a paper
@@ -772,10 +968,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
   Returns `{:ok, %{block:, fragment_html:, op_kind:, block_id:, position:,
   rev:}}` on success. When `opts[:if_rev]` is present, it must match the
   paper's current streaming revision and the final row update is atomically
-  fenced; omitting it preserves the legacy last-write-wins contract.
+  fenced; omitting it needs no revision, and the write compare-and-sets on the
+  row it read, re-applying the op on a lost race (`serialize_revless/2`).
   """
-  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ [])
-      when is_binary(slug) and is_map(op) do
+  def apply_paper_block_op(slug, op, dataset \\ @paper_default_dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        serialize_revless(opts, &admitted_apply_paper_block_op(slug, op, dataset, &1))
+      end)
+
+  defp admitted_apply_paper_block_op(slug, op, dataset, opts)
+       when is_binary(slug) and is_map(op) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
@@ -813,7 +1016,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks = patched |> ensure_block_ids() |> normalize_render_shapes(),
+         new_blocks =
+           patched
+           |> ensure_block_ids()
+           |> normalize_render_shapes()
+           |> hydrate_changed_sheet_blocks(blocks, doc, dataset, slug),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -929,8 +1136,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   no-op that still loads the paper and returns the receipt at the current rev
   with `op_count: 0` and no block_ids, without writing.
   """
-  def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
-      when is_binary(slug) and is_list(ops) do
+  def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        serialize_revless(opts, &admitted_apply_paper_block_ops(slug, ops, dataset, &1))
+      end)
+
+  defp admitted_apply_paper_block_ops(slug, ops, dataset, opts)
+       when is_binary(slug) and is_list(ops) do
     with :ok <- require_editor_ops_revision(ops, Keyword.get(opts, :if_rev)),
          {:ok, opts} <- normalize_canvas_run_opts(opts),
          %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
@@ -956,17 +1169,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   boundary so those effects run only after the actual commit; calling it from
   an already-open transaction is rejected before any read, claim, or mutation.
   """
-  def apply_paper_block_ops_once(
-        slug,
-        ops,
-        dataset,
-        request_id,
-        principal_key,
-        opts \\ []
-      )
+  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts \\ []),
+    do:
+      Door.admit(fn ->
+        admitted_apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+      end)
 
-  def apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
-      when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
+  defp admitted_apply_paper_block_ops_once(slug, ops, dataset, request_id, principal_key, opts)
+       when is_binary(slug) and is_list(ops) and is_binary(dataset) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -1031,8 +1241,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_block_ops_once(_slug, _ops, _dataset, _request_id, _principal_key, _opts),
-    do: {:error, :invalid_paper_ops_request}
+  defp admitted_apply_paper_block_ops_once(
+         _slug,
+         _ops,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_paper_ops_request}
 
   @doc """
   Apply one server-authorized contextual history continuation exactly once.
@@ -1051,19 +1268,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
         request_id,
         principal_key,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_paper_contextual_history_once(
+            slug,
+            history_ref,
+            action,
+            dataset,
+            request_id,
+            principal_key,
+            opts
+          )
+        end)
 
-  def apply_paper_contextual_history_once(
-        slug,
-        history_ref,
-        action,
-        dataset,
-        request_id,
-        principal_key,
-        opts
-      )
-      when is_binary(slug) and is_binary(history_ref) and is_binary(action) and
-             is_binary(dataset) and is_binary(request_id) and is_list(opts) do
+  defp admitted_apply_paper_contextual_history_once(
+         slug,
+         history_ref,
+         action,
+         dataset,
+         request_id,
+         principal_key,
+         opts
+       )
+       when is_binary(slug) and is_binary(history_ref) and is_binary(action) and
+              is_binary(dataset) and is_binary(request_id) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, history_ref} <- normalize_paper_ops_request_id(history_ref),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
@@ -1159,16 +1388,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_contextual_history_once(
-        _slug,
-        _history_ref,
-        _action,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _opts
-      ),
-      do: {:error, :invalid_paper_contextual_history_request}
+  defp admitted_apply_paper_contextual_history_once(
+         _slug,
+         _history_ref,
+         _action,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_paper_contextual_history_request}
 
   @doc """
   Resolve trusted server-owned block-form source against the revision-accepted
@@ -1187,21 +1416,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
         principal_key,
         resolver,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_paper_block_form_once(
+            slug,
+            source_tag,
+            source_params,
+            dataset,
+            request_id,
+            principal_key,
+            resolver,
+            opts
+          )
+        end)
 
-  def apply_paper_block_form_once(
-        slug,
-        source_tag,
-        source_params,
-        dataset,
-        request_id,
-        principal_key,
-        resolver,
-        opts
-      )
-      when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
-             is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
-             is_list(opts) do
+  defp admitted_apply_paper_block_form_once(
+         slug,
+         source_tag,
+         source_params,
+         dataset,
+         request_id,
+         principal_key,
+         resolver,
+         opts
+       )
+       when is_binary(slug) and is_binary(source_tag) and source_tag != "" and
+              is_map(source_params) and is_binary(dataset) and is_function(resolver, 1) and
+              is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -1273,17 +1515,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_paper_block_form_once(
-        _slug,
-        _source_tag,
-        _source_params,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _resolver,
-        _opts
-      ),
-      do: {:error, :invalid_block_form_request}
+  defp admitted_apply_paper_block_form_once(
+         _slug,
+         _source_tag,
+         _source_params,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _resolver,
+         _opts
+       ),
+       do: {:error, :invalid_block_form_request}
 
   defp resolve_paper_block_form(%Document{} = doc, resolver, opts) do
     with if_rev = Keyword.get(opts, :if_rev),
@@ -1427,6 +1669,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # current rev, no write or broadcast. Canonical ops keep their semantics.
         {:ok, blocks, paper_current_rev(doc), nil}
       else
+        new_blocks = hydrate_changed_sheet_blocks(new_blocks, blocks, doc, dataset, slug)
         rev = paper_next_rev(doc)
         style = get_in(doc.content || %{}, ["style"])
         scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -2095,10 +2338,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # on the row's OPAQUE rev read at load (`doc.rev`): the write lands only if the
   # row's rev is STILL that value; otherwise 0 rows change and we surface
   # `{:error, :precondition_failed}` (→ 412) exactly as `check_paper_if_rev`
-  # would. With NO `ifRev` (the client sent none) the original unfenced
-  # last-write-wins `Repo.update` is unchanged.
+  # would. With NO `ifRev` the write is compare-and-set too (inside
+  # `serialize_revless/2`, which retries the op on a lost race) and only the
+  # last bounded attempt falls back to the plain `Repo.update`.
   defp fenced_or_plain_paper_update(changeset, %Document{rev: rev} = doc, opts) do
     case Keyword.get(opts, :if_rev) do
+      # A rev-LESS write inside `serialize_revless/2`: compare-and-set on the rev
+      # this op read, so a concurrent writer that committed in between makes this
+      # attempt retry on the fresh row instead of clobbering it.
+      nil when is_binary(rev) and rev != "" ->
+        if Keyword.get(opts, @revless_cas) do
+          case fenced_paper_update(changeset, doc, rev, opts) do
+            {:error, :precondition_failed} -> {:error, :revless_conflict}
+            other -> other
+          end
+        else
+          Repo.update(changeset)
+        end
+
       nil ->
         Repo.update(changeset)
 
@@ -2108,6 +2365,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # No opaque rev to fence on (legacy row) — fall back to the plain write.
       _present ->
         Repo.update(changeset)
+    end
+  end
+
+  defp serialize_revless(opts, attempt) do
+    if Keyword.get(opts, :if_rev) != nil do
+      attempt.(opts)
+    else
+      retry_revless(attempt, Keyword.put(opts, @revless_cas, true), @revless_attempts)
+    end
+  end
+
+  defp retry_revless(attempt, opts, 1), do: attempt.(Keyword.delete(opts, @revless_cas))
+
+  defp retry_revless(attempt, opts, left) do
+    case attempt.(opts) do
+      {:error, :revless_conflict} -> retry_revless(attempt, opts, left - 1)
+      other -> other
     end
   end
 
@@ -2204,8 +2478,42 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   @spec apply_document_block_op(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def apply_document_block_op(doc_id, type, op, dataset, opts \\ [])
-      when is_binary(doc_id) and is_binary(type) and is_map(op) do
+  def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        document_revless(opts, &admitted_apply_document_block_op(doc_id, type, op, dataset, &1))
+      end)
+
+  # [document-revless-cas] (Run-4 concurrent-writer matrix) — the document twin
+  # of [blockops-revless-cas]. A revision-LESS document block op read the row,
+  # patched its block list and wrote the WHOLE content back unfenced, so two ops
+  # on DIFFERENT fields of one document raced and one was silently lost (20/20
+  # rounds). It keeps its API — no revision needed, never refused for a stale
+  # one — but now writes fenced on the rev it read and, on a lost race, re-runs
+  # on the fresh row (bounded). The last attempt falls back to the legacy plain
+  # write: a pathologically hot document degrades to last-writer-wins, never to
+  # an error. An op that carries `:if_rev` is untouched (it already 412s).
+  @document_revless_attempts 8
+
+  defp document_revless(opts, fun) do
+    if Keyword.get(opts, :if_rev) in [nil, ""] do
+      document_revless_attempt(opts, fun, @document_revless_attempts)
+    else
+      fun.(opts)
+    end
+  end
+
+  defp document_revless_attempt(opts, fun, 1), do: fun.(opts)
+
+  defp document_revless_attempt(opts, fun, attempts) do
+    case fun.(Keyword.put(opts, :document_revless_cas, true)) do
+      {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
+      other -> other
+    end
+  end
+
+  defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_map(op) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          :ok <- reject_implicit_html_conversion(doc),
          if_rev = Keyword.get(opts, :if_rev),
@@ -2215,9 +2523,22 @@ defmodule Barkpark.Content.Papers.BlockOps do
          :ok <- preflight_table_editor_ops(blocks, [op]),
          {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
          {:ok, applied_op} <- lower_editor_block_op(blocks, op),
-         {:ok, new_blocks} <- Patch.apply_patch(blocks, applied_op),
+         {:ok, patched} <- Patch.apply_patch(blocks, applied_op),
+         # HOIST (PDS, document surface): mint ids BEFORE `locate_paper_affected`,
+         # exactly as `apply_paper_block_op/4` (:816) and the batch fold (:1932)
+         # already do. `locate_paper_affected` reads the affected block out of the
+         # post-op list, so an id-less append/insert-after handed the RAW patched
+         # list reports `block_id: nil` for a block that `upsert_document`'s own
+         # chokepoint then mints and persists — the receipt withholding the id it
+         # created. `ensure_block_ids/1` is idempotent and only fills a
+         # missing/blank id, so the downstream chokepoint stays a byte-identical
+         # no-op over this list. The no-op comparison deliberately stays on
+         # `patched` (pre-mint) so a revision-fenced op over a list that was
+         # ALREADY id-less on disk keeps reporting `no_op` instead of being
+         # promoted to a write by the minting alone.
+         new_blocks = ensure_block_ids(patched),
          {:ok, affected} <- locate_paper_affected(applied_op, new_blocks) do
-      if not is_nil(if_rev) and new_blocks == blocks do
+      if not is_nil(if_rev) and patched == blocks do
         {:ok, document_no_op_receipt(doc, op, affected)}
       else
         persist_document_block_op(
@@ -2260,6 +2581,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       "status" => doc.status,
       "content" => content
     }
+
+    # [document-revless-cas]: fence the write on the row this attempt read —
+    # only when that row IS the write target (the draft); a first fork from the
+    # published row inserts the draft and has no row to fence on.
+    {cas?, opts} = Keyword.pop(opts, :document_revless_cas, false)
+
+    opts =
+      if cas? and doc.doc_id == attrs["doc_id"] and is_binary(doc.rev),
+        do: Keyword.put(opts, :if_rev, doc.rev),
+        else: opts
 
     case Content.upsert_document(type, attrs, dataset, opts) do
       {:ok, saved} ->
@@ -2324,19 +2655,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
         request_id,
         principal_key,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_document_block_op_once(
+            doc_id,
+            type,
+            op,
+            dataset,
+            request_id,
+            principal_key,
+            opts
+          )
+        end)
 
-  def apply_document_block_op_once(
-        doc_id,
-        type,
-        op,
-        dataset,
-        request_id,
-        principal_key,
-        opts
-      )
-      when is_binary(doc_id) and is_binary(type) and is_map(op) and is_binary(dataset) and
-             is_list(opts) do
+  defp admitted_apply_document_block_op_once(
+         doc_id,
+         type,
+         op,
+         dataset,
+         request_id,
+         principal_key,
+         opts
+       )
+       when is_binary(doc_id) and is_binary(type) and is_map(op) and is_binary(dataset) and
+              is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -2346,7 +2689,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
       key_hash = document_op_key_hash(doc, target_doc_id, type, request_id, principal_key)
       exact_scope = "document_op:v1:" <> document_op_payload_fingerprint(op, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
@@ -2418,16 +2764,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_document_block_op_once(
-        _doc_id,
-        _type,
-        _op,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _opts
-      ),
-      do: {:error, :invalid_document_op_request}
+  defp admitted_apply_document_block_op_once(
+         _doc_id,
+         _type,
+         _op,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _opts
+       ),
+       do: {:error, :invalid_document_op_request}
 
   @doc """
   Resolve trusted server-owned block-form source against the current generic
@@ -2448,22 +2794,36 @@ defmodule Barkpark.Content.Papers.BlockOps do
         principal_key,
         resolver,
         opts \\ []
-      )
+      ),
+      do:
+        Door.admit(fn ->
+          admitted_apply_document_block_form_once(
+            doc_id,
+            type,
+            source_tag,
+            source_params,
+            dataset,
+            request_id,
+            principal_key,
+            resolver,
+            opts
+          )
+        end)
 
-  def apply_document_block_form_once(
-        doc_id,
-        type,
-        source_tag,
-        source_params,
-        dataset,
-        request_id,
-        principal_key,
-        resolver,
-        opts
-      )
-      when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
-             source_tag != "" and is_map(source_params) and is_binary(dataset) and
-             is_function(resolver, 1) and is_list(opts) do
+  defp admitted_apply_document_block_form_once(
+         doc_id,
+         type,
+         source_tag,
+         source_params,
+         dataset,
+         request_id,
+         principal_key,
+         resolver,
+         opts
+       )
+       when is_binary(doc_id) and is_binary(type) and is_binary(source_tag) and
+              source_tag != "" and is_map(source_params) and is_binary(dataset) and
+              is_function(resolver, 1) and is_list(opts) do
     with false <- Repo.in_transaction?(),
          {:ok, request_id} <- normalize_paper_ops_request_id(request_id),
          {:ok, principal_key} <- normalize_paper_ops_principal(principal_key),
@@ -2477,7 +2837,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
         "document_block_form:v1:" <>
           block_form_payload_fingerprint(source_tag, source_params, opts)
 
-      Broadcast.clear_deferred_broadcasts()
+      # CLAIM, not merely clear: this path opens its own transaction and flushes
+      # by hand in `finish_document_op_transaction/4`, so it must register as the
+      # queue's owner or every webhook it defers reads as orphaned.
+      Broadcast.claim_deferred_queue()
       Writer.clear_deferred_after_save()
 
       try do
@@ -2556,18 +2919,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
-  def apply_document_block_form_once(
-        _doc_id,
-        _type,
-        _source_tag,
-        _source_params,
-        _dataset,
-        _request_id,
-        _principal_key,
-        _resolver,
-        _opts
-      ),
-      do: {:error, :invalid_block_form_request}
+  defp admitted_apply_document_block_form_once(
+         _doc_id,
+         _type,
+         _source_tag,
+         _source_params,
+         _dataset,
+         _request_id,
+         _principal_key,
+         _resolver,
+         _opts
+       ),
+       do: {:error, :invalid_block_form_request}
 
   defp resolve_document_blocks_for_edit(doc, type, dataset) do
     case Papers.resolve_blocks_for_edit(doc, type, dataset) do
@@ -2671,8 +3034,14 @@ defmodule Barkpark.Content.Papers.BlockOps do
   """
   @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
-  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ [])
-      when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
+  def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+      end)
+
+  defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
@@ -2812,6 +3181,54 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp reject_hollow_result(_no_blocks_list), do: :ok
 
+  # Sheet-embed hydration on the op paths (sheets-engine.md §Embed pipeline):
+  # a paper save that adds a `{"type":"sheet","ref":…}` block, or retargets
+  # one, fills its snapshot from the referenced sheet. `upsert_blocks_doc`
+  # hydrates every sheet block; the canvas op paths hydrate only a sheet block
+  # that is NEW (id absent before the op) or whose ref/tab CHANGED, so an
+  # ordinary typing batch never queries sheets. The chip retarget clears the
+  # old snapshot and relies on this to draw the new grid. The batch path runs
+  # it after the contextual-history exactness check.
+  defp hydrate_changed_sheet_blocks(new_blocks, old_blocks, %Document{} = doc, dataset, slug)
+       when is_list(new_blocks) and is_list(old_blocks) do
+    before =
+      for %{"type" => "sheet", "id" => id} = block <- old_blocks,
+          into: %{},
+          do: {id, {block["ref"], block["tab"]}}
+
+    changed? = fn
+      %{"type" => "sheet", "ref" => ref} = block when is_binary(ref) and ref != "" ->
+        Map.get(before, block["id"]) != {ref, block["tab"]}
+
+      _ ->
+        false
+    end
+
+    case Enum.filter(new_blocks, changed?) do
+      [] ->
+        new_blocks
+
+      changed ->
+        scope = %{
+          "dataset" => dataset,
+          "dataset_id" => doc.dataset_id,
+          "workspace_id" => doc.workspace_id
+        }
+
+        hydrated =
+          changed
+          |> Sheets.hydrate_sheet_blocks(scope, slug)
+          |> Map.new(&{&1["id"], &1})
+
+        Enum.map(new_blocks, fn block ->
+          if changed?.(block), do: Map.get(hydrated, block["id"], block), else: block
+        end)
+    end
+  end
+
+  defp hydrate_changed_sheet_blocks(new_blocks, _old_blocks, _doc, _dataset, _slug),
+    do: new_blocks
+
   # Quality gate, op-path RATCHET (p-quality-gate): halt only on the
   # non-hollow → hollow edge. Fresh hollow papers (seeded title + empty
   # tpl-body paragraph) stay freely editable; a paper that HAS content can
@@ -2903,9 +3320,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # whose freshly-appended block was still id-less, which is exactly how the
   # batch receipt came to withhold the id it had minted and persisted.
   # `fold_paper_ops/2` now mints per op, so both paper paths honour it.
-  # `apply_document_block_op/5` still does not (its ids are minted downstream in
-  # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
-  # nil — a known, untouched gap on a different surface, not this contract.
+  # `apply_document_block_op/5` (:2218) now honours it too — it minted downstream
+  # in `upsert_document` only, so an id-less block op on a DOCUMENT reported
+  # block_id nil for a block it had persisted with a minted id. Every caller of
+  # this function now mints first.
   defp lower_editor_block_op(
          blocks,
          %{"op" => "patch-card-body", "id" => id, "content" => content} = op
@@ -3484,7 +3902,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
       become text maps, and `pipeline` NODES become TITLE maps (the key its
-      readers render) — the readers address item FIELDS
+      readers render; an inline array also keeps its structure under `inline`) — the readers address item FIELDS
       through `get/2`, which is nil on a binary, so the raw shape renders an
       EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
       is TYPE-KEYED, never generic over `items` — `byline` string items are
@@ -3495,7 +3913,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       (render/inline.ex), so a text-keyed leaf renders as the empty string
       and a paragraph whose only leaf carries it VANISHES (live:
       `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
-      `value` are left byte-identical.
+      STRING `value` are left byte-identical; a `value: null` leaf with real
+      `text` is rescued like a text-keyed one.
   """
   @spec normalize_render_shapes(list()) :: list()
   def normalize_render_shapes(blocks) when is_list(blocks) do
@@ -3534,11 +3953,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   ## Descent
 
-  `"blocks"` and `"children"` — the same two container keys
-  `normalize_render_shapes/1` and `render_shape_errors/2` descend, so the three
-  walkers agree on what a nested block list is. A nested non-map is not itself a
-  crash (the compose bridge renders it as `""`), but it is silent content LOSS
-  behind a 200, so it is refused at the same door.
+  This walk, `normalize_render_shapes/1` and `render_shape_errors/2` all descend
+  through ONE owner — `reduce_child_block_lists/4` — so the three agree on what
+  a nested block list is BY CONSTRUCTION rather than by three hand-kept key
+  lists. That owner reaches:
+
+    * `"blocks"` and `"children"` on any block (the generic arm), and
+    * the container bodies whose block list is NOT under either key:
+      `steps[].blocks|children` (a step ROW is not a block — its body is two
+      levels down), `tabs[].blocks`, and each `columns[]` entry, which IS a
+      block list rather than a block.
+
+  Before #11621 only the first line was descended, so nothing inside
+  `steps`/`tabs`/`columns` was normalized or error-walked by ANY arm. Still not
+  descended: `figure`'s single `"child"` map, which is not a list.
+
+  A nested non-map is not itself a crash (the compose bridge renders it as
+  `""`), but it is silent content LOSS behind a 200, so it is refused at the
+  same door.
 
   Returns `:ok`, or `{:error, {:malformed_blocks, %{"blocks" => [path, …]}}}`,
   which `Barkpark.Content.Errors` renders as a 400 `malformed` envelope.
@@ -3564,15 +3996,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
     |> Enum.with_index()
     |> Enum.flat_map(fn
       {block, index} when is_map(block) ->
-        Enum.flat_map(["blocks", "children"], fn key ->
-          case Map.get(block, key) do
-            children when is_list(children) ->
-              block_element_errors(children, "#{path}[#{index}].#{key}")
+        {_block, errors} =
+          reduce_child_block_lists(block, "#{path}[#{index}]", [], fn children, child_path, acc ->
+            {children, acc ++ block_element_errors(children, child_path)}
+          end)
 
-            _ ->
-              []
-          end
-        end)
+        errors
 
       {_block, index} ->
         ["#{path}[#{index}] must be an object"]
@@ -3738,12 +4167,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp render_block_errors(block, path) do
-    Enum.flat_map(["blocks", "children"], fn key ->
-      case Map.get(block, key) do
-        children when is_list(children) -> render_shape_errors(children, "#{path}.#{key}")
-        _ -> []
-      end
-    end)
+    {_block, errors} =
+      reduce_child_block_lists(block, path, [], fn children, child_path, acc ->
+        {children, acc ++ render_shape_errors(children, child_path)}
+      end)
+
+    errors
   end
 
   defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
@@ -3793,6 +4222,125 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp valid_record_table?(_block, _rows), do: false
+
+  # ── the ONE owner of "where a block keeps nested block lists" ──────────────
+  #
+  # Every walk in this module that descends into a block's children routes
+  # through here — `normalize_render_block/1` (WRITE), `block_element_errors/2`
+  # and `render_block_errors/2` (READ) — so the three walkers agree on what a
+  # nested block list is BY CONSTRUCTION, not by three hand-kept key lists that
+  # drift the day one of them grows.
+  #
+  # It is TYPE-KEYED, not a generic reduce over a key set, because the container
+  # shapes genuinely differ and a generic reduce reaches NONE of them:
+  #
+  #   * `steps` holds ROWS (`%{"title" => …, "blocks" => […]}`) — the block list
+  #     is TWO levels down, and a row is not a block (`PortableDoc.BlockIds`
+  #     says so in as many words and projects the row's selected body only).
+  #   * `tabs` holds `%{"label" => …, "blocks" => […]}` rows — same two levels.
+  #   * `columns` holds a list of LISTS: each column IS a block list
+  #     (`Compose.compose_block/2` calls `render_blocks(List.wrap(col), …)`), so
+  #     a reduce treating `columns` as a block list hands a LIST to the
+  #     map-guarded normalizer clause, which returns it untouched.
+  #
+  # `EpicQuality.nested_keys/0` is deliberately NOT reused. That set is the
+  # authoring wall's MAP CENSUS (every map anywhere), not a statement about
+  # where block LISTS live. Swapping this owner for a generic reduce over it
+  # reds 7 tests in `ContainerDescentTest`: `columns` is reached by none of the
+  # three walkers, an opaque `%{"columns" => [...]}` body is coerced instead of
+  # left alone, and a steps row carrying both `children` and `blocks` has the
+  # hidden `blocks` alias rewritten — the rewrite `PortableDoc.BlockIds`
+  # refuses by name. It also carries `panels`, a key no block type here emits.
+  #
+  # STILL NOT DESCENDED, on purpose: `figure`'s single `"child"` map (not a
+  # list) and `expandable`'s alias body, which the generic `blocks`/`children`
+  # arm below already reaches for every shape that stores one.
+  defp reduce_child_block_lists(%{"type" => "steps", "steps" => rows} = block, path, acc, fun)
+       when is_list(rows) do
+    {rows, acc} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn {row, index}, acc ->
+        reduce_visible_body(row, "#{path}.steps[#{index}]", acc, fun)
+      end)
+
+    {Map.put(block, "steps", rows), acc}
+  end
+
+  defp reduce_child_block_lists(%{"type" => "tabs", "tabs" => rows} = block, path, acc, fun)
+       when is_list(rows) do
+    {rows, acc} =
+      rows
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn
+        {row, index}, acc when is_map(row) ->
+          case Map.get(row, "blocks") do
+            children when is_list(children) ->
+              {children, acc} = fun.(children, "#{path}.tabs[#{index}].blocks", acc)
+              {Map.put(row, "blocks", children), acc}
+
+            _opaque ->
+              {row, acc}
+          end
+
+        {row, _index}, acc ->
+          {row, acc}
+      end)
+
+    {Map.put(block, "tabs", rows), acc}
+  end
+
+  defp reduce_child_block_lists(
+         %{"type" => "columns", "columns" => columns} = block,
+         path,
+         acc,
+         fun
+       )
+       when is_list(columns) do
+    {columns, acc} =
+      columns
+      |> Enum.with_index()
+      |> Enum.map_reduce(acc, fn
+        {column, index}, acc when is_list(column) ->
+          fun.(column, "#{path}.columns[#{index}]", acc)
+
+        {column, _index}, acc ->
+          {column, acc}
+      end)
+
+    {Map.put(block, "columns", columns), acc}
+  end
+
+  defp reduce_child_block_lists(block, path, acc, fun) when is_map(block) do
+    Enum.reduce(["blocks", "children"], {block, acc}, fn key, {block, acc} ->
+      case Map.get(block, key) do
+        children when is_list(children) ->
+          {children, acc} = fun.(children, "#{path}.#{key}", acc)
+          {Map.put(block, key, children), acc}
+
+        _ ->
+          {block, acc}
+      end
+    end)
+  end
+
+  defp reduce_child_block_lists(block, _path, acc, _fun), do: {block, acc}
+
+  # A steps ROW keeps its body under the SAME `children`-then-`blocks` alias
+  # discipline every other container here uses (`visible_body_key/1`), so a row
+  # carrying both never has the hidden compatibility alias rewritten.
+  defp reduce_visible_body(container, path, acc, fun) when is_map(container) do
+    case visible_body_key(container) do
+      nil ->
+        {container, acc}
+
+      key ->
+        {children, acc} = fun.(Map.fetch!(container, key), "#{path}.#{key}", acc)
+        {Map.put(container, key, children), acc}
+    end
+  end
+
+  defp reduce_visible_body(container, _path, acc, _fun), do: {container, acc}
 
   defp normalize_render_block(%{"type" => type} = block)
        when type in [
@@ -3870,32 +4418,36 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_render_block(block) when is_map(block) do
-    Enum.reduce(["blocks", "children"], block, fn key, normalized ->
-      case Map.get(normalized, key) do
-        children when is_list(children) ->
-          Map.put(normalized, key, normalize_render_shapes(children))
+    {normalized, _acc} =
+      reduce_child_block_lists(block, "", nil, fn children, _child_path, acc ->
+        {normalize_render_shapes(children), acc}
+      end)
 
-        _ ->
-          normalized
-      end
-    end)
+    normalized
   end
 
   defp normalize_render_block(block), do: block
 
   # ONE widget item/node → the text-map dialect the readers understand. A map
   # (the canonical shape) is untouched; a bare string becomes `%{"text" => s}`;
-  # an inline ARRAY flattens to its plain text. An inline array with NO
-  # derivable text — or any other scalar — is left as-is: this is a rescue
-  # arm, never a destroyer.
+  # an inline ARRAY gets its plain text under `text` for today's readers. An
+  # inline array with NO derivable text — or any other scalar — is left as-is:
+  # this is a rescue arm, never a destroyer.
+  #
+  # POLICY for inline-array items and nodes (task-95e93702fdae9fd6, F4): the
+  # author's structure is NEVER flattened away. The plain text is ADDED under
+  # the key every reader renders (`text`, or `title` for pipeline nodes), and
+  # the original inline array — leaf dialect normalized, marks, links,
+  # wikilinks and code intact — is KEPT under the sibling key `inline`. No
+  # reader in either engine reads `inline` today, so render bytes are exactly
+  # what the flattening produced; a reader that learns rich item rendering
+  # reads `inline` and gets the markup back. Writing only the flattened text
+  # (the old behaviour) was one-way: the markup could never return.
+  @widget_inline_key "inline"
+
   defp normalize_widget_item(item) when is_binary(item), do: %{"text" => item}
 
-  defp normalize_widget_item(item) when is_list(item) do
-    case inline_plain_text(item) do
-      "" -> item
-      text -> %{"text" => text}
-    end
-  end
+  defp normalize_widget_item(item) when is_list(item), do: rescue_inline_array(item, "text")
 
   defp normalize_widget_item(item), do: item
 
@@ -3903,14 +4455,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Same rescue discipline as normalize_widget_item, different key.
   defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
 
-  defp normalize_pipeline_node(node) when is_list(node) do
-    case inline_plain_text(node) do
-      "" -> node
-      text -> %{"title" => text}
-    end
-  end
+  defp normalize_pipeline_node(node) when is_list(node), do: rescue_inline_array(node, "title")
 
   defp normalize_pipeline_node(node), do: node
+
+  defp rescue_inline_array(inline, text_key) do
+    case inline_plain_text(inline) do
+      "" -> inline
+      text -> %{text_key => text, @widget_inline_key => normalize_inline_nodes(inline)}
+    end
+  end
 
   # Flatten an inline array (or one inline node) to concatenated PLAIN text,
   # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
@@ -4068,8 +4622,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
 
+  # A STRING `value` already wins at render and is left byte-identical. Any
+  # other value — an explicit `null` from a JSON producer, which the renderer
+  # coerces to "" — is no value at all, so the real `text` is rescued into it
+  # (task-40529c5ad14ae43e; a `Map.has_key?` guard read the null as canonical).
   defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
-    if Map.has_key?(leaf, "value") do
+    if is_binary(Map.get(leaf, "value")) do
       leaf
     else
       leaf |> Map.delete("text") |> Map.put("value", text)
@@ -4593,16 +5151,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   #   2. the first heading block's text (legacy heading-driven papers);
   #   3. the slug (the desk list always needs a title).
   defp paper_title(content, slug) when is_map(content) do
-    blocks = Map.get(content, "blocks")
+    blank_to_nil(Map.get(content, "title")) || heading_title(Map.get(content, "blocks")) || slug
+  end
 
-    heading_text =
-      if is_list(blocks) do
-        Enum.find_value(blocks, fn b ->
-          if Map.get(b, "type") == "heading", do: blank_to_nil(Map.get(b, "text"))
-        end)
+  @doc """
+  The first heading block's PLAIN text, or `nil` when there is no heading with
+  printable text.
+
+  Public so the ingest controller's create-precheck twin (`create_title/3` in
+  `BulldocsIngestController`) derives the title the SAME way the authoritative
+  upsert wall does — the two derivations must move in lockstep or a dry-run
+  passes under one title and the write stores another.
+
+  Reads BOTH authored heading forms (bp-paper-ingest-title-trap): the flat
+  `"text"` key (legacy heading-driven papers) and the normal PortableDoc inline
+  `"content"` array. Matching only `"text"` made an array-authored heading miss
+  the fallback entirely, so the row title fell silently to the slug.
+  """
+  def heading_title(blocks) when is_list(blocks) do
+    Enum.find_value(blocks, fn b ->
+      if is_map(b) and Map.get(b, "type") == "heading" do
+        blank_to_nil(Map.get(b, "text")) || heading_content_text(b)
       end
+    end)
+  end
 
-    blank_to_nil(Map.get(content, "title")) || heading_text || slug
+  def heading_title(_), do: nil
+
+  defp heading_content_text(b) do
+    case Map.get(b, "content") do
+      nodes when is_list(nodes) -> nodes |> inline_plain_text() |> String.trim() |> blank_to_nil()
+      _ -> nil
+    end
   end
 
   defp blank_to_nil(""), do: nil
@@ -4687,6 +5267,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp maybe_put_paper(map, _key, nil), do: map
   defp maybe_put_paper(map, key, value), do: Map.put(map, key, value)
+
+  # The stored block list a body-less write re-renders its cache from (see
+  # `write_encrypted_blocks_doc/8`). nil when the write carries its own body,
+  # drops the blocks, or the doc has no non-empty stored block list — an
+  # HTML-only doc's cache is its source and must not be re-rendered to "".
+  # Reads the stored list shapes only (`Projection.read_blocks/1` minus its
+  # markdown arm); a markdown `body` string is not a block list.
+  defp carried_blocks(blocks, _attrs, _existing) when is_list(blocks), do: nil
+  defp carried_blocks(_blocks, _attrs, nil), do: nil
+
+  defp carried_blocks(_blocks, attrs, %Document{} = existing) do
+    content = existing.content || %{}
+
+    stored =
+      case content do
+        %{"blocks" => list} when is_list(list) -> list
+        %{"body" => %{"blocks" => list}} when is_list(list) -> list
+        %{"body" => list} when is_list(list) -> list
+        _ -> nil
+      end
+
+    cond do
+      is_binary(attrs["body_html"]) -> nil
+      clear_blocks?(attrs["clear_blocks"]) -> nil
+      stored in [nil, []] -> nil
+      true -> stored
+    end
+  end
 
   # Blocks on the way into `content`, with ONE new arm.
   #
@@ -4924,16 +5532,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp blocks_doc_preview_opts(@paper_type, slug, scope), do: paper_preview_opts(slug, scope)
 
   defp blocks_doc_preview_opts(type, _slug, scope) do
-    %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+    %{media_scope: scope, doc_type: type}
   end
 
   # The :preview sub-map injected into render_opts so Projection.project derives a
-  # rich content["preview"] card for a paper: the media resolver (bound to this
-  # paper's tenancy scope so it never resolves another tenant's blob), the reader
+  # rich content["preview"] card for a paper: the media SCOPE (this paper's
+  # tenancy, which `Projection.bind_media_resolver/1` binds into the resolver
+  # closure, so it never resolves another tenant's blob — and so the kernel never
+  # names `Barkpark.Preview`; task-1e93b1d801ff4696 edge 1), the reader
   # url, and the raw doctype. Render.render_blocks ignores the extra key.
   defp paper_preview_opts(slug, scope) do
     %{
-      media_resolver: Preview.media_resolver(scope),
+      media_scope: scope,
       url: "/papers/#{slug}",
       doc_type: @paper_type
     }
@@ -4947,7 +5557,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   # The :preview sub-map for a generic (non-paper) block-bearing document — the
-  # raw doctype + a scope-bound media resolver. No reader url (arbitrary doctypes
+  # raw doctype + the media scope the resolver is bound from. No reader url (arbitrary doctypes
   # have no canonical public page); Preview leaves manifest["url"] nil.
   defp doc_project_opts(dataset, type, %Document{} = doc) do
     scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -4961,7 +5571,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # ever wrong. The paper leg above (`maybe_project/6`) is the one that was.
     Labels.render_opts(dataset, scope)
     |> Map.put(:preview, %{
-      media_resolver: Preview.media_resolver(scope),
+      media_scope: scope,
       doc_type: type
     })
     |> Map.put(:style, :article)

@@ -156,6 +156,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   def walk(%{"kind" => "PdWikilink"} = n, width, pal), do: wikilink(n, width, pal)
   def walk(%{"kind" => "PdEmbed"} = n, _width, pal), do: embed(n, pal)
+  def walk(%{"kind" => "PdMasterRef"} = n, _width, pal), do: master_ref(n, pal)
   def walk(%{"kind" => "PdBlockref"} = n, _width, pal), do: blockref(n, pal)
   def walk(%{"kind" => "PdTag"} = n, _width, pal), do: tag_node(n, pal)
   def walk(%{"kind" => "PdChip"} = n, _width, pal), do: chip(n, pal)
@@ -233,7 +234,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # external Pd JSON, so an open `"class"` pass-through would let any document
   # claim arbitrary paper-surface classes (class injection). Compose stamps
   # these as FIXED literals (compose_section_stack); anything else stays inert.
-  @box_class_whitelist ~w(bp-section--framed bp-section--wide)
+  @box_class_whitelist ~w(bp-section--framed bp-section--wide bp-section--declaration)
 
   defp box(n, width, pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
@@ -330,13 +331,40 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
 
     # Article-only typographic roles. These now carry a `bp-role-*` CLASS (the
     # role typography lives in `.bp-paper-surface`); author marks in `out` are
     # untouched and still ride inline. In email mode (or with no hint) the class
     # is nil → byte-identical span.
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
+
+    # A highlight is author DATA like `color`. On the surface it is the semantic
+    # <mark> the stylesheet paints (no inline property — the article inline-style
+    # ratchet); off-surface (email, a bare export) it rides inline so it survives
+    # with no stylesheet. The class is the same selector the editor renders.
+    {out, inner} =
+      if Map.get(n, "highlight") do
+        case pal do
+          %{style: :article} -> {out, ~s(<mark class="bp-highlight">) <> inner <> "</mark>"}
+          _ -> {["background-color:#fff2a8" | out], inner}
+        end
+      else
+        {out, inner}
+      end
+
+    # Subscript / superscript: the semantic tags on every surface (a mail client and
+    # the paper page render <sub>/<sup> alike; no inline property, no class).
+    inner = if Map.get(n, "sub"), do: "<sub>" <> inner <> "</sub>", else: inner
+    inner = if Map.get(n, "sup"), do: "<sup>" <> inner <> "</sup>", else: inner
 
     out = Enum.reverse(out)
 
@@ -425,7 +453,23 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         out
       end
 
-    out = if Map.get(n, "color"), do: ["color:#{Map.get(n, "color")}" | out], else: out
+    # The author's colour is the ONE leaf on this path that reaches an
+    # attribute, so it is escaped like every other: an unescaped `"` here would
+    # close `style="` and let the next token land as a new attribute
+    # (`red" onmouseover="…`). `escape_attr/1` is a no-op for every legitimate
+    # colour value, so the byte-locked email golden is unmoved.
+    out =
+      if Map.get(n, "color"),
+        do: ["color:#{escape_attr(to_string(Map.get(n, "color")))}" | out],
+        else: out
+
+    # Author alignment is DATA (like `color`): an inline text-align on every surface —
+    # the :article allowlist already carries the property.
+    out =
+      if Map.get(n, "align") in ["center", "right"],
+        do: ["text-align:#{Map.get(n, "align")}" | out],
+        else: out
+
     {out, inner, role_class} = apply_text_role(out, inner, n, pal)
     out = body_type(n, pal) ++ Enum.reverse(out)
 
@@ -494,7 +538,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # same contract as PdText.
   defp heading(n, width, %{style: :article} = pal) do
     level = heading_level(Map.get(n, "level"))
-    "<h#{level}>#{heading_inner(n, width, pal)}</h#{level}>"
+    "<h#{level}#{heading_align_attr(n)}>#{heading_inner(n, width, pal)}</h#{level}>"
   end
 
   # Non-article fallback: a PdHeading reaching the walker under a stylesheet-less
@@ -503,8 +547,25 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (headings render as bold PdText spans), so this stays byte-frozen for email.
   defp heading(n, width, pal) do
     level = heading_level(Map.get(n, "level"))
-    style = heading_style(level, pal) |> Enum.join(";")
+    style = (heading_style(level, pal) ++ heading_align_style(n)) |> Enum.join(";")
     ~s(<h#{level} style="#{style}">#{heading_inner(n, width, pal)}</h#{level}>)
+  end
+
+  # The author's alignment on a heading is DATA (like `color` on a run): an inline
+  # text-align on every surface — the only inline property an article heading carries,
+  # and one the :article allowlist already holds.
+  defp heading_align_style(n) do
+    case Map.get(n, "align") do
+      a when a in ["center", "right"] -> ["text-align:#{a}"]
+      _ -> []
+    end
+  end
+
+  defp heading_align_attr(n) do
+    case heading_align_style(n) do
+      [] -> ""
+      styles -> ~s( style="#{escape_attr(Enum.join(styles, ";"))}")
+    end
   end
 
   defp heading_inner(n, width, pal) do
@@ -805,6 +866,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         %{met: met, total: total} when is_integer(met) and is_integer(total) and total > 0 ->
           "#{met}/#{total}"
 
+        # No task resolver loaded (task-9c59aa555e1e015e): the count cannot be
+        # read, so the chip SAYS so rather than omitting the segment (which
+        # would read as "this task has no criteria").
+        :unavailable ->
+          "criteria unavailable"
+
         _ ->
           nil
       end
@@ -824,16 +891,21 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # (nowrap) + `bp-task-chip__badge` (the pill border/padding/accent), styled by
   # `.bp-paper-surface`; `:email` keeps the inline pill verbatim.
   defp task_chip_html(target, hit, status, chip_text, label, %{style: :article}) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} class="bp-task-chip">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} class="bp-task-chip">) <>
       ~s(<span class="bp-task-chip__badge">#{chip_text}</span> ) <>
       label <> "</span>"
   end
 
   defp task_chip_html(target, hit, status, chip_text, label, pal) do
-    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)} style="white-space:nowrap">) <>
+    ~s(<span data-taskchip="#{target}" data-task-id="#{escape_html(to_string(hit[:id] || ""))}"#{task_status_attr(status)}#{task_unavailable_attr(hit)} style="white-space:nowrap">) <>
       ~s(<span style="border:1px solid #{pal.link_color};border-radius:10px;padding:0 6px;color:#{pal.link_color};font-size:0.85em">#{chip_text}</span> ) <>
       label <> "</span>"
   end
+
+  # Emitted ONLY for the unavailable chip, so every resolved chip is
+  # byte-identical to before.
+  defp task_unavailable_attr(%{criteria: :unavailable}), do: ~s( data-unavailable="tasks")
+  defp task_unavailable_attr(_hit), do: ""
 
   defp task_status_attr(nil), do: ""
   defp task_status_attr(s), do: ~s( data-task-status="#{escape_html(s)}")
@@ -973,6 +1045,60 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         # broken-link span). NO <a> — a raw human title is not a slug, so a link
         # would 404; show the broken reference, muted + framed, instead.
         ~s(<section class="paper-embed paper-embed--unresolved" data-embed="#{target}" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">↪ #{target}</section>)
+    end
+  end
+
+  # Linked master instance (task-59f078a2fd248698). `pal.masters` is the
+  # caller's `%{key => prerendered_html}` map (Bulldocs masters' render map,
+  # resolved per read and batched), or nil when the caller did not resolve
+  # masters at all (the body_html cache, delta frames, email).
+  #
+  #   * nil map      → a neutral "Linked master" placeholder: this surface does
+  #     not resolve at read time, so it shows no content rather than a copy that
+  #     would go stale when the master changes.
+  #   * key present  → the master's HTML, injected VERBATIM (already renderer
+  #     output) inside the instance frame.
+  #   * key absent   → "Master unavailable". A missing master, a master in
+  #     another tenant and a cycle all land here, and the output names no id,
+  #     so the two are byte-identical (no existence oracle).
+  #
+  # PURE: only injects the string — no Repo, no recursive Render.
+  defp master_ref(n, %{style: :article} = pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref bp-master-ref--pending">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref bp-master-ref--unavailable">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref(n, pal) do
+    case master_ref_html(n, pal) do
+      {:ok, html} ->
+        ~s(<div class="bp-master-ref">#{html}</div>)
+
+      :pending ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted}">Linked master</div>)
+
+      :unavailable ->
+        ~s(<div class="bp-master-ref" style="margin:1em 0;padding:0.5em 0.75em;border-left:3px solid #{pal.code_bg};color:#{pal.muted};font-style:italic">Master unavailable</div>)
+    end
+  end
+
+  defp master_ref_html(n, pal) do
+    case Map.get(pal, :masters) do
+      masters when is_map(masters) ->
+        case Map.get(masters, Map.get(n, "key")) do
+          html when is_binary(html) -> {:ok, html}
+          _ -> :unavailable
+        end
+
+      _ ->
+        :pending
     end
   end
 
@@ -1148,6 +1274,13 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     # set `head` explicitly.
     head = Map.get(n, "head", []) |> List.wrap()
     body = Map.get(n, "rows", []) |> List.wrap()
+    # Typed columns (Compose.table_col_types) — an index-aligned list of
+    # text|num|delta|spark. ABSENT ⇒ [] ⇒ table_col_class/3 returns "" for every
+    # column, so the emitted bytes are identical to the untyped render.
+    cols = Map.get(n, "cols", []) |> List.wrap()
+    # Per-cell alignment and the header column (plan #26) are read once for both row groups.
+    aligns = Map.get(n, "aligns")
+    head_col? = Map.get(n, "headCol") == true
 
     thead =
       if head == [] do
@@ -1155,23 +1288,40 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       else
         cells =
           head
-          |> Enum.map(fn cell ->
+          |> Enum.with_index()
+          |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            ~s(<th class="bp-table__th">#{inner}</th>)
+
+            ~s(<th class="bp-table__th#{table_col_class(cols, index, "bp-table__th")}"#{table_align_attr(aligns, :head, 0, index)}>#{inner}</th>)
           end)
           |> Enum.join("")
 
         "<thead><tr>#{cells}</tr></thead>"
       end
 
+    # Merged cells (Barkdown plan #24): a covered position renders nothing, the origin carries the
+    # span attributes. `spans` is already validated and in-grid (compose.ex table_put_spans/4).
+    spans = Map.get(n, "spans", []) |> List.wrap()
+    covered = table_covered(spans)
+
     tbody =
       body
-      |> Enum.map(fn row ->
+      |> Enum.with_index()
+      |> Enum.map(fn {row, r} ->
         cells =
           row
-          |> Enum.map(fn cell ->
+          |> Enum.with_index()
+          |> Enum.reject(fn {_cell, index} -> MapSet.member?(covered, {r, index}) end)
+          |> Enum.map(fn {cell, index} ->
             inner = render_children(cell, width, pal)
-            ~s(<td class="bp-table__td">#{inner}</td>)
+            attrs = table_span_attrs(spans, r, index) <> table_align_attr(aligns, :rows, r, index)
+
+            # The header column (plan #26): the first body cell is a row header.
+            if head_col? and index == 0 do
+              ~s(<th scope="row" class="bp-table__th bp-table__th--col#{table_col_class(cols, index, "bp-table__th")}"#{attrs}>#{inner}</th>)
+            else
+              ~s(<td class="bp-table__td#{table_col_class(cols, index, "bp-table__td")}"#{attrs}>#{inner}</td>)
+            end
           end)
           |> Enum.join("")
 
@@ -1180,6 +1330,10 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" class="bp-table">) <>
+      table_colgroup(
+        Map.get(n, "widths"),
+        max(length(head), body |> List.first() |> List.wrap() |> length())
+      ) <>
       thead <> "<tbody>#{tbody}</tbody></table>"
   end
 
@@ -1222,6 +1376,84 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       |> Enum.join("")
 
     ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0">#{thead}<tbody>#{rows}</tbody></table>)
+  end
+
+  # Column widths (Barkdown plan #25): one <col> per column, `style="width:Npx"` where a width is
+  # set. Integers only (compose.ex table_put_widths/2), so nothing here carries author text.
+  defp table_colgroup(widths, ncols) when is_list(widths) do
+    # One <col> per grid column: the stored list is trimmed to the last column that has a width.
+    padded = widths ++ List.duplicate(nil, max(0, ncols - length(widths)))
+
+    cols =
+      Enum.map_join(padded, "", fn
+        w when is_integer(w) and w > 0 -> ~s(<col style="#{escape_attr("width:#{w}px")}">)
+        _ -> "<col>"
+      end)
+
+    "<colgroup>#{cols}</colgroup>"
+  end
+
+  defp table_colgroup(_widths, _ncols), do: ""
+
+  # num and delta both RIGHT-ALIGN (digits and deltas line up on their ones
+  # place), the head riding right with its column — the same colRightAlign rule
+  # the Go renderer applies through lipgloss's StyleFunc. spark gets its own
+  # modifier so the inline SVG can be sized by the stylesheet. Alignment is the
+  # ONLY thing num changes: a num cell's body is the legacy text body.
+  # ` style="text-align:right"` on an aligned cell (plan #26); the vocabulary is closed
+  # (compose.ex table_cell_align/1), escaped all the same.
+  defp table_align_attr(%{} = aligns, area, r, c) do
+    list =
+      if area == :head,
+        do: Map.get(aligns, "head", []),
+        else: Enum.at(Map.get(aligns, "rows", []), r, [])
+
+    case Enum.at(List.wrap(list), c) do
+      a when a in ["center", "right"] -> ~s( style="#{escape_attr("text-align:" <> a)}")
+      _ -> ""
+    end
+  end
+
+  defp table_align_attr(_aligns, _area, _r, _c), do: ""
+
+  # The body positions a span covers without being its origin.
+  defp table_covered(spans) do
+    Enum.reduce(spans, MapSet.new(), fn s, acc ->
+      r0 = Map.get(s, "row", 0)
+      c0 = Map.get(s, "col", 0)
+
+      for r <- r0..(r0 + Map.get(s, "rowspan", 1) - 1),
+          c <- c0..(c0 + Map.get(s, "colspan", 1) - 1),
+          {r, c} != {r0, c0},
+          reduce: acc do
+        set -> MapSet.put(set, {r, c})
+      end
+    end)
+  end
+
+  # ` colspan="2" rowspan="3"` on the origin (each only when above 1); integers only, so nothing
+  # here can carry author text.
+  defp table_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s -> Map.get(s, "row") == r and Map.get(s, "col") == c end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
+  end
+
+  defp table_col_class(cols, index, base) do
+    case Enum.at(cols, index) do
+      "num" -> " #{base}--num"
+      "delta" -> " #{base}--num"
+      "spark" -> " #{base}--spark"
+      _ -> ""
+    end
   end
 
   # PdSheet — dense spreadsheet value grid; the same node shape the TUI's
@@ -1626,6 +1858,16 @@ defmodule Barkpark.PortableDoc.Render.Walk do
 
   # Tone → modifier class, mirroring `Util.tone_palette/1`'s clause set (unknown
   # → info). The five knowns each get a `--bp-tone-<tone>-{bg,fg}` token pair.
+  # The two VERDICT tones (design/tokens.json color.verdict) ride the SAME `tone`
+  # field as the five system tones — a verdict is a callout wearing a different
+  # token family, not a new block type. They resolve `--bp-verdict-*` instead of
+  # `--bp-tone-*` (paper-surface.css `.bp-callout--loss` / `--peace`), so they are
+  # ARTICLE-only: the inline/email clause below paints from `Util.tone_palette/1`,
+  # which has no verdict pair and falls back to info — deliberate, an email has no
+  # reading-page ground to walk against. Mirrored in js/packages/react
+  # blocks/core.ts CALLOUT_TONES; __parity.test.mjs holds the two halves together.
+  defp callout_tone_class("loss"), do: "loss"
+  defp callout_tone_class("peace"), do: "peace"
   defp callout_tone_class("success"), do: "success"
   defp callout_tone_class("warning"), do: "warning"
   defp callout_tone_class("danger"), do: "danger"
@@ -1662,6 +1904,8 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     end
   end
 
+  defp tone_label("loss"), do: "Loss"
+  defp tone_label("peace"), do: "Peace"
   defp tone_label("success"), do: "Success"
   defp tone_label("warning"), do: "Warning"
   defp tone_label("danger"), do: "Danger"
@@ -1674,26 +1918,81 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # surface root (serif font, ink, `--bp-body-lh` line-height, inherited) own
   # all structure in both View and Edit by construction — see the moduledoc
   # theme-vs-data contract.
+  defp list(%{"task" => true} = n, width, %{style: :article} = pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    ~s(<ul class="bp-checklist">) <> inner <> "</ul>"
+  end
+
   defp list(n, width, %{style: :article} = pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
-    "<#{tag}>" <> inner <> "</#{tag}>"
+    "<#{tag}#{list_start_attr(n)}>" <> inner <> "</#{tag}>"
   end
 
   # Email/default keeps the same semantic structure but owns its styling inline:
   # clients may strip stylesheets, so list indentation, typography, and item
   # spacing must travel on the `<ul>` / `<ol>` / `<li>` elements themselves.
+  defp list(%{"task" => true} = n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+
+    style =
+      "margin:0 0 24px;padding-left:0;list-style:none;" <>
+        "font-family:#{pal.font_body};color:#{pal.text};line-height:1.7"
+
+    ~s(<ul style="#{style}">) <> inner <> "</ul>"
+  end
+
   defp list(n, width, pal) do
     tag = if Map.get(n, "ordered"), do: "ol", else: "ul"
     inner = render_children(Map.get(n, "children", []), width, pal)
 
-    ~s(<#{tag} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
+    ~s(<#{tag}#{list_start_attr(n)} style="margin:0 0 24px;padding-left:24px;font-family:#{pal.font_body};color:#{pal.text};line-height:1.7">) <>
       inner <> "</#{tag}>"
+  end
+
+  # Compose puts `start` on an ordered PdList only when it is an integer other
+  # than 1, so a list numbered from 1 keeps its bytes.
+  defp list_start_attr(%{"ordered" => true, "start" => start}) when is_integer(start),
+    do: ~s( start="#{escape_attr(Integer.to_string(start))}")
+
+  defp list_start_attr(_n), do: ""
+
+  # Checklist item: a disabled native checkbox (state is data, not a control the
+  # reader can toggle) ahead of the text; `data-checked` lets the surface style done
+  # items. The stylesheet owns layout in article mode; email mode inlines it.
+  defp list_item(%{"task" => true} = n, width, %{style: :article} = pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    checked = Map.get(n, "checked") == true
+    checked_attr = if checked, do: " checked", else: ""
+    label = if checked, do: "Done", else: "To do"
+
+    box =
+      ~s(<input type="checkbox" class="bp-checklist__box" disabled#{checked_attr} ) <>
+        ~s(aria-label="#{label}">)
+
+    ~s(<li class="bp-checklist__item" data-checked="#{checked}">) <>
+      box <> ~s(<span class="bp-checklist__body">) <> inner <> "</span></li>"
   end
 
   defp list_item(n, width, %{style: :article} = pal) do
     inner = render_children(Map.get(n, "children", []), width, pal)
     "<li>" <> inner <> "</li>"
+  end
+
+  defp list_item(%{"task" => true} = n, width, pal) do
+    inner = render_children(Map.get(n, "children", []), width, pal)
+    checked = Map.get(n, "checked") == true
+    box = if checked, do: "&#9745;", else: "&#9744;"
+
+    style =
+      if checked do
+        "margin:4pt 0 0;opacity:.65;text-decoration:line-through"
+      else
+        "margin:4pt 0 0"
+      end
+
+    glyph = ~s(<span style="display:inline-block;width:1.4em">#{box}</span>)
+    ~s(<li style="#{style}">) <> glyph <> inner <> "</li>"
   end
 
   defp list_item(n, width, pal) do

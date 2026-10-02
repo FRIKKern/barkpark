@@ -38,7 +38,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
-       nav_section: :api_tester,
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
@@ -123,7 +122,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   # NOT orphaned: the top-bar Token field in layouts/studio.html.heex (the
-  # `<form phx-change="token-change">` shown while nav_section == :api_tester)
+  # `<form phx-change="token-change">` shown while current_path is the
+  # api-tester surface, per BarkparkWeb.Studio.Section.from_path/2)
   # dispatches this so an operator can override the run token inline.
   def handle_event("token-change", %{"token" => token}, socket) do
     {:noreply, assign(socket, token: token)}
@@ -202,7 +202,12 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   end
 
   defp do_run_all(socket) do
-    config = %{token: socket.assigns.token, base: runner_base(socket)}
+    config = %{
+      token: socket.assigns.token,
+      base: runner_base(socket),
+      dataset: socket.assigns.dataset
+    }
+
     endpoints = socket.assigns.endpoints
 
     task = Task.async(fn -> {:run_all_result, run_all_scenarios(endpoints, config)} end)
@@ -213,6 +218,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # The blocking run-all sweep, extracted so it can run inside a Task off the
   # LiveView process. Returns {scenario_results, last_results}.
   defp run_all_scenarios(endpoints, config) do
+    fixtures = seed_fixture_overrides(config)
+
     scenario_results =
       endpoints
       |> Enum.filter(&(&1.kind == :endpoint && &1[:runnable] != false))
@@ -238,6 +245,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           []
         else
           Enum.map(scenarios, fn scenario ->
+            scenario = apply_seed_fixture(scenario, ep.id, fixtures)
             # Build form state from defaults + overrides
             base_form = initial_form_state(ep)
 
@@ -262,13 +270,18 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
             legacy = %{
               id: ep.id,
               method: req.method,
-              path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+              path: String.replace_prefix(req.url, config.base, ""),
               headers: req.headers,
               body: decode_body(req.body_text),
               expect: scenario.expect
             }
 
-            result = Runner.run(legacy)
+            # The base rides into run/2 too: Runner's own default is a literal
+            # localhost:4000, so a stripped path without it goes to the wrong node.
+            result =
+              legacy
+              |> Runner.run(base: config.base)
+              |> sweep_cleanup(ep, test_config, legacy)
 
             %{
               endpoint_id: ep.id,
@@ -305,6 +318,121 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     {scenario_results, last_results}
   end
 
+  # Three probes in the catalog read DEMO-seed content: "Get single document"
+  # fetches post `p1`, and "Search" expects a title matching "GROQ" and posts
+  # matching "a". On a
+  # CLEAN-seeded instance (what `bp setup --target local` gives a new user)
+  # neither exists, so a healthy server's first Run all read 32 Pass / 3 Fail
+  # (stranger walk, 2026-09-30). The sweep now looks once for the fixture this
+  # instance actually has: the demo's p1 keeps the catalog defaults; failing
+  # that, the clean seed's published `welcome` paper stands in, and the
+  # scenario label says so. Neither present: the defaults stay and fail
+  # honestly. Keyed by endpoint id + scenario label, outside the catalog, whose
+  # entry maps are pinned by EndpointsCatalogBaseline.
+  @doc false
+  def seed_fixture_overrides(config, get \\ &probe_get/1) do
+    ds = URI.encode(Map.get(config, :dataset, "production"))
+    base = Map.get(config, :base, runner_base_url())
+
+    cond do
+      get.(base <> "/v1/data/doc/#{ds}/post/p1") == 200 ->
+        %{}
+
+      get.(base <> "/v1/data/doc/#{ds}/paper/welcome") == 200 ->
+        %{
+          {"query-single", "gets document p1"} => %{
+            label: "gets the seeded welcome paper (no demo p1 on this instance)",
+            path_overrides: %{"type" => "paper", "doc_id" => "welcome"}
+          },
+          {"search-documents", "search with results"} => %{
+            label: "search with results (\"Welcome\"; no demo GROQ post on this instance)",
+            query_overrides: %{"q" => "Welcome"}
+          },
+          {"search-documents", "search with type filter"} => %{
+            label: "search with type filter (paper; no demo posts on this instance)",
+            query_overrides: %{"q" => "Welcome", "type" => "paper"}
+          }
+        }
+
+      true ->
+        %{}
+    end
+  end
+
+  @doc false
+  def apply_seed_fixture(scenario, endpoint_id, fixtures) do
+    case Map.get(fixtures, {endpoint_id, scenario[:label]}) do
+      nil ->
+        scenario
+
+      fix ->
+        scenario
+        |> Map.put(:label, fix[:label] || scenario[:label])
+        |> Map.update(
+          :path_overrides,
+          fix[:path_overrides] || %{},
+          &Map.merge(&1 || %{}, fix[:path_overrides] || %{})
+        )
+        |> Map.update(
+          :query_overrides,
+          fix[:query_overrides] || %{},
+          &Map.merge(&1 || %{}, fix[:query_overrides] || %{})
+        )
+    end
+  end
+
+  defp probe_get(url) do
+    case Req.get(url, retry: false, receive_timeout: 5_000, connect_options: [timeout: 2_000]) do
+      {:ok, %Req.Response{status: status}} -> status
+      _ -> nil
+    end
+  rescue
+    _ -> nil
+  end
+
+  # Undo what a Run all scenario left behind: a live webhook, or fixture
+  # documents in the author's real dataset. Run all only: a single Run is the
+  # author's explicit request and keeps its result. Only after a 2xx (a refused
+  # scenario changed nothing). The steps' outcome rides on the result as
+  # `:sweep_cleanup` so a failed undo is visible.
+  #
+  # Each fun takes (response body, the scenario's request map) -> steps: the
+  # webhook undo reads the created id from the RESPONSE; the mutate undo reads
+  # the fixture ids from the REQUEST it just sent (Endpoints.Mutate).
+  @mutate_sweeps ~w(mutate-create mutate-createOrReplace mutate-createIfNotExists
+                    mutate-patch mutate-publish mutate-unpublish mutate-discardDraft)
+
+  defp sweep_fun("webhooks-create"),
+    do: fn body, _req -> Barkpark.ApiTester.Endpoints.Webhooks.created_webhook_cleanup(body) end
+
+  defp sweep_fun(id) when id in @mutate_sweeps,
+    do: fn _body, req ->
+      Barkpark.ApiTester.Endpoints.Mutate.touched_documents_cleanup(req[:body], req[:path])
+    end
+
+  defp sweep_fun(_), do: nil
+
+  @doc false
+  def sweep_cleanup(result, ep, config, request \\ %{}) do
+    case {sweep_fun(ep[:id]), result[:body_json], result[:status]} do
+      {fun, %{} = body, status} when is_function(fun, 2) and status in 200..299 ->
+        case fun.(body, request) do
+          [] ->
+            result
+
+          steps ->
+            Map.put(
+              result,
+              :sweep_cleanup,
+              run_plugin_cleanup(steps, token: config.token, base: config.base)
+            )
+        end
+
+      _ ->
+        result
+    end
+  end
+
   # Single-endpoint run, extracted so it can run inside a Task. Returns the
   # verdict result map for `endpoint`.
   defp run_single(endpoint, form_state, token, base) do
@@ -313,13 +441,13 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     legacy = %{
       id: endpoint.id,
       method: req.method,
-      path: String.replace_prefix(req.url, "http://localhost:4000", ""),
+      path: String.replace_prefix(req.url, base, ""),
       headers: req.headers,
       body: decode_body(req.body_text),
       expect: endpoint[:expect]
     }
 
-    result = Runner.run(legacy)
+    result = Runner.run(legacy, base: base)
 
     if plugin_spec = endpoint[:plugin_spec] do
       enrich_with_plugin_asserts(result, plugin_spec, token: token, base: base)
@@ -748,7 +876,6 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         <tr><td><code>not_found</code></td><td class="text-dim">404</td><td class="text-muted">Document or schema not found</td></tr>
         <tr><td><code>unauthorized</code></td><td class="text-dim">401</td><td class="text-muted">Missing or invalid token</td></tr>
         <tr><td><code>forbidden</code></td><td class="text-dim">403</td><td class="text-muted">Token lacks required permission</td></tr>
-        <tr><td><code>schema_unknown</code></td><td class="text-dim">404</td><td class="text-muted">No schema registered for this type</td></tr>
         <tr><td><code>rev_mismatch</code></td><td class="text-dim">409</td><td class="text-muted"><code class="api-inline-code">ifRevisionID</code> did not match current rev</td></tr>
         <tr><td><code>conflict</code></td><td class="text-dim">409</td><td class="text-muted">Document already exists (on <code class="api-inline-code">create</code>)</td></tr>
         <tr><td><code>malformed</code></td><td class="text-dim">400</td><td class="text-muted">Request body is malformed, missing required key (e.g., <code class="api-inline-code">mutations</code>), or missing required parameter (e.g., <code class="api-inline-code">q</code> for search)</td></tr>
@@ -912,5 +1039,26 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # valid from any page, and resolve to the same Default tenant the
   # examples seed. Scoped-mirror documentation belongs in the endpoint
   # docs (each scoped family notes its /w/... twin), not the runner base.
-  defp runner_base(_socket), do: "http://localhost:4000"
+  #
+  # THE PORT IS THIS SERVER'S OWN LISTEN PORT, not a literal 4000 (stranger
+  # walk, 2026-09-30). The runner is a server-side :httpc call back into the
+  # same node, and the hardcoded `http://localhost:4000` only reached it when
+  # the node happened to listen there: a dev server on any other PORT answered
+  # "Error" on every row of Run all, and a blue/green box whose live slot is
+  # :4001 sent every run to the DORMANT slot (or to nothing). Loopback + the
+  # Endpoint's configured `:http` port is the node itself by construction.
+  defp runner_base(_socket), do: runner_base_url()
+
+  @doc false
+  # Public for the test that pins it: the runner's base is this node's own
+  # loopback + listen port.
+  def runner_base_url do
+    port =
+      case BarkparkWeb.Endpoint.config(:http) do
+        opts when is_list(opts) -> Keyword.get(opts, :port) || 4000
+        _ -> 4000
+      end
+
+    "http://127.0.0.1:#{port}"
+  end
 end

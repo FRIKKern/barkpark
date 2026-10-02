@@ -1,0 +1,217 @@
+{
+ "measurement": "spd-w18-desk-click-latency c1 \u2014 a single press on #item-paper across 10 consecutive COLD loads",
+ "task": "spd-w18-desk-click-latency",
+ "taken_utc": "2026-09-22T01:43:07Z..2026-09-22T01:47:09Z",
+ "host": "https://guerrilla.barkpark.cloud",
+ "served_sha": "1b3856eed",
+ "served_sha_note": "reported by the harness's own PRE/POST served-commit stamp; pre == post on all 10 runs, so no deploy landed mid-measurement. 1b3856eed is an ancestor of origin/main.",
+ "viewport": "headless Chrome default (--headless=new, no --window-size passed by journey.mjs); Chrome/153.0.8010.53, node v22.22.0, darwin arm64",
+ "instrument": {
+  "path": "tooling/studio-journey/journey.mjs",
+  "invocation": "TMPDIR=<fresh empty dir> scripts/studio-journey-smoke.sh report --legs a",
+  "reused_not_rebuilt": "This is the harness shipped by PR #16603 (41de602a0) for criterion c0. Nothing was built for c1; the row's own recorded invocation was executed.",
+  "reading": "the CREATE beat's check '#item-paper click patches the URL to the paper pane', which reports latency, ATTEMPT COUNT, and the three-valued wire verdict (SENT / NOT SENT / CANNOT READ) off Chrome's Network.webSocketFrameSent."
+ },
+ "result": {
+  "n": 10,
+  "url_patched": 10,
+  "presses_per_run": 1,
+  "retries": 0,
+  "wire_verdict": "SENT on 10/10, exactly 1 \"type\":\"click\" frame per run",
+  "latencies_s": [
+   0.3,
+   0.7,
+   1.1,
+   0.5,
+   1.3,
+   0.5,
+   0.5,
+   0.6,
+   0.5,
+   0.5
+  ],
+  "latencies_sorted_s": [
+   0.3,
+   0.5,
+   0.5,
+   0.5,
+   0.5,
+   0.5,
+   0.6,
+   0.7,
+   1.1,
+   1.3
+  ],
+  "min_s": 0.3,
+  "median_s": 0.5,
+  "max_s": 1.3,
+  "mean_s": 0.65,
+  "precision_note": "the harness prints one decimal; 0.1 s is the quantisation, not a rounded-away distribution."
+ },
+ "controls": [
+  {
+   "name": "COLD-LOAD PROOF (not an assertion)",
+   "how": "journey.mjs creates its Chrome user-data-dir with fs.mkdtempSync(os.tmpdir(),'studio-journey-') and deletes it at teardown. Each of the 10 runs was given its OWN TMPDIR, created empty by the driver and VERIFIED empty (entries_before=0) immediately before the run. A separate watched run (coldwatch) polled that directory at 2 Hz DURING the run and observed the profile appear at t=1.0s as studio-journey-pA6teo with Cookies=0 and 97 cache files, rising to 172 cache files at t=1.5s, and the directory was empty again after teardown.",
+   "why_it_settles_it": "cookies=0 at first observation means the cookie jar was created empty and the session cookie was written by the run's OWN ticket redeem; a growing cache from zero means the HTTP cache started empty. No state can cross runs because the profile is deleted and the next run gets a different, verified-empty directory."
+  },
+  {
+   "name": "NO-RETRY CONTROL \u2014 mutation M-RETRY (an absence is never caught by inspection)",
+   "how": "'1 press(es)' is only evidence of no retry if the counter can print something else. Mutation M-RETRY was applied to the OFFLINE self-test fixture's #item-paper handler \u2014 'if ((window.__mSwallowFirst = (window.__mSwallowFirst||0)+1) === 1) return;' \u2014 so the first click is swallowed and clickUntil must press again.",
+   "result": "the SAME check line, on the SAME clickUntil code path, printed '/good/... in 5.5s after 2 press(es) \u00b7 SENT \u2014 2 \"type\":\"click\" frame(s)' and likewise on /rot/. Unmutated the same line reads '0.5s after 1 press(es) \u00b7 SENT \u2014 1 frame'. The mutation was reverted (git checkout) and does not ship.",
+   "why_it_settles_it": "the attempt counter and the frame counter both move. A retry in any of the 10 live runs would have been printed."
+  },
+  {
+   "name": "CAN-IT-FAIL CONTROL, OFFLINE \u2014 the harness's own self-test",
+   "how": "scripts/studio-journey-smoke.sh self-test",
+   "result": "SELF-TEST PASS, 134 assertions executed (floor 40); product exits good=0, rot=1. The /rot/ arm reds LEG A 3/7 and prints NOT SENT for #item-sheet."
+  },
+  {
+   "name": "CAN-IT-FAIL CONTROL, LIVE \u2014 two arms in ONE evaluation on the deployed desk",
+   "how": "Chrome DevTools CDP against guerrilla, authenticated by a minted login ticket, viewport 1440x900, served 1b3856eed. A SINGLE evaluate_script armed the row's named gate 3 (set data-phx-ref-src on #item-paper), pressed, polled 6 s; then removed the attribute and pressed the SAME button again in the SAME evaluation. Arming and reading never spanned two calls.",
+   "result": "ARM 1 (gate 3 armed): answered=false, URL unchanged after 6.010 s \u2014 SWALLOWED. ARM 2 (control, attribute removed): answered=true in 0.371 s, URL patched to /studio/paper.",
+   "why_it_settles_it": "the probe reports a failure and a success against the live host in the same evaluation, so a 10/10 pass is not a green with no subject. It ALSO shows the row's named swallow mechanism is still live on the deployed build."
+  }
+ ],
+ "verdict": {
+  "c1": "SATISFIED as written, on served 1b3856eed. 10/10 cold loads patched the URL on a single press, 0 retries, wire SENT with exactly 1 click frame each; latencies 0.3 / 0.5 / 0.5 / 0.5 / 0.5 / 0.5 / 0.6 / 0.7 / 1.1 / 1.3 s (min 0.3, median 0.5, max 1.3).",
+  "what_c1_does_NOT_say": "c1 is a reliability claim about a press on a settled cold desk. It is not a claim that the swallow is fixed. The CAN-IT-FAIL LIVE control reproduces the swallow on this same build in 6.0 s: LiveView's bindClick still returns early on an element carrying data-phx-ref-src. The row's title defect is NOT fixed; the window in which it fires has collapsed.",
+  "why_the_window_collapsed": "the harness's DESK beat reports the LiveView socket joining in 0.2 s on every run. The original filing (deployed e4ed31a10, 2026-07-29) recorded one run connecting in 4.9 s and latencies of 1.6 s / 2.4 s / never-within-15 s. The swallow window is proportional to the join latency; it did not close, it shrank."
+ },
+ "retraction": {
+  "what": "the 2026-09-06 attempt note on c1 said 'NEEDS A DEPLOY, not more build ... Re-run it once 41de602a0 is live on the box.'",
+  "why_it_was_wrong": "41de602a0 touched exactly two files, tooling/studio-journey/README.md and tooling/studio-journey/journey.mjs \u2014 nothing server-side. The harness is a LOCAL client that drives a headless Chrome against a deployed host; it is never deployed. It became runnable the moment #16603 merged to main on 2026-09-06, and c1 was measurable from that day. Sixteen days were spent waiting for a deploy the criterion never needed.",
+  "separately": "the prod micro-block 89.167.28.206 reports commit ca4534461 (2026-08-31) and does NOT contain 41de602a0 \u2014 but that host is irrelevant to this criterion. guerrilla, the host the harness targets by default and the host the row's own description was measured on, serves 1b3856eed."
+ },
+ "runs": [
+  {
+   "run": 1,
+   "started_utc": "2026-09-22T01:43:07Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run1",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.3,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 2,
+   "started_utc": "2026-09-22T01:43:30Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run2",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.7,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 3,
+   "started_utc": "2026-09-22T01:43:55Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run3",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 1.1,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 4,
+   "started_utc": "2026-09-22T01:44:20Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run4",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.5,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 5,
+   "started_utc": "2026-09-22T01:44:45Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run5",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 1.3,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 6,
+   "started_utc": "2026-09-22T01:45:10Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run6",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.5,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 7,
+   "started_utc": "2026-09-22T01:45:34Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run7",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.5,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 8,
+   "started_utc": "2026-09-22T01:45:58Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run8",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.6,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 9,
+   "started_utc": "2026-09-22T01:46:22Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run9",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.5,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  },
+  {
+   "run": 10,
+   "started_utc": "2026-09-22T01:46:44Z",
+   "tmpdir_entries_before": 0,
+   "tmpdir": "<scratchpad>/w3/coldprofiles/run10",
+   "served_sha_pre": "1b3856eed",
+   "served_sha_post": "1b3856eed",
+   "url_patched": true,
+   "latency_s": 0.5,
+   "presses": 1,
+   "wire_verdict": "SENT",
+   "click_frames": 1
+  }
+ ]
+}

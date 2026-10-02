@@ -195,6 +195,30 @@ func terminalIcon(icon string) string {
 	return ""
 }
 
+// opensTo is what selecting a desk row opens. The schema-built desk wraps every
+// openable node in a list_item whose Child is the node; the SERVER desk
+// (GET /v1/structure, the tree Studio renders) puts document_type_list, nested
+// list and document nodes DIRECTLY in a list — `{"id":"post","type":
+// "document_type_list","typeName":"post"}` at the root. Reading only .Child
+// made every such row a dead end: Enter pushed the path, no pane opened, and
+// the editor column said "Select a document to edit" over nothing (found on
+// the stranger walk, 2026-09-30, against a fresh local instance). A row with
+// no Child that is itself openable opens to itself; a divider or a childless
+// list_item opens to nothing.
+func opensTo(n *StructureNode) *StructureNode {
+	if n == nil {
+		return nil
+	}
+	if n.Child != nil {
+		return n.Child
+	}
+	switch n.Type {
+	case NodeDocumentTypeList, NodeList, NodeDocument:
+		return n
+	}
+	return nil
+}
+
 // fromDeskNode converts one server desk node into the TUI's pane tree.
 // Browser-only node types (link/plugin_link) are skipped — a terminal has
 // nowhere to send them; unknown future types degrade the same way instead

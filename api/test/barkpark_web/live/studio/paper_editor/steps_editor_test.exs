@@ -77,8 +77,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.StepsEditorTest do
              "row-one"
            ]
 
-    assert tree |> LazyHTML.query("input[name='step-0-title']") |> LazyHTML.attribute("value") ==
-             ["First step"]
+    # The step title edits where the reader paints it, as a field of the steps form.
+    assert tree
+           |> LazyHTML.query(
+             ".bp-steps__title > textarea[name='step-0-title'][form='steps-form-steps']"
+           )
+           |> Enum.map(&LazyHTML.text/1) == ["First step"]
 
     assert tree |> LazyHTML.query("button[name='step-action']") |> LazyHTML.attribute("value") ==
              ["up:row-one", "down:row-one", "remove:row-one", "add"]

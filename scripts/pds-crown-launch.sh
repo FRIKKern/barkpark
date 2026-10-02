@@ -24,7 +24,7 @@
 # no new floor, no new predicate is introduced by this file.
 #
 # THE FLOOR IT ARMS, AND TWO NON-ACTIONS — load-bearing, not decoration:
-#   * It arms the DERIVED floor of 897 MiB (PDS-D276/D277), against the DEPLOYED
+#   * It arms the DERIVED floor of 897 MiB (PDS-D276/PDS-D277), against the DEPLOYED
 #     streaming spill engine, in all three floor knobs at once: the poll
 #     predicate (:348), the arm-refusal guard (:412-414), and
 #     PDS_FULL_EXPORT_MIN_MEM_MB exported to the harness (fire_detached). The old
@@ -33,7 +33,7 @@
 #     rounds up to 897 (D244's earlier refusal, with its NEGATIVE -7.55 MiB
 #     delta, was derived against that retired engine and no longer applies). It
 #     never LOWERS the floor below that derived law — the predicate tightens
-#     only. Full arithmetic: scripts/pds-w20-floor-derivation.md.
+#     only. Full arithmetic: docs/ledgers/pds-w20-floor-derivation.md.
 #   * It never splits the climb. `--all`, unsplit, once. `--only` runs touching
 #     rungs 2-6 are FORBIDDEN (W6-C).
 #   * It never writes to the real attempts counter or the real export lock. It
@@ -86,11 +86,16 @@
 #
 # ── WHERE THE PRE-WARM RUNS, AND WHY IT MOVED (PDS-D241) ────────────────────
 #
-# D241 requires `cd api && CC=/usr/bin/clang MIX_ENV=prod mix compile` to be paid
-# BEFORE the timed window opens (measured 155.72 s cold-prod on a real host). The
-# `CC` override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
+# D241 requires `cd api && CC=/usr/bin/clang mix compile` to be paid BEFORE the
+# timed window opens (measured 155.72 s cold-prod on a real host). The `CC`
+# override is LOAD-BEARING: bare `cc` resolves to the Claude CLI wrapper and
 # argon2_elixir then FAILS to build ("unknown option '-g'") rather than merely
 # running slow.
+#
+# PDS-D755 fixes WHICH env is warmed. It was `MIX_ENV=prod` only, while the
+# harness's sole mix invocation is `MIX_ENV=dev mix run --no-start` — separate
+# _build trees, so the pre-warm stamped OK having warmed nothing the climb
+# reads. Both are now warmed, dev FIRST, and every stamp names its env.
 #
 # That compile is paid by the CHILD, as its first act, before the first draw is
 # taken. This is deliberate: paying it inside `arm` would blow the one constraint
@@ -117,12 +122,29 @@
 # And the banner claims exactly what was read: "child is UP as of <t>" —
 # necessary, not sufficient. It never claims the climb finishes.
 #
+# ── A ZERO-SPEND REFUSAL NO LONGER ENDS THE POLL ────────────────────────────
+#
+# The launcher and the harness read MemAvailable at DIFFERENT moments, and
+# adjacent draws swing ~100 MiB, so a marginal FIRE can be refused by the
+# harness's own gate (b) the instant it looks. Such a refusal costs ZERO export
+# attempts but used to end the whole window. The child now re-enters the SAME
+# poll loop on exactly one proven shape — rc != 0 AND the harness's attempts
+# counter provably unmoved across the invocation — and terminates on every
+# other, including an unreadable counter. Same MAX_DRAWS, no extension, every
+# invocation stamped. The rationale and the three laws it satisfies sit above
+# refire_verdict() in the generated child.
+#
 # ── EXIT STATUS ─────────────────────────────────────────────────────────────
 #   arm       0 armed (child proven up, or liveness UNPERFORMABLE and said so)
 #             4 the child is NOT up (the named state is printed)
 #             3 refused/usage/environment
 #   collect   0 FINISHED or FINISHED-nosent · 2 STILL-RUNNING · 1 anything else
 #   selftest  0 every check held · 1 a check failed
+#
+# The CHILD's own sentinel (the transcript's last line) is the harness rc on a
+# spend, 5 on a draws-exhausted stand-down that never invoked the harness, and
+# 6 on a window exhausted after one or more proven ZERO-SPEND refusals. All of
+# them still classify as one of the six states (PDS-D247); 6 invents no seventh.
 #
 # bash 3.2 compatible (macOS system bash).
 
@@ -154,11 +176,11 @@ FULL_LOCK="$FULL_DIR/lock"
 # floor can be dialled down is a rubber stamp with extra steps.
 INTERVAL="${PDS_LAUNCH_INTERVAL:-10}"
 MAX_DRAWS="${PDS_LAUNCH_MAX_DRAWS:-360}"
-# PDS-D276/D277: the DERIVED floor is 897 MiB, against the deployed streaming
+# PDS-D276/PDS-D277: the DERIVED floor is 897 MiB, against the deployed streaming
 # spill engine (98.16 demand + 798.81 margin). Both the poll-predicate default
 # and the tighten-only guard-law move off the fossil 2200 together — moving one
 # without the other leaves the predicate defaulting to 2200 and the child
-# standing down forever. scripts/pds-w20-floor-derivation.md.
+# standing down forever. docs/ledgers/pds-w20-floor-derivation.md.
 MEM_FLOOR_MIB="${PDS_LAUNCH_MEM_FLOOR_MIB:-897}"
 MEM_FLOOR_LAW=897
 
@@ -259,6 +281,55 @@ pid_live_ours() { # $1 = pid · $2 = meta file (may be absent)
   return 3
 }
 
+# ── THE PER-RUN TRANSCRIPT BOUNDARY ──────────────────────────────────────────
+#
+# run_tag = cksum(PDS_RUN_ID), so a REUSED PDS_RUN_ID reuses the run dir, and
+# fire_detached opens transcript.log O_APPEND and never truncates. classify()
+# and cmd_collect then grep the WHOLE file for ^EXIT:/^RESULT: — so a re-arm
+# onto a run_tag whose dir already holds a FINISHED transcript reads the PRIOR
+# run's terminal verdict and calls a live climb FINISHED. A verdict must only
+# ever be read from THIS run's lines.
+#
+# The fix is a boundary, not a truncation: the prior transcript is EVIDENCE (it
+# is how the previous outcome is diagnosed at all), and deleting it to make the
+# read correct would trade one blindness for another. arm stamps one line
+# immediately before the fork; every verdict-bearing read is taken from the
+# lines AFTER the LAST such line.
+#
+# It is stamped ONLY when the log already exists. A first arm must leave the
+# path ABSENT, or NO-TRANSCRIPT — the empty-log signature of a SyntaxError in
+# the detach program — could never fire again, which is the same class of
+# defect with the polarity flipped.
+#
+# A transcript with no boundary reads whole-file, unchanged: that is every
+# pre-boundary run dir, and every pre-w14 FINISHED-nosent transcript.
+RUN_BOUNDARY_RE='^===== PDS-RUN-BOUNDARY '
+
+stamp_run_boundary() { # $1 = transcript path · $2 = run_tag  -> 0 always
+  local t="${1:-}" tag="${2:-}"
+  [ -n "$t" ] && [ -f "$t" ] || return 0
+  printf '===== PDS-RUN-BOUNDARY %s armed_at=%s launcher_pid=%s =====\n' \
+    "$tag" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "$$" >> "$t"
+}
+
+# Print ONLY the lines the CURRENT run wrote. A function, not four inline greps,
+# so the selftest can reach it directly (same reason as assert_child_up).
+run_slice() { # $1 = transcript path
+  local t="${1:-}" n
+  [ -n "$t" ] && [ -f "$t" ] || return 0
+  n="$(grep -nE "$RUN_BOUNDARY_RE" "$t" 2>/dev/null | tail -1 | cut -d: -f1 || true)"
+  if is_int "${n:-}"; then tail -n +"$(( n + 1 ))" "$t"; else cat "$t"; fi
+}
+
+# How many prior runs this transcript holds (0 = never reused).
+run_boundary_count() { # $1 = transcript path
+  local t="${1:-}" n
+  [ -n "$t" ] && [ -f "$t" ] || { printf '0\n'; return 0; }
+  n="$(grep -cE "$RUN_BOUNDARY_RE" "$t" 2>/dev/null || true)"
+  is_int "${n:-}" || n=0
+  printf '%s\n' "$n"
+}
+
 # ── THE FORK (PDS-D243 + PDS-D249) ───────────────────────────────────────────
 #
 # The ONE place this file detaches, and the ONE place the budget is resolved.
@@ -275,7 +346,7 @@ fire_detached() {
   spent="$(cat "$attempts_file" 2>/dev/null || echo 0)"
   is_int "$spent" || spent=0
   export PDS_FULL_EXPORT_BUDGET=$(( spent + 2 ))                    # PDS-D224
-  # PDS-D276/D277: export the DERIVED 897 MiB floor to the frozen harness's own
+  # PDS-D276/PDS-D277: export the DERIVED 897 MiB floor to the frozen harness's own
   # cond_b (b) gate. This REVERSES D244's deliberate UNSET — that refusal was
   # taken against the retired in-RAM engine's NEGATIVE -7.55 MiB delta; the
   # deployed streaming engine's real demand is 98.16 MiB + 798.81 margin = 897.
@@ -304,6 +375,42 @@ derive_run_tag() { # $1 = run id
   printf '%s' "$1" | cksum | awk '{printf "%x", $1}'
 }
 
+# ── THE SCRATCH-TARGET PRECONDITION (PDS-D266) ───────────────────────────────
+#
+# fire_detached exports BARKPARK_HOME=/tmp/pds-w14.$run_tag and NOTHING boots a
+# scratch target there. A FRESH arm invents run_id=<date>-$$, so its run_tag is
+# a number no earlier `pds-scratch-target.sh up` could possibly have targeted:
+# the harness reads $BARKPARK_HOME/scratch.env, finds it absent, and rungs
+# 0c/1/2/5/6 ABORT env:scratch-target-not-booted. Wave 16 spent attempt 3->4
+# exactly that way, on a budget that is one attempt ever.
+#
+# So the prerequisite is checked AT THE BOUNDARY, before anything is armed. Two
+# non-actions are as load-bearing as the check itself:
+#
+#   * arm does NOT boot the scratch. Booting is a ~minutes-long side effect with
+#     its own teardown obligation, and growing it here would make `arm` — whose
+#     entire contract is "return fast, fire once" — the owner of an instance it
+#     cannot tear down. It refuses honestly instead, and names the command.
+#   * pinning PDS_RUN_ID to an already-booted scratch is NOT the fix. It is what
+#     wave 19 does by hand, and it fails silently the first time somebody
+#     forgets. It stays WORKING — this check passes for exactly that case — but
+#     it is a workaround, not the guard.
+#
+# The prefix is spelled here EXACTLY as fire_detached spells it; §4e asserts the
+# two agree, because a drift between them would make this check assert on a path
+# the child never uses — a guard that passes about the wrong file.
+scratch_home_for() { # $1 = run_tag -> the BARKPARK_HOME fire_detached will export
+  printf '%s\n' "/tmp/pds-w14.$1"
+}
+
+# The predicate alone, side-effect free, so the selftest can drive BOTH answers
+# without arming anything (same reason as assert_child_up and run_slice).
+scratch_env_present() { # $1 = run_tag -> 0 present · 1 absent
+  local tag="${1:-}"
+  [ -n "$tag" ] || return 1
+  [ -f "$(scratch_home_for "$tag")/scratch.env" ]
+}
+
 # ── the generated child ──────────────────────────────────────────────────────
 #
 # Written to disk rather than inlined so the armed payload is READABLE after the
@@ -324,6 +431,9 @@ write_child_script() { # $1 = dest · $2 = run_tag
     printf 'SSH_HOST=%q\n'       "$SSH_HOST"
     printf 'SSH_KEY=%q\n'        "$SSH_KEY"
     printf 'DO_PREWARM=%q\n'     "${DO_PREWARM:-1}"
+    # The harness's OWN attempts counter, spelled by the launcher so the child
+    # reads the very file the harness writes. The child only ever READS it.
+    printf 'FULL_ATTEMPTS_FILE=%q\n' "$FULL_ATTEMPTS_FILE"
   } > "$dest"
 
   cat >> "$dest" <<'CHILD_BODY'
@@ -341,32 +451,48 @@ sentinel() { printf 'EXIT: %s\n' "$1"; }
 stamp "child up — pid=$$ pgid=$(ps -o pgid= -p $$ | tr -d ' ') sid_leader=$(ps -o stat= -p $$ | tr -d ' ')"
 stamp "run_tag=$RUN_TAG"
 stamp "budget PDS_FULL_EXPORT_BUDGET=${PDS_FULL_EXPORT_BUDGET:-<UNSET — the child did not inherit it>}"
-stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/D277 derived floor)"
-stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/D277; UNSET here means the export did NOT cross the fork>}"
+stamp "poll   MEM_FLOOR_MIB=$MEM_FLOOR_MIB (the launcher's poll predicate — PDS-D276/PDS-D277 derived floor)"
+stamp "floor  PDS_FULL_EXPORT_MIN_MEM_MB=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET — expected 897 per PDS-D276/PDS-D277; UNSET here means the export did NOT cross the fork>}"
 stamp "home   BARKPARK_HOME=${BARKPARK_HOME:-<unset>}"
 stamp "point  PDS_SCRATCH_POINTER=${PDS_SCRATCH_POINTER:-<unset>}"
 stamp "art    PDS_PROOF_ARTIFACTS=${PDS_PROOF_ARTIFACTS:-<unset>}"
 
-# ── PRE-WARM (PDS-D241) ──────────────────────────────────────────────────────
-# CC=/usr/bin/clang is LOAD-BEARING: bare `cc` is the Claude CLI wrapper and
-# argon2_elixir FAILS to build under it ("unknown option '-g'"). This is paid
-# HERE, before the first draw, so the timed window never pays a cold compile.
+# ── PRE-WARM (PDS-D241, PDS-D755) ────────────────────────────────────────────
+# CC=/usr/bin/clang is LOAD-BEARING in BOTH envs: bare `cc` is the Claude CLI
+# wrapper and argon2_elixir FAILS to build under it ("unknown option '-g'").
+# This is paid HERE, before the first draw, so the timed window never pays a
+# cold compile.
+#
+# PDS-D755: `dev` is FIRST and is not optional. The harness's only mix
+# invocation is `MIX_ENV=dev mix run --no-start` (pds-pull-proof.sh), and mix
+# envs do not share a _build tree — a prod-only pre-warm reported OK while
+# warming a tree the climb never reads, so a cold api/_build/dev still paid its
+# compile inside the window the pre-warm exists to protect. `prod` is retained
+# because PDS-D241 measured it (155.72 s cold-prod) and a release build is the
+# fallback path. EVERY stamp below NAMES its env, so the transcript says which
+# tree was warmed instead of leaving a reader to assume.
+PREWARM_ENVS="dev prod"
 if [ "$DO_PREWARM" = "1" ]; then
-  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
-  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
-    stamp "prewarm: OK — the window will not pay a cold compile"
-  else
-    rc=$?
-    stamp "prewarm: FAILED rc=$rc — NOT firing. A climb that pays 155 s of compile"
-    stamp "         inside its own window is a measurement of the compile."
-    sentinel "$rc"
-    exit "$rc"
-  fi
+  stamp "prewarm: envs=$PREWARM_ENVS (dev first — the harness runs MIX_ENV=dev mix run; PDS-D755)"
+  for pw_env in $PREWARM_ENVS; do
+    stamp "prewarm: MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+    if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ); then
+      stamp "prewarm: OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    else
+      rc=$?
+      stamp "prewarm: FAILED rc=$rc MIX_ENV=$pw_env — NOT firing. A climb that pays 155 s of compile"
+      stamp "         inside its own window is a measurement of the compile."
+      sentinel "$rc"
+      exit "$rc"
+    fi
+  done
+  stamp "prewarm: OK — the window will not pay a cold compile (warmed: $PREWARM_ENVS)"
 elif [ "$DO_PREWARM" = "0" ]; then
-  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now)"
+  stamp "prewarm: already paid synchronously in the arming shell (--prewarm-now), envs=$PREWARM_ENVS"
 else
-  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/prod is not already warm,"
-  stamp "         the window below pays the compile and measures it (PDS-D241)."
+  stamp "prewarm: SKIPPED by --no-prewarm. If api/_build/dev (what the harness reads)"
+  stamp "         and api/_build/prod are not already warm, the window below pays the"
+  stamp "         compile and measures it (PDS-D241/PDS-D755)."
 fi
 
 # ── the draw probe — ONE ssh round trip, every value a READ ──────────────────
@@ -397,8 +523,65 @@ printf 'builds=%s\n' "${builds:-}"
 REMOTE
 }
 
+# ── A REFUSAL THAT COST NOTHING MUST NOT COST THE WINDOW ─────────────────────
+#
+# The launcher probes MemAvailable here; the harness re-reads it for its OWN
+# gate (b) seconds to tens of seconds later. Adjacent draws have been measured
+# swinging by ~100 MiB, so a marginal FIRE is roughly a coin flip to be refused
+# the instant the harness looks. That refusal costs ZERO export attempts — the
+# harness's gate (b) refuses ABOVE its spend — but this loop used to exit on the
+# harness rc regardless, burning the whole window and yielding neither a climb
+# transcript nor a full stand-down dataset.
+#
+# THE DISCRIMINATOR IS THE HARNESS'S OWN ATTEMPTS COUNTER, read immediately
+# before and immediately after the invocation. Not the rc, and not the refusal
+# text: only the counter is the thing the one-attempt law is actually written
+# about, so a harness that rewords a message or refuses for a reason nobody has
+# named yet is still classified correctly.
+#
+# THE ONLY CONTINUE-ABLE OUTCOME is rc != 0 with BOTH readings numeric and
+# EQUAL. Every other shape — rc 0, a moved counter, an unreadable or garbage
+# counter — exits exactly as this loop always did. Therefore:
+#
+#   * NO SECOND ATTEMPT CAN BE SPENT SILENTLY. The shape that spends is the
+#     shape that terminates, and an UNVERIFIABLE counter is read as a spend, not
+#     as a licence to re-fire. Being wrong in that direction costs a window;
+#     being wrong in the other direction costs a real export attempt.
+#   * NO UNBOUNDED RETRY AND NO EXTENDED WINDOW. A re-entry consumes the draw it
+#     sat in like any other draw, the budget stays the SAME $MAX_DRAWS, and the
+#     loop condition is untouched — which is what makes termination provable.
+#   * NOTHING IS SILENT. Every invocation stamps its before/after readings and
+#     its verdict, so `collect` and a human read the same fact.
+#
+# A MISSING counter file reads 0, mirroring the harness's own full_attempts();
+# a PRESENT but non-numeric one reads UNVERIFIABLE, which is stricter than the
+# harness on purpose — this is the read that decides whether to fire again.
+read_attempts() {
+  local v=""
+  [ -e "$FULL_ATTEMPTS_FILE" ] || { printf '0'; return 0; }
+  v="$(cat "$FULL_ATTEMPTS_FILE" 2>/dev/null || true)"
+  v="$(printf '%s' "$v" | tr -d '[:space:]')"
+  [ -n "$v" ] || v=0
+  printf '%s' "$v"
+}
+
+# $1 rc · $2 attempts-before · $3 attempts-after -> exactly one of
+#   ZERO-SPEND-REFUSAL · SPENT · SPENT-UNVERIFIED
+refire_verdict() {
+  local rc="${1:-}" before="${2:-}" after="${3:-}"
+  case "$before" in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  case "$after"  in ''|*[!0-9]*) printf 'SPENT-UNVERIFIED\n'; return 0 ;; esac
+  if [ "$rc" = "0" ]; then printf 'SPENT\n'; return 0; fi
+  if [ "$after" -eq "$before" ]; then
+    printf 'ZERO-SPEND-REFUSAL\n'
+  else
+    printf 'SPENT\n'
+  fi
+}
+
 draw=0
 fired=0
+refusals=0
 while [ "$draw" -lt "$MAX_DRAWS" ]; do
   draw=$((draw + 1))
 
@@ -452,14 +635,30 @@ while [ "$draw" -lt "$MAX_DRAWS" ]; do
     "${builds:-<empty>}" "${rss_kb:-?}" "${elapsed:-?}" "$verdict"
 
   if [ "$verdict" = "FIRE" ]; then
-    fired=1
+    fired=$(( fired + 1 ))
     stamp "FIRE — draw $draw of $MAX_DRAWS qualified."
     stamp "  gated on: mem_mib=$mem_mib >= $MEM_FLOOR_MIB AND bp-site-build-* listing EMPTY"
     stamp "  recorded, NOT gated (PDS-D246): beam rss_kb=${rss_kb:-?} slot_uptime=${elapsed:-?}"
     stamp "  firing ONE unsplit --all (W6-C: --only across rungs 2-6 is forbidden)"
+    att_before="$(read_attempts)"
+    stamp "  attempts before this invocation: $att_before (read from $FULL_ATTEMPTS_FILE)"
     "$HARNESS" --all
     rc=$?
-    stamp "harness returned rc=$rc after $draw draw(s)"
+    att_after="$(read_attempts)"
+    refire="$(refire_verdict "$rc" "$att_before" "$att_after")"
+    stamp "attempts: before=$att_before after=$att_after rc=$rc verdict=$refire"
+    if [ "$refire" = "ZERO-SPEND-REFUSAL" ]; then
+      refusals=$(( refusals + 1 ))
+      stamp "ZERO-SPEND REFUSAL #$refusals — the harness refused with rc=$rc and its attempts counter"
+      stamp "  did NOT move ($att_before -> $att_after), so NO export attempt was spent. This is the"
+      stamp "  launcher/harness floor disagreement: two MemAvailable reads, seconds apart."
+      stamp "  Re-entering the SAME poll loop — draw $draw of $MAX_DRAWS spent, budget UNCHANGED,"
+      stamp "  window NOT extended. The next FIRE re-checks this counter before it exits."
+      sleep "$INTERVAL"
+      continue
+    fi
+    stamp "harness returned rc=$rc after $draw draw(s) — ATTEMPT SPENT ($refire). The launcher exits"
+    stamp "  here and NEVER re-fires: a spent attempt is the one outcome that must not be retried."
     sentinel "$rc"
     exit "$rc"
   fi
@@ -474,11 +673,24 @@ if [ "$fired" -eq 0 ]; then
   sentinel 5
   exit 5
 fi
+
+# Reached ONLY by the re-entry path above: the harness ran, every run was a
+# proven zero-spend refusal, and the draw budget ran out. It is neither a
+# stand-down (the harness WAS invoked) nor a spend (the counter never moved), so
+# it gets its own anchored stamp and its own sentinel rather than being folded
+# into either — `collect` reads this stamp to make the attempt-cost claim, and a
+# claim made on the FIRE stamp alone would call this a spent attempt.
+stamp "WINDOW-EXHAUSTED — $MAX_DRAWS draws taken. The harness was invoked $fired time(s) and"
+stamp "  EVERY invocation was a zero-spend refusal ($refusals of them): its attempts counter never"
+stamp "  moved, so ZERO export attempts were spent and re-arming is free. The refused draws and the"
+stamp "  refused invocations are both the dataset. Re-arm, or raise --max-draws for a longer window."
+sentinel 6
+exit 6
 CHILD_BODY
   chmod +x "$dest"
 }
 
-# ── the floor record (PDS-D276/D277) ─────────────────────────────────────────
+# ── the floor record (PDS-D276/PDS-D277) ─────────────────────────────────────────
 #
 # ONE producer for the two floor knobs this arm carries, emitted as key=value
 # lines. run_dir/meta, the arm banner, and the selftest ALL read this — so the
@@ -500,7 +712,7 @@ arm_floor_summary() {
   info "poll floor  mem_floor_mib=$MEM_FLOOR_MIB — the launcher's poll predicate (:348)"
   info "harness flr full_export_min_mem_mb=${PDS_FULL_EXPORT_MIN_MEM_MB:-<UNSET>} — exported to the frozen harness's cond_b gate"
   if [ "$MEM_FLOOR_MIB" != 2200 ] || [ "${PDS_FULL_EXPORT_MIN_MEM_MB:-}" != 2200 ]; then
-    info "            DERIVED floor (PDS-D276/D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see scripts/pds-w20-floor-derivation.md"
+    info "            DERIVED floor (PDS-D276/PDS-D277) — the fossil 2200 of the retired in-RAM engine no longer applies; see docs/ledgers/pds-w20-floor-derivation.md"
   fi
 }
 
@@ -527,14 +739,15 @@ write_run_meta() {
 
 cmd_arm() {
   local force=0 run_id run_tag run_dir log pid_file child payload pid t0 t1
-  local child_state arc read_at prc
+  local child_state arc read_at prc scratch_home
   DO_PREWARM=1
 
   while [ $# -gt 0 ]; do
     case "$1" in
       --force)       force=1 ;;
       --prewarm-now) DO_PREWARM=0 ;;
-      # For a tree whose api/_build/prod is ALREADY warm, and for proving `arm`
+      # For a tree whose api/_build/dev AND api/_build/prod are ALREADY warm,
+      # and for proving `arm`
       # itself against a dummy harness. Skipping it on a cold tree makes the
       # window pay a 155 s compile, which is why it is opt-in and never default.
       --no-prewarm)  DO_PREWARM=2 ;;
@@ -598,6 +811,44 @@ cmd_arm() {
   t0="$(date +%s)"
   run_id="${PDS_RUN_ID:-$(date -u +%Y%m%dT%H%M%SZ)-$$}"
   run_tag="$(derive_run_tag "$run_id")"
+
+  # ── the scratch target must EXIST before anything is armed (PDS-D266) ─────
+  # Deliberately the FIRST thing after the tag is known: before mkdir, before
+  # the optional pre-warm compile, before write_child_script, and — the point
+  # of the whole check — before fire_detached, which is the only caller that
+  # resolves the attempt budget. Refusing here therefore spends ZERO attempts
+  # and leaves no run directory behind.
+  if ! scratch_env_present "$run_tag"; then
+    scratch_home="$(scratch_home_for "$run_tag")"
+    rule
+    say "NOT ARMED — the scratch target this run would measure is not booted."
+    rule
+    info "run_id      $run_id"
+    info "run_tag     $run_tag  (cksum of the run_id above)"
+    info "derived     BARKPARK_HOME=$scratch_home"
+    info "missing     $scratch_home/scratch.env"
+    info ""
+    info "fire_detached would export that BARKPARK_HOME into the child, and the"
+    info "harness reads \$BARKPARK_HOME/scratch.env to find the target it is"
+    info "supposed to measure. With the file absent, rungs 0c/1/2/5/6 abort"
+    info "env:scratch-target-not-booted — after the attempt has been spent."
+    info "Nothing was armed, and the attempt counter is UNTOUCHED."
+    info ""
+    info "Either boot a target at this exact home:"
+    info ""
+    info "    BARKPARK_HOME=$scratch_home scripts/pds-scratch-target.sh up --verify"
+    info ""
+    info "…or point this arm at a target that is ALREADY up, by pinning the SAME"
+    info "run id that booted it:"
+    info ""
+    info "    PDS_RUN_ID=<the booted run id> $SELF arm"
+    info ""
+    info "The pin is a REUSE path, not a repair: it works only while somebody"
+    info "remembers to set it, which is why this refusal exists at all."
+    rule
+    exit 3
+  fi
+
   run_dir="$STATE_DIR/$run_tag"
   mkdir -p "$run_dir"
   log="$run_dir/transcript.log"
@@ -605,13 +856,31 @@ cmd_arm() {
   child="$run_dir/child.sh"
 
   if [ "$DO_PREWARM" -eq 0 ]; then
-    say "pre-warming synchronously (--prewarm-now); arming will take as long as this compile."
-    ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ) \
-      || die "pre-warm FAILED — refusing to arm a climb that would pay a cold compile inside its own window."
+    say "pre-warming synchronously (--prewarm-now); arming will take as long as these compiles."
+    # PDS-D755: the SAME env list as the child leg, dev first, and each leg says
+    # which env it is paying. dev is the one the harness actually reads.
+    for pw_env in dev prod; do
+      say "pre-warm MIX_ENV=$pw_env — cd $API_DIR && CC=/usr/bin/clang MIX_ENV=$pw_env mix compile"
+      ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV="$pw_env" mix compile ) \
+        || die "pre-warm FAILED at MIX_ENV=$pw_env — refusing to arm a climb that would pay a cold compile inside its own window."
+      say "pre-warm OK MIX_ENV=$pw_env — api/_build/$pw_env is warm"
+    done
   fi
 
   write_child_script "$child" "$run_tag"
   payload="exec /bin/bash $(printf '%q' "$child")"
+
+  # A reused PDS_RUN_ID lands in a run dir that may already hold a FINISHED
+  # transcript, and fire_detached appends to it. Fence THIS run's lines off
+  # before the fork so no verdict is ever read from the previous run's
+  # ^EXIT:/^RESULT:. Stamped only on reuse — see stamp_run_boundary's header.
+  if [ -f "$log" ]; then
+    stamp_run_boundary "$log" "$run_tag"
+    say "transcript $log ALREADY EXISTS — run_tag $run_tag is being re-armed."
+    info "It now holds $(run_boundary_count "$log") prior run(s). The previous"
+    info "transcript is KEPT, not truncated; every state read from here on is"
+    info "taken from the lines AFTER the boundary just stamped."
+  fi
 
   fire_detached "$run_tag" "$FULL_ATTEMPTS_FILE" "$log" "$payload" "$pid_file"
 
@@ -622,7 +891,7 @@ cmd_arm() {
 
   # meta records BOTH floor knobs distinctly (mem_floor_mib AND
   # full_export_min_mem_mb) via arm_floor_record, so a revert of either is
-  # individually diagnosable from the run directory (PDS-D276/D277).
+  # individually diagnosable from the run directory (PDS-D276/PDS-D277).
   write_run_meta "$run_dir" "$run_tag" "$run_id" "$pid" "$log"
 
   # ── the read-back behind the word ARMED (PDS-D317) ──────────────────────
@@ -706,8 +975,13 @@ classify() { # $1 = transcript · $2 = pid file  -> prints the state token
 
   [ -f "$t" ] || { printf 'NO-TRANSCRIPT\n'; return 0; }
 
-  sent="$(grep -c '^EXIT: ' "$t" 2>/dev/null || true)"
-  res="$(grep -c '^RESULT:' "$t" 2>/dev/null || true)"
+  # SCOPED TO THIS RUN. Both greps read run_slice, not the file: a reused
+  # run_tag appends to the previous run's transcript, and the whole-file read
+  # returned the PRIOR run's terminal verdict for a climb that is still
+  # climbing. With no boundary in the file, run_slice IS the whole file, so
+  # every pre-boundary transcript classifies exactly as before.
+  sent="$(run_slice "$t" | grep -c '^EXIT: ' || true)"
+  res="$(run_slice "$t" | grep -c '^RESULT:' || true)"
   is_int "$sent" || sent=0
   is_int "$res"  || res=0
 
@@ -771,7 +1045,10 @@ assert_child_up() {
   marker=0
   i=0
   while [ "$i" -lt "$settle" ]; do
-    if [ -f "$t" ] && grep -qF 'child up' "$t" 2>/dev/null; then marker=1; break; fi
+    # SCOPED, and counted rather than `grep -q`: a prior run's own `child up`
+    # would otherwise satisfy this run's arrival marker instantly. `grep -qF`
+    # on a pipe also exits 141 on SIGPIPE, which would read as "no marker".
+    if [ "$(run_slice "$t" | grep -cF 'child up' || true)" -gt 0 ]; then marker=1; break; fi
     sleep 1
     i=$(( i + 1 ))
   done
@@ -789,7 +1066,7 @@ assert_child_up() {
 }
 
 cmd_collect() {
-  local tag="" t="" p="" state pid rc lines sd_stamp fire_stamp pw_stamp
+  local tag="" t="" p="" state pid rc lines priors sd_stamp fire_stamp pw_stamp
 
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -821,9 +1098,17 @@ cmd_collect() {
   [ -n "$tag" ] && info "run_tag     $tag"
 
   if [ -f "$t" ]; then
-    lines="$(wc -l < "$t" | tr -d ' ')"
+    # Counts, like the verdict, describe THIS run — the file may hold several.
+    priors="$(run_boundary_count "$t")"
+    lines="$(run_slice "$t" | wc -l | tr -d ' ')"
     info "lines       $lines"
-    info "draws       $(grep -c '^DRAW' "$t" 2>/dev/null || true)"
+    info "draws       $(run_slice "$t" | grep -c '^DRAW' || true)"
+    if [ "$priors" -gt 0 ]; then
+      info "reused      YES — this transcript holds $priors prior run(s)."
+      info "            Every figure and state above is read ONLY from the"
+      info "            lines after the last PDS-RUN-BOUNDARY; the earlier"
+      info "            run(s) are still in the file, above it."
+    fi
   fi
 
   case "$state" in
@@ -862,14 +1147,46 @@ cmd_collect() {
       # pre-warm exists to catch. So each claim is made only where its own
       # stamp proves it, and an unrecognised transcript is called UNDIAGNOSED
       # rather than assigned a cost that was never measured.
-      sd_stamp="$(grep -cE '^\[[^]]+\] STAND-DOWN — ' "$t" 2>/dev/null || true)"
-      fire_stamp="$(grep -cE '^\[[^]]+\] FIRE — draw ' "$t" 2>/dev/null || true)"
-      pw_stamp="$(grep -cE '^\[[^]]+\] prewarm: FAILED rc=' "$t" 2>/dev/null || true)"
-      is_int "$sd_stamp"   || sd_stamp=0
-      is_int "$fire_stamp" || fire_stamp=0
-      is_int "$pw_stamp"   || pw_stamp=0
+      # SCOPED like classify's: on a reused run_tag a PRIOR run's FIRE stamp
+      # would otherwise decide THIS run's attempt-cost claim.
+      sd_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] STAND-DOWN — ' || true)"
+      fire_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] FIRE — draw ' || true)"
+      pw_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] prewarm: FAILED rc=' || true)"
+      # A FIRE stamp no longer implies a spend. The child may invoke the harness,
+      # be refused at zero cost, and re-enter the poll loop; so the attempt-cost
+      # claim is made from the two stamps that actually READ the counter, and
+      # only falls back to the FIRE stamp when neither is present (a pre-re-arm
+      # transcript, or a child killed before it could stamp its readings — both
+      # of which must keep the conservative "an attempt WAS SPENT" reading).
+      #
+      # ORDER IS LOAD-BEARING: a spend stamp wins over an exhaustion stamp,
+      # because a window that exhausted BEFORE a later spend is not the verdict,
+      # and the spend stamp is the only one written after a counter moved.
+      spend_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] attempts: .* verdict=SPENT' || true)"
+      exh_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] WINDOW-EXHAUSTED — ' || true)"
+      zsr_stamp="$(run_slice "$t" | grep -cE '^\[[^]]+\] ZERO-SPEND REFUSAL #' || true)"
+      is_int "$sd_stamp"    || sd_stamp=0
+      is_int "$fire_stamp"  || fire_stamp=0
+      is_int "$pw_stamp"    || pw_stamp=0
+      is_int "$spend_stamp" || spend_stamp=0
+      is_int "$exh_stamp"   || exh_stamp=0
+      is_int "$zsr_stamp"   || zsr_stamp=0
 
-      if [ "$fire_stamp" -gt 0 ]; then
+      if [ "$spend_stamp" -gt 0 ]; then
+        info "The harness RAN and its attempts counter MOVED (or could not be read)."
+        info "An export attempt WAS SPENT — re-arming is NOT free. The \`attempts:\`"
+        info "line above carries the before/after readings that prove it. Read"
+        info "$FULL_ATTEMPTS_FILE against the PDS-D224 budget of 5;"
+        info "a second arm burns a second real attempt."
+      elif [ "$exh_stamp" -gt 0 ]; then
+        info "WINDOW EXHAUSTED AFTER ZERO-SPEND REFUSALS — not a mid-rung abort."
+        info "The harness was invoked $fire_stamp time(s) and refused $zsr_stamp time(s)"
+        info "with its attempts counter UNMOVED across every invocation, then the"
+        info "draw budget ran out. ZERO export attempts were spent; re-arming is"
+        info "free. This is the launcher/harness floor disagreement — the two read"
+        info "MemAvailable seconds apart. Re-arm, or widen the window with"
+        info "\`--max-draws\`; the \`attempts:\` lines above are the proof."
+      elif [ "$fire_stamp" -gt 0 ]; then
         info "Sentinel present, no ^RESULT: — the harness died mid-rung under its"
         info "own \`set -euo pipefail\` (:85). This is NOT an OOM-kill (those keep"
         info "no sentinel at all) and the exit code below is the harness's own."
@@ -888,7 +1205,8 @@ cmd_collect() {
         info "PDS-D241 pre-warm (:264), before its first draw — no FIRE stamp,"
         info "so the harness was NEVER INVOKED and ZERO export attempts were"
         info "spent. Re-arming is free, but it will fail identically until the"
-        info "\`MIX_ENV=prod mix compile\` above builds; fix that first."
+        info "\`mix compile\` above builds — the stamp names WHICH MIX_ENV"
+        info "failed (PDS-D755); fix that env first."
       else
         info "Sentinel present, no ^RESULT:, and NEITHER the FIRE (:358) nor the"
         info "STAND-DOWN (:373) nor the pre-warm-failure (:264) stamp is in the"
@@ -908,8 +1226,63 @@ cmd_collect() {
       info "a defect."
       ;;
     STILL-RUNNING)
+      # ── the escape hatch, named ONLY where it is safe ─────────────────────
+      #
+      # `arm --force` is the sanctioned way past a false STILL-RUNNING, and
+      # arm's OWN refusal says so verbatim ("Use `collect` first, or --force if
+      # you know that pid is not a climb."). But that message is only reachable
+      # by running the very command this branch tells the operator NOT to run,
+      # so an operator who obeys never learns the flag exists.
+      #
+      # Naming it unconditionally here would be worse than hiding it: on a
+      # genuinely live climb --force stacks two full exports and OOMs the live
+      # box (PDS-D31). So it is conditioned on the SAME identity evidence the
+      # arm-time guard uses (pid_live_ours). Two cases reach STILL-RUNNING:
+      #
+      #   fingerprint RECORDED and MATCHING -> the pid provably IS this climb.
+      #       --force is named only to be REFUSED, with the reason.
+      #   NO fingerprint recorded (a run dir armed before the identity check
+      #       landed) -> pid_live_ours degraded to plain pid_live, so identity
+      #       is UNPROVEN in either direction. That is the exact shape that
+      #       strands an obedient operator, and the only one where --force is
+      #       offered — after a hand check that disproves the climb.
+      set +e
+      pid_live_ours "$pid" "${p:+$(dirname "$p")/meta}"
+      rc=$?
+      set -e
       info "Neither marker, and \`ps -p $pid\` shows the process. Come back later;"
       info "do NOT re-arm — two concurrent full exports would OOM the live box."
+      info ""
+      if [ -n "$PID_IDENT_RECORDED" ] && [ "$rc" -eq 0 ]; then
+        info "IDENTITY PROVEN — the fingerprint recorded at arm and the one \`ps\`"
+        info "reports now AGREE, so this pid is the armed child, not a recycled"
+        info "slot:"
+        info "  recorded at arm: $PID_IDENT_RECORDED"
+        info "  seen now:        $PID_IDENT_SEEN"
+        info "\`arm --force\` exists for a pid that is provably NOT this climb."
+        info "This one provably IS one, so --force is the WRONG tool here: it"
+        info "would put a second full export on the live box. Wait."
+      else
+        info "IDENTITY UNPROVEN — this run dir records no pid_fingerprint (it was"
+        info "armed before the identity check landed), so liveness ALONE cannot"
+        info "separate the armed child from an unrelated process that inherited"
+        info "the number. STILL-RUNNING here is a degraded read, not a proof."
+        info ""
+        info "Disprove the climb by hand BEFORE doing anything else:"
+        info ""
+        info "    ps -o pid=,comm=,lstart=,args= -p $pid"
+        info ""
+        info "If that is this launcher's child (a \`bash …/child.sh\`), it IS the"
+        info "climb: come back later, exactly as above. If it is something else"
+        info "entirely — a shell, an editor, a build — then the climb is already"
+        info "dead and its pid slot was reused, and the sanctioned escape is:"
+        info ""
+        info "    $SELF arm --force"
+        info ""
+        info "That is the same flag arm's own refusal names. Do not reach for it"
+        info "on a pid you could not identify: --force on a live climb is two"
+        info "concurrent full exports and an OOM on the live box (PDS-D31)."
+      fi
       ;;
     KILLED)
       set +e
@@ -925,6 +1298,8 @@ cmd_collect() {
         info "The armed child is gone; its pid number was reused by an"
         info "unrelated process. This reads KILLED because the CLIMB is dead —"
         info "do NOT kill pid $pid, it belongs to something else."
+        info "You do not need \`arm --force\` for this: arm runs the SAME identity"
+        info "comparison, sees the same mismatch, and arms without being forced."
       elif [ "$rc" -eq 2 ]; then
         # NOT kern.maxproc — see pid_live's header: maxproc caps concurrent
         # processes, not pid VALUES, and bounding on it calls live pids dead.
@@ -959,9 +1334,9 @@ cmd_collect() {
 
   if [ -f "$t" ]; then
     rule
-    say "last 12 lines"
+    say "last 12 lines (this run only)"
     rule
-    tail -12 "$t" | sed 's/^/  /'
+    run_slice "$t" | tail -12 | sed 's/^/  /'
   fi
   rule
 
@@ -980,6 +1355,10 @@ cmd_collect() {
 
 ST_PASS=0
 ST_FAIL=0
+# §4e boots no scratch, but it does create ONE real /tmp/pds-w14.<tag> home to
+# drive the present-branch against the path the child actually gets. Global so
+# the EXIT trap can remove it even if a check aborts mid-section.
+ST_FAKE_HOME=""
 ok()   { ST_PASS=$((ST_PASS + 1)); printf '  ok    %s\n' "$*"; }
 bad()  { ST_FAIL=$((ST_FAIL + 1)); printf '  FAIL  %s\n' "$*"; }
 check(){ if [ "$1" = "$2" ]; then ok "$3 ($1)"; else bad "$3 — expected '$2', got '$1'"; fi; }
@@ -1002,13 +1381,15 @@ cmd_selftest() {
   local scratch real_attempts_before real_attempts_after
   local real_lock_before real_lock_after
   local t0 t1 elapsed pid line pgid ppid stat budget seeded expect
-  local state live_pid dead_pid out i
+  local state live_pid dead_pid out i reuse_log rc
+  local unbooted_id unbooted_tag unbooted_home booted_id booted_tag
+  local pw_harness_envs pw_leg pw_body pw_list pw_lits pw_have pw_env pw_unnamed pw_legacy pw_stamps
 
   real_attempts_before="$(cat /tmp/pds-full-export/attempts 2>/dev/null || echo '<none>')"
   real_lock_before=absent; [ -d /tmp/pds-full-export/lock ] && real_lock_before=present
 
   scratch="$(mktemp -d "${TMPDIR:-/tmp}/pds-launch-selftest.XXXXXX")"
-  trap '[ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"' EXIT
+  trap '[ -n "${scratch:-}" ] && [ -d "$scratch" ] && rm -rf "$scratch"; [ -n "${ST_FAKE_HOME:-}" ] && [ -d "$ST_FAKE_HOME" ] && rm -rf "$ST_FAKE_HOME"; true' EXIT
 
   rule
   say "pds-crown-launch selftest — DUMMY payload only, the real climb is never touched"
@@ -1088,12 +1469,12 @@ DUMMY
   if [ "${budget:-1}" = "1" ]; then
     bad "the child read 1 — that is the silent default, i.e. the export never crossed the fork"
   fi
-  # PDS-D276/D277: fire_detached exports the derived 897 floor, so the DUMMY
+  # PDS-D276/PDS-D277: fire_detached exports the derived 897 floor, so the DUMMY
   # child MUST inherit it across the fork. Mutation-provable: remove the
   # `export PDS_FULL_EXPORT_MIN_MEM_MB=897` knob and the child prints `unset`
   # here and this check FAILS (this is the pds-bl-floor-env-silent-revert guard).
   out="$(grep '^DUMMY-FLOOR=' "$scratch/dummy.log" 2>/dev/null | head -1 | cut -d= -f2 || true)"
-  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/D277 — was UNSET under D244)"
+  check "${out:-unset}" "897" "PDS_FULL_EXPORT_MIN_MEM_MB=897 crosses the fork (PDS-D276/PDS-D277 — was UNSET under D244)"
 
   # …and the arm's OWN floor record carries the derived 897 in BOTH knobs. This
   # is the single producer that meta AND the banner read (arm_floor_record /
@@ -1205,6 +1586,163 @@ DUMMY
   out="$(grep '^pid_fingerprint=' "$scratch/identmeta/meta" | cut -d= -f2- || true)"
   check "$out" "$(pid_fingerprint "$$")" "write_run_meta records the arm-time comm+lstart fingerprint"
 
+  # ── 4c · the --force escape, named only for a pid that is not provably ours
+  #
+  # (pds-bl-collect-stillrunning-hides-force.) arm's refusal names --force;
+  # collect's STILL-RUNNING branch named it NOWHERE, so an operator who obeys
+  # "do NOT re-arm" could never reach the one message that documents the flag.
+  # It must now be reachable from collect — but ONLY where the identity check
+  # has not proved the pid IS this climb. Both fixtures below classify
+  # STILL-RUNNING; what is under test is which advisory collect prints.
+  say ""
+  say "4c · collect names \`arm --force\` only where the pid is not provably ours"
+
+  # (a) identity PROVEN — fingerprint recorded AND matching. The invocation must
+  #     be WITHHELD, with the reason, and the do-not-re-arm warning must stand.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/ident.log" --pid-file "$scratch/ident-match/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"IDENTITY PROVEN"*) ok "a matching fingerprint is reported as IDENTITY PROVEN" ;;
+    *)                   bad "collect does not report a matching fingerprint as proof of identity" ;;
+  esac
+  case "$out" in
+    *"$SELF arm --force"*) bad "collect offers the --force invocation for a pid it PROVED is this climb" ;;
+    *)                     ok "the --force invocation is withheld from a provably-live climb" ;;
+  esac
+  case "$out" in
+    *"--force is the WRONG tool here"*) ok "collect says WHY --force is refused on a live climb" ;;
+    *)                                  bad "collect withholds --force without giving the reason" ;;
+  esac
+  case "$out" in
+    *"do NOT re-arm"*) ok "a genuinely live climb still gets the unambiguous do-not-re-arm warning" ;;
+    *)                 bad "the do-not-re-arm warning was lost from a genuinely live climb" ;;
+  esac
+
+  # (b) identity UNPROVEN — a run dir with no recorded fingerprint, where
+  #     pid_live_ours degraded to plain pid_live. This is the shape that strands
+  #     an obedient operator, so the escape must be NAMED, gated on a hand check.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/ident.log" --pid-file "$scratch/ident-legacy/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"IDENTITY UNPROVEN"*) ok "a run dir with no fingerprint is reported as IDENTITY UNPROVEN" ;;
+    *)                     bad "collect presents a degraded liveness read as a proof" ;;
+  esac
+  case "$out" in
+    *"$SELF arm --force"*) ok "collect names the \`arm --force\` escape where identity is unproven" ;;
+    *)                     bad "the documented --force escape is still undiscoverable from collect" ;;
+  esac
+  case "$out" in
+    *"ps -o pid=,comm=,lstart=,args= -p"*) ok "the escape is gated on a hand identity check the operator can run" ;;
+    *)                                     bad "collect offers --force with no way to disprove the climb first" ;;
+  esac
+  case "$out" in
+    *"do NOT re-arm"*) ok "the unproven case still warns against re-arming on this evidence alone" ;;
+    *)                 bad "the do-not-re-arm warning was lost from the unproven case" ;;
+  esac
+
+  # ── 4d · a re-armed run_tag never classifies off the PRIOR run's verdict ──
+  #
+  # (pds-bl-launcher-statedir-fresh-transcript.) run_tag = cksum(PDS_RUN_ID),
+  # so a reused run id reuses the run dir; fire_detached appends and never
+  # truncates; classify used to grep the WHOLE file. A re-arm onto a dir
+  # holding a FINISHED transcript therefore read that transcript's ^EXIT: and
+  # ^RESULT: and called a live climb FINISHED.
+  say ""
+  say "4d · a reused run dir reads THIS run's lines, never the prior run's"
+
+  mkdir -p "$scratch/reuse"
+  reuse_log="$scratch/reuse/transcript.log"
+  printf '%s\n' "$$" > "$scratch/reuse/child.pid"
+  printf 'pid_fingerprint=%s\n' "$(pid_fingerprint "$$")" > "$scratch/reuse/meta"
+
+  # A PRIOR run that FINISHED, seeded exactly where a re-arm would find it.
+  {
+    printf '[2026-07-20T01:00:00Z] child up — pid=111\n'
+    printf 'DRAW\t1\t2026-07-20T01:00:00Z\tverdict=FIRE\n'
+    printf '[2026-07-20T01:05:00Z] FIRE — draw 1 of 240 qualified.\n'
+    printf 'RESULT: PASS (prior run)\n'
+    printf 'EXIT: 0\n'
+  } > "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "FINISHED" "the seeded prior transcript really does classify FINISHED (precondition)"
+
+  # THE RE-ARM. stamp_run_boundary is the arm-side half, reached directly for
+  # the same reason assert_child_up is: the selftest never runs cmd_arm.
+  stamp_run_boundary "$reuse_log" "deadbeef"
+  out="$(run_boundary_count "$reuse_log")"
+  check "$out" "1" "arm stamps exactly one boundary onto the reused transcript"
+  out="$(grep -c 'RESULT: PASS (prior run)' "$reuse_log" || true)"
+  check "$out" "1" "the prior transcript is KEPT, not truncated — it is still evidence"
+
+  # …and the new child starts writing, mid-rung, no sentinel of its own.
+  {
+    printf '[2026-07-21T07:00:00Z] child up — pid=%s\n' "$$"
+    printf 'STEP 3 — the full export\n'
+  } >> "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "STILL-RUNNING" "a re-arm over a FINISHED transcript is NOT misread as FINISHED"
+
+  # The slice is the mechanism, asserted in its own right, both directions.
+  out="$(run_slice "$reuse_log" | grep -c '^EXIT: ' || true)"
+  check "$out" "0" "run_slice hides the prior run's sentinel"
+  out="$(run_slice "$reuse_log" | grep -c '^STEP 3' || true)"
+  check "$out" "1" "run_slice shows this run's own lines"
+  out="$(run_slice "$reuse_log" | grep -c '^DRAW' || true)"
+  check "$out" "0" "the draw count is this run's, not the prior run's"
+
+  # And when the CURRENT run finishes, its OWN terminal verdict is read.
+  printf 'RESULT: PASS (current run)\nEXIT: 0\n' >> "$reuse_log"
+  state="$(classify "$reuse_log" "$scratch/reuse/child.pid")"
+  check "$state" "FINISHED" "the current run's own terminal verdict still classifies FINISHED"
+
+  # NO BOUNDARY = whole file, unchanged. This is every pre-boundary run dir and
+  # every pre-w14 transcript; a scoping fix that broke them would be a
+  # regression dressed as a fix.
+  printf 'RESULT: PASS (legacy)\n' > "$scratch/legacy.log"
+  state="$(classify "$scratch/legacy.log" "$scratch/dummy.pid")"
+  check "$state" "FINISHED-nosent" "a transcript with no boundary still reads whole-file"
+
+  # A FIRST arm must leave the path ABSENT, or NO-TRANSCRIPT — the empty-log
+  # signature of a SyntaxError in the detach program — could never fire again.
+  stamp_run_boundary "$scratch/never-armed.log" "cafe0003"
+  if [ -f "$scratch/never-armed.log" ]; then
+    bad "stamp_run_boundary CREATED a transcript on a first arm — NO-TRANSCRIPT is now unreachable"
+  else
+    ok "a first arm leaves the transcript absent (NO-TRANSCRIPT stays reachable)"
+  fi
+
+  # collect says the transcript is reused rather than silently showing a slice.
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$reuse_log" --pid-file "$scratch/reuse/child.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"reused      YES"*) ok "collect declares that the transcript holds prior runs" ;;
+    *)                   bad "collect reads a slice without saying the transcript was reused" ;;
+  esac
+  case "$out" in
+    *"RESULT: PASS (prior run)"*) bad "collect's tail leaks the prior run's lines into this run's report" ;;
+    *)                            ok "collect's tail is scoped to this run" ;;
+  esac
+
+  # c1: the anti-stack guard and the BARKPARK_HOME reuse are UNTOUCHED by the
+  # scoping change. The predicate itself is proved live at 4b; these two pin
+  # that cmd_arm still calls it and still refuses, since a boundary that
+  # silently disarmed the OOM guard would be far worse than the bug it fixes.
+  # shellcheck disable=SC2016  # these patterns are SOURCE TEXT, matched literally
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'pid_live_ours "$prev_pid"' || true)"
+  check "${out:-0}" "1" "cmd_arm still runs the identity-aware anti-stack check on the previous run"
+  # shellcheck disable=SC2016
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'is STILL-RUNNING (pid \$prev_pid)' || true)"
+  check "${out:-0}" "1" "cmd_arm still REFUSES to stack a second climb on a genuinely live child"
+  # shellcheck disable=SC2016
+  out="$(sed -n '/^fire_detached()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'BARKPARK_HOME="/tmp/pds-w14.\$run_tag"' || true)"
+  check "${out:-0}" "1" "BARKPARK_HOME reuse is preserved (/tmp/pds-w14.\$run_tag, PDS-D233)"
+
   # NO-TRANSCRIPT
   state="$(classify "$scratch/absent.log" "$scratch/dummy.pid")"
   check "$state" "NO-TRANSCRIPT" "absent transcript classifies"
@@ -1282,8 +1820,8 @@ DUMMY
   # attempt was spent is D252's own error with the polarity flipped.
   {
     printf '[2026-07-21T07:00:00Z] child up — pid=1234\n'
-    printf '[2026-07-21T07:00:01Z] prewarm: cd /x && CC=/usr/bin/clang MIX_ENV=prod mix compile\n'
-    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 — NOT firing. A climb that pays 155 s of compile\n'
+    printf '[2026-07-21T07:00:01Z] prewarm: MIX_ENV=dev — cd /x && CC=/usr/bin/clang MIX_ENV=dev mix compile\n'
+    printf '[2026-07-21T07:02:00Z] prewarm: FAILED rc=1 MIX_ENV=dev — NOT firing. A climb that pays 155 s of compile\n'
     printf 'EXIT: 1\n'
   } > "$scratch/prewarm-fail.log"
   state="$(classify "$scratch/prewarm-fail.log" "$scratch/dummy.pid")"
@@ -1342,6 +1880,182 @@ DUMMY
     check "$state" "KILLED" "no marker + dead pid classifies"
   else
     bad "could not obtain a reaped in-range pid for the KILLED fixture"
+  fi
+
+
+  # ── 4e · arm REFUSES when the scratch target it would measure is absent ───
+  #
+  # (pds-bl-launcher-assert-scratch-env.) fire_detached exports
+  # BARKPARK_HOME=/tmp/pds-w14.$run_tag and nothing boots a target there. A
+  # fresh arm invents run_id=<date>-$$, so no earlier `pds-scratch-target.sh
+  # up` can have targeted its tag: rungs 0c/1/2/5/6 abort
+  # env:scratch-target-not-booted AFTER the attempt is spent. Wave 16 burned
+  # attempt 3->4 exactly so.
+  #
+  # Both directions are driven, and the refusal is driven THROUGH cmd_arm
+  # rather than through the predicate alone — the whole claim is about what
+  # `arm` does with the answer (exit non-zero, spend nothing, fork nothing),
+  # and a predicate test proves none of that.
+  say ""
+  say "4e · arm asserts scratch.env at its derived BARKPARK_HOME before arming"
+
+  # (a) ABSENT. A control on the absence first: an empty read is only evidence
+  # once the path it read is shown to be the right one and really empty.
+  unbooted_id="pds-selftest-unbooted-$$-$(date -u +%s)"
+  unbooted_tag="$(derive_run_tag "$unbooted_id")"
+  unbooted_home="$(scratch_home_for "$unbooted_tag")"
+  check "$unbooted_home" "/tmp/pds-w14.$unbooted_tag" \
+    "the derived home is /tmp/pds-w14.<run_tag> (precondition)"
+  if [ -e "$unbooted_home" ]; then
+    bad "the 'unbooted' home $unbooted_home ALREADY EXISTS — this arm proves nothing"
+  else
+    ok "the derived home for a never-booted run id is absent (precondition)"
+  fi
+  if scratch_env_present "$unbooted_tag"; then
+    bad "scratch_env_present says PRESENT for a home that does not exist"
+  else
+    ok "scratch_env_present is FALSE when scratch.env is absent"
+  fi
+
+  # THE REFUSAL, end to end.
+  #
+  # The dummy harness is pinned here even though a PASSING guard never reaches
+  # it: under MUTATION — which is how this section is proved to fail — the arm
+  # runs to completion, and an unpinned PDS_LAUNCH_HARNESS would detach a child
+  # onto the REAL pds-pull-proof.sh. A selftest must not be one deleted line
+  # away from firing the instrument it exists to guard.
+  cat > "$scratch/harness4e.sh" <<'H4E'
+#!/bin/bash
+printf 'DUMMY HARNESS — no rung is run, nothing is measured.\n'
+sleep 30
+H4E
+  chmod +x "$scratch/harness4e.sh"
+  mkdir -p "$scratch/full4e"
+  printf '%s\n' "41" > "$scratch/full4e/attempts"
+  set +e
+  out="$(PDS_RUN_ID="$unbooted_id" \
+         PDS_LAUNCH_STATE_DIR="$scratch/state4e" \
+         PDS_FULL_EXPORT_DIR="$scratch/full4e" \
+         PDS_LAUNCH_HARNESS="$scratch/harness4e.sh" \
+         PDS_LAUNCH_ARM_SETTLE_S=3 \
+         "$0" arm --no-prewarm 2>&1)"
+  rc=$?
+  set -e
+  check "$rc" "3" "arm REFUSES (documented exit 3), it does not arm"
+  case "$out" in
+    *"NOT ARMED — the scratch target"*) ok "the refusal names its cause, not a bare failure" ;;
+    *) bad "arm exited $rc without naming the missing scratch target: $out" ;;
+  esac
+  case "$out" in
+    *"BARKPARK_HOME=$unbooted_home"*) ok "the refusal prints the DERIVED home it checked" ;;
+    *) bad "the refusal does not print the home it checked — the operator cannot verify it" ;;
+  esac
+  case "$out" in
+    *"$unbooted_home/scratch.env"*) ok "the refusal names the exact missing file" ;;
+    *) bad "the refusal never names \$BARKPARK_HOME/scratch.env" ;;
+  esac
+
+  # ZERO ATTEMPTS, and nothing forked. This is the whole point: the old
+  # behaviour reached the harness and paid an attempt to learn the same thing.
+  out="$(cat "$scratch/full4e/attempts")"
+  check "$out" "41" "the attempt counter is UNTOUCHED by the refusal"
+  if [ -e "$scratch/state4e/$unbooted_tag" ]; then
+    bad "the refusal left a run directory behind — it ran past the boundary"
+  else
+    ok "the refusal leaves no run directory (it aborts before mkdir)"
+  fi
+  # `|| true` on the find itself: `set -o pipefail` is on, and find exits 1 on a
+  # path that does not exist — which is the EXPECTED state here.
+  out="$( { find "$scratch/state4e" -name 'child.pid' 2>/dev/null || true; } | wc -l | tr -d ' ')"
+  check "${out:-0}" "0" "the refusal forked nothing"
+
+  # (b) PRESENT — the reuse path wave 19 relies on. A pinned run id whose
+  # scratch IS booted must arm exactly as before. The home is the REAL derived
+  # path (not a redirectable prefix) so this exercises the same string the
+  # child is handed; it is removed again below.
+  booted_id="pds-selftest-booted-$$-$(date -u +%s)"
+  booted_tag="$(derive_run_tag "$booted_id")"
+  ST_FAKE_HOME="$(scratch_home_for "$booted_tag")"
+  mkdir -p "$ST_FAKE_HOME"
+  printf 'PDS_SCRATCH_DB=postgres://selftest/none\n' > "$ST_FAKE_HOME/scratch.env"
+  if scratch_env_present "$booted_tag"; then
+    ok "scratch_env_present is TRUE once scratch.env exists at the derived home"
+  else
+    bad "scratch_env_present is FALSE with scratch.env present — the guard would refuse a booted target"
+  fi
+
+  mkdir -p "$scratch/full4e2"
+  printf '%s\n' "41" > "$scratch/full4e2/attempts"
+  set +e
+  out="$(PDS_RUN_ID="$booted_id" \
+         PDS_LAUNCH_STATE_DIR="$scratch/state4e2" \
+         PDS_FULL_EXPORT_DIR="$scratch/full4e2" \
+         PDS_LAUNCH_HARNESS="$scratch/harness4e.sh" \
+         PDS_LAUNCH_ARM_SETTLE_S=3 \
+         "$0" arm --no-prewarm 2>&1)"
+  rc=$?
+  set -e
+  check "$rc" "0" "a pinned run id whose scratch IS booted arms normally"
+  case "$out" in
+    *"NOT ARMED — the scratch target"*) bad "the guard refused a BOOTED target — the reuse path is broken" ;;
+    *) ok "the guard does not fire when scratch.env is present" ;;
+  esac
+  if [ -f "$scratch/state4e2/$booted_tag/child.pid" ]; then
+    ok "the booted-target arm reached the fork (child.pid written)"
+  else
+    bad "the booted-target arm never forked — the reuse path regressed"
+  fi
+
+  # Tear the dummy climb down: it is a `sleep 30` in its OWN session (that is
+  # the whole detach form), so nothing reaps it when this selftest exits.
+  pid="$(cat "$scratch/state4e2/$booted_tag/child.pid" 2>/dev/null | tr -d ' \n' || true)"
+  if is_int "${pid:-}"; then
+    pgid="$(ps -o pgid= -p "$pid" 2>/dev/null | tr -d ' ' || true)"
+    is_int "${pgid:-}" && kill -TERM -"$pgid" 2>/dev/null || true
+    kill -TERM "$pid" 2>/dev/null || true
+  fi
+  rm -rf "$ST_FAKE_HOME"; ST_FAKE_HOME=""
+
+  # (c) MUTATION GUARD — the call, and its POSITION. Deleting the call, or
+  # moving it after fire_detached, both restore the defect; only the first
+  # would be caught by a presence grep.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'scratch_env_present' || true)"
+  if [ "${out:-0}" -ge 1 ]; then
+    ok "cmd_arm calls scratch_env_present (the guard is wired, not merely defined)"
+  else
+    bad "cmd_arm no longer asserts scratch.env — a fresh arm can spend an attempt that cannot run"
+  fi
+  i="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -n 'scratch_env_present' | head -1 | cut -d: -f1 || true)"
+  line="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -n '^  fire_detached ' | head -1 | cut -d: -f1 || true)"
+  if is_int "${i:-}" && is_int "${line:-}" && [ "$i" -lt "$line" ]; then
+    ok "the guard runs BEFORE fire_detached (line $i < $line inside cmd_arm)"
+  else
+    bad "the guard is not provably ahead of fire_detached (guard=${i:-<none>} fork=${line:-<none>}) — an attempt could be resolved first"
+  fi
+
+  # (d) DRIFT GUARD. scratch_home_for spells the prefix itself; fire_detached
+  # spells it again (§c1 pins that literal). If they diverge, this guard
+  # asserts a path the child never uses — correct about the wrong file.
+  # shellcheck disable=SC2016
+  # '$run_tag' is LITERAL on purpose: the needle is fire_detached's source text,
+  # which contains the unexpanded variable name, not any value of it.
+  out="$(sed -n '/^fire_detached()/,/^}/p' "$SCRIPT_DIR/$SELF" \
+         | grep -c "BARKPARK_HOME=\"$(scratch_home_for '$run_tag')\"" || true)"
+  check "${out:-0}" "1" "scratch_home_for and fire_detached spell the SAME /tmp/pds-w14.<tag> home"
+
+  # (e) EXPLICIT NEGATIVE. arm must REFUSE, never grow a side effect: booting a
+  # scratch is a minutes-long action with its own teardown obligation, and arm
+  # cannot own an instance it cannot tear down. Every mention of the boot
+  # command inside cmd_arm must be TEXT the operator reads, never a command.
+  out="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -c 'pds-scratch-target' || true)"
+  i="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" | grep -cE '^ *(#|info ")' \
+       | head -1 || true)"
+  line="$(sed -n '/^cmd_arm()/,/^}/p' "$SCRIPT_DIR/$SELF" \
+          | grep 'pds-scratch-target' | grep -cE '^ *(#|info ")' || true)"
+  if [ "${out:-0}" -ge 1 ] && [ "${out:-0}" -eq "${line:-0}" ]; then
+    ok "cmd_arm only NAMES pds-scratch-target.sh ($out/$line mentions are prose); it never boots one"
+  else
+    bad "cmd_arm has $out mention(s) of pds-scratch-target.sh and only $line are prose — arm is booting the scratch itself"
   fi
 
   # ── 5. KILLED names the stranded lock (PDS-D248) ─────────────────────────
@@ -1527,6 +2241,310 @@ MUTECHILD
     bad "the banner makes a promise about the climb's outcome that one read cannot back"
   fi
 
+  # ── 10. the pre-warm warms the env the HARNESS runs (PDS-D755) ────────────
+  say ""
+  say "10 · the pre-warm warms every MIX_ENV the harness actually runs (PDS-D755)"
+
+  # The expected env set is DERIVED FROM THE HARNESS, never listed here. A
+  # hard-coded "dev" would go on passing if the harness moved to another env —
+  # which is exactly the class of bug this section exists to catch, one level up.
+  pw_harness_envs="$(grep -oE 'MIX_ENV=[a-z]+[[:space:]]+mix[[:space:]]' "$HARNESS" 2>/dev/null \
+                     | grep -oE 'MIX_ENV=[a-z]+' | cut -d= -f2 | sort -u | tr '\n' ' ')"
+  pw_harness_envs="${pw_harness_envs% }"
+
+  # PRECONDITION, not a control: an empty derivation would make every assertion
+  # below vacuously true. Print the key set before trusting an empty read.
+  if [ -n "$pw_harness_envs" ]; then
+    ok "the harness names at least one MIX_ENV (derived from $HARNESS: $pw_harness_envs)"
+  else
+    bad "derived NO MIX_ENV from $HARNESS — every check below would be vacuous; fix the derivation"
+  fi
+
+  # `pw_warmed_envs <file>` prints the envs a pre-warm body compiles, one per
+  # line. It reads compile invocations only, so a mere mention in a comment
+  # does not count as warming.
+  pw_warmed_envs() {
+    grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?[[:space:]]+mix[[:space:]]+compile' "$1" \
+      | grep -oE 'MIX_ENV="?\$?[A-Za-z_]+"?' | sed 's/MIX_ENV=//; s/"//g' | sort -u
+  }
+
+  # The child's pre-warm body, and the synchronous --prewarm-now leg, verbatim
+  # from this file. Both are compared against the SAME derived set, because a
+  # fix that lands in only one of them leaves the other warming the wrong tree.
+  sed -n '/^# ── PRE-WARM (PDS-D241/,/^fi$/p'  "$SCRIPT_DIR/$SELF" > "$scratch/pw-child.txt"
+  sed -n '/pre-warming synchronously/,/^  fi$/p' "$SCRIPT_DIR/$SELF" > "$scratch/pw-sync.txt"
+
+  for pw_leg in child sync; do
+    pw_body="$scratch/pw-$pw_leg.txt"
+    if [ ! -s "$pw_body" ]; then
+      bad "could not extract the $pw_leg pre-warm leg from $SELF — the anchor moved"
+      continue
+    fi
+    # A literal env, or the loop variable expanded from a literal list.
+    pw_list="$(grep -oE 'PREWARM_ENVS="[a-z ]+"|for pw_env in [a-z ]+;' "$pw_body" \
+               | sed 's/.*PREWARM_ENVS="//; s/for pw_env in //; s/[";]//g' | tr ' ' '\n' | sort -u)"
+    pw_lits="$(pw_warmed_envs "$pw_body" | grep -v '^\$' || true)"
+    pw_have="$(printf '%s\n%s\n' "$pw_list" "$pw_lits" | grep -v '^$' | sort -u)"
+    for pw_env in $pw_harness_envs; do
+      if printf '%s\n' "$pw_have" | grep -qx "$pw_env"; then
+        ok "the $pw_leg pre-warm leg warms MIX_ENV=$pw_env — the env the harness runs"
+      else
+        bad "the $pw_leg pre-warm leg does NOT warm MIX_ENV=$pw_env; it warms: $(printf '%s' "$pw_have" | tr '\n' ' ')"
+      fi
+    done
+  done
+
+  # …and every per-env stamp NAMES its env, so the transcript is
+  # self-describing rather than leaving a reader to assume which tree was
+  # warmed. The rule is "every stamp INSIDE the per-env loop", not a list of
+  # stamp prefixes — a list would stop matching the very stamp that dropped
+  # its env, and pass.
+  sed -n '/for pw_env in \$PREWARM_ENVS; do/,/^  done$/p' "$scratch/pw-child.txt" \
+    > "$scratch/pw-loop.txt"
+  pw_stamps="$(grep -cE '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" || true)"
+  if [ "${pw_stamps:-0}" -ge 3 ]; then
+    ok "the per-env pre-warm loop was found and carries $pw_stamps stamps"
+  else
+    bad "found only ${pw_stamps:-0} stamp(s) in the per-env pre-warm loop — the anchor moved and the naming check below is vacuous"
+  fi
+  pw_unnamed="$(grep -E '^[[:space:]]*stamp "prewarm:' "$scratch/pw-loop.txt" \
+                | grep -cv 'pw_env' || true)"
+  if [ "${pw_unnamed:-1}" -eq 0 ]; then
+    ok "every stamp inside the per-env pre-warm loop names its MIX_ENV"
+  else
+    bad "$pw_unnamed stamp(s) inside the per-env pre-warm loop do not name their MIX_ENV"
+  fi
+
+  # CONTROL — the predicate must DISCRIMINATE. Run the same extractor over the
+  # pre-PDS-D755 body (prod only). If this reports dev as warmed, the checks
+  # above are passing on their own shape and prove nothing about the fix.
+  cat > "$scratch/pw-legacy.txt" <<'LEGACYPW'
+if [ "$DO_PREWARM" = "1" ]; then
+  stamp "prewarm: cd $API_DIR && CC=/usr/bin/clang MIX_ENV=prod mix compile"
+  if ( cd "$API_DIR" && CC=/usr/bin/clang MIX_ENV=prod mix compile ); then
+    stamp "prewarm: OK — the window will not pay a cold compile"
+  fi
+fi
+LEGACYPW
+  pw_legacy="$(pw_warmed_envs "$scratch/pw-legacy.txt" | tr '\n' ' ')"
+  case " $pw_legacy " in
+    *" prod "*) ok "the extractor does read the legacy body (it sees prod: $pw_legacy)" ;;
+    *)          bad "the extractor cannot even read the legacy body — it measures nothing" ;;
+  esac
+  case " $pw_legacy " in
+    *" dev "*) bad "the extractor reports dev warmed by a prod-only body — it cannot detect this defect" ;;
+    *)         ok  "the extractor reports the prod-only body as NOT warming dev (the defect is detectable)" ;;
+  esac
+
+  # ── 11. a zero-spend refusal re-enters the poll; a spend never does ───────
+  #
+  # This section RUNS the generated child end to end against a stub ssh and a
+  # stub harness — it arms nothing, touches no real host, and spends no real
+  # attempt (the whole mechanism is pointed at a scratch attempts file, and §7
+  # separately proves the real counter is untouched). Three legs drive the three
+  # verdicts refire_verdict can return, and a fourth MUTATES the generated child
+  # back to the one-shot form to prove these assertions discriminate.
+  say ""
+  say "11 · a zero-spend refusal re-enters the poll; a spend exits and never re-fires"
+
+  r11="$scratch/refire"
+  mkdir -p "$r11/bin" "$r11/full"
+
+  # The stub remote: swallows the heredoc program, answers with a reading that
+  # clears any floor and no running site builds, so EVERY draw verdicts FIRE.
+  cat > "$r11/bin/ssh" <<'STUB_SSH'
+#!/usr/bin/env bash
+cat >/dev/null 2>&1 || true
+printf 'mem_kb=99999999\n'
+printf 'rss_kb=1000\n'
+printf 'elapsed=10:00\n'
+printf 'builds=\n'
+STUB_SSH
+  chmod +x "$r11/bin/ssh"
+
+  # Stub harness A — REFUSES and never touches the counter (the cond_b shape).
+  cat > "$r11/bin/harness-refuse" <<STUB_REFUSE
+#!/usr/bin/env bash
+printf 'STUB: refusing --all, counter untouched\n'
+printf 'call\n' >> "$r11/calls-refuse"
+exit 1
+STUB_REFUSE
+  # Stub harness B — SPENDS an attempt, then fails (the mid-rung abort shape).
+  cat > "$r11/bin/harness-spend" <<STUB_SPEND
+#!/usr/bin/env bash
+printf 'STUB: spending one attempt, then failing\n'
+printf 'call\n' >> "$r11/calls-spend"
+n=\$(cat "$r11/full/attempts" 2>/dev/null || echo 0)
+printf '%s\n' "\$(( n + 1 ))" > "$r11/full/attempts"
+exit 1
+STUB_SPEND
+  # Stub harness C — refuses, but the counter is GARBAGE and cannot be read.
+  cat > "$r11/bin/harness-unverifiable" <<STUB_UNV
+#!/usr/bin/env bash
+printf 'STUB: refusing --all against an unreadable counter\n'
+printf 'call\n' >> "$r11/calls-unv"
+exit 1
+STUB_UNV
+  chmod +x "$r11/bin/harness-refuse" "$r11/bin/harness-spend" "$r11/bin/harness-unverifiable"
+
+  # $1 dest · $2 harness — write a child pointed entirely at scratch.
+  write_stub_child() {
+    (
+      HARNESS="$2"
+      FULL_ATTEMPTS_FILE="$r11/full/attempts"
+      API_DIR="$scratch/api-never-read"
+      INTERVAL=0
+      MAX_DRAWS=3
+      MEM_FLOOR_MIB=1
+      SSH_HOST=stub-host
+      SSH_KEY=/dev/null
+      DO_PREWARM=2
+      write_child_script "$1" "stub$$"
+    )
+  }
+
+  run_stub_child() { # $1 child · $2 log -> prints the rc
+    local c="$1" l="$2" rc
+    set +e
+    PATH="$r11/bin:$PATH" bash "$c" > "$l" 2>&1
+    rc=$?
+    set -e
+    printf '%s\n' "$rc"
+  }
+
+  # ── leg A: the zero-spend refusal ────────────────────────────────────────
+  printf '3\n' > "$r11/full/attempts"
+  a11_before="$(cat "$r11/full/attempts")"
+  write_stub_child "$r11/child-refuse.sh" "$r11/bin/harness-refuse"
+  a11_rc="$(run_stub_child "$r11/child-refuse.sh" "$r11/refuse.log")"
+  a11_after="$(cat "$r11/full/attempts")"
+  a11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${a11_calls:-}" || a11_calls=0
+
+  check "$a11_calls" "3" "the refused harness is re-invoked once per remaining draw, capped at MAX_DRAWS=3"
+  check "$a11_rc" "6" "the child TERMINATES on its own with the window-exhausted status (the loop is bounded)"
+  check "$(tail -1 "$r11/refuse.log")" "EXIT: 6" "the last line is the sentinel — the transcript is still diagnosable"
+  check "$a11_before" "3" "PRECONDITION: the scratch attempts counter reads 3 before the run"
+  check "$a11_after" "3" "the attempts counter is UNCHANGED at 3 across three re-fires — no attempt was spent"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/refuse.log" || true)" "3" "every re-entry is STAMPED, none is silent"
+  check "$(grep -c 'verdict=ZERO-SPEND-REFUSAL' "$r11/refuse.log" || true)" "3" "each invocation records its before/after counter readings and its verdict"
+  check "$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/refuse.log" || true)" "1" "the exhausted window gets its own terminal stamp, exactly once"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/refuse.log" || true)" "0" "the zero-spend leg never claims an attempt was spent"
+
+  # ── leg B: a real spend must still end the run, on the FIRST invocation ───
+  printf '3\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-spend.sh" "$r11/bin/harness-spend"
+  b11_rc="$(run_stub_child "$r11/child-spend.sh" "$r11/spend.log")"
+  b11_after="$(cat "$r11/full/attempts")"
+  b11_calls="$(wc -l < "$r11/calls-spend" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${b11_calls:-}" || b11_calls=0
+
+  check "$b11_calls" "1" "a SPENT attempt invokes the harness exactly ONCE — no second, hidden attempt"
+  check "$b11_rc" "1" "the child exits on the harness rc, exactly as it always did"
+  check "$b11_after" "4" "CONTROL: the spend leg really did move the counter (3 -> 4), so leg A measured something"
+  check "$(grep -c 'ZERO-SPEND REFUSAL #' "$r11/spend.log" || true)" "0" "a moved counter never re-enters the poll"
+  check "$(grep -c 'ATTEMPT SPENT' "$r11/spend.log" || true)" "1" "the spend is named in the transcript"
+
+  # ── leg C: an UNREADABLE counter is read as a spend, never as a licence ──
+  printf 'not-a-number\n' > "$r11/full/attempts"
+  write_stub_child "$r11/child-unv.sh" "$r11/bin/harness-unverifiable"
+  c11_rc="$(run_stub_child "$r11/child-unv.sh" "$r11/unv.log")"
+  c11_calls="$(wc -l < "$r11/calls-unv" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${c11_calls:-}" || c11_calls=0
+  check "$c11_calls" "1" "a garbage counter stops the run after ONE invocation — unverifiable is treated as spent"
+  check "$c11_rc" "1" "the unverifiable leg exits on the harness rc rather than re-firing"
+  check "$(grep -c 'verdict=SPENT-UNVERIFIED' "$r11/unv.log" || true)" "1" "the unverifiable verdict is named in the transcript"
+
+  # ── the MUTATION: revert the child to the one-shot form and re-run leg A ──
+  #
+  # Deleting the re-entry branch from the GENERATED child reproduces the exact
+  # pre-fix behaviour (fire once, exit on rc). If leg A's assertions still pass
+  # against it, they are passing on their own shape and prove nothing.
+  awk '
+    /^    if \[ "\$refire" = "ZERO-SPEND-REFUSAL" \]; then$/ { skip=1 }
+    skip && /^    fi$/ { skip=0; next }
+    !skip { print }
+  ' "$r11/child-refuse.sh" > "$r11/child-oneshot.sh"
+  chmod +x "$r11/child-oneshot.sh"
+  m11_dropped="$(( $(wc -l < "$r11/child-refuse.sh") - $(wc -l < "$r11/child-oneshot.sh") ))"
+  if [ "$m11_dropped" -gt 0 ]; then
+    ok "the mutation APPLIED — $m11_dropped line(s) of the re-entry branch removed from the generated child"
+  else
+    bad "the mutation changed NOTHING — the anchor moved, and the control below is vacuous"
+  fi
+  if bash -n "$r11/child-oneshot.sh" 2>/dev/null; then
+    ok "the mutated child is still syntactically valid, so its result is behaviour, not a parse error"
+  else
+    bad "the mutated child does not parse — the control measures a syntax error, not the revert"
+  fi
+
+  printf '3\n' > "$r11/full/attempts"
+  : > "$r11/calls-refuse"
+  m11_rc="$(run_stub_child "$r11/child-oneshot.sh" "$r11/oneshot.log")"
+  m11_calls="$(wc -l < "$r11/calls-refuse" 2>/dev/null | tr -d ' ' || true)"
+  is_int "${m11_calls:-}" || m11_calls=0
+
+  # Each assertion below is the NEGATION of one of leg A's — i.e. leg A goes RED
+  # on the reverted tree. Stated as the value leg A demanded, and what it is now.
+  if [ "$m11_calls" = "1" ] && [ "$m11_calls" != "$a11_calls" ]; then
+    ok "REVERTED: the one-shot child invokes the harness ONCE, not $a11_calls — leg A's call count goes RED"
+  else
+    bad "REVERTED: the one-shot child still invoked the harness $m11_calls time(s); leg A's count does not discriminate"
+  fi
+  if [ "$m11_rc" != "6" ]; then
+    ok "REVERTED: the one-shot child exits rc=$m11_rc, not 6 — leg A's exit-status check goes RED"
+  else
+    bad "REVERTED: the one-shot child still exits 6; leg A's exit status does not discriminate"
+  fi
+  m11_exh="$(grep -c 'WINDOW-EXHAUSTED — ' "$r11/oneshot.log" || true)"
+  if [ "${m11_exh:-0}" -eq 0 ]; then
+    ok "REVERTED: no WINDOW-EXHAUSTED stamp — leg A's terminal-stamp check goes RED"
+  else
+    bad "REVERTED: the one-shot child still printed WINDOW-EXHAUSTED; that check does not discriminate"
+  fi
+
+  # ── collect must not call an exhausted window a spent attempt ─────────────
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=3 rc=1 verdict=ZERO-SPEND-REFUSAL\n'
+    printf '[2026-07-21T07:00:10Z] ZERO-SPEND REFUSAL #1 — the harness refused with rc=1\n'
+    printf '[2026-07-21T07:01:00Z] WINDOW-EXHAUSTED — 3 draws taken. The harness was invoked 3 time(s) and\n'
+    printf 'EXIT: 6\n'
+  } > "$scratch/exhausted.log"
+  check "$(classify "$scratch/exhausted.log" "$scratch/dummy.pid")" "CRASHED" \
+    "an exhausted-after-refusals transcript classifies CRASHED (still six states, no seventh)"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/exhausted.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"ZERO export attempts were spent"*) ok "collect reads the exhausted window as costing ZERO attempts" ;;
+    *) bad "collect does not say the exhausted window spent zero attempts — it would hoard a budget still held" ;;
+  esac
+  case "$out" in
+    *"An export attempt WAS SPENT"*) bad "collect calls an unmoved counter a spent attempt (the FIRE-stamp misread)" ;;
+    *) ok "collect does NOT call the exhausted window a spent attempt" ;;
+  esac
+
+  # …and the spend shape must still read as spent, from the counter this time.
+  {
+    printf '[2026-07-21T07:00:00Z] FIRE — draw 1 of 3 qualified.\n'
+    printf '[2026-07-21T07:00:10Z] attempts: before=3 after=4 rc=2 verdict=SPENT\n'
+    printf 'EXIT: 2\n'
+  } > "$scratch/spent.log"
+  set +e
+  out="$(PDS_FULL_EXPORT_DIR="$scratch/full" "$0" collect \
+          --transcript "$scratch/spent.log" --pid-file "$scratch/dummy.pid" 2>&1)"
+  set -e
+  case "$out" in
+    *"An export attempt WAS SPENT"*) ok "a MOVED counter still reads as a spent attempt" ;;
+    *) bad "a moved counter no longer reads as a spent attempt — re-arming would burn a second one" ;;
+  esac
+  case "$out" in
+    *"ZERO export attempts were spent"*) bad "the spend shape is called free to re-arm" ;;
+    *) ok "the spend shape is never called free to re-arm" ;;
+  esac
+
   say ""
   rule
   printf '  %d ok · %d FAIL\n' "$ST_PASS" "$ST_FAIL"
@@ -1550,7 +2568,9 @@ usage: $SELF <command>
   arm [--force] [--prewarm-now|--no-prewarm] [--max-draws N] [--interval S]
         Launch the climb DETACHED and return. Does not poll; the poll loop
         lives in the child, which outlives this turn. By default the child
-        pays the MIX_ENV=prod pre-warm before its first draw (PDS-D241).
+        pays the pre-warm before its first draw (PDS-D241): MIX_ENV=dev
+        first — the env the harness actually runs — then MIX_ENV=prod
+        (PDS-D755). Each stamp names its env.
 
   collect [<run-tag>] [--transcript P --pid-file F]
         Classify a transcript into one of six states (PDS-D247):

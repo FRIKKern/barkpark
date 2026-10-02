@@ -21,6 +21,25 @@ services:
     build:
       context: .
       dockerfile: api/Dockerfile
+      # ── Build identity (task-2ab4f5f0a07e887a) ───────────────────────────
+      # BUILD args, not runtime env: Barkpark.BuildInfo freezes version/commit/
+      # built_at at COMPILE time, so a value supplied here is the only one that
+      # can reach it. All three are OPTIONAL — leave them unset and the image
+      # takes its release from the checked-in VERSION file the Dockerfile COPYs,
+      # which is what a self-hoster building from a tarball or a `.git`-less
+      # context gets.
+      #
+      # `${FOO:-}` IS CORRECT HERE and is NOT the passthrough-allowlist trap
+      # documented under `environment:` below. There an empty string is a
+      # distinct and sometimes destructive VALUE (BARKPARK_PLUGINS="" is the
+      # plugin kill switch), so an unset var MUST stay unset. Here it is not a
+      # value at all: BuildInfo's env reader treats "" exactly as unset and
+      # falls through to the VERSION file, so the two spellings are
+      # indistinguishable to the only consumer.
+      args:
+        BARKPARK_BUILD_VERSION: ${BARKPARK_BUILD_VERSION:-}
+        BARKPARK_BUILD_COMMIT: ${BARKPARK_BUILD_COMMIT:-}
+        BARKPARK_BUILD_DATE: ${BARKPARK_BUILD_DATE:-}
     ports:
       - "${PORT:-4000}:4000"
     environment:
@@ -48,6 +67,8 @@ services:
       # Boot-time seed profile: `clean` skips the heavy demo dataset (avoids the
       # codelist-seed memory pressure); `demo` for a populated stage.
       - BARKPARK_SEED_PROFILE=${BARKPARK_SEED_PROFILE:-clean}
+      # The shape (docs/contracts/product-era.md): compose installs a Solo box.
+      - BARKPARK_SHAPE=${BARKPARK_SHAPE:-solo}
       # ── Passthrough allowlist ────────────────────────────────────────────
       # Everything below is a BARE line on purpose: the variable reaches the
       # container ONLY when set in the invoking shell / .env, and stays UNSET
@@ -93,6 +114,7 @@ services:
       - ECTO_IPV6
       - PHX_PORT
       - PHX_SCHEME
+      - OBAN_POOL_SIZE
       - POOL_SIZE
       - PUBLIC_READ_TOKEN_FILE
       # Crypto / preview
@@ -160,6 +182,7 @@ services:
       - BARKPARK_PAPER_CANVAS
       - PAPERFLOW_INGEST_TOKEN
       # Tasks / tickets / pulse
+      - BARKPARK_FILING_LAW_ABSENT_SURFACE_HARD
       - BARKPARK_GITHUB_INTAKE_WORKSPACE_ID
       - BARKPARK_PULSE_CHANNELS
       - BARKPARK_TASK_ENGAGEMENT_TTL_SECONDS
@@ -167,6 +190,12 @@ services:
       - BARKPARK_TICKET_RATE_ATTACHMENT
       - BARKPARK_TICKET_RATE_CREATE
       - BARKPARK_TICKET_RATE_MESSAGE
+      # Quiz room-spawn rails (Barkpark.Quiz.SpawnBudget; both read in
+      # api/config/runtime.exs). MODE is the kill switch ("enforce"/"shadow"/
+      # "off"); PER_HOUR is parsed with String.to_integer/1, so the bare form
+      # matters doubly here — `${...:-}` would hand it "" and crash the boot.
+      - BARKPARK_QUIZ_ROOM_SPAWN_MODE
+      - BARKPARK_QUIZ_ROOM_SPAWN_PER_HOUR
       # Sync (cloud mirror)
       - BARKPARK_CLOUD_URL
       - BARKPARK_SYNC_DATASET
@@ -207,8 +236,19 @@ services:
       # refuses the node at boot rather than silently using ours.
       - ANTHROPIC_API_URL
       - ONIX_DATASET_HOST
+      # Barkspark slice J (task-2f59ba23bcad333e): comma list of non-plugin
+      # subsystems to turn OFF (studio_chat, cycle_fleet, epic_fleet).
+      # Passthrough-only: unset or empty keeps all of them ON; an unknown
+      # name refuses the boot.
+      - BARKPARK_CAPABILITIES_OFF
       - BARKPARK_CLAUDE_CHAT
       - BARKPARK_TMUX_CONSOLE
+      # Write admission for a dedicated managed instance (Barkdown C083).
+      # Passthrough-only: unset keeps admission OFF; INSTANCE and JOURNAL must
+      # be set together, INITIALIZE=1 provisions the journal once.
+      - BARKPARK_WRITE_ADMISSION_INSTANCE
+      - BARKPARK_WRITE_ADMISSION_JOURNAL
+      - BARKPARK_WRITE_ADMISSION_INITIALIZE
     volumes:
       - uploads:/app/uploads
     depends_on:
@@ -220,7 +260,7 @@ services:
     # `condition: service_healthy` consumer anywhere — a slow-but-fine first
     # boot must never be turned into a failed `docker compose up`.
     healthcheck:
-      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/api/schemas || exit 1"]
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:4000/status.json || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 5

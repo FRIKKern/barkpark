@@ -156,6 +156,27 @@ defmodule Barkpark.Search.Intelligence do
 
   @doc """
   Suggestions for autocomplete. Returns `%{recent: [], popular: [], nohits: []}`.
+
+  ## Audience (task-bee78e63628ffe9b)
+
+  `popular` and `nohits` are drawn from OTHER callers' query text, so they are
+  bounded by who is asking:
+
+    * `audience: :public` — the caller is pinned to the published corpus (no
+      token, or a public-read site token; `BarkparkWeb.SearchIntel.audience/1`).
+      It sees ONLY queries that were themselves recorded by a public caller
+      (`metadata.audience == "public"`, stamped at ingest by `record/6`). An
+      editor's token search, and every drafts-perspective search (only a
+      non-public caller can run one), never reaches it. Day crystals carry no
+      audience split, so this arm reads the raw events over the same
+      #{@popular_window_days}-day window instead; events recorded before the
+      stamp existed carry no audience and are excluded (fail closed).
+    * anything else (`:private`, or absent for module-level callers) — the
+      pre-existing read: crystals + today's events, every audience.
+
+  `nohits` carries the same k-floor as `popular` (`:min_search_count`, default
+  #{@min_search_count}) in every audience: one person's no-hit query is never
+  shown to anyone else.
   """
   @spec suggestions(String.t(), String.t(), String.t(), String.t() | nil, keyword()) :: map()
   def suggestions(surface, scope, actor_key, prefix \\ nil, opts \\ [])
@@ -163,14 +184,15 @@ defmodule Barkpark.Search.Intelligence do
     limit = Keyword.get(opts, :limit, @default_limit)
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     workspace_id = Keyword.get(opts, :workspace_id)
+    public? = Keyword.get(opts, :audience) == :public
     prefix = normalize_suggest_prefix(prefix)
 
-    suggest_opts = [min_search_count: min_count]
+    suggest_opts = [min_search_count: min_count, public?: public?]
 
     %{
       recent: recent_queries(surface, scope, actor_key, prefix, limit, workspace_id),
       popular: popular_queries(surface, scope, prefix, limit, suggest_opts, workspace_id),
-      nohits: nohits_queries(surface, scope, prefix, min(limit, 5), workspace_id)
+      nohits: nohits_queries(surface, scope, prefix, min(limit, 5), suggest_opts, workspace_id)
     }
   end
 
@@ -303,7 +325,14 @@ defmodule Barkpark.Search.Intelligence do
     source = Keyword.get(opts, :source, "api")
     session_key = Keyword.get(opts, :session_key)
     tags = Keyword.get(opts, :tags, [])
-    metadata = Keyword.get(opts, :metadata, %{})
+
+    # The audience stamp the public suggestions read keys on (see
+    # `suggestions/5`). Server-derived only — `:metadata` is built by the
+    # controller from the search meta, never from request input.
+    metadata =
+      opts
+      |> Keyword.get(:metadata, %{})
+      |> stamp_audience(Keyword.get(opts, :audience))
 
     raw_query = Map.get(context, :query, "") || ""
     filters = Map.get(context, :filters, %{})
@@ -648,7 +677,7 @@ defmodule Barkpark.Search.Intelligence do
   # Submit a search event WITHOUT stalling the caller's response. The record
   # write sat synchronously inside every keystroke's request; normally ~free,
   # but any DB contention (crystallizer roll-up, Oban, a checkpoint) stalled
-  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sometimes 450ms"
+  # THE SEARCH RESPONSE by exactly that hiccup — the observed "sporadic ~450ms"
   # spikes on an otherwise ~100ms path. The event id is PRE-GENERATED so the
   # response's `searchEventId` contract (click attribution) is unchanged; the
   # INSERT rides Barkpark.TaskSupervisor (Task.* propagates `$callers`, so the
@@ -768,26 +797,50 @@ defmodule Barkpark.Search.Intelligence do
     }
   end
 
+  defp stamp_audience(metadata, audience) when audience in [:public, :private],
+    do: Map.put(metadata, "audience", Atom.to_string(audience))
+
+  defp stamp_audience(metadata, _), do: metadata
+
+  # Public callers read only public-recorded events (fail closed: an unstamped
+  # legacy event is not public). Private callers read everything, as before.
+  defp audience_events(queryable, true),
+    do: from(e in queryable, where: fragment("?->>'audience' = 'public'", e.metadata))
+
+  defp audience_events(queryable, _), do: queryable
+
+  # Crystals carry no audience split, so a public read takes the raw events
+  # over the whole window; a private read keeps crystals + today's events.
+  defp windowed_rows(true, _crystals_fun, events_fun, window_start, _today_start),
+    do: events_fun.(DateTime.new!(window_start, ~T[00:00:00], "Etc/UTC"), true)
+
+  defp windowed_rows(false, crystals_fun, events_fun, _window_start, today_start),
+    do: merge_count_rows(crystals_fun.(), events_fun.(today_start, false))
+
   defp popular_queries(surface, scope, prefix, limit, opts, workspace_id) do
     min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
-
-    crystal_rows =
-      popular_from_crystals(
-        surface,
-        scope,
-        prefix,
-        window_start,
-        Date.add(today, -1),
-        workspace_id
-      )
-
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = popular_from_events(surface, scope, prefix, today_start, workspace_id)
 
-    crystal_rows
-    |> merge_count_rows(raw_rows)
+    Keyword.get(opts, :public?, false)
+    |> windowed_rows(
+      fn ->
+        popular_from_crystals(
+          surface,
+          scope,
+          prefix,
+          window_start,
+          Date.add(today, -1),
+          workspace_id
+        )
+      end,
+      fn since, public? ->
+        popular_from_events(surface, scope, prefix, since, workspace_id, public?)
+      end,
+      window_start,
+      today_start
+    )
     |> Enum.filter(fn row -> row.count >= min_count end)
     |> Enum.sort_by(& &1.count, :desc)
     |> Enum.take(limit)
@@ -833,7 +886,7 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp popular_from_events(surface, scope, prefix, since, workspace_id) do
+  defp popular_from_events(surface, scope, prefix, since, workspace_id, public?) do
     cap = source_cap()
 
     from(e in Event,
@@ -851,6 +904,7 @@ defmodule Barkpark.Search.Intelligence do
       }
     )
     |> accepted_events()
+    |> audience_events(public?)
     |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()
@@ -863,25 +917,33 @@ defmodule Barkpark.Search.Intelligence do
     end)
   end
 
-  defp nohits_queries(surface, scope, prefix, limit, workspace_id) do
+  defp nohits_queries(surface, scope, prefix, limit, opts, workspace_id) do
+    min_count = Keyword.get(opts, :min_search_count, @min_search_count)
     today = Date.utc_today()
     window_start = Date.add(today, -@popular_window_days)
-
-    crystal_rows =
-      nohits_from_crystals(
-        surface,
-        scope,
-        prefix,
-        window_start,
-        Date.add(today, -1),
-        workspace_id
-      )
-
     today_start = DateTime.new!(today, ~T[00:00:00], "Etc/UTC")
-    raw_rows = nohits_from_events(surface, scope, prefix, today_start, workspace_id)
 
-    crystal_rows
-    |> merge_count_rows(raw_rows)
+    Keyword.get(opts, :public?, false)
+    |> windowed_rows(
+      fn ->
+        nohits_from_crystals(
+          surface,
+          scope,
+          prefix,
+          window_start,
+          Date.add(today, -1),
+          workspace_id
+        )
+      end,
+      fn since, public? ->
+        nohits_from_events(surface, scope, prefix, since, workspace_id, public?)
+      end,
+      window_start,
+      today_start
+    )
+    # k-floor: a no-hit query searched fewer than `min_count` times is one
+    # person's typo or secret, not a pattern — never show it to anyone else.
+    |> Enum.filter(fn row -> row.count >= min_count end)
     |> Enum.sort_by(& &1.count, :desc)
     |> Enum.take(limit)
     |> Enum.map(fn row -> %{query: row.query, count: row.count} end)
@@ -913,7 +975,7 @@ defmodule Barkpark.Search.Intelligence do
     |> Enum.map(fn row -> %{query: row.query_normalized, count: row.count} end)
   end
 
-  defp nohits_from_events(surface, scope, prefix, since, workspace_id) do
+  defp nohits_from_events(surface, scope, prefix, since, workspace_id, public?) do
     cap = source_cap()
 
     from(e in Event,
@@ -926,6 +988,7 @@ defmodule Barkpark.Search.Intelligence do
       select: %{query: max(e.query), count: count(e.id)}
     )
     |> accepted_events()
+    |> audience_events(public?)
     |> scope_ws(workspace_id)
     |> maybe_prefix_on_normalized(prefix)
     |> Repo.all()

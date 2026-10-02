@@ -6,6 +6,9 @@ defmodule BarkparkWeb.QuizChannelTest do
   """
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   import Phoenix.ChannelTest
 
   alias Barkpark.Quiz

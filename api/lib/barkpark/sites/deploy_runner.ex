@@ -81,7 +81,15 @@ defmodule Barkpark.Sites.DeployRunner do
   nothing (no provision, no unit) and returns `{:error, {:artifact_rejected,
   code, message}}` — it NEVER degrades to a box build, because a box build
   passes HEALTH on genuine markers while serving bytes the caller never asked
-  for. The staged dir reaches the engine as `PREBUILT_DIR` + `PREBUILT_SHA256`
+  for.
+
+  An artifact that was FINE and could not be put on disk anyway (ENOSPC,
+  EACCES, a failed rename) is NOT a refusal and does not share that shape: it
+  answers `{:error, {:artifact_staging_failed, code, message}}`, which the door
+  renders 5xx. `Barkpark.Sites.PrebuiltArtifact.internal_failure?/1` is the
+  single classifier — see its taxonomy comment for who retries.
+
+  The staged dir reaches the engine as `PREBUILT_DIR` + `PREBUILT_SHA256`
   on BOTH env sinks (`resolved_prebuilt_vars/1`), and both are persisted in the
   run manifest so a re-attach after a BEAM restart still knows the run was
   prebuilt.
@@ -132,19 +140,28 @@ defmodule Barkpark.Sites.DeployRunner do
   function. `serving-memory.json` is the one record ruled intentionally
   unswept: it has a FIXED name, so it is bounded at one by construction.
 
-  This slice keeps the record on the BOX. No raw log bytes are exposed over
-  HTTP here: the build env file carries `BARKPARK_TOKEN=` in plaintext and the
-  recorded log is written to disk VERBATIM — nothing scrubs it at write.
+  This slice keeps the record on the BOX; no raw log bytes are exposed over HTTP
+  here. What CHANGED 2026-09-11 (dr-bl-recorder-http-read-path c2) is the state
+  of the bytes themselves: the deploy shell's `tee` still writes the log
+  VERBATIM, but `write_terminal_record/2` now folds that file in place with
+  `Barkpark.Sites.BuildLogScrub.raw/1` (`strip_ansi |> scrub`) before it measures
+  it, and stamps the pattern-set version it used onto the record as
+  `log_scrub`. The scrubber compiles the SAME `cloud/priv/secret-scrub.exs` the
+  control plane's display boundary does — one pattern set, two apps.
 
-  CORRECTED 2026-09-08 (task-04e89e88f056aa38). This used to read "the display
-  scrubber does not yet know that shape, so the read path ships after the
-  scrubber does". It knows the shape now. DERIVATION, re-read on main on
-  2026-09-08 in `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns`
-  carries a dedicated `bppat_`/`bpcs_`/`bp_<kind>_` arm, closing a leak that
-  file measures at 94.3%; and `raw/1` = `strip_ansi |> scrub` closed a separate
-  ordering leak it measures at 2000/2000 = 100%. Both landed fixes are
-  DISPLAY-BOUNDARY scrubbers, so neither one touches the bytes on disk — which
-  is why the read path is STILL withheld, now for the reason that is true.
+  THE WINDOW IS NAMED, NOT HIDDEN. Between the first `tee` write and finalize
+  the bytes on disk are raw; the fold is at finalize, not at write-per-line, and
+  a box that dies mid-build leaves a raw log behind. That run finalizes (and so
+  folds) on the next `status/1` — the manifest is deliberately left on disk for
+  exactly that — and `build_record/2` heals any unstamped record whose log is
+  still there. A record with `log_scrub: nil` is the honest statement that its
+  bytes were never folded.
+
+  HISTORY, kept because it is the reason the read path was withheld: as of
+  2026-09-08 the two landed fixes (the `bppat_`/`bpcs_`/`bp_<kind>_` arm closing
+  a 94.3% shape-blindness leak, and `raw/1` = `strip_ansi |> scrub` closing a
+  2000/2000 ordering leak) were BOTH display-boundary scrubbers, so neither one
+  touched the bytes on disk. That is the hole this write-boundary fold closes.
 
   ## Fail-closed
 
@@ -165,6 +182,7 @@ defmodule Barkpark.Sites.DeployRunner do
 
   require Logger
 
+  alias Barkpark.Sites.BuildLogScrub
   alias Barkpark.Sites.DeployRequest
   alias Barkpark.Sites.PrebuiltArtifact
   alias Barkpark.Sites.Provisioner
@@ -331,6 +349,29 @@ defmodule Barkpark.Sites.DeployRunner do
   # known", never a guess at which half is serving.
   @served_slots ~w(a b)
 
+  # ── THE ROUTE ARMING CHANNEL (charter D608) ───────────────────────────────
+  #
+  # Both engines emit, after their Caddy arming attempt,
+  #
+  #     BPSTAGE name=ROUTE status=<ok|failed> build_id=<id> detail="armed: …"
+  #
+  # (deploy/site-deploy.sh, deploy/site-deploy-node.sh). ROUTE is deliberately
+  # NOT in `@stage_names` — it is a MEASUREMENT of what the box did to Caddy,
+  # never a verdict on the deployment, exactly as SERVED above is. Admitting it
+  # to the whitelist would route it into `deploy_outcome/2`, whose first clause
+  # is "the latest stage with status `failed` decides the run": a `ROUTE
+  # status=failed` would then set `exit_code = stage_exit_code("ROUTE")` = -1
+  # (the catch-all clause — ROUTE has no code of its own) and a failure_reason,
+  # on a run that had already SWITCHed cleanly. A non-fatal arming miss would
+  # start reporting as an abnormally-ended deploy, and whether an arming miss is
+  # fatal at all is precisely the ruling `dr-w19-bl-arm-route-incidence-then-fatal`
+  # has not made yet.
+  #
+  # So: its own regex, its own fold, its own two keys on the status map — the
+  # SERVED shape, for the SERVED reason. Both statuses are matched, because the
+  # whole point of this channel is that a `failed` arming can be SEEN.
+  @route_re ~r/\bBPSTAGE\s+name=ROUTE\s+status=(ok|failed)(?:\s+build_id=\S*)?(?:\s+detail="([^"]*)")?/
+
   # systemctl is-active states that mean the build is STILL running. Everything
   # else (inactive / failed / deactivating / unknown / "") is terminal or gone.
   @active_states ~w(active activating reloading)
@@ -437,6 +478,7 @@ defmodule Barkpark.Sites.DeployRunner do
           | {:error,
              :already_running | :box_at_capacity | :disabled | :runner_unavailable | :start_failed}
           | {:error, {:artifact_rejected, String.t(), String.t()}}
+          | {:error, {:artifact_staging_failed, String.t(), String.t()}}
           | {:error, {:provision_failed, String.t()}}
   def trigger(%DeployRequest{} = req),
     do:
@@ -458,27 +500,61 @@ defmodule Barkpark.Sites.DeployRunner do
   recorded answers `:never_recorded` and carries nothing. Those used to be the
   same map.
 
-  `:log_path` is a path ON THE BOX. The bytes are deliberately NOT returned —
-  they carry the build env's plaintext `BARKPARK_TOKEN` and NOTHING SCRUBS THEM
-  AT WRITE, so whatever the build printed sits on disk in the clear.
+  `:log_path` is a path ON THE BOX and `:log_scrub` says what state its bytes are
+  in: the pattern-set version they were folded with, or `nil` for NOT FOLDED.
+  This function still does not RETURN the bytes — that is a separate door and a
+  separate criterion — but as of 2026-09-11 they are no longer raw on disk:
+  `write_terminal_record/2` folds the log with `BuildLogScrub.raw/1` before
+  measuring it, and this read heals a record that predates that fold (see
+  `heal_unscrubbed_log/1`).
 
-  CORRECTED 2026-09-08 (task-04e89e88f056aa38). The old wording — "no scrubber
-  on this box is trusted with that shape yet" — is no longer true, and was never
-  the operative fact. DERIVATION, re-read on main on 2026-09-08 in
-  `cloud/lib/barkpark_cloud/failure_copy.ex`: `@secret_patterns` gained a
-  `bppat_`/`bpcs_`/`bp_<kind>_` arm (closing a 94.3% shape-blindness leak) and
-  `raw/1` = `strip_ansi |> scrub` closed a 2000/2000 = 100% ordering leak. Both
-  are DISPLAY-BOUNDARY scrubbers; the WRITE path still has none, and that — not
-  a scrubber's competence — is what this refusal rests on.
+  A caller that ever does serve the bytes must read `:log_scrub` and refuse a
+  `nil`. It is `nil` for a record written before the fold existed whose log has
+  since been evicted (nothing left to heal), and for a fold that hit an IO error.
   """
   @spec build_record(String.t(), String.t() | nil) :: map()
   def build_record(slug, build_id \\ nil) when is_binary(slug) do
     case find_terminal_record(slug, build_id) do
       nil -> absent_record(slug, build_id)
-      record -> render_terminal_record(record)
+      record -> record |> heal_unscrubbed_log() |> render_terminal_record()
     end
   rescue
     _ -> absent_record(slug, build_id)
+  end
+
+  # THE CRASH WINDOW, closed on the way past. A log is folded at finalize, so a
+  # box that died between the shell's `tee` and `write_terminal_record/2` leaves
+  # raw bytes on disk with no stamp. That run finalizes on the next `status/1`
+  # (the manifest is left on disk precisely so it can) — but a record written
+  # BEFORE this scrub existed never will, and the read is the next thing that
+  # touches it. So the single-record read heals: an unstamped record whose log is
+  # still on disk gets folded, re-measured and re-stamped here, once.
+  #
+  # `build_records/0` deliberately does NOT do this — healing a whole directory
+  # on a list call would fold every log on the box behind one HTTP request.
+  #
+  # Best-effort by construction: a failed fold returns the record untouched, and
+  # it therefore still reads as unstamped (raw), which is the honest answer.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp heal_unscrubbed_log(record) do
+    log_file = record["log_file"]
+
+    with true <- record["log_scrub"] != BuildLogScrub.version(),
+         true <- is_binary(log_file),
+         true <- File.regular?(log_file),
+         :ok <- BuildLogScrub.scrub_file(log_file) do
+      healed =
+        record
+        |> Map.put("log_scrub", BuildLogScrub.version())
+        |> Map.put("log_bytes", file_size(log_file))
+
+      _ = File.write(record_path_for_log(log_file), Jason.encode!(healed))
+      healed
+    else
+      _ -> record
+    end
+  rescue
+    _ -> record
   end
 
   @doc """
@@ -495,6 +571,161 @@ defmodule Barkpark.Sites.DeployRunner do
   rescue
     _ -> []
   end
+
+  # ── the BYTES door's size policy (dr-bl-recorder-http-read-path c1) ────────
+  #
+  # A BOUNDED TAIL, NEVER THE WHOLE FILE. `@default_max_build_log_bytes` above is
+  # 256 MiB, and it is the RETENTION cap — the size a log is allowed to REACH on
+  # disk — not a serving cap. Reading a log that big to answer an HTTP request
+  # means `File.read!/1` puts the whole binary, its JSON encoding and the response
+  # buffer in memory at once, on a box that is also building sites. So the two
+  # numbers are deliberately separate and this one is four orders of magnitude
+  # smaller.
+  #
+  # The tail is read by SEEKING — `:file.position/2` to `{:eof, -cap}` and one
+  # `IO.binread/2` of at most `cap` bytes — so peak memory is the CAP, whatever
+  # the file size. 256 KiB is ~8x the real Next build log recovered off the box
+  # (30,993 bytes), so the common case is served WHOLE and `truncated` is false.
+  #
+  # The TAIL is the right end: a build's cause is at the bottom, which is the same
+  # reason `failure_reason` folds the TRAILING meaningful lines (@reason_lines).
+  @default_max_build_log_tail_bytes 262_144
+
+  @doc """
+  The recorded build log's BYTES for one deployment — a bounded TAIL, or a
+  refusal that says why (`dr-bl-recorder-http-read-path` c1).
+
+  Returns `{:ok, record_with_tail}` or `{:error, reason, record}`; the record is
+  carried on the refusals too, so a caller can always say which build it is
+  refusing about. Never raises.
+
+  THE REFUSAL IS THE POINT. `:log_scrub` is the pattern-set version the bytes
+  were folded with, and `nil` means NEVER FOLDED — a record written before the
+  write-boundary scrub existed whose log has since been evicted (nothing left to
+  heal), or a fold that hit an IO error. Those bytes may carry a plaintext
+  `BARKPARK_TOKEN=`, so this refuses `:unscrubbed` rather than serving them. It
+  is a REFUSAL, not an absence: an operator gets told the bytes exist and why
+  they are withheld, which is a different fact from "there is no log".
+
+  Reading goes through `build_record/2`, so an unstamped record whose log is
+  still on disk is FOLDED AND RE-STAMPED first (`heal_unscrubbed_log/1`) and then
+  served. The refusal is reached only when healing is impossible.
+
+  The other refusals are the recorder's own honest states: `:evicted` (retention
+  took the bytes, a tombstone says so), `:missing` (gone from disk, never
+  tombstoned — retention did NOT do it), `:never_recorded` (nothing was ever
+  written), `:unreadable` (the file is there and could not be read).
+  """
+  @spec build_log_tail(String.t(), String.t() | nil) :: {:ok, map()} | {:error, atom(), map()}
+  def build_log_tail(slug, build_id \\ nil) when is_binary(slug) do
+    record = build_record(slug, build_id)
+
+    case record.log_state do
+      :available -> serve_tail(record)
+      :evicted -> {:error, :evicted, record}
+      :missing -> {:error, :missing, record}
+      _other -> {:error, :never_recorded, record}
+    end
+  rescue
+    _ -> {:error, :unreadable, absent_record(slug, build_id)}
+  end
+
+  @doc "The serving cap for `build_log_tail/2` — config-injectable, so a test can drive PAST it."
+  @spec max_build_log_tail_bytes() :: pos_integer()
+  def max_build_log_tail_bytes do
+    Keyword.get(config(), :max_build_log_tail_bytes, @default_max_build_log_tail_bytes)
+  end
+
+  # NOT FOLDED — refuse. Matched BEFORE the read, so unscrubbed bytes are never
+  # loaded into this process at all, let alone rendered.
+  defp serve_tail(%{log_scrub: nil} = record), do: {:error, :unscrubbed, record}
+
+  defp serve_tail(record) do
+    case read_tail_bytes(record.log_path, max_build_log_tail_bytes()) do
+      {:ok, tail, total, truncated} ->
+        {:ok,
+         Map.merge(record, %{
+           tail: tail,
+           tail_bytes: byte_size(tail),
+           # Re-measured from the FILE, not trusted from the record: the record's
+           # `log_bytes` was written at finalize and a heal can have changed it.
+           log_bytes: total,
+           truncated: truncated
+         })}
+
+      :error ->
+        {:error, :unreadable, record}
+    end
+  end
+
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_tail_bytes(path, cap) when is_binary(path) and is_integer(cap) and cap > 0 do
+    File.open(path, [:read, :binary], fn fd ->
+      {:ok, total} = :file.position(fd, :eof)
+
+      if total <= cap do
+        {:ok, _} = :file.position(fd, :bof)
+        {printable(read_exactly(fd, total)), total, false}
+      else
+        {:ok, _} = :file.position(fd, {:eof, -cap})
+
+        # The seek lands MID-LINE. That first partial line is dropped rather than
+        # served, because a half line at the top of a log reads as a real line and
+        # is not one — and dropping it also removes the only place a multi-byte
+        # character can have been cut in half.
+        tail = fd |> read_exactly(cap) |> drop_partial_line() |> printable()
+
+        {truncation_notice(total - byte_size(tail), total) <> tail, total, true}
+      end
+    end)
+    |> case do
+      {:ok, {tail, total, truncated}} -> {:ok, tail, total, truncated}
+      _other -> :error
+    end
+  rescue
+    _ -> :error
+  end
+
+  defp read_tail_bytes(_path, _cap), do: :error
+
+  defp read_exactly(_fd, 0), do: ""
+
+  defp read_exactly(fd, count) do
+    case IO.binread(fd, count) do
+      data when is_binary(data) -> data
+      _ -> ""
+    end
+  end
+
+  defp drop_partial_line(bin) do
+    case :binary.match(bin, "\n") do
+      {pos, len} -> binary_part(bin, pos + len, byte_size(bin) - pos - len)
+      :nomatch -> bin
+    end
+  end
+
+  # TRUNCATION IS VISIBLE, AND IT IS VISIBLE IN THE BYTES — not only in an
+  # envelope flag. The bytes are what a human reads; a caller that renders `tail`
+  # and ignores `truncated` must still see that it is looking at the end of
+  # something longer. Same doctrine as `cap_reason/1` on the record door: a quiet
+  # slice makes a partial diagnosis indistinguishable from a complete one.
+  defp truncation_notice(dropped, total) do
+    "…[truncated: this is the TAIL of the build log — " <>
+      "#{dropped} of #{total} bytes are not shown]\n"
+  end
+
+  # A JSON encoder raises on invalid UTF-8, and a build log is arbitrary process
+  # output. Anything that will not encode is dropped at the first bad byte rather
+  # than crashing the door.
+  defp printable(bin) when is_binary(bin) do
+    case :unicode.characters_to_binary(bin) do
+      valid when is_binary(valid) -> valid
+      {:error, ok, _rest} -> ok
+      {:incomplete, ok, _rest} -> ok
+    end
+  end
+
+  defp printable(_), do: ""
 
   @doc """
   Enforce the three retention caps on the durable build logs NOW and report the
@@ -854,7 +1085,8 @@ defmodule Barkpark.Sites.DeployRunner do
           refusals_since: DateTime.t() | nil,
           door_open_admissions_total: non_neg_integer() | nil,
           door_open_admissions: %{String.t() => non_neg_integer()} | nil,
-          measured_at: DateTime.t() | nil
+          measured_at: DateTime.t() | nil,
+          census_interval_ms: pos_integer()
         }
 
   @typedoc """
@@ -908,18 +1140,57 @@ defmodule Barkpark.Sites.DeployRunner do
   (D113), and a census that called the Runner would hang exactly when it
   mattered. The cost is staleness, which is why `measured_at` is rendered too —
   every value here is "as of" that instant, not "as of now".
+
+  `census_interval_ms` is what BOUNDS that staleness, rendered so a reader does
+  not have to know a module attribute. It is the backstop tick's period, read
+  through the same `census_interval_ms/0` the ticker arms with (config
+  `:census_interval_ms`, default `@default_census_interval_ms`) — never a second
+  constant. Like `capacity` it is CONFIGURATION, not a measurement, so it
+  renders even when nothing was read. What it means:
+
+    * every door event (trigger, run completion, deadline) republishes at once,
+      so in PORT mode the census is exact;
+    * in SYSTEMD mode a transient unit can finish without sending this BEAM a
+      message, so `observed_in_flight` can read 1 for a build that already ended
+      — for at most one interval PLUS the tick's own cost (one `systemctl
+      is-active` per tracked deploy unit, each bounded by `ctl_cmd_timeout_ms`)
+      while the Runner is healthy;
+    * so `now - measured_at` well past `census_interval_ms` does not mean "old
+      but true": it means the Runner is NOT TICKING (wedged or busy), and the
+      reading has no bound at all. That is the one case this ETS read exists to
+      survive, and the interval is what makes it visible.
   """
   @spec door_census() :: door_census()
-  def door_census do
+  def door_census, do: door_census(@census_table)
+
+  @doc """
+  `door_census/0` against a NAMED table — the injection seam, and the only way
+  the no-table arm is reachable from a test.
+
+  The "nothing was read" arm (every measurement `nil`, capacity still rendered)
+  is the whole honesty contract of this gauge: a `nil` means UNREAD, never zero.
+  It fires when no Runner has ever run in this BEAM, so `@census_table` does not
+  exist and `census_get/2`'s `ArgumentError` rescue answers `nil`. ExUnit always
+  starts the supervised Runner, so the table ALWAYS exists under test, and the
+  table is OWNED BY THE RUNNER — deleting it means killing a supervised
+  singleton, which is a flake generator across an `async: false` module. Passing
+  a table name that was never created reaches the same arm with nothing killed.
+
+  Not for production callers: `door_census/0` is the real reader.
+  """
+  @doc since: "dr-w22"
+  @spec door_census(atom()) :: door_census()
+  def door_census(table) when is_atom(table) do
     %{
       capacity: build_slot_capacity(),
-      observed_in_flight: census_get(:observed_in_flight),
-      in_flight_slugs: census_get(:in_flight_slugs),
-      refusals_total: census_get(:refusals_total),
-      refusals_since: census_get(:refusals_since),
-      door_open_admissions_total: census_get(:door_open_admissions_total),
-      door_open_admissions: census_get(:door_open_admissions),
-      measured_at: census_get(:measured_at)
+      observed_in_flight: census_get(table, :observed_in_flight),
+      in_flight_slugs: census_get(table, :in_flight_slugs),
+      refusals_total: census_get(table, :refusals_total),
+      refusals_since: census_get(table, :refusals_since),
+      door_open_admissions_total: census_get(table, :door_open_admissions_total),
+      door_open_admissions: census_get(table, :door_open_admissions),
+      measured_at: census_get(table, :measured_at),
+      census_interval_ms: census_interval_ms()
     }
   end
 
@@ -1044,8 +1315,14 @@ defmodule Barkpark.Sites.DeployRunner do
     end
   end
 
-  defp census_get(key) do
-    case :ets.lookup(@census_table, key) do
+  defp census_get(key), do: census_get(@census_table, key)
+
+  # `nil` has TWO meanings here and both are UNREAD, never zero: the key was
+  # never written (`[]`), or the table itself does not exist (`ArgumentError` —
+  # no Runner has ever run in this BEAM). A `0` in either arm would report an
+  # idle door where there is no door at all.
+  defp census_get(table, key) do
+    case :ets.lookup(table, key) do
       [{^key, value}] -> value
       [] -> nil
     end
@@ -1092,8 +1369,32 @@ defmodule Barkpark.Sites.DeployRunner do
   # `lock_triple/1` with the two `:error` cases KEPT APART: `:absent` is
   # conclusive (no file, so nothing holds this gate) while `{:unreadable, _}` is
   # ignorance — the door admits on it, and that admission is counted.
+  #
+  # Reachability: `path` is always a `build_gate_lock_candidates/0` entry —
+  # `$BARKPARK_BUILD_GATE_LOCK`, else app config, else the compile-time
+  # `@default_build_gate_lock` (:388), plus `${TMPDIR:-/tmp}` joined with the
+  # compile-time `@build_gate_lock_basename` (:389). Two in-app call sites and
+  # no others: `lock_triple/1` (:1110) and `foreign_build_in_flight?/1` (:1244,
+  # `Enum.map(build_gate_lock_candidates(), ...)`). Neither takes a request
+  # value or a slug. `lock_triple/1` is PUBLIC purely for testability and would
+  # stat whatever an in-app caller handed it — an existence oracle returning a
+  # dev:inode triple, no content read, no write; today its only non-test caller
+  # is the door itself.
+  #
+  # Sobelow 0.14.1's Traversal.FileModule does not list `stat`, so this site is
+  # SILENT today and the annotation waives nothing YET. It is written anyway:
+  # every other File-module call site in this module carries a traced block, and
+  # a Sobelow bump that adds `stat` to that detector would otherwise red this
+  # code on an unrelated future PR — inside an ADVISORY job, i.e. as a warning
+  # on a green board. dr-bl-w5-lock-triple-file-stat-unwaived.
+  #
+  # The annotation sits BELOW the @spec, not above the block, because this @spec
+  # wraps: sobelow-inline-overlap-check.sh's DETACHED predicate skips lines that
+  # START with `@`, so a wrapped spec's continuation line reads as the bound
+  # construct and the check reds. Sobelow binds to the `defp` either way.
   @spec lock_triple_status(String.t()) ::
           {:ok, String.t()} | :absent | {:unreadable, File.posix()}
+  # sobelow_skip ["Traversal.FileModule"]
   defp lock_triple_status(path) do
     case File.stat(path) do
       {:ok, %File.Stat{major_device: dev, inode: inode}} ->
@@ -1296,8 +1597,20 @@ defmodule Barkpark.Sites.DeployRunner do
     # would pass HEALTH on genuine markers while serving bytes the caller never
     # asked for. The refusal is typed and reaches the caller as a 400.
     case ingest_prebuilt(req) do
-      :ok -> provision_and_spawn(state, req)
-      {:error, code, message} -> {:reply, {:error, {:artifact_rejected, code, message}}, state}
+      :ok ->
+        provision_and_spawn(state, req)
+
+      {:error, code, message} ->
+        # SPLIT ON WHOSE FAULT IT IS. `stage/4` answers two kinds of failure
+        # through one shape, and collapsing them into `:artifact_rejected` made
+        # the door render ENOSPC, EACCES and a failed rename as 400 — "your
+        # tarball is bad" about bytes that were fine. The classification lives
+        # in `PrebuiltArtifact` (it owns the codes); the Runner only routes.
+        if PrebuiltArtifact.internal_failure?(code) do
+          {:reply, {:error, {:artifact_staging_failed, code, message}}, state}
+        else
+          {:reply, {:error, {:artifact_rejected, code, message}}, state}
+        end
     end
   end
 
@@ -1317,9 +1630,15 @@ defmodule Barkpark.Sites.DeployRunner do
         :ok
 
       {:error, code, message} ->
-        Logger.warning(
-          "[site-deploy] prebuilt artifact REFUSED for #{inspect(req.slug)}: #{code} — #{message}"
-        )
+        # An operator reading journald gets the same split the caller does:
+        # REFUSED means go fix the tarball, STAGING FAILED means go fix the box.
+        # One word, and it is the difference between the right person looking.
+        verdict =
+          if PrebuiltArtifact.internal_failure?(code),
+            do: "prebuilt artifact STAGING FAILED (box fault)",
+            else: "prebuilt artifact REFUSED"
+
+        Logger.warning("[site-deploy] #{verdict} for #{inspect(req.slug)}: #{code} — #{message}")
 
         {:error, code, message}
     end
@@ -1359,6 +1678,13 @@ defmodule Barkpark.Sites.DeployRunner do
     # @stage_names are untouched.
     case Provisioner.provision(req) do
       :ok ->
+        spawn_run(state, req)
+
+      # An external-source site: the Provisioner deliberately did NOT touch
+      # <slug>/src (it is a clone / unpacked artifact, not ours to overwrite).
+      # The deploy proceeds exactly as it does after a marker-fresh no-op — the
+      # source is expected to already be on the box.
+      {:ok, :external_source_preserved} ->
         spawn_run(state, req)
 
       {:error, {:provision_failed, reason}} ->
@@ -1633,6 +1959,23 @@ defmodule Barkpark.Sites.DeployRunner do
               "--property=WorkingDirectory=#{run_cd()}",
               "--property=EnvironmentFile=#{env_file}",
               "--property=MemoryMax=#{memory_max()}",
+              # Deploy-reliability charter D611 (the constructive half of D118).
+              # Under cgroup v2 `memory.swap.max` defaults to `max`, so a build
+              # held to MemoryMax RSS can still push an unbounded number of pages
+              # into the box's swapfile, and the pages it displaces are the
+              # serving BEAM's. This is a BLAST-RADIUS bound, not a reclaim one:
+              # the 2026-08-06 guerrilla steady-state budget
+              # (`tooling/grip/ledger/guerrilla-steady-state-memory-budget-2026-08-06.md:70-73`)
+              # measured build processes holding ~9 MB of swap in total while the
+              # box held 2,160 MB — refusing it outright frees approximately
+              # nothing and costs the build approximately nothing; what it buys
+              # is removing the build from the set of processes that can be the
+              # one that tips the API into the global OOM killer. Literal `0`,
+              # not a knob: D611(c) prescribes no other number, and a non-zero
+              # ceiling would have to be derived from the build unit's own
+              # MemorySwapPeak. D118 forbids this property on the SERVING slot;
+              # the per-build transient unit is its only permitted home.
+              "--property=MemorySwapMax=0",
               "--property=CPUQuota=#{cpu_quota()}",
               "--collect",
               engine_path
@@ -1754,6 +2097,7 @@ defmodule Barkpark.Sites.DeployRunner do
     log = read_log_tail(manifest.log_file)
     stages = fold_status_file(manifest.status_file, manifest.build_id)
     {served_port, served_slot} = fold_served_file(manifest.status_file)
+    {route_status, route_detail} = fold_route_file(manifest.status_file)
 
     base = %{
       slug: manifest.slug,
@@ -1764,6 +2108,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: stages,
       served_port: served_port,
       served_slot: served_slot,
+      route_status: route_status,
+      route_detail: route_detail,
       log: log,
       log_state: disk_log_state(manifest.log_file),
       log_path: manifest.log_file,
@@ -1826,6 +2172,30 @@ defmodule Barkpark.Sites.DeployRunner do
         |> Enum.reduce({nil, nil}, fn line, acc ->
           case parse_served_line(line) do
             {:ok, port, slot} -> {port, slot}
+            :skip -> acc
+          end
+        end)
+
+      {:error, _} ->
+        {nil, nil}
+    end
+  end
+
+  # THE ROUTE CHANNEL'S fold — `fold_served_file/1`'s twin over the same durable
+  # file, latest-wins. `{nil, nil}` when the run emitted no ROUTE line at all
+  # (every engine older than 2026-08-08, and any run that died before arming),
+  # which is the honest "nobody measured this", not a passing zero.
+  # Reachability: `path` is always `manifest.status_file` (run_state_dir + a
+  # charset-validated slug), never request data.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp fold_route_file(path) do
+    case File.read(path) do
+      {:ok, contents} ->
+        contents
+        |> String.split("\n", trim: true)
+        |> Enum.reduce({nil, nil}, fn line, acc ->
+          case parse_route_line(line) do
+            {:ok, status, detail} -> {status, detail}
             :skip -> acc
           end
         end)
@@ -2296,19 +2666,12 @@ defmodule Barkpark.Sites.DeployRunner do
     Process.send_after(self(), {:run_deadline, port}, run_deadline_ms())
   end
 
-  # Closing a `{:spawn_executable, _}` port closes the pipe fds and sends the child
-  # NO signal — it terminates only a program that exits on stdin EOF or dies to
-  # SIGPIPE (GH #6681: the Codex runtime orphaned a child that did neither, which
-  # `Session.reap_port/1` now SIGKILLs after the close). A deploy child that
-  # ignores EOF survives this watchdog the same way; reaping here is filed, not
-  # done. Tolerate an already-closed port so the watchdog never crashes the Runner.
-  defp close_port(port) do
-    Port.close(port)
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
-  end
+  # The deadline fires precisely BECAUSE the deploy child is misbehaving, so
+  # closing the port alone (which sends it no signal) left it running with its
+  # pipes closed. `Barkpark.PortReaper.reap/1` reads the pid, closes, then
+  # SIGKILLs it (task-aa975de15eff4e6b); it never raises, so the watchdog never
+  # crashes the Runner.
+  defp close_port(port), do: Barkpark.PortReaper.reap(port)
 
   # Apply `fun` to the run this port belongs to; a port we do not know (a stale
   # message from a finished run) is ignored.
@@ -2390,6 +2753,27 @@ defmodule Barkpark.Sites.DeployRunner do
   end
 
   def parse_served_line(_), do: :skip
+
+  @doc """
+  Parse one durable-status-file line as the ROUTE arming measurement.
+
+  `{:ok, status, detail}` for a well-formed `BPSTAGE name=ROUTE` line (status is
+  the RAW `ok`/`failed` token, detail the engine's own prose — `armed: …`,
+  `already armed: …`, or the failure's reason), `:skip` for anything else.
+
+  Public for the same reason `parse_served_line/1` is: the fold and its tests
+  read the ONE parser, so the wire contract cannot drift between them.
+  """
+  @spec parse_route_line(String.t()) :: {:ok, String.t(), String.t() | nil} | :skip
+  def parse_route_line(line) when is_binary(line) do
+    case Regex.run(@route_re, line, capture: :all_but_first) do
+      [status] -> {:ok, status, nil}
+      [status, detail] -> {:ok, status, blank_to_nil(detail)}
+      _no_match -> :skip
+    end
+  end
+
+  def parse_route_line(_), do: :skip
 
   defp served_port(raw) do
     case Integer.parse(raw) do
@@ -2526,7 +2910,49 @@ defmodule Barkpark.Sites.DeployRunner do
     String.trim(line) == "" or Regex.match?(@stage_re, line)
   end
 
-  # site-deploy.sh's typed exit codes (its header block is the contract).
+  # site-deploy.sh's typed exit codes (its header block, :79-86, is the contract).
+  #
+  # PRUNE-OR-PIN, DECIDED (dr-w15-bl-exit-label-dead-templates). Wave 15 measured
+  # that production has EVER produced three of these — 14 (3,688 rows), 12
+  # (1,575), 10 (1) — and filed the other eleven as candidates for removal. THE
+  # ZEROS ARE REAL; THE INFERENCE FROM THEM WAS NOT. "No row has worn this label"
+  # is a statement about what the fleet has SUFFERED, not about what the engine
+  # can EMIT, and every clause below has a live producer on main today:
+  #
+  #     2   deploy/site-deploy.sh:179   unknown flag
+  #    10   :3497, :3533                BUILD: missing site source dir
+  #    11   :3157/:3160/:3380/:3382/:3410/:3428/:3432/:3454/:3501
+  #    12   :3571                       BUILD failed
+  #    13   :655/:665/:675/:3586/:3590  STAGE failed
+  #    14   :3623                       HEALTH gate failed
+  #    15   :3517                       gave up waiting for a lock
+  #    16   :3891                       SWITCH failed
+  #    21   :3226/:3229/:3232 (+ do_rollback:305/307 return 21)
+  #    22   :3224 (+ do_rollback:301 return 22)
+  #    23   :3214
+  #    24   do_rollback:317/318 return 24; deploy/site-deploy-node.sh's three
+  #         `rb_mark "rollback failed (exit 24)"; exit 24` lines
+  #    -1   THIS module: :693 (port died with no exit_status) and
+  #         `deploy_outcome/2`'s stages==[] / no-terminal arms
+  #    -2   THIS module: :738 (the unit deadline watchdog)
+  #  fallback  every bare `exit 1` in site-deploy.sh (:1274, :1458, :1489, :2034,
+  #         :2401, :2454, :2695, :2903), and a 25 arriving under a DEPLOY mode
+  #
+  # So NOTHING IS REMOVED. Every clause is retained AS A TRIPWIRE for a condition
+  # this fleet has not yet met: deleting one does not delete the exit, it routes a
+  # documented engine failure into the generic fallback, and the operator loses
+  # the one sentence that names what broke. The population that WOULD justify a
+  # prune is "codes the engine can no longer produce" — currently empty.
+  #
+  # Every clause is asserted by name in test/barkpark/sites/deploy_runner_test.exs
+  # ("every typed exit code maps to its own honest label", the 23/25 mode tests,
+  # the deadline test, and the abnormal-rollback test) — a retained tripwire with
+  # a real producer and no assertion is the rot this decision exists to avoid.
+  #
+  # BYTE-FROZEN, and not by convention: cloud/lib/barkpark_cloud/deploy_ledger.ex
+  # :919 `String.starts_with?(reason, "deploy process died abnormally")`, and its
+  # PROCESS_DIED copy at :312, read the -1 bytes below. Re-wording that clause
+  # silently reclassifies every abnormal deploy in the ledger.
   defp exit_label(2), do: "usage error (exit 2)"
   defp exit_label(10), do: "missing site source dir (exit 10)"
   defp exit_label(11), do: "missing or invalid required input (exit 11)"
@@ -2815,7 +3241,14 @@ defmodule Barkpark.Sites.DeployRunner do
 
   # Reachability: `dir` is `run_state_dir()`; `path` came back OUT of a manifest
   # on disk, which is exactly why it is checked before it is followed.
-  # sobelow_skip ["Traversal.FileModule"]
+  #
+  # NO sobelow_skip HERE, deliberately (task-3988d545ee8095bc): this def makes no
+  # File.* call itself — it invokes the capture it is handed — so Sobelow flags
+  # nothing in it and a waiver here suppresses nothing (MEASURED: `mix sobelow
+  # --skip` 0 findings with the waiver, 0 without; deleting the waiver on
+  # prune_run_state_dir/1 instead moves 0 -> 4). Sobelow flags the `&File.rm/1` /
+  # `&File.rm_rf/1` captures at the CALLER, and prune_run_state_dir/1's waiver
+  # covers them. The containment below is WHY that caller's waiver is sound.
   defp sweep_path(dir, path, fun) when is_binary(path) do
     if inside_run_state_dir?(dir, path) do
       fun.(path)
@@ -2973,6 +3406,28 @@ defmodule Barkpark.Sites.DeployRunner do
   defp record_path_for_log(log_path),
     do: String.replace_suffix(log_path, ".log", ".terminal.json")
 
+  # Fold the recorded log in place with `BuildLogScrub.raw/1` and return the
+  # scrub version to stamp, or `nil` if nothing was folded.
+  #
+  # NEVER raises and never fails the finalize: a terminal record that could not
+  # be written is a build whose outcome is lost, which is strictly worse than an
+  # unstamped one. An IO error therefore lands as `nil` (the record then says, by
+  # the absence of the stamp, that its bytes are raw) plus a warning.
+  defp scrub_recorded_log(log_file) do
+    case BuildLogScrub.scrub_file(log_file) do
+      :ok ->
+        if is_binary(log_file), do: BuildLogScrub.version(), else: nil
+
+      {:error, reason} ->
+        Logger.warning(
+          "[site-deploy] could not scrub the recorded build log #{inspect(log_file)}: " <>
+            inspect(reason)
+        )
+
+        nil
+    end
+  end
+
   # Written ONCE per deployment, at finalize. ~1 KB, and it outlives the log.
   # Reachability: the path is `run_state_dir()` + a validated slug + a
   # charset-validated build_id (or a server-generated `<mode>-<ms>` tag).
@@ -2981,6 +3436,14 @@ defmodule Barkpark.Sites.DeployRunner do
     dir = run_state_dir()
     tag = manifest_tag(manifest)
     log_file = manifest.log_file
+
+    # SCRUB AT WRITE, and BEFORE the bytes are measured. The deploy shell's
+    # `tee` wrote this log verbatim, and the build env it sourced carries
+    # `BARKPARK_TOKEN=` in plaintext — so this is the one moment at which the
+    # recorded bytes stop being raw. `log_bytes` below is deliberately computed
+    # AFTER this call: a byte count that described the unscrubbed file would
+    # describe a file that no longer exists.
+    scrub_version = scrub_recorded_log(log_file)
 
     payload = %{
       "slug" => manifest.slug,
@@ -3003,9 +3466,19 @@ defmodule Barkpark.Sites.DeployRunner do
       # asks a terminal record what THIS build ended up serving.
       "served_port" => Map.get(render, :served_port),
       "served_slot" => Map.get(render, :served_slot),
+      # The arming measurement outlives the unit for the same reason the served
+      # slot does: the Caddyfile it was read out of has moved on by the time
+      # anyone asks a terminal record what THIS build did to the route.
+      "route_status" => Map.get(render, :route_status),
+      "route_detail" => Map.get(render, :route_detail),
       "log_file" => log_file,
       "log_bytes" => file_size(log_file),
       "log_state" => Atom.to_string(live_log_state(log_file)),
+      # The scrub STAMP: the version of the pattern set these bytes were folded
+      # with, or `nil` when the fold did not happen (no log, or an IO error).
+      # `nil` is the honest marker that this log's bytes were never redacted —
+      # nothing downstream may treat an unstamped record as safe.
+      "log_scrub" => scrub_version,
       "evicted_at" => nil,
       "started_at" => iso_or_nil(manifest.started_at),
       "finished_at" => iso_or_nil(Map.get(render, :finished_at) || DateTime.utc_now())
@@ -3151,6 +3624,7 @@ defmodule Barkpark.Sites.DeployRunner do
       log_state: :never_recorded,
       log_path: nil,
       log_bytes: nil,
+      log_scrub: nil,
       exit_code: nil,
       failure_reason: nil,
       stages: [],
@@ -3178,11 +3652,18 @@ defmodule Barkpark.Sites.DeployRunner do
       log_state: resolved_log_state(record, log_path),
       log_path: log_path,
       log_bytes: record["log_bytes"],
+      # The pattern-set version these bytes were folded with. `nil` means NOT
+      # SCRUBBED — a record written before the write-boundary scrub existed, or
+      # one whose fold hit an IO error. Any door that serves bytes must read
+      # this, not assume it.
+      log_scrub: record["log_scrub"],
       exit_code: record["exit_code"],
       failure_reason: record["failure_reason"],
       stages: record["stages"] || [],
       served_port: record["served_port"],
       served_slot: record["served_slot"],
+      route_status: record["route_status"],
+      route_detail: record["route_detail"],
       unit_name: record["unit_name"],
       journal_command: record["journal_command"] || journal_command(record["unit_name"]),
       mode: record["mode"],
@@ -3215,6 +3696,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: Enum.map(rendered.stages, &decode_record_stage/1),
       served_port: rendered.served_port,
       served_slot: rendered.served_slot,
+      route_status: rendered.route_status,
+      route_detail: rendered.route_detail,
       exit_code: rendered.exit_code,
       failure_reason: rendered.failure_reason,
       # The BYTES are not served here — the record survived, the log may not
@@ -3250,7 +3733,12 @@ defmodule Barkpark.Sites.DeployRunner do
   # holding the line.
   # Reachability: `dir` is `run_state_dir()`; every candidate is a `*.log` entry
   # inside it, never a caller-supplied path.
-  # sobelow_skip ["Traversal.FileModule"]
+  # NO `sobelow_skip` HERE, DELIBERATELY: this body makes no `File.` call of its
+  # own — every filesystem touch happens in `build_log_entries/1`,
+  # `active_log_paths/1`, `evict_build_log/2` and `prune_terminal_records/2`,
+  # each of which carries its own waiver. A waiver on this def suppressed
+  # nothing and read as a risk somebody had weighed here. If you add a direct
+  # `File.` call below, the waiver belongs with it — not back up here.
   defp prune_build_logs(dir) do
     caps = retention_caps()
     protected = active_log_paths(dir)
@@ -3678,6 +4166,8 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: [],
       served_port: nil,
       served_slot: nil,
+      route_status: nil,
+      route_detail: nil,
       exit_code: nil,
       failure_reason: nil,
       log: [],
@@ -3705,6 +4195,13 @@ defmodule Barkpark.Sites.DeployRunner do
       stages: run.stages,
       served_port: run.served_port,
       served_slot: run.served_slot,
+      # The in-process Port fallback (dev / CI / macOS) does NOT fold the durable
+      # status file — it streams stdout — so it has no arming measurement to
+      # report. `nil` is the honest answer here, and it is deliberate: a test
+      # that could see a ROUTE outcome on THIS path would be vacuous against
+      # production, which runs systemd-run + `reconstruct/2`.
+      route_status: nil,
+      route_detail: nil,
       exit_code: run.exit_code,
       failure_reason: run.failure_reason,
       log: Enum.reverse(run.log),

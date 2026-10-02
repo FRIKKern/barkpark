@@ -4,8 +4,21 @@ defmodule BarkparkWeb.MutateControllerTest do
   alias Barkpark.Content
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", "test", ["read", "write", "admin"])
-    Barkpark.Auth.create_token("barkpark-readonly-token", "ro", "test", ["read"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      "test",
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
+    Barkpark.Auth.create_token(
+      "barkpark-readonly-token",
+      "ro",
+      "test",
+      ["read"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
 
     Content.upsert_schema(
       %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
@@ -558,6 +571,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # no longer licenses an ILLEGAL transition (`any → done` is reached only
     # through the close primitive). The escape remains live for LEGAL terminal
     # transitions — see the `blocked` rev-escape test below, which stays 200.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "D7a supersede: a revision precondition no longer licenses an illegal open → done patch",
          %{conn: conn} do
       create_task(conn, "guard-cas")
@@ -695,6 +710,7 @@ defmodule BarkparkWeb.MutateControllerTest do
         Map.merge(
           %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "acceptance_criteria" => [%{"criterion" => "the fixture is closeable", "met" => true}]
@@ -748,6 +764,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       :ok
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a criteria-clearing publish over /v1/data/mutate answers 422 validation_failed " <>
            "with the acceptance_criteria message, and the stamp survives the HTTP read-back",
          %{conn: conn} do
@@ -755,6 +773,7 @@ defmodule BarkparkWeb.MutateControllerTest do
       content =
         %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "lifecycle_status" => "open",
           "priority" => 1,
           "acceptance_criteria" => [
@@ -1025,6 +1044,7 @@ defmodule BarkparkWeb.MutateControllerTest do
               "_type" => "task",
               "title" => "flat envelope",
               "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
               "lifecycle_status" => "done"
             }
           }
@@ -1350,7 +1370,15 @@ defmodule BarkparkWeb.MutateControllerTest do
         "_id" => id,
         "_type" => "task",
         "title" => "Guard fixture #{id}",
-        "content" => Map.merge(%{"kind" => "task", "lifecycle_status" => "open"}, content_extra)
+        "content" =>
+          Map.merge(
+            %{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => "open"
+            },
+            content_extra
+          )
       }
     end
 
@@ -1698,6 +1726,7 @@ defmodule BarkparkWeb.MutateControllerTest do
           "title" => "Merge-gate advisory fixture #{id}",
           "content" => %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 2,
             "acceptance_criteria" => criteria
@@ -1706,6 +1735,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       }
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an unflagged MERGE-GATED criterion puts a warning ON THE RESPONSE, not just the journal",
          %{conn: conn} do
       resp =
@@ -1758,6 +1789,8 @@ defmodule BarkparkWeb.MutateControllerTest do
   describe "filing-law door guard (cch-w28, D307/D331)" do
     @epic "cloud-console-hardening-epic"
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an OFF-VOCABULARY surface on a create under the epic is REFUSED 422", %{conn: conn} do
       resp = file_row(conn, "cchw28-offvocab", %{"surface" => "dashboard"})
 
@@ -1775,6 +1808,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert missing?("cchw28-offvocab")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "EXACT CASE: a differently-cased term is off-vocabulary too", %{conn: conn} do
       resp = file_row(conn, "cchw28-cased", %{"surface" => "Console"})
 
@@ -1828,6 +1863,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw28-no-parent")["surface"] == "dashboard"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
       resp =
         create_row(conn, "cchw28-draft-parent", %{
@@ -1847,6 +1884,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # against the route, and every arm below answers 200 on the birth-only
     # tree.
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the PATCH that carries an off-vocabulary surface onto a live epic row is REFUSED",
          %{conn: conn} do
       assert file_row(conn, "cchw29-live", %{"surface" => "console"}).status == 200
@@ -1863,6 +1902,8 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw29-live")["surface"] == "console"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "create BARE, patch the surface, publish: the term never reaches the published row",
          %{conn: conn} do
       # The publish wall (label spine + tag registry) is a separate door; satisfy
@@ -1942,6 +1983,95 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert task_content("cchw29-grandfathered")["surface"] == "dashboard"
     end
 
+    # ── THE SECOND EPIC (task-29b971932b045394) ────────────────────────────
+    #
+    # The guard keyed on ONE literal while the law governs two epics;
+    # `cch-instruments-epic` held 35 of 45 live open rows, all filed through an
+    # unguarded door. Every test here names that parent explicitly. MUTATION:
+    # drop `cch-instruments-epic` from `@cch_epic_parents` in birth_guards.ex
+    # and the refusal tests below go 200.
+
+    @instruments_epic "cch-instruments-epic"
+
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
+    test "SECOND EPIC: an off-vocabulary create under cch-instruments-epic is REFUSED " <>
+           "with the first parent's error, word for word but the slug",
+         %{conn: conn} do
+      first = file_row(conn, "cchs32-first-offvocab", %{"surface" => "dashboard"})
+      second = file_under(conn, @instruments_epic, "cchs32-offvocab", %{"surface" => "dashboard"})
+
+      assert second.status == 422
+      assert first.status == 422
+      second_error = Jason.decode!(second.resp_body)["error"]
+      first_error = Jason.decode!(first.resp_body)["error"]
+      assert second_error["code"] == "validation_failed"
+      assert [second_message] = second_error["details"]["surface"]
+      assert [first_message] = first_error["details"]["surface"]
+
+      # The same refusal: identical text once the governed epic's slug is swapped —
+      # the filer is told the epic it actually filed under, nothing else differs.
+      assert second_message =~ ~s(cannot be filed under "#{@instruments_epic}" as "dashboard")
+
+      assert second_message ==
+               String.replace(first_message, ~s("#{@epic}"), ~s("#{@instruments_epic}"))
+
+      assert missing?("cchs32-offvocab")
+    end
+
+    test "SECOND EPIC: each sanctioned term PASSES and reads back", %{conn: conn} do
+      for term <- ~w(console instrument ledger) do
+        resp = file_under(conn, @instruments_epic, "cchs32-ok-#{term}", %{"surface" => term})
+
+        assert resp.status == 200
+        assert task_content("cchs32-ok-#{term}")["surface"] == term
+      end
+    end
+
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
+    test "SECOND EPIC: a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
+      resp =
+        file_under(conn, "drafts." <> @instruments_epic, "cchs32-draft-parent", %{
+          "surface" => "dashboard"
+        })
+
+      assert resp.status == 422
+      assert missing?("cchs32-draft-parent")
+    end
+
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
+    test "SECOND EPIC: a GRANDFATHERED prose-surface row passes an unchanged update; " <>
+           "patching the prose itself is refused",
+         %{conn: conn} do
+      # The 10 prose rows under this epic predate the guard; stand one in via the
+      # non-`:api` source the door cannot see.
+      prose = "cloud control plane - probe"
+
+      assert file_row(conn, "cchs32-grandfathered", %{"surface" => prose},
+               source: :worker,
+               parent: @instruments_epic
+             ).status == 200
+
+      assert mutate(conn, [
+               %{
+                 "patch" => %{
+                   "id" => "cchs32-grandfathered",
+                   "type" => "task",
+                   "set" => %{"priority" => 3}
+                 }
+               }
+             ]).status == 200
+
+      assert task_content("cchs32-grandfathered")["priority"] == 3
+      assert task_content("cchs32-grandfathered")["surface"] == prose
+
+      # CONTROL: the arm that grandfathers is the arm that refuses a new term.
+      assert set_surface(conn, "cchs32-grandfathered", "other prose").status == 422
+      assert task_content("cchs32-grandfathered")["surface"] == prose
+    end
+
     # ── THE UPSERT BYPASS (do_upsert_document's own INSERT branch) ──────────
     #
     # `POST /api/documents/task` (LegacyController.create) reaches
@@ -1949,6 +2079,8 @@ defmodule BarkparkWeb.MutateControllerTest do
     # Measured on the pre-guard tree: 201 for an epic filing with an
     # off-vocabulary surface. This is that window, closed.
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the LEGACY create door refuses an off-vocabulary epic filing (was 201)",
          %{conn: conn} do
       resp = legacy_file(conn, "cchw28-legacy-offvocab", %{"surface" => "dashboard"})
@@ -1975,7 +2107,12 @@ defmodule BarkparkWeb.MutateControllerTest do
             "title" => "Filing-law fixture #{id}",
             "content" =>
               Map.merge(
-                %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+                %{
+                  "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
+                  "lifecycle_status" => "open",
+                  "priority" => 1
+                },
                 content_extra
               )
           }
@@ -1986,10 +2123,16 @@ defmodule BarkparkWeb.MutateControllerTest do
     defp file_row(conn, id, content_extra),
       do: create_row(conn, id, Map.put(content_extra, "parent_id", @epic))
 
+    defp file_under(conn, parent, id, content_extra),
+      do: create_row(conn, id, Map.put(content_extra, "parent_id", parent))
+
     # A birth the guard cannot see: `:source` is server-set on every HTTP door,
     # so this writes through the Writer directly to stand in for a row that
     # already carried an off-vocabulary term before the door existed.
-    defp file_row(_conn, id, content_extra, source: source) do
+    defp file_row(_conn, id, content_extra, opts) do
+      source = Keyword.fetch!(opts, :source)
+      parent = Keyword.get(opts, :parent, @epic)
+
       {:ok, _doc} =
         Barkpark.Content.Writer.create_document(
           "task",
@@ -2000,9 +2143,10 @@ defmodule BarkparkWeb.MutateControllerTest do
               Map.merge(
                 %{
                   "kind" => "task",
+                  "brief" => Barkpark.TaskBriefFixtures.brief(),
                   "lifecycle_status" => "open",
                   "priority" => 1,
-                  "parent_id" => @epic
+                  "parent_id" => parent
                 },
                 content_extra
               )
@@ -2030,6 +2174,7 @@ defmodule BarkparkWeb.MutateControllerTest do
             "id" => id,
             "title" => "Filing-law fixture #{id}",
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "priority" => 1,
             "parent_id" => @epic
@@ -2202,6 +2347,204 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert resp.status == 200
       {:ok, doc} = Content.get_document("drafts.bare-unset", "post", "test")
       refute Map.has_key?(doc.content || %{}, "id")
+    end
+  end
+
+  # ── the PATCH door and a type that declares its own `status` (task-949bee3f1fb1d304) ──
+  #
+  # #17346 taught the CREATE/UPSERT flat-envelope door to ASK THE TYPE whether
+  # `status` is the caller's own field. The PATCH door was never taught: both
+  # of its `apply_one/3` clauses held a HARD `~w(title status _id _type _rev)`
+  # and dropped `status` out of every verb, so on a declaring type a
+  # `patch{set:{status:…}}` returned HTTP 200 and wrote NOTHING — not the
+  # field, not the lifecycle. A silent no-op, undetectable by the caller.
+  #
+  # TWO DOORS, and the door set is DERIVED, not listed: `grep -n 'title status
+  # _id _type _rev' lib/barkpark/content/` finds exactly three sites.
+  #   * mutations.ex `protected` (the ops-bearing clause) — a patch carrying
+  #     setIfMissing/unset/inc/dec/append/prepend, WITH OR WITHOUT `set`.
+  #   * mutations.ex (the set-only clause) — a patch carrying ONLY `set`.
+  #     This is the door the row's own repro takes; a fix to the first clause
+  #     alone would not have moved it at all.
+  #   * papers/value_writeback.ex `@protected_fields` — NOT this defect: it
+  #     REFUSES with `{:error, :invalid_field}`, which the caller can see.
+  #
+  # Every cell asserts the STORED BYTES, never only the 200 — a 200 is exactly
+  # what the bug already returned.
+  describe "patch `status` on a type that declares it (task-949bee3f1fb1d304)" do
+    setup do
+      # `invoice` DECLARES its own `status` field. `post` (the top-level setup)
+      # declares none, and is the byte-unchanged control.
+      Content.upsert_schema(
+        %{
+          "name" => "invoice",
+          "title" => "Invoice",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "status", "type" => "string"},
+            %{"name" => "slug", "type" => "string"}
+          ]
+        },
+        "test"
+      )
+
+      :ok
+    end
+
+    defp patch_mutate(conn, mutations) do
+      conn
+      |> put_req_header("authorization", "Bearer barkpark-dev-token")
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/data/mutate/test", Jason.encode!(%{"mutations" => mutations}))
+    end
+
+    defp seed!(id, type, content) do
+      {:ok, _} =
+        Content.create_document(
+          type,
+          %{"_id" => id, "title" => "seed", "content" => content},
+          "test"
+        )
+
+      :ok
+    end
+
+    # CELL 1 — declaring type + `set`, through the SET-ONLY clause.
+    test "declaring type + set: `status` lands in content and the lifecycle is untouched",
+         %{conn: conn} do
+      seed!("inv-set", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "inv-set", "type" => "invoice", "set" => %{"status" => "paid"}}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-set", "invoice", "test")
+      # THE BYTES. Before the fix this read back "archived" — the create's value.
+      assert doc.content["status"] == "paid"
+      assert doc.content["slug"] == "s"
+      # The document's lifecycle never moved.
+      assert doc.status == "draft"
+    end
+
+    # CELL 2 — declaring type + `set`, through the OPS-BEARING clause. Same
+    # `set`, but the presence of `unset` routes it to the OTHER apply_one head.
+    # Both heads must have been taught, and a one-clause fix reds here.
+    test "declaring type + set through the ops clause: the other head routes the same way",
+         %{conn: conn} do
+      seed!("inv-set-ops", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "inv-set-ops",
+              "type" => "invoice",
+              "set" => %{"status" => "paid"},
+              "unset" => ["slug"]
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-set-ops", "invoice", "test")
+      assert doc.content["status"] == "paid"
+      refute Map.has_key?(doc.content, "slug")
+      assert doc.status == "draft"
+    end
+
+    # CELL 3 — declaring type + `unset`. `unset_keys -- protected` scrubbed
+    # "status" out of the unset list, so the key was undeletable: 200, nothing
+    # removed.
+    test "declaring type + unset: `status` is actually removed from content", %{conn: conn} do
+      seed!("inv-unset", "invoice", %{"status" => "archived", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "inv-unset", "type" => "invoice", "unset" => ["status"]}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-unset", "invoice", "test")
+      refute Map.has_key?(doc.content, "status")
+      assert doc.content["slug"] == "s"
+      assert doc.status == "draft"
+    end
+
+    # CELL 4 — NON-declaring type + `set`. THE EXISTING CONTRACT, stated: the
+    # patch door DROPS the key silently; it does NOT refuse. `status` is the
+    # lifecycle word on such a type and is moved with publish/archive, never by
+    # writing a content key. This arm must be byte-identical to main.
+    test "non-declaring type + set: `status` is still DROPPED (not refused), bytes unchanged",
+         %{conn: conn} do
+      seed!("post-set", "post", %{"slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "post-set",
+              "type" => "post",
+              "set" => %{"status" => "paid", "slug" => "t"}
+            }
+          }
+        ])
+
+      # Dropped, not refused — a 422 here would be a DIFFERENT contract.
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.post-set", "post", "test")
+      refute Map.has_key?(doc.content, "status")
+      # The sibling key in the same `set` still landed, so the drop is
+      # key-scoped and not a whole-patch refusal.
+      assert doc.content["slug"] == "t"
+      assert doc.status == "draft"
+    end
+
+    # CELL 5 — NON-declaring type + `unset`. Still undeletable: a stored
+    # `content["status"]` (which a nested-content create can leave behind)
+    # survives the unset, byte-for-byte.
+    test "non-declaring type + unset: `status` is still undeletable, bytes unchanged",
+         %{conn: conn} do
+      seed!("post-unset", "post", %{"status" => "stored", "slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{"patch" => %{"id" => "post-unset", "type" => "post", "unset" => ["status", "slug"]}}
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.post-unset", "post", "test")
+      assert doc.content["status"] == "stored"
+      # The sibling unset key DID go, so the survival is status-scoped.
+      refute Map.has_key?(doc.content, "slug")
+      assert doc.status == "draft"
+    end
+
+    # The COST gate, pinned: a patch that never mentions `status` must not be
+    # changed by any of this. `title` stays protected on BOTH types — it is
+    # lifted to the title COLUMN, not dropped into nothing, so it is a
+    # different story and deliberately out of scope.
+    test "a patch that never says `status` is unchanged, and `title` stays column-lifted",
+         %{conn: conn} do
+      seed!("inv-title", "invoice", %{"slug" => "s"})
+
+      resp =
+        patch_mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "inv-title",
+              "type" => "invoice",
+              "set" => %{"title" => "renamed", "slug" => "t"}
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      {:ok, doc} = Content.get_document("drafts.inv-title", "invoice", "test")
+      assert doc.title == "renamed"
+      refute Map.has_key?(doc.content, "title")
+      assert doc.content["slug"] == "t"
     end
   end
 end

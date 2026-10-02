@@ -55,7 +55,13 @@ defmodule BarkparkWeb.MutateCriterionWhitespaceTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@token, "test-mutate-crit-ws", "test", ["read", "write", "admin"])
+      Auth.create_token(
+        @token,
+        "test-mutate-crit-ws",
+        "test",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
@@ -154,6 +160,8 @@ defmodule BarkparkWeb.MutateCriterionWhitespaceTest do
   end
 
   describe "the authoring door" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a create carrying a trailing-newline criterion is refused and persists nothing" do
       id = uniq("mcws-create")
 
@@ -231,6 +239,8 @@ defmodule BarkparkWeb.MutateCriterionWhitespaceTest do
                resp.resp_body
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a row already carrying the wording 422s on an UNRELATED patch", %{scope: scope} do
       id = mk_task!(scope, @clean)
       :ok = plant_dirty_criterion!(id)

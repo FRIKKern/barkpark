@@ -16,7 +16,13 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "test admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
@@ -28,7 +34,11 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
 
       # Outer shell + topbar
       assert html =~ ~s|<div class="studio-shell">|
-      assert html =~ ~s|<div class="studio-bar">|
+      # The topbar carries `id="studio-bar" phx-hook="PressAnswer"` (the press
+      # answer moved off `#studio-panes`, which only StudioLive's desk renders —
+      # task-66807dd8154e667d), so this asserts the CLASS, not a byte-exact tag.
+      assert html =~ ~s|<div class="studio-bar"|
+      assert html =~ ~s|phx-hook="PressAnswer"|
 
       # Brand (Sanity-style): the WORKSPACE is the identity — its avatar
       # (initial) lives in the scope chip; the standalone "B" square +
@@ -72,7 +82,11 @@ defmodule BarkparkWeb.Layouts.StudioLayoutTest do
       # Studio chrome must be present (Boss revision: admin keeps chrome
       # so the Task #9 nav-disappears fix does not regress).
       assert html =~ ~s|<div class="studio-shell">|
-      assert html =~ ~s|<div class="studio-bar">|
+      # The topbar carries `id="studio-bar" phx-hook="PressAnswer"` (the press
+      # answer moved off `#studio-panes`, which only StudioLive's desk renders —
+      # task-66807dd8154e667d), so this asserts the CLASS, not a byte-exact tag.
+      assert html =~ ~s|<div class="studio-bar"|
+      assert html =~ ~s|phx-hook="PressAnswer"|
       # Workspace avatar carries the brand on admin too (same chrome).
       assert html =~ ~s|class="scope-avatar"|
       assert html =~ ~s|class="scope-switcher"|

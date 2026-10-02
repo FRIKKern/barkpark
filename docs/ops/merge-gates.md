@@ -34,9 +34,8 @@ A PR targeting `main` must clear:
    comment directly beneath it records why it was removed, and a reader who
    plans around a test→compile ordering is planning around an edge that no
    longer exists. Cited by JOB KEY, not by line, and the reason is measured:
-   this sentence pinned bare line numbers (510, 515) until 2026-09-01, by which
-   time the job had moved past line 760 — and it moved AGAIN during the very
-   session that fixed it, when an unrelated merge landed in the same workflow.
+   this sentence pinned bare line numbers until the job moved past them twice,
+   the second time mid-session ([history](merge-gates-history.md#the-line-numbers-this-page-pinned-and-lost)).
    A line number in a doc is correct exactly once; `grep -n '^  mix-prod-compile:'`
    is correct always). Cleans `api/_build/prod`, force-recompiles deps,
    then runs `MIX_ENV=prod mix compile --warnings-as-errors`. **This is the
@@ -223,12 +222,10 @@ add its context to `.github/required-checks.json` and apply — never hand-PUT.
 
 ### A pull request runs the IMPACTED ExUnit set; main runs all of it
 
-`Test (Elixir …)` no longer runs all 1,458 ExUnit files on a pull request. A
+`Test (Elixir …)` may run less than the whole suite on a pull request. A
 step before it, `Which tests does this pull request need?`, computes the
 impacted subset with `scripts/elixir-impacted-tests.sh`; the `Test` step reads
-that answer from a file and runs either the list or the whole suite. Replayed
-over the last 40 api/-touching commits on main: 12 select everything, the rest a
-median of ~200 files.
+that answer from a file and runs either the list or the whole suite.
 
 **Nothing about a push to main changed.** The dispatcher already emits every path
 set `true` on a non-pull_request event, and the selection step returns `ALL` on
@@ -243,8 +240,10 @@ along with an empty diff, an unresolvable `HEAD^1`, a failed `mix xref`, a lib
 file with no module in it, and a missing or empty selection file. Nothing is
 enumerated, so a new kind of path can only ever make this run more. Since an
 empty `xref` graph is legitimate for a leaf and catastrophic from a broken
-instrument, a positive control over `lib/barkpark/repo.ex` runs first: no
-dependents there and the whole run falls back to `ALL`.
+instrument, a probe runs first: a hub (`lib/barkpark/plugin.ex`) and a leaf
+(`lib/barkpark/tasks/landed.ex`) must get different closures, or the run logs
+`narrowing unavailable: running ALL`. On today's toolchain they do not (#20217),
+so an `api/lib` PR runs everything until a direct-edge closure lands (#20219).
 
 **The ALWAYS set** rides every narrowed selection — the tests a compile closure
 structurally cannot reach. Source-scanning censuses are DERIVED from the tree on
@@ -301,54 +300,82 @@ is harmless:
   of any of them cannot stop a merge. `format` **left this class on 2026-09-04**
   (#15971): it dropped `continue-on-error` FIRST, precisely so the laundering
   above could not happen, and only then joined `elixir-gate`'s `needs:`, where it
-  is now SUBSUMED like every other upstream (see
-  the `elixir-gate` job's `needs:` comment block, which now records that
-  `format` IS in `needs`, and item 2 above for the diff scope). `plugin-node` is a third case again: blocking
+  is now SUBSUMED (the `elixir-gate` job's `needs:` comment block records it, and
+  item 2 above has the diff scope). `plugin-node` is a third case again: blocking
   nothing today, and relevant only when the PR touches `api/priv/plugins/**`.
 
 - **A NAME THAT SAYS `(blocking)` AND HAS NO MERGE AUTHORITY AT ALL.**
   `gofmt drift ceiling (blocking)` (`.github/workflows/go-format.yml`) is a real,
   working guard: it reds by name on any new off-roster gofmt drift and fails
   closed on a vacuous scan (`OK: 838 Go files scanned; 0 off-roster drift`). It
-  is not required, not `needs:`-ed by any required aggregator, and — because
-  go-format.yml carries a workflow-level `on: pull_request: paths:` filter — it
-  is structurally ineligible to be required, since an absent context reports
-  `expected` forever. Its `(blocking)` means *blocking inside its own workflow*,
-  the same sense as doc-gates' 22 `(fails this job)` steps below (that label
-  replaced `(blocking)` there in #12631). Until 2026-08-08 it
-  appeared in **neither** `.github/required-checks.json` nor this page:
-  `grep -c gofmt` was 0 in both. That was not an oversight anyone could have
-  caught by re-reading — `required-checks.json` is GENERATED from names observed
-  on sampled heads, and its own `_readme` concedes "EXCLUSIONS ARE WHAT THE
-  SAMPLE SAW, never a complete census", so **every paths-filtered workflow is
-  invisible to that census by construction**. The same mechanism loses rows in
-  the other direction with no report: four names once enumerated there
-  (`PR task gate self-test`, `Re-land advisory`, `Filebase aesthetics gate`,
-  `Boundary gate`) have silently left the list on regeneration. Three of those
-  four carry written rows again as of 2026-09-06 — `PR task gate self-test`
-  earlier, `Re-land advisory` and `Boundary gate` in the every-rendered-name
-  census pass; `Filebase aesthetics gate` did not render on that sample and is
-  still unledgered. Read an absence
-  from that file as "the sample did not see it", never as "no such gate exists";
-  the ceiling is now filed there under **S4 PATHS-FILTERED** with that mechanism
-  written into its reason. **That hand-added row now survives a regeneration,
-  and until 2026-08-09 it did not.** History: [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
+  is not required, not `needs:`-ed by any required aggregator, and structurally
+  ineligible to be required because go-format.yml is paths-filtered (the venue
+  rule below). Its `(blocking)` means *blocking inside its own workflow*,
+  the same sense as doc-gates' `(fails this job)` steps below (that label
+  replaced `(blocking)` there in #12631). It is now filed under
+  **S4 PATHS-FILTERED**, and until 2026-08-08 it appeared in **neither**
+  `.github/required-checks.json` nor this page. `required-checks.json` is
+  GENERATED from names observed on sampled heads, so **every paths-filtered
+  workflow is invisible to that census by construction**, and the same mechanism
+  drops rows the other way with no report. Read an absence from that file as
+  "the sample did not see it", never as "no such gate exists". That concession
+  no longer covers a name that can BLOCK a merge: `scripts/blocking-name-census.py`
+  (a step of `Elixir path-escape ratchet`, so it reds `Elixir gate`) walks each
+  required aggregator's `needs:` closure statically and reds on any job in it
+  that neither list names. Its output is the only source for census counts; `--at
+  <rev>` re-derives the wave-56 residue recipe at any commit. History, with the
+  four names it lost and the regeneration that now carries this row:
+  [merge-gates-history.md](merge-gates-history.md#the-generator-merge-that-lost-25-exclusion-rows).
 - **ADDING A BLOCKING JOB TO `security.yml` COSTS A SIXTH PLACE, and forgetting
   it reds the spec gate on every open PR.** #14073 paid the five its own message
   enumerates (the job, the aggregator's `needs`, its decide binding, every
   `env -i` simulator of that step body, the spec-authority marker) and stopped
   there. The sixth is the `ACK_EX` list in §14 of
-  `scripts/required-checks.test.sh`: the hermetic suite drives the generator
-  over a FROZEN fixture pair, a job added after that freeze can never render
-  there, and the committed exclusion row it needs is therefore permanently
-  unrenderable ON THAT WINDOW — so the generator refuses every emit until the
-  name is acknowledged. Re-sampling is not the escape hatch (D130 freezes the
-  pair on purpose); typing the rendered name into `ACK_EX` is. History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-spec-gate-deadlock).
+  `scripts/required-checks.test.sh`: the hermetic suite drives the generator over
+  a FROZEN fixture pair, so a job added after that freeze can never render there
+  and the exclusion row it needs is permanently unrenderable ON THAT WINDOW — the
+  generator then refuses every emit until the name is acknowledged. Re-sampling
+  is not the escape hatch (D130 freezes the pair); typing the name into `ACK_EX`
+  is. History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-spec-gate-deadlock).
 
 §19 of `scripts/required-checks.test.sh` derives both lists from source — the
 aggregators' `needs:` from `.github/workflows/`, the required contexts from
-`.github/required-checks.json` — and reds if this page ever again describes a
+`.github/required-checks.json` — and reds if ANY agent/human-tier doc describes a
 transitive upstream of a required aggregator as unable to stop a merge.
+
+### Where a guard that must BLOCK lives
+
+**A guard can be mutation-proven and still stop nothing, because of the file it
+was put in.** A workflow-level `on: pull_request: paths:` filter emits no run and
+no check run on a PR that misses the paths, and an absent required context reads
+`expected` forever (D18). `.github/required-checks.json` is the truth about the
+required set, and its **S4 PATHS-FILTERED** rows (`go-format.yml`,
+`doc-gates.yml`, `architecture.yml`, …) are that disqualification. The false step is the next: that a path-scoped guard therefore
+has no home with merge authority.
+
+**It has one, and the repo built it four times.** On origin/main 58092344b all
+four required contexts live in workflows whose `pull_request:` arm carries NO
+`paths:` key — elixir.yml, cloud.yml, console-harness.yml, pr-task-gate.yml — so
+each starts on every PR and saves cost inside: one cheap dispatcher job
+publishes the path decision as an output, and every expensive job carries a
+**job-level `if:`** on it (four such jobs in elixir.yml, five in
+console-harness.yml, three in cloud.yml — cloud.yml:572 is the reader-corpus
+census, #17522). A job-level `if:` renders the check SKIPPED where a `paths:`
+filter renders nothing: **skipped is a verdict, absent is not.** That is the
+rule. A `push:`-arm filter is a separate question and is allowed
+(console-harness.yml:103): protection gates merges INTO main and never sees a
+push-to-main run.
+
+**The dispatcher pays for it.** Every PR starts the workflow, so it must be cheap
+and must never publish a silent `false`: two exits, no third — FAIL on an
+unresolvable base, dispatch TRUE and run everything on an empty changed-file set
+(console-harness.yml:313, cloud.yml:185 and elixir.yml's dispatcher each print
+"a skip here would green a required context nothing measured", priced). A run
+that dispatched nothing must then DISCLOSE that it evaluated nothing — NOT
+APPLICABLE below, worked at pr-task-gate.yml:227. A guard kept out of
+this shape must record that choice and its reason where it is documented
+(`docs/contracts/canonical-impl-markers.md` is the worked example). What the rule
+forbids is advisory while read as blocking.
 
 ### The required set governs the MERGE, not main's health afterwards
 
@@ -360,11 +387,9 @@ History: [merge-gates-history.md](merge-gates-history.md#the-2026-08-24-merge-th
 
 **The mechanism is the trigger block, not the required list.** A workflow with a
 `push:` arm re-runs against the merge commit, so a red one on the PR is a red one
-on main — required or not. **RE-DERIVE these counts; do not quote them.** They
-were measured 2026-08-24 over 55 workflows and were stale within a day — three
-workflows landed 2026-08-24/25 (`research-coverage-suite`, `hundesteder`,
-`chronicle-paper`) and this block still read "41 of 55" on 2026-09-01. The
-figures below are the 2026-09-01 re-derivation:
+on main — required or not. **RE-DERIVE these counts; do not quote them.** The
+2026-08-24 measurement over 55 workflows was stale within a day, and this block
+still read "41 of 55" a week later. The figures are the 2026-09-01 re-derivation:
 
 ```bash
 # workflows that re-run on main after a merge — 42 of 57 on 2026-09-01
@@ -401,16 +426,38 @@ merge" and "cannot hurt you" are not the same sentence.
 
 **And the post-merge watcher does not cover this.** `main-gate-watch.yml` reads
 the required set **live from branch protection** and watches only those contexts
-on main's tip. A red NON-required context on main therefore has *no* watcher:
-main carries a red check while `main-gate-watch` stays green — correctly, since
-that context was never in its scope. The second scream is scoped to the first
-scream's list.
+on main's tip, so a red NON-required context on main has *no* watcher: main
+carries a red check while `main-gate-watch` stays green, correctly — that context
+was never in its scope. The second scream is scoped to the first scream's list.
 
 **Operationally:** four required greens are a *merge* predicate, not a
-main-health predicate. Before merging — and especially from automation — read the
+main-health predicate. Before merging — especially from automation — read the
 full check list and treat any red whose workflow has a `push:` arm as a red you
-are about to move onto main. It is not blocked, and it will not be caught
-afterwards either.
+are about to move onto main: nothing stops it, and nothing catches it after.
+
+#### Changing branch protection taxes the watcher — read this first
+
+`main-gate-watch.yml` derives its watched set **live from branch protection**,
+never from the committed spec, so it cannot go stale against the live rule. The
+price: **adding a required context reds the watcher until a human classifies
+it** by name in `scripts/main-gate-watch.sh` (`WATCHED_CONTEXTS` /
+`EXCLUDED_CONTEXTS`). One that is neither is a CONFIGURATION FAULT; guessing is
+refused, because a PR-scoped context guessed as watched false-reds forever and a
+post-merge one guessed as excluded is silently unwatched. **If you add a
+required context, classify it in the same change.**
+
+Two check-run names, two owners — they are split so a broken watcher does not
+read like a red main (`cch-w59-bl-main-gate-watch-has-no-notification-egress`):
+
+| Red check run | What it means | Who acts |
+|---|---|---|
+| **Main gate watch** | main's tip is genuinely not green on a watched required context (RED, or never judged) | whoever owns the red context; re-run or fix main |
+| **Main gate watch configuration fault** | the watcher has no authority — `BREAKGLASS_TOKEN` rotated/removed, or protection names a context nobody classified | whoever changed protection or the secret. **Main gate watch is SKIPPED for that run — main's state is UNKNOWN, not green.** |
+
+Neither is softened with `|| true`; neither is a required context. Getting a red
+here *to a human* is a separate concern, owned by
+`cch-w42-s4-main-push-gate-failures-find-a-human` — this split only makes the
+two facts distinguishable once someone looks.
 
 ### A green gate does not prove the branch was rebased
 
@@ -433,11 +480,9 @@ gh api repos/FRIKKern/barkpark/branches/main/protection \
   -q .required_status_checks.strict    # false → up-to-date not required
 ```
 
-(The wave-2 record explained this posture with the exact claim the
-Security-gates topology note above retires as **false since 2026-07-28**. It is
-deliberately not re-quoted here — §18 of `scripts/required-checks.test.sh`
-censuses every unpinned restatement, and one pinned copy is enough. The
-conclusion survives on `strict: false` alone.)
+(The wave-2 record's version of this posture rests on a claim retired as false
+since 2026-07-28; §18 of `scripts/required-checks.test.sh` censuses every
+unpinned restatement. The conclusion survives on `strict: false` alone.)
 
 
 ### NOT APPLICABLE — the required green that ran nothing
@@ -449,18 +494,15 @@ declared path sets.** That green means **NOT APPLICABLE to this diff** — never
 "the suite passed". Nothing was compiled, nothing was tested, no job was
 dispatched, and the check-run still reads `pass` next to the merge button.
 
-Measured on merged PRs, not inferred: on #10565 (head `bb15f596d`, a single
-ledger `.md`) the per-commit check-runs read `Cloud control-plane (compile +
-format) | skipped`, `Cloud control-plane (test) | skipped`, `Cloud gate |
-success` with one annotation. #10450 (head `5a43bf893`) is the same shape.
-`gh pr checks 10565` prints `Cloud gate  pass  4s` and stops there — the
-disclosure is one API call or one UI click further on, which is why this page
-has to tell you it exists.
+`gh pr checks <N>` prints `Cloud gate  pass` and stops there — the disclosure is
+one API call or one UI click further on, which is why this page has to tell you
+it exists. Measured on merged PRs:
+[merge-gates-history.md](merge-gates-history.md#the-path-gated-green-measured-on-merged-prs).
 
 Each path-gated aggregator emits the disclosure itself, as a `::notice`
-annotation on its own check-run. The roster below is the contract §21 of
-`scripts/required-checks.test.sh` holds both sides of; `—` in the second column
-means that gate does not emit, because it is not path-gated at all.
+annotation on its own check-run. §21 of `scripts/required-checks.test.sh` holds
+both sides of the roster below; `—` means that gate does not emit, because it is
+not path-gated at all.
 
 | Gate | Emits `gate: green — nothing ran` from | Required context |
 | --- | --- | --- |
@@ -470,17 +512,24 @@ means that gate does not emit, because it is not path-gated at all.
 | `Security gate` | `.github/workflows/security.yml` | no |
 | `Compose smoke` | `.github/workflows/compose-smoke.yml` | no |
 | `Go gate` | `.github/workflows/go-tests.yml` | no |
+| `Web gate` | `.github/workflows/ci.yml` | no |
 | `PR references an active task` | — | yes |
 
 So three of the four required contexts can go green having dispatched nothing.
 The fourth, `PR references an active task`, is **exempt by construction** in the
 path-gating sense: its workflow carries no `paths:` filter and no `changes`
-dispatcher, so it executes on every PR. `Security gate`, `Compose smoke` and `Go
-gate` emit the same notice but are not required — a red one of the three cannot
-block a merge and never could, so those greens are the weakest on this roster.
-`Go gate` is step 2
-of the sequence in go-tests.yml's header; step 3 (register `Go gate`, never the
-leaf `go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
+dispatcher, so it executes on every PR. `Security gate`, `Compose smoke`, `Go
+gate` and `Web gate` emit the same notice but are not required — a red one of the
+four cannot block a merge and never could, so those greens are the weakest on
+this roster. `Web gate` is ci.yml's aggregator, added 2026-09-11
+(pds-bl-w48-web-gate-cannot-block-and-greens-vacuously) when that workflow's
+`pull_request` paths filter was deleted: until then its one real job,
+`web/ typecheck + unit tests + lint`, was ABSENT on a non-web head and could not
+be required at all. Registering `Web gate` (the aggregator, never that leaf)
+takes the required set 4 -> 5 and is a separate, deliberate act.
+`Go gate` is step 2 of
+go-tests.yml's header sequence; step 3 (register `Go gate`, never the leaf
+`go vet + test`) has not landed. If `Compose smoke` or `Go gate` is ever
 promoted to a required context, its `no` above must flip to `yes` in the same PR:
 clause 3 of §21 parses the required set from `.github/required-checks.json` and
 reds on any disagreement in either direction.
@@ -489,13 +538,13 @@ reds on any disagreement in either direction.
 2026-08-08 it disclosed nothing.** `pr-task-gate.yml` grandfathers a PR whose
 base commit predates the gate, and every evaluating step below carries
 `if: enforced == '1'` — so a grandfathered run concludes SUCCESS having verified
-no task at all, byte-identical on the check-run API to one where a live claim was
-proven. It now emits its own annotation on that path,
+no task at all, byte-identical on the check-run API to a proven live claim. It
+now emits its own annotation on that path,
 `::notice title=PR task gate: green — nothing evaluated::` ("NO TASK WAS CHECKED
 on this PR … Read it as 'no task check ran', never as 'this PR is task-backed'").
 It is deliberately **not** worded `nothing ran` and stays a `—` row in the table
-above: this green is not path-gating, and the roster that table holds is about
-path-gated aggregators. History: [merge-gates-history.md](merge-gates-history.md#the-pr-task-gate-grandfather-branch-and-the-39-of-39-re-derivation).
+above: this green is not path-gating and that roster is for path-gated
+aggregators. History: [merge-gates-history.md](merge-gates-history.md#the-pr-task-gate-grandfather-branch-and-the-39-of-39-re-derivation).
 
 The annotation says it in its own words. `Cloud gate`, verbatim from
 `cloud.yml`:
@@ -509,9 +558,9 @@ Green here means NOT APPLICABLE to this diff. Read it as 'no Cloud job
 executed', never as 'the Cloud suite passed'.
 ```
 
-**Where a merger reads it.** The check-run page in the GitHub UI shows the
-annotation inline. From a terminal, `gh pr checks <pr>` will not show it —
-resolve the check-run id for the head SHA and read the annotations:
+**Where a merger reads it.** The GitHub check-run page shows the annotation
+inline. From a terminal, `gh pr checks <pr>` will not show it — resolve the
+head SHA's check-run id and read its annotations:
 
 ```bash
 gh api "repos/FRIKKern/barkpark/commits/$(gh pr view <pr> --json headRefOid -q .headRefOid)/check-runs" \
@@ -520,8 +569,8 @@ gh api repos/FRIKKern/barkpark/check-runs/<id>/annotations \
   -q '.[] | "\(.annotation_level)\t\(.title)\t\(.message)"'
 ```
 
-`ann=0` on a gate that reports green means it really ran; `ann=1` with that
-title means it ran nothing. The emission is pinned by
+`ann=0` on a green gate means it really ran; `ann=1` with that title means it
+ran nothing. The emission is pinned by
 `scripts/gate-announces-skips.test.sh`, which runs inside the `Elixir gate`
 aggregator's own `needs:` graph and asserts the DELIVERED annotation title, so a
 gate that quietly stopped disclosing reds a required context.
@@ -546,27 +595,22 @@ History: [merge-gates-history.md](merge-gates-history.md#the-stale-verdict-popul
 conflicted PR asserts a green whose `completedAt` predates a commit on main, and
 that red cannot clear itself — only a rebase, a push, or a close clears it.
 
-Two counting traps it exists to avoid, both of which lie in the comforting
-direction:
+Two counting traps it avoids, both lying in the comforting direction:
 
-- **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** #10722 and #10720
-  render FIVE required-named rollup entries, because `PR references an active
-  task` appears twice on one head: once FAILURE, once SUCCESS. Counting SUCCESS
-  occurrences still reaches 4, so the failing required context is laundered out
-  of the report. Occurrence-counting says TEN; all-of-present says EIGHT — a 25%
-  over-report. A context is green only when it rendered and *every* entry
-  carrying its name concluded SUCCESS.
-- **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** On
-  2026-08-09 the first `gh pr list` after a quiet period answered 39 UNKNOWN of
-  40 open; the second, 12 seconds later, answered 22 CONFLICTING / 18 MERGEABLE.
-  A naive `select(.mergeable == "CONFLICTING")` silently drops those rows and
-  prints a smaller, calmer number. Re-poll, and print whatever is still UNKNOWN
-  as a warning row rather than omitting it.
+- **Count ALL-OF-PRESENT, never occurrences-of-SUCCESS.** A required context can
+  render twice on one head, once FAILURE and once SUCCESS; counting SUCCESS
+  occurrences launders the failing one out of the report. A context is green
+  only when it rendered and *every* entry carrying its name concluded SUCCESS.
+- **`mergeable` is LAZILY COMPUTED, and UNKNOWN is a warning row.** The first
+  `gh pr list` after a quiet period answers UNKNOWN for most rows and settles
+  seconds later. A naive `select(.mergeable == "CONFLICTING")` drops those rows
+  and prints a calmer number. Re-poll, and print whatever is still UNKNOWN as a
+  warning row. Both traps are measured on the history page linked above.
 
 Being merely **behind** main is not in this class and is never reported: main is
-`strict: false`, so a MERGEABLE PR behind main is exactly what the merge policy
-permits. Only a conflicted one is stuck. All four behaviours are mutation-proved
-over self-written fixtures in `scripts/stale-verdict-watch.test.sh`.
+`strict: false`, so a MERGEABLE PR behind main is what the merge policy permits.
+Only a conflicted one is stuck. All four behaviours are mutation-proved over
+fixtures in `scripts/stale-verdict-watch.test.sh`.
 
 ### SELF-CAMOUFLAGING — the fix that narrates itself in the vocabulary it removed
 
@@ -577,158 +621,58 @@ own prose indistinguishable from the remaining work.** The codebase's own search
 key stops discriminating, and it stops discriminating in the comforting
 direction — the fix looks like the biggest remaining cluster.
 
-Measured, not inferred: #16888 tightened 32 multi-status refusal assertions and
-gave each site a comment quoting the bracket literal it had just deleted. A
-sweep for that literal over `api/test` then returned 80 hits, of which 20 were
-that PR's own explanations — and all 20 sat in the ten files that were already
-fixed. A sweeper re-deriving the remaining population reads the highest apparent
-density of work precisely where there is none. It produced one false reading
-before it was caught.
+Measured, not inferred, on #16888:
+[merge-gates-history.md](merge-gates-history.md#the-16888-sweep-that-counted-its-own-explanations).
 
 When a fix narrates the pattern it deleted, describe that pattern in prose —
 name the statuses, not the numerals — rather than reproducing a greppable
-literal. The durable second layer is to anchor the sweep grep on `status` before
-the bracket, so an assertion and a sentence about an assertion stop matching the
-same expression; that strict form is invariant across the reword, which is how
-you prove the reword removed only phantoms.
+literal. Then anchor the sweep grep on `status` before the bracket, so an
+assertion and a sentence about one stop matching the same expression; that
+strict form is invariant across the reword, which is how you prove the reword
+removed only phantoms.
 
-The non-vacuity arm is the acceptance criterion that matters. Re-run the loose
+The non-vacuity arm is the acceptance criterion that matters: re-run the loose
 sweep after the reword and confirm it still returns the same number of LIVE-CODE
-sites. A fix that silences false positives by also blinding the search has made
-the artifact worse than the noise it removed.
+sites. A fix that silences false positives by blinding the search has made the
+artifact worse than the noise it removed.
+
+### PARSED BUT NOT RUN — the static check that cannot see an expansion-time error
+
+Those five are about a CHECK that reads green; the sixth is the hand check
+an author runs on a gate script: **`sh -n script.sh` answers 0 on a script that
+then exits 0 having compared NOTHING.** A capture that fails at RUN time leaves
+its operand EMPTY, the assignment discards the status, and emptiness reads as "no
+differences". Measured 2026-09-13, `scripts/sunset-route-consumers.test.sh`
+under `sh`: exit 0, `---- 0 failure(s), 32 pass(es)`, and four swallowed
+`command substitution: … syntax error` lines on stderr.
+
+**THE TRIGGER IS PLATFORM-SHAPED; THE SHAPE IS NOT.** That was bash 3.2 (macOS),
+which refuses process substitution in POSIX mode and parses command
+substitutions LAZILY — the refusal lands at expansion time. bash 5.2.21 (ubuntu
+24.04, CI) ALLOWS it: same fixture, exit 2, both comparisons red
+(2026-09-15). **The vacuous variant is what a macOS developer sees; CI sees the
+loud one.**
+
+**Verify a gate script by RUNNING it under the interpreter in question.**
+`scripts/posix-vacuous-green-census.sh` says so in its RED remedy line: its
+`sh-n-blindness` arms re-measure it on any interpreter; its
+`procsub-under-posix` arms DETECT which world they are in, then assert what that
+world owes — vacuous where refused, loud where allowed, CANNOT READ where
+neither, never a skip.
 
 ## Security gates (Sobelow + mix_audit)
 
 `.github/workflows/security.yml` (filed by `task-a41fc4590b2c2eb1`) adds two
-Elixir security gates, path-triggered on `api/**`:
-
-9. **`sobelow` job** — Phoenix-aware static analysis (XSS.Raw / SendResp,
-   SQL injection, unsafe `String.to_atom`, missing CSRF/CSP, hardcoded secrets,
-   `binary_to_term`, directory traversal…). **Advisory** (`continue-on-error:
-   true`) because the reviewed baseline is not drained — see the amended flip
-   verdict below. What *is* unstable is the
-   **line number**, which is inside the hash: a pure renumber invalidates every
-   waiver in the file. That is a reason to migrate waivers to AST-bound inline
-   annotations, not a reason to stay advisory.
-   `mix sobelow --skip --exit Low` reads the reviewed `api/.sobelow-skips`
-   baseline and reds on a fresh unskipped finding. CI also runs a pinned
-   Elixir 1.18.1/OTP27 reconcile in the only safe order: `--clear-skip`, then
-   `--mark-skip-all`; it uploads the regenerated baseline and diff as an
-   artifact for human review. CI never auto-commits it, and a developer-box
-   regeneration must never be committed. After review, a separate change may
-   update the tracked baseline. The fresh-finding guard plants a non-controller
-   `String.to_atom` call and requires Sobelow to exit 1, preventing blanket
-   suppression while the job remains advisory.
-
-   **Flip verdict 2026-07-21 — STAY ADVISORY**, and **amended 2026-07-28 (D139)**
-   because the precondition as first written was unsatisfiable. History: [merge-gates-history.md](merge-gates-history.md#the-sobelow-flip-precondition-as-first-written).
-
-   **Live count — RE-DERIVE, never quote.** The count is drained by every
-   annotation wave, so any number written here is stale on arrival. Run:
-
-   ```
-   $ grep -c '^[A-Za-z]' api/.sobelow-skips
-   $ grep '^[A-Za-z]' api/.sobelow-skips | sed 's/:.*//' | sort | uniq -c | sort -rn
-   ```
-
-   History: [merge-gates-history.md](merge-gates-history.md#sobelow-baseline-and-floor-derivations-2026-07-28-onward).
-
-   **Amended precondition — the floor is 9, not 0.** The flip is gated on the
-   baseline holding **ONLY entries that provably cannot carry an inline
-   `# sobelow_skip` annotation**, enumerated by type and count. The floor is a
-   property of sobelow 0.14.1's architecture, not of the baseline's size: it is
-   **9** today, out of a baseline of 41 rows
-   (`grep -c '^[A-Za-z]' api/.sobelow-skips`), in two mechanical classes.
-   Derive both numbers rather than quoting this paragraph — it said **10** and
-   **8** until 2026-09-01, having predicted its own decay two paragraphs down
-   and never been re-derived after the fix landed:
-
-   | Class | Count | Entries | Why no annotation can ever reach it |
-   |---|---|---|---|
-   | `Sobelow.Config.*` | **7** | 6 `Config.CSRF` + 1 `Config.HTTPS` (`config/prod.exs:0`) | `sobelow.ex` calls `Config.fetch(project_root, routers, endpoints)` and only *then* does `allowed = allowed -- [Config, Vuln]`. Config findings are produced outside the `def_funs |> combine_skips()` pipeline, so `@sobelow_skip` is never consulted. `config/prod.exs:0` has no function to annotate at all. |
-   | `.heex` `XSS.Raw` | **2** | `layouts/bulldocs.html.heex:95`, `layouts/quiz.html.heex:21` | `Parse.get_meta_template_funs/1` builds the template AST with `EEx.compile_string(File.read!(filepath))`. It bypasses `Parse.read_file/1`, the reader that rewrites `# sobelow_skip [...]` into `@sobelow_skip [...]` when `--skip` is set, so a template's source never sees the substitution. |
-
-   The `.heex` line numbers are part of each row's fingerprint,
-   so read them off `api/.sobelow-skips`, never from memory: this table carried
-   `bulldocs.html.heex:67` for the row that is really at `:95`.
-
-   The third `XSS.Raw` entry (`controllers/error_html.ex:25`) is a normal `.ex`
-   function and **is** annotatable — it is not part of the floor. Re-evaluate
-   the flip when the baseline contains nothing but those 9; do not re-evaluate
-   on "reaches 0", which cannot happen.
-
-   **The floor holds only while the findings still exist.** It is a count of
-   *unannotatable* findings, not of *unfixable* ones — fixing the underlying
-   code removes a row from the floor. Re-derive the floor from
-   `api/.sobelow-skips` after any such fix; it is never a constant.
-
-   **Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.**
-   This entry used to conclude "no `security.yml` check can be required", on two
-   successive arguments that are both now retired. The first rested on "`main`
-   has no branch protection" — **false since 2026-07-28**: protection is live
-   with `enforce_admins: true` and the tracked file carries `"enforced": true`.
-   (Trap worth keeping: `gh api …/rulesets` → `[]` is a TRUE reading that
-   produces the WRONG conclusion, because this repo's protection is not a
-   ruleset.) The second rested on **S4**, and wave 10 paid it:
-
-   - `security.yml` **no longer carries a workflow-level `paths:` key** on either
-     trigger, so it renders a check run on every head. Path decisions moved to
-     JOB level behind an always-running `changes` dispatcher — the elixir.yml /
-     console-harness.yml shim, transplanted. A job skipped by a job-level `if:`
-     still publishes a `skipped` check run, and GitHub counts `skipped` as
-     satisfying a required context.
-   - The registrable name is **`Security gate`**: unmatrixed, `if: always()`, and
-     it ASSERTS over every upstream result rather than echoing them.
-   - `sobelow` is deliberately **NOT in that aggregator's `needs`**. Measured: a
-     `continue-on-error: true` job that exits 1 concludes FAILURE and renders a
-     RED check run while `needs.<job>.result` reads `success` — byte-identical to
-     a genuine pass, and undecomposable, because the information is destroyed
-     before the aggregator's shell starts. There is no honest "tolerate sobelow"
-     branch to write, so its own red check run is the only truthful signal it
-     has. `scripts/security-gate-shape.test.sh` forces this shape (deriving the
-     continue-on-error set FROM the workflow, so it self-corrects the day Sobelow
-     becomes blocking), and the unfiltered `gate-shape` job runs it on every head.
-   - **The remaining blocker is not topology, and it is no longer a live red
-     either — it is that `mix-audit` reads a LIVE advisory database.** History: [merge-gates-history.md](merge-gates-history.md#the-mix-audit-blocker-retracted). The standing ground is forward-looking: a CVE published
-     tomorrow reds `Security gate` on every open PR with no change to this repo,
-     a permanently correct red no PR can clear, which is what branch protection
-     must never pin. Registering it needs its own wave — a written policy for
-     who clears a fleet-wide advisory red, plus a fresh
-     `scripts/registration-deadlock-sweep.sh` — not a silent promotion by the
-     next regeneration.
-
-   So flipping `continue-on-error: true` → `false` on `sobelow` now DOES change
-   the picture: the shape ratchet immediately demands it be added to the
-   aggregator's `needs`, and from then on a Sobelow regression reds `Security
-   gate`. That is a consequence to intend, not a side effect to discover.
-
-   **Sobelow's greenness therefore is not a branch-protection concern — it is
-   still a real one.** A permanently-red regression gate cannot report a
-   regression: while it is red for residue, a genuinely new insecure pattern is
-   indistinguishable from an old one. That is the reason to drain it, and the
-   only honest one.
-
-   History: [merge-gates-history.md](merge-gates-history.md#provenance-d75-is-a-dangling-citation).
-
-10. **`mix-audit` job** — dependency CVE scan (`mix deps.audit`, the `mix_audit`
-    dep) over `mix.lock`. **Blocking** (no `continue-on-error`). The 8
-    pre-existing CVEs were remediated by a version bump (task-726cab56d9a84551),
-    NOT by accepting them: mint 1.7.1→1.9.1 (×4 advisories), postgrex
-    0.22.0→0.22.3, phoenix 1.8.5→1.8.9, decimal 2.3.0→3.1.1 (the last needed
-    ecto 3.13.5→3.13.6 + ex_json_schema 0.11.2→0.11.5 to relax decimal to
-    `~> 3.0`). The 8th — **esaml GHSA-4g2h-vm7x-747c** (XXE, local-file
-    disclosure/SSRF) — has **no upstream fix** (every release ≤ 4.6.0 is
-    affected), so it is the single `--ignore-advisory-ids GHSA-4g2h-vm7x-747c`
-    suppression in the audit step, justified because OTP 27+ neutralises the XXE
-    (xmerl disables external entities by default) and both CI (OTP 27.0) and
-    prod run OTP 27+. Every OTHER CVE must be fixed by a bump — never ignored.
-    Protective proof: `mix deps.audit` exits 1 on the pre-bump lock and on any
-    new CVE; drop the esaml id the moment upstream ships a patch. To suppress
-    additional accepted advisories, mix_audit also takes `--ignore-file <path>`
-    (advisory IDs, one per line).
-
-Both deps are `only: [:dev, :test], runtime: false` in `api/mix.exs` — analysis
-tooling that never ships in the release.
+Elixir security gates, path-triggered on `api/**` — items **9 (`sobelow`)** and
+**10 (`mix-audit`)** of this page's roster. Their policy of record moved out to
+[security-gates.md](security-gates.md) under its own `canonical-for`: the
+reviewed `api/.sobelow-skips` baseline, the amended flip precondition and the
+unannotatable floor, the `Security gate` aggregator's shape and why
+`sobelow` is deliberately not in its `needs:`, and the single esaml
+`--ignore-advisory-ids` suppression. Nothing was retired — the split was made
+because this page was 5 bytes under its 64000B cap and the remedy for overflow
+is to split, never to raise the cap. Read the two gates' strengths there, not
+from memory.
 
 ## Platform checks (not ours — GitHub App checks)
 
@@ -740,24 +684,17 @@ run them, cannot run them locally, and cannot fix them in a PR.
     Vercel GitHub App (projects `guerrilla/barkpark` and `guerrilla/demo`).
     **Advisory** — and advisory here means *ignored*, not *tolerated*: there
     is no `continue-on-error` to set, because these are not our jobs. The
-    classification rests on measurement, not on preference. Both report
-    `fail` on **every** open and recently-merged PR repo-wide, including PRs
-    that touch neither `cloud/` nor the console nor any front-end file (of
-    the six most recently merged PRs, all six carry both failures and five
-    change zero `cloud/` files), and PR #4732 merged carrying both. A check
-    that is red identically on PRs with disjoint diffs is not reading the
-    diff — the breakage is platform-side integration, not a defect in PR
-    code. **The root cause is NOT diagnosed.** The check surfaces
-    `Deployment has failed — npx vercel inspect dpl_<id> --logs`; nobody has
-    run that and read the build log, so "platform-side" is an inference from
-    the failure *pattern*, not a diagnosis. Until someone does, treat these
-    two as carrying no information about the PR under review — and do not
-    cite this entry as evidence that Vercel is *healthy*. Diagnosis is owned
-    by **`hg-bl-vercel-legacy-statuses-red-repo-wide`** (it absorbed
-    `gr-blk-vercel-checks-ungoverned`, which was cancelled as a duplicate —
-    do not re-file either); when it lands, this entry gets
-    replaced by a real classification (fix it, or turn the integration off —
-    a permanently-red check trains reviewers to ignore red).
+    classification rests on measurement: both report `fail` on **every** open
+    and recently-merged PR repo-wide, including PRs that change zero `cloud/`
+    files, and a check red identically on disjoint diffs is not reading the
+    diff. **The root cause is NOT diagnosed** — "platform-side" is an inference
+    from the failure *pattern*; nobody has run the `npx vercel inspect
+    dpl_<id> --logs` the check surfaces. So treat these two as carrying no
+    information about the PR under review, and do not cite this entry as
+    evidence that Vercel is *healthy*. Diagnosis is owned by
+    **`hg-bl-vercel-legacy-statuses-red-repo-wide`** (it absorbed
+    `gr-blk-vercel-checks-ungoverned`, cancelled as a duplicate — do not
+    re-file either); when it lands, this entry gets a real classification.
 
     History: [merge-gates-history.md](merge-gates-history.md#provenance-of-the-vercel-advisory-classification).
 
@@ -777,20 +714,15 @@ cd api && rm -rf _build/prod && MIX_ENV=prod mix deps.get && \
 
 ### Why a partial clean is not enough
 
-`CLAUDE.md` golden rule #1 and "Past Mistakes" #1: cleaning only
-`_build/prod/lib/barkpark` (or any subset) leaves stale `.beam` artifacts for
-HEEx templates and dependent modules. The compiler is happy with the
-existing artifacts and does not re-evaluate the module graph; the bug then
-surfaces only on the production server after a fresh deploy. **Always
-`rm -rf _build/prod` first.**
+Owned by `CLAUDE.md` golden rule #1 and "Past Mistakes" #1: a subset clean
+leaves stale `.beam` artifacts and the bug surfaces only after a prod deploy.
+**Always `rm -rf _build/prod` first.**
 
 ### Why dev-mode `mix compile` is insufficient
 
-`MIX_ENV=dev` enables compile-time leniency that `:prod` does not — most
-notably, certain macro-vs-function ambiguities in `runtime.exs` `when`
-guards. `mix test` runs under `:test` and is similarly lenient. Only
-`MIX_ENV=prod mix compile` exercises the prod compiler; only the prod
-compiler rejects the PR #42 bug class.
+`MIX_ENV=dev` enables compile-time leniency that `:prod` does not — notably some
+macro-vs-function ambiguities in `runtime.exs` `when` guards — and `:test` is
+similarly lenient. Only `MIX_ENV=prod mix compile` rejects the PR #42 bug class.
 
 ## Lessons-learned: PR #42 macro-in-guard (2026-04-25)
 
@@ -806,10 +738,10 @@ because `@canonical capability:` markers in source files must be re-checked
 when a code rename rots a marker. The workflow also fires on changes to the
 gate scripts themselves and to the workflow file.
 
-### The doc-gates roster (it is not two scripts — it is twenty-five)
+### The doc-gates roster (it is not two scripts)
 
 `doc-gates` is a single job (`Doc budgets + anchors`) whose name badly
-undersells it: it runs **25 steps labelled `(fails this job)`** plus 7
+undersells it: it runs **30 steps labelled `(fails this job)`** plus the
 `(tripwire)` self-tests that prove a scanner still reds on a planted defect. A
 PR touching one `.ex` file runs all of them.
 
@@ -827,12 +759,14 @@ JOB on the PRs where it runs, and that red is visible on the PR; **none of it
 stops a merge**, and `doc-gates` **cannot block a merge** by itself. That is the
 whole of its authority.
 
-(The count read 17 until 2026-08-07 — `Never-cancel-main concurrency ratchet`
-and `Nil-polarity fail-closed gate` were missing from the table below. The 22 is
-derived by running, not transcribed:
+(The count read 17 until 2026-08-07, two steps short; it read 26 until #18707
+added the doc-drift pair, and 28 until #19266 added the charter adoption
+census. The current count is derived by
+running, not transcribed:
 
 ```bash
-grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml   # → 22
+grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates.yml
+grep -cE '^[[:space:]]*- name: .*\(tripwire\)'        .github/workflows/doc-gates.yml
 ```
 
 §20 CLAUSE
@@ -840,7 +774,7 @@ grep -cE '^[[:space:]]*- name: .*\(fails this job\)' .github/workflows/doc-gates
 below, and the workflow drift apart, and it counts the UNION of both labels so a
 revert to the old name is still counted rather than read as zero. RESIDUE, named
 rather than left to be tripped over: the unanchored `grep -c '(fails this job)'`
-returns **23**, because `.github/workflows/doc-gates.yml` quotes both labels
+returns MORE, because `.github/workflows/doc-gates.yml` quotes both labels
 inside its own corrective header — anchor on `- name:`, as above. §20 CLAUSE
 11's pass message also still spells the label `(blocking)`; it compares NUMBERS,
 so its verdict is unaffected.) In workflow order:
@@ -872,6 +806,11 @@ so its verdict is unaffected.) In workflow order:
 | 23 | Dependabot root drift | `scripts/dependabot-roots-check.sh` |
 | 24 | Silencer growth ratchet | `scripts/silencer-growth-ratchet.sh` |
 | 25 | repo-papers snapshot freshness | `node scripts/repo-papers-freshness.mjs` (+ its `(tripwire)` self-test step; added by #17151, 2026-09-09) |
+| 26 | Paper dialect ratchet | `scripts/paper-dialect-ratchet.sh` (+ its `(tripwire)` self-test step; shrink-only counts of text-keyed inline leaves and malformed widget items per in-repo paper corpus, with a non-vacuity floor that REFUSES rather than greens) |
+| 27 | Doc drift — links, routes, placeholders, runnable examples | `scripts/doc-drift-check.sh` (+ its `(tripwire)` self-test step; diff-scoped, landed by #18707 — see *When your PR touches a doc* below) |
+| 28 | Charter-corpus marker hygiene | `scripts/charter-corpus-hygiene-check.sh` (`--selftest`, then the check) over the `.claude/workflows/*-charter.md` corpus |
+| 29 | Charter adoption census | `deploy/charter-adoption-check.sh` (`--selftest`, then the check; the deploy-reliability charter's declared adoption set vs the set derived from `.github/workflows/`, red in both directions — D620) |
+| 30 | bp-command doc parse over docs/cli | `node tooling/doc-truth/verify-bp-commands.mjs` (`--selftest`, then the gate over `docs/cli/*.md`; the step carries its own glob FLOOR of 3 files, so a glob that expands to nothing FAILS and can never read as a pass) |
 
 Run any of them locally with the same command CI uses — they are ordinary
 scripts, not workflow-only steps. `docs-anchors-check.sh` runs clean in ~50s
@@ -880,13 +819,17 @@ retired; it was fixed in #4473).
 
 ### What step 1 covers under `docs/ops/` — and what this page's own header means
 
-`scripts/check-doc-budgets.sh` gates a fixed 31-row byte table (pinned by
-`CAPS_ROWS_EXPECTED`), the 7 `docs/cards/*.md`, and the pinned
-`docs/setup/CODEX.md` onramp span — nothing else. Under `docs/ops/` that table
-now names **three** files of the twenty-one: `docs/ops/PROD_OPS.md`, this page,
-and `docs/ops/branch-protection-and-overrides.md`. Every other `docs/ops/*.md`
-carries a G1 `budget:` figure that **no gate reads** — on those files the header
-is a declaration, not a cap.
+`scripts/check-doc-budgets.sh` gates a hand-written byte table (pinned by
+`CAPS_ROWS_EXPECTED` — re-derive the row count from the script, it moves), the 7
+`docs/cards/*.md`, the pinned `docs/setup/CODEX.md` onramp span, **and every
+other spine doc by HEADER DISCOVERY**: a declared `budget: Ntok` is enforced as
+`N * 4` bytes. Under `docs/ops/` the hand-written table names three files —
+`docs/ops/PROD_OPS.md`, this page, and
+`docs/ops/branch-protection-and-overrides.md`; the rest are capped by their own
+headers, which is why `docs/ops/security-gates.md` needed no new table row. The
+older reading — that a `docs/ops/` header outside the table is a declaration no
+gate reads — is DEAD: discovery closed that hole, and the `budget:` figure in a
+header is now the cap.
 
 History: [merge-gates-history.md](merge-gates-history.md#the-budget-header-that-enforced-nothing). The registration / break-glass / recorded-override runbook
 moved out to `docs/ops/branch-protection-and-overrides.md` under its own
@@ -901,6 +844,58 @@ was never an option — G1 in `scripts/docs-anchors-check.sh` requires
 `budget: [0-9]+tok` on every active doc. Adding a page to the CAPS table remains
 a deliberate two-line `scripts/` edit: the row, plus the `CAPS_ROWS_EXPECTED`
 bump.
+
+### When your PR touches a doc — three contributor rules
+
+These are the rules a reviewer applies to the DOC half of an ordinary PR. They
+are enforced, where they are enforced at all, by `scripts/doc-drift-check.sh`
+(step 27 of the roster above, wired into `.github/workflows/doc-gates.yml` on
+both the `push` and `pull_request` arms) — reviewed and landed in **PR #18707**.
+
+1. **A new durable fact goes into its CANONICAL OWNER.** `canonical-for` in the
+   G1 header is unique repo-wide, so every topic has exactly one document that
+   owns it; adding the fact to a second doc is how one topic ends up with two
+   answers that disagree, and the reader has no way to tell which is current.
+   `scripts/docs-anchors-check.sh` enforces the uniqueness of the topic, not the
+   placement of the fact — that part is a reviewer's job. If the owner is at its
+   byte ceiling, **split it or retire content** (this page's own Security-gates
+   section was split out to `docs/ops/security-gates.md` for exactly that
+   reason); writing the fact somewhere else instead is the failure this rule
+   exists to stop, and raising the cap is not an option.
+2. **An INDEPENDENT READER reviews the doc change, not just the code change.** A
+   second reader asks a different question: the author already knows what the
+   sentence was meant to say, so the author cannot be the one who checks that it
+   says it. Name what you want checked — that the route in the link is the one
+   you meant, that the example is the one you actually ran. No gate can do this,
+   and none pretends to; it is a review rule, not a check.
+3. **RE-RUN the supported startup paths a doc names.** If your change touches a
+   file an allowlisted example depends on, declare it —
+   put an HTML comment reading `doc-exec: allowlisted deps=path/one,path/two`
+   on the line above the fence (spelled out rather than reproduced here: the
+   checker matches that literal LINE-WISE, so a marker quoted in prose with no
+   fence under it is itself a red) — and the drift check
+   re-runs that example on YOUR PR instead of leaving it to rot until someone
+   else's. Unmarked fences are never run, so an example you want PROTECTED has
+   to say so.
+
+**Actual check coverage — what is mechanised and what is not.** Rules 1 and 3
+are partly mechanised; rule 2 is not mechanised at all.
+
+| Rule | What a check actually does | Deliberately silent about |
+|---|---|---|
+| 1 · canonical ownership | `docs-anchors-check.sh` reds on a duplicate `canonical-for` topic and on a missing G1 header; `check-doc-budgets.sh` reds when an owner overflows its byte cap | whether a given FACT landed in the right owner — no gate reads meaning |
+| 2 · independent reader | nothing | everything — this rule is carried by review alone |
+| 3 · rerun startup paths | `doc-drift-check.sh` re-runs a fence carrying the `doc-exec: allowlisted` marker comment and reds on a non-zero exit, diff-scoped: yours when your diff touches the doc or a declared `deps=` file | every unmarked fence; cold-tier docs, `_attic/`, `fixtures/` trees and `tooling/grip/ledger/` are out of the corpus |
+| (carried along) links + placeholders | `doc-drift-check.sh` reds on a relative link target that resolves nowhere, and on `FIXME` / `TBD` / `TODO:` / `<PLACEHOLDER>` / `REPLACE_ME` standing as prose | `http(s)`, absolute, anchor-only and templated targets; a bare extensionless route a `.md`, a directory or an `index.md` serves; the same placeholder words inside a fence or code span, which are quotation, not assertion |
+
+**The strength of that coverage, said negatively.** Every one of those checks
+runs inside the single `Doc budgets + anchors` job, which is an S4
+paths-filtered exclusion in `.github/required-checks.json` and **cannot block a
+merge** — a red is visible on the PR and nothing more. So rules 1–3 are
+REVIEW rules with partial mechanical assistance, never a merge wall. Run them
+yourself before pushing: `bash scripts/doc-drift-check.sh` (scoped to
+`origin/main...HEAD`) and `bash scripts/doc-drift-check.test.sh` for its twelve
+regression arms. Mechanism detail lives in `tooling/doc-truth/README.md`.
 
 ### Touching `api/lib/barkpark_web/layouts/root.html.heex`
 
@@ -962,8 +957,6 @@ content — never raise the cap.
 | Run the plugin matrix test | `bash api/test/scripts/test-plugin-node-matrix.sh` |
 | Lint the workflows         | `actionlint .github/workflows/*.yml`           |
 
-`actionlint` is not installed by default in this repo's environment. To add
-it locally: `brew install actionlint` (macOS) or
-`go install github.com/rhysd/actionlint/cmd/actionlint@latest`. CI does not
-currently run `actionlint`; add it as a separate workflow if drift becomes
-common.
+`actionlint` is not installed here by default (`brew install actionlint`, or
+`go install github.com/rhysd/actionlint/cmd/actionlint@latest`) and CI does not
+run it; add it as a separate workflow if drift becomes common.

@@ -72,6 +72,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
   end
 
   describe "register_all_schemas/0 — DB-level" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "installs the OnixEdit book schema" do
       assert {:ok, count} = Bootstrap.register_all_schemas()
       assert count >= 1
@@ -95,6 +97,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       assert book.fields != []
     end
 
+    # Plugins-off: the onixedit plugin (its book schema is what register_all_schemas installs)
+    @tag :requires_plugins
     test "is idempotent — second call does not duplicate the book row" do
       assert {:ok, n1} = Bootstrap.register_all_schemas()
       assert {:ok, n2} = Bootstrap.register_all_schemas()
@@ -204,6 +208,8 @@ defmodule Barkpark.Plugins.BootstrapTest do
       :ok
     end
 
+    # Plugins-off: the onixedit plugin (its book schema is what register_all_schemas installs)
+    @tag :requires_plugins
     test "returns book schema in the SDK envelope", %{conn: conn} do
       body =
         conn

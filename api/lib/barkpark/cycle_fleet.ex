@@ -1743,7 +1743,11 @@ defmodule Barkpark.CycleFleet do
       when is_binary(assignment_id) and is_map(claim) and is_map(opts) do
     recorder = value(opts, :recorder, Recorder)
 
-    with {:ok, attempt} <- prepare_runtime_attempt(assignment_id, claim, opts),
+    # The attempt runs on a Studio Chat Recorder. With Studio Chat switched off
+    # (`Barkpark.Capability`) the Recorder tier never started, so refuse before
+    # committing an attempt row the runtime could never open.
+    with true <- Barkpark.Capability.enabled?(:studio_chat) || {:error, :studio_chat_disabled},
+         {:ok, attempt} <- prepare_runtime_attempt(assignment_id, claim, opts),
          %StudioChat.Session{} = session <- StudioChat.get_session(attempt.session_id),
          {:ok, recorder_pid} <- recorder.ensure(recorder_opts(session, opts)) do
       {:ok, %{attempt: attempt, session: session, recorder: recorder_pid}}
@@ -2311,12 +2315,21 @@ defmodule Barkpark.CycleFleet do
   defp pass_public_smoke(smoke, proof) do
     unsigned = %{"request" => smoke.request, "proof" => proof}
     digest = EpicFleet.canonical_digest(unsigned)
-    attestation = release_hmac(digest)
 
     Repo.transaction(fn ->
+      # The availability check comes FIRST and `release_hmac/1` after it.
+      # `release_hmac/1` reads the secret with `Application.fetch_env!/2`, so
+      # computing the attestation ahead of this guard turned a missing secret
+      # into an unnamed ArgumentError instead of the named
+      # :release_capture_signing_unavailable refusal this rollback exists for.
+      # Since config/runtime.exs no longer refuses the BOOT on a missing
+      # release-capture secret, this ordering is the only thing keeping the
+      # public-smoke refusal explicit.
       unless put_release_capture_hmac_secret() == :ok do
         Repo.rollback(:release_capture_signing_unavailable)
       end
+
+      attestation = release_hmac(digest)
 
       root = Promotion.lock_root(smoke.root_wave_id)
       event = Repo.get!(Event, smoke.promotion_event_id)
@@ -2490,7 +2503,7 @@ defmodule Barkpark.CycleFleet do
                            where: q.correction_wave_id == ^target.id
                        ),
                    {:ok, restoration} <-
-                     restore_release_materializations(chain, restore_event_id) do
+                     restore_release_materializations(chain, restore_event_id, root) do
                 persist_promotion_event(
                   root,
                   target,
@@ -2568,7 +2581,7 @@ defmodule Barkpark.CycleFleet do
          authority_evidence: current_admission && lifecycle_admission(current_admission),
          quarantines:
            quarantines
-           |> Enum.sort_by(&{&1.inserted_at, &1.id})
+           |> Enum.sort_by(&chronological_key/1)
            |> Enum.map(&lifecycle_quarantine/1),
          superseded: Enum.map(superseded, &lifecycle_wave(&1, lifecycle_status.(&1))),
          historical_ancestry:
@@ -2627,12 +2640,19 @@ defmodule Barkpark.CycleFleet do
 
   defp maybe_put_canonical_origin(authority, _workspace, _project), do: authority
 
+  # task-0284692b2db7f02e: oldest-first by inserted_at, id as tiebreak. A
+  # `{%DateTime{}, id}` tuple sorts STRUCTURALLY (day before month), which put
+  # 2026-09-24 after 2026-10-01; the microsecond epoch orders chronologically.
+  @doc false
+  def chronological_key(%{inserted_at: %DateTime{} = at, id: id}),
+    do: {DateTime.to_unix(at, :microsecond), id}
+
   @doc "Project the immutable retrieval attribution seed for every assignment in one cycle wave."
   @spec assignment_attributions(map()) :: [map()]
   def assignment_attributions(scope) when is_map(scope) do
     scope
     |> list_assignments()
-    |> Enum.sort_by(&{&1.inserted_at, &1.id})
+    |> Enum.sort_by(&chronological_key/1)
     |> Enum.map(&assignment_attribution/1)
   end
 
@@ -3150,7 +3170,7 @@ defmodule Barkpark.CycleFleet do
     end
   end
 
-  defp restore_release_materializations(chain, restore_event_id) do
+  defp restore_release_materializations(chain, restore_event_id, %Wave{} = root) do
     promotions =
       Enum.filter(chain, &(&1.action == "promote" and is_map(&1.release_materialization)))
 
@@ -3168,6 +3188,7 @@ defmodule Barkpark.CycleFleet do
            Enum.reduce_while(desired, :ok, fn {document_id, state}, :ok ->
              restore_release_document(
                {document_id, Map.fetch!(current, document_id), state},
+               root,
                :ok
              )
            end) do
@@ -3204,10 +3225,44 @@ defmodule Barkpark.CycleFleet do
     end)
   end
 
-  defp restore_release_document({document_id, expected, state}, :ok) do
+  # ── SEAT CLASSIFICATION (task-d507d3d83476b57d, ruling clause (d)) ────────
+  #
+  # A raw `Repo.update_all` on `Document` keyed by UUID PK — the only seat of
+  # the five that never passes through `Document.changeset`, and therefore the
+  # only one whose harm is NOT a nil-workspace stamp: it sets rev / revision
+  # pointers / title / status / content and touches no scope column at all, so
+  # it can neither create a row nor null one's workspace.
+  #
+  # Its harm is the other direction — a CROSS-TENANT write. The document ids come
+  # from `release_materialization["documents"]`, replayed out of stored promotion
+  # EVENTS, and the statement then rewrote whatever row carried that id in ANY
+  # workspace. CLASS (a) by the ruling's wording (a scope context EXISTS and was
+  # not consulted), so the remedy is a REFUSAL, not a Default stamp: the wave's
+  # own `workspace_id` is the authority — `rollback_correction/2` already
+  # requires `root.project_id` — and a document outside it halts the restore with
+  # `:paper_restore_scope_mismatch`, rolling the whole rollback back. A root wave
+  # with a nil workspace (pre-tenancy fleet rows) keeps the old behaviour rather
+  # than refusing a rollback nobody can scope — the ruling's residual arm.
+  defp restore_release_document({document_id, expected, state}, %Wave{} = root, :ok) do
     document = Repo.one(from d in Document, where: d.id == ^document_id, lock: "FOR UPDATE")
     revision = Repo.get(Revision, state["current_revision_id"])
 
+    if document && not release_document_in_scope?(document, root) do
+      {:halt, {:error, :paper_restore_scope_mismatch}}
+    else
+      restore_release_document_in_scope(document, revision, expected, state)
+    end
+  end
+
+  # Public ONLY so the seat test can exercise the guard's decision surface
+  # without standing up a whole promotion chain (the end-to-end rollback path is
+  # covered by `cycle_fleet_test.exs`). Production callers reach it through
+  # `restore_release_document/3`.
+  @doc false
+  def release_document_in_scope?(%Document{workspace_id: doc_ws}, %Wave{workspace_id: wave_ws}),
+    do: is_nil(wave_ws) or doc_ws == wave_ws
+
+  defp restore_release_document_in_scope(document, revision, expected, state) do
     if (document && revision && revision.document_id == document.id) and
          document.rev == expected["rev"] and
          document.current_revision_id == expected["current_revision_id"] and

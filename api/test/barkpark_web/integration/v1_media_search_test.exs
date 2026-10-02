@@ -109,6 +109,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
   end
 
   describe "GET /v1/media/:dataset/search" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "returns hits with delivery URLs and facets", %{conn: conn} do
       hero = upload_tagged(conn, "hero-banner.png", ["hero", "homepage"])
       _other = upload_tagged(conn, "other-shot.png", ["archive"])
@@ -134,6 +136,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       cleanup(_other)
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "q matches asset title with relevance sort", %{conn: conn} do
       created =
         conn
@@ -156,6 +160,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       cleanup(created["result"])
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "q matches asset tags", %{conn: conn} do
       tagged = upload_tagged(conn, "tagged-search.png", ["campaign", "spring"])
 
@@ -188,6 +194,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
     # (`?kind=image`) instead of `facet.kind=`, the kind facet must NOT collapse
     # to just "image" — it should still report every kind, while the hits stay
     # filtered to image.
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "top-level ?kind= does not collapse the kind facet", %{conn: conn} do
       image = upload_as(conn, "top-level-kind.png", "image/png")
       doc = upload_as(conn, "top-level-doc.pdf", "application/pdf")
@@ -239,6 +247,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       cleanup(doc)
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "exact-limit last page reports hasMore:false with no dangling cursor",
          %{conn: conn} do
       # Upload exactly `limit` matching assets so the first page IS the last
@@ -264,6 +274,8 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
       for u <- uploaded, do: cleanup(u)
     end
 
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "a partial final page still paginates then stops", %{conn: conn} do
       # 3 matching assets, page size 2 → page one is full (hasMore:true, cursor),
       # page two is the remaining 1 (hasMore:false, no cursor). Default

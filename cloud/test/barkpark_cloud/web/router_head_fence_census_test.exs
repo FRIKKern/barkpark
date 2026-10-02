@@ -75,6 +75,8 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   """
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.Web.RouterAuthWrappers
+
   @router_source Path.expand("../../../lib/barkpark_cloud/web/router.ex", __DIR__)
 
   # A GET declaration in either form: `get "/path" do` and `get("/path", do: …)`.
@@ -84,40 +86,26 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # moduledoc.
   @block_end_re ~r/^  end\s*$/
 
-  # Every wrapper that establishes a HUMAN/session-token identity, directly or
-  # one call deep. `with_team_role` → `Auth.require_team_role`; `with_team_site`
-  # → `Auth.require_user` (or `require_user_or_pat` + `require_ability`);
-  # `require_user_sse` → `verify_user_session_token` / `consume_sse_ticket`;
-  # `proxy_instance_webhook` → `Auth.require_user`.
-  @session_wrappers [
-    "Auth.require_user",
-    "Auth.require_user_or_pat",
-    "Auth.require_team_admin",
-    "Auth.require_team_role",
-    "Auth.require_current_team_admin",
-    "Auth.require_current_team_owner",
-    "Auth.require_platform_operator",
-    "Auth.require_ability",
-    "with_team_role",
-    "with_team_site",
-    "require_user_sse",
-    "proxy_instance_webhook"
-  ]
-
-  # Machine identities: an agent token or the internal worker shared secret.
-  # Checked FIRST, so a route carrying both classifies as machine.
+  # THE WRAPPER SETS ARE NO LONGER WRITTEN HERE. They come from
+  # `BarkparkCloud.Web.RouterAuthWrappers`, whose companion test
+  # (`router_auth_wrapper_registry_test.exs`) DERIVES the wrapper set from
+  # router.ex on every run and reds in both directions when the registry and the
+  # router disagree.
   #
-  # `Auth.require_user_or_pat_or_worker` is listed here DELIBERATELY even though
-  # it also admits a human: it is a route a MACHINE can reach, and the whole
-  # point of checking this list first is that "carries both" resolves to machine.
-  # Leaving it out would have been the quiet option — the substring
-  # `Auth.require_user` matches it, so the census would have stayed 68/49/7/12
-  # and a route that became worker-reachable would have moved no number at all.
-  @machine_wrappers [
-    "Auth.require_agent",
-    "Auth.require_worker",
-    "Auth.require_user_or_pat_or_worker"
-  ]
+  # WHY THE MOVE. These two lists used to be a hand-written enumeration, the same
+  # shape as charter decision D34's eight names — and D34 is the worked example
+  # of why that fails: it was correct when written, the router grew wrappers, and
+  # every number rebuilt from its text came out wrong with nothing going red. The
+  # lists here were RIGHT for the GET surface and still went stale for the rest
+  # of the router: `go_live/1` and `resurrect/1` are session wrappers on POST
+  # routes that neither list ever named. They move no number in this file (no GET
+  # body mentions either, which is why the four integers below are unchanged by
+  # the move), and the registry test is what makes the next one loud.
+  #
+  # Machine is checked FIRST, so a route carrying both classifies as machine —
+  # see the 2026-09-02 baseline entry.
+  @session_wrappers RouterAuthWrappers.session_wrappers()
+  @machine_wrappers RouterAuthWrappers.machine_wrappers()
 
   # THE BASELINE. Four integers, re-derived from source above, changed only
   # DELIBERATELY and with a reason written next to them.
@@ -150,9 +138,10 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # agent_or_worker and public are unchanged: no existing route changed class.
   # 2026-08-07: 66 / 47 / 7 / 12. deploy-reliability dr-w16-s6 added ONE
   # session-or-PAT GET, `/v1/deploy-ledger/census` — the team-scoped twin of the
-  # operator route above, added because that operator route 403s for every real
-  # account (PLATFORM_ADMIN_EMAILS is unset in production), so the correct number
-  # this epic spent sixteen waves building was unreadable by anyone. It counts as
+  # operator route above, added because that operator route 403'd for every real
+  # account (PLATFORM_ADMIN_EMAILS was unset in production until
+  # gr-ops-platform-admin-emails, 2026-09-25), so the correct number this epic
+  # spent sixteen waves building was unreadable by anyone. It counts as
   # SESSION because `Auth.require_user_or_pat` is a session wrapper here; the
   # `Auth.require_ability("read")` beside it narrows a PAT, it does not reclassify
   # the route. RULED NOT SIDE-EFFECTING by reading the whole path:
@@ -281,9 +270,55 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # `Auth.require_user/2`. It was a SESSION route, so `total` and `session` each
   # fall by exactly one; machine and public are untouched. A removal owes no
   # `side_effecting_get?/1` ruling — the fence rules on routes that exist.
-  @baseline_total 71
-  @baseline_session 51
-  @baseline_machine 8
+  # 2026-09-11: 72 / 52 / 8 / 12. ONE ROUTE WAS ADDED —
+  # `GET /v1/sites/:id/deployments/:dep_id/build-log/bytes`
+  # (dr-bl-recorder-http-read-path c1), the operator read for the recorded build
+  # log's BYTES. A pure READ of a box's durable artifact, like the `build-log`
+  # route above it: it mints nothing, burns nothing and spends no nonce, so no
+  # `side_effecting_get?/1` clause is owed. A bare HEAD costs one cross-host GET —
+  # a COST, not a mutation, and the fence rules on mutation. It is behind
+  # `require_platform_operator`, which delegates to `require_user`, so it lands in
+  # the SESSION bucket: `total` and `session` each rise by exactly one; machine and
+  # public are untouched.
+  # 2026-09-11: 73 / 53 / 8 / 12. ONE ROUTE WAS ADDED — `GET /v1/me/security-events`
+  # (cloud-console-user-security-log), the account owner's own trail over the new
+  # user-scoped `user_security_events` table. A bare HEAD of it MUTATES NOTHING:
+  # the body is `Auth.require_user/2` then `Accounts.list_user_security_events/2`,
+  # a `Repo.all` with no write, no token mint and no nonce burn — so it owes no
+  # `side_effecting_get?/1` clause. It is session-gated like its three
+  # self-scoped siblings (`/v1/account/sessions`, `/v1/account/two-factor`,
+  # `/v1/account/security-audit`), so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  # 2026-09-13: 74 / 53 / 9 / 12. ONE ROUTE WAS ADDED — `GET /v1/agent/sites`
+  # (the box's live-site TLS state fetch: this barkpark's sites and their current
+  # `serving_mode`, which the on-box runtime reconciles its rendered Caddyfile
+  # against so a flip on an already-live site stops waiting for that site's next
+  # deploy). A bare HEAD of it MUTATES NOTHING: the body is `Auth.require_agent/2`
+  # then `Registry.list_sites/1`, a `Repo.all` with no write, no token mint and no
+  # nonce burn — so it owes no `side_effecting_get?/1` clause. It is agent-gated
+  # like its `/v1/agent/*` siblings, so `total` and `agent_or_worker` each rise by
+  # exactly one; session and public are untouched.
+  # 2026-09-18: 75 / 54 / 9 / 12. ONE ROUTE WAS ADDED — `GET
+  # /v1/providers/:kind/identity` (WHICH cloud account a connection points at,
+  # for the CONNECTABLE kinds rather than the catalog kinds). A bare HEAD of it
+  # MUTATES NOTHING: the body is `Auth.require_user/2`, `Registry.list_providers/1`
+  # and `Registry.reveal_provider_token/1` — a read and a decrypt, no write, no
+  # token mint, no nonce burn, and NO upstream call at all — so it owes no
+  # `side_effecting_get?/1` clause. It is session-gated like its
+  # `/v1/providers/*` siblings, so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  # 2026-09-25: 76 / 55 / 9 / 12. ONE ROUTE WAS ADDED — `GET
+  # /v1/sites/:id/forms` (N-08: a site's form endpoint state and its inbox). A
+  # bare HEAD of it MUTATES NOTHING: the body is `with_team_site/3` then
+  # `Sites.Forms.endpoint/2` and `Sites.Forms.list/3`, which issue only GET
+  # relays to the box (`/v1/plugins`, one doc read, one query) — no write on
+  # either side, no token mint, no nonce burn — so it owes no
+  # `side_effecting_get?/1` clause. It is user-or-PAT gated like its
+  # `/v1/sites/:id/*` siblings, so `total` and `session` each rise by exactly
+  # one; machine and public are untouched.
+  @baseline_total 76
+  @baseline_session 55
+  @baseline_machine 9
   @baseline_public 12
 
   # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.

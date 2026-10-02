@@ -1,0 +1,1436 @@
+{
+  "_readme": [
+    "Manifest<->SDK parity fixture for @barkpark/core. Two halves, two owners:",
+    "  * `coverage` / `sdk_only` are HAND-AUTHORED. They are the reviewed map from an",
+    "    SDK method to the HTTP method + path template it promises, plus the explicit",
+    "    allow-list of SDK methods that deliberately do NOT name a manifest command.",
+    "  * `manifest_routes` is GENERATED from the live capabilities manifest. Refresh it",
+    "    with the command in `refresh` below; never hand-edit it.",
+    "The manifest is a COMMAND surface, not an inventory of every HTTP route, so this",
+    "fixture never asserts global set equality: manifest commands with no SDK method",
+    "are expected and unlisted (see `manifest_only_rationale`)."
+  ],
+  "coverage": [
+    {
+      "method": "GET",
+      "path_template": "/v1/data/doc/:dataset/:type/:doc_id",
+      "sdk_method": "client.doc"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/query/:dataset/:type",
+      "sdk_method": "client.docs"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/query/:dataset/:type",
+      "sdk_method": "client.getDocuments"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset",
+      "sdk_method": "client.search"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/suggestions",
+      "sdk_method": "client.getSearchSuggestions"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/backlinks/:dataset/:id",
+      "sdk_method": "client.getBacklinks"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/related/:dataset/:id",
+      "sdk_method": "client.getRelated"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/tags/:dataset",
+      "sdk_method": "client.listTags"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/tags/:dataset/:tag",
+      "sdk_method": "client.getTagDocs"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/graph/:id",
+      "sdk_method": "client.getGraph"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/graph/orphans",
+      "sdk_method": "client.getOrphans"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/graph/dangling",
+      "sdk_method": "client.getDangling"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/history/:dataset/:type/:doc_id",
+      "sdk_method": "client.getHistory"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/revision/:dataset/:rev_id",
+      "sdk_method": "client.getRevision"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/revision/:dataset/:rev_id/restore",
+      "sdk_method": "client.restoreRevision"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/data/analytics/:dataset",
+      "sdk_method": "client.getAnalytics"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/register",
+      "sdk_method": "client.auth.register"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/login",
+      "sdk_method": "client.auth.login"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/auth/me",
+      "sdk_method": "client.auth.me"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/auth/logout",
+      "sdk_method": "client.auth.logout"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/enroll",
+      "sdk_method": "client.auth.enrollMfa"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/verify",
+      "sdk_method": "client.auth.verifyMfa"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/disable",
+      "sdk_method": "client.auth.disableMfa"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/verify-email",
+      "sdk_method": "client.auth.verifyEmail"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/request-reset",
+      "sdk_method": "client.auth.requestPasswordReset"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/auth/reset",
+      "sdk_method": "client.auth.resetPassword"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/upload",
+      "sdk_method": "client.uploadAsset"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset",
+      "sdk_method": "client.listAssets"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/:id",
+      "sdk_method": "client.getAsset"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/:id",
+      "sdk_method": "client.deleteAsset"
+    },
+    {
+      "method": "PATCH",
+      "path_template": "/v1/media/:dataset/:id",
+      "sdk_method": "client.updateAsset"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/:id/checkout",
+      "sdk_method": "client.checkoutAsset"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/:id/undo-checkout",
+      "sdk_method": "client.undoCheckoutAsset"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/:id/relations",
+      "sdk_method": "client.getAssetRelations"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search",
+      "sdk_method": "client.searchAssets"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/suggestions",
+      "sdk_method": "client.getAssetSearchSuggestions"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections",
+      "sdk_method": "client.listCollections"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections/:id",
+      "sdk_method": "client.getCollection"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections/:id/assets",
+      "sdk_method": "client.getCollectionAssets"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/collections/:id/members",
+      "sdk_method": "client.addCollectionMember"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/collections/:id/members/:asset_id",
+      "sdk_method": "client.removeCollectionMember"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/collections/:id/share",
+      "sdk_method": "client.shareCollection"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/collections/:id/share",
+      "sdk_method": "client.revokeCollectionShare"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/schemas/:dataset",
+      "sdk_method": "client.schemas"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/schemas/:dataset/:name",
+      "sdk_method": "client.getSchema"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/schemas/:dataset",
+      "sdk_method": "client.upsertSchema"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/schemas/:dataset/:name",
+      "sdk_method": "client.deleteSchema"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/webhooks/:dataset",
+      "sdk_method": "client.listWebhooks"
+    },
+    {
+      "method": "GET",
+      "path_template": "/v1/webhooks/:dataset/:id",
+      "sdk_method": "client.getWebhook"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset",
+      "sdk_method": "client.createWebhook"
+    },
+    {
+      "method": "PUT",
+      "path_template": "/v1/webhooks/:dataset/:id",
+      "sdk_method": "client.updateWebhook"
+    },
+    {
+      "method": "DELETE",
+      "path_template": "/v1/webhooks/:dataset/:id",
+      "sdk_method": "client.deleteWebhook"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.create"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.createOrReplace"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.createIfNotExists"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.delete"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.patch"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.transaction"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.publish"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.unpublish"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset",
+      "sdk_method": "client.discardDraft"
+    },
+    {
+      "method": "GET",
+      "path_template": "/api/workspaces",
+      "sdk_method": "client.listWorkspaces"
+    },
+    {
+      "method": "GET",
+      "path_template": "/api/workspaces/:workspace_slug/projects",
+      "sdk_method": "client.listProjects"
+    },
+    {
+      "method": "GET",
+      "path_template": "/api/workspaces/:workspace_slug/projects/:project_slug/datasets",
+      "sdk_method": "client.listDatasets"
+    },
+    {
+      "method": "POST",
+      "path_template": "/api/workspaces",
+      "sdk_method": "client.createWorkspace"
+    },
+    {
+      "method": "POST",
+      "path_template": "/api/workspaces/:workspace_slug/projects",
+      "sdk_method": "client.createProject"
+    }
+  ],
+  "generated_at": "2026-09-11T13:30:51Z",
+  "manifest_only_rationale": "Most manifest commands (chat.*, cycle.*, access.*, secrets.*, members.*, tokens.*, shares.*, plugins.*, status.*, fleet.*, the search-settings/synonyms admin legs) are bp/MCP operator verbs with no typed helper in @barkpark/core. That is a deliberate product boundary, not drift, so a manifest route with no `coverage` entry is NOT a failure. Only the reverse — a covered route that the manifest stopped serving — is.",
+  "manifest_routes": [
+    {
+      "command": "workspace.ls",
+      "method": "GET",
+      "path_template": "/api/workspaces"
+    },
+    {
+      "command": "workspace.create",
+      "method": "POST",
+      "path_template": "/api/workspaces"
+    },
+    {
+      "command": "workspace.project-ls",
+      "method": "GET",
+      "path_template": "/api/workspaces/:workspace_slug/projects"
+    },
+    {
+      "command": "workspace.project-create",
+      "method": "POST",
+      "path_template": "/api/workspaces/:workspace_slug/projects"
+    },
+    {
+      "command": "workspace.dataset-ls",
+      "method": "GET",
+      "path_template": "/api/workspaces/:workspace_slug/projects/:project_slug/datasets"
+    },
+    {
+      "command": "access.ls",
+      "method": "GET",
+      "path_template": "/v1/access"
+    },
+    {
+      "command": "access.grant",
+      "method": "POST",
+      "path_template": "/v1/access"
+    },
+    {
+      "command": "access.revoke",
+      "method": "DELETE",
+      "path_template": "/v1/access/:id"
+    },
+    {
+      "command": "access.show",
+      "method": "GET",
+      "path_template": "/v1/access/:id"
+    },
+    {
+      "command": "access.claim",
+      "method": "POST",
+      "path_template": "/v1/access/claim"
+    },
+    {
+      "command": "access.mine",
+      "method": "GET",
+      "path_template": "/v1/access/mine"
+    },
+    {
+      "command": "workspace.reinstate",
+      "method": "POST",
+      "path_template": "/v1/admin/workspaces/:slug/reinstate"
+    },
+    {
+      "command": "app_token.revoke",
+      "method": "DELETE",
+      "path_template": "/v1/auth/app-tokens"
+    },
+    {
+      "command": "app_token.ls",
+      "method": "GET",
+      "path_template": "/v1/auth/app-tokens"
+    },
+    {
+      "command": "app_token.create",
+      "method": "POST",
+      "path_template": "/v1/auth/app-tokens"
+    },
+    {
+      "command": "app_token.revoke-by-id",
+      "method": "DELETE",
+      "path_template": "/v1/auth/app-tokens/:id"
+    },
+    {
+      "command": "app_token.revoke-current",
+      "method": "DELETE",
+      "path_template": "/v1/auth/app-tokens/current"
+    },
+    {
+      "command": "auth.login",
+      "method": "POST",
+      "path_template": "/v1/auth/login"
+    },
+    {
+      "command": "auth.logout",
+      "method": "DELETE",
+      "path_template": "/v1/auth/logout"
+    },
+    {
+      "command": "auth.me",
+      "method": "GET",
+      "path_template": "/v1/auth/me"
+    },
+    {
+      "command": "auth.mfa-disable",
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/disable"
+    },
+    {
+      "command": "auth.mfa-enroll",
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/enroll"
+    },
+    {
+      "command": "auth.mfa-verify",
+      "method": "POST",
+      "path_template": "/v1/auth/mfa/verify"
+    },
+    {
+      "command": "auth.register",
+      "method": "POST",
+      "path_template": "/v1/auth/register"
+    },
+    {
+      "command": "auth.request-reset",
+      "method": "POST",
+      "path_template": "/v1/auth/request-reset"
+    },
+    {
+      "command": "auth.reset",
+      "method": "POST",
+      "path_template": "/v1/auth/reset"
+    },
+    {
+      "command": "auth.verify-email",
+      "method": "POST",
+      "path_template": "/v1/auth/verify-email"
+    },
+    {
+      "command": "chat.list_sessions",
+      "method": "GET",
+      "path_template": "/v1/chat/sessions"
+    },
+    {
+      "command": "chat.create_session",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions"
+    },
+    {
+      "command": "chat.get_session",
+      "method": "GET",
+      "path_template": "/v1/chat/sessions/:id"
+    },
+    {
+      "command": "chat.update_session",
+      "method": "PATCH",
+      "path_template": "/v1/chat/sessions/:id"
+    },
+    {
+      "command": "chat.answer",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/answer"
+    },
+    {
+      "command": "chat.approve",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/approval"
+    },
+    {
+      "command": "chat.archive",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/archive"
+    },
+    {
+      "command": "chat.upload_attachment",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/attachments"
+    },
+    {
+      "command": "chat.get_attachment",
+      "method": "GET",
+      "path_template": "/v1/chat/sessions/:id/attachments/:attachment_id"
+    },
+    {
+      "command": "chat.interrupt",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/interrupt"
+    },
+    {
+      "command": "chat.send_message",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/messages"
+    },
+    {
+      "command": "chat.unarchive",
+      "method": "POST",
+      "path_template": "/v1/chat/sessions/:id/unarchive"
+    },
+    {
+      "command": "dataset.stats",
+      "method": "GET",
+      "path_template": "/v1/data/analytics/:dataset"
+    },
+    {
+      "command": "doc.backlinks",
+      "method": "GET",
+      "path_template": "/v1/data/backlinks/:dataset/:id"
+    },
+    {
+      "command": "data.counts",
+      "method": "GET",
+      "path_template": "/v1/data/counts/:dataset"
+    },
+    {
+      "command": "doc.get",
+      "method": "GET",
+      "path_template": "/v1/data/doc/:dataset/:type/:doc_id"
+    },
+    {
+      "command": "doc.history",
+      "method": "GET",
+      "path_template": "/v1/data/history/:dataset/:type/:doc_id"
+    },
+    {
+      "command": "doc.mutate",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.publish",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.unpublish",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.discard-draft",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.delete",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.create",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.create-or-replace",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.create-if-not-exists",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.patch",
+      "method": "POST",
+      "path_template": "/v1/data/mutate/:dataset"
+    },
+    {
+      "command": "doc.ls",
+      "method": "GET",
+      "path_template": "/v1/data/query/:dataset/:type"
+    },
+    {
+      "command": "doc.query",
+      "method": "GET",
+      "path_template": "/v1/data/query/:dataset/:type"
+    },
+    {
+      "command": "doc.related",
+      "method": "GET",
+      "path_template": "/v1/data/related/:dataset/:id"
+    },
+    {
+      "command": "doc.revision",
+      "method": "GET",
+      "path_template": "/v1/data/revision/:dataset/:rev_id"
+    },
+    {
+      "command": "doc.restore-revision",
+      "method": "POST",
+      "path_template": "/v1/data/revision/:dataset/:rev_id/restore"
+    },
+    {
+      "command": "search.query",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset"
+    },
+    {
+      "command": "search.correction",
+      "method": "POST",
+      "path_template": "/v1/data/search/:dataset/correction"
+    },
+    {
+      "command": "search.insights",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/insights"
+    },
+    {
+      "command": "search.interaction",
+      "method": "POST",
+      "path_template": "/v1/data/search/:dataset/interaction"
+    },
+    {
+      "command": "search.reindex",
+      "method": "POST",
+      "path_template": "/v1/data/search/:dataset/reindex"
+    },
+    {
+      "command": "search.settings",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/settings"
+    },
+    {
+      "command": "search.update-settings",
+      "method": "PUT",
+      "path_template": "/v1/data/search/:dataset/settings"
+    },
+    {
+      "command": "search.suggestions",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/suggestions"
+    },
+    {
+      "command": "search.synonyms",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/synonyms"
+    },
+    {
+      "command": "search.create-synonym",
+      "method": "POST",
+      "path_template": "/v1/data/search/:dataset/synonyms"
+    },
+    {
+      "command": "search.delete-synonym",
+      "method": "DELETE",
+      "path_template": "/v1/data/search/:dataset/synonyms/:id"
+    },
+    {
+      "command": "search.synonym-preview",
+      "method": "GET",
+      "path_template": "/v1/data/search/:dataset/synonyms/preview"
+    },
+    {
+      "command": "search.promote-synonym",
+      "method": "POST",
+      "path_template": "/v1/data/search/:dataset/synonyms/promote"
+    },
+    {
+      "command": "tag.browse",
+      "method": "GET",
+      "path_template": "/v1/data/tags/:dataset"
+    },
+    {
+      "command": "tag.docs",
+      "method": "GET",
+      "path_template": "/v1/data/tags/:dataset/:tag"
+    },
+    {
+      "command": "fleet.beat",
+      "method": "POST",
+      "path_template": "/v1/fleet/beat"
+    },
+    {
+      "command": "fleet.roster",
+      "method": "GET",
+      "path_template": "/v1/fleet/roster"
+    },
+    {
+      "command": "fleet_support_token.create",
+      "method": "POST",
+      "path_template": "/v1/fleet/support-tokens"
+    },
+    {
+      "command": "fleet_support_token.revoke",
+      "method": "DELETE",
+      "path_template": "/v1/fleet/support-tokens/:token_id"
+    },
+    {
+      "command": "graph.corpus",
+      "method": "GET",
+      "path_template": "/v1/graph"
+    },
+    {
+      "command": "graph.show",
+      "method": "GET",
+      "path_template": "/v1/graph/:id"
+    },
+    {
+      "command": "graph.tasks",
+      "method": "GET",
+      "path_template": "/v1/graph/:id/tasks"
+    },
+    {
+      "command": "graph.dangling",
+      "method": "GET",
+      "path_template": "/v1/graph/dangling"
+    },
+    {
+      "command": "graph.orphans",
+      "method": "GET",
+      "path_template": "/v1/graph/orphans"
+    },
+    {
+      "command": "media.ls",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset"
+    },
+    {
+      "command": "media.delete",
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/:id"
+    },
+    {
+      "command": "media.get",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/:id"
+    },
+    {
+      "command": "media.update",
+      "method": "PATCH",
+      "path_template": "/v1/media/:dataset/:id"
+    },
+    {
+      "command": "media.checkout",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/:id/checkout"
+    },
+    {
+      "command": "media.relations",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/:id/relations"
+    },
+    {
+      "command": "media.undo-checkout",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/:id/undo-checkout"
+    },
+    {
+      "command": "media.collections",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections"
+    },
+    {
+      "command": "media.collection",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections/:id"
+    },
+    {
+      "command": "media.collection-assets",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/collections/:id/assets"
+    },
+    {
+      "command": "media.add-member",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/collections/:id/members"
+    },
+    {
+      "command": "media.remove-member",
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/collections/:id/members/:asset_id"
+    },
+    {
+      "command": "media.revoke-share",
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/collections/:id/share"
+    },
+    {
+      "command": "media.share-collection",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/collections/:id/share"
+    },
+    {
+      "command": "media.search",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search"
+    },
+    {
+      "command": "media.search-insights",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/insights"
+    },
+    {
+      "command": "media.search-interaction",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/search/interaction"
+    },
+    {
+      "command": "media.search-settings",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/settings"
+    },
+    {
+      "command": "media.update-search-settings",
+      "method": "PUT",
+      "path_template": "/v1/media/:dataset/search/settings"
+    },
+    {
+      "command": "media.suggest",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/suggestions"
+    },
+    {
+      "command": "media.search-synonyms",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/synonyms"
+    },
+    {
+      "command": "media.create-search-synonym",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/search/synonyms"
+    },
+    {
+      "command": "media.delete-search-synonym",
+      "method": "DELETE",
+      "path_template": "/v1/media/:dataset/search/synonyms/:id"
+    },
+    {
+      "command": "media.search-synonym-preview",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/search/synonyms/preview"
+    },
+    {
+      "command": "media.promote-search-synonym",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/search/synonyms/promote"
+    },
+    {
+      "command": "media.share-view",
+      "method": "GET",
+      "path_template": "/v1/media/:dataset/share/:token"
+    },
+    {
+      "command": "media.upload",
+      "method": "POST",
+      "path_template": "/v1/media/:dataset/upload"
+    },
+    {
+      "command": "workspace.member-ls",
+      "method": "GET",
+      "path_template": "/v1/members"
+    },
+    {
+      "command": "workspace.member-add",
+      "method": "POST",
+      "path_template": "/v1/members"
+    },
+    {
+      "command": "workspace.member-rm",
+      "method": "DELETE",
+      "path_template": "/v1/members/:principal_ref"
+    },
+    {
+      "command": "workspace.member-role",
+      "method": "PATCH",
+      "path_template": "/v1/members/:principal_ref"
+    },
+    {
+      "command": "paper.access",
+      "method": "GET",
+      "path_template": "/v1/papers/:slug/access"
+    },
+    {
+      "command": "plugin.ls",
+      "method": "GET",
+      "path_template": "/v1/plugins"
+    },
+    {
+      "command": "bulldocs.intents",
+      "method": "GET",
+      "path_template": "/v1/plugins/bulldocs/intents"
+    },
+    {
+      "command": "bulldocs.intent-processed",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/intents/:id/processed"
+    },
+    {
+      "command": "bulldocs.publish",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers"
+    },
+    {
+      "command": "bulldocs.patch",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers/:slug/ops"
+    },
+    {
+      "command": "bulldocs.propose",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers/:slug/proposals"
+    },
+    {
+      "command": "session.open",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/sessions"
+    },
+    {
+      "command": "session.publish",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/sessions"
+    },
+    {
+      "command": "session.view",
+      "method": "GET",
+      "path_template": "/v1/plugins/bulldocs/sessions/:slug"
+    },
+    {
+      "command": "session.touch",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/sessions/:slug/conversations"
+    },
+    {
+      "command": "session.log",
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/sessions/:slug/events"
+    },
+    {
+      "command": "github.adopt",
+      "method": "POST",
+      "path_template": "/v1/plugins/github/adopt/:id"
+    },
+    {
+      "command": "github.status",
+      "method": "GET",
+      "path_template": "/v1/plugins/github/status"
+    },
+    {
+      "command": "onixedit.export",
+      "method": "GET",
+      "path_template": "/v1/plugins/onixedit/export/:dataset/:id"
+    },
+    {
+      "command": "plugin.settings",
+      "method": "PUT",
+      "path_template": "/v1/plugins/settings/:plugin_name"
+    },
+    {
+      "command": "sheets.export-csv",
+      "method": "GET",
+      "path_template": "/v1/plugins/sheets/:slug/export.csv"
+    },
+    {
+      "command": "sheets.export-html",
+      "method": "GET",
+      "path_template": "/v1/plugins/sheets/:slug/export.html"
+    },
+    {
+      "command": "sheets.export-md",
+      "method": "GET",
+      "path_template": "/v1/plugins/sheets/:slug/export.md"
+    },
+    {
+      "command": "sheets.export-tsv",
+      "method": "GET",
+      "path_template": "/v1/plugins/sheets/:slug/export.tsv"
+    },
+    {
+      "command": "sheets.export-xlsx",
+      "method": "GET",
+      "path_template": "/v1/plugins/sheets/:slug/export.xlsx"
+    },
+    {
+      "command": "sheets.ops",
+      "method": "POST",
+      "path_template": "/v1/plugins/sheets/:slug/ops"
+    },
+    {
+      "command": "sheets.import",
+      "method": "POST",
+      "path_template": "/v1/plugins/sheets/import"
+    },
+    {
+      "command": "ticket-key.ls",
+      "method": "GET",
+      "path_template": "/v1/plugins/tickets/keys"
+    },
+    {
+      "command": "ticket-key.mint",
+      "method": "POST",
+      "path_template": "/v1/plugins/tickets/keys"
+    },
+    {
+      "command": "ticket-key.revoke",
+      "method": "DELETE",
+      "path_template": "/v1/plugins/tickets/keys/:id"
+    },
+    {
+      "command": "ticket-key.pause",
+      "method": "POST",
+      "path_template": "/v1/plugins/tickets/keys/:id/pause"
+    },
+    {
+      "command": "ticket-key.rotate",
+      "method": "POST",
+      "path_template": "/v1/plugins/tickets/keys/:id/rotate"
+    },
+    {
+      "command": "ticket-key.unpause",
+      "method": "POST",
+      "path_template": "/v1/plugins/tickets/keys/:id/unpause"
+    },
+    {
+      "command": "schema.ls",
+      "method": "GET",
+      "path_template": "/v1/schemas/:dataset"
+    },
+    {
+      "command": "schema.apply",
+      "method": "POST",
+      "path_template": "/v1/schemas/:dataset"
+    },
+    {
+      "command": "schema.delete",
+      "method": "DELETE",
+      "path_template": "/v1/schemas/:dataset/:name"
+    },
+    {
+      "command": "schema.get",
+      "method": "GET",
+      "path_template": "/v1/schemas/:dataset/:name"
+    },
+    {
+      "command": "secret.ls",
+      "method": "GET",
+      "path_template": "/v1/secrets"
+    },
+    {
+      "command": "secret.rm",
+      "method": "DELETE",
+      "path_template": "/v1/secrets/:name"
+    },
+    {
+      "command": "secret.get",
+      "method": "GET",
+      "path_template": "/v1/secrets/:name"
+    },
+    {
+      "command": "secret.set",
+      "method": "PUT",
+      "path_template": "/v1/secrets/:name"
+    },
+    {
+      "command": "share.rm",
+      "method": "DELETE",
+      "path_template": "/v1/shares"
+    },
+    {
+      "command": "share.ls",
+      "method": "GET",
+      "path_template": "/v1/shares"
+    },
+    {
+      "command": "share.add",
+      "method": "POST",
+      "path_template": "/v1/shares"
+    },
+    {
+      "command": "share.link-ls",
+      "method": "GET",
+      "path_template": "/v1/shares/links"
+    },
+    {
+      "command": "share.link-mint",
+      "method": "POST",
+      "path_template": "/v1/shares/links"
+    },
+    {
+      "command": "share.link-revoke",
+      "method": "DELETE",
+      "path_template": "/v1/shares/links/:id"
+    },
+    {
+      "command": "share.token-ls",
+      "method": "GET",
+      "path_template": "/v1/shares/tokens"
+    },
+    {
+      "command": "share.token-mint",
+      "method": "POST",
+      "path_template": "/v1/shares/tokens"
+    },
+    {
+      "command": "share.token-revoke",
+      "method": "DELETE",
+      "path_template": "/v1/shares/tokens/:token_id"
+    },
+    {
+      "command": "incident.create",
+      "method": "POST",
+      "path_template": "/v1/status/incidents"
+    },
+    {
+      "command": "incident.resolve",
+      "method": "POST",
+      "path_template": "/v1/status/incidents/:id/resolve"
+    },
+    {
+      "command": "task.ls",
+      "method": "GET",
+      "path_template": "/v1/tasks"
+    },
+    {
+      "command": "task.get",
+      "method": "GET",
+      "path_template": "/v1/tasks/:doc_id"
+    },
+    {
+      "command": "task.claim",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/claim"
+    },
+    {
+      "command": "task.close",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/close"
+    },
+    {
+      "command": "task.discharges",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/discharges"
+    },
+    {
+      "command": "task.landed",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/landed"
+    },
+    {
+      "command": "task.move",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/move"
+    },
+    {
+      "command": "task.pulse",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/pulse"
+    },
+    {
+      "command": "task.release",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/release"
+    },
+    {
+      "command": "task.renew",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/renew"
+    },
+    {
+      "command": "session.link-task",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/sessions"
+    },
+    {
+      "command": "task.stage",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/stage"
+    },
+    {
+      "command": "task.stamp",
+      "method": "POST",
+      "path_template": "/v1/tasks/:doc_id/stamp"
+    },
+    {
+      "command": "task.next",
+      "method": "POST",
+      "path_template": "/v1/tasks/claim"
+    },
+    {
+      "command": "task.events",
+      "method": "GET",
+      "path_template": "/v1/tasks/events"
+    },
+    {
+      "command": "task.prime",
+      "method": "GET",
+      "path_template": "/v1/tasks/prime"
+    },
+    {
+      "command": "task.ready",
+      "method": "GET",
+      "path_template": "/v1/tasks/ready"
+    },
+    {
+      "command": "ticket.answer",
+      "method": "POST",
+      "path_template": "/v1/tickets/:id/answer"
+    },
+    {
+      "command": "ticket.close",
+      "method": "POST",
+      "path_template": "/v1/tickets/:id/close"
+    },
+    {
+      "command": "ticket.inbox",
+      "method": "GET",
+      "path_template": "/v1/tickets/inbox"
+    },
+    {
+      "command": "ticket.show",
+      "method": "GET",
+      "path_template": "/v1/tickets/inbox/:id"
+    },
+    {
+      "command": "token.ls",
+      "method": "GET",
+      "path_template": "/v1/tokens"
+    },
+    {
+      "command": "token.create",
+      "method": "POST",
+      "path_template": "/v1/tokens"
+    },
+    {
+      "command": "token.revoke",
+      "method": "DELETE",
+      "path_template": "/v1/tokens/:id"
+    },
+    {
+      "command": "webhook.ls",
+      "method": "GET",
+      "path_template": "/v1/webhooks/:dataset"
+    },
+    {
+      "command": "webhook.create",
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset"
+    },
+    {
+      "command": "webhook.delete",
+      "method": "DELETE",
+      "path_template": "/v1/webhooks/:dataset/:id"
+    },
+    {
+      "command": "webhook.get",
+      "method": "GET",
+      "path_template": "/v1/webhooks/:dataset/:id"
+    },
+    {
+      "command": "webhook.update",
+      "method": "PUT",
+      "path_template": "/v1/webhooks/:dataset/:id"
+    },
+    {
+      "command": "webhook.deliveries",
+      "method": "GET",
+      "path_template": "/v1/webhooks/:dataset/:id/deliveries"
+    },
+    {
+      "command": "webhook.replay",
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay"
+    },
+    {
+      "command": "webhook.reenable",
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset/:id/reenable"
+    },
+    {
+      "command": "webhook.rotate",
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset/:id/rotate"
+    },
+    {
+      "command": "webhook.test-send",
+      "method": "POST",
+      "path_template": "/v1/webhooks/:dataset/:id/test-send"
+    },
+    {
+      "command": "cycle.show",
+      "method": "GET",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id"
+    },
+    {
+      "command": "cycle.assign",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments"
+    },
+    {
+      "command": "cycle.result",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results"
+    },
+    {
+      "command": "cycle.open",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open"
+    },
+    {
+      "command": "cycle.promote",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote"
+    },
+    {
+      "command": "cycle.quarantine",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine"
+    },
+    {
+      "command": "cycle.release-gate-activate",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate"
+    },
+    {
+      "command": "cycle.release-paper-stage",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage"
+    },
+    {
+      "command": "cycle.release-gate-open",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open"
+    },
+    {
+      "command": "cycle.rollback",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback"
+    },
+    {
+      "command": "cycle.seal",
+      "method": "POST",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal"
+    },
+    {
+      "command": "secret.scoped-ls",
+      "method": "GET",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets"
+    },
+    {
+      "command": "secret.scoped-rm",
+      "method": "DELETE",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+    },
+    {
+      "command": "secret.scoped-get",
+      "method": "GET",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+    },
+    {
+      "command": "secret.scoped-set",
+      "method": "PUT",
+      "path_template": "/w/:workspace_slug/p/:project_slug/v1/secrets/:name"
+    }
+  ],
+  "refresh": "cd api && mix run ../js/packages/core/tests/fixtures/refresh-capabilities.exs",
+  "sdk_only": [
+    {
+      "rationale": "Frozen config object, not a call. No HTTP.",
+      "sdk_method": "client.config"
+    },
+    {
+      "rationale": "Returns a derived client. No HTTP.",
+      "sdk_method": "client.withConfig"
+    },
+    {
+      "rationale": "Pure URL builder over an asset ref (src/image-url.ts). Emits a CDN/media URL, never a /v1 API call.",
+      "sdk_method": "client.imageUrl"
+    },
+    {
+      "rationale": "Caller-supplied escape hatch (src/fetchRaw.ts): the path is an ARGUMENT, so it has no fixed template to cover.",
+      "sdk_method": "client.fetchRaw"
+    },
+    {
+      "rationale": "GET /v1/meta. Mounted and served, but deliberately NOT a manifest command — bp reads meta through its own boot path, not a verb. Same class as the router drift guard's @served_by_a_builtin.",
+      "sdk_method": "client.handshake"
+    },
+    {
+      "rationale": "GET /v1/data/export/:dataset. An NDJSON stream, not the single JSON body the generic manifest command path decodes; bp dispatches `bp export` directly from internal/cli/cli.go.",
+      "sdk_method": "client.exportDataset"
+    },
+    {
+      "rationale": "GET /v1/data/listen/:dataset. A long-lived SSE stream, same reason as export; bp dispatches `bp listen` directly.",
+      "sdk_method": "client.listen"
+    },
+    {
+      "rationale": "Internal cache handle exposed for tests. No HTTP.",
+      "sdk_method": "client.__handshakeCache"
+    }
+  ],
+  "source": "Barkpark.Plugins.Capabilities.manifest(\"admin\", project: false)[\"commands\"] — the UN-projected superset, so an existence-hiding projection cannot shrink what the fixture records.",
+  "source_tier": "admin"
+}

@@ -31,7 +31,6 @@ defmodule Barkpark.Tasks.ReconcileMergeGateTest do
       {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
     end
 
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     %{scope: scope}
   end
 

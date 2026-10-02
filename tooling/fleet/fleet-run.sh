@@ -20,7 +20,16 @@
 # exit on a refused read; bp_json checks all three so a refusal can never be
 # read as an empty result (task-4eb2994a588453d3).
 _FLEET_RUN_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-. "$_FLEET_RUN_DIR/../../scripts/lib/bp-read.sh"
+# bp-read.sh is looked for BESIDE the runner first: a support box installs the runner at
+# /opt/barkpark-fleet/ (bp cloud support add|refresh write bp-read.sh next to it), where the
+# repo-relative ../../scripts/lib path does not exist. Then the repo layout, then the box's
+# own checkout. Found nowhere ⇒ listen/once REFUSE below (without bp_json every ledger read
+# fails and the loop would idle forever while still beating online).
+for _bp_read in "$_FLEET_RUN_DIR/bp-read.sh" "$_FLEET_RUN_DIR/../../scripts/lib/bp-read.sh" /opt/barkpark/scripts/lib/bp-read.sh; do
+  # shellcheck source=../../scripts/lib/bp-read.sh
+  if [ -f "$_bp_read" ]; then . "$_bp_read"; break; fi
+done
+unset _bp_read
 
 export PATH="$HOME/.local/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
 FLEET_AGENT="${FLEET_AGENT:-claude}"
@@ -135,17 +144,33 @@ print(round(max(cap - tot, 0.0), 6))
 PY
 }
 
+# The runner's own version (pdf-bl-fleet-run-refresh): the origin/main commit sha that
+# `bp cloud support add|refresh` wrote into fleet-run.version beside this file. Only a hex sha
+# is ever reported — anything else (absent file, a dev checkout, garbage) prints nothing, so
+# an unknown version reads as unreported rather than as a made-up one.
+runner_sha(){
+  local f="${FLEET_RUN_VERSION_FILE:-$_FLEET_RUN_DIR/fleet-run.version}" v=""
+  [ -f "$f" ] && IFS= read -r v < "$f"
+  case "$v" in
+    ''|*[!0-9a-f]*) return 0 ;;
+  esac
+  [ "${#v}" -ge 7 ] && [ "${#v}" -le 40 ] && printf '%s' "$v"
+  return 0
+}
+
 # The advertised capacity envelope. $1 = slots_free (0 mid-order, 1 idle). size_class + slots are
-# always present; budget appears only when a cap is set. Malformed ledger propagates exit 3.
+# always present; budget appears only when a cap is set; runner_sha only when fleet-run.version
+# holds a sha — it rides the beat the listener already sends, so the roster (bp fleet roster /
+# GET /v1/fleet/roster) shows which runner every box runs WITHOUT SSH. The server stores the
+# capacity map whole and validates only size_class/slots/budget. Malformed ledger propagates exit 3.
 capacity_json(){
-  local sf="${1:-1}" sc bud
+  local sf="${1:-1}" sc bud rs extra=""
   sc=$(measure_size_class)
   bud=$(measure_budget) || return 3
-  if [ -n "$bud" ]; then
-    printf '{"size_class":"%s","slots_total":1,"slots_free":%s,"budget":%s}\n' "$sc" "$sf" "$bud"
-  else
-    printf '{"size_class":"%s","slots_total":1,"slots_free":%s}\n' "$sc" "$sf"
-  fi
+  rs=$(runner_sha)
+  [ -n "$bud" ] && extra="$extra,\"budget\":$bud"
+  [ -n "$rs" ] && extra="$extra,\"runner_sha\":\"$rs\""
+  printf '{"size_class":"%s","slots_total":1,"slots_free":%s%s}\n' "$sc" "$sf" "$extra"
 }
 
 # One beat with measured capacity threaded in. On a corrupt ledger, scream and still beat (presence
@@ -472,6 +497,13 @@ do_order(){ # $1 = task id
 # and gate the verdict on fixtures without running a turn or touching a server.
 if [ "${BASH_SOURCE[0]}" = "$0" ]; then
   MODE="${1:?mode: listen|once}"; shift
+  case "$MODE" in
+    listen|once)
+      command -v bp_json >/dev/null 2>&1 || {
+        echo "fleet-run.sh: bp-read.sh not found (looked beside $_FLEET_RUN_DIR, in the repo's scripts/lib, and /opt/barkpark/scripts/lib) — refusing to $MODE: every ledger read would fail and the loop would idle forever. Re-run: bp cloud support refresh <name>" >&2
+        exit 1
+      } ;;
+  esac
   case "$MODE" in
     capacity)  # print the measured capacity envelope (the gate + a human both read this)
       WORKER="${1:-${WORKER:-}}"; capacity_json 1 ;;

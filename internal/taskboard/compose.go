@@ -356,7 +356,7 @@ func (m Model) previewLines(t Task, width, avail int, now time.Time) []string {
 // previewDetail is a task's preview-pane detail: the reading index's entry, or
 // a thin best-effort wrap of the board row when the index has none.
 func (m Model) previewDetail(t Task) TaskDetail {
-	if d, has := m.details[t.DocID]; has {
+	if d, has := m.detailFor(t.DocID); has {
 		return d
 	}
 	return TaskDetail{Task: t}

@@ -44,6 +44,8 @@ defmodule Barkpark.Tasks.DedupTest do
   @rate_limit "add rate limiting to the mutate controller"
   @rate_limit_desc "throttle writes on the REST mutate endpoint per token bucket"
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a near-duplicate cross-epic task is REFUSED with the similar list", %{scope: scope} do
     {:ok, _} =
       create_task("existing-rl", @rate_limit, scope, %{
@@ -123,6 +125,8 @@ defmodule Barkpark.Tasks.DedupTest do
              })
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a DONE task DOES still surface (already-landed signal)", %{scope: scope} do
     {:ok, _} =
       create_task("shipped-rl", @rate_limit, scope, %{
@@ -211,6 +215,8 @@ defmodule Barkpark.Tasks.DedupTest do
       assert env.message =~ "task dedup gate could not complete"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the bypass is an OWNER decision, not a server shortcut — it skips a real duplicate", %{
       scope: scope
     } do
@@ -314,7 +320,7 @@ defmodule Barkpark.Tasks.DedupTest do
       #   2. TOKEN-FAR, so they cannot themselves refuse. Once stopwords go, the
       #      probe scores {rate, limiting, mutate, controller} and each filler
       #      shares only {rate} out of a seven-token union — Jaccard 0.14, well
-      #      under the 0.30 advise floor.
+      #      under the 0.28 advise floor.
       #
       # Near-misspellings of the probe satisfy both: almost the same string,
       # almost none of the same words.
@@ -460,6 +466,8 @@ defmodule Barkpark.Tasks.DedupTest do
     # CRITERION 4 — the tripwire is not paid for with a detection hole. The rows
     # the scan DOES fetch are scored exactly as before; only the extra probe row
     # is new, and it is dropped before scoring.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "no detection regression: an in-range duplicate is still refused", %{scope: scope} do
       assert {:error, {:duplicate_task, payload}} =
                create_task("probe-default-limit", @rate_limit, scope, %{
@@ -487,6 +495,8 @@ defmodule Barkpark.Tasks.DedupTest do
   # produces the cost reduction — that unrelated rows never enter the candidate
   # set — plus, in both directions, that detection survived it.
   describe "trgm candidate pre-filter" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an unrelated task never enters the candidate set", %{scope: scope} do
       {:ok, _} =
         create_task("dupe-target", @rate_limit, scope, %{"description" => @rate_limit_desc})
@@ -523,6 +533,8 @@ defmodule Barkpark.Tasks.DedupTest do
 
     # ARM A of the mutation proof. The pre-filter must not become a hole: a
     # genuine near-duplicate still has to be REFUSED through the new query.
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a genuine near-duplicate is still REFUSED through the pre-filtered query", %{
       scope: scope
     } do
@@ -551,7 +563,7 @@ defmodule Barkpark.Tasks.DedupTest do
     # threshold dropped to 0.0, proving nothing about the decision. A trigram-
     # near, token-far title keeps the candidate IN the set and forces the
     # THRESHOLD to be the thing that lets it through: shared tokens are {rate}
-    # against a seven-token union, Jaccard 0.14, under the 0.30 advise floor.
+    # against a seven-token union, Jaccard 0.14, under the 0.28 advise floor.
     test "a candidate that IS scanned but scores below the threshold still PASSES", %{
       scope: scope
     } do
@@ -617,6 +629,8 @@ defmodule Barkpark.Tasks.DedupTest do
   end
 
   describe "candidate projection + twin collapse" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a draft/published TWIN pair is scored and reported ONCE, not twice", %{scope: scope} do
       {:ok, draft} =
         create_task("twin-rl", @rate_limit, scope, %{
@@ -641,6 +655,8 @@ defmodule Barkpark.Tasks.DedupTest do
       assert [%{id: "twin-rl"}] = payload.similar
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "detection is unchanged for a task that exists ONLY as a draft", %{scope: scope} do
       # No published counterpart: the draft is the one surviving row and must
       # still block. Collapsing twins narrowed nothing.
@@ -663,6 +679,8 @@ defmodule Barkpark.Tasks.DedupTest do
       assert [%{id: "only-draft-rl"}] = payload.similar
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the projected row still carries every scored field (labels included)", %{scope: scope} do
       {:ok, _} =
         create_task("proj-a", "alpha beta gamma delta", scope, %{
@@ -713,6 +731,8 @@ defmodule Barkpark.Tasks.DedupTest do
   end
 
   describe "tier-2 judge escalation" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a judged 'duplicate' escalates an advise-band match to a REFUSE", %{scope: scope} do
       with_judge({:ok, ~s({"relation":"duplicate","confidence":0.9,"reason":"same"})})
       {:ok, _} = create_task("adv-a", @adv_title_a, scope, %{"parent_id" => "epic-a"})
@@ -775,7 +795,7 @@ defmodule Barkpark.Tasks.DedupTest do
   # opening words (trgm match -> the row IS scanned) while its scored tokens stay
   # far apart: the probe tokenizes to {unrelated} once stopwords go, against
   # {unrelated, poisoned, label, set} here, for a Jaccard of 0.25 — under the
-  # 0.30 advise floor, so the create is still allowed on the merits.
+  # 0.28 advise floor, so the create is still allowed on the merits.
   @poison_probe_title "an unrelated new task"
 
   defp plant_poisoned_row!(doc_id, labels, scope) do
@@ -810,6 +830,8 @@ defmodule Barkpark.Tasks.DedupTest do
       @shape shape
       @label label
 
+      # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+      @tag :requires_plugins
       test "#{label} in content.labels does NOT take the gate down", %{scope: scope} do
         plant_poisoned_row!("poison-#{:erlang.phash2(@label)}", @shape, scope)
 
@@ -838,6 +860,8 @@ defmodule Barkpark.Tasks.DedupTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the malformed row is REPORTED by doc_id, not silently swallowed", %{scope: scope} do
       import ExUnit.CaptureLog
 
@@ -857,6 +881,8 @@ defmodule Barkpark.Tasks.DedupTest do
       assert log =~ "labels"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the poisoned row still PARTICIPATES in detection — it is not dropped", %{scope: scope} do
       # A row with unusable labels keeps its title/description signal, which is
       # 0.7 of the score. Degrading `labels` must not amount to deleting the row
@@ -934,6 +960,8 @@ defmodule Barkpark.Tasks.DedupTest do
     @up_title "add rate limiting to the mutate controller"
     @up_desc "throttle writes on the REST mutate endpoint per token bucket"
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an upsert onto an UNSEEN doc_id is a birth and the duplicate is REFUSED", %{
       scope: scope
     } do

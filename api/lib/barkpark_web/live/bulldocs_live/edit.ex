@@ -304,7 +304,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp apply_unidentified_op(socket, op) do
     cond do
-      not writable?(socket) ->
+      not fresh_writable?(socket) ->
         refuse_save(socket, nil)
 
       not is_binary(socket.assigns[:slug]) ->
@@ -333,7 +333,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   """
   def apply_ops(socket, ops) when is_list(ops) and ops != [] do
     cond do
-      not writable?(socket) ->
+      not fresh_writable?(socket) ->
         refuse(socket)
 
       not is_binary(socket.assigns[:slug]) ->
@@ -552,7 +552,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "The `+ Add block` form → `insert-after` when anchored, else `append-block`."
   def add_block(socket, %{"block-type" => type} = params) when is_binary(type) do
-    new = Blocks.default_block(type, Blocks.new_block_id())
+    new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
     op =
       case params["after-id"] do
@@ -645,7 +645,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Materialize one supported optional template slot through the canonical op path."
   def materialize_slot(socket, %{"kind" => kind} = params) do
-    case materialize_slot_block(kind) do
+    case materialize_slot_block(kind, Blocks.new_block_id(params["request_id"])) do
       nil ->
         failed_save(socket, params["request_id"])
 
@@ -668,7 +668,7 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   @doc "Insert a slash-menu block after its anchor, or append it for a blank anchor."
   def slash_insert(socket, %{"type" => type} = params) when is_binary(type) do
-    id = Blocks.new_block_id()
+    id = Blocks.new_block_id(params["request_id"])
 
     block =
       type
@@ -951,6 +951,19 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # Connected item-share readers retain the signed mount session in the
   # PluginScopeSession liveness assign. Resolve its raw link again for EVERY
   # write so revocation/expiry is checked before an idempotency receipt lookup.
+  # The request-less write paths re-check the credential exactly as the
+  # request-identified path does: the :can_edit? assign is set at mount, so an
+  # open socket whose token was revoked (or whose share lapsed) must not keep
+  # writing on the strength of it.
+  defp fresh_writable?(socket) do
+    writable?(socket) and
+      PaperViewer.can_edit?(
+        fresh_authorization_assigns(socket.assigns),
+        doc_field(socket.assigns[:paper_doc], :workspace_id),
+        socket.assigns[:slug]
+      )
+  end
+
   defp fresh_authorization_assigns(assigns) do
     assigns
     |> refresh_api_token()
@@ -1056,18 +1069,22 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # no copy of its own (the same D5/D6 stance the Studio editor holds).
   defp handle_result({:error, {:halted, reason}}, socket, request_id) do
     message = halt_reason(reason)
+    socket = sync(socket)
 
     socket
     |> assign(:paper_halt, message)
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{
-      saved: false,
-      request_id: request_id,
-      changed: false,
-      history_step: nil
-    })
+    |> assign(
+      :last_save_result,
+      # The refusal is final: say so, with the server's reason and the STORED
+      # runs, so the canvas host can put the author's view back on storage
+      # (see `SharedPaper.halted_result/3`).
+      socket
+      |> SharedPaper.halted_result(request_id, reason)
+      |> Map.merge(%{changed: false, history_step: nil})
+    )
   end
 
   defp handle_result({:error, _reason}, socket, request_id) do
@@ -1100,28 +1117,17 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> Map.put("request_id", params["request_id"])
   end
 
-  # Structural handlers mint block ids before they reach this seam. A lost
-  # acknowledgement rebuilds that op on retry, so bind the minted id to the
-  # stable request id before the exact-once facade fingerprints the payload.
+  # Constructors seed request-stable trees before overrides. Retain the parent
+  # ID guard here for server-minted ops; never remap client-authored identities.
   defp stable_request_op(%{@server_minted_block => true, "block" => %{} = block} = op, request_id) do
     op
     |> Map.delete(@server_minted_block)
-    |> Map.put("block", Map.put(block, "id", request_block_id(request_id)))
+    |> Map.put("block", SharedPaper.request_stable_block(block, request_id))
   end
 
   defp stable_request_op(op, _request_id), do: Map.delete(op, @server_minted_block)
 
   defp server_minted_block(op), do: Map.put(op, @server_minted_block, true)
-
-  defp request_block_id(request_id) do
-    suffix =
-      request_id
-      |> then(&:crypto.hash(:sha256, &1))
-      |> binary_part(0, 9)
-      |> Base.url_encode64(padding: false)
-
-    "b-" <> suffix
-  end
 
   # ── slice 4 internals ───────────────────────────────────────────────────────
 
@@ -1224,25 +1230,25 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
 
   defp socket_task_previews(socket), do: socket.assigns[:paper_task_previews] || %{}
 
-  defp materialize_slot_block("featured") do
+  defp materialize_slot_block("featured", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "image",
       "role" => "featured",
       "locked" => true
     }
   end
 
-  defp materialize_slot_block("ingress") do
+  defp materialize_slot_block("ingress", id) do
     %{
-      "id" => Blocks.new_block_id(),
+      "id" => id,
       "type" => "paragraph",
       "role" => "ingress",
       "content" => []
     }
   end
 
-  defp materialize_slot_block(_kind), do: nil
+  defp materialize_slot_block(_kind, _id), do: nil
 
   defp maybe_put_field_name(block, %{"fieldName" => name})
        when is_binary(name) and name != "",

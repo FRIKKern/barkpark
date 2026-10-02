@@ -20,6 +20,7 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Export do
       Keyword.get(opts, :experiment) ||
         Mix.raise("usage: mix barkpark.epic_fleet.export --experiment UUID [--out PATH]")
 
+    refuse_unless_enabled!()
     Mix.Task.run("app.start")
 
     case Barkpark.EpicFleet.export_benchmark_json(experiment_id) do
@@ -37,6 +38,19 @@ defmodule Mix.Tasks.Barkpark.EpicFleet.Export do
 
       {:error, reason} ->
         Mix.raise("EpicFleet benchmark export failed: #{inspect(reason)}")
+    end
+  end
+
+  # task-71ea7ca2c8fabce2: an operator who switched EpicFleet off gets a named
+  # refusal before the task boots the app or touches the ledger. `app.config`
+  # loads config/runtime.exs, where BARKPARK_CAPABILITIES_OFF is read.
+  defp refuse_unless_enabled! do
+    Mix.Task.run("app.config")
+
+    unless Barkpark.Capability.enabled?(:epic_fleet) do
+      Mix.raise(
+        "EpicFleet benchmark export refused: " <> Barkpark.Capability.off_message(:epic_fleet)
+      )
     end
   end
 end

@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.Papers.HistoricalBlockAuthorityTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
 

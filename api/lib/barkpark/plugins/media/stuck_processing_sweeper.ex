@@ -79,8 +79,8 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   namespace `Barkpark.Plugins.Media.*`) alongside `Assets`/`Codelists`, and NOT
   under host `lib/barkpark/media/`. It reconciles `mediaAsset` DOCUMENTS — rows
   the Media plugin owns and creates (`Assets.ensure_for_upload/1`) — and it
-  resolves them through `Assets.find_by_media_file_id/3` +
-  `Assets.file_scope_opts/1`. Sitting in host code it would be a NEW
+  resolves them through `Assets.find_by_media_file_id/3` (scoped with the CORE
+  `MediaFile.scope_opts/1`). Sitting in host code it would be a NEW
   core→removable-plugin coupling outside `@sanctioned_host_plugin_coupling`
   (`test/barkpark/plugin_free_boot_test.exs` tier 5), i.e. host code whose only
   reason to exist is a plugin's document type. Here the coupling disappears by
@@ -110,6 +110,7 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.Processing
+  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
 
@@ -234,7 +235,7 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
   # external callback that healed it between SELECT and now is respected (the
   # `"processing"` guard in `recover_one/1` short-circuits on the fresh read).
   defp reload(file) do
-    Assets.find_by_media_file_id(file.id, file.dataset, Assets.file_scope_opts(file))
+    Assets.find_by_media_file_id(file.id, file.dataset, MediaFile.scope_opts(file))
   end
 
   defp drive(%Document{} = doc, file) do
@@ -289,7 +290,7 @@ defmodule Barkpark.Plugins.Media.StuckProcessingSweeper do
            @asset_type,
            attrs,
            file.dataset,
-           [source: :worker] ++ Assets.file_scope_opts(file)
+           [source: :worker] ++ MediaFile.scope_opts(file)
          ) do
       {:ok, updated} ->
         updated

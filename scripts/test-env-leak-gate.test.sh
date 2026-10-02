@@ -271,6 +271,104 @@ defmodule CleanTest do
 end
 EX
 
+# ── 3f. a restore reached through a CHAIN of helpers credits at any depth ────
+# The gate used to credit only the FIRST link: a helper the on_exit names. A
+# restore whose put_env sits one helper further in — the shape
+# Barkpark.BootModeSandbox uses, BECAUSE the sandbox is the mechanism that fixes
+# the leak — was reported as `2 unrestored mutation(s) of :barkpark/:boot_mode`,
+# exit 1. A false positive ON THE REMEDY is worse than a miss: it teaches the
+# next author to add an allowlist row instead of a restore, and the waiver file
+# becomes the real policy.
+#
+# Three links here, not two, on purpose. "Credit two levels" is the same
+# enumeration one deeper and the next honest chain reds again; the rule is a
+# fixpoint over the file's own call graph, so this case must pass for a depth
+# the gate was never told about.
+mkdir -p "$TMP/chain"
+cat > "$TMP/chain/chain_test.exs" <<'EX'
+defmodule ChainTest do
+  use ExUnit.Case
+
+  defp write_boot_mode(v), do: Application.put_env(:barkpark, :boot_mode, v)
+  defp thread_it(v), do: write_boot_mode(v)
+  defp restore_boot_mode(v), do: thread_it(v)
+
+  setup do
+    prev = Application.get_env(:barkpark, :boot_mode)
+    Application.put_env(:barkpark, :boot_mode, :test)
+    on_exit(fn -> restore_boot_mode(prev) end)
+    :ok
+  end
+
+  test "restored through a three-link chain" do
+    assert Application.get_env(:barkpark, :boot_mode) == :test
+  end
+end
+EX
+rc="$(run_gate "$TMP/o3f" "$TMP/chain" "$TMP/allow-empty")"
+if [ "$rc" = 0 ]; then
+  ok "3f. a restore threaded through THREE helpers greens — depth is followed, not enumerated"
+else
+  no "3f. a correct multi-helper restore reddened (exit $rc) — the gate reds its own remedy"
+  sed 's/^/        /' "$TMP/o3f" >&2
+fi
+
+# ── 3g. …and the SAME chain shape restoring ANOTHER key still REDS ───────────
+# 3f alone would also pass if following the chain had simply pardoned everything
+# it could reach. This is the control that proves the widening moved DEPTH and
+# not the key: :plugins is put back, :boot_mode is not, and :boot_mode must red.
+mkdir -p "$TMP/chainleak"
+cat > "$TMP/chainleak/chain_leak_test.exs" <<'EX'
+defmodule ChainLeakTest do
+  use ExUnit.Case
+
+  defp write_plugins(v), do: Application.put_env(:barkpark, :plugins, v)
+  defp restore_plugins(v), do: write_plugins(v)
+
+  setup do
+    Application.put_env(:barkpark, :boot_mode, :test)
+    on_exit(fn -> restore_plugins([]) end)
+    :ok
+  end
+
+  test "boot_mode escapes the module" do
+    assert Application.get_env(:barkpark, :boot_mode) == :test
+  end
+end
+EX
+rc="$(run_gate "$TMP/o3g" "$TMP/chainleak" "$TMP/allow-empty")"
+if [ "$rc" != 0 ] && grep -q "chain_leak_test.exs:8" "$TMP/o3g"; then
+  ok "3g. a chain restoring a DIFFERENT key still reds (chain_leak_test.exs:8) — the closure is not an amnesty"
+else
+  no "3g. a chain restoring :plugins pardoned a leaking :boot_mode (exit $rc) — following the chain became a laundering path"
+  sed 's/^/        /' "$TMP/o3g" >&2
+fi
+
+# ── 3h. a helper chain NOTHING calls from a restore context credits nothing ──
+# The closure is seeded by the restore context. A file that defines the same two
+# helpers and calls them from a TEST body has written a mutation, not a restore.
+mkdir -p "$TMP/uncalled"
+cat > "$TMP/uncalled/uncalled_test.exs" <<'EX'
+defmodule UncalledTest do
+  use ExUnit.Case
+
+  defp write_boot_mode(v), do: Application.put_env(:barkpark, :boot_mode, v)
+  defp set_boot_mode(v), do: write_boot_mode(v)
+
+  test "sets it from the test body and never puts it back" do
+    set_boot_mode(:test)
+    assert true
+  end
+end
+EX
+rc="$(run_gate "$TMP/o3h" "$TMP/uncalled" "$TMP/allow-empty")"
+if [ "$rc" != 0 ] && grep -q "uncalled_test.exs:4" "$TMP/o3h"; then
+  ok "3h. the same helpers called from a TEST body still red — the seed is the restore context, not the shape"
+else
+  no "3h. an uncalled helper chain pardoned its own write (exit $rc) — every def/defp became a restore"
+  sed 's/^/        /' "$TMP/o3h" >&2
+fi
+
 # ── 4. a `try … after` restore in the same test block also greens ────────────
 cat > "$TREE/after_test.exs" <<'EX'
 defmodule AfterTest do

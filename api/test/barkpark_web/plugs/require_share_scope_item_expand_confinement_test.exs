@@ -222,6 +222,8 @@ defmodule BarkparkWeb.Plugs.RequireShareScopeItemExpandConfinementTest do
       refute Jason.encode!(result) =~ "SECRET-TASK"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "CONTROL: a SECTION grant on the same scope still gets ?resolve=tasks", ctx do
       %{conn: conn, ws: ws, proj: proj} = ctx
       with_shares("#{ws.slug}/#{proj.slug}/#{@dataset}:docs:read")

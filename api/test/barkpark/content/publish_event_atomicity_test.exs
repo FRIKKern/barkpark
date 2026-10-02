@@ -60,6 +60,7 @@ defmodule Barkpark.Content.PublishEventAtomicityTest do
   `mutation_events`, which sits on the write path of every document mutation in
   the suite. Serialising this file keeps that lock window short.
   """
+  # sync: `CREATE TRIGGER` takes an ACCESS EXCLUSIVE lock on `mutation_events`, on every mutation's write path
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content
@@ -227,6 +228,80 @@ defmodule Barkpark.Content.PublishEventAtomicityTest do
 
       assert kept && kept.rev == draft.rev,
              "the fenced draft delete committed while the publish event was lost"
+    end
+  end
+
+  # The same boundary for the three other lifecycle writes (r2c webhook audit):
+  # before, each COMMITTED its row change and only then inserted the event.
+  describe "unpublish / delete / discard paths" do
+    defp published!(pid) do
+      {:ok, _} =
+        Content.create_document(
+          "note",
+          %{"_id" => "drafts.#{pid}", "title" => "D", "status" => "draft"},
+          @dataset
+        )
+
+      {:ok, pub} = Content.publish_document(pid, "note", @dataset)
+      pub
+    end
+
+    test "a save_event fault on UNPUBLISH leaves the published row in place" do
+      pid = unique_id("atomic-unpublish")
+      pub = published!(pid)
+      break_mutation_events!()
+
+      assert_raise Ecto.StaleEntryError, fn ->
+        Content.unpublish_document(pid, "note", @dataset)
+      end
+
+      kept = fetch(pid, "note")
+      assert kept && kept.rev == pub.rev, "the unpublish committed while its event was lost"
+    end
+
+    test "a save_event fault on DELETE leaves the document in place" do
+      pid = unique_id("atomic-delete")
+      pub = published!(pid)
+      break_mutation_events!()
+
+      assert_raise Ecto.StaleEntryError, fn ->
+        Content.delete_document(pid, "note", @dataset)
+      end
+
+      kept = fetch(pid, "note")
+      assert kept && kept.rev == pub.rev, "the delete committed while its event was lost"
+    end
+
+    test "a save_event fault on DISCARD leaves the draft in place" do
+      pid = unique_id("atomic-discard")
+
+      {:ok, draft} =
+        Content.create_document(
+          "note",
+          %{"_id" => "drafts.#{pid}", "title" => "D", "status" => "draft"},
+          @dataset
+        )
+
+      break_mutation_events!()
+
+      assert_raise Ecto.StaleEntryError, fn ->
+        Content.discard_draft(pid, "note", @dataset)
+      end
+
+      kept = fetch(draft.doc_id, "note")
+      assert kept && kept.rev == draft.rev, "the discard committed while its event was lost"
+    end
+
+    test "CONTROL: without the fault each of the three still succeeds" do
+      pid = unique_id("atomic-ok")
+      _ = published!(pid)
+      assert {:ok, _} = Content.unpublish_document(pid, "note", @dataset)
+      assert {:ok, _} = Content.discard_draft(pid, "note", @dataset)
+
+      pid2 = unique_id("atomic-ok2")
+      _ = published!(pid2)
+      assert {:ok, _} = Content.delete_document(pid2, "note", @dataset)
+      refute fetch(pid2, "note")
     end
   end
 end

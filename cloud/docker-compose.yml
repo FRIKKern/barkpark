@@ -39,6 +39,9 @@ x-control-plane: &control_plane
     - STRIPE_PRICE_SUPPORTER
     - STRIPE_PRICE_SUPPORT_PLUS
     - WORKER_TOKEN
+    # Optional: comma-separated client IPs the worker token is accepted from
+    # (dr-w24). Unset = token alone, as before.
+    - WORKER_ALLOWED_IPS
     # OAuth SSO (#680): OAUTH_STATE_SECRET is a hard boot raise in prod —
     # same passthrough-only rule as the secrets above. Provider client ids
     # are optional (provider disabled when unset).
@@ -50,12 +53,20 @@ x-control-plane: &control_plane
     - GOOGLE_OAUTH_CLIENT_SECRET
     # Trial tier (dwb-13): optional knob, defaults to 14 in runtime.exs.
     - TRIAL_DAYS
+    # Per-team stored-artifact ceiling in bytes (ssw9-bl-artifact-retention-quota):
+    # optional knob, defaults to 512 MB in runtime.exs; "infinity" disables it.
+    - ARTIFACT_QUOTA_BYTES
     # Zero-paste Vercel handoff (task-4e4a53b101a97051): passthrough-only, both
     # optional — unset means the feature is OFF (503 feature_not_configured) and
     # the SPA keeps the classic clone-URL flow. Set VERCEL_PLATFORM_TOKEN in
     # cloud/.env to activate; VERCEL_TEAM_ID only for a team-scoped token.
     - VERCEL_PLATFORM_TOKEN
     - VERCEL_TEAM_ID
+    # Cloudflare Origin CA (cf-origin-ca-wire-and-provision): passthrough-only,
+    # both optional — unset means Origin CA minting is OFF (fails closed) and the
+    # cert/key paths default per runtime.exs.
+    - CLOUDFLARE_ORIGIN_CA_KEY
+    - ORIGIN_CA_CERT_DIR
     # Platform-operator allowlist (isu-w5 / GR60): comma-separated emails of
     # REGISTERED accounts. Passthrough-only and optional — unset means `[]`,
     # which fails CLOSED in BOTH directions: /v1/me reports
@@ -74,6 +85,12 @@ x-control-plane: &control_plane
     # refuses the node at boot rather than silently serving ours.
     - PLATFORM_BASE_DOMAIN
     - TEMPLATES_REPO_URL
+    # task-b4b2bb60b63e28ea follow-up: the control plane's own egress IP(s),
+    # sent on every self-update trigger so a self-updating box backfills
+    # BARKPARK_TRUSTED_PROXIES. Passthrough-only and optional — unset keeps the
+    # trigger body `{}`. Without this bare line the CONTAINER never sees a value
+    # set in .env, and every self-update silently goes out without it.
+    - BARKPARK_CLOUD_EGRESS_IPS
     # Mail (notifications-email): defaults point at the bundled `postfix`
     # sidecar below (self-hosted, no third-party provider). SMTP_USERNAME/
     # PASSWORD are passthrough-only, shared with the postfix service's own
@@ -108,6 +125,13 @@ x-control-plane: &control_plane
     # NOTHING (see the rule at the top of this file) and the container reports
     # null forever while looking built.
     - BARKPARK_GIT_SHA
+    # The INSTALLED provisioner binary's own sha, separate from the app sha above
+    # because the two legitimately diverge (the provisioner is cross-built at the
+    # run's headSha; the app is `git pull`-ed on the box). deploy/cp-deploy.sh
+    # reads it out of the artifact with `bp-provisioner --version` and exports it
+    # beside BARKPARK_GIT_SHA. BARE and WITHOUT a default, same rule: absent must
+    # stay absent so the reader reports null rather than an invented value.
+    - BARKPARK_PROVISIONER_SHA
     # ── Census widening (self-host-blessing W1/S1b) ────────────────────────
     # Everything below is read by cloud/config/runtime.exs or cloud/lib and was
     # NOT passed through: the container fell back to the code-side default (or

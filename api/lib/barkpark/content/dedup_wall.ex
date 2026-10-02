@@ -49,7 +49,29 @@ defmodule Barkpark.Content.DedupWall do
       failure arrives as an exit, not an exception, and a rescue-only clause
       lets it escape as a 500;
     * a degraded fetch returns `{:error, {:dedup_unavailable, message}}` whose
-      message names what could not be done and how to proceed.
+      message names what could not be done and how to proceed — and says WHICH
+      of two things happened: an infra OUTAGE (DBConnection / Postgrex / exit)
+      keeps the `content.dedup_bypass` remedy and logs at `:warning`; a code
+      DEFECT (FunctionClauseError, ArgumentError, MatchError, …) names the bug,
+      offers no bypass, logs at `:error` with a `DEFECT` prefix and emits
+      `[:barkpark, :dedup_wall, :defect]` — one sentence cannot mean both.
+
+  ## The `catch :exit` arm is PROVEN, not asserted
+
+  That exit clause used to be unfalsifiable from a test: inside the Ecto SQL
+  sandbox every stageable failure (dead or live dummy dynamic repo, ownership
+  timeout, unallowed process, `pg_terminate_backend`, query/transaction timeout
+  0 and 1) arrives as an EXCEPTION and lands in the `rescue`. Deleting the
+  clause left the whole dedup suite green.
+
+  `Barkpark.Dedup.ScanSeam` closes that. It is a one-verb fault injector
+  (`exit/1` and nothing else) called from inside this module's candidate fetch,
+  compiled in ONLY when `:dedup_scan_seam` is set — which only `config/test.exs`
+  does. Outside that build the compiler emits `check!/1` as a literal `:ok` and
+  the arming functions do not exist in the BEAM at all; inside it, an unarmed
+  process is byte-identical to today. Its moduledoc states all three layers.
+  The coverage lives in `test/barkpark/dedup/scan_exit_seam_test.exs`, whose two
+  cases red INDEPENDENTLY when the matching `catch :exit` clause is deleted.
 
   Escape hatches, both live: a document in the grandfather exemption ledger
   never reaches E4 at all (`AuthoringWall.dedup_gate/5`), and
@@ -89,6 +111,7 @@ defmodule Barkpark.Content.DedupWall do
   require Logger
 
   alias Barkpark.Content.{Document, DraftId, Scope}
+  alias Barkpark.Dedup.ScanSeam
   alias Barkpark.Repo
 
   # ── Tunable thresholds (copied from Tasks.Similarity — one calibrated scale) ─
@@ -208,7 +231,28 @@ defmodule Barkpark.Content.DedupWall do
   @spec lock_publish_scope!(String.t(), String.t(), keyword()) :: :ok
   def lock_publish_scope!(type, dataset, opts \\ []) do
     if scope_lock_enabled?() do
-      key = publish_scope_lock_key(type, dataset, Keyword.get(opts, :workspace_id))
+      workspace_id = Keyword.get(opts, :workspace_id)
+
+      # LOCK ORDER (task-0c397ec87de1f924): the audit-chain lock BEFORE the
+      # scope lock. A publish takes the scope lock and then, through
+      # `Broadcast.tap_broadcast` -> `Audit.emit/1`, the audit-chain lock in
+      # the SAME transaction. A mutate batch (`Mutations.apply_mutations/3` is
+      # one transaction) that audited an earlier mutation already holds the
+      # audit-chain lock when its publish reaches here: opposite orders over
+      # the same two keys, and Postgres answered 40P01:
+      #
+      #     A waits for advisory lock [_,0,1329934127,1]  dedup:paper:<ws>:production
+      #     B waits for advisory lock [_,0,2614849228,1]  audit chain of <ws>
+      #
+      # Taken first, every holder of the scope lock already holds the
+      # audit-chain lock, so the cycle cannot form; it is re-entrant, so the
+      # later emit does not wait on itself. `:audit_workspace_id` is the
+      # workspace the document is AUDITED under (AuthoringWall passes the
+      # document's); the opts scope is only the fallback. Inside this `if`, so
+      # the race harness's scope-lock-off red arm still serializes nothing.
+      :ok = Barkpark.Audit.lock_chain!(Keyword.get(opts, :audit_workspace_id, workspace_id))
+
+      key = publish_scope_lock_key(type, dataset, workspace_id)
       _ = Repo.query!("SELECT pg_advisory_xact_lock(hashtext($1))", [key])
     end
 
@@ -404,7 +448,25 @@ defmodule Barkpark.Content.DedupWall do
     end
   end
 
-  defp degraded_message(reason) do
+  # Two messages from one door, because two different people need to act.
+  #
+  # OUTAGE (a binary reason): the database was slow or gone. The operator can
+  # wait it out or, deliberately, publish unchecked — so the remedy is named.
+  #
+  # DEFECT (`{:defect, phrase}`): OUR code raised. Offering `dedup_bypass` here
+  # would teach the operator to disable the wall permanently for a bug that is
+  # never reported — the exact misread this arm exists to prevent. No remedy is
+  # offered because the operator has none; the sentence tells them whose bug it
+  # is and to report it.
+  defp degraded_message({:defect, phrase}) do
+    "publish dedup wall hit a DEFECT, not an outage: #{phrase}. The publish was " <>
+      "REFUSED rather than passed unchecked — no duplicate check ran, so nothing " <>
+      "here claims this document is new. This is a bug in Barkpark, not a slow " <>
+      "database: retrying will not help and there is no operator escape for it. " <>
+      "Report it with this message so the defect gets fixed."
+  end
+
+  defp degraded_message(reason) when is_binary(reason) do
     "publish dedup wall could not complete: #{reason}. The publish was REFUSED " <>
       "rather than passed unchecked — no duplicate check ran, so nothing here " <>
       "claims this document is new. Retry, or resend with content.dedup_bypass: " <>
@@ -526,7 +588,7 @@ defmodule Barkpark.Content.DedupWall do
 
   defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
-    timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
+    timeout = resolve_timeout(opts)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
     if timeout <= 0 do
@@ -549,6 +611,13 @@ defmodule Barkpark.Content.DedupWall do
   end
 
   defp do_fetch_candidates(type, dataset, title, timeout, incumbent, opts) do
+    # THE EXIT SEAM. Inert by construction outside `MIX_ENV=test` — see
+    # `Barkpark.Dedup.ScanSeam`'s moduledoc for the three layers that make it so.
+    # It sits INSIDE this function's try body on purpose: the `catch :exit` arm
+    # below is the thing under test, and an injection point outside the try would
+    # prove nothing about it.
+    ScanSeam.check!(:content_dedup_wall)
+
     query =
       from(d in Document,
         as: :doc,
@@ -629,11 +698,15 @@ defmodule Barkpark.Content.DedupWall do
       # `{:ok, _}` alone would have shaped this as a MatchError — the right
       # verdict by accident, with a message that names the wrong failure.
       {:error, reason} ->
-        Logger.warning(
-          "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
-        )
+        if code_error?(reason) do
+          {:degraded, defect_reason("candidate txn rolled back", reason)}
+        else
+          Logger.warning(
+            "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
+          )
 
-        {:degraded, rollback_phrase(reason, timeout)}
+          {:degraded, rollback_phrase(reason, timeout)}
+        end
     end
   rescue
     # CLIFF B, now fail-LOUD: this wraps the WHOLE Repo.transaction — a
@@ -645,12 +718,19 @@ defmodule Barkpark.Content.DedupWall do
     # outage, wrong for the bug — see @code_error_modules for the FunctionClauseError
     # that hid here, green, for months.
     e ->
-      if code_error?(e) and raise_on_code_errors?() do
-        reraise e, __STACKTRACE__
-      end
+      cond do
+        code_error?(e) and raise_on_code_errors?(opts) ->
+          reraise e, __STACKTRACE__
 
-      Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
-      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+        # Prod (tripwire off): the defect still refuses the publish, but it
+        # must not arrive wearing the outage's clothes — see `defect_reason/2`.
+        code_error?(e) ->
+          {:degraded, defect_reason("candidate fetch failed", e)}
+
+        true ->
+          Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
+          {:degraded, reason_phrase(e, resolve_timeout(opts))}
+      end
   catch
     # Pool-checkout death arrives as an EXIT, not an exception — a rescue-only
     # clause lets it through as a 500. This is the clause Tasks.Dedup needed.
@@ -673,6 +753,30 @@ defmodule Barkpark.Content.DedupWall do
     do: "the duplicate scan failed (#{inspect(mod)})"
 
   defp reason_phrase(_, _timeout), do: "the duplicate scan failed"
+
+  # The code-class arm of the rescue, when the tripwire is not re-raising (prod).
+  # Same fail-CLOSED verdict as an outage, DIFFERENT clothes:
+  #
+  #   * `Logger.error`, not `.warning` — an outage is watched, a defect is
+  #     paged. The `DEFECT` prefix is the string an alert can key on; the infra
+  #     arms above keep `degraded:` and stay at warning.
+  #   * `[:barkpark, :dedup_wall, :defect]` telemetry with the exception module,
+  #     for anyone who alerts on events rather than log lines.
+  #   * a `{:defect, phrase}` reason, so `degraded_message/1` renders the message
+  #     that does NOT offer `content.dedup_bypass`.
+  defp defect_reason(where, %{__struct__: mod} = e) do
+    Logger.error(
+      "Content.DedupWall DEFECT (not an outage): #{where} with a code error " <>
+        "in Barkpark, #{inspect(e)}"
+    )
+
+    :telemetry.execute([:barkpark, :dedup_wall, :defect], %{count: 1}, %{
+      exception: mod,
+      where: where
+    })
+
+    {:defect, "the duplicate scan could not run because of a bug in Barkpark (#{inspect(mod)})"}
+  end
 
   defp maybe_filter_dataset(query, nil), do: query
 
@@ -706,11 +810,14 @@ defmodule Barkpark.Content.DedupWall do
   # is refused, never waved through), which is exactly why nobody looked: the
   # wall was refusing publishes on that path while the log blamed the database.
   #
-  # PROD BEHAVIOUR IS UNCHANGED, deliberately. Raising in prod would turn a
-  # fail-closed refusal into a 500 and lose the actionable message the caller
-  # gets today, so `raise_on_code_errors?` defaults OFF and `config/test.exs`
-  # turns it ON. The tripwire's job is to stop a defect from SHIPPING, not to
-  # change what a shipped defect does.
+  # PROD STILL REFUSES INSTEAD OF RAISING, deliberately. Raising in prod would
+  # turn a fail-closed refusal into a 500, so `raise_on_code_errors?` defaults
+  # OFF and `config/test.exs` turns it ON. The tripwire's job is to stop a defect
+  # from SHIPPING. What a shipped defect SAYS did change: with the tripwire off,
+  # a code-class exception goes through `defect_reason/2` (`:error` log,
+  # telemetry, a message that names the bug and offers no bypass) instead of
+  # wearing the outage's `:warning` + `dedup_bypass` clothes. The classifier
+  # below is shared by both arms.
   @code_error_modules [
     ArgumentError,
     ArithmeticError,
@@ -733,8 +840,59 @@ defmodule Barkpark.Content.DedupWall do
   defp code_error?(%{__struct__: mod}), do: mod in @code_error_modules
   defp code_error?(_), do: false
 
-  defp raise_on_code_errors?,
-    do: Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+  # A per-call `dedup_raise_on_code_errors: false` opt lets a test exercise the
+  # PROD arm (tripwire off) without flipping the global app env under async
+  # siblings; it can only ever turn the tripwire OFF for one call, which is what
+  # prod already is.
+  defp raise_on_code_errors?(opts) do
+    Keyword.get(
+      opts,
+      :dedup_raise_on_code_errors,
+      Application.get_env(:barkpark, :dedup_raise_on_code_errors, false)
+    )
+  end
+
+  # ── THE SCAN BUDGET, AND WHY ITS OVERRIDE IS COMPILED OUT OF PROD ───────────
+  #
+  # THE PROBLEM (dr-w32-bl-dedup-outage-unreachable-from-http). The degraded arm
+  # — `{:error, {:dedup_unavailable, _}}`, the ONE wall shape that is a transient
+  # OUTAGE rather than a policy refusal — fired only on a non-string dataset or
+  # an explicit `dedup_timeout_ms` opt. Neither is settable from an HTTP request:
+  # the ingest controller's `put_scope/3` always threads a string dataset and
+  # `Content.upsert_paper/1` passes no opts through. So the ingest controller's
+  # four `{:error, {:dedup_unavailable, reason}}` arms were unreachable from the
+  # wire, and the 503 envelope they render was asserted NOWHERE above unit level.
+  # That is precisely how this shape shipped as a 409 plugin-veto in the first
+  # place: no test could see what the door actually said.
+  #
+  # THE DECISION (option (a) of the row, ruled by the lead). The DEFAULT budget —
+  # what every request gets when no opt is passed — becomes overridable through
+  # `Application.get_env(:barkpark, :dedup_timeout_ms)`, so a ConnCase can drive
+  # the whole HTTP stack into a degraded scan with `put_env(…, 0)` and read the
+  # wire shape the controller emits.
+  #
+  # WHY IT IS `Mix.env() == :test` AND NOT A RUNTIME FLAG. A runtime-only default
+  # would mean a prod config file — or anything that can write application env in
+  # a running node — could steer the wall into permanent self-inflicted degraded
+  # mode, turning every publish into a 503 with no database fault behind it. The
+  # sibling door above (`raise_on_code_errors?`) is safe as pure runtime config
+  # because its worst case is a LOUD raise on an already-broken path; this one's
+  # worst case is a silent, total, fail-closed outage. So the `get_env` read is
+  # COMPILED AWAY outside `:test`: in `:prod` and `:dev` `default_timeout/0` is
+  # the literal `@query_timeout_ms` and there is no config key to find.
+  #
+  # PROD BEHAVIOUR IS BYTE-IDENTICAL. Same constant, same call, one extra inlined
+  # zero-arity function. An explicit `dedup_timeout_ms` opt still wins everywhere
+  # — the override only supplies the DEFAULT.
+  @test_env Mix.env() == :test
+
+  defp resolve_timeout(opts), do: Keyword.get(opts, :dedup_timeout_ms, default_timeout())
+
+  if @test_env do
+    defp default_timeout, do: Application.get_env(:barkpark, :dedup_timeout_ms, @query_timeout_ms)
+  else
+    defp default_timeout, do: @query_timeout_ms
+  end
 
   # ── shaping ──────────────────────────────────────────────────────────────────
 

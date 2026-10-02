@@ -106,7 +106,7 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		Message:    "connected to " + server + " as " + tier + "; bp now defaults here",
 		Profile:    plan.Profile,
 		StudioURL:  server + "/studio",
-		Next:       nextSteps(plan.Profile),
+		Next:       nextSteps(plan.Profile, tier),
 	})
 	if opts.json() {
 		return nil
@@ -131,9 +131,20 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		fmt.Fprintf(w, "  api:    %s..%s\n", meta.MinAPIVersion, meta.MaxAPIVersion)
 	}
 	writeKnownServersLine(w, opts.KnownServers)
+	if anonymousTier(tier) {
+		// A tokenless connect is legitimate (a public read-only server), but the
+		// stranger who just ran it needs to know they are READ-ONLY and hidden
+		// from every write verb — otherwise the first `bp doc create` answers
+		// "no verb create" and nothing on screen says why.
+		fmt.Fprintf(w, "\n  ! no credential: you are connected anonymously (tier %s) — write verbs are hidden\n", tier)
+		fmt.Fprintf(w, "    to write, re-run with a token: bp setup --target connect --server %s --token <token>\n", server)
+	}
 	writeNextSteps(w, server, plan.Profile)
 	return nil
 }
+
+// anonymousTier reports whether a probed tier is the no-credential tier.
+func anonymousTier(tier string) bool { return tier == "" || tier == "none" || tier == "anonymous" }
 
 // writeNextSteps prints the done-screen tail of a successful connect: the
 // Studio URL plus the next-steps cheat block. The welcome-paper line renders
@@ -142,7 +153,10 @@ func executeConnect(plan SetupPlan, opts Options) error {
 func writeNextSteps(w interface{ Write([]byte) (int, error) }, server, profile string) {
 	fmt.Fprintf(w, "\n  studio:  %s/studio\n", server)
 	fmt.Fprintf(w, "\nnext steps\n")
-	fmt.Fprintf(w, "  bp doc ls                    list documents\n")
+	// `bp doc ls` alone is a usage error (it needs a <type>), so the first
+	// suggested step used to exit 2. Name the discovery step, then the list.
+	fmt.Fprintf(w, "  bp schema ls                 list the document types on this server\n")
+	fmt.Fprintf(w, "  bp doc ls <type>             list the documents of one type\n")
 	if profile == ProfileClean {
 		fmt.Fprintf(w, "  bp paper view welcome        read the welcome paper in your terminal\n")
 	}
@@ -152,8 +166,13 @@ func writeNextSteps(w interface{ Write([]byte) (int, error) }, server, profile s
 }
 
 // nextSteps is the machine form of the next-steps block for the JSON Result.
-func nextSteps(profile string) []string {
-	next := []string{"bp doc ls"}
+// An anonymous connect leads with the token step, the one thing that unlocks
+// every write verb.
+func nextSteps(profile, tier string) []string {
+	next := []string{"bp schema ls", "bp doc ls <type>"}
+	if anonymousTier(tier) {
+		next = append([]string{"bp setup --target connect --server <url> --token <token>"}, next...)
+	}
 	if profile == ProfileClean {
 		next = append(next, "bp paper view welcome")
 	}

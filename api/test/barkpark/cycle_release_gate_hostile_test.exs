@@ -39,6 +39,12 @@ defmodule Barkpark.CycleReleaseGateHostileAdapter do
 
       :capture_failure ->
         {:error, {:credential_detail, "must-never-be-persisted"}}
+
+      # task-455ede261044ef0b: the real HTTP leg RAISES inside Req (a host-less
+      # URL). It must surface as an error so CycleFleet stamps capture_failed,
+      # not kill the calling process through a linked task.
+      :capture_raises ->
+        Barkpark.CycleFleet.ReleaseCaptureAdapter.BoundedHTTP.get("http://", [])
     end
   end
 
@@ -269,7 +275,13 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
     restore_document!(base)
 
     failed_challenge_ids =
-      for mode <- [:missing_capture, :candidate_drift, :header_drift, :capture_failure] do
+      for mode <- [
+            :missing_capture,
+            :candidate_drift,
+            :header_drift,
+            :capture_failure,
+            :capture_raises
+          ] do
         Application.put_env(:barkpark, :cycle_release_capture_test_mode, mode)
         assert {:error, _reason} = activate(fixture, "activate-hostile-#{mode}")
 
@@ -284,7 +296,10 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
         assert challenge.failed_at
 
         assert challenge.failure ==
-                 if(mode == :capture_failure, do: "capture_failed", else: "finalize_failed")
+                 if(mode in [:capture_failure, :capture_raises],
+                   do: "capture_failed",
+                   else: "finalize_failed"
+                 )
 
         refute inspect(challenge) =~ "must-never-be-persisted"
         challenge.id
@@ -819,6 +834,45 @@ defmodule Barkpark.CycleReleaseGateHostileTest do
       rollback_key: "rollback-#{unique}",
       stable_a: stable_a
     }
+  end
+
+  # THE SERVING HALF of the fleet migration-lag fix (task-1ca9e5837593a8ba).
+  # config/runtime.exs no longer refuses the BOOT on a missing
+  # BARKPARK_RELEASE_CAPTURE_HMAC_SECRET — that raise made `mix ecto.migrate`
+  # impossible on a box without the secret and left three warm boxes
+  # crashlooping with a 28-52 day old schema (census 2026-09-19). The refusal
+  # therefore has to live HERE, at the feature boundary, and it has to be
+  # NAMED. Both arms run against the real activate flow so the fix cannot be
+  # "everything now passes": absent and short secrets refuse and sign nothing,
+  # a valid secret activates unchanged.
+  test "a missing or short release-capture HMAC secret refuses the gate by name and signs nothing" do
+    fixture = release_fixture!()
+    {:ok, _campaign} = stage_candidate(fixture, "campaign", fixture.campaign_document)
+    {:ok, _successor} = stage_candidate(fixture, "successor", fixture.successor_document)
+
+    previous_secret = Application.get_env(:barkpark, :cycle_release_capture_hmac_secret)
+    on_exit(fn -> restore_env(:cycle_release_capture_hmac_secret, previous_secret) end)
+
+    baseline_captures = Repo.aggregate(Capture, :count)
+
+    Application.delete_env(:barkpark, :cycle_release_capture_hmac_secret)
+
+    assert {:error, :release_capture_signing_unavailable} =
+             activate(fixture, "activate-absent-hmac-secret")
+
+    # A SET-but-short secret takes the same refusal, on the same >= 32 byte
+    # predicate config/runtime.exs used to enforce at boot.
+    Application.put_env(:barkpark, :cycle_release_capture_hmac_secret, String.duplicate("x", 31))
+
+    assert {:error, :release_capture_signing_unavailable} =
+             activate(fixture, "activate-short-hmac-secret")
+
+    assert Repo.aggregate(Capture, :count) == baseline_captures
+
+    restore_env(:cycle_release_capture_hmac_secret, previous_secret)
+
+    assert {:ok, _activation} = activate(fixture, fixture.activate_key)
+    assert Repo.aggregate(Capture, :count) == baseline_captures + length(@capture_names)
   end
 
   defp admit_open(fixture, key) do

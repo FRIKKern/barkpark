@@ -69,6 +69,7 @@ defmodule BarkparkWeb.TasksControllerTest do
     content =
       %{
         "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
         "lifecycle_status" => "open",
         "acceptance_criteria" => @fixture_criterion
       }
@@ -167,6 +168,7 @@ defmodule BarkparkWeb.TasksControllerTest do
       Map.merge(
         %{
           "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
           "acceptance_criteria" => [
             %{"criterion" => "the fixture states its bar", "met" => true, "evidence" => "fixture"}
           ],
@@ -508,6 +510,11 @@ defmodule BarkparkWeb.TasksControllerTest do
 
       # RED WITHOUT the `page` block: nil, and a caller cannot tell a bounded
       # page from a complete one.
+      # task-8483029782444df4 added the four `dataset*` keys to this block — the
+      # index now honours `?dataset=` and an envelope must state the scope it
+      # served. Kept as an EXACT map rather than four `["page"]["x"]` reads so
+      # it still reds on an unannounced key: a page block that grows in silence
+      # is the same class of defect as one that never existed.
       assert body["page"] == %{
                "limit" => 100,
                "offset" => 0,
@@ -518,7 +525,11 @@ defmodule BarkparkWeb.TasksControllerTest do
                # request's `?offset=`, and it is present exactly when
                # `has_more` is true. A `has_more: true` with nothing to page
                # with is the defect this key exists to close.
-               "next_offset" => 100
+               "next_offset" => 100,
+               "dataset" => nil,
+               "datasets" => ["production"],
+               "dataset_scope" => "all-datasets-in-scope",
+               "dataset_ambiguous" => []
              }
     end
 
@@ -569,7 +580,12 @@ defmodule BarkparkWeb.TasksControllerTest do
                "returned" => 2,
                "has_more" => true,
                # offset + returned, so the walk advances past what it just read.
-               "next_offset" => 4
+               "next_offset" => 4,
+               # task-8483029782444df4 — see the bare-GET test above.
+               "dataset" => nil,
+               "datasets" => ["production"],
+               "dataset_scope" => "all-datasets-in-scope",
+               "dataset_ambiguous" => []
              }
     end
 
@@ -1869,6 +1885,48 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert payload["doc"]["claim"]["epoch"] == epoch
     end
 
+    # task-66cc8ad999fa5a24 — `--ack-gate` ON THE WIRE. The GitHub reporter-loop
+    # flag is the ONE machine signal the census and the close gate read, and
+    # until this flag existed no writer with a `bp` verb could mint it: the
+    # eleven pre-gate `gh-<num>` rows could be given a criterion that READ like
+    # an acknowledgement and was invisible to both. Proven end to end here
+    # because the controller's `put_opt` is the seam that carries it.
+    test "--ack-gate on a --miss SEED mints the reporter-loop flag; in-range does not",
+         %{conn: conn, scope: scope} do
+      {doc_id, epoch} =
+        claim_with_criteria!(conn, scope, [%{"criterion" => "the first bar", "met" => false}])
+
+      body = Jason.encode!(%{worker_id: "worker-1", observed_epoch: to_string(epoch)})
+
+      # In range: the flag is dropped — a stored criterion is never retro-flagged.
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=0&criterion-text=the+first+bar&miss=true&note=still+going&ack-gate=true",
+          body
+        )
+
+      assert resp.status == 200
+      [first] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      refute Map.has_key?(first, "ack_gate")
+
+      # One past the end: the SEED mints it, born unmet.
+      resp =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{doc_id}/stamp?criterion=1&criterion-text=ACKNOWLEDGED+UPSTREAM&miss=true&note=backfilled&ack-gate=true",
+          body
+        )
+
+      assert resp.status == 200
+      [_first, seeded] = Jason.decode!(resp.resp_body)["doc"]["content"]["acceptance_criteria"]
+      assert seeded["criterion"] == "ACKNOWLEDGED UPSTREAM"
+      assert seeded["ack_gate"] == true
+      assert seeded["met"] == false, "seeding the obligation never discharges it"
+    end
+
     # D56 — the guard on the WIRE. An index-only --met stamp (the exact shape
     # five of eight Wave-4 builders sent) is a 409 whose message tells the caller
     # what to type, and it writes nothing. The message is not decoration: the bp
@@ -2801,6 +2859,61 @@ defmodule BarkparkWeb.TasksControllerTest do
       index = conn |> authed() |> get("/v1/tasks", %{"parent" => root}) |> json_response(200)
 
       assert index["docs"] |> Enum.map(& &1["doc_id"]) |> Enum.sort() == Enum.sort(child_ids)
+    end
+
+    # dr-bl-w6-phantom-draft-twins-accumulate-on-the-rail.
+    #
+    # THE SHAPE THIS PINS: a NEVER-PUBLISHED child — an unpaired `drafts.<id>`
+    # row with NO published twin anywhere in scope. That is the residue the row
+    # measured (`drafts.dr-w34-bl-5658-blocks-its-own-routing-fix`: status
+    # "draft", `bp doc get task <bare-id>` → not_found), NOT the twinned
+    # double-count, which `Tasks.Query.collapse_twins/1` already closed (the
+    # test two above pins it).
+    #
+    # It rides the rail BY RULING (the non-vacuity test directly above), so the
+    # defect is not that it is there — it is that the summary did not SAY so.
+    # `children` is the sole producer of `child_count` and carries each child's
+    # criteria_progress, so a denominator built off this array counted a
+    # never-published row with no way to know. The parent's own render and every
+    # brief list card already carry `status` under the omit-when-"published"
+    # law; the rail did not.
+    #
+    # RED BEFORE: `assert summary["status"] == "draft"` fails with
+    # `left: nil` — `child_summary/1` emitted no `status` key at all.
+    test "dr-bl-w6: a never-published draft child is NAMED status:draft on the rail",
+         %{conn: conn, scope: scope} do
+      root = mk_published_task!(uniq("phantom-root"), scope, %{})
+      published = mk_published_task!(uniq("phantom-pub"), scope, %{"parent_id" => root})
+
+      # Never published: `Content.create_document/4` forces every new row
+      # through `DraftId.draft_id/1`, so this lands at `drafts.<id>` with
+      # `status: "draft"` and NO published twin.
+      draft = mk_task!(uniq("phantom-draft"), scope, %{"parent_id" => root})
+      assert String.starts_with?(draft.doc_id, "drafts.")
+      assert draft.status == "draft"
+
+      payload = conn |> authed() |> get("/v1/tasks/#{root}") |> json_response(200)
+
+      by_id = Map.new(payload["children"], &{&1["doc_id"], &1})
+
+      # The ruling is UNCHANGED: the draft child is still on the rail and still
+      # counted. This slice makes it legible, it does not evict it.
+      assert payload["child_count"] == 2
+      assert Map.has_key?(by_id, draft.doc_id)
+      assert Map.has_key?(by_id, published)
+
+      summary = by_id[draft.doc_id]
+      assert summary["status"] == "draft"
+
+      # The negative arm: a published child's summary is byte-identical to what
+      # it was — the steady state is OMITTED, never shipped as "published".
+      refute Map.has_key?(by_id[published], "status")
+
+      # And the discriminator is USABLE: the audit the row could not run.
+      never_published =
+        payload["children"] |> Enum.filter(&(&1["status"] == "draft")) |> Enum.map(& &1["doc_id"])
+
+      assert never_published == [draft.doc_id]
     end
   end
 
@@ -3905,6 +4018,58 @@ defmodule BarkparkWeb.TasksControllerTest do
       refute Map.has_key?(card, "claim")
     end
 
+    # task-4fe00055375680bb: the cut above is right, and it made the residue
+    # UNCOUNTABLE from this endpoint — the read every board-wide sweep runs.
+    # `claim_residue` is the replacement question, asserted here over the real
+    # HTTP page rather than the renderer, because it is the page that the
+    # sweep walks. Both directions in one request.
+    test "claim_residue rides the ready page for a worker-less claim, and only for one",
+         %{conn: conn, scope: scope} do
+      phase = uniq("phase-brief-residue-key")
+
+      mk_task!(uniq("brief-residue-expired"), scope, %{
+        "parent_id" => phase,
+        "priority" => 0,
+        "claim" => %{
+          "worker" => nil,
+          "epoch" => 2,
+          "previous_worker" => "console-r21f-w14",
+          "expired_at" => "2026-09-18T05:06:00.735979Z"
+        }
+      })
+
+      mk_task!(uniq("brief-residue-released"), scope, %{
+        "parent_id" => phase,
+        "priority" => 1,
+        "claim" => %{
+          "worker" => nil,
+          "epoch" => 16,
+          "released_by" => "lead-cli",
+          "released_at" => "2026-09-20T14:56:20.623609Z"
+        }
+      })
+
+      # THE CONTROL that makes an absent key mean something: a row with no
+      # claim at all, on the same page, through the same render.
+      mk_task!(uniq("brief-residue-none"), scope, %{"parent_id" => phase, "priority" => 2})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks/ready?phase_id=#{phase}&view=brief")
+        |> json_response(200)
+
+      cards = Enum.sort_by(payload["docs"], & &1["priority"])
+      assert length(cards) == 3
+      assert Enum.map(cards, & &1["claim_residue"]) == ["expired", "released", nil]
+
+      # The card tightening is untouched: no claim block came back with it.
+      refute Enum.any?(cards, &Map.has_key?(&1, "claim"))
+
+      # Cut (a) holds — the claimless row omits the key, it does not null it.
+      refute Map.has_key?(List.last(cards), "claim_residue")
+    end
+
     test "truncation: title/now.text grapheme-capped with bare … and ONE help line; full view untouched",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-brief-trunc")
@@ -4637,6 +4802,87 @@ defmodule BarkparkWeb.TasksControllerTest do
       )
 
       assert bytes <= 30_720, "hostile 50-card brief page blew the 30,720 B ceiling: #{bytes}B"
+    end
+
+    # ── task-935213699e606b6a: the FULLY-DELEGATED hostile page ────────────
+    #
+    # WHY THIS TEST EXISTS. `put_brief_dispatch/4`'s moduledoc discloses a
+    # 1,200 B worst case (50 cards x `,"dispatch":"delegated"` = 24 B) and
+    # argues it is "inside that headroom" — quoting a headroom figure
+    # (~2,080 B there, 765 B in the ledger row that sent me here) that NOBODY
+    # re-derived. Worse, the hostile tripwire above cannot exhibit that worst
+    # case AT ALL: it seeds no children, so `classify/2` answers nil on all 50
+    # cards and the key never rides. The ceiling's own worst case was
+    # therefore unmeasured by the test that owns the ceiling.
+    #
+    # This test seeds the missing half — one LIVE (`in_progress`, i.e.
+    # non-terminal per `Dispatchability.terminal_statuses/0`) child per hostile
+    # card — so every one of the 50 cards classifies `delegated` and the page
+    # renders the disclosed worst case. `in_progress` children are not
+    # themselves ready, so the page is still the same 50 hostile cards.
+    #
+    # The 50/50 `delegated` census below is the teeth: an assertion on the
+    # byte total alone would go green on a page where the key silently stopped
+    # riding, which is exactly the state the tripwire above was already in.
+    test "hostile-ceiling worst case: 50 FULLY-DELEGATED maxed cards ≤ 30,720 B",
+         %{conn: conn, scope: scope} do
+      ts = "2026-07-19T12:00:00.654321Z"
+      title = String.duplicate("hostile title ", 10)
+      now_text = String.duplicate("now line words ", 20)
+
+      criteria =
+        for j <- 1..5,
+            do: %{"criterion" => "criterion #{j}", "met" => j <= 2, "evidence" => ""}
+
+      ids = for i <- 1..50, do: fixed_uniq("hd", i)
+
+      for {id, i} <- Enum.with_index(ids, 1) do
+        mk_card_task!(id, title, scope, %{
+          "lifecycle_status" => "blocked",
+          "priority" => 0,
+          "assignee" => "hostile-builder",
+          "parent_id" => "phase-hostile",
+          "distinct_from" => ids -- [id],
+          "acceptance_criteria" => criteria,
+          "disposition" => "parked",
+          "reopen_trigger" => "never — this row is a byte-ceiling fixture",
+          "claim" => %{
+            "epoch" => 7,
+            "ts_iso" => ts,
+            "work_digest" => "ffffffff",
+            "now" => %{"text" => now_text, "ts" => ts}
+          }
+        })
+
+        # The live child that makes the parent `delegated`. Not ready itself,
+        # so it never lands on the page being measured.
+        mk_task!(fixed_uniq("hdkid", i), scope, %{
+          "parent_id" => id,
+          "lifecycle_status" => "in_progress"
+        })
+      end
+
+      resp = conn |> authed() |> get("/v1/tasks/ready?view=brief&limit=50")
+      payload = json_response(resp, 200)
+      assert length(payload["docs"]) == 50
+
+      # The precondition this whole test buys: EVERY card carries the key, at
+      # the longest value the classifier can produce.
+      assert Enum.count(payload["docs"], &(&1["dispatch"] == "delegated")) == 50,
+             "the fully-delegated shape was not reached — dispatch census: " <>
+               inspect(Enum.frequencies(Enum.map(payload["docs"], & &1["dispatch"])))
+
+      assert_fixed_width_ids!(payload["docs"])
+
+      bytes = byte_size(resp.resp_body)
+
+      IO.puts(
+        "task-935213699e606b6a fully-delegated hostile probe: #{bytes}B for 50 maxed " <>
+          "delegated cards (#{30_720 - bytes}B headroom under the 30,720B ceiling)"
+      )
+
+      assert bytes <= 30_720,
+             "fully-delegated hostile 50-card brief page blew the 30,720 B ceiling: #{bytes}B"
     end
   end
 

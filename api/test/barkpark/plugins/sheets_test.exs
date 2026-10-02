@@ -74,27 +74,24 @@ defmodule Barkpark.Plugins.SheetsTest do
     # Mirror the pattern from registry_test.exs describe "collect_routes/1":
     # set :plugins to [] before calling the registry path, restore on exit.
     setup do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
+      prev = Barkpark.PluginEnv.capture()
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       :ok
     end
 
     test "with :plugins=[], collect_routes/1 returns [] (sheets has no routes yet, kill switch respected)" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
 
       assert Registry.collect_routes(%{}) == [],
              "expected collect_routes to return [] when :plugins kill switch is active"
     end
 
     test "with :plugins=[], collect_workers/1 returns [] (sheets has no workers, kill switch respected)" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
 
       assert Registry.collect_workers(%{}) == [],
              "expected collect_workers to return [] when :plugins kill switch is active"

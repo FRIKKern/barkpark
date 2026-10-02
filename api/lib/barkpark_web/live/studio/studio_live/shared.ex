@@ -13,7 +13,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
+  require Logger
+
   alias Barkpark.{Content, Tenancy}
+  alias Barkpark.Content.Forms
   alias Barkpark.Content.Warnings
   alias Barkpark.Media.Storage.Access, as: MediaAccess
   alias BarkparkWeb.Presence
@@ -239,6 +242,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     %{"blocks" => [%{"id" => "session-body", "type" => "paragraph", "content" => []}]}
   end
 
+  # A SHEET is born with ONE empty tab. `%{}` rendered fine — the grid paints a
+  # phantom "Sheet 1" when there are no tabs (sheet_grid/grid_data.ex) — but the
+  # session's op path looks tab 0 up for real (`Sheets.Core.get_tab/2` via
+  # session/ops.ex fetch_tab) and refused the FIRST keystroke with "1 op(s)
+  # rejected: the sheet has no tab 0", dropping the typed value (stranger walk,
+  # 2026-09-30). The seeded tab carries the same name the grid already shows.
+  def seed_new_doc_content("sheet"), do: %{"tabs" => [%{"name" => "Sheet 1", "cells" => %{}}]}
+
   def seed_new_doc_content(type) do
     if Content.blocks_type?(type), do: %{"blocks" => []}, else: %{}
   end
@@ -397,7 +408,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # other type, so it must not shadow the two refusals that carry their own
   # user-facing wording.
   @doc false
-  def do_autosave(socket, params) do
+  def do_autosave(socket, params, trigger \\ :unknown) do
     doc = socket.assigns[:editor_doc]
     doc_id = if is_map(doc), do: Map.get(doc, :doc_id)
     type = socket.assigns[:editor_type]
@@ -418,11 +429,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         |> assign(save_status: "Read-only")
 
       true ->
-        autosave_write(socket, params)
+        autosave_write(socket, params, trigger)
     end
   end
 
-  defp autosave_write(socket, params) do
+  defp autosave_write(socket, params, trigger) do
     doc = socket.assigns[:editor_doc]
     schema = socket.assigns[:editor_schema]
     type = socket.assigns[:editor_type]
@@ -446,7 +457,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         ScopeHelpers.scope_opts(socket)
       )
 
-    if doc && type do
+    changed? = autosave_changes_something?(doc, schema, params)
+
+    # task-512fec7116c519e5 crit 0 — THE PHANTOM'S FLIGHT RECORDER.
+    #
+    # Two `drafts.frontpage` rows appeared on the Gyldendal twin in September
+    # whose content was byte-identical to the published document, and a later
+    # sweep found two more (both publications). NOBODY could say what wrote
+    # them: the autosave path left no trace, so every instance had to be
+    # reconstructed from row timestamps alone. One line per write attempt,
+    # naming the socket, WHICH door fired (a `phx-change`, an explicit save,
+    # the slug-derive arm, an array op, or the `{:autosave_form, …}`
+    # handle_info), how many params were posted, and whether the store would
+    # actually move. A future instance is then one grep, not an archaeology.
+    #
+    # `:info`, not `:debug` — prod runs at `:info` and a line nobody ships is
+    # not a flight recorder. One line per autosave, no content in it.
+    Logger.info(
+      "studio.autosave socket=#{inspect(socket.id)} trigger=#{trigger} " <>
+        "type=#{inspect(type)} doc_id=#{inspect(doc && Map.get(doc, :doc_id))} " <>
+        "params=#{map_size(params)} changed=#{changed?}"
+    )
+
+    if doc && type && changed? do
       case Content.upsert_draft(
              doc,
              type,
@@ -461,6 +494,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           # show what the store holds.
           new_title = saved_doc.title || Map.get(params, "title", doc.title)
 
+          # Both halves as a TREE (Gyldendal parity E1.11): a finding on
+          # `seo.description` or `banners[1].title` renders under that input.
+          findings = validation_findings(schema, new_title, saved_doc.content, errs)
+
           panes =
             PaneBuilder.update_title(
               socket.assigns.panes,
@@ -474,8 +511,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             editor_is_draft: Content.draft?(saved_doc.doc_id),
             editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
             save_status: "Saved",
-            validation_errors: errs,
-            validation_warnings: validation_warnings(schema, new_title, saved_doc.content),
+            validation_errors: findings.errors,
+            validation_warnings: findings.warnings,
             cross_violations: compute_cross_violations(schema, params)
           )
           |> maybe_refresh_content_preview()
@@ -489,9 +526,99 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           assign(socket, save_status: "Save failed")
       end
     else
-      socket
+      # NOT a silent drop. When the post carried nothing new the store already
+      # holds what the editor shows, so "Saved" is the true answer — and it is
+      # the one `Fields.do_save/2` reads to clear the dirty flag on an explicit
+      # save of an untouched form. A socket with no doc/type still falls through
+      # untouched, exactly as before.
+      if doc && type, do: assign(socket, save_status: "Saved"), else: socket
     end
   end
+
+  # ── task-512fec7116c519e5 crit 1 — AN AUTOSAVE THAT CHANGES NOTHING ────────
+  #
+  # THE DEFECT. A `drafts.<id>` row whose content is byte-identical to the
+  # published document, with the published row untouched — observed four times
+  # on the Gyldendal twin across two types (frontpage, publication), no
+  # keystroke known for any of them. Harmless as bytes, not as state: it puts
+  # the document in "draft" in every desk, and it would carry a future
+  # serialisation regression into the store the day one lands.
+  #
+  # WHAT IS COMPARED, AND WHY THIS AND NOT SOMETHING ELSE. Both sides are
+  # normalised through `Forms.coerce_params/2` — the SAME function this write
+  # path already applies to the posted params two lines above — and the stored
+  # side is derived with `Forms.doc_to_form/2`, the very function that produced
+  # the form the browser is now posting back. That pair is the writer's own
+  # round trip, so the two known shape asymmetries cancel instead of
+  # manufacturing a false difference: an `image` value travels to the browser as
+  # a JSON STRING and returns as one while the stored value is a MAP, and a
+  # `richText` body is a map in content but an HTML string in the form.
+  # Comparing raw params to `doc.content` would report "changed" on every
+  # Forside — precisely the documents this is for.
+  #
+  # NOT a re-encode-and-compare-strings: JSON float formatting is not stable
+  # enough to carry a write decision. NOT a term compare of decoded content
+  # against a locally rebuilt candidate: that would fork the writer's
+  # normalisation into a second copy, and a fork here is a fork in "did this
+  # change anything".
+  #
+  # ONE-SIDED, DELIBERATELY. Only the keys the post actually carried are
+  # compared, and a key the stored projection does NOT carry counts as a
+  # DIFFERENCE. So a partial post (the slug-derive arm sends one field) is
+  # judged on what it sends, an empty post is "nothing changed", and anything
+  # this path cannot account for — an unknown key, a nil schema, a doc shape
+  # `doc_to_form/2` cannot project — falls through to the write. The failure
+  # direction is a write that was not needed, never an edit that was dropped.
+  defp autosave_changes_something?(doc, schema, params) when is_map(params) do
+    stored = stored_form(doc, schema)
+
+    cond do
+      stored == :unprojectable -> true
+      # CONTENT IS NOT THE WHOLE WRITE. A titleless type derives its `title`
+      # COLUMN on write from the schema's list-preview field
+      # (`TitleDerivation.maybe_derive/4`, Gyldendal parity E1.8) — and it fires
+      # only while that column is BLANK. So on a blank-titled row an autosave
+      # that posts nothing new still moves the store, and skipping it would
+      # strand the row as "Untitled" on every desk. Caught by
+      # `EditorTitlelessAuthorTest` "an autosave through the form back-fills the
+      # title column from the name", which went red the first time this guard
+      # ran the whole studio suite. A blank title always writes.
+      blank_title?(doc) -> true
+      params == %{} -> false
+      true -> Enum.any?(params, fn {k, v} -> Map.fetch(stored, k) != {:ok, v} end)
+    end
+  end
+
+  defp autosave_changes_something?(_doc, _schema, _params), do: true
+
+  # The stored document as the form the browser was handed. Read TOTALLY: a
+  # pane doc is a `%Content.Document{}` on the live path but a bare map in the
+  # unit fixtures, and `doc_to_form/2` reaches for `.title` / `.status` /
+  # `.content` — a KeyError on a shape that has always been legal here. An
+  # unprojectable doc (nil doc, nil schema) answers `:unprojectable`, which the
+  # caller reads as "cannot tell — write".
+  defp stored_form(doc, schema) when is_map(doc) and is_map(schema) do
+    shim = %{
+      title: Map.get(doc, :title),
+      status: Map.get(doc, :status),
+      content: Map.get(doc, :content)
+    }
+
+    Forms.coerce_params(Forms.doc_to_form(shim, schema), schema)
+  rescue
+    _ -> :unprojectable
+  end
+
+  defp stored_form(_doc, _schema), do: :unprojectable
+
+  defp blank_title?(doc) when is_map(doc) do
+    case Map.get(doc, :title) do
+      t when is_binary(t) -> String.trim(t) == ""
+      _ -> true
+    end
+  end
+
+  defp blank_title?(_doc), do: true
 
   @doc false
   def hook_opts(socket) do
@@ -790,41 +917,76 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       # bulk publish surfaces the same advisories the single-doc path does.
       Warnings.reset()
 
+      # A BULK unpublish must not do what the single-document path refuses to do
+      # silently: unpublish a document other documents still reference. The
+      # editor's Unpublish opens a guard listing the referencers (disconnect /
+      # unpublish anyway); the bulk path used to call unpublish_document straight
+      # through and leave those references dangling with no warning (stranger
+      # walk, 2026-09-30). A referenced document is SKIPPED here and counted —
+      # the single-document guard stays the one place to review and decide.
+      {ids_to_run, referenced} =
+        case kind do
+          :unpublish ->
+            Enum.split_with(ids, fn id ->
+              Content.Graph.reverse_referencers(
+                id,
+                [dataset: dataset] ++ ScopeHelpers.scope_opts(socket)
+              ) == []
+            end)
+
+          :publish ->
+            {ids, []}
+        end
+
       # `walled` tracks label-spine rejections separately from plugin halts and
       # generic failures (authoring-excellence D14): a wall rejection carries a
       # fix and must say so — "cancelled by plugin rules" would misattribute
       # it, "failed" would hide it. The first rejection's detail rides the
       # flash so the author sees a concrete field/rule/fix, not just a count.
-      {ok, halted, err, walled, wall_detail} =
-        Enum.reduce(ids, {0, 0, 0, 0, nil}, fn id, {ok, halted, err, walled, wall_detail} ->
+      {{ok, halted, err, walled, wall_detail}, unchanged} =
+        Enum.reduce(ids_to_run, {{0, 0, 0, 0, nil}, 0}, fn id, {acc, unchanged} ->
+          {ok, halted, err, walled, wall_detail} = acc
+
           result =
             case kind do
               :publish -> Content.publish_document(id, type, dataset, opts)
               :unpublish -> Content.unpublish_document(id, type, dataset, opts)
             end
 
-          case result do
-            {:ok, _} ->
-              {ok + 1, halted, err, walled, wall_detail}
+          step =
+            case result do
+              {:ok, _} ->
+                {ok + 1, halted, err, walled, wall_detail}
 
-            {:error, {:halted, _}} ->
-              {ok, halted + 1, err, walled, wall_detail}
+              {:error, {:halted, _}} ->
+                {ok, halted + 1, err, walled, wall_detail}
 
-            {:error, {:label_spine, details}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
+              {:error, {:label_spine, details}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(details)}
 
-            # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
-            # near-duplicate rejection is a WALL block, not a generic failure —
-            # fold both into the `walled` accumulator (first-wall_detail idiom) so
-            # the batch flash attributes them to the wall with a concrete fix.
-            {:error, {:unknown_tag, payload}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+              # The E3/E4 wall shapes (authoring-excellence D80): an unknown-tag or
+              # near-duplicate rejection is a WALL block, not a generic failure —
+              # fold both into the `walled` accumulator (first-wall_detail idiom) so
+              # the batch flash attributes them to the wall with a concrete fix.
+              {:error, {:unknown_tag, payload}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
-            {:error, {:duplicate_of, payload}} ->
-              {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
+              {:error, {:duplicate_of, payload}} ->
+                {ok, halted, err, walled + 1, wall_detail || format_wall_details(payload)}
 
-            _ ->
-              {ok, halted, err + 1, walled, wall_detail}
+              # Nothing to do is not a failure: publishing a document with no
+              # draft (already published, no pending changes) or unpublishing one
+              # that is not published. It used to be counted "failed".
+              {:error, :not_found} ->
+                :unchanged
+
+              _ ->
+                {ok, halted, err + 1, walled, wall_detail}
+            end
+
+          case step do
+            :unchanged -> {acc, unchanged + 1}
+            next -> {next, unchanged}
           end
         end)
 
@@ -852,11 +1014,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             "#{verb} #{ok} of #{length(ids)} (#{err} failed)"
         end
 
+      flash =
+        case bulk_skip_note(kind, unchanged, length(referenced)) do
+          "" -> flash
+          note -> String.trim_trailing(flash, ".") <> "." <> note
+        end
+
       socket
       |> assign(selected_doc_ids: MapSet.new())
       |> put_flash(:info, with_advisories(flash, advisories))
       |> rebuild_panes()
     end
+  end
+
+  # The sentences a bulk flash adds for documents it did not act on — never
+  # counted as failures, always saying why.
+  defp bulk_skip_note(kind, unchanged, referenced) do
+    nothing =
+      cond do
+        unchanged == 0 -> ""
+        kind == :publish -> " #{unchanged} had no draft changes to publish."
+        true -> " #{unchanged} #{if unchanged == 1, do: "was", else: "were"} not published."
+      end
+
+    refs =
+      if referenced == 0,
+        do: "",
+        else:
+          " #{referenced} skipped: still referenced by other documents — open " <>
+            "#{if referenced == 1, do: "it", else: "each"} to review the references before unpublishing."
+
+    nothing <> refs
   end
 
   @doc false
@@ -1060,7 +1248,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         Barkpark.Tenancy.Auth.member?(token, ws_id)
 
       _ ->
-        match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
+        # An ACCOUNT session carries `:current_user`, never `:api_token`
+        # (OptionalSessionToken). Before this arm a signed-in account could
+        # reach only the workspace it was already mounted in, so the scope
+        # switcher's dataset click (scope-open) silently closed the menu for
+        # every account user — Gyldendal, 2026-09-14, an owner of Default
+        # trying to leave the twin workspace. Membership is asked of the
+        # user's OWN principal kind; the identity fallback stays for the
+        # anonymous/dev socket only.
+        case socket.assigns[:current_user] do
+          %Barkpark.Accounts.User{} = user ->
+            Barkpark.Tenancy.Auth.member?(user, ws_id)
+
+          _ ->
+            match?(%{id: ^ws_id}, socket.assigns[:current_workspace])
+        end
     end
   end
 
@@ -1119,6 +1321,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {panes, editor} =
       PaneBuilder.build(socket.assigns.dataset, socket.assigns.nav_path,
         desk: socket.assigns[:nav_desk],
+        list_limits: socket.assigns[:desk_list_limits] || %{},
         scope: ScopeHelpers.scope_opts(socket),
         scope_prefix: socket.assigns[:scope_prefix] || ""
       )
@@ -1170,6 +1373,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_blocks_identity_error: editor_blocks_identity_error,
         editor_blocks_synth?: editor_blocks_synth?,
         editor_empty: editor_empty,
+        # E3.5: set only when the walk ALIASED a dead head (friction 67) and
+        # opened a document — the LiveView rewrites the URL to it once.
+        editor_canonical_path: editor && editor[:canonical_path],
         save_status:
           if(same_doc?,
             do: socket.assigns[:save_status] || "",
@@ -1459,15 +1665,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         }
 
       match?(%{role: :list}, last) ->
+        selected = Map.get(last, :selected)
+
         %{
           reason: :no_schema,
           doc_id: List.last(nav_path),
-          doc_type: Map.get(last, :selected)
+          doc_type: selected_type_name(last, selected) || selected
         }
 
       true ->
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
     end
+  end
+
+  # The type the selected row stands for. `:selected` is a NODE id, and a bare
+  # `/studio/<type>` URL is normalized into the …Rest column, whose rows
+  # `Structure` ids `"rest-<type>"` — so the node id is not the type name.
+  # nil when the row carries no type (the caller falls back to the id).
+  defp selected_type_name(pane, selected) do
+    pane
+    |> Map.get(:items, [])
+    |> Enum.find_value(fn
+      %{id: ^selected, type_name: type} when is_binary(type) -> type
+      _ -> nil
+    end)
   end
 
   # Did the desk walk stop on an outbound `:plugin_link` row? Keyed on the
@@ -1685,13 +1906,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc """
-  Warning-level findings for the open document against the schema the Studio
-  resolved (Gyldendal parity E1.6). `%{}` without a schema.
+  Error and warning findings for the open document against the schema the
+  Studio resolved, as the tree `Validation.check_tree/3` reads (Gyldendal
+  parity E1.6 warnings, E1.11 nested). Without a schema the save path's own
+  flat verdict stands and there are no warnings.
   """
-  def validation_warnings(nil, _title, _content), do: %{}
+  def validation_findings(nil, _title, _content, errs),
+    do: %{errors: BarkparkWeb.StudioLocale.localize_findings(errs || %{}), warnings: %{}}
 
-  def validation_warnings(schema, title, content),
-    do: Barkpark.Content.Validation.check(content, title, schema).warnings
+  def validation_findings(schema, title, content, _errs) do
+    # Translated ONCE here, in the workspace's language (E7 follow-up), so
+    # every render site — top-level field, composite subfield, array row,
+    # localized text, codelist — shows the same words.
+    %{errors: errs, warnings: warns} =
+      Barkpark.Content.Validation.check_tree(content, title, schema)
+
+    %{
+      errors: BarkparkWeb.StudioLocale.localize_findings(errs),
+      warnings: BarkparkWeb.StudioLocale.localize_findings(warns)
+    }
+  end
 
   @doc false
   def resolve_nav_group(_current, _old, nil), do: nil
@@ -2024,40 +2258,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @spec sheet_authz_ctx(map()) :: map()
   def sheet_authz_ctx(assigns) when is_map(assigns), do: Map.take(assigns, @sheet_authz_keys)
 
-  defp sheet_grant_target_denied?(assigns) do
-    grant_graded?(assigns) and not grant_admits_sheet?(assigns)
-  end
-
-  # The two assigns that mean "this socket's write descends from a GRANT":
-  # `LiveScope.assign_grant_scope/2` sets `caller_context`, and
-  # `attach_write_gate/2` sets `write_gate?`. Same pair `Caps.restricted?/1` and
-  # `Shared.Paper.grant_graded?/1` read.
-  defp grant_graded?(assigns) do
-    not is_nil(Map.get(assigns, :caller_context)) or Map.get(assigns, :write_gate?) == true
-  end
-
-  # `Access.validate/3` — the SAME containment ladder `attach_write_gate/2`'s
-  # `write_target_permitted?/4` walks, over the SAME grant set it captured, so
-  # the two routes answer this target identically. Deliberately NOT
-  # `Access.admits_desk?/3`: that helper is the mechanism this closes.
+  # ONE LADDER, ONE OWNER: `Caps.grant_target_denied?/4`. This surface used to
+  # RESTATE the containment walk (pds-w41 bolted a second copy on because the
+  # paper copy was `defp`), which is exactly the drift shape `Caps`' own
+  # moduledoc warns about. What is left here is the SHEET surface's one
+  # deliberate difference, and it is a pair of ARGUMENTS, not a fork:
   #
-  # The grants come from `caller_context` rather than a fresh reload: expiry
-  # truth already arrives through `Caps.write_capable_now?/1` (an expired grant
-  # makes `caps.write` false and the `and` above short-circuits), while a grant
-  # ADDED mid-session leaves this set stale-NARROW, which over-restricts and
-  # never under-restricts — the same disposition `attach_write_gate/2`
-  # documents for its own captured ctx.
-  defp grant_admits_sheet?(assigns) do
-    case sheet_write_target(assigns) do
-      %{} = target ->
-        Enum.any?(
-          grant_ctx_grants(assigns),
-          &(Barkpark.Access.validate(&1, :write, target) == :ok)
-        )
+  #   * the grants come from `caller_context` rather than a fresh reload —
+  #     `render/1` is a hot path and a `Repo` round trip per parent render is
+  #     not a thing to add to it. Expiry truth already arrives through
+  #     `Caps.write_capable_now?/1` (an expired grant makes `caps.write` false
+  #     and the `and` at the callsite short-circuits), and a grant ADDED
+  #     mid-session leaves this set stale-NARROW, which over-restricts and never
+  #     under-restricts — the same disposition `attach_write_gate/2` documents
+  #     for its own captured ctx;
+  #   * the leaf comes from the `:sheet_doc` assign, read totally by
+  #     `Caps.doc_leaf/1`, so a sheet doc with no type or doc_id resolves to an
+  #     unresolvable target and FAILS CLOSED for a grant-graded socket.
+  defp sheet_grant_target_denied?(assigns) do
+    {type, doc_id} = Caps.doc_leaf(Map.get(assigns, :sheet_doc))
 
-      nil ->
-        false
-    end
+    Caps.grant_target_denied?(assigns, grant_ctx_grants(assigns), type, doc_id)
   end
 
   defp grant_ctx_grants(assigns) do
@@ -2066,42 +2287,4 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       _ -> []
     end
   end
-
-  # The desk levels come from the MOUNT and the leaf levels from the SHEET the
-  # component is about to write — the same broad→narrow ladder
-  # `LiveScope.write_target/3` feeds `Access.validate/3`, including its
-  # `Content.published_id/1` normalisation so a draft id is matched against the
-  # grant by its published identity.
-  #
-  # FAIL-CLOSED on an unresolvable target (no workspace / project / dataset, or
-  # a sheet doc with no type or doc_id): `nil` here denies for a grant-graded
-  # socket, matching `write_target/3`'s `:error -> halt`. Inert for every other
-  # socket, which never reaches this.
-  defp sheet_write_target(assigns) do
-    ws = Map.get(assigns, :current_workspace)
-    proj = Map.get(assigns, :current_project)
-    dataset = Map.get(assigns, :dataset)
-    doc = Map.get(assigns, :sheet_doc)
-    type = sheet_doc_field(doc, :type)
-    doc_id = sheet_doc_field(doc, :doc_id)
-
-    if is_map(ws) and is_binary(Map.get(ws, :id)) and is_map(proj) and
-         is_binary(Map.get(proj, :id)) and is_binary(dataset) and is_binary(type) and
-         is_binary(doc_id) do
-      %{
-        workspace_id: ws.id,
-        project_id: proj.id,
-        dataset: dataset,
-        type: type,
-        doc_id: Content.published_id(doc_id)
-      }
-    end
-  end
-
-  # Read TOTALLY: the sheet doc is a `%Content.Document{}` on the live path but a
-  # bare map in unit fixtures, so `doc.type` would raise a KeyError on a shape
-  # that has always been legal here. A missing key yields nil, which
-  # `sheet_write_target/1` treats as unresolvable (fail-closed).
-  defp sheet_doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
-  defp sheet_doc_field(_doc, _key), do: nil
 end

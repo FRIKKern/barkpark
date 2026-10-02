@@ -4,7 +4,13 @@
  * changes without an ADR amendment.
  */
 
-import type { CreateProjectInput, CreateWorkspaceInput, Project, Workspace, Dataset } from './tenancy'
+import type {
+  CreateProjectInput,
+  CreateWorkspaceInput,
+  Project,
+  Workspace,
+  Dataset,
+} from './tenancy'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import type { ListenOptions } from './listen'
 import type { WebhookEventKind } from './webhook'
@@ -14,6 +20,24 @@ export type ApiVersion = `${number}-${number}-${number}`
 
 /** Phoenix perspectives — the view a read resolves against (published docs, drafts, or raw). */
 export type Perspective = 'published' | 'drafts' | 'raw'
+
+/**
+ * Server-side BLOCK RESOLUTION for a read (`?resolve=…`) — an OPT-IN seam on
+ * `GET /v1/data/doc/…` and `GET /v1/data/query/…`
+ * (`api/lib/barkpark_web/controllers/query_controller.ex`, `maybe_resolve_tasks/3`).
+ *
+ * `'tasks'` runs the same resolver Studio runs: every PortableDoc task block
+ * that carries a `query` instead of a literal `snapshot` is answered with a
+ * live snapshot of the matching rows, perspective-threaded like the documents
+ * around it. WITHOUT it a query-shaped task block arrives with no rows at all,
+ * and a renderer that reads `snapshot` (e.g. `@barkpark/react`'s task-board)
+ * has nothing to draw — permanently, not staly.
+ *
+ * Author-pinned blocks (a literal `snapshot`/`task` and no `query`) are left
+ * untouched by design, so this is additive: it can only fill blocks that were
+ * empty.
+ */
+export type ResolveSpec = 'tasks'
 
 /** Options for `client.exportDataset()` (`GET /v1/data/export/:dataset`). */
 export interface ExportOptions {
@@ -152,12 +176,7 @@ export interface BarkparkClientConfig extends BarkparkHooks {
 
 /** Filter op predicates (input to fluent builder). */
 export type FilterValue =
-  | string
-  | number
-  | boolean
-  | null
-  | Date
-  | ReadonlyArray<string | number | boolean | Date>
+  string | number | boolean | null | Date | ReadonlyArray<string | number | boolean | Date>
 
 export interface QueryOptions {
   perspective?: Perspective
@@ -792,7 +811,11 @@ export interface MfaVerifyResult {
 /** The user-auth surface, namespaced under `client.auth`. */
 export interface BarkparkAuth {
   /** Register a new user (`POST /v1/auth/register`). */
-  register(email: string, password: string, opts?: { signal?: AbortSignal }): Promise<AuthRegisterResult>
+  register(
+    email: string,
+    password: string,
+    opts?: { signal?: AbortSignal },
+  ): Promise<AuthRegisterResult>
   /** Log in; returns `{ token, user }` (`POST /v1/auth/login`). Throws `BarkparkAuthError` (code `mfa_required` when a TOTP code is needed). */
   login(email: string, password: string, opts?: LoginOptions): Promise<AuthSession>
   /** The current user, or `null` when not authenticated (`GET /v1/auth/me`). */
@@ -1147,9 +1170,15 @@ export interface DocsBuilder<T = BarkparkDocument> {
   /** Sugar for `where(field, 'neq', value)` — strict `!=`; NULL/absent rows are excluded. */
   neq(field: DocFieldName<T>, value: string | number | boolean | Date | null): DocsBuilder<T>
   /** Sugar for `where(field, 'in', values)` — matches any listed value. */
-  in(field: DocFieldName<T>, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
+  in(
+    field: DocFieldName<T>,
+    values: ReadonlyArray<string | number | boolean | Date>,
+  ): DocsBuilder<T>
   /** Sugar for `where(field, 'nin', values)` — excludes the listed values (NULL/absent rows too). */
-  nin(field: DocFieldName<T>, values: ReadonlyArray<string | number | boolean | Date>): DocsBuilder<T>
+  nin(
+    field: DocFieldName<T>,
+    values: ReadonlyArray<string | number | boolean | Date>,
+  ): DocsBuilder<T>
   /** Sugar for `where(field, 'has', value)` — array membership (the field's array contains `value`, as a `{_ref}` or scalar). */
   has(field: DocFieldName<T>, value: string | number | boolean | Date): DocsBuilder<T>
   /**
@@ -1197,7 +1226,12 @@ export interface DocsBuilder<T = BarkparkDocument> {
    * `expand`, so an expanded field survives if it's selected.
    */
   select(fields: string | string[]): DocsBuilder<T>
-  /** Execute and return all matches. */
+  /**
+   * Execute and return ONE page of matches — the server's default page (100)
+   * unless `.limit(n)` (max 1000) is set. Use `.findPage()` for the page plus
+   * `total`/`hasMore`/`nextOffset`. A `find()` without `.limit()` that leaves
+   * documents behind logs a one-time warning per type.
+   */
   find(): Promise<T[]>
   /** Execute with `limit:1` and return the first match or null. */
   findOne(): Promise<T | null>
@@ -1254,10 +1288,14 @@ export interface TransactionBuilder {
   create(doc: Partial<BarkparkDocument> & { _type: string }): TransactionBuilder
   /** Append a `createOrReplace` op — server upserts the document by `_id`. Only `_id` + `_type`
    *  are required; the server assigns `_rev` and the `_createdAt`/`_updatedAt` timestamps. */
-  createOrReplace(doc: Partial<BarkparkDocument> & { _id: string; _type: string }): TransactionBuilder
+  createOrReplace(
+    doc: Partial<BarkparkDocument> & { _id: string; _type: string },
+  ): TransactionBuilder
   /** Append a `createIfNotExists` op — creates the document only if `_id` is free (no-op otherwise).
    *  Only `_id` + `_type` are required; the server assigns `_rev` and the timestamps. */
-  createIfNotExists(doc: Partial<BarkparkDocument> & { _id: string; _type: string }): TransactionBuilder
+  createIfNotExists(
+    doc: Partial<BarkparkDocument> & { _id: string; _type: string },
+  ): TransactionBuilder
   /** Append a `patch` op. `type` is the document's `_type` — the server requires it to
    *  dispatch the op (api-v1.md §6). Call `.set()` on the inner builder; do NOT call its
    *  `.commit()`. */
@@ -1287,7 +1325,8 @@ export interface BarkparkClient {
   withConfig(patch: Partial<BarkparkClientConfig>): BarkparkClient
   /** Fetch a single document by type + id. Returns `null` on 404. Pass
    *  `{ expand }` to inline reference fields (depth 1), e.g. `{ expand: 'author' }`,
-   *  and/or `{ fields }` to project (return only those content fields). */
+   *  `{ fields }` to project (return only those content fields), and/or
+   *  `{ resolve: 'tasks' }` to have the server fill query-shaped task blocks. */
   doc<T = BarkparkDocument>(
     type: string,
     id: string,
@@ -1296,6 +1335,7 @@ export interface BarkparkClient {
       fields?: string | string[]
       signal?: AbortSignal
       perspective?: Perspective
+      resolve?: ResolveSpec
     },
   ): Promise<T | null>
   /**
@@ -1305,7 +1345,7 @@ export interface BarkparkClient {
    */
   docs<T = BarkparkDocument>(
     type: string,
-    opts?: { perspective?: Perspective; signal?: AbortSignal },
+    opts?: { perspective?: Perspective; signal?: AbortSignal; resolve?: ResolveSpec },
   ): DocsBuilder<T>
   /**
    * Batch-fetch documents of `type` by id. Returns them in the SAME order as `ids`,
@@ -1329,10 +1369,7 @@ export interface BarkparkClient {
   search<T = BarkparkDocument>(q: string, opts?: SearchOptions): Promise<SearchResult<T>>
   /** Typeahead suggestions for a document search box — recent/popular/nohits queries
    *  (`GET /v1/data/search/:dataset/suggestions`); `prefix` filters each bucket as the user types. */
-  getSearchSuggestions(
-    prefix?: string,
-    opts?: SearchSuggestionsOptions,
-  ): Promise<SearchSuggestions>
+  getSearchSuggestions(prefix?: string, opts?: SearchSuggestionsOptions): Promise<SearchSuggestions>
   /** Upload a media asset (multipart `POST /v1/media/:dataset/upload`). `file` is a web `Blob`/`File`. */
   uploadAsset(file: Blob, opts?: UploadOptions): Promise<MediaAsset>
   /** List media assets in the dataset (`GET /v1/media/:dataset`). Paginate with `limit`/`offset`. */
@@ -1478,7 +1515,11 @@ export interface BarkparkClient {
    *  `opts` forwards retry / idempotencyKey / timeoutMs to the write. */
   discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
-  listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T>
+  listen<T = BarkparkDocument>(
+    type?: string,
+    filter?: ListenFilter,
+    opts?: ListenOptions,
+  ): ListenHandle<T>
   /** Stream a dataset's documents as NDJSON (`GET /v1/data/export/:dataset`) —
    *  the backup/portability export, yielded lazily via an async iterable. */
   exportDataset(opts?: ExportOptions): AsyncGenerator<BarkparkDocument, void, unknown>

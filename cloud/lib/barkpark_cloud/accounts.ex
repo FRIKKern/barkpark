@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Accounts do
     TeamMembership,
     TwoFactor,
     User,
+    UserSecurityEvent,
     UserToken
   }
 
@@ -110,6 +111,23 @@ defmodule BarkparkCloud.Accounts do
   # fronting proxy/WAF is the IP-level backstop, the same stance /register takes.
   @confirm_throttle {1, 300}
   @change_email_throttle {3, 3600}
+
+  # cch-bl-lifecycle-token-reaper: the GRACE WINDOW `reap_lifecycle_tokens/0`
+  # applies to EXPIRED-but-unrevoked `reset` / `confirm` / `change_email` rows,
+  # and the reason it exists at all. `throttled?/3` above implements BOTH
+  # throttles by COUNTING rows: `is_nil(revoked_at) and inserted_at >= since`.
+  # It never looks at `expires_at`. So an expired-but-unrevoked row is STILL a
+  # live vote against the throttle, and deleting it at `expires_at <= now` (the
+  # no-grace shape `reap_sse_tickets/0` and `reap_oauth_exchange_codes/0` use)
+  # would hand the caller back a resend slot early — a spam-DELIVERY regression,
+  # not a hygiene win. `change_email` is the tight case: a 10-minute TTL under a
+  # 3600s throttle window, so the row stops counting 3000s AFTER it expires.
+  #
+  # The bound: a row stops counting at `inserted_at + window`, and
+  # `expires_at >= inserted_at` for every mint here (TTL is non-negative), so
+  # `expires_at + grace >= inserted_at + grace`. Any grace >= the LARGEST window
+  # (3600s) is therefore safe for every context. 7200s is that bound doubled.
+  @lifecycle_reap_grace_seconds 7200
 
   ## Users
 
@@ -247,15 +265,18 @@ defmodule BarkparkCloud.Accounts do
   @spec get_user_by_email_and_password(String.t(), String.t()) :: User.t() | nil
   def get_user_by_email_and_password(email, password)
       when is_binary(email) and is_binary(password) do
-    user = get_user_by_email(email)
+    # EXACTLY ONE bcrypt verification on every path (task-97852e25746dcd87). A
+    # known email pays `verify_pass/2` whether the password is right or wrong;
+    # an unknown email pays `no_user_verify/0`. The old `cond` sent a known email
+    # with a WRONG password through BOTH (verify_pass failed, then the catch-all
+    # burned a second hash), so a wrong password on a registered address took
+    # twice as long as one on an unknown address — measured 1.64x — which
+    # enumerated accounts the register/reset paths are careful not to reveal.
+    case get_user_by_email(email) do
+      %User{} = user ->
+        if Bcrypt.verify_pass(password, user.hashed_password), do: user, else: nil
 
-    cond do
-      user && Bcrypt.verify_pass(password, user.hashed_password) ->
-        user
-
-      true ->
-        # No matching user (or wrong password): burn a hash so the timing of
-        # the failure path matches the success path — never reveal which.
+      nil ->
         Bcrypt.no_user_verify()
         nil
     end
@@ -307,10 +328,11 @@ defmodule BarkparkCloud.Accounts do
   Add `user` to `team` as `role`, AUTHORIZED by `actor`.
 
   The escalation-safe sibling of `add_member/3`: it refuses unless `actor` is a
-  team admin who OUTRANKS the granted role (anti-escalation, delegated to
-  `Authz.can_grant?/3`). This closes the privilege-escalation hole at the
-  context, so even a route that forgets to gate cannot mint a higher role than
-  the caller holds. The raw `add_member/3` stays for the signup transaction,
+  team admin and the granted role does not rank STRICTLY ABOVE the actor's own
+  (anti-escalation, delegated to `Authz.can_grant?/3`, whose comparison is `>`
+  — equal rank IS permitted, so an admin may mint another admin). This closes
+  the privilege-escalation hole at the context, so even a route that forgets to
+  gate cannot mint a role HIGHER than the caller holds. The raw `add_member/3` stays for the signup transaction,
   which legitimately grants `"owner"` with no acting user.
 
   Returns `{:ok, membership} | {:error, :forbidden} | {:error, changeset}`.
@@ -329,14 +351,32 @@ defmodule BarkparkCloud.Accounts do
     end
   end
 
-  @doc "Fetch the membership for `user` in `team`, or nil."
-  @spec get_membership(Team.t() | binary(), User.t() | binary()) :: TeamMembership.t() | nil
+  @doc """
+  Fetch the membership for `user` in `team`, or nil.
+
+  TOTAL over the declared domain, and deliberately so: this is the funnel every
+  `Authz` entry point reaches, so a non-UUID or nil id must mean "no membership",
+  never a 500. Both ids go through `Repo.uuid_or_nil/1` — the class guard for
+  `:binary_id` lookups — and a catch-all closes the clauses, so `""`,
+  `"not-a-uuid"` and `nil` all land on `nil` instead of raising
+  `Ecto.Query.CastError` / `FunctionClauseError`. Pinned by ARM 1 of
+  `test/barkpark_cloud/accounts/authz_call_site_census_test.exs`.
+  """
+  @spec get_membership(Team.t() | binary() | nil, User.t() | binary() | nil) ::
+          TeamMembership.t() | nil
   def get_membership(%Team{id: team_id}, user), do: get_membership(team_id, user)
   def get_membership(team_id, %User{id: user_id}), do: get_membership(team_id, user_id)
 
   def get_membership(team_id, user_id) when is_binary(team_id) and is_binary(user_id) do
-    Repo.get_by(TeamMembership, team_id: team_id, user_id: user_id)
+    with tid when is_binary(tid) <- Repo.uuid_or_nil(team_id),
+         uid when is_binary(uid) <- Repo.uuid_or_nil(user_id) do
+      Repo.get_by(TeamMembership, team_id: tid, user_id: uid)
+    else
+      nil -> nil
+    end
   end
+
+  def get_membership(_team, _user), do: nil
 
   @doc """
   All Teams `user` belongs to, oldest membership first. The membership order is
@@ -408,6 +448,60 @@ defmodule BarkparkCloud.Accounts do
     %AuditEvent{}
     |> AuditEvent.changeset(attrs)
     |> Repo.insert()
+  end
+
+  @doc """
+  Append one row to a USER's own security trail (`user_security_events`).
+
+  `attrs` carries `:user_id` (required) and `:action` (required, one of
+  `UserSecurityEvent.actions/0`), plus optional `:ip`, `:user_agent`,
+  `:metadata`. Returns `{:ok, %UserSecurityEvent{}}` | `{:error, changeset}`.
+
+  This is the SOLE writer. There is no update and no delete counterpart, in this
+  module or anywhere else: the table is append-only in Ecto (`updated_at: false`)
+  and at the DB (a BEFORE UPDATE OR DELETE trigger, see the migration).
+
+  DELIBERATELY NOT `record_audit/1`'s sibling in transaction discipline. The
+  producing call sites are POST-COMMIT and BEST-EFFORT — the password is already
+  rotated, the session already revoked, the email already swapped by the time
+  this runs — so a failed insert must never turn a completed security change
+  into a 500. The router's `record_user_security_event/3` wrapper logs the
+  failure instead of raising. That is the same ruling
+  `Router.audit_account_security/2` already carries, for the same reason.
+  """
+  @spec record_user_security_event(map()) ::
+          {:ok, UserSecurityEvent.t()} | {:error, Ecto.Changeset.t()}
+  def record_user_security_event(attrs) do
+    %UserSecurityEvent{}
+    |> UserSecurityEvent.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  @doc """
+  A user's OWN security trail, newest first.
+
+  THE SCOPE IS A COLUMN, NOT A COMPOUND PREDICATE — and that is the whole reason
+  this table exists separately. `list_self_security_audit_events/2` has to prove
+  "self" out of THREE fields (`actor_user_id` AND `target_type` AND `target_id`)
+  because an audit row carries an actor, a target and a team; drop any one of
+  those `where`s and a member reads another member's rows. Here "self" is
+  `user_id`, one column, one `where`, and the query has no other filter that
+  could widen it: no team scope, no target predicate, no caller-supplied
+  parameter beyond `:limit`.
+
+  `:limit` is clamped to 1..200 (default 100) so a query string cannot ask for
+  the whole table.
+  """
+  @spec list_user_security_events(User.t() | binary(), keyword()) :: [UserSecurityEvent.t()]
+  def list_user_security_events(user, opts \\ []) do
+    uid = user_id(user)
+    limit = opts |> Keyword.get(:limit, 100) |> min(200) |> max(1)
+
+    UserSecurityEvent
+    |> where([e], e.user_id == ^uid)
+    |> order_by([e], desc: e.inserted_at, desc: e.id)
+    |> limit(^limit)
+    |> Repo.all()
   end
 
   @doc """
@@ -1495,6 +1589,28 @@ defmodule BarkparkCloud.Accounts do
   @spec accept_invitation(binary(), User.t()) ::
           {:ok, TeamMembership.t()} | {:error, atom()}
   def accept_invitation(raw_token, %User{} = user) when is_binary(raw_token) do
+    case do_accept_invitation(raw_token, user) do
+      {:ok, %TeamMembership{} = membership} ->
+        dispatch_member_joined(membership, user)
+        {:ok, membership}
+
+      other ->
+        other
+    end
+  end
+
+  def accept_invitation(_, _), do: {:error, :invalid_token}
+
+  # cch-w30-bl-member-joined-alert — THE TRANSACTION, AND ONLY THE TRANSACTION.
+  # Split out so the alert below can fire AFTER the commit, the wave-28
+  # discipline `Registry.transition_deployment_with_site_update/5` follows: the
+  # private function owns `Repo.transaction/1`, the public wrapper matches its
+  # `{:ok, _}` and dispatches outside it. Inside, a notification send would run
+  # on the same connection as an uncommitted write — a recipient read, an SMTP
+  # round-trip and a `notification_deliveries` insert all held inside a row lock
+  # (`lock: "FOR UPDATE"` on the invitation), and a rollback after the mail left
+  # would have told a team about a member who was never added.
+  defp do_accept_invitation(raw_token, %User{} = user) do
     hash = TeamInvitation.hash_token(raw_token)
 
     Repo.transaction(fn ->
@@ -1535,7 +1651,27 @@ defmodule BarkparkCloud.Accounts do
     end)
   end
 
-  def accept_invitation(_, _), do: {:error, :invalid_token}
+  # The team-facing half of an acceptance. `dispatch_event/3` fans to every team
+  # member and never raises into its caller, so a mail problem cannot fail an
+  # acceptance that already committed; a team that has the toggle off (the
+  # default — a join is a success, and successes are opt-in) sends nothing.
+  #
+  # The payload names WHO joined and AT WHAT ROLE, and `Render.joined_clause/1`
+  # is the single owner of that sentence for both rails. `:name` is the key
+  # `Render.render/2` and `EventEmail` already read for the alert's subject, so
+  # the team name rides under it rather than under a tenth spelling.
+  defp dispatch_member_joined(%TeamMembership{} = membership, %User{} = user) do
+    case Repo.get(Team, membership.team_id) do
+      %Team{} = team ->
+        payload = %{name: team.name, email: user.email, role: membership.role}
+        Notifications.dispatch_event(team, :member_joined, payload)
+
+      # The team vanished between the commit and this read. Nothing to name and
+      # nobody to name it to — the acceptance still stands.
+      nil ->
+        :ok
+    end
+  end
 
   @doc "Pending (unaccepted, unexpired) invitations for a team, newest first."
   @spec list_invitations(Team.t()) :: [TeamInvitation.t()]
@@ -1585,6 +1721,31 @@ defmodule BarkparkCloud.Accounts do
     |> Ecto.Changeset.change(revoked_at: DateTime.truncate(DateTime.utc_now(), :microsecond))
     |> Repo.update()
   end
+
+  @doc """
+  Does `password` match `user`'s stored hash?
+
+  The REAUTHENTICATION primitive, extracted for irreversible self-service acts
+  that are not themselves a password change — today that is `DELETE /v1/account`.
+  A live session token is proof the browser was authenticated once; it is not
+  proof the person at the keyboard right now is the account holder, and account
+  erasure is the one write on the plane an operator cannot undo.
+
+  Timing-equalised on the miss (`Bcrypt.no_user_verify/0`) exactly as
+  `update_user_password/4` is, so a wrong password and a user with no usable hash
+  (an OAuth-only account) cost the same and neither is distinguishable from the
+  success path by a stopwatch. An OAuth-only account therefore cannot erase
+  itself through this door — it has no password to present — and that is a
+  deliberate refusal, recorded in `BarkparkCloud.Accounts.Erasure`'s moduledoc,
+  not an oversight.
+  """
+  @spec valid_password?(User.t(), String.t()) :: boolean()
+  def valid_password?(%User{hashed_password: hash}, password)
+      when is_binary(hash) and is_binary(password) do
+    Bcrypt.verify_pass(password, hash)
+  end
+
+  def valid_password?(%User{}, _password), do: Bcrypt.no_user_verify()
 
   @doc """
   Change `user`'s password after verifying `current_password` (timing-safe via
@@ -1733,7 +1894,8 @@ defmodule BarkparkCloud.Accounts do
            # Single-use: consume THIS link and any sibling links for the user, so
            # a second outstanding reset email cannot be replayed afterwards.
            _ <- revoke_reset_tokens(uid, DateTime.truncate(now, :microsecond)),
-           {:ok, _n} <- revoke_all_user_sessions(user) do
+           {:ok, _n} <- revoke_all_user_sessions(user),
+           _ <- revoke_recovery_credentials(uid, DateTime.truncate(now, :microsecond)) do
         updated
       else
         {:error, reason} -> Repo.rollback(reason)
@@ -1742,6 +1904,23 @@ defmodule BarkparkCloud.Accounts do
   end
 
   def reset_password_by_token(_, _), do: {:error, :invalid_token}
+
+  # A RESET is account RECOVERY, not a voluntary password change
+  # (task-2cf2d783832c12e9). `revoke_all_user_sessions/2` deliberately spares PATs
+  # — right for "change my password", wrong here: the person resetting may be
+  # recovering from a compromise, and an attacker who held the account could
+  # have minted a PAT, a 2FA challenge, an OAuth exchange code or an email-change
+  # code that would otherwise outlive the recovery. Kill them all.
+  @recovery_revoked_contexts ~w(pat 2fa_pending oauth_exchange change_email)
+
+  defp revoke_recovery_credentials(user_id, now) do
+    from(t in UserToken,
+      where:
+        t.user_id == ^user_id and t.context in ^@recovery_revoked_contexts and
+          is_nil(t.revoked_at)
+    )
+    |> Repo.update_all(set: [revoked_at: now])
+  end
 
   # Revoke (stamp revoked_at) every live `reset` token for a user. Used both when
   # a fresh reset is requested (supersede older links) and when one is consumed
@@ -1906,6 +2085,9 @@ defmodule BarkparkCloud.Accounts do
           token.token_hash == UserToken.hash_token(code) ->
             with {:ok, updated} <- Repo.update(User.apply_email_change_changeset(user)),
                  {:ok, _tok} <- Repo.update(UserToken.changeset(token, %{revoked_at: n})) do
+              # A reset link already mailed to the OLD address (sent_to is nil
+              # on reset rows) must not outlive the change (task-9a30ab22cf0842f2).
+              _ = revoke_reset_tokens(user.id, n)
               {:ok, updated}
             else
               # pending_email got taken between stage and confirm → unique_constraint
@@ -2001,16 +2183,24 @@ defmodule BarkparkCloud.Accounts do
       where: t.user_id == ^uid and t.context in ^contexts and is_nil(t.revoked_at)
   end
 
-  # DB-count MINT throttle: true when the user already minted `max` live tokens of
+  # DB-count MINT throttle: true when the user already minted `max` tokens of
   # this context within the last `window` seconds. Anti-spam on the deliver side
   # only — the wrong-code brute force is guarded by the failed_attempts lockout.
+  #
+  # EVERY row minted in the window counts, REVOKED ones included
+  # (task-e347bde0b83592fa). Each new mint supersedes (revokes) the previous
+  # live one, so counting only `is_nil(revoked_at)` rows could never exceed ONE
+  # and the throttle never fired: unlimited code mails to any address, and a
+  # per-code 5-attempt lockout that reset with every re-mint. The lifecycle
+  # reaper's grace (@lifecycle_reap_grace_seconds, 2x the largest window) keeps
+  # every row this count needs on disk.
   defp throttled?(%User{id: uid}, context, {max, window}) do
     since = DateTime.add(lifecycle_now(), -window, :second)
 
     count =
       UserToken
       |> where([t], t.user_id == ^uid and t.context == ^context)
-      |> where([t], is_nil(t.revoked_at) and t.inserted_at >= ^since)
+      |> where([t], t.inserted_at >= ^since)
       |> Repo.aggregate(:count)
 
     count >= max
@@ -2737,6 +2927,9 @@ defmodule BarkparkCloud.Accounts do
     query =
       from t in UserToken,
         where: t.token_hash == ^hash and t.context == "2fa_pending",
+        # A password reset stamps revoked_at on pending challenges
+        # (revoke_recovery_credentials/2); a revoked challenge must not verify.
+        where: is_nil(t.revoked_at),
         where: is_nil(t.expires_at) or t.expires_at > ^now
 
     case Repo.one(query) do
@@ -2770,6 +2963,9 @@ defmodule BarkparkCloud.Accounts do
     query =
       from t in UserToken,
         where: t.token_hash == ^hash and t.context == "2fa_pending",
+        # A password reset stamps revoked_at on pending challenges
+        # (revoke_recovery_credentials/2); a revoked challenge must not verify.
+        where: is_nil(t.revoked_at),
         where: is_nil(t.expires_at) or t.expires_at > ^now,
         select: t.sent_to
 
@@ -2967,6 +3163,101 @@ defmodule BarkparkCloud.Accounts do
       |> Repo.delete_all()
 
     %{reaped: count}
+  end
+
+  ## Account-lifecycle token hygiene (cch-bl-lifecycle-token-reaper)
+
+  @lifecycle_reap_contexts ["reset", "confirm", "change_email"]
+
+  @doc """
+  Delete the DEAD `"reset"` / `"confirm"` / `"change_email"` rows —
+  `revoked_at` stamped immediately, `expires_at` only after a
+  #{@lifecycle_reap_grace_seconds}s GRACE window. Hygiene only; returns
+  `%{reaped: count}`, and `BarkparkCloud.Workers.LifecycleTokenReaper` calls it
+  per minute.
+
+  Same accretion defect the `"sse"` and `"oauth_exchange"` sweeps already paid
+  for, in the last three short-lived contexts that had no owner. None of the
+  three ever DELETEs: `revoke_reset_tokens/2` soft-stamps `revoked_at` both on
+  supersede and on consume; `confirm_user/1` revokes via `Multi.update_all`;
+  `update_user_email/2` stamps `revoked_at` on success AND on lockout. So every
+  password-reset link a user ever requested, and every confirm/change code, was
+  still a row.
+
+  ## WHY THIS DIVERGES FROM THE NO-GRACE RULING
+
+  `reap_sse_tickets/0` and `reap_oauth_exchange_codes/0` delete at
+  `revoked_at IS NOT NULL OR expires_at <= now` exactly, and that ruling is
+  CORRECT THERE: nothing downstream reads a lapsed `"sse"` or
+  `"oauth_exchange"` row. It is WRONG here, and copying it unexamined would have
+  shipped a regression. `throttled?/3` implements `@confirm_throttle` (1/300s)
+  and `@change_email_throttle` (3/3600s) by COUNTING
+  `is_nil(revoked_at) and inserted_at >= since` rows. It does not filter
+  `expires_at`. An expired-but-unrevoked row therefore still counts, so deleting
+  it on expiry alone would silently return a resend slot to the caller ahead of
+  the throttle — spam email delivery, which is precisely the outbound side
+  effect those throttles exist to bound.
+
+  Hence the SPLIT condition, not one uniform one:
+
+    * `revoked_at IS NOT NULL` → delete NOW, no grace. `throttled?/3` already
+      excludes revoked rows from its count, so removing one cannot move the
+      count. Nothing else reads them either: the lockout that
+      `update_user_email/2` enforces persists as `pending_email = NULL` on the
+      USER, not as the burned token row, and every reader here
+      (`user_by_valid_lifecycle_token/2`, `live_lifecycle_tokens/2`, the
+      `FOR UPDATE` change-code lookup) already filters `is_nil(revoked_at)`.
+    * `expires_at <= now - #{@lifecycle_reap_grace_seconds}s` → delete after the
+      grace. See `@lifecycle_reap_grace_seconds` for the arithmetic: the grace
+      is double the LARGEST throttle window, and a row stops counting at
+      `inserted_at + window <= expires_at + window`, so the throttle has always
+      released the row before this clause can reach it.
+
+  STRICTLY these three contexts. `user_tokens` is polymorphic and `session`,
+  `pat`, `2fa_pending`, `device`, `sse`, `oauth_exchange` each have their own
+  lifecycle owner — a revoked `session` row is the tombstone the
+  active-sessions UI renders. `reap_sse_tickets/0` is deliberately NOT widened
+  to cover this: its `context == "sse"` clause is pinned by its own test, and
+  its no-grace ruling is a different (correct) answer to a different question.
+
+  A row with a NULL `expires_at` and no `revoked_at` survives — `NULL <= x` is
+  NULL and `false OR NULL` is NULL — which is right: it is still live.
+  """
+  @spec reap_lifecycle_tokens() :: %{reaped: non_neg_integer()}
+  def reap_lifecycle_tokens do
+    cutoff = DateTime.add(lifecycle_now(), -@lifecycle_reap_grace_seconds, :second)
+    contexts = @lifecycle_reap_contexts
+
+    {count, _} =
+      from(t in UserToken,
+        where: t.context in ^contexts,
+        where: not is_nil(t.revoked_at) or t.expires_at <= ^cutoff
+      )
+      |> Repo.delete_all()
+
+    %{reaped: count}
+  end
+
+  @doc """
+  The grace window `reap_lifecycle_tokens/0` applies to expired-but-unrevoked
+  rows, in seconds. Exposed so the reaper's test can assert the invariant that
+  makes the sweep safe — grace > the largest mint-throttle window — rather than
+  hard-coding a number that could drift away from `@change_email_throttle`.
+  """
+  @spec lifecycle_reap_grace_seconds() :: pos_integer()
+  def lifecycle_reap_grace_seconds, do: @lifecycle_reap_grace_seconds
+
+  @doc """
+  The mint-throttle windows `reap_lifecycle_tokens/0`'s grace must outlive,
+  as `%{context => window_seconds}`. Paired with
+  `lifecycle_reap_grace_seconds/0` so the safety margin is a TESTED relation
+  between the two, not a comment.
+  """
+  @spec lifecycle_throttle_windows() :: %{binary() => pos_integer()}
+  def lifecycle_throttle_windows do
+    {_, confirm_window} = @confirm_throttle
+    {_, change_window} = @change_email_throttle
+    %{"confirm" => confirm_window, "change_email" => change_window}
   end
 
   ## OAuth exchange codes
@@ -3308,7 +3599,7 @@ defmodule BarkparkCloud.Accounts do
   defp find_or_birth_oauth_user!(provider, uid, email) do
     case email && get_user_by_email(email) do
       %User{} = existing ->
-        {existing, :linked}
+        {reclaim_if_unproven!(existing, email), :linked}
 
       _ ->
         # No email match (or no email at all) → birth a fresh OAuth-only account
@@ -3317,6 +3608,79 @@ defmodule BarkparkCloud.Accounts do
         # the durable link is the (provider, uid) row, not this address.
         {birth_oauth_user!(email || synthetic_oauth_email(provider, uid)), :created}
     end
+  end
+
+  # PRE-ACCOUNT TAKEOVER GUARD (task-b3eb09e83fbb7cbc). `register_user/1` logs a
+  # password signup in immediately and never requires the address to be
+  # confirmed, so ANYONE can create `victim@corp.com` with a password of their
+  # choosing. Converging the victim's IdP-VERIFIED identity onto that row used to
+  # hand the squatter a shared account: their password, sessions, PATs, 2FA and
+  # any provider identity THEY linked all survived, and every team the victim
+  # later joined was readable by them.
+  #
+  # So an existing account is converged UNTOUCHED only when its ownership of the
+  # address is already PROVEN — `confirmed_at` is set, or it carries an external
+  # identity whose IdP-verified email IS this address (an OAuth-born account is
+  # born with confirmed_at NULL but proved the address through its provider).
+  # Otherwise the verified identity RECLAIMS the account: every credential the
+  # unproven holder could still use is killed — the password is replaced by a
+  # random one (as for any OAuth-born account; a reset sets a real one), all
+  # user_tokens are revoked (sessions, PATs, reset/confirm/change codes,
+  # 2fa_pending, oauth_exchange, sse), 2FA is cleared, a pending email change is
+  # dropped, and any provider identity linked under a DIFFERENT email is removed
+  # — and `confirmed_at` is stamped, because the IdP just verified the address.
+  # Teams, memberships and roles are left as they are.
+  defp reclaim_if_unproven!(%User{} = user, email) do
+    if address_proven?(user, email) do
+      user
+    else
+      now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+      from(t in UserToken, where: t.user_id == ^user.id and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
+
+      from(i in ExternalIdentity, where: i.user_id == ^user.id)
+      |> Repo.delete_all()
+
+      random = :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)
+
+      user
+      |> Ecto.Changeset.change(
+        hashed_password: Bcrypt.hash_pwd_salt(random),
+        confirmed_at: now,
+        pending_email: nil,
+        two_factor_secret: nil,
+        two_factor_recovery_codes: nil,
+        two_factor_confirmed_at: nil,
+        two_factor_last_step: nil
+      )
+      |> Repo.update()
+      |> case do
+        {:ok, reclaimed} ->
+          Logger.warning(
+            "[accounts] oauth reclaimed an UNCONFIRMED account user_id=#{reclaimed.id}: " <>
+              "prior password, tokens, 2FA and foreign identities revoked"
+          )
+
+          reclaimed
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end
+  end
+
+  defp address_proven?(%User{confirmed_at: %DateTime{}}, _email), do: true
+
+  defp address_proven?(%User{id: user_id}, email) do
+    target = String.downcase(email)
+
+    from(i in ExternalIdentity,
+      where: i.user_id == ^user_id and not is_nil(i.email),
+      select: i.email
+    )
+    |> Repo.all()
+    |> Enum.any?(&(String.downcase(&1) == target))
   end
 
   # Birth a passwordless OAuth user + team + owner membership + trial +

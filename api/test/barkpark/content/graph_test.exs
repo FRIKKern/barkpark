@@ -253,6 +253,8 @@ defmodule Barkpark.Content.GraphTest do
 
     # lvw-t12 (wire §7(2)): the drafts traverse folds the plugin
     # resolve_extract_edges chain, not just core extract_edges.
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a DRAFT paper's plugin-extracted valueref/task edges appear under :drafts and NOT under :published" do
       target = publish!("dp-val-target")
 
@@ -309,6 +311,8 @@ defmodule Barkpark.Content.GraphTest do
              "the published graph must NOT show the draft paper's valueref edge before publish"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a valueref to a DRAFT-ONLY target traverses (drafts-corpus dangling lens)" do
       # The target exists ONLY as a draft — invisible under the :published lens,
       # but a member of the scoped drafts corpus, so the plugin edge is
@@ -333,6 +337,8 @@ defmodule Barkpark.Content.GraphTest do
       refute Enum.any?(drafts.nodes, fn n -> n[:broken_id] == "dp-draft-target" end)
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the :sources filter applies to drafts plugin edges (published-path parity)" do
       publish!("dp-flt-target")
 
@@ -638,10 +644,19 @@ defmodule Barkpark.Content.GraphTest do
           "owned_node",
           %{"_id" => id, "title" => "secret-#{id}"},
           @dataset,
-          user_ctx(uid)
+          # CLASS (c) DECLARATION (task-e6523cc7154304f0): the caller_context is
+          # here for the OWNER stamp; the write names no workspace and this
+          # block tests the owner-ACL, not tenancy.
+          [instance_wide: true] ++ user_ctx(uid)
         )
 
-      {:ok, doc} = Content.publish_document(id, "owned_node", @dataset, user_ctx(uid))
+      {:ok, doc} =
+        Content.publish_document(
+          id,
+          "owned_node",
+          @dataset,
+          [instance_wide: true] ++ user_ctx(uid)
+        )
 
       # Prove publish carried owner_id onto the published row (no force-stamp).
       assert doc.owner_id == uid

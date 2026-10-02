@@ -41,6 +41,14 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
   # code out of this list into known_codes the day its endpoint joins the public
   # SDK surface.
   @offspec_codes MapSet.new([
+                   # Managed write admission (Barkdown C083) — the trusted hold
+                   # endpoint /v1/admin/write-admission is an instance-operator
+                   # surface consumed by Barkdown's migration runner, not a
+                   # content operation; its refusals name the coordinator state.
+                   "admission_closed",
+                   "invalid_operation",
+                   "invalid_recovery",
+                   "recovery_refused",
                    # Instance self-update — admin ops trigger POST /v1/self-update
                    # (git-pull/rebuild subprocess state, not a content operation).
                    "already_running",

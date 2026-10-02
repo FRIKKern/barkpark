@@ -2,6 +2,7 @@ defmodule Barkpark.Content.Validation.OpsTest do
   # The Validation.Registry is a singleton ETS table populated at boot —
   # tests that exercise registered checkers must not run concurrently
   # with registry tests.
+  # sync: touches the `Validation.Registry` singleton ETS table
   use ExUnit.Case, async: false
 
   alias Barkpark.Content.Validation.Ops

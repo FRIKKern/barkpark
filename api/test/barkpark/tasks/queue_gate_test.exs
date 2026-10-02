@@ -106,17 +106,31 @@ defmodule Barkpark.Tasks.QueueGateTest do
     # The exact shape `close` leaves behind: worker KEPT, closed_by + closed_at
     # stamped (close.ex "Stamp close metadata into the claim lease"), and then
     # `Stage` reopens `done → open` without touching `content.claim` at all.
+    #
+    # `ts_iso` is COMPUTED and FRESH, and that is the whole subject of this
+    # test. `live_claim_worker/1` is a conjunction — a worker name, NOT a
+    # closed claim, AND a live lease — so a fixture whose lease is already dead
+    # is answered by the lease arm before the close arm is ever consulted.
+    # This fixture carried the frozen literal "2026-07-26T18:00:00Z", which was
+    # expired by the time it was read: deleting `not closed_claim?(claim)` from
+    # the predicate left this whole test green, including the two ALONE arms
+    # below that exist precisely to measure it. A fresh lease is the only shape
+    # in which the close stamp is the reason the claim is not live.
     reopened = %{
       "kind" => "task",
       "lifecycle_status" => "open",
       "claim" => %{
         "worker" => "worker-a",
         "epoch" => 3,
-        "ts_iso" => "2026-07-26T18:00:00Z",
+        "ts_iso" => fresh_ts(),
         "closed_by" => "worker-a",
         "closed_at" => "2026-07-26T18:29:53Z"
       }
     }
+
+    # THE PRECONDITION, asserted rather than assumed: the lease arm says LIVE,
+    # so anything that follows is the close arm speaking.
+    assert QueueGate.claim_lease_live?(reopened)
 
     # RED BEFORE: both of these were "foreign_claimed"/false, forever.
     assert Tasks.execution_class(reopened, "worker-b") == "executable"

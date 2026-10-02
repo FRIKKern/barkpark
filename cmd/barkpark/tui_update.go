@@ -55,6 +55,11 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // Studio edit (or a TUI mutation's optimistic re-query) re-render live —
 // shared by the DataStoreRefreshMsg handler and the task quick-actions.
 func (m *model) refreshDocViews() {
+	// The paper pane's reference cache answers from memory until something says
+	// the store moved; this IS that something, for every mutation and every SSE
+	// echo alike. Dropping it here is what keeps a cached render from outliving
+	// the data it rendered.
+	m.paperDocs.invalidate()
 	prevID, prevType, hadEditor := "", "", m.showEditor
 	prevFocus := m.focus
 	if m.selectedDoc != nil {
@@ -468,6 +473,15 @@ func (m model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.panes[m.focus.PaneIndex].IsDocList {
 			m.startCreateDoc()
 			return m, textinput.Blink
+		}
+
+	// ── Load more (`+` on a truncated doc-list pane): the list read one page
+	//    and its header shows "100+"; this reads the next page. ──
+	case "+":
+		if m.focus.Target == FocusPane && m.focus.PaneIndex < len(m.panes) &&
+			m.panes[m.focus.PaneIndex].IsDocList {
+			m.loadMoreDocs()
+			return m, nil
 		}
 
 	// ── Search (`/` on a focused pane only — never while editing text: the

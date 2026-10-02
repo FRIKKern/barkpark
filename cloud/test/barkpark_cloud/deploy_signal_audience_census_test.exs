@@ -56,9 +56,20 @@ defmodule BarkparkCloud.DeploySignalAudience.GoReader do
   """
   @spec request_path(binary(), binary(), keyword()) ::
           {:ok, %{method: binary(), path: binary(), line: pos_integer()}} | {:error, atom()}
-  def request_path(file, func, opts \\ []) do
-    src = source(file)
+  def request_path(file, func, opts \\ []), do: request_path_in(source(file), func, opts)
 
+  @doc """
+  `request_path/3` over SOURCE TEXT that is already in hand.
+
+  The candidate derivation (see `CandidateReader`) needs to run the same
+  extractor over a MUTATED copy of a real source — the only way to show in this
+  file, rather than in a PR comment nobody re-runs, that the derived set SHRINKS
+  when the source loses a method. Reading the disk a second time cannot do that,
+  so the text is the parameter and `request_path/3` is the thin file wrapper.
+  """
+  @spec request_path_in(binary(), binary(), keyword()) ::
+          {:ok, %{method: binary(), path: binary(), line: pos_integer()}} | {:error, atom()}
+  def request_path_in(src, func, opts \\ []) do
     case body(src, func) do
       {:ok, body, line} ->
         re = if opts[:walker] == :broken, do: @broken_call_re, else: @call_re
@@ -142,9 +153,12 @@ defmodule BarkparkCloud.DeploySignalAudience.ExReader do
   to classify the population it draws from:
 
     * `:platform_allowlist` — the body's source is the `:platform_admin_emails`
-      config allowlist. That population is EMPTY BY CONSTRUCTION on prod: no
-      User field carries operator-ness, no route or console writes the key, and
-      `config.exs` hard-defaults it to `[]`.
+      config allowlist. No User field carries operator-ness, no route or console
+      writes the key, and `config.exs` hard-defaults it to `[]`, so for
+      seventeen waves it was EMPTY on prod. It is no longer:
+      gr-ops-platform-admin-emails set the env var on the live control plane,
+      and the census classifies it REACHABLE (dr-w19-rollout-brake-is-machine-only,
+      see `@empty_push_populations`).
     * `:team_members` — the body draws team membership rows. A team with an
       owner always has at least that one member.
     * `:unknown` — anything else. Fails CLOSED: the census refuses to answer
@@ -187,7 +201,7 @@ defmodule BarkparkCloud.DeploySignalAudience.ExReader do
       {:ok, fun_body, line} ->
         re = if opts[:walker] == :broken, do: @broken_resolver_re, else: @resolver_re
 
-        case Regex.run(re, fun_body) do
+        case Regex.run(re, fun_body) || hop(src, fun_body, re) do
           [_, resolver] ->
             {:ok, %{resolver: resolver, population: classify(src, resolver), line: line}}
 
@@ -198,6 +212,29 @@ defmodule BarkparkCloud.DeploySignalAudience.ExReader do
       :error ->
         {:error, :func_not_found}
     end
+  end
+
+  # ONE HOP, AND ONLY ONE. `deliver_deploy_rate_notices/1` is a per-team LOOP
+  # whose send is a private helper (`send_deploy_rate_notice/3`); the resolver is
+  # in the helper, not in the arm. Without a hop this census could only watch
+  # senders that happen to inline their own recipient lookup, which is a shape
+  # accident rather than a rule — and a sender it cannot read is a sender it is
+  # green over BY CONSTRUCTION, the exact fail-open this file is closing.
+  #
+  # The hop is bounded at depth one and takes the FIRST callee that resolves, so
+  # it cannot wander: a resolver two helpers deep still reports
+  # `:no_recipient_resolver` and reds, which is the honest answer.
+  defp hop(src, fun_body, re) do
+    fun_body
+    |> then(&Regex.scan(~r/\b([a-z_][a-z0-9_]*)\(/, &1))
+    |> Enum.map(fn [_, callee] -> callee end)
+    |> Enum.uniq()
+    |> Enum.find_value(fn callee ->
+      case body(src, callee) do
+        {:ok, callee_body, _line} -> Regex.run(re, callee_body)
+        :error -> nil
+      end
+    end)
   end
 
   defp classify(src, resolver) do
@@ -356,6 +393,211 @@ defmodule BarkparkCloud.DeploySignalAudience.ConsoleReader do
   end
 end
 
+defmodule BarkparkCloud.DeploySignalAudience.CandidateReader do
+  @moduledoc """
+  THE CANDIDATE SET — what a deploy-health signal LOOKS LIKE in source, derived,
+  so that a signal nobody registered is still seen (dr-w19-audience-registry-fail-open).
+
+  `@signals` is a DECLARATION, and wave 18's census admitted in its own moduledoc
+  that the declaration FAILS OPEN: an instrument that never gets a row is
+  invisible, so the census goes green over it forever. This module is the other
+  half — it does not ask "is the declared reader reachable", it asks "is there a
+  reader in source that LOOKS like a deploy-health signal and has no row at all".
+
+  ## The two derivation rules, both structural
+
+    * PULL — an EXPORTED method on `*Client` anywhere in `internal/cloudclient`
+      (test files excluded) whose DERIVED request path matches
+      `deploy-ledger|deployments|autoupdate|census`, and whose method is `GET`.
+      The `GET` narrowing is not convenience: a SIGNAL is something a human
+      READS. `POST /v1/operator/autoupdate/halt` is an ACT — pulling the fleet
+      brake — and an act has an actor, not an audience. Including the write
+      verbs would file `RolloutHalt` and `Deploy` as unregistered signals and
+      make the stated-reason table a list of things that were never signals.
+    * PUSH — a PUBLIC `deliver_*` / `dispatch_*` function in `notifications.ex`
+      whose body NAMES a deploy event: `:deployment_failed`,
+      `:deployment_refused`, `:deployment_abandoned`, `deploy_failure_rate`,
+      `deploy_health` or `fleet_digest`. The event vocabulary is the tree's own
+      (`@chat_default_on`, the `EmailSettings.event_enabled?/2` arms), read as
+      SOURCE TEXT — nothing here calls into the module.
+
+  ## Why the reader takes SOURCE TEXT
+
+  A derivation is only worth the name if it MOVES when the source moves, and the
+  only way to prove that inside this file is to run the same extractor over a
+  mutated copy of the real source and watch the set shrink. So every public
+  function here takes `{label, source}` pairs; `go_sources/1` is the thin
+  disk wrapper. The shrink proof is a test, not a PR comment.
+
+  ## The positive control
+
+  An extractor that finds NOTHING is a broken extractor, never a clean repo.
+  `go_methods/2` and `ex_senders/2` RAISE on an empty read rather than return
+  `[]`, because `[]` candidates is how this whole guard would pass while
+  measuring nothing — the exact failure mode it exists to close.
+  """
+
+  # An exported method on the client receiver. Unexported helpers (`do`, `url`,
+  # `rolloutRequest`, `postSiteDeploy`) are plumbing, not a signal a command
+  # calls; they are reached THROUGH an exported method, which is the one that
+  # gets a row.
+  @go_method_re ~r/^func \(c \*Client\) ([A-Z]\w*)\(/m
+
+  # The deploy-health route vocabulary, per the task row.
+  @deploy_path_re ~r/deploy-ledger|deployments|autoupdate|census/
+
+  # A public sender. `defp` helpers (`dispatch_waiting_email/3`,
+  # `send_deploy_rate_notice/3`) are called BY one of these.
+  @ex_sender_re ~r/^  def (deliver_[a-z0-9_]+|dispatch_[a-z0-9_]+)[\s(]/m
+
+  # The deploy event vocabulary, as the tree spells it.
+  @deploy_event_re ~r/:deployment_(?:failed|refused|abandoned)\b|deploy_failure_rate|deploy_health|fleet_digest/
+
+  @type candidate :: %{
+          file: binary(),
+          func: binary(),
+          line: pos_integer(),
+          kind: :pull | :push,
+          sends: binary()
+        }
+
+  @doc """
+  `{label, source}` for every non-test `.go` file under `dir`.
+
+  The label is the repo-relative path the registry uses, so a candidate and a
+  `@signals` reader row compare as equals.
+  """
+  @spec go_sources(binary(), binary()) :: [{binary(), binary()}]
+  def go_sources(dir, label_prefix) do
+    unless File.dir?(dir) do
+      raise ArgumentError,
+            "DeploySignalAudience.CandidateReader: Go client package not found at #{dir}. " <>
+              "The package moved or was renamed — re-point @candidate_go_dir in the census. " <>
+              "Refusing to derive an EMPTY candidate set from a directory that does not exist."
+    end
+
+    files =
+      dir
+      |> File.ls!()
+      |> Enum.filter(&(String.ends_with?(&1, ".go") and not String.ends_with?(&1, "_test.go")))
+      |> Enum.sort()
+
+    if files == [] do
+      raise ArgumentError,
+            "DeploySignalAudience.CandidateReader: zero non-test .go files under #{dir}. " <>
+              "A package with no source is a BROKEN SCAN, not a clean repo."
+    end
+
+    Enum.map(files, fn f -> {label_prefix <> "/" <> f, File.read!(Path.join(dir, f))} end)
+  end
+
+  @doc """
+  Every exported `*Client` method in `src`, with its line.
+
+  Per FILE this may legitimately be `[]` — `retry.go` carries backpressure
+  notices and no client method at all. The emptiness that means a BROKEN SCAN is
+  a CORPUS-wide zero, and `go_candidates/1` is where that is refused.
+  """
+  @spec client_methods(binary()) :: [%{func: binary(), line: pos_integer()}]
+  def client_methods(src) do
+    Regex.scan(@go_method_re, src, return: :index)
+    |> Enum.map(fn [{start, _}, {fs, fl}] ->
+      %{
+        func: binary_part(src, fs, fl),
+        line: length(String.split(binary_part(src, 0, start), "\n"))
+      }
+    end)
+  end
+
+  @doc """
+  The `:pull` candidates across `sources`.
+
+  THE POSITIVE CONTROL LIVES HERE. A corpus in which the extractor finds ZERO
+  exported client methods RAISES: `[]` candidates would make every downstream
+  assertion vacuously true, which is the precise way this guard would pass while
+  measuring nothing.
+  """
+  @spec go_candidates([{binary(), binary()}]) :: [candidate()]
+  def go_candidates(sources) do
+    scanned = for {label, src} <- sources, do: {label, src, client_methods(src)}
+    total = scanned |> Enum.map(fn {_, _, m} -> length(m) end) |> Enum.sum()
+
+    if total == 0 do
+      raise ArgumentError,
+            "DeploySignalAudience.CandidateReader: zero exported *Client methods across " <>
+              "#{length(sources)} source(s) (#{Enum.map_join(sources, ", ", &elem(&1, 0))}). " <>
+              "An extractor that finds nothing is a BROKEN EXTRACTOR, never a clean source — " <>
+              "`func (c *Client) Name(` is the shape it reads, and the tree stopped having it."
+    end
+
+    for {label, src, methods} <- scanned,
+        %{func: func, line: line} <- methods,
+        {:ok, %{method: method, path: path}} <-
+          [BarkparkCloud.DeploySignalAudience.GoReader.request_path_in(src, func)],
+        method == "GET",
+        Regex.match?(@deploy_path_re, path) do
+      %{file: label, func: func, line: line, kind: :pull, sends: "#{method} #{path}"}
+    end
+    |> Enum.sort_by(&{&1.file, &1.func})
+  end
+
+  @doc """
+  Every PUBLIC `deliver_*` / `dispatch_*` function in `src`, with its line.
+
+  RAISES on zero, for the same reason `go_methods/2` does.
+  """
+  @spec ex_senders(binary(), binary()) :: [%{func: binary(), line: pos_integer()}]
+  def ex_senders(label, src) do
+    hits =
+      Regex.scan(@ex_sender_re, src, return: :index)
+      |> Enum.map(fn [{start, _}, {fs, fl}] ->
+        %{
+          func: binary_part(src, fs, fl),
+          line: length(String.split(binary_part(src, 0, start), "\n")) + 1
+        }
+      end)
+
+    if hits == [] do
+      raise ArgumentError,
+            "DeploySignalAudience.CandidateReader: zero public deliver_*/dispatch_* functions " <>
+              "in #{label}. An extractor that finds nothing is a BROKEN EXTRACTOR, never a " <>
+              "clean source — the notification module stopped having the shape it reads."
+    end
+
+    hits
+  end
+
+  @doc "The `:push` candidates in one `{label, source}` pair."
+  @spec ex_candidates({binary(), binary()}) :: [candidate()]
+  def ex_candidates({label, src}) do
+    for %{func: func, line: line} <- ex_senders(label, src),
+        {:ok, fun_body} <- [body(src, func)],
+        event = names_deploy_event(fun_body),
+        event != nil do
+      %{file: label, func: func, line: line, kind: :push, sends: "names #{event}"}
+    end
+    |> Enum.sort_by(& &1.func)
+  end
+
+  defp names_deploy_event(fun_body) do
+    case Regex.run(@deploy_event_re, fun_body) do
+      [hit | _] -> hit
+      nil -> nil
+    end
+  end
+
+  # A `def name(...) ... end` block, or a one-line `def name(...), do: expr`.
+  defp body(src, func) do
+    inline = ~r/^  def #{Regex.escape(func)}\(.*,\s*do:.*$/m
+    block = ~r/^  def #{Regex.escape(func)}[\s(].*?^  end$/ms
+
+    case Regex.run(inline, src) || Regex.run(block, src) do
+      [match | _] -> {:ok, match}
+      _ -> :error
+    end
+  end
+end
+
 defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @moduledoc """
   THE EMPTY-AUDIENCE CENSUS — every deploy-health signal declares the credential
@@ -365,8 +607,9 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   ## The defect
 
   For seventeen waves this epic built deploy-health instruments and addressed
-  every one of them to the platform-operator population — which nobody is in and
-  nobody can join. `PLATFORM_ADMIN_EMAILS` is unset on prod; the `User` schema
+  every one of them to the platform-operator population — which nobody was in and
+  nobody could join. `PLATFORM_ADMIN_EMAILS` was unset on prod (until
+  gr-ops-platform-admin-emails, 2026-09-25); the `User` schema
   has no platform field, so operator-ness is not storable; `mix
   barkpark_cloud.create_admin` touches the allowlist zero times; no route,
   LiveView or console action writes `:platform_admin_emails`; the only
@@ -387,10 +630,14 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   population that resolver draws from, parsed from `notifications.ex`.
 
   THE ASSERTION: a signal every one of whose readers lands on a no-human tier —
-  `operator` or `worker` (pull), see `@empty_pull_tiers` — or on the platform
-  allowlist (push) has an EMPTY AUDIENCE BY CONSTRUCTION
+  `worker` (pull), see `@empty_pull_tiers`; no push population is empty today,
+  see `@empty_push_populations` — has an EMPTY AUDIENCE BY CONSTRUCTION
   and must be allowlisted with a reason NAMING ITS CLOSER — or it reds, naming
   the signal and the reader's `file:line`.
+
+  `operator` and the platform allowlist WERE in that set until
+  dr-w19-rollout-brake-is-machine-only: they are one population, and
+  gr-ops-platform-admin-emails provisioned it on the live control plane.
 
   Nothing here reads `PLATFORM_ADMIN_EMAILS`, or any `Application.get_env`. A
   config-reading guard is vacuous by construction: the CI value is `[]` whatever
@@ -406,6 +653,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   population empty for a HUMAN signal, but it still does not judge whether the
   machine's secret is provisioned anywhere.
 
+  The `operator` tier is the mirror case. It is REACHABLE here because a human
+  act outside this tree (gr-ops-platform-admin-emails) put people in it, not
+  because any source line guarantees them: the source default is still `[]`.
+  This census reads source, never config, so if the live env var were emptied
+  again it would stay green. That is the price of refusing a config read that
+  is vacuous in CI, and it is stated here rather than hidden.
+
   Nor does it judge WHO within a population may see WHICH row. A push signal
   resolving `team_members` is REACHABLE; whether it fans one team's rows into
   another team's inbox is a TENANCY question this file cannot see, because it
@@ -413,16 +667,37 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   a fleet-wide digest exactly as readily as on the per-team one that shipped —
   that ruling is made in `deliver_fleet_digest/1`'s own doc, not here.
 
-  And the registry FAILS OPEN: an unregistered signal is invisible to this file,
-  exactly as `router_head_fence_census_test.exs` admits of its own deny-list.
-  Nothing syntactic closes that hole — a new instrument reaches this census only
-  when someone adds its row. What this file buys is that the boundary MOVES
-  LOUDLY: when a reader is re-pointed at a reachable route, or a signal's last
-  reachable reader is taken away, the diff says so on the PR that did it.
+  ## SIDE C — the registry no longer fails open (dr-w19-audience-registry-fail-open)
+
+  This moduledoc used to end: "the registry FAILS OPEN: an unregistered signal is
+  invisible to this file… Nothing syntactic closes that hole." Something now
+  does. `CandidateReader` derives, from the same sources, what a deploy-health
+  signal LOOKS LIKE — an exported `*Client` GET whose derived path matches
+  `deploy-ledger|deployments|autoupdate|census`, or a public `deliver_*` /
+  `dispatch_*` in `notifications.ex` whose body names a deploy event — and a
+  candidate with no `@signals` row REDS, naming its `file:line`.
+
+  That is a NARROWER claim than "no deploy signal can hide". The derivation sees
+  the two shapes it reads and no others: a deploy-health read issued from
+  `internal/cli`, from the Studio, or over a path that spells the resource some
+  other way is still invisible here, and a sender whose recipient resolver is two
+  helpers deep still reports `:no_recipient_resolver`. What changed is that the
+  DEFAULT flipped: an instrument in the shapes this epic actually builds now
+  reaches the census by landing in source, not by someone remembering to add a
+  row. On its first run it found four, three of which had never been registered,
+  and one of those three — `site_build_log` — turned out to be addressed to
+  nobody. That finding is CLOSED: `dr-w19-site-build-log-is-operator-only`
+  re-pointed the route at the team-scoped door its siblings use, the rot assertion
+  below reddened on the stale allowlist row, and the row was deleted by name.
+
+  And the boundary still MOVES LOUDLY: when a reader is re-pointed at a reachable
+  route, or a signal's last reachable reader is taken away, the diff says so on
+  the PR that did it.
   """
 
   use ExUnit.Case, async: true
 
+  alias BarkparkCloud.DeploySignalAudience.CandidateReader
   alias BarkparkCloud.DeploySignalAudience.ConsoleReader
   alias BarkparkCloud.DeploySignalAudience.ExReader
   alias BarkparkCloud.DeploySignalAudience.GoReader
@@ -439,14 +714,37 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   @deliveries Path.expand("../../../internal/cloudclient/deliveries.go", __DIR__)
   @notifications Path.expand("../../lib/barkpark_cloud/notifications.ex", __DIR__)
 
+  # Added by dr-w19-audience-registry-fail-open: the candidate derivation below
+  # found `SiteBuildLog` sending GET /v1/sites/*/deployments/*/build-log with no
+  # row anywhere in this file, so its source joins @sources in the same commit
+  # as the row that names it.
+  @site_build_log Path.expand("../../../internal/cloudclient/site_build_log.go", __DIR__)
+
+  # Added by task-801c6c33769ca01d (bp sites logs prints the build BYTES): the
+  # candidate derivation found `SiteBuildLogBytes` sending
+  # GET /v1/sites/*/deployments/*/build-log/bytes with no row, so its source joins
+  # @sources in the same commit as the reader row that names it (below).
+  @site_build_log_bytes Path.expand(
+                          "../../../internal/cloudclient/site_build_log_bytes.go",
+                          __DIR__
+                        )
+
   # The console bundle. `cloud/priv/static/**` is a CLOUD_PATH, so a console edit
   # re-runs this census — which is the point of counting its cards here rather
   # than in a number frozen into prose.
   @app_js Path.expand("../../priv/static/app.js", __DIR__)
 
+  # The candidate corpus. A DIRECTORY, walked, not a file list: a new Go source
+  # file in this package must be scanned the day it lands, and a list would have
+  # to be edited for that to happen — which is the fail-open shape this slice is
+  # closing, one level up.
+  @candidate_go_dir Path.expand("../../../internal/cloudclient", __DIR__)
+
   @sources %{
     "internal/cloudclient/client.go" => @cloudclient,
     "internal/cloudclient/deliveries.go" => @deliveries,
+    "internal/cloudclient/site_build_log.go" => @site_build_log,
+    "internal/cloudclient/site_build_log_bytes.go" => @site_build_log_bytes,
     "cloud/lib/barkpark_cloud/notifications.ex" => @notifications
   }
 
@@ -466,7 +764,14 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       kind: :pull,
       what:
         "one site's production deployment ledger, keyset-paged — how a team audits its own deploy failures",
-      readers: [%{file: "internal/cloudclient/client.go", func: "ListDeployments"}]
+      readers: [
+        %{file: "internal/cloudclient/client.go", func: "ListDeployments"},
+        # SAME ROUTE, SECOND READER (dr-w19-audience-registry-fail-open). The
+        # candidate derivation found `ListSpawnSiteDeployments` sending the same
+        # GET /v1/sites/*/deployments with no row; it is not a second SIGNAL —
+        # one route, one audience — so it is a second reader of this one.
+        %{file: "internal/cloudclient/client.go", func: "ListSpawnSiteDeployments"}
+      ]
     },
     %{
       name: "fleet_rollout_state",
@@ -481,6 +786,43 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
       what:
         "THE CROWN read, `bp cloud deliveries <sha>`: the platform's own per-sha delivery record — what was delivered, on whose run, and the clocks around it",
       readers: [%{file: "internal/cloudclient/deliveries.go", func: "PlatformDeliveries"}]
+    },
+    %{
+      name: "site_deployment_detail",
+      kind: :pull,
+      what:
+        "ONE deployment's row: its status, its clocks and its failure class — the read a team makes when the ledger page says a deploy failed and the question is which one",
+      readers: [%{file: "internal/cloudclient/client.go", func: "SpawnSiteDeployment"}]
+    },
+    %{
+      name: "site_build_log",
+      kind: :pull,
+      what:
+        "the BUILD LOG of one deployment — the only deploy-health read that carries the failure's own words rather than a class label, and the last stop before a human guesses. Two doors onto the one signal: the SCRUBBED record (user-tier) and the raw BYTES (operator-tier)",
+      readers: [
+        %{file: "internal/cloudclient/site_build_log.go", func: "SiteBuildLog"},
+        # SAME SIGNAL, SECOND DOOR (task-801c6c33769ca01d). `SiteBuildLogBytes`
+        # sends GET /v1/sites/*/deployments/*/build-log/bytes — a DISTINCT route
+        # from the record's /build-log, but onto the SAME signal: one deployment's
+        # build log. The bytes door is deliberately operator-gated because raw,
+        # never-scrubbed bytes can carry secrets, so Side B derives tier `operator`
+        # for THIS reader while the record reader stays `user(s)`. (It was an
+        # EMPTY tier until dr-w19-rollout-brake-is-machine-only; it is reachable
+        # now.) Either way it was NOT an empty-audience finding: the signal REACHES a human over
+        # the scrubbed record door, and the raw-bytes door is a superset-privilege
+        # escalation, not a signal addressed to nobody — which is exactly why the
+        # empty-audience arm reds only when EVERY reader of a signal is empty.
+        %{file: "internal/cloudclient/site_build_log_bytes.go", func: "SiteBuildLogBytes"}
+      ]
+    },
+    %{
+      name: "site_deploy_rate_alert",
+      kind: :push,
+      what:
+        "the DEPLOY FAILURE RATE alert: one email per red episode when a team's deploy failure rate crosses the verdict threshold for N consecutive ticks",
+      readers: [
+        %{file: "cloud/lib/barkpark_cloud/notifications.ex", func: "deliver_deploy_rate_notices"}
+      ]
     },
     %{
       name: "fleet_operator_digest",
@@ -500,6 +842,25 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     }
   ]
 
+  # WHY THE DIGEST *RECEIPT* READ IS NOT A SEVENTH ROW (dr-w20-bl). The daily
+  # digest's Delivery receipt is now provably readable by the team it belongs to
+  # over GET /v1/notifications/deliveries?event=fleet_digest, tier `user`, pinned
+  # in `router_notifications_test.exs` — but that read is NOT a distinct signal
+  # and does not get a row here, for two reasons that are structural rather than
+  # editorial:
+  #
+  #   * it is the SAME signal as `fleet_operator_digest`, seen from the receiving
+  #     end. That row's audience already derives `team_members` and is already
+  #     off the allowlist; a second row over one signal would inflate
+  #     `@signal_floor` without widening what the census can see.
+  #   * Side B for a `:pull` signal is derived from a Go reader in
+  #     `internal/cloudclient` (`@sources`), and NO Go source sends
+  #     /v1/notifications/deliveries — `grep -rn "notifications/deliveries"
+  #     internal/` is empty. A row naming a reader that does not exist fails
+  #     `path_of/1`'s `Map.fetch!` or the extractor, which is a red about this
+  #     file rather than about an audience. When a `bp` command grows that read,
+  #     THAT is the commit that registers it.
+
   # THE ANTI-VACUITY FLOOR. A deleted registry row, or a Go/Elixir syntax change
   # that quietly empties Side B, would otherwise be a silent green: zero signals
   # examined is zero empty audiences found. Committed, and lowered only in the
@@ -507,8 +868,25 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # Raised 5 -> 6 by dr-w27-bl-fleet-rollout-state-has-no-human-reader, which
   # registered `bp cloud deliveries` — the crown read this census was FAILING
   # OPEN over. Lowered only in the same commit as the signal that goes away.
-  @signal_floor 6
-  @reader_floor 6
+  # Raised 6 -> 9 by dr-w19-audience-registry-fail-open: the candidate derivation
+  # below found three deploy-health signals with no row at all — one deployment's
+  # detail read, the build log, and the deploy-failure-RATE alert — and registering
+  # them is what the derivation is for. Lowered only in the same commit as the
+  # signal that goes away.
+  @signal_floor 9
+  # Raised 6 -> 10 in the same commit: three new signals plus the second reader
+  # (`ListSpawnSiteDeployments`) the derivation found on an already-registered route.
+  # Raised 10 -> 11 by task-801c6c33769ca01d: `SiteBuildLogBytes`, the second door
+  # (raw bytes) onto the `site_build_log` signal. Lowered only in the same commit
+  # as the reader that goes away.
+  @reader_floor 11
+
+  # THE CANDIDATE FLOOR. Side C's own anti-vacuity number: a derivation that
+  # finds FEWER candidates than the registry has rows has stopped reading the
+  # source, and zero candidates is zero unregistered candidates — a silent green
+  # over the exact hole this arm closes. Committed, and lowered only in the same
+  # commit as the reader that went away.
+  @candidate_floor 8
 
   # THE PULL-SIDE EMPTY TIERS. `operator` was the whole list until dr-w19-s5,
   # and that made the census's green on a `worker`-tier reader VACUOUS: `worker`
@@ -523,7 +901,33 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # population and this census does not judge whether its secret is provisioned
   # anywhere") is now narrowed by construction: the census does not judge the
   # PROVISIONING, but it no longer calls the tier reachable.
-  @empty_pull_tiers ["operator", "worker"]
+  #
+  # `operator` LEFT the list in dr-w19-rollout-brake-is-machine-only. It was
+  # never empty for a SOURCE reason: `Auth.require_platform_operator/2` admits
+  # whoever `Notifications.platform_admin_emails/0` returns, and that was empty
+  # only because the env var was unset on prod. gr-ops-platform-admin-emails
+  # set it. Measured 2026-09-25T08:58Z by lead-api-r22: a real bp-login session
+  # gets `platform_operator: true` from GET /v1/me, and `bp cloud rollout status`
+  # (GET /v1/operator/autoupdate) answers 200 with the brake's position. A tier a
+  # person can pass is not empty, so keeping it here would make every red on it
+  # a false one and every allowlist row over it a stale excuse.
+  #
+  # `worker` STAYS: no person holds `WORKER_TOKEN`. That is what keeps this
+  # census able to red on a pull signal, and the control test
+  # "RED-ON-DEMAND: a signal whose only reader is the worker door REDS" proves it
+  # on the real router, not on a hand-written tier string.
+  @empty_pull_tiers ["worker"]
+
+  # THE PUSH-SIDE EMPTY POPULATIONS. `:platform_allowlist` is the SAME
+  # population as the `operator` tier above — `platform_admin_emails/0` is both
+  # the recipient resolver and the gate — so it left this list in the same
+  # commit, for the same measured reason. Calling one population reachable when
+  # it gates a route and empty when it receives mail would be two answers to one
+  # question. The list is empty today; no push reader resolves to it anyway (all
+  # three derive `team_members`). `:unknown` is not here on purpose: it is a
+  # population the census could not read, and the push rows' derived output is
+  # printed above so a reader sees one appear.
+  @empty_push_populations []
 
   # ---------------------------------------------------------------------------
   # THE ALLOWLIST — today's empty audiences, each WITH ITS CLOSER.
@@ -542,54 +946,67 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
   # The other row is NOT armed: dr-w18-s3 counts the digest's loss but leaves its
   # AUDIENCE the platform allowlist, so that row's closer is a later slice.
   @empty_audience_allowlist %{
-    # `fleet_deploy_census` used to sit here: its only reader sent
-    # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
-    # allowlist that is unset on prod and unsettable through any route, console
-    # action or User field — ZERO accounts could read the epic's headline number.
-    # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
-    # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
-    # every team can reach. The "allowlist cannot rot" test reds on an excuse that
-    # stopped being true and ordered this deletion by name, so the row is gone in
-    # the same commit as the reader that closed it.
-    #
-    # `fleet_operator_digest` used to sit here too: `deliver_fleet_digest/1`
-    # resolved its recipients through `platform_admin_emails/0`, so the daily
-    # digest took its `:no_admins` arm every single day and nobody ever received
-    # one. Its named CLOSER (dr-w19-fleet-digest-audience-still-empty) is THIS
-    # branch: the digest is now partitioned by team and addressed to each team's
-    # own membership rows, so Side B reclassifies it `team_members` with no test
-    # edit at all. The rot assertion below reddened in its own words ("This is
-    # the GOOD direction: its closer landed. Delete the allowlist row.") and the
-    # row is gone in the same commit as the re-address that closed it.
-    "fleet_rollout_state" =>
-      "EMPTY BY CONSTRUCTION — but the CONSTRUCTION MOVED, and so did the reason. " <>
-        "`platform_admin_emails/0` reads `[]` when the config key is unset, so the " <>
-        "gate still resolves to zero accounts by construction; what changed is WHY. " <>
-        "This row used to read " <>
-        "'`RolloutStatus` sends GET /v1/admin/autoupdate, tier `worker`' — the " <>
-        "machine population that holds `WORKER_TOKEN`, which no human account holds. " <>
-        "isu-backlog-operator-principal repointed the three rollout verbs at the " <>
-        "operator door (GET/POST /v1/operator/autoupdate*, the same trio the console " <>
-        "calls), so Side B now derives tier `operator` from source with no edit here. " <>
-        "The row's own prediction that repointing 'reds this census harder' is " <>
-        "REFUTED: dr-w19-s5 had already put `operator` in @empty_pull_tiers, so the " <>
-        "verdict is unchanged and only the REASON moved. What is left is not a " <>
-        "missing verb or a wrong door — it is that `:platform_admin_emails` is unset " <>
-        "on the live control plane, so the human-shaped door has nobody behind it. " <>
-        "Charter D30 rules that allowlist a PERMANENT HUMAN GATE. " <>
-        "CLOSER: gr-ops-platform-admin-emails — set PLATFORM_ADMIN_EMAILS on the live " <>
-        "control plane and the operator door opens for a real person; when it lands, " <>
-        "delete this row."
-  }
+                              # `fleet_deploy_census` used to sit here: its only reader sent
+                              # GET /v1/operator/deploy-ledger/census, gated on the `:platform_admin_emails`
+                              # allowlist that was then unset on prod and unsettable through any route, console
+                              # action or User field — ZERO accounts could read the epic's headline number.
+                              # Its named CLOSER (dr-w18-s1) is THIS branch: the client now reads the
+                              # team-scoped GET /v1/deploy-ledger/census, tier `user`, which every member of
+                              # every team can reach. The "allowlist cannot rot" test reds on an excuse that
+                              # stopped being true and ordered this deletion by name, so the row is gone in
+                              # the same commit as the reader that closed it.
+                              #
+                              # `fleet_operator_digest` used to sit here too: `deliver_fleet_digest/1`
+                              # resolved its recipients through `platform_admin_emails/0`, so the daily
+                              # digest took its `:no_admins` arm every single day and nobody ever received
+                              # one. Its named CLOSER (dr-w19-fleet-digest-audience-still-empty) is THIS
+                              # branch: the digest is now partitioned by team and addressed to each team's
+                              # own membership rows, so Side B reclassifies it `team_members` with no test
+                              # edit at all. The rot assertion below reddened in its own words ("This is
+                              # the GOOD direction: its closer landed. Delete the allowlist row.") and the
+                              # row is gone in the same commit as the re-address that closed it.
+                              # `site_build_log` used to sit here, and it was FOUND BY THE DERIVATION, NOT BY
+                              # A HUMAN (dr-w19-audience-registry-fail-open) — it had no row in this file at
+                              # all until the candidate set named it, and the census had been green over it
+                              # for nine waves. Its reader sends GET /v1/sites/*/deployments/*/build-log,
+                              # which the router enforced at tier `operator`: the `:platform_admin_emails`
+                              # allowlist, then unset on prod and unsettable through any route, console action or
+                              # User field. So the ONE deploy-health read that carries a failed build's
+                              # ACTUAL LOG TEXT, rather than a failure-class label, was readable by zero
+                              # accounts while its sibling reads on the same resource
+                              # (GET /v1/sites/*/deployments/*, tier `user(s)`) answered every member of the
+                              # owning team. Its named CLOSER (dr-w19-site-build-log-is-operator-only) is
+                              # THIS branch: the route now goes through `with_team_site(conn, {:ability,
+                              # "read"}, …)` — the sibling's own door — so Side B derives tier `user(s)` and
+                              # the rot assertion below reddened in its own words ("This is the GOOD
+                              # direction: its closer landed. Delete the allowlist row."). The row is gone in
+                              # the same commit as the re-point that closed it.
+                              #
+                              # `fleet_rollout_state` used to sit here, and it is the first row closed by a
+                              # HUMAN ACT rather than a code change. Its reader, `RolloutStatus`, first
+                              # sent GET /v1/admin/autoupdate (tier `worker`: `WORKER_TOKEN`, held by no
+                              # person); isu-backlog-operator-principal re-pointed it at
+                              # GET /v1/operator/autoupdate (tier `operator`), which was still empty
+                              # because `:platform_admin_emails` was unset on the live control plane
+                              # (Charter D30: a PERMANENT HUMAN GATE). Its named CLOSER,
+                              # gr-ops-platform-admin-emails, is DONE: the env var is set, a real bp-login
+                              # session reads the brake (lead-api-r22, 2026-09-25T08:58Z). The row said
+                              # "when it lands, delete this row", `operator` left @empty_pull_tiers
+                              # (dr-w19-rollout-brake-is-machine-only), the rot assertion reddened on it,
+                              # and it is deleted by name. The allowlist is EMPTY now; see
+                              # "RED-ON-DEMAND" below for why that is not a vacuous green.
+                            }
 
   # ---------------------------------------------------------------------------
-  # THE ZERO-VIEWER CONSOLE SURFACES (dr-w27-bl-fleet-rollout-state-has-no-human-reader)
+  # THE OPERATOR CONSOLE SURFACES (dr-w27-bl-fleet-rollout-state-has-no-human-reader)
   # ---------------------------------------------------------------------------
   # The operator console mounts a page of deploy cards behind
   # `Auth.require_platform_operator/2` on every route it reads. That principal is
-  # the `:platform_admin_emails` allowlist — the same population `fleet_rollout_state`
-  # is allowlisted for above — so every one of those cards is RENDERED CODE WITH
-  # ZERO POSSIBLE VIEWERS, and the count belongs in a census rather than in prose.
+  # the `:platform_admin_emails` allowlist, so until gr-ops-platform-admin-emails
+  # landed every one of those cards was RENDERED CODE WITH ZERO POSSIBLE VIEWERS.
+  # Since dr-w19-rollout-brake-is-machine-only the census counts them REACHABLE
+  # (operator is no longer an empty tier) and pins that every card still reads an
+  # operator-tier route — a card re-pointed at the worker door would red.
   #
   # THE FILING SAID FOUR. It is FIVE on main: `operatorPageHtml/0`'s own comment
   # still says "five cards" while the block comment above `OPERATOR_FLEET` says
@@ -649,7 +1066,7 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
            where: "#{reader.file}:#{line}",
            sends: "recipients <- #{resolver}/*",
            resolves: Atom.to_string(population),
-           empty?: population == :platform_allowlist
+           empty?: population in @empty_push_populations
          }}
 
       {:error, why} ->
@@ -741,34 +1158,79 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     assert length(rows) >= @reader_floor
   end
 
+  # The offender predicate, shared by the real assertion and its RED-ON-DEMAND
+  # control, so the control exercises the same code the census trusts.
+  defp offenders(derived, allowlist) do
+    for {signal, results} <- derived,
+        audiences = ok_audiences(results),
+        audiences != [],
+        Enum.all?(audiences, & &1.empty?),
+        not Map.has_key?(allowlist, signal.name) do
+      "  #{signal.name} (#{signal.kind}) — every reader lands on an empty population:\n" <>
+        Enum.map_join(audiences, "\n", fn a ->
+          "      #{a.where}  sends #{a.sends}  -> #{a.resolves}"
+        end)
+    end
+  end
+
   test "a signal whose EVERY reader is empty-by-construction REDS unless it is allowlisted" do
-    offenders =
-      for {signal, results} <- derive(),
-          audiences = ok_audiences(results),
-          audiences != [],
-          Enum.all?(audiences, & &1.empty?),
-          not Map.has_key?(@empty_audience_allowlist, signal.name) do
-        "  #{signal.name} (#{signal.kind}) — every reader lands on an empty population:\n" <>
-          Enum.map_join(audiences, "\n", fn a ->
-            "      #{a.where}  sends #{a.sends}  -> #{a.resolves}"
-          end)
-      end
+    offenders = offenders(derive(), @empty_audience_allowlist)
 
     assert offenders == [], """
     #{length(offenders)} deploy-health signal(s) have an audience that is EMPTY BY
-    CONSTRUCTION: every reader resolves to a population no person is in — the
-    platform-operator allowlist, which no account is in and none can join
-    (PLATFORM_ADMIN_EMAILS is unset on prod, no User field carries operator-ness,
-    and nothing but runtime.exs writes the key), or the `worker` machine tier,
-    whose token no human account holds. A signal reported there is a signal nobody
-    receives.
+    CONSTRUCTION: every reader resolves to a population no person is in — see
+    @empty_pull_tiers and @empty_push_populations (today: the `worker` machine
+    tier, whose token no human account holds). A signal reported there is a
+    signal nobody receives.
 
     #{Enum.join(offenders, "\n")}
 
     Fix: give the signal a reader with a reachable audience (a team-scoped route,
-    a team-resolved recipient set). If it must stay operator-only for now, add it
+    a team-resolved recipient set). If it must stay unreachable for now, add it
     to @empty_audience_allowlist WITH the task that closes it.
     """
+  end
+
+  test "RED-ON-DEMAND: a signal whose only reader is the worker door REDS" do
+    # The allowlist is EMPTY since dr-w19-rollout-brake-is-machine-only, so the
+    # real run above can no longer show the offender arm firing. This control
+    # shows it on the REAL router: the worker-tier twin of the brake read,
+    # GET /v1/admin/autoupdate, derived through the same `route_for/2` and lens
+    # as every reader, must come out empty and must red when unexcused.
+    {:ok, route} = route_for("GET", "/v1/admin/autoupdate")
+    {:ok, tier} = Lens.tier_of("GET", route)
+    assert tier == "worker"
+
+    control = %{name: "control_worker_brake", kind: :pull}
+
+    audience = %{
+      where: "control",
+      sends: "GET /v1/admin/autoupdate",
+      resolves: tier,
+      empty?: tier in @empty_pull_tiers
+    }
+
+    assert [red] = offenders([{control, [{:ok, audience}]}], @empty_audience_allowlist)
+    assert red =~ "control_worker_brake"
+    assert red =~ "-> worker"
+
+    # And the excuse door still works, so an allowlist row is still a real lever.
+    assert offenders([{control, [{:ok, audience}]}], %{"control_worker_brake" => "x"}) == []
+
+    # The mirror: the operator door is REACHABLE, so the same shape over it does
+    # not red. If `operator` crept back into @empty_pull_tiers this flips.
+    {:ok, op_route} = route_for("GET", "/v1/operator/autoupdate")
+    {:ok, op_tier} = Lens.tier_of("GET", op_route)
+
+    op = %{
+      audience
+      | sends: "GET /v1/operator/autoupdate",
+        resolves: op_tier,
+        empty?: op_tier in @empty_pull_tiers
+    }
+
+    assert op_tier == "operator"
+    assert offenders([{control, [{:ok, op}]}], @empty_audience_allowlist) == []
   end
 
   test "the allowlist cannot rot: a row whose audience is no longer empty REDS" do
@@ -821,9 +1283,12 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
              "#{name}: the row must state the census evidence, not just an intention"
     end
 
-    # If this ever reads zero, the allowlist has stopped being able to say
-    # "this one is empty" and every row above is decoration.
-    assert map_size(@empty_audience_allowlist) > 0
+    # This used to assert `map_size(@empty_audience_allowlist) > 0`. The last
+    # row (`fleet_rollout_state`) was closed by gr-ops-platform-admin-emails, so
+    # an empty allowlist is now the TRUE state, not a broken one. What that
+    # assertion guarded — that the census can still call a signal empty — is
+    # proved by "RED-ON-DEMAND" instead, which does not need a live defect to
+    # exist in order to show the arm fires.
   end
 
   test "ANTI-VACUITY: the BROKEN walker derives a DIFFERENT (empty) Side B" do
@@ -902,9 +1367,13 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     end
   end
 
-  test "c1 — the fleet brake's position is UNREADABLE, and the census names the fenced act" do
+  test "c1 — the fleet brake's position is READABLE: its reader resolves to tier operator, reachable" do
     name = "fleet_rollout_state"
-    reason = Map.fetch!(@empty_audience_allowlist, name)
+
+    refute Map.has_key?(@empty_audience_allowlist, name), """
+    #{name} is back on the allowlist. Its closer (gr-ops-platform-admin-emails)
+    landed and `operator` is a reachable tier; an excuse here is a stale one.
+    """
 
     audiences =
       derive()
@@ -912,44 +1381,29 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
 
     # DERIVED, not declared: the door the Go client actually knocks on, and the
     # tier router.ex actually enforces on it.
-    assert [%{sends: sends, resolves: tier, empty?: true}] = audiences
+    assert [%{sends: sends, resolves: tier, empty?: empty?}] = audiences
 
     assert sends == "GET /v1/operator/autoupdate", """
-    the fleet brake's reader now sends #{sends}. If that is a REACHABLE door the
-    row above is stale and must be deleted; if it is another empty one, say so.
+    the fleet brake's reader now sends #{sends}. Re-derive whether that door has
+    a person behind it before editing this assertion.
     """
 
+    # The ruling this row asked for (a): a human-reachable read route for the
+    # brake, and the census asserting its tier.
     assert tier == "operator"
-    assert tier in @empty_pull_tiers
-
-    # The RECORD, by name. This is what the criterion buys when the reader path
-    # cannot be opened by any code change in this repo: the census says WHICH
-    # door, WHICH population, and WHICH act outside this tree would open it.
-    assert reason =~ "/v1/operator/autoupdate",
-           "#{name}: the row must name the door its reader knocks on"
-
-    assert reason =~ ":platform_admin_emails",
-           "#{name}: the row must name the population behind that door"
-
-    assert reason =~ "CLOSER: gr-ops-platform-admin-emails",
-           "#{name}: the row must name the act that would make the brake readable"
-
-    assert reason =~ "PERMANENT HUMAN GATE", """
-    #{name}: the row must say the closer is a FENCED, non-code act. Without that
-    sentence a reader is sent hunting for a slice to write, and there is none —
-    setting PLATFORM_ADMIN_EMAILS on the live control plane is the whole remedy.
-    """
+    refute tier in @empty_pull_tiers
+    assert empty? == false
   end
 
-  test "c2 — every operator console deploy card is a ZERO-VIEWER surface, and the count is published" do
+  test "c2 — every operator console deploy card reads an operator-tier route, and the count is published" do
     src = ConsoleReader.source(@app_js)
     cards = ConsoleReader.cards(src)
     paints = ConsoleReader.paints(src)
 
     assert length(cards) == @operator_console_card_pin, """
     the operator console mounts #{length(cards)} deploy card(s); the pin is
-    #{@operator_console_card_pin}. A card added or removed changes the honest
-    zero-viewer count — move the pin in the SAME commit, and say which card.
+    #{@operator_console_card_pin}. A card added or removed changes the published
+    count — move the pin in the SAME commit, and say which card.
     """
 
     assert Enum.sort(Enum.map(cards, &elem(&1, 0))) == Enum.sort(Map.keys(paints)), """
@@ -966,25 +1420,34 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
         %{id: id, heading: heading, path: path, tier: tier, empty?: tier in @empty_pull_tiers}
       end
 
-    reachable = Enum.reject(rows, & &1.empty?)
+    off_tier = Enum.reject(rows, &(&1.tier == "operator"))
 
-    assert reachable == [], """
-    #{length(reachable)} operator console card(s) now read a REACHABLE route. That
-    is the GOOD direction — the surface grew a viewer — but the published
-    zero-viewer count below is now wrong. Re-state it:
+    assert off_tier == [], """
+    #{length(off_tier)} operator console card(s) read a route that is not operator-tier.
+    The console is one page behind one principal; a card on another tier is a
+    card whose audience differs from the page it sits on:
 
-    #{Enum.map_join(reachable, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
+    #{Enum.map_join(off_tier, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
+    """
+
+    dark = Enum.filter(rows, & &1.empty?)
+
+    assert dark == [], """
+    #{length(dark)} operator console card(s) read a route on an EMPTY tier — a
+    card nobody can see:
+
+    #{Enum.map_join(dark, "\n", fn r -> "      #{r.id} (#{r.heading}) reads GET #{r.path} -> #{r.tier}" end)}
     """
 
     IO.puts("""
 
-    operator console deploy cards — ZERO-VIEWER SURFACES
-      cards mounted : #{length(rows)}  (every one gated on :platform_admin_emails, which is [] on prod)
+    operator console deploy cards
+      cards mounted : #{length(rows)}  (every one gated on :platform_admin_emails, provisioned on prod by gr-ops-platform-admin-emails)
     #{Enum.map_join(rows, "\n", fn r -> "      #{String.pad_trailing(r.id, 16)} #{String.pad_trailing(r.heading, 18)} GET #{String.pad_trailing(r.path, 38)} -> #{r.tier}" end)}
 
       THE NUMBER THIS CENSUS PUBLISHES ABOUT READERSHIP
         deploy-health signals with an empty audience : #{map_size(@empty_audience_allowlist)}
-        operator console cards with zero viewers    : #{length(rows)}
+        operator console cards with zero viewers    : #{length(dark)}
     """)
   end
 
@@ -1030,11 +1493,277 @@ defmodule BarkparkCloud.DeploySignalAudienceCensusTest do
     end
   end
 
-  test "the moduledoc states the LIMIT of the claim" do
+  # ---------------------------------------------------------------------------
+  # SIDE C — THE CANDIDATE SET, and the registry's own fail-open
+  # ---------------------------------------------------------------------------
+  # `@signals` is a DECLARATION, and this file's moduledoc has said since wave 18
+  # that the declaration FAILS OPEN: "an unregistered signal is invisible to this
+  # file… Nothing syntactic closes that hole." This is the syntactic thing that
+  # closes it. `CandidateReader` derives, from source, what a deploy-health
+  # signal LOOKS like — a GET on a `deploy-ledger|deployments|autoupdate|census`
+  # path, or a public notification sender naming a deploy event — and a candidate
+  # with no row anywhere in `@signals` REDS, naming its `file:line`.
+  #
+  # WHAT IT FOUND ON ITS FIRST RUN, and what happened to each:
+  #   * `ListSpawnSiteDeployments` — same GET /v1/sites/*/deployments as the
+  #     registered `ListDeployments`. One route, one audience: it became a SECOND
+  #     READER of `site_deployment_history`, not a second signal.
+  #   * `SpawnSiteDeployment` — GET /v1/sites/*/deployments/*. Registered as
+  #     `site_deployment_detail`; derives tier `user`, reachable.
+  #   * `SiteBuildLog` — GET /v1/sites/*/deployments/*/build-log. Registered as
+  #     `site_build_log`, and it WAS the FINDING: the route was operator-gated, so
+  #     the one deploy-health read that carries a failed build's actual log text
+  #     was addressed to a population of zero. CLOSED by
+  #     dr-w19-site-build-log-is-operator-only — the route now takes
+  #     `with_team_site(conn, {:ability, "read"}, …)`, derives tier `user(s)`, and
+  #     is reachable by every member of the team that owns the site. Its allowlist
+  #     row is deleted; the rot assertion is what ordered that deletion.
+  #   * `deliver_deploy_rate_notices` — the deploy-failure-RATE alert. Registered
+  #     as `site_deploy_rate_alert`; reaches `team_member_emails/1` through one
+  #     hop, so its audience is `team_members` and it is reachable.
+  #
+  # THE EXCUSE DOOR, and why it is empty today. A candidate that is genuinely NOT
+  # a signal gets a row here saying so in words. Nothing needs one right now —
+  # every candidate the derivation found got a real registry row instead, which
+  # is the better answer — and the door is kept because the alternative is that
+  # the next true non-signal has no honest way through except weakening the
+  # extractor. Its mechanism is proven by the fake-candidate tests below, not by
+  # a decorative live row.
+  @unregistered_candidate_reasons %{}
+
+  defp candidate_go_sources,
+    do: CandidateReader.go_sources(@candidate_go_dir, "internal/cloudclient")
+
+  defp candidate_ex_source,
+    do: {"cloud/lib/barkpark_cloud/notifications.ex", File.read!(@notifications)}
+
+  defp candidates do
+    CandidateReader.go_candidates(candidate_go_sources()) ++
+      CandidateReader.ex_candidates(candidate_ex_source())
+  end
+
+  # A candidate is REGISTERED when some `@signals` row names its exact
+  # `{file, func}`. Nothing else counts: a signal whose name merely resembles the
+  # method is not a row that points at it.
+  defp unregistered(candidates, signals, reasons) do
+    registered =
+      for signal <- signals, reader <- signal.readers, into: MapSet.new() do
+        {reader.file, reader.func}
+      end
+
+    Enum.reject(candidates, fn c ->
+      MapSet.member?(registered, {c.file, c.func}) or
+        Map.has_key?(reasons, {c.file, c.func})
+    end)
+  end
+
+  test "SIDE C — a deploy-health candidate with NO registry row REDS, naming file:line" do
+    found = candidates()
+
+    rows =
+      for c <- found do
+        "  #{String.pad_trailing("#{c.file}:#{c.line}", 46)} #{String.pad_trailing(c.func, 28)} " <>
+          "#{c.kind} #{c.sends}"
+      end
+
+    IO.puts("""
+
+    deploy-health CANDIDATE set, derived from source
+      candidates : #{length(found)}  (#{Enum.count(found, &(&1.kind == :pull))} pull, #{Enum.count(found, &(&1.kind == :push))} push)
+    #{Enum.join(rows, "\n")}
+    """)
+
+    assert length(found) >= @candidate_floor, """
+    the derivation found #{length(found)} candidate(s); the floor is #{@candidate_floor}.
+    A derivation that finds FEWER candidates than the registry has rows has stopped
+    reading the source — teach the extractor the new idiom, or lower the floor in
+    the SAME commit as the reader that went away.
+    """
+
+    missing = unregistered(found, @signals, @unregistered_candidate_reasons)
+
+    assert missing == [], """
+    #{length(missing)} deploy-health signal(s) exist in SOURCE with no row in
+    `@signals` at all. The census is green over them BY CONSTRUCTION — it cannot
+    judge the audience of a signal it has never heard of, which is the fail-open
+    this arm exists to close:
+
+    #{Enum.map_join(missing, "\n", fn c -> "      #{c.file}:#{c.line}  #{c.func}  (#{c.kind}) #{c.sends}" end)}
+
+    Fix: add a `@signals` row naming that `{file, func}` — and raise
+    `@signal_floor`/`@reader_floor` with it — or, if it is genuinely not a signal,
+    add a `@unregistered_candidate_reasons` row that says SO IN WORDS.
+    """
+  end
+
+  test "SIDE C RED-ON-DEMAND: a fake candidate with no row REDS and names its file:line" do
+    fake = %{
+      file: "internal/cloudclient/client.go",
+      func: "ListPhantomDeployments",
+      line: 4242,
+      kind: :pull,
+      sends: "GET /v1/sites/*/deployments/phantom"
+    }
+
+    missing = unregistered([fake | candidates()], @signals, @unregistered_candidate_reasons)
+
+    assert [%{func: "ListPhantomDeployments", line: 4242}] = missing,
+           "a candidate absent from @signals must survive the registered filter — " <>
+             "if it does not, the arm above is green because it cannot see anything"
+
+    # The red the real assertion prints MUST carry the location, because
+    # "something is unregistered" is not actionable and `file:line` is.
+    rendered = "#{hd(missing).file}:#{hd(missing).line}"
+    assert rendered == "internal/cloudclient/client.go:4242"
+  end
+
+  test "SIDE C EXCUSE DOOR: a stated reason — and only a stated reason — lets a candidate through" do
+    fake = %{
+      file: "internal/cloudclient/client.go",
+      func: "ListPhantomDeployments",
+      line: 4242,
+      kind: :pull,
+      sends: "GET /v1/sites/*/deployments/phantom"
+    }
+
+    key = {fake.file, fake.func}
+
+    assert unregistered([fake], @signals, %{}) == [fake]
+
+    assert unregistered([fake], @signals, %{key => "not a signal: a phantom, by construction"}) ==
+             []
+
+    # The excuse is keyed on the EXACT {file, func}. A reason filed against a
+    # different method does not silence this one — otherwise one row could quietly
+    # excuse a whole file.
+    assert unregistered([fake], @signals, %{
+             {fake.file, "SomeOtherMethod"} => "an excuse for a different method"
+           }) == [fake]
+  end
+
+  test "MUTATION: the PULL derivation SHRINKS when the Go source loses a method" do
+    sources = candidate_go_sources()
+    before = CandidateReader.go_candidates(sources)
+
+    assert Enum.any?(before, &(&1.func == "SiteBuildLog")),
+           "the mutation below removes `SiteBuildLog`; if it is not in the baseline set " <>
+             "this test measures nothing"
+
+    mutated =
+      Enum.map(sources, fn {label, src} ->
+        {label, String.replace(src, "func (c *Client) SiteBuildLog(", "func (c *Client) zz(")}
+      end)
+
+    after_ = CandidateReader.go_candidates(mutated)
+
+    assert length(after_) == length(before) - 1, """
+    deleting one deploy-health Go method changed the candidate count from
+    #{length(before)} to #{length(after_)}. A derived set that does not move when its
+    SOURCE moves is a hand-written list wearing a derivation's clothes.
+    """
+
+    assert Enum.map(after_, & &1.func) == Enum.map(before, & &1.func) -- ["SiteBuildLog"]
+  end
+
+  test "MUTATION: the PUSH derivation SHRINKS when a notifications sender goes away" do
+    {label, src} = candidate_ex_source()
+    before = CandidateReader.ex_candidates({label, src})
+
+    assert Enum.any?(before, &(&1.func == "deliver_deploy_rate_notices"))
+
+    mutated =
+      String.replace(src, "  def deliver_deploy_rate_notices(", "  defp zz_deploy_rate_notices(")
+
+    after_ = CandidateReader.ex_candidates({label, mutated})
+
+    assert length(after_) == length(before) - 1, """
+    removing one public deploy-event sender changed the push candidate count from
+    #{length(before)} to #{length(after_)}.
+    """
+
+    refute Enum.any?(after_, &(&1.func == "deliver_deploy_rate_notices"))
+  end
+
+  test "POSITIVE CONTROL: the extractor REFUSES an empty read rather than returning []" do
+    # A corpus with no exported client method. `[]` here would make every
+    # assertion above vacuously true — zero candidates is zero unregistered
+    # candidates — so it is a RAISE.
+    assert_raise ArgumentError, ~r/zero exported \*Client methods across/, fn ->
+      CandidateReader.go_candidates([{"scratch/empty.go", "package cloudclient\n"}])
+    end
+
+    # And the real Elixir module, fed to the Go extractor, is exactly that shape:
+    # a file that exists, is non-empty, and carries nothing the scanner reads.
+    assert_raise ArgumentError, ~r/zero exported \*Client methods across/, fn ->
+      CandidateReader.go_candidates([{"notifications.ex", File.read!(@notifications)}])
+    end
+
+    assert_raise ArgumentError, ~r/zero public deliver_\*\/dispatch_\* functions/, fn ->
+      CandidateReader.ex_candidates({"scratch/empty.ex", "defmodule X do\nend\n"})
+    end
+
+    # A missing package directory is a NAMED refusal, never an empty scan.
+    assert_raise ArgumentError, ~r/Go client package not found/, fn ->
+      CandidateReader.go_sources(@candidate_go_dir <> "-gone", "internal/cloudclient")
+    end
+
+    # CONTROL ON THE CONTROL: the same extractor over the REAL corpus does NOT
+    # raise and does NOT return []. Without this, the four refusals above are
+    # consistent with an extractor that refuses everything.
+    live = CandidateReader.go_candidates(candidate_go_sources())
+    assert length(live) > 0
+  end
+
+  # THE MODULEDOC, AND NOTHING ELSE. The test below used to read the WHOLE FILE
+  # into `src` — so every `assert src =~ "..."` matched ITS OWN ASSERTION
+  # LITERAL, and the guard was VACUOUS on main for all three of its probes.
+  # Measured, not assumed (dr-w19-audience-registry-fail-open): deleting the
+  # sentence from the moduledoc left the test GREEN. Scoping the read to the
+  # moduledoc is what makes the probe about the doc rather than about itself.
+  defp moduledoc_text do
     src = File.read!(@self)
 
-    assert src =~ "This proves an AUDIENCE SHAPE, not DELIVERY"
-    assert src =~ "the registry FAILS OPEN: an unregistered signal is invisible"
-    assert src =~ "does NOT prove any route returns 200"
+    # The LAST `@moduledoc` before `use ExUnit.Case` — this file carries four of
+    # them (the three readers, then the census), and a non-greedy match from the
+    # front lands on `GoReader`'s.
+    [head, _] = String.split(src, "\n  use ExUnit.Case", parts: 2)
+
+    head
+    |> String.split("  @moduledoc \"\"\"\n")
+    |> List.last()
+    |> String.split("\n  \"\"\"")
+    |> hd()
+  end
+
+  test "the moduledoc states the LIMIT of the claim" do
+    src = moduledoc_text()
+
+    # THE CONTROL ON THE PROBE. If `src` ever grows back into the whole file,
+    # these assertions start matching themselves and stop measuring anything.
+    refute src =~ "assert src =~",
+           "the limit probe is reading its own assertions again — scope it to the moduledoc"
+
+    assert byte_size(src) < byte_size(File.read!(@self)) / 2
+
+    # WHITESPACE-TOLERANT, because the moduledoc is HARD-WRAPPED at 80 columns and
+    # "does NOT prove any route returns 200" is split across two lines in it. The
+    # old whole-file probe matched the ASSERTION LITERAL and never the doc, which
+    # is how a probe for a sentence that is not literally present stayed green.
+    assert src =~ ~r/This proves an AUDIENCE SHAPE,\s+not DELIVERY/
+    assert src =~ ~r/does NOT prove any\s+route returns 200/
+
+    # dr-w19-audience-registry-fail-open RETRACTED the old admission — "the
+    # registry FAILS OPEN: an unregistered signal is invisible to this file" —
+    # and this assertion used to grep for exactly that sentence. IT WOULD HAVE
+    # STAYED GREEN ON THE RETRACTION: the retraction QUOTES the sentence it
+    # retracts, three lines above the correction, so the old probe matched its
+    # own obituary and reported that the file still admitted a hole it had just
+    # closed. A guard must probe the NEW text.
+    assert src =~ "the registry no longer fails open"
+    assert src =~ "This moduledoc used to end:"
+
+    # And the NEW claim carries its own limit, which is narrower than "no deploy
+    # signal can hide": the derivation reads two shapes and is blind to the rest.
+    assert src =~ ~r/The derivation sees\s+the two shapes it reads and no others/
   end
 end

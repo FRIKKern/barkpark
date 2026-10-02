@@ -93,6 +93,19 @@ defmodule Barkpark.Tenancy.Workspace do
     # branch.
     field :is_default, :boolean, default: false
 
+    # REVERSIBLE ARCHIVE (task-55474a106554e65a). NULL = live. Non-NULL = the
+    # workspace is INERT BUT NOT GONE: every row it owns survives untouched,
+    # and the tenant resolvers (`Plugs.ResolveWorkspace`,
+    # `Plugs.DeriveWorkspaceFromToken`) refuse scoped traffic with
+    # `workspace_archived` (409) — distinct from the 404 a deleted workspace
+    # answers and the 403 a non-member gets.
+    #
+    # NOT CAST, for the same reason as `is_default`: the only writers are
+    # `Tenancy.archive_workspace/1` and `Tenancy.restore_workspace/1`, so no
+    # attrs map (a controller's, a bundle manifest's) can archive or un-archive
+    # a workspace behind the admin + tenancy gate those two sit behind.
+    field :archived_at, :utc_datetime_usec
+
     # Thin Organization tier (era-w1-org): nullable, additive, not read by any
     # authorization path — a workspace joins an org when SSO/SCIM is configured.
     belongs_to :organization, Barkpark.Tenancy.Organization
@@ -106,6 +119,11 @@ defmodule Barkpark.Tenancy.Workspace do
   @type t :: %__MODULE__{}
 
   def reserved_slugs, do: @reserved_slugs
+
+  @doc "True when the workspace has been archived (`archived_at` is set)."
+  @spec archived?(t()) :: boolean()
+  def archived?(%__MODULE__{archived_at: nil}), do: false
+  def archived?(%__MODULE__{}), do: true
 
   def changeset(workspace, attrs) do
     workspace

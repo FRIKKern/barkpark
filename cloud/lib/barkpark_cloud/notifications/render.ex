@@ -138,11 +138,31 @@ defmodule BarkparkCloud.Notifications.Render do
          "A content publish for #{site} did not deploy — it was refused." <>
            "#{identity(payload)}#{cause(payload)}", :warning}
 
+      # cch-w29-bl-agent-unreachable-letter-has-no-next-step: the chat twin gets
+      # the SAME next step as the letter, from the same owner
+      # (`unreachable_next_step/0`) — one dispatch must not produce two stories.
       "agent_unreachable" ->
-        {"Site unreachable", "#{site} stopped responding to health checks.", :warning}
+        {"Site unreachable",
+         "#{site} stopped responding to health checks." <> unreachable_next_step(), :warning}
 
       "agent_reachable" ->
         {"Site reachable again", "#{site} is responding to health checks again.", :info}
+
+      # cch-w30-bl-member-joined-alert — a person ACCEPTED an invitation and is
+      # now on the team. `:info` is correct and is honest green: nothing is
+      # broken, and this is the one membership change the team asked to hear
+      # about (the column defaults OFF — a join is a success, and successes are
+      # opt-in).
+      #
+      # `joined_clause/1` owns the sentence, shared with `EventEmail`, so the
+      # inbox and Slack cannot disagree about who joined or at what role. The
+      # copy says JOINED and never "invited": the event fires at
+      # `Accounts.accept_invitation/2`, not when the invitation was sent — the
+      # invitee's own invite letter is a different, transactional message
+      # (`Transactional.deliver_invite/1`), and wave 30 deleted the
+      # `member_invited` toggle precisely because it promised a duplicate of it.
+      "member_joined" ->
+        {"Member joined", "#{joined_clause(payload)} on #{site}.", :info}
 
       "subscription_past_due" ->
         {"Subscription past due",
@@ -239,6 +259,50 @@ defmodule BarkparkCloud.Notifications.Render do
   end
 
   @doc """
+  WHO joined and at WHAT ROLE, as ONE clause — `"pat@acme.com joined as an
+  admin"`, `"pat@acme.com joined"` when the payload carries no role, or
+  `"a new member joined"` when it carries no address either
+  (cch-w30-bl-member-joined-alert).
+
+  It lives here, and the alert email calls it, for exactly the reason
+  `deployment_identity/1` does: the inbox and the chat channels must not tell one
+  person a different story about the same join.
+
+  TWO THINGS IT REFUSES TO SAY:
+
+    * "invited". The producer is `Accounts.accept_invitation/2` — the moment the
+      person ACCEPTED. The send side already has its own transactional letter,
+      and a toggle that mailed a team at invite time is the one wave 30 deleted.
+    * a role it does not hold. `role` is the `team_memberships.role` column the
+      acceptance actually wrote; an absent or unrecognised value drops the
+      clause rather than guessing "member".
+
+  The payload reaching a chat shaper is the Oban args map, so every key is read
+  under both a string and an atom.
+  """
+  @spec joined_clause(map()) :: String.t()
+  def joined_clause(payload) when is_map(payload) do
+    who =
+      case field(payload, :email) do
+        address when is_binary(address) and address != "" -> address
+        _ -> "a new member"
+      end
+
+    who <> " joined" <> role_clause(payload)
+  end
+
+  # The roles `Accounts` actually grants (`can_grant?/2`: owner, admin, member).
+  # Anything else — nil, a string nobody writes — renders NO clause at all.
+  defp role_clause(payload) do
+    case field(payload, :role) do
+      "owner" -> " as the owner"
+      "admin" -> " as an admin"
+      "member" -> " as a member"
+      _ -> ""
+    end
+  end
+
+  @doc """
   WHAT the trial teardown destroyed, as ONE clause — `"acme has been torn down"`,
   `"acme and beta have been torn down"` (cch-w52-bl).
 
@@ -260,6 +324,63 @@ defmodule BarkparkCloud.Notifications.Render do
       [one] -> "#{one} has been torn down"
       many -> "#{join_names(many)} have been torn down"
     end
+  end
+
+  @doc """
+  The NEXT STEP for an unreachable instance, as one block of prose, shared
+  verbatim by the alert email and every chat channel
+  (cch-w29-bl-agent-unreachable-letter-has-no-next-step).
+
+  ## Why it is a constant and not a producer field
+
+  Both and only both `:agent_unreachable` producers pass a name and nothing else
+  — `Health.StalenessWorker.flip_offline/1` sends `%{name: offline.name}`, and
+  the report-flip site calls `dispatch_barkpark_event/2`, whose payload defaults
+  to `%{}`. So `EventEmail.detail/1` renders `""` for this event 100% of the
+  time, and `alert_detail_reachability_test.exs` PINS that (`detail_reachability
+  (:agent_unreachable) == :never`). Giving the letter a next step by inventing a
+  payload would break that pin and, worse, would invite a CAUSE the control
+  plane never measured. It did not measure one: Barkpark has no active probe.
+
+  ## Every sentence below is a property the code actually has
+
+    * "Barkpark only knows what the box reports" — ingest is push-only
+      (`POST /v1/agent/report`); `StalenessWorker`'s moduledoc states the same
+      absence ("Barkpark has no active-probe channel").
+    * "It will not restart it, retry it, or send another message about this
+      outage" — `flip_offline/1` records a status event, dispatches once and
+      broadcasts; there is no remediation path, and the second message is
+      debounced two ways (the WENT SILENT arm drops out of
+      `Registry.stale_online_barkparks/1` once `agent_status` leaves "online";
+      the NEVER REPORTED arm latches on `unreachable_notification_sent`). The
+      report-flip producer needs an up→down transition, which cannot recur
+      without an intervening recovery.
+    * "Nothing changes here until its agent reports again" — true of BOTH
+      producers, which is why it is phrased as the agent reporting rather than
+      as a count or a duration.
+    * The recovery notice is stated CONDITIONALLY. `Registry.record_agent_report/2`
+      re-arms the latch and the health flip dispatches `:agent_reachable`, but
+      that event has its own per-team toggle (`EmailSettings.agent_reachable`),
+      so promising the mail unconditionally would assert a property a muted team
+      does not have.
+
+  No duration and no missed-tick count appear, deliberately: the report-flip
+  producer fires on a single reported transition with no debounce at all, so any
+  "we waited N checks" sentence would be false on one of the two rails.
+  """
+  @spec unreachable_next_step() :: String.t()
+  def unreachable_next_step do
+    "\n\nBarkpark only knows what the box reports — there is no probe that can " <>
+      "reach in and look, so this is the end of what Barkpark can do by itself. " <>
+      "It will not restart the box, retry it, or send another message about this " <>
+      "outage.\n\n" <>
+      "Worth checking on the box, in this order: that the machine is powered on " <>
+      "and on the network, that the Barkpark agent is running on it, and that the " <>
+      "agent can still reach Barkpark Cloud.\n\n" <>
+      "If you do nothing, nothing changes here until the agent reports again. " <>
+      "When it does, Barkpark notices on its own and marks the instance reachable " <>
+      "— you get a \"reachable again\" notice unless your team has switched that " <>
+      "one off."
   end
 
   defp instance_names(payload) do

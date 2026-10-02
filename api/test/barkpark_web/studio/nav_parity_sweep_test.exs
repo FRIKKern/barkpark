@@ -169,6 +169,15 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       url: {:scoped, "/d/production/studio/_plugins/onixedit/settings"},
       active: "Structure"
     },
+    # The user's own "Your data" page (era-bl-gdpr-selfserve-ui). Same
+    # underscore-reserved segment and same prefix match as `_plugins`, so it
+    # sits in Structure's territory; it has no top-menu tab of its own.
+    %{
+      route: "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_account",
+      disposition: :mount,
+      url: {:scoped, "/d/production/studio/_account"},
+      active: "Structure"
+    },
 
     # ── env-gated (mount hard-gates on the enabled? predicate; off in test) ──
     %{route: "/studio/tmux", disposition: :skip_env_gated, gated: :tmux},
@@ -248,11 +257,17 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
 
   setup do
     {:ok, _} =
-      Auth.create_token(@admin_token, "nav parity sweep admin", "production", [
-        "read",
-        "write",
-        "admin"
-      ])
+      Auth.create_token(
+        @admin_token,
+        "nav parity sweep admin",
+        "production",
+        [
+          "read",
+          "write",
+          "admin"
+        ],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     :ok
   end
@@ -293,6 +308,8 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       {:ok, mounts: mounts}
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "the ordered tab-label set is IDENTICAL on every mounted route", %{mounts: mounts} do
       [{ref_row, ref_nav} | rest] = mounts
       reference = labels(ref_nav)
@@ -308,6 +325,8 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
       end
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "env-gated tabs (tmux/chat) are present iff their predicate holds — oracle in lockstep",
          %{mounts: [{_row, nav} | _]} do
       present = labels(nav) |> Enum.filter(&(&1 in ["tmux", "chat"]))
@@ -322,6 +341,8 @@ defmodule BarkparkWeb.Studio.NavParitySweepTest do
                "predicates the component uses #{inspect(expected)}"
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "every mounted route highlights exactly its own tab (or none for a non-tab surface)",
          %{mounts: mounts} do
       # Accumulate ALL mismatches so a single run shows the full picture

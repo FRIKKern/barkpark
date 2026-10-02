@@ -62,9 +62,19 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		machine = briefManifest(m)
 	}
 
+	// The min_cli floor the server advertises, checked against THIS binary.
+	// `bp capabilities` is the command a human runs to ask what a box can do,
+	// so it is where a floor this binary does not meet has to be legible —
+	// advisory, on stderr, in every output shape, and silent otherwise.
+	// See min_cli_gate.go for why this reports and never refuses.
+	minCLIMsg := minCLINotice(m.Server)
+
 	switch out.output {
 	case "json":
 		out.renderJSON(machine)
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		out.errf("%s", builtinPointerLine())
 	case "yaml":
 		// Round-trip through JSON to a generic value for the YAML emitter.
@@ -72,11 +82,20 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		var v any
 		_ = json.Unmarshal(b, &v)
 		out.renderYAML(v)
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		out.errf("%s", builtinPointerLine())
 	default:
 		tree := m.Tree()
-		out.outf("server:    %s (%s)", m.Server.Name, m.Server.Version)
+		// `advertised` and not `running`: server.version is the app's mix
+		// version, frozen (0.1.0 on a prod box running 0.2.26.929). The
+		// running-release oracle is GET /status.json, not this field.
+		out.outf("server:    %s (advertised %s — running release: GET /status.json)", m.Server.Name, m.Server.Version)
 		out.outf("base_url:  %s", m.Server.BaseURL)
+		if m.Server.MinCLI != nil && *m.Server.MinCLI != "" {
+			out.outf("min_cli:   %s (advisory — reported, never enforced as a refusal)", *m.Server.MinCLI)
+		}
 		out.outf("auth_tier: %s", m.AuthTier)
 		out.outf("manifest:  v%s  etag=%s", m.ManifestVersion, m.ETag)
 		out.outf("")
@@ -93,6 +112,9 @@ func runCapabilities(out *writer, g globals, ctx manifest.Context) int {
 		// only — the manifest contract, the brief projection, and every byte of
 		// machine stdout are untouched; machine mode gets the same fact as ONE
 		// stderr line above.
+		if minCLIMsg != "" {
+			out.errf("%s", minCLIMsg)
+		}
 		if lines := builtinCapabilityLines(); len(lines) > 0 {
 			out.outf("")
 			for _, line := range lines {
@@ -169,14 +191,42 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 	if anyEnvSet(ServerEnvNames...) {
 		return "env", false, name
 	}
-	// 3. Saved config — the resolved server matches the persisted active server.
+	// 3. Repo file — a .barkpark.json above cwd names the server that resolved.
+	//    It outranks the saved active config (flags > env > repo file > active),
+	//    so a pinned repo must not be labelled "default" (which tells the reader
+	//    to run `bp setup`) nor "saved" (which blames the global config).
+	if _, ok := whoamiRepoFileServer(cfg, ctx); ok {
+		active := cfg != nil && cfg.IsActiveServer(ctx.Server)
+		return "repo-file", active, name
+	}
+	// 4. Saved config — the resolved server matches the persisted active server.
 	if cfg != nil && cfg.ActiveServer() != "" {
 		if normalizeServerURL(cfg.ActiveServer()) == normalizeServerURL(ctx.Server) {
 			return "saved", cfg.IsActiveServer(ctx.Server), name
 		}
 	}
-	// 4. Otherwise it's the baked localhost default.
+	// 5. Otherwise it's the baked localhost default.
 	return "default", false, name
+}
+
+// whoamiRepoFileServer reports the path of the .barkpark.json that chose
+// ctx.Server: the nearest repo file above cwd names a server, and that server —
+// resolved the way overlayActive resolves it (a saved name/alias → its URL, else
+// the raw URL) — is the one ctx resolved to. A repo file that names no server
+// (scope only), or one whose server lost to a higher layer, is not the source.
+func whoamiRepoFileServer(cfg *Config, ctx manifest.Context) (string, bool) {
+	repo, err := loadRepoFile()
+	if err != nil || repo == nil || repo.Server == "" {
+		return "", false
+	}
+	server := repo.Server
+	if entry, ok := cfg.FindServer(repo.Server); ok {
+		server = entry.Server
+	}
+	if normalizeServerURL(server) != normalizeServerURL(ctx.Server) {
+		return "", false
+	}
+	return repo.Path, true
 }
 
 // runWhoami answers "what am I connected to" — and it is LOCAL-FIRST, so it
@@ -188,6 +238,12 @@ func whoamiSourceName(g globals, ctx manifest.Context) (source string, active bo
 func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenance) int {
 	source, active, name := whoamiSourceName(g, ctx)
 	tokenPresent := ctx.Token != ""
+	// The repo file that pinned the server, named so the reader can find it.
+	sourcePath := ""
+	if source == "repo-file" {
+		cfg, _ := LoadConfig()
+		sourcePath, _ = whoamiRepoFileServer(cfg, ctx)
+	}
 
 	// WHICH credential, not merely whether one exists. `token_present: true` was
 	// the whole diagnosis before this line, and it is the same "true" for a saved
@@ -352,6 +408,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		"server":        ctx.Server,
 		"kind":          kind,
 		"source":        source,
+		"source_path":   sourcePath,
 		"active":        active,
 		"workspace":     ctx.Workspace,
 		"project":       ctx.Project,
@@ -434,9 +491,9 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		prodMark = "  ⚠ PROD"
 	}
 	if name != "" {
-		out.outf("target:    %s — %s [%s] (%s)%s", name, ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s — %s [%s] (%s)%s", name, ctx.Server, kind, whoamiSourceLabel(source, active, sourcePath), prodMark)
 	} else {
-		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active), prodMark)
+		out.outf("target:    %s [%s] (%s)%s", ctx.Server, kind, whoamiSourceLabel(source, active, sourcePath), prodMark)
 	}
 	// The scope block is no longer an unconditional echo of ctx — see
 	// whoamiScopeLines. Floor scope prints exactly one byte-identical line;
@@ -491,8 +548,13 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 // whoamiSourceLabel renders the parenthetical source annotation for the human
 // target line, e.g. "saved · active", "default — no saved config; run 'bp setup
 // --target connect'", "env", "flag".
-func whoamiSourceLabel(source string, active bool) string {
+func whoamiSourceLabel(source string, active bool, path string) string {
 	switch source {
+	case "repo-file":
+		if path != "" {
+			return "repo file " + path
+		}
+		return "repo file"
 	case "saved":
 		if active {
 			return "saved · active"
@@ -524,7 +586,7 @@ var completionNouns = []string{
 // completionGlobals are the global flags valid before any noun.
 var completionGlobals = []string{
 	"-s", "--server", "--token", "-w", "--workspace", "-p", "--project",
-	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest",
+	"-d", "--dataset", "-o", "--output", "--limit", "--offset", "--manifest", "--session",
 	"--json", "-q", "--quiet", "-v", "--verbose", "--no-color", "--dry-run",
 	"--yes", "--all", "--full", "--no-cache", "-h", "--help", "--version", "-V",
 }
@@ -544,7 +606,11 @@ func runCompletion(out *writer, g globals, ctx manifest.Context, args []string) 
 	if len(args) > 0 {
 		shell = args[0]
 	}
-	verbMap := completionVerbMap(ctx)
+	// The manifest cache supplies verbs/flags for MANIFEST nouns. Control-plane
+	// builtins (`bp cloud …`) are architecturally absent from every manifest, so
+	// their tree comes from completion_builtins.go and is UNIONed in here — one
+	// merge, so every emitter below sees one map and cannot disagree.
+	verbMap := mergeBuiltinVerbs(completionVerbMap(ctx))
 	flagMap := completionFlagMap(ctx)
 	nouns := completionNounList(verbMap)
 	globals := strings.Join(completionGlobals, " ")
@@ -584,6 +650,45 @@ func completionNounList(verbMap map[string][]string) string {
 	}
 	sort.Strings(nouns)
 	return strings.Join(nouns, " ")
+}
+
+// mergeBuiltinVerbs unions the ONE-WORD builtin completion paths (the
+// control-plane nouns in builtinCompletionPaths, plus every noun carrying a
+// verb-level built-in from the nounBuiltins registry) into the manifest-derived
+// verb map. A builtin noun then completes its verbs through exactly the same
+// position-2 machinery a manifest noun does — `bp cloud <TAB>` offers site,
+// status, deploy…, and `bp task <TAB>` offers create/frontier beside the
+// manifest verbs. The input map is never mutated (it is the cache's view).
+func mergeBuiltinVerbs(verbMap map[string][]string) map[string][]string {
+	merged := make(map[string][]string, len(verbMap)+8)
+	for n, v := range verbMap {
+		merged[n] = v
+	}
+	for _, key := range sortedBuiltinPathKeys() {
+		if hasSpace(key) {
+			continue
+		}
+		merged[key] = dedupeSorted(append(append([]string(nil), merged[key]...), builtinPathCandidates(key)...))
+	}
+	return merged
+}
+
+// builtinPathMap is the MULTI-WORD half of the same table: a space-joined
+// command prefix ("cloud site", "cloud site deploy") -> the tokens offered at
+// the next position. One-word prefixes are excluded because mergeBuiltinVerbs
+// already folded them into the position-2 verb map; listing them twice would
+// offer a noun's verbs again one position too late.
+func builtinPathMap() map[string][]string {
+	m := make(map[string][]string)
+	for _, key := range sortedBuiltinPathKeys() {
+		if !hasSpace(key) {
+			continue
+		}
+		if c := builtinPathCandidates(key); len(c) > 0 {
+			m[key] = c
+		}
+	}
+	return m
 }
 
 // completionVerbMap reads the ON-DISK manifest cache (never the network) and
@@ -681,8 +786,9 @@ func sortedFlagKeys(flagMap map[string][]string) []string {
 // serves bash and zsh, whose single-quote semantics are identical here.)
 
 // shSingleQuoteEach single-quotes each token and space-joins them, for a context
-// (e.g. a zsh `arr=(...)` literal) that parses the quotes at assignment time and
-// performs quote removal — so the elements stay separate and land unquoted.
+// (a zsh or bash `arr=(...)` literal) that parses the quotes at assignment time
+// and performs quote removal — so the elements stay separate and land unquoted,
+// one array element per token no matter what characters the token holds.
 func shSingleQuoteEach(toks []string) string {
 	q := make([]string, len(toks))
 	for i, t := range toks {
@@ -714,14 +820,24 @@ func bashCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 		fmt.Fprintf(&cases, "      %s) __bpverbs=%q;;\n", noun, strings.Join(verbMap[noun], " "))
 	}
 	// Position 3+ offers the command's own flags, keyed on the "noun verb" pair.
-	// The flag list is single-quoted as ONE value (not %q): the untrusted flag
-	// tokens must never be command-substituted when the case body assigns
-	// __bpflags. We deliberately store the raw space-joined names (no per-token
-	// quotes) because a shell variable's value is word-split but NOT quote-removed
-	// on re-expansion — interior quotes would survive as literal characters.
+	// Untrusted flag tokens go into a bash ARRAY literal with EACH element
+	// single-quoted — never one space-joined scalar. A scalar has to be
+	// re-split to become candidates again, and an unquoted `$__bpflags` splits
+	// AND GLOBS: a manifest flag named `--x*` then matched `./--xSECRET…` and
+	// offered a filename from the user's cwd as a completion candidate. An array
+	// carries the token count with the tokens, so the loop below can read it
+	// fully quoted and no second expansion pass exists at all.
 	var flagCases strings.Builder
 	for _, key := range sortedFlagKeys(flagMap) {
-		fmt.Fprintf(&flagCases, "      %q) __bpflags=%s;;\n", key, shSingleQuote(strings.Join(flagMap[key], " ")))
+		fmt.Fprintf(&flagCases, "      %q) __bpflags=(%s);;\n", key, shSingleQuoteEach(flagMap[key]))
+	}
+	// Builtin command TREES (`cloud site`, `cloud site deploy`) key on the FULL
+	// typed prefix, not the two-word noun/verb pair the manifest flags use — a
+	// control-plane path is three and four words deep. Same quoted-array shape as
+	// the flag case, matched through the same expansion-free loop.
+	var pathCases strings.Builder
+	for _, key := range sortedFlagKeys(builtinPathMap()) {
+		fmt.Fprintf(&pathCases, "      %q) __bppath=(%s);;\n", key, shSingleQuoteEach(builtinPathMap()[key]))
 	}
 	return `# bash completion for bp — eval "$(bp completion bash)" or source a saved copy.
 _bp_complete() {
@@ -742,18 +858,29 @@ _bp_complete() {
     esac
     COMPREPLY=( $(compgen -W "$__bpverbs $globals" -- "$cur") )
   else
-    local __bpflags=""
+    local __bpflags=()
     case "${COMP_WORDS[1]} ${COMP_WORDS[2]}" in
 ` + flagCases.String() + `      *) ;;
+    esac
+    # Builtin trees: match on every word typed so far, so "bp cloud site <TAB>"
+    # offers the site verbs and "bp cloud site deploy --<TAB>" offers --prebuilt.
+    local __bppath=()
+    case "${COMP_WORDS[*]:1:COMP_CWORD-1}" in
+` + pathCases.String() + `      *) ;;
     esac
     # SECURITY: flag names are untrusted (manifest cache). compgen -W RE-EXPANDS
     # its wordlist — command substitution included — so a poisoned flag reaching
     # ` + "`compgen -W \"$__bpflags\"`" + ` would execute on TAB even though the
-    # assignment above is single-quoted. Match manually instead: expanding a
-    # variable word-splits but does not re-scan for $(...), so nothing runs.
+    # assignment above is single-quoted. Match manually instead, and read the
+    # arrays FULLY QUOTED: "${arr[@]}" yields one word per element with no word
+    # splitting and no pathname expansion, so a flag named --x* stays --x*
+    # instead of matching files in $PWD. The ${arr[@]+...} wrapper is the
+    # bash-3.2 empty-array guard: a bare "${arr[@]}" on an empty array is an
+    # unbound reference under "set -u" there. $globals is a baked constant, not
+    # manifest data, so it keeps its intentional split.
     local __bpword
     COMPREPLY=()
-    for __bpword in $__bpflags $globals; do
+    for __bpword in ${__bpflags[@]+"${__bpflags[@]}"} ${__bppath[@]+"${__bppath[@]}"} $globals; do
       case "$__bpword" in "$cur"*) COMPREPLY+=("$__bpword");; esac
     done
   fi
@@ -775,10 +902,15 @@ func zshCompletionScript(nouns, globals string, verbMap, flagMap map[string][]st
 	for _, key := range sortedFlagKeys(flagMap) {
 		fmt.Fprintf(&flagCases, "      %q) flags=(%s);;\n", key, shSingleQuoteEach(flagMap[key]))
 	}
+	// Builtin trees, keyed on the full typed prefix (see the bash emitter).
+	var pathCases strings.Builder
+	for _, key := range sortedFlagKeys(builtinPathMap()) {
+		fmt.Fprintf(&pathCases, "      %q) bpath=(%s);;\n", key, shSingleQuoteEach(builtinPathMap()[key]))
+	}
 	return `#compdef bp
 # zsh completion for bp — eval "$(bp completion zsh)" or save to a file on $fpath.
 _bp_complete() {
-  local -a nouns globals verbs flags
+  local -a nouns globals verbs flags bpath
   nouns=(` + nouns + `)
   globals=(` + globals + `)
   if (( CURRENT == 2 )); then
@@ -797,7 +929,12 @@ _bp_complete() {
     case "${words[2]} ${words[3]}" in
 ` + flagCases.String() + `      *) ;;
     esac
-    compadd -- $flags $globals
+    # Builtin trees: the whole typed prefix, so "bp cloud site deploy --<TAB>"
+    # reaches --prebuilt three words in, where the noun/verb key cannot.
+    case "${(j: :)words[2,CURRENT-1]}" in
+` + pathCases.String() + `      *) ;;
+    esac
+    compadd -- $flags $bpath $globals
   fi
 }
 compdef _bp_complete bp
@@ -831,12 +968,26 @@ func fishCompletionScript(nouns, globals string, verbMap, flagMap map[string][]s
 			"complete -c bp -n '__fish_seen_subcommand_from %s; and __fish_seen_subcommand_from %s' -a '%s'\n",
 			parts[0], parts[1], fishSingleQuoteEscape(flagMap[key]))
 	}
+	// Builtin trees need an EXACT prefix match, which __fish_seen_subcommand_from
+	// cannot express (it is order-free and matches a token anywhere). __bp_path_is
+	// joins the typed tokens after `bp` and compares the whole string.
+	var pathLines strings.Builder
+	pm := builtinPathMap()
+	for _, key := range sortedFlagKeys(pm) {
+		fmt.Fprintf(&pathLines, "complete -c bp -n '__bp_path_is \"%s\"' -a '%s'\n",
+			fishSingleQuoteEscape([]string{key}), fishSingleQuoteEscape(pm[key]))
+	}
 	return `# fish completion for bp — ` + "`bp completion fish | source`" + `, or save to
 # ~/.config/fish/completions/bp.fish (then it loads automatically).
+function __bp_path_is
+  set -l toks (commandline -opc)
+  set -e toks[1]
+  test (string join " " $toks) = "$argv[1]"
+end
 complete -c bp -f
 complete -c bp -n '__fish_use_subcommand' -a '` + nouns + `'
 complete -c bp -n 'not __fish_use_subcommand' -a '` + globals + `'
-` + verbLines.String() + flagLines.String()
+` + verbLines.String() + flagLines.String() + pathLines.String()
 }
 
 // whoamiScopeLines renders whoami's scope block.

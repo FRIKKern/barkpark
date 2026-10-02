@@ -68,6 +68,53 @@ type devicePersistError struct{ err error }
 func (e *devicePersistError) Error() string { return e.err.Error() }
 func (e *devicePersistError) Unwrap() error { return e.err }
 
+// deviceTeamError marks a device/start the control plane refused because the
+// --team value names no existing team (422 invalid_team). It is bad INPUT, not
+// an auth failure, so callers map it to exitUsage with code invalid_team.
+type deviceTeamError struct{ team string }
+
+func (e *deviceTeamError) Error() string {
+	return fmt.Sprintf("no team %s exists (invalid_team) — check the id with 'bp teams', or run `bp login` without --team", e.team)
+}
+
+// deviceStartError turns a DeviceStart failure into the CLI's error: a 422
+// invalid_team becomes a *deviceTeamError naming the --team value; anything
+// else keeps the "could not start browser login" wrap.
+func deviceStartError(err error, teamID string) error {
+	var ref *cloudclient.CloudRefusal
+	if errors.As(err, &ref) && ref.Code == "invalid_team" {
+		return &deviceTeamError{team: teamID}
+	}
+	return fmt.Errorf("could not start browser login: %w", err)
+}
+
+// resolveLoginTeam turns a --team value into the team UUID device/start takes.
+// A UUID passes through (the control plane is the judge of whether it exists).
+// A slug can only be resolved from GET /v1/me's membership list, so it needs a
+// signed-in session against the same control plane (the `bp team use` idiom).
+// On failure it returns an envelope code and a message; msg == "" is success.
+func resolveLoginTeam(cfg *Config, base, team string) (id, code, msg string) {
+	if looksLikeUUID(team) {
+		return team, "", ""
+	}
+	if strings.TrimSpace(cfg.CloudToken) == "" || strings.TrimRight(cfg.CloudURL, "/") != strings.TrimRight(base, "/") {
+		return "", "usage", fmt.Sprintf("--team %q is not a team UUID, and a slug resolves only from a signed-in session — pass the team's UUID", team)
+	}
+	me, err := (&cloudclient.Client{BaseURL: base, Token: cfg.CloudToken}).Me(cloudCtx())
+	if err != nil {
+		return "", "usage", fmt.Sprintf("--team %q is not a team UUID and the slug could not be resolved (%v) — pass the team's UUID", team, err)
+	}
+	match, found := resolveTeam(me.Teams, team)
+	if !found {
+		m := fmt.Sprintf("not a member of team %q", team)
+		if names := teamHandles(me.Teams); names != "" {
+			m += " — your teams: " + names
+		}
+		return "", "invalid_team", m
+	}
+	return match.ID, "", ""
+}
+
 // deviceEmailFallback is the always-present escape hatch line: the device flow
 // is the friendly default, but email+password is one flag away for headless / CI
 // use. Rendered under the box and echoed in every give-up message.
@@ -101,15 +148,22 @@ func deviceClientName() string {
 // returns nil on success; a *deviceAuthError on denial/expiry/timeout (→
 // exitAuth); or a plain error on a transport/config failure (→ exitGeneric). The
 // caller owns the exit-code mapping so the wizard can reuse this verbatim.
-func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName string) error {
+//
+// teamID (a team UUID, "" for an unbound login) is sent on device/start: only a
+// member of that team may approve, and the session lands in it. A 422
+// invalid_team comes back as a *deviceTeamError (→ exitUsage).
+func runDeviceLoginFlow(out *writer, cfg *Config, base, clientName, teamID string) error {
 	client := &cloudclient.Client{BaseURL: base}
 
-	ds, err := client.DeviceStart(cloudCtx(), clientName)
+	ds, err := client.DeviceStart(cloudCtx(), clientName, teamID)
 	if err != nil {
-		return fmt.Errorf("could not start browser login: %w", err)
+		return deviceStartError(err, teamID)
 	}
 
 	renderDeviceBox(out, ds)
+	if teamID != "" {
+		out.errf("Bound to team %s — only a member of it can approve; anyone else is refused (team_mismatch).", teamID)
+	}
 
 	// The complete URI embeds the code (prefilled approve form); fall back to the
 	// bare page. This is what we open / the user copies.
@@ -236,11 +290,16 @@ func devicePollStep(out *writer, cfg *Config, client *cloudclient.Client, base, 
 // then returns exitOK WITHOUT polling. No box, no browser open, no blocking loop:
 // a headless / agent wrapper surfaces the URL + code to the human itself and then
 // drives approval with repeated `--device-poll`, owning the whole cadence.
-func runDeviceStartStep(out *writer, base string) int {
+func runDeviceStartStep(out *writer, base, teamID string) int {
 	client := &cloudclient.Client{BaseURL: base}
-	ds, err := client.DeviceStart(cloudCtx(), deviceClientName())
+	ds, err := client.DeviceStart(cloudCtx(), deviceClientName(), teamID)
 	if err != nil {
-		return useError(out, "failed", "could not start browser login: "+err.Error(), exitGeneric)
+		derr := deviceStartError(err, teamID)
+		var te *deviceTeamError
+		if errors.As(derr, &te) {
+			return useError(out, "invalid_team", derr.Error(), exitUsage)
+		}
+		return useError(out, "failed", derr.Error(), exitGeneric)
 	}
 	emitDeviceEnvelope(out, map[string]any{
 		"device_code":               ds.DeviceCode,
@@ -406,6 +465,12 @@ func emitDeviceLoginSuccess(out *writer, base, teamID string, acct deviceAccount
 // the control plane's code string verbatim, so a substring match is faithful.
 func classifyDevicePollError(err error) error {
 	m := err.Error()
+	// A team-bound grant approved by an outsider: the control plane refuses the
+	// approve itself (403 team_mismatch, grant stays pending), but should the code
+	// ever reach the poll, name the cause rather than "denied or expired".
+	if strings.Contains(m, "team_mismatch") {
+		return &deviceAuthError{msg: "the approving account is not a member of the team this login is bound to (team_mismatch) — approve from a member account, or run `bp login` without --team"}
+	}
 	for _, code := range []string{"access_denied", "expired_token", "expired", "denied", "unauthorized"} {
 		if strings.Contains(m, code) {
 			return &deviceAuthError{msg: "browser login was denied or the code expired — run `bp login` again, or " + deviceEmailFallback}

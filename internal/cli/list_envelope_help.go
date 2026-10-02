@@ -41,6 +41,14 @@ import (
 type listEnvelopeShape struct {
 	Key     string
 	IDField string
+	// FullViewIDField is the id field the rows carry when the CLI did NOT ask
+	// for the brief projection. `bp search query -o table` (and a TTY) reads the
+	// full view, whose rows are stored documents keyed `_id`; only `-o json`
+	// sends `view=brief` and gets `id`. The help documents the -o json path, so
+	// IDField stays `id` — but a table read carrying `_id` is not drift, and the
+	// drift check used to cry "envelope drift" on every one (stranger walk,
+	// 2026-09-30).
+	FullViewIDField string
 }
 
 // commandListEnvelopes is the registry. It is the SAME population the
@@ -76,14 +84,18 @@ var commandListEnvelopes = map[string]listEnvelopeShape{
 	// stored documents, so they carry `id` and no `_id`. Verified by running it
 	// against the live server 2026-09-07 — and caught by listEnvelopeDrift itself
 	// after this file first shipped `_id` here by inheriting the sibling rows.
-	"search.query":            {Key: "documents", IDField: "id"},
+	"search.query":            {Key: "documents", IDField: "id", FullViewIDField: "_id"},
 	"media.ls":                {Key: "assets"},
 	"media.search":            {Key: "hits"},
 	"media.collections":       {Key: "collections"},
 	"media.collection-assets": {Key: "hits"},
-	"ticket.inbox":            {Key: "tickets"},
-	"token.ls":                {Key: "tokens", IDField: "id"},
-	"workspace.member-ls":     {Key: "members"},
+	// doc.history → history_controller.ex index/2 emits `revisions:`, and
+	// render_revision/1 keys each row `id` — read from the controller, not
+	// inferred from the key name.
+	"doc.history":         {Key: "revisions", IDField: "id"},
+	"ticket.inbox":        {Key: "tickets"},
+	"token.ls":            {Key: "tokens", IDField: "id"},
+	"workspace.member-ls": {Key: "members"},
 }
 
 // listEnvelopeHelpLines is the block usageCommand renders. Empty for a command
@@ -164,6 +176,9 @@ func listEnvelopeDrift(cmd manifest.Command, status int, respBody []byte) string
 	}
 	first, isObj := rows[0].(map[string]any)
 	if !isObj {
+		return ""
+	}
+	if _, full := first[env.FullViewIDField]; env.FullViewIDField != "" && full {
 		return ""
 	}
 	if _, has := first[env.IDField]; !has {

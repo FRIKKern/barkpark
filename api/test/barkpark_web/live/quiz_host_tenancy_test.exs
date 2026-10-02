@@ -53,6 +53,9 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the quiz plugin (Barkpark.Quiz.RoomRegistry and its /quiz routes)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Content

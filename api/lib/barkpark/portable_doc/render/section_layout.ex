@@ -11,6 +11,7 @@ defmodule Barkpark.PortableDoc.Render.SectionLayout do
 
   def frame_class(%{"variant" => "framed"}), do: "bp-section--framed"
   def frame_class(%{"variant" => "wide"}), do: "bp-section--wide"
+  def frame_class(%{"variant" => "declaration"}), do: "bp-section--declaration"
   def frame_class(_block), do: nil
 
   def cell_style(child) when is_map(child) do

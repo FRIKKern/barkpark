@@ -24,6 +24,37 @@
 
 // ── portable-doc inline tree  →  flat TipTap text nodes ────────────────────
 
+// A text leaf's string the way the reader coerces it (inline.ex coerce_text_value):
+// binaries pass, numbers stringify, anything else is empty.
+function coerceInlineText(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return "";
+}
+
+// One entry of a text leaf's flat `marks` array (the ProseMirror-style spelling the
+// reader folds in inline.ex apply_mark/3) → the TipTap mark the canvas edits. A mark
+// the canvas has no editor for returns null and is left out of the projection.
+function flatMarkToTiptap(mark) {
+  const type = mark && typeof mark === "object" ? mark.type : null;
+  switch (type) {
+    case "bold": case "strong": return { type: "bold" };
+    case "italic": case "em": return { type: "italic" };
+    case "underline": return { type: "underline" };
+    case "highlight": return { type: "highlight" };
+    case "sub": return { type: "subscript" };
+    case "sup": return { type: "superscript" };
+    case "strike": case "s": case "strikethrough": return { type: "strike" };
+    case "code": return { type: "code" };
+    case "link": {
+      const href = (mark.attrs && typeof mark.attrs.href === "string" && mark.attrs.href) ||
+        (typeof mark.href === "string" ? mark.href : "");
+      return { type: "link", attrs: { href } };
+    }
+    default: return null;
+  }
+}
+
 // Walk one portable-doc inline node, accumulating active marks, and push the
 // resulting flat TipTap text nodes into `out`.
 function inlineToTiptapNodes(node, marks, out) {
@@ -31,10 +62,15 @@ function inlineToTiptapNodes(node, marks, out) {
 
   switch (node.type) {
     case "text": {
-      const text = node.value || "";
+      // The reader dual-reads `value` || legacy `text` (inline.ex compose_inline) and
+      // applies a flat `marks` array; read both the same way so the canvas shows — and a
+      // touched block keeps — what the reader paints.
+      const text = coerceInlineText(node.value) || coerceInlineText(node.text);
       if (text.length === 0) return;
+      const own = Array.isArray(node.marks) ? node.marks.map(flatMarkToTiptap).filter(Boolean) : [];
+      const all = [...marks, ...own];
       const tnode = { type: "text", text };
-      if (marks.length) tnode.marks = marks.map((m) => ({ ...m }));
+      if (all.length) tnode.marks = all.map((m) => ({ ...m }));
       out.push(tnode);
       return;
     }
@@ -55,13 +91,31 @@ function inlineToTiptapNodes(node, marks, out) {
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
-    case "strikethrough": {
+    // `strike` / `s` are reader-accepted spellings of strikethrough (inline.ex, inline.go).
+    case "strikethrough":
+    case "strike":
+    case "s": {
       const next = [...marks, { type: "strike" }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
     case "underline": {
       const next = [...marks, { type: "underline" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "highlight": {
+      const next = [...marks, { type: "highlight" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "sub": {
+      const next = [...marks, { type: "subscript" }];
+      (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
+      return;
+    }
+    case "sup": {
+      const next = [...marks, { type: "superscript" }];
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, next, out));
       return;
     }
@@ -190,6 +244,9 @@ const MARK_ORDER = [
   "em",
   "underline",
   "strikethrough",
+  "highlight",
+  "sub",
+  "sup",
   "code",
   "blockref",
   "tag",
@@ -209,6 +266,12 @@ function markToPd(mark) {
       return { kind: "strikethrough" };
     case "underline":
       return { kind: "underline" };
+    case "highlight":
+      return { kind: "highlight" };
+    case "subscript":
+      return { kind: "sub" };
+    case "superscript":
+      return { kind: "sup" };
     case "link":
       return { kind: "link", href: (mark.attrs && mark.attrs.href) || "" };
     case "wikilink": {
@@ -319,6 +382,9 @@ function pdKindToMark(kind) {
   if (kind === "strong") return "strong";
   if (kind === "em") return "em";
   if (kind === "underline") return "underline";
+  if (kind === "highlight") return "highlight";
+  if (kind === "sub") return "subscript";
+  if (kind === "sup") return "superscript";
   if (kind === "strikethrough") return "strikethrough";
   if (kind === "link") return "link";
   if (kind === "wikilink") return "wikilink";
@@ -336,8 +402,8 @@ function pdKindToMark(kind) {
 // round-trips through these two, never a reinvented inline serializer.
 export function tiptapInlineToPd(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map(tiptapTextNodeToPd);
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map(n => tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n));
 }
 
 // ── block ⇄ TipTap document ────────────────────────────────────────────────
@@ -356,7 +422,13 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // A level beyond the three the canvas offers (an import, an agent) is shown at the
+      // nearest level and carried on the source, so an edit to the text never rewrites it
+      // (D-headings: three levels to author, a deeper stored level is never restructured).
+      if (Number.isFinite(Number(block.level)) && clampLevel(block.level) !== Number(block.level)) source.level = Number(block.level);
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = headingInline(source);
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -370,7 +442,11 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
+      // The key's presence rides the source even when cleared (align:null), so a re-projection of
+      // a live doc (the diff runs on one) still knows the block carries an align to drop.
+      if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "paragraph", attrs: { bpParagraphSource: source } };
+      if (block.align === "center" || block.align === "right") node.attrs.textAlign = block.align;
       const inline = inlineArrayToTiptap(listItemToInlineArray(source));
       if (inline.length) node.content = inline;
       return { type: "doc", content: [node] };
@@ -507,7 +583,7 @@ function exactObjectKeys(value, expected) {
 
 const TABLE_CELL_KINDS = new Set(["inline-array", "content-map"]);
 const TABLE_PROTECTED_CHAIN_TYPES = new Set([
-  "link", "wikilink", "strong", "em", "underline", "strikethrough", "text",
+  "link", "wikilink", "strong", "em", "underline", "strikethrough", "highlight", "sub", "sup", "text",
 ]);
 
 function tableCellDescriptor(cellShape) {
@@ -616,9 +692,18 @@ function tableProtectedInlineSupported(inline, sourceInline, descriptor) {
 }
 
 const TABLE_MARKS = new Set([
-  "bold", "italic", "underline", "strike", "code", "link", "wikilink",
+  "bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code", "link", "wikilink",
   "blockref", "tag", "valueref",
 ]);
+
+function tableCellAttrsPlain(attrs) {
+  if (attrs == null) return true;
+  if (!tableAttrsHaveOnly(attrs, ["bpTableCellSource", "colspan", "rowspan", "align", "head"])) return false;
+  if (attrs.bpTableCellSource != null) return false;
+  // A per-cell alignment or a row-header cell (plan #26) is canvas-only here: fail closed.
+  if (attrs.align != null || attrs.head === true) return false;
+  return (attrs.colspan == null || attrs.colspan === 1) && (attrs.rowspan == null || attrs.rowspan === 1);
+}
 
 function tableAttrsHaveOnly(attrs, allowed) {
   return attrs && typeof attrs === "object" && !Array.isArray(attrs) &&
@@ -628,7 +713,7 @@ function tableAttrsHaveOnly(attrs, allowed) {
 function validTableMark(mark) {
   if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
       !TABLE_MARKS.has(mark.type)) return false;
-  if (["bold", "italic", "underline", "strike", "code"].includes(mark.type)) {
+  if (["bold", "italic", "underline", "strike", "highlight", "subscript", "superscript", "code"].includes(mark.type)) {
     return exactObjectKeys(mark, ["type"]);
   }
   if (!exactObjectKeys(mark, ["type", "attrs"])) return false;
@@ -728,8 +813,12 @@ function tableCellRows(editorJSON, projection) {
   const nodes = editorJSON?.content;
   if (!source.editable || !Array.isArray(nodes) || nodes.length !== 1 ||
       nodes[0]?.type !== "bpTable" || nodes[0]?.attrs?.bpId !== projection.id ||
-      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource"]) ||
+      !tableAttrsHaveOnly(nodes[0]?.attrs, ["bpId", "bpType", "bpTableSource", "colWidths", "headCol"]) ||
+      nodes[0]?.attrs?.headCol === true ||
       nodes[0]?.attrs?.bpTableSource != null ||
+      // Column widths (plan #25) are a canvas attribute; the per-block Studio editor edits plain
+      // grids, so a table carrying one fails closed here (read-only) and no widths reads as plain.
+      (Array.isArray(nodes[0]?.attrs?.colWidths) && nodes[0].attrs.colWidths.some((w) => w != null)) ||
       !Array.isArray(nodes[0].content)) return null;
   const liveRows = nodes[0].content;
   const hasHead = source.head != null;
@@ -739,9 +828,10 @@ function tableCellRows(editorJSON, projection) {
         row.content.length !== source.rows[0].length) return null;
     const expectedType = header ? "bpTableHeaderCell" : "bpTableCell";
     const cells = row.content.map((cell, column) => {
-      if (cell?.type !== expectedType ||
-          (cell.attrs != null && (!exactObjectKeys(cell.attrs, ["bpTableCellSource"]) ||
-            cell.attrs.bpTableCellSource != null))) return null;
+      // The canvas cell carries colspan / rowspan (merged cells, plan #24); the per-block Studio
+      // editor edits plain grids only, so a spanning cell fails closed here (read-only), and 1/1
+      // reads as the plain cell it is.
+      if (cell?.type !== expectedType || !tableCellAttrsPlain(cell.attrs)) return null;
       const inline = cell.content || [];
       if (!Array.isArray(inline)) return null;
       try {
@@ -899,7 +989,20 @@ function comparableListInline(content) {
   const out = [];
   for (const node of content || []) {
     const next = deepCloneJson(node);
+    // Chromium may parse a literal inline newline as a native break while
+    // typing. Both represent the same PortableDoc text; retain source carriers
+    // when this DOM normalization is the only difference (including Undo).
+    if (next.type === "hardBreak") {
+      next.type = "text";
+      next.text = "\n";
+    }
     if (!next.marks?.length) delete next.marks;
+    // The Link extension decorates a mounted link mark with its render defaults
+    // (target/rel/class); only `href` is PortableDoc (markToPd reads nothing else).
+    // Compare on href alone so an untouched carrier with a link still matches its
+    // source and is kept verbatim instead of being re-serialized.
+    else next.marks = next.marks.map((mark) => mark?.type === "link"
+      ? { type: "link", attrs: { href: (mark.attrs && mark.attrs.href) || "" } } : mark);
     const previous = out[out.length - 1];
     if (previous?.type === "text" && next.type === "text" && jsonEqual(previous.marks, next.marks)) {
       previous.text += next.text;
@@ -918,19 +1021,51 @@ function orderedListSource(block) {
   return block.ordered === true || block.type === "ordered-list" || block.type === "numbered_list";
 }
 
+// An ordered list's first number: the block's integer `start` when it is not 1,
+// else null (numbering from 1) — the reader's rule (compose.ex list_start/1).
+// It mounts as TipTap's orderedList `start` attr and comes back from it.
+export function listStart(block) {
+  const start = block && block.start;
+  return Number.isInteger(start) && start !== 1 ? start : null;
+}
+
+function nodeListStart(node) {
+  const start = node && node.type === "orderedList" ? node.attrs?.start : null;
+  return Number.isInteger(start) && start !== 1 ? start : null;
+}
+
+// A checklist is `{type:"list", task:true, items:[{content|text, checked, children?}…]}`; it mounts
+// as TipTap's taskList/taskItem so the checkbox is a native control, and comes back through
+// listItemFromTiptap with `checked` on every item map.
 function listToTiptap(block, path, nested = false) {
+  const task = block.task === true;
+  const itemChecked = (item) => item && typeof item === "object" && !Array.isArray(item) && item.checked === true;
   const items = (Array.isArray(block.items) ? block.items : []).map((item, index) => ({
-    type: "listItem",
-    attrs: { bpListSource: { item: deepCloneJson(item) } },
+    type: task ? "taskItem" : "listItem",
+    attrs: { bpListSource: { item: deepCloneJson(item) }, ...(task ? { checked: itemChecked(item) } : {}) },
     content: [{ type: "paragraph", content: inlineArrayToTiptap(listItemToInlineArray(item)) },
       ...(Array.isArray(item?.children) ? item.children.flatMap((child, at) =>
         supportedListChild(child) ? [listToTiptap(child, `${path}/${index}/${at}`, true)] : []) : [])],
   }));
-  return {
-    type: orderedListSource(block) ? "orderedList" : "bulletList",
-    ...(nested ? { attrs: { bpListFrameSource: { block: deepCloneJson(block), path } } } : {}),
-    content: items.length ? items : [{ type: "listItem", content: [{ type: "paragraph" }] }],
+  const start = !task && orderedListSource(block) ? listStart(block) : null;
+  const attrs = {
+    ...(nested ? { bpListFrameSource: { block: deepCloneJson(block), path } } : {}),
+    ...(start === null ? {} : { start }),
   };
+  return {
+    type: task ? "taskList" : orderedListSource(block) ? "orderedList" : "bulletList",
+    ...(Object.keys(attrs).length ? { attrs } : {}),
+    content: items.length ? items : [{ type: task ? "taskItem" : "listItem", ...(task ? { attrs: { checked: false } } : {}), content: [{ type: "paragraph" }] }],
+  };
+}
+
+// The item as the wire wants it for a checklist: always a map carrying `checked`.
+function withChecked(result, li, content) {
+  const checked = li.attrs?.checked === true;
+  if (result && typeof result === "object" && !Array.isArray(result)) return { ...result, checked };
+  if (Array.isArray(result)) return { content: result, checked };
+  if (typeof result === "string") return { text: result, checked };
+  return { content: tiptapInlineToPd(content), checked };
 }
 
 function nestedListFromTiptap(node, seen) {
@@ -938,8 +1073,10 @@ function nestedListFromTiptap(node, seen) {
   const ownsSource = source?.block && !seen.has(source.path);
   if (ownsSource) seen.add(source.path);
   const ordered = node.type === "orderedList";
+  const task = node.type === "taskList";
   const items = (node.content || []).map(li => listItemFromTiptap(li, seen));
-  if (!ownsSource) return { type: "list", ordered, items };
+  const start = nodeListStart(node);
+  if (!ownsSource) return { type: "list", ordered, items, ...(start === null ? {} : { start }), ...(task ? { task: true } : {}) };
   const fields = deepCloneJson(source.block);
   // An empty source list needs a schema placeholder, not a new persisted item.
   const emptyPlaceholder = fields.items.length === 0 && node.content?.length === 1 &&
@@ -949,6 +1086,15 @@ function nestedListFromTiptap(node, seen) {
     fields.type = "list";
     fields.ordered = ordered;
   }
+  if (task !== (fields.task === true)) {
+    fields.type = "list";
+    fields.task = task;
+  }
+  // The shown first number wins: an ordered list the canvas numbers from 1 drops a
+  // stored start it no longer shows. Anything else (a bullet list, a start the
+  // reader ignores) keeps its source bytes.
+  if (start !== null) fields.start = start;
+  else if (ordered && listStart(fields) !== null) delete fields.start;
   return fields;
 }
 
@@ -958,15 +1104,78 @@ function listItemFromTiptap(li, seen = new Set()) {
   const item = source && Object.hasOwn(source, "item")
     ? inlineCarrierFromTiptap(source.item, content) : tiptapInlineToPd(content);
   const nested = (li.content || []).slice(1).filter(node =>
-    node.type === "bulletList" || node.type === "orderedList").map(node => nestedListFromTiptap(node, seen));
+    node.type === "bulletList" || node.type === "orderedList" || node.type === "taskList").map(node => nestedListFromTiptap(node, seen));
   const original = Array.isArray(source?.item?.children) ? source.item.children : [];
-  if (!nested.length && !original.some(supportedListChild)) return item;
+  const finish = (result) => li.type === "taskItem" ? withChecked(result, li, content) : result;
+  if (!nested.length && !original.some(supportedListChild)) return finish(item);
   let index = 0;
   const children = original.flatMap(child => supportedListChild(child)
     ? index < nested.length ? [nested[index++]] : [] : [deepCloneJson(child)]);
   children.push(...nested.slice(index));
-  return item && typeof item === "object" && !Array.isArray(item)
-    ? { ...item, children } : { content: tiptapInlineToPd(content), children };
+  return finish(item && typeof item === "object" && !Array.isArray(item)
+    ? { ...item, children } : { content: tiptapInlineToPd(content), children });
+}
+
+// reuseInlineSource(source, content) → the portable-doc inline array for an EDITED
+// carrier, keeping the author's own source nodes wherever the edit did not reach.
+//
+// A touched carrier re-serializes through tiptapInlineToPd, which writes the
+// canonical spelling of every run: `strike`/`s` become `strikethrough`, a flat
+// `marks` leaf becomes nested wrappers, a legacy `text` key becomes `value`, and
+// any key the canvas has no attr for is dropped — on runs the author never
+// touched. So the edit is located instead: the longest run of SOURCE nodes at the
+// start, and then at the end, whose own canvas projection equals the matching
+// stretch of the edited content is kept verbatim; only the stretch between them
+// is re-serialized. When the two ends cannot be told apart the canonical array
+// stands, and the result is checked to project exactly as the edited content does.
+function reuseInlineSource(source, content) {
+  const inline = tiptapInlineToPd(content);
+  if (!Array.isArray(source) || !source.length) return inline;
+  const whole = comparableListInline(content);
+  const target = whole.map(deepCloneJson);
+  const pieces = source.map((node) => comparableListInline(inlineArrayToTiptap([node])));
+  const matchesAt = (piece, at) => piece.length > 0 && at >= 0 && at + piece.length <= target.length &&
+    piece.every((node, k) => jsonEqual(node, target[at + k]));
+  // ProseMirror merges neighbouring text of the same marks into one node, so a source
+  // leaf can also be the leading (or trailing) part of a longer edited text node.
+  const partAt = (piece, at, fromEnd) => {
+    const node = target[at];
+    if (piece.length !== 1 || !node || piece[0].type !== "text" || node.type !== "text") return false;
+    if (!jsonEqual(piece[0].marks, node.marks) || node.text.length <= piece[0].text.length) return false;
+    return fromEnd ? node.text.endsWith(piece[0].text) : node.text.startsWith(piece[0].text);
+  };
+  let head = 0;
+  let from = 0;
+  let to = target.length;
+  while (head < source.length) {
+    if (matchesAt(pieces[head], from)) from += pieces[head++].length;
+    else if (from < to && partAt(pieces[head], from, false)) target[from].text = target[from].text.slice(pieces[head++][0].text.length);
+    else break;
+  }
+  let tail = source.length;
+  while (tail > head) {
+    const piece = pieces[tail - 1];
+    if (matchesAt(piece, to - piece.length) && to - piece.length >= from) to -= pieces[--tail].length;
+    else if (to - 1 >= from && partAt(piece, to - 1, true)) { const node = target[to - 1]; node.text = node.text.slice(0, -pieces[--tail][0].text.length); }
+    else break;
+  }
+  if (head === 0 && tail === source.length) return inline;
+  const middle = tiptapInlineToPd(target.slice(from, to));
+  // New text joins a plain neighbouring leaf rather than sitting beside it, so a
+  // paragraph does not gain one more leaf per editing session; kept source leaves
+  // never merge with each other.
+  const plain = (node) => node && node.type === "text" && typeof node.value === "string" &&
+    Object.keys(node).length === 2;
+  const out = source.slice(0, head).map(deepCloneJson);
+  const rest = source.slice(tail).map(deepCloneJson);
+  middle.forEach((node, k) => {
+    const last = out[out.length - 1];
+    if (plain(node) && plain(last)) last.value += node.value;
+    else if (k === middle.length - 1 && plain(node) && plain(rest[0])) rest[0].value = node.value + rest[0].value;
+    else out.push(node);
+  });
+  out.push(...rest);
+  return jsonEqual(comparableListInline(inlineArrayToTiptap(out)), whole) ? out : inline;
 }
 
 function inlineCarrierFromTiptap(item, content) {
@@ -978,7 +1187,7 @@ function inlineCarrierFromTiptap(item, content) {
     if (!(Array.isArray(item.content) && item.content.length) && typeof item.text === "string" &&
       inline.every(node => node.type === "text")) next.text = inline.map(node => node.value).join("");
     else {
-      next.content = inline;
+      next.content = Array.isArray(item.content) && item.content.length ? reuseInlineSource(item.content, content) : inline;
       // Reader maps fall back to text when content is empty. Clearing the
       // authored body must not resurrect an old shadow text value.
       if (!inline.length && typeof next.text === "string") next.text = "";
@@ -990,7 +1199,7 @@ function inlineCarrierFromTiptap(item, content) {
     if (!jsonEqual(decoded, [{ type: "text", value: item }])) return JSON.stringify(inline);
     if (inline.every(node => node.type === "text")) return inline.map(node => node.value).join("");
   }
-  return inline;
+  return Array.isArray(item) ? reuseInlineSource(item, content) : inline;
 }
 
 function headingInline(source) {
@@ -1005,12 +1214,17 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
 
   switch (blockType) {
     case "heading": {
-      const level = clampLevel(top.attrs && top.attrs.level);
+      const shown = clampLevel(top.attrs && top.attrs.level);
       const source = top.attrs?.bpHeadingSource;
+      // The carried deeper level stands while the canvas still shows its nearest level; a
+      // turn-into to another level is the author's change and wins.
+      const level = source && typeof source === "object" && Number.isFinite(source.level) && clampLevel(source.level) === shown ? source.level : shown;
       if (source && typeof source === "object") {
         const fields = deepCloneJson(source);
-        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return { ...fields, level };
-        const content = tiptapInlineToPd(top.content);
+        delete fields.level;
+        if (jsonEqual(comparableListInline(headingInline(source)), comparableListInline(top.content))) return withAlign({ ...fields, level }, top, source);
+        const content = Array.isArray(source.content) && source.content.length
+          ? reuseInlineSource(source.content, top.content) : tiptapInlineToPd(top.content);
         const rich = content.some(node => node.type !== "text");
         if ((Array.isArray(source.content) && source.content.length) || rich) {
           fields.content = content;
@@ -1018,24 +1232,30 @@ export function tiptapToBlock(editorJSON, blockId, blockType) {
         } else {
           fields.text = plainText(top.content);
         }
-        return { ...fields, level };
+        return withAlign({ ...fields, level }, top, source);
       }
       const content = tiptapInlineToPd(top.content);
-      if (content.some(node => node.type !== "text")) return { content, level };
+      if (content.some(node => node.type !== "text")) return withAlign({ content, level }, top, null);
       const text = plainText(top.content);
-      return { text, level };
+      return withAlign({ text, level }, top, null);
     }
     case "list": {
-      const ordered = top.type === "orderedList";
+      const task = top.type === "taskList";
+      const ordered = !task && top.type === "orderedList";
       const seen = new Set();
       const items = (top.content || []).map(li => listItemFromTiptap(li, seen));
-      return { ordered, items };
+      // `task` rides only when true; run-convert adds task:false when a checklist turns back into a plain list.
+      // `start` rides only when the canvas numbers from something other than 1; run-convert
+      // adds start:null when a stored start is no longer shown.
+      const start = nodeListStart(top);
+      if (task) return { ordered, items, task: true };
+      return start === null ? { ordered, items } : { ordered, items, start };
     }
     case "paragraph":
     default: {
       const source = top.attrs?.bpParagraphSource;
-      if (source && typeof source === "object") return inlineCarrierFromTiptap(source, top.content);
-      return { content: tiptapInlineToPd(top.content) };
+      if (source && typeof source === "object") return withAlign(inlineCarrierFromTiptap(source, top.content), top, source);
+      return withAlign({ content: tiptapInlineToPd(top.content) }, top, null);
     }
   }
 }
@@ -1058,6 +1278,18 @@ export function buildPatchBlockOp(editorJSON, blockId, blockType) {
 
 // ── helpers ────────────────────────────────────────────────────────────────
 
+// The author's alignment on the way back: "center" | "right" ride as `align`; left drops the
+// key — as `align: null` on a block whose source carried one (the patch merge drops it),
+// as nothing on a fresh block.
+function withAlign(fields, top, source) {
+  const out = fields && typeof fields === "object" ? fields : {};
+  const align = top && top.attrs && top.attrs.textAlign;
+  if (align === "center" || align === "right") out.align = align;
+  else if (source && Object.hasOwn(source, "align")) out.align = null;
+  else delete out.align;
+  return out;
+}
+
 function clampLevel(level) {
   const n = Number(level);
   if (!Number.isFinite(n)) return 1;
@@ -1070,8 +1302,8 @@ function clampLevel(level) {
 // carry a flat string in portable-doc, so marks are dropped here by design.
 function plainText(content) {
   return (content || [])
-    .filter((n) => n.type === "text")
-    .map((n) => n.text || "")
+    .filter((n) => n.type === "text" || n.type === "hardBreak")
+    .map((n) => n.type === "hardBreak" ? "\n" : n.text || "")
     .join("");
 }
 

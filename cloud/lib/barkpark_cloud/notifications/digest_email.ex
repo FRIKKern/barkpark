@@ -103,6 +103,14 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
       arriving as a green one is the exact defect this epic exists to remove.
       Expect a small team to fall below `min_sample` and render the
       counts-intact refusal: that is the honest answer, not a regression.
+    * **AND AN UNMEASURED WINDOW SAYS WHEN IT MEASURES AGAIN.** A door refused
+      for a BOUNDARY STRADDLE carries a date: the boundary instant plus that
+      door's own span, which is the first send at which the whole window sits on
+      one side of the vocabulary change. It is the difference between a reader
+      concluding "the pipeline is broken" and reading "this waits until
+      2026-08-12". The door is never clipped and the boundary is never widened
+      to manufacture a number
+      (dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out).
     * **NO LIFETIME RATE.** The all-time numerator's honest freeze point is
       2026-08-08T14:55:28.776961 at 18,640, which is not the instant anybody
       would read it as, so the digest reports only windows it pins itself.
@@ -322,6 +330,14 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     # sites, never a per-site league table: the counts and percentages name
     # nobody, and the population is already narrowed to sites this recipient can
     # read by name elsewhere.
+    #
+    # `site_limit` GOVERNS THE `sites` LEAGUE TABLE ONLY. The coverage envelope
+    # carries its own separately-bounded `never_covered_sites`, which the
+    # coverage clause DOES print by name
+    # (dr-w35-bl-digest-blind-to-never-covered-sites) — so "the counts and
+    # percentages name nobody" above is a claim about the RATE, and stopped
+    # being a claim about the whole deploy block the day that list started
+    # rendering. Both lists come out of the same `site_ids`-narrowed query.
     census = DeployLedger.census(from, now, site_ids: site_ids, site_limit: 0)
 
     %{
@@ -387,22 +403,33 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   end
 
   @doc """
-  The digest subject line — the fleet health at a glance, on the MEASURED rungs.
+  The digest subject line — the health of THE RECIPIENT TEAM'S OWN instances at
+  a glance, on the MEASURED rungs.
 
   `current` / `behind` / `unmeasured` / `paused` are always present (a `0
-  unmeasured` is itself the signal that the fleet is fully measured); `diverged`
-  and `ahead of main` appear only when a box is actually on them.
+  unmeasured` is itself the signal that every one of those instances is
+  measured); `diverged` and `ahead of main` appear only when a box is actually
+  on them.
+
+  IT SAYS "YOUR", NOT "FLEET" (dr-w28-fu). `deliver_fleet_digest/1` partitions
+  the rows BY TEAM before it builds anything, so every summary that ever reaches
+  `build/2` holds one team's own instances and nothing else. The counts were
+  already correct; the WORD was not — a reader who owns 2 of 13 instances read
+  "Barkpark fleet digest — 0 current / 2 behind" as the platform having two
+  boxes. That is the same defect `dr-w18-bl-census-headline-still-says-fleet`
+  names on the census surface, and `deploy_block/1` below already refuses it on
+  the other half of this same email.
   """
   @spec subject(summary()) :: String.t()
   def subject(%{} = s) do
-    "Barkpark fleet digest — " <> Enum.join(count_words(s), " / ")
+    "Your Barkpark instances — " <> Enum.join(count_words(s), " / ")
   end
 
   @doc """
-  The plain-text digest body: a fleet header (counts + latest available release)
-  then one honest line per instance (name, running -> latest, state, pin/pause
-  flags, last checked). An empty fleet renders a clear "no instances" line rather
-  than a bare header.
+  The plain-text digest body: a header naming THIS TEAM'S OWN instances (counts +
+  latest available release) then one honest line per instance (name, running ->
+  latest, state, pin/pause flags, last checked). A team that owns no instances
+  renders a clear "no instances" line rather than a bare header.
   """
   @spec body(summary()) :: String.t()
   def body(%{instances: []} = s) do
@@ -448,21 +475,26 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
 
   ## ── Rendering helpers ────────────────────────────────────────────────────
 
+  # THE HEADER SAYS WHOSE ROWS THESE ARE (dr-w28-fu). Every summary that reaches
+  # here was built inside `deliver_fleet_digest/1`'s per-team comprehension, so
+  # "Fleet:" over these counts was a claim about the platform made out of one
+  # team's rows. There is no fleet-wide caller to keep honest: `build/2` has
+  # exactly one call site and it is the team-partitioned one.
   defp header(%{total: total, latest: latest} = s) do
-    fleet =
+    owned =
       case total do
         0 ->
-          "Fleet: 0 instances."
+          "Your team owns 0 instances."
 
         _ ->
-          "Fleet: #{total} #{pluralize(total, "instance")} — " <>
+          "Your team owns #{total} #{pluralize(total, "instance")} — " <>
             Enum.join(count_words(s), ", ") <> "."
       end
 
     """
-    Barkpark fleet — daily update digest.
+    Your Barkpark instances — daily update digest.
 
-    #{fleet}
+    #{owned}
     Latest available release: #{latest || "unknown"}\
     """
   end
@@ -551,8 +583,55 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
     settled =
       basis_clause(Map.get(w, :terminal_rate), w.failed, Map.get(w, :settled, 0), "settled")
 
-    attempted <> "; " <> settled
+    attempted <> "; " <> settled <> boundary_horizon_clause(w)
   end
+
+  # THE READER'S NEXT QUESTION, ANSWERED ONCE PER DOOR
+  # (dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out).
+  #
+  # When a door's window straddles the deferred-status vocabulary boundary, BOTH
+  # bases above refuse and both print the census's own reason — which is correct
+  # and is deliberately not softened: a blend of two taxonomies is not a
+  # measurement, and the counts beside it are real. But the operator prose stops
+  # exactly where a non-operator starts, at "is this pipeline broken?". The
+  # honest answer has a DATE in it, and this clause is that date.
+  #
+  # IT IS NOT A SECOND REFUSAL AND IT IS NOT A NUMBER. The alternative considered
+  # and REJECTED was clipping the window (`from = max(now - 7d, boundary)`) so a
+  # rate survives: that keeps the label "last 7d" over a window that is not seven
+  # days long, which is the unpinned-window hazard `deploy_health/1` pins both
+  # bounds to avoid (D3) and the same "a window must stay a window" ruling
+  # `DeployLedger.DrainDistribution.retake/2` makes one module over. Widening the
+  # boundary to rescue the number is forbidden outright. So the door keeps
+  # refusing and starts SAYING WHEN it stops.
+  #
+  # THE HORIZON IS DERIVED, NEVER TYPED: boundary instant + this window's own
+  # span, so a door of any length answers for itself and the 24h and 7d doors
+  # cannot disagree. The boundary comes from `DeployLedger.refusal_boundary/0`
+  # rather than from parsing the reason prose — a renderer that scraped the
+  # sentence would go quiet the day the sentence is reworded.
+  #
+  # IT IS KEYED ON THE PREDICATE, NOT ON THE REFUSAL. `straddles_refusal_boundary?/2`
+  # is the same test `census/3` refuses on, so a rate refused for a SMALL SAMPLE
+  # never collects a horizon it has no claim to, and a straddling window still
+  # gets one on the day its sample also happens to be short.
+  defp boundary_horizon_clause(%{from: %DateTime{} = from, to: %DateTime{} = to} = w) do
+    if DeployLedger.straddles_refusal_boundary?(from, to) do
+      boundary = DeployLedger.refusal_boundary()
+      span = DateTime.diff(to, from, :second)
+      measures_again = DateTime.add(boundary.instant, span, :second)
+
+      ". Nothing here is broken and the boundary is not being moved to rescue " <>
+        "the percentage: this door measures again from " <>
+        "#{format_ts(measures_again)}, the first moment a whole #{w.label} " <>
+        "window sits after the #{boundary.subject} boundary. Until then the " <>
+        "attempted and deferred counts above are real and only the ratio is withheld"
+    else
+      ""
+    end
+  end
+
+  defp boundary_horizon_clause(_w), do: ""
 
   # ONE basis, rendered with its OWN denominator beside it — three endings and
   # not one of them is a bare percentage.
@@ -618,9 +697,13 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
   # thing out loud precisely so nobody reads the second one into it. The window
   # is named INSIDE the clause and not left to the line prefix, because this
   # sentence gets quoted on its own.
-  defp coverage_clause(%{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity}} = w) do
+  defp coverage_clause(
+         %{coverage: %{cohorts: [_ | _] = cohorts, maturity_seconds: maturity} = coverage} = w
+       ) do
     "Coverage over #{w.label} (COVERED means the site has since rebuilt, not that an edit " <>
-      "of yours shipped): " <> Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity))
+      "of yours shipped): " <>
+      Enum.map_join(cohorts, "; ", &cohort_clause(&1, maturity)) <>
+      never_covered_sites_clause(coverage)
   end
 
   defp coverage_clause(_),
@@ -699,6 +782,83 @@ defmodule BarkparkCloud.Notifications.DigestEmail do
        do: "#{number(n)} in #{environment}"
 
   defp environment_part(%{never_covered: n}), do: "#{number(n)} in an unnamed environment"
+
+  # WHICH SITES ARE SITTING DARK, BY NAME (dr-w35-bl-digest-blind-to-never-covered-sites).
+  # The cohort clauses above give a COUNT and the environment split gives a
+  # WHERE; neither can answer WHICH, and an operator who cannot name the site
+  # cannot go and look at it. The ledger has computed the named tail
+  # (`never_covered_sites`, with its `_total` and `_truncated` siblings) since
+  # #11534 and this module threw the whole envelope away — the same shape
+  # `environment_clause/2` fixed one key earlier, reproduced at the envelope
+  # level.
+  #
+  # IT IS POOLED ACROSS BOTH COHORTS ON PURPOSE, exactly as the ledger pools it:
+  # a site is stuck or it is not, and whether the row that stranded it
+  # terminated `deferred` or `failed` is the cohort clauses' question, not this
+  # list's. That is also why it hangs off the coverage ENVELOPE and not off a
+  # cohort — a per-cohort copy would print the same site twice.
+  #
+  # TENANCY. Every name here came out of `coverage_cohorts/2` over `scoped`,
+  # which `DeployLedger.census/3` narrowed with the recipient's own `site_ids`
+  # before any name was resolved; `deploy_health/1` refuses an unscoped read
+  # outright. A site that can be named in this email is a site this recipient
+  # was already reading by name elsewhere in it.
+  defp never_covered_sites_clause(coverage) do
+    coverage
+    |> Map.get(:never_covered_sites, [])
+    |> List.wrap()
+    |> Enum.filter(&readable_site?/1)
+    |> case do
+      [] ->
+        ""
+
+      sites ->
+        " — the sites still not covered: " <>
+          Enum.map_join(sites, ", ", &site_part/1) <> site_truncation_tail(coverage, sites)
+    end
+  end
+
+  # A shape this module cannot read costs this fragment and never the morning
+  # email, for the same reason `cohort_clause/2` names every count it prints.
+  # `never_covered` must be a positive integer: a site the ledger reported with
+  # a zero is not sitting dark, and printing it would be a false alarm with a
+  # real site's name on it.
+  defp readable_site?(%{never_covered: n}) when is_integer(n) and n > 0, do: true
+  defp readable_site?(_), do: false
+
+  # THE NAME, THEN THE SLUG, THEN AN HONEST REFUSAL. `name` is NULLABLE at the
+  # ledger on purpose — a site deleted since the deployment was written resolves
+  # to no name at all — so this walks down to whatever identifier survives and
+  # says "a site since deleted" rather than printing an empty string or a bare
+  # UUID at a human.
+  defp site_part(%{name: name} = s) when is_binary(name) and name != "",
+    do: "#{name}#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_part(%{slug: slug} = s) when is_binary(slug) and slug != "",
+    do: "#{slug}#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_part(s), do: "a site since deleted#{site_where(s)} (#{number(s.never_covered)})"
+
+  defp site_where(%{environment: environment})
+       when is_binary(environment) and environment != "",
+       do: " in #{environment}"
+
+  defp site_where(_s), do: " in an unnamed environment"
+
+  # THE TOP-N OF A LONGER TAIL MUST NEVER READ AS THE WHOLE TAIL. The ledger
+  # bounds the list and carries `never_covered_sites_total` beside it precisely
+  # so this sentence can be written; an email that printed twenty names and
+  # stopped would be telling a reader the fleet has twenty stuck sites when it
+  # may have two hundred.
+  defp site_truncation_tail(coverage, shown) do
+    total = Map.get(coverage, :never_covered_sites_total)
+
+    if Map.get(coverage, :never_covered_sites_truncated) == true and is_integer(total) do
+      " (#{number(length(shown))} of #{number(total)} — the list is truncated)"
+    else
+      ""
+    end
+  end
 
   # The two counts that are neither covered nor never-covered, stated only when
   # they exist: a row too young to judge is not a stuck site, and a row nobody

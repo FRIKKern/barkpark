@@ -23,6 +23,19 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     3. `journey_side_of/1`'s `cond` collapsed to `_ -> :pre` — dropping the
        boundary split. Reds `every figure is reported per side of the regime
        boundary`: post-door and straddling runs land in the pre-door figure.
+    4. The run key back to `site_id` alone (`Enum.group_by` and the window
+       `partition by`) — dropping the environment from the SEGMENTATION. Reds
+       `a PREVIEW live row does not close a PRODUCTION run` and nothing else:
+       the deferred-only population reads 0 where the truth is 1.
+    5. `superseding_live/2` back to `group_by: d.site_id` with `superseded?/2`
+       looking up by `site_id` — dropping the environment from the D212 probe.
+       Reds `a later PREVIEW live row is NOT benign supersession`: a
+       stranded production publish is credited as benignly superseded by a
+       preview build that never touched `sites.current_deployment_id`.
+
+  Mutations 4 and 5 both leave `a same-environment live row still closes the run
+  AND still supersedes` GREEN — that arm is the control proving the environment
+  key narrows the population rather than switching supersession off.
 
   ## What this file does NOT assert, on purpose
 
@@ -52,6 +65,12 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
   @from ~U[2026-08-06 00:00:00Z]
   @to ~U[2026-08-07 00:00:00Z]
   @door ~U[2026-08-06 22:24:16Z]
+
+  # PINNED `as_of` for the deferred-only settling clause and the D212
+  # supersession probe. A default `as_of` is `DateTime.utc_now/0`, which makes
+  # the rendered line carry a moving instant and the whole-report equality
+  # assertion below unrunnable — so every test that reads the D223 node pins it.
+  @as_of ~U[2026-08-07 12:00:00Z]
 
   describe "segmentation" do
     test "a rev group is a content EPOCH, not a release — one rev going live three times is THREE journeys" do
@@ -311,9 +330,22 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     test "the node publishes NO elapsed time — run-keying is unfit for a wait clock (D161)" do
       node = DeployLedger.journeys(@from, @to, site_ids: [])
 
-      refute node
-             |> flatten_keys()
-             |> Enum.any?(&(&1 =~ "second" or &1 =~ "elapsed" or &1 =~ "ttl"))
+      refute node |> flatten_keys() |> Enum.any?(&clock_key?/1)
+    end
+
+    test "the clock-key predicate still catches a real duration key, and stops catching `settled`" do
+      # THE CONTROL FOR THE TIGHTENING ABOVE. `ttl` used to be matched as a bare
+      # substring, which reads `settled` / `unsettled` as duration keys — se-TTL-ed
+      # — and would have refused charter D223's settling vocabulary for a reason
+      # that has nothing to do with clocks. The arm is now a TOKEN match, and
+      # this test is what proves the narrowing did not blind it: every duration
+      # key shape D161 was defending against still trips it.
+      assert Enum.all?(
+               ~w(seconds wait_seconds elapsed elapsed_at ttl lease_ttl ttl_seconds),
+               &clock_key?/1
+             )
+
+      refute Enum.any?(~w(settled unsettled settle_rule publishes superseded), &clock_key?/1)
     end
   end
 
@@ -366,6 +398,7 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
 
       lines =
         DeployLedger.journeys(@from, @to,
+          as_of: @as_of,
           site_ids: [pre_site.id, unmetered_site.id, post_site.id, straddling_site.id]
         )
         |> DeployLedger.journey_report()
@@ -376,25 +409,328 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
                "    contended subset : 4.00 attempts over 1 journeys (4 attempts; 1 UNMETERED journeys excluded)",
                "    failed-terminated: 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
                "    open runs (no terminal row in window, never metered): 0",
+               "    deferred-only    : 0 publishes settled DEFERRED-ONLY over 2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z (0 superseded by a later live row — D212 benign; 0 unsuperseded); 0 not yet settled at 2026-08-07T12:00:00Z, EXCLUDED as right-censored — ABSOLUTE counts, never a rate",
                "  POST-DOOR (run began at or after the boundary)",
                "    live-terminated  : 2.00 attempts over 1 journeys (2 attempts; 1 UNMETERED journeys excluded)",
                "    contended subset : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
                "    failed-terminated: REFUSED over 0 journeys (0 UNMETERED journeys excluded)",
                "    open runs (no terminal row in window, never metered): 1",
+               "    deferred-only    : 1 publishes settled DEFERRED-ONLY over 2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z (0 superseded by a later live row — D212 benign; 1 unsuperseded); 0 not yet settled at 2026-08-07T12:00:00Z, EXCLUDED as right-censored — ABSOLUTE counts, never a rate",
                "  STRADDLING (began before the door, ended after — its own bucket, never a side)",
                "    live-terminated  : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
                "    contended subset : 2.00 attempts over 1 journeys (2 attempts; 0 UNMETERED journeys excluded)",
                "    failed-terminated: REFUSED over 0 journeys (0 UNMETERED journeys excluded)",
-               "    open runs (no terminal row in window, never metered): 0"
+               "    open runs (no terminal row in window, never metered): 0",
+               "    deferred-only    : 0 publishes settled DEFERRED-ONLY over 2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z (0 superseded by a later live row — D212 benign; 0 unsuperseded); 0 not yet settled at 2026-08-07T12:00:00Z, EXCLUDED as right-censored — ABSOLUTE counts, never a rate"
              ]
 
       # The six header lines the drop above skipped are the ones carrying the
       # window, the segmentation rule, the basis, the unmetered rule and the
       # door — asserted for PRESENCE here so the drop count cannot silently
       # start swallowing a cohort line.
-      assert length(lines) == 21
+      assert length(lines) == 24
       assert Enum.at(lines, 1) =~ "window        : 2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z"
       assert Enum.at(lines, 5) =~ "regime door   : 2026-08-06T22:24:16Z (charter D137)"
+    end
+  end
+
+  describe "the DEFERRED-ONLY publish population (charter D223)" do
+    test "the population is runs of nothing but deferrals that nothing closed — not a contended release, not an in-flight run" do
+      # THE UNIT IS THE PUBLISH. Under the ATTEMPT unit all three sites below
+      # contribute deferred rows to one bucket and nothing tells them apart.
+      stranded = site_fixture()
+
+      deployments!(stranded, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "e1e1e1e1e1e1"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "e1e1e1e1e1e1"},
+        %{inserted_at: ~U[2026-08-06 10:02:00Z], status: "deferred", content_rev: "e1e1e1e1e1e1"}
+      ])
+
+      contended_live = site_fixture()
+
+      deployments!(contended_live, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "e2e2e2e2e2e2"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "e2e2e2e2e2e2"},
+        %{inserted_at: ~U[2026-08-06 10:02:00Z], status: "live", content_rev: "e2e2e2e2e2e2"}
+      ])
+
+      in_flight = site_fixture()
+
+      deployments!(in_flight, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "e3e3e3e3e3e3"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "building", content_rev: "e3e3e3e3e3e3"}
+      ])
+
+      side = d223_side([stranded, contended_live, in_flight])
+
+      # TWO open runs, exactly ONE of which is a deferred-only publish. An
+      # `open_runs` count alone cannot make that distinction, which is why the
+      # node carries both numbers.
+      assert side.open_runs == 2
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.unsettled.publishes == 0
+    end
+
+    test "a run whose last row is younger than the settling horizon is RIGHT-CENSORED — beside the count, never inside it" do
+      # The window edge is not a defect. `recent`'s last row is 20 minutes before
+      # `as_of`: it has not failed to settle, it has not had time to.
+      settled_site = site_fixture()
+
+      deployments!(settled_site, [
+        %{inserted_at: ~U[2026-08-06 11:00:00Z], status: "deferred", content_rev: "f1f1f1f1f1f1"}
+      ])
+
+      recent = site_fixture()
+
+      deployments!(recent, [
+        %{inserted_at: ~U[2026-08-06 11:40:00Z], status: "deferred", content_rev: "f2f2f2f2f2f2"}
+      ])
+
+      node =
+        DeployLedger.journeys(@from, @to,
+          as_of: ~U[2026-08-06 12:00:00Z],
+          site_ids: [settled_site.id, recent.id]
+        )
+
+      side = side(node, :pre)
+
+      assert side.open_runs == 2
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.unsettled.publishes == 1
+
+      assert side.deferred_only.unsettled.excluded_because =~ "RIGHT-CENSORED"
+      assert side.deferred_only.settle_rule =~ "NEVER as a rate"
+    end
+
+    test "a later live row makes it D212 BENIGN SUPERSESSION — and the probe looks BEYOND the pinned window" do
+      # The superseding row is at 2026-08-07T06:00Z, OUTSIDE `@to`. That is the
+      # normal shape: the publish that overtook this one happened later than the
+      # window an analyst pinned. A probe bounded by `to` reads this site as a
+      # stranding and manufactures loss out of the window edge.
+      superseded = site_fixture()
+
+      deployments!(superseded, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "a9a9a9a9a9a9"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "a9a9a9a9a9a9"},
+        %{inserted_at: ~U[2026-08-07 06:00:00Z], status: "live", content_rev: "b9b9b9b9b9b9"}
+      ])
+
+      unsuperseded = site_fixture()
+
+      deployments!(unsuperseded, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "c9c9c9c9c9c9"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "c9c9c9c9c9c9"}
+      ])
+
+      side = d223_side([superseded, unsuperseded])
+
+      assert side.deferred_only.settled.publishes == 2
+      assert side.deferred_only.settled.superseded == 1
+      assert side.deferred_only.settled.unsuperseded == 1
+      assert side.deferred_only.supersession_rule =~ "D212"
+    end
+
+    test "an EARLIER live row does not supersede — supersession is strictly after the run's last row" do
+      # THE CONTROL FOR THE TEST ABOVE, and it took two sites to make it bite.
+      # The supersession probe floors its query at the EARLIEST deferred-only run
+      # in the population, so a single-site corpus has its pre-run live row
+      # filtered out by the floor and the comparison is never exercised —
+      # `superseded?/2` could answer `true` for any live row at all and the
+      # suite would stay green. `early` drags the floor back to 09:30 so
+      # `control`'s 09:45 live row REACHES the comparison, which is the only
+      # arrangement in which `== :gt` is load-bearing.
+      early = site_fixture()
+
+      deployments!(early, [
+        %{inserted_at: ~U[2026-08-06 09:29:00Z], status: "deferred", content_rev: "1a1a1a1a1a1a"},
+        %{inserted_at: ~U[2026-08-06 09:30:00Z], status: "deferred", content_rev: "1a1a1a1a1a1a"}
+      ])
+
+      control = site_fixture()
+
+      deployments!(control, [
+        %{inserted_at: ~U[2026-08-06 09:45:00Z], status: "live", content_rev: "d9d9d9d9d9d9"},
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "e9e9e9e9e9e9"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "e9e9e9e9e9e9"}
+      ])
+
+      side = d223_side([early, control])
+
+      assert side.deferred_only.settled.publishes == 2
+      assert side.deferred_only.settled.superseded == 0
+      assert side.deferred_only.settled.unsuperseded == 2
+    end
+
+    test "the node publishes COUNTS ONLY — no rate, share, fraction or percentage key anywhere in the subtree" do
+      # n=163 on the corpus that motivated D223, below the @min_sample 200 floor.
+      # The refusal is enforced by KEY NAME so that adding one reds here rather
+      # than reaching an operator's screen as a decimal point.
+      node = DeployLedger.journeys(@from, @to, as_of: @as_of, site_ids: [])
+
+      keys =
+        node.sides
+        |> Enum.map(& &1.deferred_only)
+        |> flatten_keys()
+
+      assert "publishes" in keys
+      assert "superseded" in keys
+      assert "unsuperseded" in keys
+
+      refute Enum.any?(
+               keys,
+               &(&1 =~ "rate" or &1 =~ "share" or &1 =~ "fraction" or &1 =~ "percent" or
+                   &1 =~ "ratio")
+             )
+    end
+
+    test "the rendered line carries the WINDOW, both splits and the word ABSOLUTE" do
+      site = site_fixture()
+
+      deployments!(site, [
+        %{inserted_at: ~U[2026-08-06 10:00:00Z], status: "deferred", content_rev: "f9f9f9f9f9f9"},
+        %{inserted_at: ~U[2026-08-06 10:01:00Z], status: "deferred", content_rev: "f9f9f9f9f9f9"}
+      ])
+
+      line =
+        DeployLedger.journeys(@from, @to, as_of: @as_of, site_ids: [site.id])
+        |> DeployLedger.journey_report()
+        |> line("PRE-DOOR", "deferred-only")
+
+      assert line ==
+               "    deferred-only    : 1 publishes settled DEFERRED-ONLY over " <>
+                 "2026-08-06T00:00:00Z -> 2026-08-07T00:00:00Z " <>
+                 "(0 superseded by a later live row — D212 benign; 1 unsuperseded); " <>
+                 "0 not yet settled at 2026-08-07T12:00:00Z, EXCLUDED as right-censored " <>
+                 "— ABSOLUTE counts, never a rate"
+    end
+  end
+
+  describe "the ENVIRONMENT key (a preview deploy is a DIFFERENT publish queue)" do
+    # `deployments_active_site_env_index` is keyed `(site_id, environment)`, so
+    # production and preview are two INDEPENDENT queues on one site: a preview
+    # build never contends with a production build and never touches
+    # `sites.current_deployment_id`. A run keyed on `site_id` alone therefore
+    # splices two queues into one journey.
+    test "a PREVIEW live row does not close a PRODUCTION run — the stranded publish stays visible" do
+      site = site_fixture()
+
+      deployments!(site, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "b1b1b1b1b1b1",
+          environment: "production"
+        },
+        %{
+          inserted_at: ~U[2026-08-06 10:01:00Z],
+          status: "deferred",
+          content_rev: "b1b1b1b1b1b1",
+          environment: "production"
+        },
+        # A preview build for the same site, AFTER both production deferrals. It
+        # answers on its own host and says NOTHING about whether the production
+        # content reached the web.
+        %{
+          inserted_at: ~U[2026-08-06 10:02:00Z],
+          status: "live",
+          content_rev: "b2b2b2b2b2b2",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([site])
+
+      # THE PRODUCTION PUBLISH IS DEFERRED-ONLY AND SETTLED. Keyed on `site_id`
+      # alone the preview row TERMINATES the run: both production deferrals land
+      # in a `live`-terminated journey and the D223 population reads ZERO on a
+      # site whose production content never reached the web.
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.unsuperseded == 1
+      assert side.deferred_only.settled.superseded == 0
+    end
+
+    test "a later PREVIEW live row is NOT benign supersession — the production site is still not serving" do
+      site = site_fixture()
+
+      deployments!(site, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "c1c1c1c1c1c1",
+          environment: "production"
+        },
+        # Beyond `@to`, exactly like the real D212 probe expects — but on the
+        # OTHER queue. Crediting it as supersession reads loss as safe, which is
+        # the comforting direction and therefore the forbidden one.
+        %{
+          inserted_at: ~U[2026-08-07 06:00:00Z],
+          status: "live",
+          content_rev: "c2c2c2c2c2c2",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([site])
+
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.superseded == 0
+      assert side.deferred_only.settled.unsuperseded == 1
+    end
+
+    # THE QUIET ARM. The environment key must not become a blanket refusal to
+    # supersede: a later live row on the SAME environment is still D212 benign
+    # supersession, and a same-environment live row still closes its run.
+    test "a same-environment live row still closes the run AND still supersedes" do
+      closed = site_fixture()
+
+      deployments!(closed, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "d1d1d1d1d1d1",
+          environment: "production"
+        },
+        %{
+          inserted_at: ~U[2026-08-06 10:01:00Z],
+          status: "live",
+          content_rev: "d1d1d1d1d1d1",
+          environment: "production"
+        }
+      ])
+
+      overtaken = site_fixture()
+
+      deployments!(overtaken, [
+        %{
+          inserted_at: ~U[2026-08-06 10:00:00Z],
+          status: "deferred",
+          content_rev: "d2d2d2d2d2d2",
+          environment: "preview"
+        },
+        %{
+          inserted_at: ~U[2026-08-07 06:00:00Z],
+          status: "live",
+          content_rev: "d3d3d3d3d3d3",
+          environment: "preview"
+        }
+      ])
+
+      side = d223_side([closed, overtaken])
+
+      # `closed` contributes NO deferred-only publish (its run is live-terminated
+      # on its own queue); `overtaken` contributes one, SUPERSEDED.
+      assert side.deferred_only.settled.publishes == 1
+      assert side.deferred_only.settled.superseded == 1
+      assert side.deferred_only.settled.unsuperseded == 0
+    end
+
+    test "the segmentation and the supersession rule both NAME the environment key" do
+      node = DeployLedger.journeys(@from, @to, as_of: @as_of, site_ids: [])
+
+      assert node.segmentation =~ "environment"
+
+      side = side(node, :pre)
+      assert side.deferred_only.supersession_rule =~ "environment"
     end
   end
 
@@ -403,6 +739,13 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
   defp pre(site), do: site |> node_for() |> side(:pre)
 
   defp node_for(site), do: DeployLedger.journeys(@from, @to, site_ids: [site.id])
+
+  # The PRE side, read at the pinned `as_of` over several sites at once — the
+  # D223 tests all measure a population that spans sites.
+  defp d223_side(sites) do
+    DeployLedger.journeys(@from, @to, as_of: @as_of, site_ids: Enum.map(sites, & &1.id))
+    |> side(:pre)
+  end
 
   defp side(node, want), do: Enum.find(node.sides, &(&1.side == want))
 
@@ -419,6 +762,14 @@ defmodule BarkparkCloud.DeployLedgerJourneysTest do
     lines
     |> Enum.drop(idx)
     |> Enum.find(&(&1 =~ cohort_caption))
+  end
+
+  # A key that names a CLOCK. `ttl` is matched as a TOKEN (whole key, or
+  # underscore-delimited inside one) and never as a bare substring: as a
+  # substring it fires on `settled`, `unsettled` and `settle_rule`, which are
+  # counts and prose, not durations.
+  defp clock_key?(key) when is_binary(key) do
+    key =~ "second" or key =~ "elapsed" or "ttl" in String.split(key, "_")
   end
 
   defp flatten_keys(term, acc \\ [])

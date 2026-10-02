@@ -1,0 +1,10 @@
+{
+  "plugin_name": "forms",
+  "version": "0.1.0",
+  "description": "Forms — a hosted site's public form posts land as private type:form_submission documents in the dataset the site is bound to. A form_endpoint document in that dataset opts the site in and declares its allowed origins and field names; the anonymous endpoint refuses unknown or oversized payloads, rate-limits per address and per endpoint, and drops honeypot hits without writing.",
+  "capabilities": [
+    "schemas",
+    "routes"
+  ],
+  "module": "Barkpark.Plugins.Forms"
+}

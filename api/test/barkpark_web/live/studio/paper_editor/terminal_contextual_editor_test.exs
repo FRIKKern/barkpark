@@ -54,8 +54,11 @@ defmodule BarkparkWeb.Studio.PaperEditor.TerminalContextualEditorTest do
 
     assert LazyHTML.attribute(controls, "open") == []
     assert LazyHTML.text(LazyHTML.query(controls, "summary")) =~ "Configure terminal"
-    assert input_value(controls, "title") == ["7"]
-    assert input_value(controls, "footer") == [""]
+    # Title and footer edit where the reader paints them: fields of the
+    # terminal form, placed in the bar and the footer box.
+    assert inline_copy(tree, "title") == ["7"]
+    assert inline_copy(tree, "footer") == [""]
+    assert Enum.empty?(LazyHTML.query(controls, ~s([name="title"])))
     assert input_value(controls, "live") == ["false", "true"]
 
     assert LazyHTML.attribute(LazyHTML.query(controls, "input[type='checkbox']"), "checked") == [
@@ -154,6 +157,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.TerminalContextualEditorTest do
              ~S|:is(.bp-section__cell, .bp-cols__c) > .bp-paper-contextual-editor:first-child > [data-paper-terminal-editor-frame] {
   margin-top: 0;
 }|
+  end
+
+  defp inline_copy(tree, name) do
+    tree
+    |> LazyHTML.query(~s(.bp-term textarea[form="terminal-form-terminal"][name="#{name}"]))
+    |> Enum.map(&LazyHTML.text/1)
   end
 
   defp input_value(tree, name),

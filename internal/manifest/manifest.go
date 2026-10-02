@@ -37,6 +37,27 @@ import (
 // (bp-secgo-completion-emitter-quoting).
 var safeName = regexp.MustCompile(`^[a-z0-9][a-z0-9_-]*$`)
 
+// safeParamName constrains a manifest-supplied FLAG name and positional ARG
+// name to a shell-safe identifier. It is safeName's sibling, deliberately one
+// character class wider: an opening ASCII letter or digit, then any run of
+// ASCII letters, digits, underscores, or hyphens. Uppercase is allowed here and
+// not in safeName because it is MEASURED to be load-bearing — the live
+// capabilities manifest ships camelCase parameter names (`objectId`,
+// `queryEventId`; the repo fixtures add `assetId`, `periodStart`), so reusing
+// the lowercase-only safeName for flags/args would reject the REAL manifest at
+// Parse and brick every bp against prod. Uppercase carries no shell meaning; the
+// metacharacters that do — quotes, `$`, backtick, `;`, `(`, whitespace, `%`,
+// a leading `-` — are outside both classes.
+//
+// Same trust boundary, same reason as safeName: a flag name is emitted as
+// `--<name>` into the bash/zsh/fish completion scripts the user is told to eval
+// (completionFlagMap in internal/cli/builtins.go) and into help output. The
+// emitters quote today (bp-secgo-completion-emitter-quoting); this is the
+// upstream half — a boundary reject, so a hostile name never reaches a
+// consumer that might forget to quote. The predicate is an ALLOWED SHAPE, not a
+// blocklist: a metacharacter nobody thought to enumerate still fails it.
+var safeParamName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]*$`)
+
 // Manifest is the root capabilities document. Field names mirror
 // manifest.schema.json exactly; optional/additive fields use omitempty.
 type Manifest struct {
@@ -82,6 +103,39 @@ type ChatProviderCaps struct {
 
 // Server identifies the responding Barkpark instance. APIVersion and MinCLI are
 // optional/additive (pointers + omitempty) so a manifest that omits them parses.
+//
+// VERSION IS A PLACEHOLDER — NOTHING MAY BRANCH ON IT. Server-side it is
+// Application.spec(:barkpark, :vsn), i.e. the mix.exs project version, which is
+// frozen: the prod box at 89.167.28.206 answered server.version "0.1.0" on
+// 2026-09-16 while its own /status.json reported version "0.2.26.929" (commit
+// ca4534461). Display it, never compare it. The honest running-release oracle
+// is GET /status.json, or the control plane, which holds each box's
+// self-reported version and git_commit.
+//
+// MINCLI IS ADVISORY. Server-side it is a hardcoded literal ("1.0.0" on prod),
+// not derived from the running build.
+//
+// THIS COMMENT USED TO ADD: "every published bp release is tagged v0.2.x —
+// strictly below it. A blocking gate keyed on today's value would therefore
+// refuse 100% of released clients." That is FALSE (re-measured 2026-09-17) and
+// it conflated two tag series in one repo. v0.2.x is the SERVER release series
+// — the same number /status.json reports as "0.2.26.929". The CLI ships from
+// cli-v* tags, and cli-release.yml does `VERSION=${TAG#cli-v}`, so a released
+// bp carries "1.21.0". `git tag -l 'cli-v*' | sed 's/cli-v//' | sort -V` lists
+// 27 releases, 1.1.0 through 1.21.0, NONE below 1.0.0.
+//
+// So the floor is not unreachable — it is SATISFIED by every client ever
+// shipped, which is why the check has never fired in production. It stays
+// advisory for the reasons that do survive: a dev build carries no release
+// identity, and a floor never once exercised must not debut as a refusal.
+//
+// It is decoded (it MUST be: Parse uses DisallowUnknownFields, so dropping the
+// field would fail every manifest that carries it) and reported by internal/cli
+// minCLICheck — at `bp capabilities`, and at the whoami/doctor freshness leg via
+// serverFloorStaleness. That second consumer is why the VALUE matters: because
+// DisallowUnknownFields recurses, the server envelope cannot gain a NEW key
+// without breaking every released binary, so min_cli is the only channel by
+// which a server can tell an already-installed client it is not current.
 type Server struct {
 	Name       string  `json:"name"`
 	Version    string  `json:"version"`
@@ -236,6 +290,14 @@ type Flag struct {
 	Repeatable bool        `json:"repeatable,omitempty"`
 }
 
+// IsSwitch reports whether the flag is a value-less switch. The schema keeps
+// Type a free string, and the server spells switches both "bool" (most verbs)
+// and "boolean" (access.grant --single_use), so every CLI consumer asks this
+// instead of comparing Type to one spelling.
+func (f Flag) IsSwitch() bool {
+	return f.Type == "bool" || f.Type == "boolean"
+}
+
 // Parse decodes a manifest document. It rejects unknown top-level/structural
 // fields the same way the frozen schema's additionalProperties:false does, so a
 // typo or stray field fails fast instead of being silently dropped.
@@ -275,6 +337,19 @@ func Parse(body []byte) (*Manifest, error) {
 		}
 		if !safeName.MatchString(c.Verb) {
 			return nil, fmt.Errorf("parse manifest: unsafe command verb %q (must match %s)", c.Verb, safeName)
+		}
+		// Flag and arg names ride the same path to the eval'd completion
+		// scripts and to help output, so they are rejected at the same
+		// boundary — see safeParamName.
+		for _, a := range c.Args {
+			if !safeParamName.MatchString(a.Name) {
+				return nil, fmt.Errorf("parse manifest: unsafe arg name %q on command %q (must match %s)", a.Name, c.ID, safeParamName)
+			}
+		}
+		for _, f := range c.Flags {
+			if !safeParamName.MatchString(f.Name) {
+				return nil, fmt.Errorf("parse manifest: unsafe flag name %q on command %q (must match %s)", f.Name, c.ID, safeParamName)
+			}
 		}
 	}
 	return &m, nil

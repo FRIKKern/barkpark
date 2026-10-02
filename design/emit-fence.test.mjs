@@ -23,16 +23,16 @@
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, cpSync, copyFileSync, readFileSync, writeFileSync, realpathSync,
-  rmSync,
+  rmSync, readdirSync, statSync, utimesSync, existsSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 import { ARTIFACTS, AUDIT_ACTIONS_PATH } from "./emit.mjs";
-import { SURFACE_PATH, BUNDLE_PATH } from "./paper-editor-mirror.mjs";
+import { SURFACE_PATH, BUNDLE_PATH, MIRROR_NAME } from "./paper-editor-mirror.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = join(here, "..");
@@ -74,16 +74,78 @@ function makeTree() {
 // filled the machine's boot disk. The exit hook (not per-test teardown)
 // keeps the trees inspectable while the run is alive and costs one rm each.
 const tempRoots = [];
-process.on("exit", () => {
-  for (const root of tempRoots) {
+function removeTempRoots() {
+  for (const root of tempRoots.splice(0)) {
     try {
       rmSync(root, { recursive: true, force: true });
     } catch {
-      // exit handler: nothing sane to do, and the leak signature in noo-noo
-      // sweeps stragglers.
+      // exit handler: nothing sane to do, and the stale sweep below takes
+      // any straggler on the next run.
     }
   }
-});
+}
+process.on("exit", removeTempRoots);
+
+// A KILLED RUN NEVER REACHES `exit` (task-c5d4ac654b076ba6). A builder that
+// is cancelled, times out or dies on a spend limit gets SIGTERM/SIGINT/SIGHUP,
+// and node's default action for those terminates without running `exit`
+// listeners: 135 emit-fence-* dirs appeared within hours of the exit hook
+// landing. Handling the signal turns it into process.exit(), which DOES run
+// the exit hook above, with the conventional 128+n status so the caller still
+// sees a killed run.
+for (const [signal, n] of [["SIGINT", 2], ["SIGTERM", 15], ["SIGHUP", 1]]) {
+  process.on(signal, () => process.exit(128 + n));
+}
+
+// SIGKILL cannot be caught by anything, so every run also sweeps emit-fence-*
+// dirs that a PREVIOUS run left behind. The age bar keeps a concurrent run's
+// live trees safe: a whole run takes seconds, so a tree older than this has no
+// owner left.
+const STALE_TREE_MS = 6 * 60 * 60 * 1000;
+function sweepStaleTrees(dir = tmpdir(), now = Date.now()) {
+  let swept = 0;
+  let names = [];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return 0;
+  }
+  for (const name of names) {
+    if (!name.startsWith("emit-fence-")) continue;
+    const path = join(dir, name);
+    try {
+      if (now - statSync(path).mtimeMs > STALE_TREE_MS) {
+        rmSync(path, { recursive: true, force: true });
+        swept += 1;
+      }
+    } catch {
+      // raced with another sweeper, or not ours to stat: leave it
+    }
+  }
+  return swept;
+}
+
+// Child modes for the cleanup tests at the bottom of this file. Each one
+// returns before any test is registered, so a child never recurses.
+if (process.env.EMIT_FENCE_CHILD === "sweep") {
+  console.log(`swept ${sweepStaleTrees()}`);
+  process.exit(0);
+}
+if (process.env.EMIT_FENCE_CHILD === "hold") {
+  makeTreeForChild();
+  console.log("tree-made");
+  setInterval(() => {}, 1000);
+  // Top-level await: module evaluation stops here, so no test is registered.
+  await new Promise(() => {});
+}
+sweepStaleTrees();
+
+function makeTreeForChild() {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
+  tempRoots.push(root);
+  writeFileSync(join(root, "marker"), "held by a child the test will SIGTERM\n");
+  return root;
+}
 
 function emit(root, args) {
   const r = spawnSync(process.execPath, [join(root, "design", "emit.mjs"), ...args], {
@@ -305,3 +367,218 @@ for (const [which, edited, marker] of REGION_CASES) {
     assert.ok(readIn(root, TWO_REGION_FILE).includes(sentinel), "the sentinel was DELETED — the fence did not hold");
   });
 }
+
+// ── the ORPHAN SLOT prune (cch-w68-s4a follow-up) ────────────────────────────
+// BEFORE: run() built the next ledger as `{ ...regions }` and merged the run's
+// digests on top, at BOTH --adopt and --write. A key no ARTIFACTS entry produced
+// any more was therefore never removed: rename an artifact and its old slot sits
+// in design/emit-manifest.json forever, asserting a SHA-256 for a surface that
+// does not exist, indistinguishable to a reader from a live slot.
+//
+// PROVEN ABLE TO FAIL BY MUTATION, in BOTH directions (charter D41). Deleting a
+// LIVE slot is the far worse failure — it makes the next --check report a
+// legitimately generated region as UNATTRIBUTED and sends a developer to --adopt
+// over bytes nobody verified — so the over-firing direction gets its own arms:
+//
+//   UNDER-prune  restore `const nextRegions = { ...regions };` in run()
+//                → (o1) and (o2) RED; (o3)/(o4)/(o5) stay GREEN.
+//   OVER-prune   drop the mirror from claimedKeys (`new Set(results.map(regionKey))`)
+//                → (o5) RED: the mirror is claimed by the POST-step, not the
+//                  artifact loop, and a ledger built from `results` alone eats it.
+//   OVER-prune   exclude errored units (`.filter((u) => !u.error)`)
+//                → (o4) RED: a surface that merely failed to READ loses its slot.
+//
+// MEASURED LIMIT, stated so nobody over-reads (o3): spreading the prune across
+// every key sharing a path with an orphan does NOT red it, because the write loop
+// below re-adds every LIVE artifact's digest immediately afterwards. (o3) is a
+// true end-to-end assertion about the final ledger, but its subject is defended
+// twice over; the arms that actually catch an over-fire are (o4) and (o5), whose
+// subjects nothing re-adds.
+
+// A key shaped exactly like a real slot for a surface that no longer exists. This
+// is what a rename leaves behind.
+const RETIRED_KEY = "design/retired-surface.css#a surface that no longer exists";
+const RETIRED_DIGEST = "0".repeat(64);
+
+function plantOrphan(root) {
+  const man = JSON.parse(readIn(root, "design/emit-manifest.json"));
+  man.regions[RETIRED_KEY] = RETIRED_DIGEST;
+  writeIn(root, "design/emit-manifest.json", `${JSON.stringify(man, null, 2)}\n`);
+}
+
+// Unregister ONE artifact from the COPIED emitter — the rename, seen from the
+// registry's side: the file and its marker stay on disk, but no ARTIFACTS entry
+// claims that name any more, exactly as if it had been re-keyed.
+function unregisterArtifact(root, name) {
+  const src = readIn(root, "design/emit.mjs");
+  const anchor = "export function evaluateAll()";
+  assert.ok(src.includes(anchor), "could not find evaluateAll() to unregister an artifact before");
+  const drop =
+    `{ const i = ARTIFACTS.findIndex((a) => a.name === ${JSON.stringify(name)});\n` +
+    `  if (i < 0) throw new Error("no ARTIFACTS entry named " + ${JSON.stringify(name)});\n` +
+    `  ARTIFACTS.splice(i, 1); }\n\n`;
+  writeIn(root, "design/emit.mjs", src.replace(anchor, drop + anchor));
+}
+
+// The two slots of cloud/priv/static/app.js are the whole point of the same-path
+// arm: drop one and the OTHER must survive. Derived from the registry, not quoted,
+// so this re-points itself if the names move.
+const SAME_PATH_SLOTS = ARTIFACTS.filter((a) => a.path === "cloud/priv/static/app.js");
+const DROPPED = SAME_PATH_SLOTS[0];
+const SURVIVOR = SAME_PATH_SLOTS[1];
+const MIRROR_KEY = `${BUNDLE_PATH}#${MIRROR_NAME}`;
+
+test("(o1) --write emits ONLY keys a unit claimed: an unregistered artifact's slot is GONE", () => {
+  assert.ok(SURVIVOR, "cloud/priv/static/app.js no longer carries two slots — re-point this test");
+  const root = makeTree();
+  const droppedKey = `${DROPPED.path}#${DROPPED.name}`;
+  const before = manifestKeys(root);
+  assert.ok(before.includes(droppedKey), `the ledger must start with ${droppedKey}`);
+
+  unregisterArtifact(root, DROPPED.name);
+  const w = emit(root, ["--write"]);
+  assert.equal(w.code, 0, `--write should succeed after unregistering\n${w.out}\n${w.err}`);
+
+  assert.ok(
+    !manifestKeys(root).includes(droppedKey),
+    `${droppedKey} survived --write — the ledger still asserts a digest for an artifact no unit claims`,
+  );
+  assert.match(w.out, new RegExp(`PRUNE ${droppedKey.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`),
+    "--write pruned the slot without naming it");
+  // and it removed EXACTLY that one — the removal half of the pair whose survival
+  // half is (o3).
+  assert.deepEqual(
+    before.filter((k) => !manifestKeys(root).includes(k)),
+    [droppedKey],
+    "--write removed something other than the one unclaimed slot",
+  );
+});
+
+test("(o3) the SAME-PATH sibling of an unregistered artifact is NEVER pruned", () => {
+  const root = makeTree();
+  unregisterArtifact(root, DROPPED.name);
+  const survivorKey = `${SURVIVOR.path}#${SURVIVOR.name}`;
+  const before = manifestKeys(root);
+  assert.ok(before.includes(survivorKey), `the ledger must start with ${survivorKey}`);
+
+  assert.equal(emit(root, ["--write"]).code, 0, "--write should succeed");
+  const after = manifestKeys(root);
+
+  // The live sibling shares the path AND the key prefix with the pruned one. A
+  // prune keyed on path (or on any prefix) would take both.
+  assert.ok(after.includes(survivorKey),
+    `${survivorKey} was pruned along with its file-mate — the predicate is not derived from the units`);
+  // and the mirror, claimed by the POST-step rather than the artifact loop, keeps its slot.
+  assert.ok(after.includes(MIRROR_KEY), `${MIRROR_KEY} was pruned — the mirror's claim was not counted`);
+  // NOTHING else went with it. Stated as a SURVIVAL set (every key but the dropped
+  // one is still there) rather than as a removal set, so this case stays GREEN
+  // under the `{ ...regions }` mutation — it pins only the over-firing direction.
+  assert.deepEqual(
+    before.filter((k) => k !== `${DROPPED.path}#${DROPPED.name}` && !after.includes(k)),
+    [],
+    "--write removed a slot other than the one unclaimed one",
+  );
+});
+
+test("(o5) CONTROL: --write on an UNMODIFIED tree prunes nothing — every one of the real slots survives", () => {
+  const root = makeTree();
+  const before = manifestKeys(root).slice().sort();
+  assert.ok(before.length > 20, `the ledger should carry the real slot set, got ${before.length}`);
+  const w = emit(root, ["--write"]);
+  assert.equal(w.code, 0, `--write should succeed on a faithful copy\n${w.out}\n${w.err}`);
+  assert.deepEqual(manifestKeys(root).slice().sort(), before,
+    "--write changed the KEY SET of a healthy tree — the prune is over-firing");
+  assert.doesNotMatch(w.out, /PRUNE /, "a healthy tree reported a prune");
+});
+
+test("(o2) --adopt NAMES an orphan slot and KEEPS it; --write is the mode that removes it", () => {
+  const root = makeTree();
+  plantOrphan(root);
+
+  const a = emit(root, ["--adopt"]);
+  assert.equal(a.code, 0, `--adopt should succeed\n${a.out}\n${a.err}`);
+  assert.ok(a.err.includes(`ORPHAN ${RETIRED_KEY}`),
+    `--adopt did not NAME the orphan slot (it passed silently)\n${a.err}`);
+  assert.ok(manifestKeys(root).includes(RETIRED_KEY),
+    "--adopt DROPPED the orphan — adopt must never remove a slot, only report it");
+
+  const w = emit(root, ["--write"]);
+  assert.equal(w.code, 0, `--write should succeed\n${w.out}\n${w.err}`);
+  assert.ok(!manifestKeys(root).includes(RETIRED_KEY), "--write kept the orphan slot");
+});
+
+test("(o4) a unit whose region is UNREADABLE keeps its slot and is NOT called an orphan", () => {
+  const root = makeTree();
+  // Strip the BEGIN marker so evaluate() reports an error for this ONE artifact.
+  const rel = MARKER_CSS;
+  const broken = readIn(root, rel).replace(/[^\n]*BEGIN GENERATED: tokens[^\n]*\n/, "");
+  assert.notEqual(broken, readIn(root, rel), `could not remove the tokens marker from ${rel}`);
+  const atPath = ARTIFACTS.filter((a) => a.path === rel);
+  assert.equal(atPath.length, 1, `${rel} no longer carries exactly one slot — re-point this test`);
+  const brokenName = atPath[0].name;
+  const brokenKey = `${rel}#${brokenName}`;
+  writeIn(root, rel, broken);
+
+  const a = emit(root, ["--adopt"]);
+  assert.equal(a.code, 0, `--adopt should still succeed\n${a.out}\n${a.err}`);
+  assert.ok(a.out.includes(`skip  ${brokenName}`) || a.err.includes(`skip  ${brokenName}`),
+    `--adopt should report the unreadable region as skipped\n${a.out}\n${a.err}`);
+  assert.ok(manifestKeys(root).includes(brokenKey),
+    `${brokenKey} LOST its slot because its region failed to read — pruning is for absence, never for failure`);
+  assert.ok(!a.err.includes(`ORPHAN ${brokenKey}`),
+    `an errored unit was reported as an ORPHAN — a later prune would delete a live slot\n${a.err}`);
+
+  // --write refuses outright on an errored unit, so the ledger is not rewritten at all.
+  const w = emit(root, ["--write"]);
+  assert.notEqual(w.code, 0, "--write must refuse while an artifact is missing its marker");
+  assert.ok(manifestKeys(root).includes(brokenKey), `${brokenKey} was pruned by a REFUSED --write`);
+});
+
+// ── cleanup on a KILLED run (task-c5d4ac654b076ba6) ──────────────────────────
+// Each child runs THIS file in a child mode against a private TMPDIR, so the
+// assertions see only the child's own trees.
+const selfPath = fileURLToPath(import.meta.url);
+function privateTmp() {
+  const dir = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-cleanup-probe-")));
+  tempRoots.push(dir);
+  return dir;
+}
+const fenceTrees = (dir) => readdirSync(dir).filter((n) => n.startsWith("emit-fence-"));
+
+test("a SIGTERMed run removes its temp trees (the exit hook alone never fires on a signal)", async () => {
+  const dir = privateTmp();
+  const child = spawn(process.execPath, [selfPath], {
+    env: { ...process.env, EMIT_FENCE_CHILD: "hold", TMPDIR: dir },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  await new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error("child never made its tree")), 10_000);
+    child.stdout.on("data", (b) => {
+      if (String(b).includes("tree-made")) { clearTimeout(timer); resolve(); }
+    });
+  });
+  assert.equal(fenceTrees(dir).length, 1, "the child should hold exactly one tree before the signal");
+  const code = await new Promise((resolve) => {
+    child.on("exit", (c, sig) => resolve(c ?? sig));
+    child.kill("SIGTERM");
+  });
+  assert.equal(code, 143, `a SIGTERMed run should still exit 128+15, got ${code}`);
+  assert.deepEqual(fenceTrees(dir), [], "the SIGTERMed run left its emit-fence-* tree behind");
+});
+
+test("a later run sweeps trees a SIGKILLed run left behind, and spares a live one", () => {
+  const dir = privateTmp();
+  const stale = join(dir, "emit-fence-stale");
+  const fresh = join(dir, "emit-fence-fresh");
+  mkdirSync(stale);
+  mkdirSync(fresh);
+  const old = new Date(Date.now() - 7 * 60 * 60 * 1000);
+  utimesSync(stale, old, old);
+  const r = spawnSync(process.execPath, [selfPath], {
+    env: { ...process.env, EMIT_FENCE_CHILD: "sweep", TMPDIR: dir },
+    encoding: "utf8",
+  });
+  assert.equal(r.status, 0, `sweep child failed\n${r.stdout}\n${r.stderr}`);
+  assert.ok(!existsSync(stale), "a tree older than the stale bar survived the sweep");
+  assert.ok(existsSync(fresh), "the sweep removed a FRESH tree — it could belong to a concurrent run");
+});

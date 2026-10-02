@@ -32,9 +32,22 @@ caller is expected to read the status before it reads `RELAND_FINDINGS`:
   skipped — the fetcher deliberately did not evaluate (see reland_fetch.py).
 
 `RELAND_ZERO_DIGEST=1` marks the third case: docs were scanned but not one
-carried a `content.landed` digest, so a 0-finding verdict is hollow. (The
-root cause of the live zero-digest corpus is tracked separately as
-`arpss-reland-check-zero-landed-signal`.)
+carried a `content.landed` digest, so a 0-finding verdict is hollow.
+
+THE CORPUS IS NO LONGER ZERO-DIGEST, AND THIS DOCSTRING USED TO SAY IT WAS.
+Measured against the live ledger 2026-09-15: 8935 published tasks, **16 with
+`lifecycle_status: done` carrying `content.landed.files`**, every one of them
+stamped 2026-09-13 or later. The closer that was missing now exists — a push to
+main runs `.github/workflows/landed-mark.yml` -> `scripts/landed-mark.sh`, which
+writes the merge sha and file list onto the row the `Task:` trailer names. The
+CI job's own reading agrees: `RELAND_DIGESTS_SCANNED=16`, `RELAND_ZERO_DIGEST=0`.
+
+So `RELAND_ZERO_DIGEST=1` no longer means "this was never built". It now means
+the closer path REGRESSED — landed-mark stopped running, stopped resolving the
+trailer, or stopped writing — and that is a live incident to chase, not a known
+gap to shrug at. The historical root-cause analysis is
+`arpss-reland-check-zero-landed-signal` (done); the build-out it asked for is
+`arpss-reland-teach-closer-landed`.
 
 `--strict` (for CI) turns an `infra` payload into a distinct exit code 2 so a
 misconfigured pipeline cannot be mistaken for a clean one; without it the local

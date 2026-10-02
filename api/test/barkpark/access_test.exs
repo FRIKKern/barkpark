@@ -357,7 +357,7 @@ defmodule Barkpark.AccessTest do
 
     # The three grant reads now delegate the cast to Repo.uuid_or_nil/1. Prove
     # the guard is intact after the dedup: a non-UUID string folds to the empty
-    # branch (never an Ecto.CastError 500), while a well-formed-but-absent UUID
+    # branch (never an Ecto.Query.CastError), while a well-formed-but-absent UUID
     # exercises the cast-success → no-row path (also empty, no crash).
     test "list reads fold a non-UUID and a well-formed-absent UUID to empty" do
       absent = Ecto.UUID.generate()

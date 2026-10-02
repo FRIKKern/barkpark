@@ -13,11 +13,6 @@
       "type": "heading"
     },
     {
-      "content": [],
-      "id": "hhc-gap-title",
-      "type": "paragraph"
-    },
-    {
       "content": [
         {
           "type": "text",
@@ -136,16 +131,6 @@
       "type": "toc"
     },
     {
-      "content": [],
-      "id": "hhc-gap-g1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-g2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-grand",
       "level": 2,
       "text": "The grand view",
@@ -247,16 +232,6 @@
         }
       ],
       "id": "hhc-grand-p3",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-m1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-m2",
       "type": "paragraph"
     },
     {
@@ -484,16 +459,6 @@
       "type": "paragraph"
     },
     {
-      "content": [],
-      "id": "hhc-gap-s1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-s2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-shape",
       "level": 2,
       "text": "The proposed shape — three epics on the risk seam",
@@ -713,11 +678,6 @@
       "type": "paragraph"
     },
     {
-      "content": [],
-      "id": "hhc-gap-e1a",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h3-e1",
       "level": 3,
       "text": "E1 · http-edge-truth — the edge tells the truth",
@@ -853,11 +813,6 @@
       "value": "# api/lib/barkpark_web/endpoint.ex — the cloud two-plug port (target shape)\n# replaces the single bare Plug.Static (endpoint.ex:56-61)\nplug Plug.Static,\n  at: \"/fonts\", from: {:barkpark, \"priv/static/fonts\"},\n  headers: %{\"cache-control\" => \"public, max-age=31536000, immutable\"},\n  cache_control_for_etags: \"public, max-age=31536000, immutable\"\n\nplug Plug.Static,\n  at: \"/\", from: :barkpark,\n  only: ~w(assets images favicon.ico robots.txt),\n  gzip: not code_reloading?,\n  headers: %{\"cache-control\" => \"no-cache\"},   # no-cache = REVALIDATE, not don't-cache\n  cache_control_for_etags: \"no-cache\"\n# proven: cloud/lib/.../web/router.ex:326-421, pinned by router_test.exs:1999-2016\n# — the exact fix for the live stale-Studio-shell bug, with zero template rewrites"
     },
     {
-      "content": [],
-      "id": "hhc-gap-e2a",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h3-e2",
       "level": 3,
       "text": "E2 · anonymous-metering — measured, polite, cheap, bounded",
@@ -904,11 +859,6 @@
       "id": "hhc-e2-diagram",
       "source": "flowchart LR\n  C[\"anonymous client\"] -->|\"HTTP GET (dead render)\"| P[\"Gate A: RateLimit plug<br/>new :browser class, HTML 429\"]\n  P --> DR[\"LiveView dead render\"]\n  C -->|\"WS upgrade /live\"| S[\"endpoint socket<br/>connect_info: session ONLY today\"]\n  S -.->|\"invisible to every plug, forever\"| M[\"connected mount,<br/>live nav, handle_event\"]\n  M --> H[\"Gate B: on_mount +<br/>attach_hook(:handle_event)\"]",
       "type": "diagram"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-e3a",
-      "type": "paragraph"
     },
     {
       "id": "hhc-h3-e3",
@@ -1002,11 +952,6 @@
       "type": "terminal"
     },
     {
-      "content": [],
-      "id": "hhc-gap-fc",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h3-filed",
       "level": 3,
       "text": "Filed, not built",
@@ -1060,16 +1005,6 @@
       ],
       "ordered": false,
       "type": "list"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-gt1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-gt2",
-      "type": "paragraph"
     },
     {
       "id": "hhc-h2-ground",
@@ -1632,16 +1567,6 @@
       "type": "table"
     },
     {
-      "content": [],
-      "id": "hhc-gap-f1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-f2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-files",
       "level": 2,
       "text": "Files likely to change — the consolidated picture",
@@ -2184,16 +2109,6 @@
       "type": "table"
     },
     {
-      "content": [],
-      "id": "hhc-gap-o1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-o2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-own",
       "level": 2,
       "text": "Absorb, cite, defer — the ownership rulings",
@@ -2509,16 +2424,6 @@
       "type": "callout"
     },
     {
-      "content": [],
-      "id": "hhc-gap-c1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-c2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-contra",
       "level": 2,
       "text": "Contradictions and resolutions",
@@ -2699,16 +2604,6 @@
         ]
       ],
       "type": "table"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-p1x",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-p2x",
-      "type": "paragraph"
     },
     {
       "id": "hhc-h2-proof",
@@ -3019,16 +2914,6 @@
       "type": "table"
     },
     {
-      "content": [],
-      "id": "hhc-gap-r1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-r2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-risk",
       "level": 2,
       "text": "Risks, unknowns, and the judgment calls",
@@ -3247,16 +3132,6 @@
       "type": "list"
     },
     {
-      "content": [],
-      "id": "hhc-gap-rec1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-rec2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-reco",
       "level": 2,
       "text": "The recommendation and the first wave",
@@ -3356,16 +3231,6 @@
       "type": "callout"
     },
     {
-      "content": [],
-      "id": "hhc-gap-st1",
-      "type": "paragraph"
-    },
-    {
-      "content": [],
-      "id": "hhc-gap-st2",
-      "type": "paragraph"
-    },
-    {
       "id": "hhc-h2-stack",
       "level": 2,
       "text": "The paper stack — where to descend",
@@ -3408,11 +3273,6 @@
       "type": "cards"
     },
     {
-      "content": [],
-      "id": "hhc-gap-close",
-      "type": "paragraph"
-    },
-    {
       "content": [
         {
           "type": "text",
@@ -3425,7 +3285,7 @@
       "type": "callout"
     }
   ],
-  "source_rev": "8fab184e1e2d65eb621754717d5b40bb",
+  "source_rev": "c178d363fada39a327a56346a53cb9b1",
   "style": "article",
   "title": "The Ultimate Plan — Hardening Barkpark at Hobby Scale"
 }

@@ -174,7 +174,7 @@ defmodule Barkpark.Accounts do
     # lock a non-existent account) and unlike the generic failed-login event it
     # takes 10 failures to provoke — no cheap enumeration oracle.
     if locked? do
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "account_locked",
         subject: user.id,
@@ -535,6 +535,23 @@ defmodule Barkpark.Accounts do
   def confirm_user(_), do: :error
 
   @doc """
+  Confirm a user that an identity provider has ALREADY vouched for, with no
+  email-confirmation token.
+
+  `confirm_user/1` needs the plaintext token from the confirmation email.
+  IdP-driven provisioning (SSO JIT, OIDC, social login, SCIM) never has one:
+  the provider verified the address, so the account is born confirmed. This
+  is the one public door for that, so those callers stop reaching past this
+  context with a raw `Repo.update!/1` on `User.confirm_changeset/2`.
+
+  Call it ONLY on a user the caller just provisioned from a verified IdP
+  assertion. It is not a way to skip email confirmation for a sign-up.
+  """
+  @spec confirm_provisioned_user(User.t()) :: User.t()
+  def confirm_provisioned_user(%User{} = user),
+    do: Repo.update!(User.confirm_changeset(user))
+
+  @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
   Drops the revoked-session count — use `reset_user_password_counting/2` on any
@@ -707,7 +724,7 @@ defmodule Barkpark.Accounts do
   @spec valid_totp?(User.t(), String.t()) :: boolean()
   def valid_totp?(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code),
-      do: NimbleTOTP.valid?(secret, code, totp_opts(user))
+      do: totp_attempt_allowed?(user) and NimbleTOTP.valid?(secret, code, totp_opts(user))
 
   def valid_totp?(_, _), do: false
 
@@ -781,7 +798,7 @@ defmodule Barkpark.Accounts do
   @spec verify_totp(User.t(), String.t()) :: {:ok, User.t()} | :error
   def verify_totp(%User{totp_enabled: true, totp_secret: secret} = user, code)
       when is_binary(secret) and is_binary(code) do
-    if NimbleTOTP.valid?(secret, code, totp_opts(user)) do
+    if totp_attempt_allowed?(user) and NimbleTOTP.valid?(secret, code, totp_opts(user)) do
       now = DateTime.truncate(DateTime.utc_now(), :microsecond)
       consume_totp_step(user, now)
     else
@@ -790,6 +807,27 @@ defmodule Barkpark.Accounts do
   end
 
   def verify_totp(_, _), do: :error
+
+  # task-4d52cfb35cbb0b08: THE PER-ACCOUNT TOTP ATTEMPT BUDGET. Every TOTP
+  # check (the Studio /login/mfa step, the JSON MFA doors, step-up, disable)
+  # spends one token from a per-user bucket: a burst of
+  # `@totp_attempt_capacity`, refilling about 30 a day. Past it even the right
+  # code is refused. Without it, POST /login/mfa (the :browser pipeline mounts
+  # no RateLimit, and a correct password resets the password lockout) let a
+  # password holder guess 6-digit codes as fast as the box answered. The
+  # cloud's twin is TwoFactorRateLimiter's daily bound. The key is per USER,
+  # never per IP, so rotating addresses buys nothing. The cost, stated: a
+  # password holder can spend the budget and hold the account's second step
+  # shut for a while; recovery codes and a password reset still work.
+  @totp_attempt_capacity 10
+  @totp_attempt_refill_per_sec 30 / 86_400
+
+  defp totp_attempt_allowed?(%User{id: id}) do
+    Barkpark.RateLimiter.check(Barkpark.RateLimiter.scoped_key(nil, {:totp_attempt, id}),
+      capacity: @totp_attempt_capacity,
+      refill_per_sec: @totp_attempt_refill_per_sec
+    ) == :ok
+  end
 
   # Atomic compare-and-swap on `last_totp_at`: advance to `now` ONLY if the row
   # still holds the value this caller read (`seen`). A concurrent verify that
@@ -859,7 +897,7 @@ defmodule Barkpark.Accounts do
       # A one-time recovery code was just burned — a security-relevant fallback
       # authentication. Record it (with how many codes remain) so a run of
       # recovery-code use, or a user running low, is visible on the audit trail.
-      emit_audit(%{
+      Audit.emit_best_effort(%{
         category: "auth",
         action: "recovery_code_used",
         subject: id,
@@ -872,19 +910,6 @@ defmodule Barkpark.Accounts do
     else
       :error
     end
-  end
-
-  # Best-effort audit emit: an audit-bus hiccup must NEVER break an
-  # authentication decision (the change it records has already committed). The
-  # emit result is discarded and any infra-level raise/throw is swallowed —
-  # mirrors `Barkpark.Access.emit_grant_event/4`.
-  defp emit_audit(attrs) do
-    Audit.emit(attrs)
-    :ok
-  rescue
-    _ -> :ok
-  catch
-    _, _ -> :ok
   end
 
   # ── Step-up MFA ──────────────────────────────────────────────────────────────

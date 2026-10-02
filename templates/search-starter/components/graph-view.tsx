@@ -277,6 +277,15 @@ export function GraphView({
         }}
       />
       <div
+        // THE CROSS-EDITION MOUNT MARKER. `[data-bp-graph-mount]` exists in
+        // the DOM if and only if this subtree rendered, on BOTH flagship
+        // editions — the Astro one portals its pane into `#bp-graph-slot`, the
+        // Next one mounts GraphView directly, and a smoke keyed on either of
+        // those shapes is blind to the other. (The live journey harness asserted
+        // `#bp-graph-slot` children: on the Next edition that selector is absent
+        // so the phone arm passed VACUOUSLY and the desktop arm failed a working
+        // graph.) Presence of the marker is the claim; never a class, never a id.
+        data-bp-graph-mount=""
         ref={hostRef}
         // The renderer injects an absolutely-positioned canvas filling this box,
         // so it needs `relative` + a real height. The parent gives it height;

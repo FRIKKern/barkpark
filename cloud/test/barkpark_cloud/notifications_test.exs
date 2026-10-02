@@ -447,8 +447,8 @@ defmodule BarkparkCloud.NotificationsTest do
   ## The daily fleet digest — dr-w19-s5, THE ADDRESS
   ##
   ## `deliver_fleet_digest/1` used to resolve `platform_admin_emails/0`, whose
-  ## only source is a config allowlist that is unset on prod and hard-defaults to
-  ## `[]`: the one push channel for fleet health succeeded at sending nothing,
+  ## only source is a config allowlist that was then unset on prod (provisioned
+  ## 2026-09-25 by gr-ops-platform-admin-emails) and hard-defaults to `[]`: the one push channel for fleet health succeeded at sending nothing,
   ## every day, for its whole recorded life. It now partitions the fleet by team
   ## and mails each team's own members. These tests pin the two things a SOURCE
   ## census structurally cannot: that the population is REAL (a registered
@@ -526,7 +526,7 @@ defmodule BarkparkCloud.NotificationsTest do
 
       assert bodies[a1] =~ "alpha-only"
       refute bodies[a1] =~ "bravo-only"
-      assert bodies[a1] =~ "Fleet: 1 instance"
+      assert bodies[a1] =~ "Your team owns 1 instance"
 
       assert bodies[b1] =~ "bravo-only"
       refute bodies[b1] =~ "alpha-only"
@@ -582,16 +582,22 @@ defmodule BarkparkCloud.NotificationsTest do
       ref = make_ref()
       test_pid = self()
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         "covered-#{inspect(ref)}",
         [:barkpark_cloud, :notifications, :fleet_digest, :settled],
         fn _event, measurements, metadata, _cfg ->
-          send(test_pid, {ref, measurements, metadata})
+          # OURS ONLY. The handler runs in whichever process emits, and other
+          # async modules settle fleet digests too (DailyDigestWorkerTest,
+          # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+          # main push run 36885879832. Keep events from this test's lineage.
+          if self() == test_pid or test_pid in List.wrap(Process.get(:"$callers")) do
+            send(test_pid, {ref, measurements, metadata})
+          end
         end,
         nil
       )
 
-      on_exit(fn -> :telemetry.detach("covered-#{inspect(ref)}") end)
+      on_exit(fn -> BarkparkCloud.TelemetryTap.detach("covered-#{inspect(ref)}") end)
 
       assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest(fleet)
 

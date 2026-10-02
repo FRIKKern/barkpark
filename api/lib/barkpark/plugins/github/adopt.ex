@@ -88,6 +88,7 @@ defmodule Barkpark.Plugins.Github.Adopt do
   require Logger
 
   alias Barkpark.Content
+  alias Barkpark.Content.Broadcast
   alias Barkpark.Content.Document
   alias Barkpark.Plugins.Github.{Client, Link, Settings}
   alias Barkpark.Tasks.Internal
@@ -185,26 +186,35 @@ defmodule Barkpark.Plugins.Github.Adopt do
     observed_rev = published.rev
     new_rev = Internal.generate_rev()
 
-    case Internal.fenced_content_write(published, observed_rev, new_content, new_rev) do
-      {:ok, %Document{} = stored} ->
-        # Same event contract as the old upsert path: stamped `source: "github"`,
-        # so `Outbox.fetch/3` excludes it and the adopt write can never echo back
-        # out as an outbound mirror (loop cut #2).
-        ev = Internal.insert_mutation_event!(stored, "update", observed_rev, "github")
+    # task-8cb1e54603e4c3cf: the flip and its mutation_events row are ONE
+    # write. `fenced_content_write` auto-commits outside a transaction, so an
+    # event fault used to leave the row adopted with no event. The backlink
+    # comment is a GitHub HTTP call, so it runs only after the commit.
+    result =
+      Broadcast.write_atomically(fn ->
+        case Internal.fenced_content_write(published, observed_rev, new_content, new_rev) do
+          {:ok, %Document{} = stored} ->
+            # Same event contract as the old upsert path: stamped `source: "github"`,
+            # so `Outbox.fetch/3` excludes it and the adopt write can never echo back
+            # out as an outbound mirror (loop cut #2).
+            ev = Internal.insert_mutation_event!(stored, "update", observed_rev, "github")
 
-        Content.broadcast_document_mutation(stored, "update",
-          event_id: ev.id,
-          previous_rev: observed_rev
-        )
+            Content.broadcast_document_mutation(stored, "update",
+              event_id: ev.id,
+              previous_rev: observed_rev
+            )
 
-        maybe_backlink(github, opts)
-        {:ok, stored}
+            {:ok, stored}
 
-      :stale ->
-        detail = %{doc_id: pid, gate: "rev_fence", observed_rev: observed_rev}
-        report_anomaly(detail)
-        {:error, {:adopt_refused, detail}}
-    end
+          :stale ->
+            detail = %{doc_id: pid, gate: "rev_fence", observed_rev: observed_rev}
+            report_anomaly(detail)
+            {:error, {:adopt_refused, detail}}
+        end
+      end)
+
+    with {:ok, _stored} <- result, do: maybe_backlink(github, opts)
+    result
   end
 
   # NEVER-PUBLISHED arm — byte for byte the pre-existing behaviour minus the

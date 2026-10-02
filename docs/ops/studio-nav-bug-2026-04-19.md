@@ -170,7 +170,8 @@ message.
 
 **Cannot verify in this worktree without mutating — browser repro and
 server-side `journalctl` grep for `check_origin` log lines are recommended
-in the fix-verification step below.**
+in the fix-verification step below (§7.3 — scan all three units and print the
+sanity total; an empty scan is not evidence of none).**
 
 ---
 
@@ -404,8 +405,17 @@ curl -s -o /dev/null -w "%{http_code}\n" \
 
 ```bash
 ssh root@89.167.28.206 \
-  'journalctl -u barkpark -n 500 --no-pager | grep -iE "check_origin|origin not allowed|CONNECTED TO Phoenix\.LiveView\.Socket"'
+  'U="-u barkpark -u barkpark-slot@blue -u barkpark-slot@green"
+   journalctl $U -n 500 --no-pager > /tmp/j.log
+   echo "SANITY total lines scanned: $(wc -l < /tmp/j.log)"   # 0 => WRONG UNITS
+   grep -icE "check_origin|origin not allowed|CONNECTED TO Phoenix\.LiveView\.Socket" /tmp/j.log'
 ```
+
+Name **all three** units: `barkpark.service` exists only on a pull-deploy box
+and `barkpark-slot@blue`/`@green` only on a `.slots` blue/green box, so a
+one-unit scan on the other topology prints `-- No entries --` — which reads as
+"clean" but means "I could not look". The SANITY line is what separates the
+two: a zero match on top of a non-zero total is a real zero.
 
 Expect to see `CONNECTED TO Phoenix.LiveView.Socket` lines for each browser
 tab, and **zero** `origin not allowed` lines after the restart timestamp.

@@ -63,12 +63,29 @@ import (
 	"time"
 )
 
-// corpusJSON is the fixed task corpus: 11 render_doc envelopes — two epic
+// corpusJSON is the fixed task corpus: 32 render_doc envelopes — five epic
 // roots with leaf children (the spine's ├─/└─ tree rows drive.sh locates),
 // a lifecycle mix (open / in_progress-with-claim / blocked / done), and one
 // standalone pair. Titles are unique and stable — they ARE the row identity
 // (D118) and appear verbatim in assert transcripts, so never edit one without
 // re-recording the committed evidence.
+//
+// WHY 32 AND NOT 11 (D130, task ttw22-fixture-overflow-enrichment): the
+// original 11-doc corpus flattened to ~14 spine lines, which FITS the wide
+// board's ~34-row spine window at 130x40. windowSpine (render.go) only paints
+// its numbered "↑ N more above" / "↓ N more below" affordances when
+// len(spineLines) > avail, so with 11 docs those markers never rendered and
+// the D119 marker-CLICK gesture (wideBoardMarkerAt -> moveCursor) could not be
+// asserted hermetically at all — the class was live-only by accident of corpus
+// size, not by design. The three added sections (bell tower / quarry road /
+// salt marsh) push the flattened spine past the window so the overflow markers
+// are a boot-time fact of every hermetic run. The floor is MECHANICAL, not a
+// comment: mustCorpus refuses to boot below spineOverflowFloor, so shrinking
+// the corpus back under the overflow boundary fails loudly instead of quietly
+// turning drive.sh's marker asserts into no-ops.
+//
+// The added rows carry NO churn: fixed ids, fixed timestamps, fixed claims.
+// They grow the corpus; they do not make it move.
 const corpusJSON = `[
   {"doc_id":"fx-harbor","title":"Harbor lights epic","lifecycle_status":"open","kind":"task","parent_id":"","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":4},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-01T09:00:00Z","updated_at":"2026-08-10T09:00:00Z","content":{"description":"Fixture epic: relight the harbor.","acceptance_criteria":[{"criterion":"north channel dredged","met":true,"evidence":"fixture"},{"criterion":"pier bollards painted","met":false,"evidence":""},{"criterion":"fog bell replaced","met":false,"evidence":""},{"criterion":"old winch retired","met":false,"evidence":""}]}},
   {"doc_id":"fx-hb-dredge","title":"Dredge the north channel","lifecycle_status":"in_progress","kind":"task","parent_id":"fx-harbor","priority":1,"labels":[],"claim":{"worker":"fixture-worker","epoch":3,"ts_iso":"2026-08-10T08:00:00Z"},"criteria_progress":{"met":1,"total":2},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-01T09:01:00Z","updated_at":"2026-08-10T08:00:00Z","content":{"description":"Fixture leaf, claimed and in progress."}},
@@ -80,21 +97,55 @@ const corpusJSON = `[
   {"doc_id":"fx-or-mulch","title":"Mulch the seedling beds","lifecycle_status":"in_progress","kind":"task","parent_id":"fx-orchard","priority":2,"labels":[],"claim":{"worker":"fixture-worker-two","epoch":1,"ts_iso":"2026-08-09T08:30:00Z"},"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-02T09:02:00Z","updated_at":"2026-08-09T08:30:00Z","content":{"description":"Fixture leaf, claimed and in progress."}},
   {"doc_id":"fx-or-net","title":"Net the cherry rows","lifecycle_status":"blocked","kind":"task","parent_id":"fx-orchard","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":1,"dependent_count":0,"inserted_at":"2026-08-02T09:03:00Z","updated_at":"2026-08-07T09:00:00Z","content":{"description":"Fixture leaf, blocked on the graft."}},
   {"doc_id":"fx-shed","title":"Sweep the tool shed","lifecycle_status":"open","kind":"task","parent_id":"","priority":4,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-03T09:00:00Z","updated_at":"2026-08-03T09:00:00Z","content":{"description":"Fixture standalone, open and ready."}},
-  {"doc_id":"fx-hinges","title":"Oil the gate hinges","lifecycle_status":"done","kind":"task","parent_id":"","priority":4,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-03T09:05:00Z","updated_at":"2026-08-05T10:00:00Z","content":{"description":"Fixture standalone, done."}}
+  {"doc_id":"fx-hinges","title":"Oil the gate hinges","lifecycle_status":"done","kind":"task","parent_id":"","priority":4,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-03T09:05:00Z","updated_at":"2026-08-05T10:00:00Z","content":{"description":"Fixture standalone, done."}},
+  {"doc_id":"fx-bt","title":"Bell tower epic","lifecycle_status":"open","kind":"task","parent_id":"","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":3},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:00:00Z","updated_at":"2026-08-04T09:00:00Z","content":{"description":"Fixture epic: rehang the bells."}},
+  {"doc_id":"fx-bt-headstock","title":"Recast the cracked headstock","lifecycle_status":"open","kind":"task","parent_id":"fx-bt","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:01:00Z","updated_at":"2026-08-04T09:01:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-bt-louvres","title":"Reslat the belfry louvres","lifecycle_status":"open","kind":"task","parent_id":"fx-bt","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:02:00Z","updated_at":"2026-08-04T09:02:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-bt-rope","title":"Splice the tenor bell rope","lifecycle_status":"in_progress","kind":"task","parent_id":"fx-bt","priority":3,"labels":[],"claim":{"worker":"fixture-worker-bt","epoch":2,"ts_iso":"2026-08-04T08:30:00Z"},"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:03:00Z","updated_at":"2026-08-04T09:03:00Z","content":{"description":"Fixture leaf, claimed and in progress."}},
+  {"doc_id":"fx-bt-clapper","title":"Rebush the treble clapper","lifecycle_status":"open","kind":"task","parent_id":"fx-bt","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:04:00Z","updated_at":"2026-08-04T09:04:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-bt-frame","title":"Shim the oak bell frame","lifecycle_status":"open","kind":"task","parent_id":"fx-bt","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:05:00Z","updated_at":"2026-08-04T09:05:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-bt-hatch","title":"Reseal the tower hatch","lifecycle_status":"done","kind":"task","parent_id":"fx-bt","priority":3,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-04T09:06:00Z","updated_at":"2026-08-04T09:06:00Z","content":{"description":"Fixture leaf, done."}},
+  {"doc_id":"fx-qr","title":"Quarry road epic","lifecycle_status":"open","kind":"task","parent_id":"","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":3},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:00:00Z","updated_at":"2026-08-05T09:00:00Z","content":{"description":"Fixture epic: reopen the quarry road."}},
+  {"doc_id":"fx-qr-culvert","title":"Rebuild the washed culvert","lifecycle_status":"open","kind":"task","parent_id":"fx-qr","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:01:00Z","updated_at":"2026-08-05T09:01:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-qr-verge","title":"Regrade the western verge","lifecycle_status":"open","kind":"task","parent_id":"fx-qr","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:02:00Z","updated_at":"2026-08-05T09:02:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-qr-gate","title":"Rehang the quarry gate","lifecycle_status":"in_progress","kind":"task","parent_id":"fx-qr","priority":3,"labels":[],"claim":{"worker":"fixture-worker-qr","epoch":2,"ts_iso":"2026-08-05T08:30:00Z"},"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:03:00Z","updated_at":"2026-08-05T09:03:00Z","content":{"description":"Fixture leaf, claimed and in progress."}},
+  {"doc_id":"fx-qr-signage","title":"Repost the weight-limit signage","lifecycle_status":"open","kind":"task","parent_id":"fx-qr","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:04:00Z","updated_at":"2026-08-05T09:04:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-qr-ditch","title":"Clear the roadside ditch","lifecycle_status":"open","kind":"task","parent_id":"fx-qr","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:05:00Z","updated_at":"2026-08-05T09:05:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-qr-cattlegrid","title":"Relevel the cattle grid","lifecycle_status":"done","kind":"task","parent_id":"fx-qr","priority":3,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-05T09:06:00Z","updated_at":"2026-08-05T09:06:00Z","content":{"description":"Fixture leaf, done."}},
+  {"doc_id":"fx-sm","title":"Salt marsh epic","lifecycle_status":"open","kind":"task","parent_id":"","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":3},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:00:00Z","updated_at":"2026-08-06T09:00:00Z","content":{"description":"Fixture epic: reflood the salt marsh."}},
+  {"doc_id":"fx-sm-sluice","title":"Rehang the tidal sluice","lifecycle_status":"open","kind":"task","parent_id":"fx-sm","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:01:00Z","updated_at":"2026-08-06T09:01:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-sm-boardwalk","title":"Replank the marsh boardwalk","lifecycle_status":"open","kind":"task","parent_id":"fx-sm","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:02:00Z","updated_at":"2026-08-06T09:02:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-sm-hide","title":"Rebuild the birdwatcher hide","lifecycle_status":"in_progress","kind":"task","parent_id":"fx-sm","priority":3,"labels":[],"claim":{"worker":"fixture-worker-sm","epoch":2,"ts_iso":"2026-08-06T08:30:00Z"},"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:03:00Z","updated_at":"2026-08-06T09:03:00Z","content":{"description":"Fixture leaf, claimed and in progress."}},
+  {"doc_id":"fx-sm-saltings","title":"Reseed the upper saltings","lifecycle_status":"open","kind":"task","parent_id":"fx-sm","priority":1,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:04:00Z","updated_at":"2026-08-06T09:04:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-sm-counter","title":"Recalibrate the tide counter","lifecycle_status":"open","kind":"task","parent_id":"fx-sm","priority":2,"labels":[],"claim":null,"criteria_progress":{"met":0,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:05:00Z","updated_at":"2026-08-06T09:05:00Z","content":{"description":"Fixture leaf, open and ready."}},
+  {"doc_id":"fx-sm-fence","title":"Retension the stock fence","lifecycle_status":"done","kind":"task","parent_id":"fx-sm","priority":3,"labels":[],"claim":null,"criteria_progress":{"met":1,"total":1},"dependency_count":0,"dependent_count":0,"inserted_at":"2026-08-06T09:06:00Z","updated_at":"2026-08-06T09:06:00Z","content":{"description":"Fixture leaf, done."}}
 ]`
 
 // primeJSON is the /v1/tasks/prime slice: counts SUMMING to the corpus row
-// count (11 — the board's truncation-honesty check compares len(tasks) against
-// the summed counts), the derived ready head (open rows with no undone
-// blockers), and a short fixed event tail for the activity ticker.
+// count (32 — the board's truncation-honesty check compares len(tasks) against
+// the summed counts; countsSum below is the mechanical guard that they still
+// agree), the derived ready head (open rows with no undone blockers), and a
+// short fixed event tail for the activity ticker.
 const primeJSON = `{
   "ok": true,
-  "counts": {"open": 6, "in_progress": 2, "blocked": 1, "done": 2},
+  "counts": {"open": 21, "in_progress": 5, "blocked": 1, "done": 5},
   "ready": [
     {"doc_id": "fx-hb-bollards"},
     {"doc_id": "fx-hb-fogbell"},
     {"doc_id": "fx-or-graft"},
-    {"doc_id": "fx-shed"}
+    {"doc_id": "fx-shed"},
+    {"doc_id": "fx-bt-headstock"},
+    {"doc_id": "fx-bt-louvres"},
+    {"doc_id": "fx-bt-clapper"},
+    {"doc_id": "fx-bt-frame"},
+    {"doc_id": "fx-qr-culvert"},
+    {"doc_id": "fx-qr-verge"},
+    {"doc_id": "fx-qr-signage"},
+    {"doc_id": "fx-qr-ditch"},
+    {"doc_id": "fx-sm-sluice"},
+    {"doc_id": "fx-sm-boardwalk"},
+    {"doc_id": "fx-sm-saltings"},
+    {"doc_id": "fx-sm-counter"}
   ],
   "recent_events": [
     {"event": "task.claim", "doc_id": "fx-or-mulch", "at": "2026-08-09T08:30:00Z"},
@@ -108,31 +159,138 @@ const primeJSON = `{
 // liveStale window for the whole (short) harness run.
 const keepaliveEvery = 5 * time.Second
 
-// mustCorpus parses the corpus once at startup and REFUSES to boot on a
-// malformed or empty corpus — the board's decodeTaskListFull treats a
-// docs-less or blank body as offline, so serving one would be the exact silent
-// lie this fixture exists to make impossible. It returns the full docs plus
+// mustCorpus audits the corpus once at startup and REFUSES to boot on any
+// violation auditCorpus reports — a malformed or empty corpus (the board's
+// decodeTaskListFull treats a docs-less or blank body as offline, so serving
+// one would be the exact silent lie this fixture exists to make impossible),
+// a duplicate row identity, a dangling parent, a prime/corpus count mismatch,
+// or a corpus shrunk below the overflow floors. It returns the full docs plus
 // the in_progress-filtered subset (the D115 route), both as raw messages so
 // the served bytes are the committed bytes.
 func mustCorpus() (all, inProgress []json.RawMessage) {
-	if err := json.Unmarshal([]byte(corpusJSON), &all); err != nil {
-		log.Fatalf("tbfixture: corpus does not parse: %v", err)
+	all, inProgress, err := auditCorpus(corpusJSON, primeJSON)
+	if err != nil {
+		log.Fatalf("tbfixture: %v", err)
+	}
+	return all, inProgress
+}
+
+// The corpus FLOORS (D130, task ttw22-fixture-overflow-enrichment). A floor
+// matters because zero is also zero failures: the D119 marker asserts in
+// drive.sh can only fire while the flattened spine OVERFLOWS the wide board's
+// window, and a shrunk corpus would turn each of them into a silent no-op
+// rather than a red. These are deliberately a floor on the corpus SHAPE, not
+// arithmetic on spine lines — the fixture does not (and must not) reimplement
+// flattenSpine/windowSpine, and section display modes mean a doc does not
+// always paint a row, so any line count computed here would be a guess. The
+// PAINTED overflow marker is proven where it is visible: drive.sh asserts the
+// numbered "↓ N more below" affordance in the wide frame. This guard's job is
+// only to make a shrink LOUD at boot instead of quietly disarming that assert.
+const (
+	corpusFloorDocs     = 32 // the corpus that measurably overflows the spine at 130x40
+	corpusFloorSections = 5  // epic roots — sections are what put blank separators in the spine
+)
+
+// auditCorpus parses the corpus and the prime slice, ENROLS every document in
+// the same walk, and refuses on any violation. It is a predicate over whatever
+// the corpus happens to hold, never a hand-kept list of expected ids: add a row
+// and it is audited; remove enough rows and the floor refuses.
+//
+// It returns the full docs plus the in_progress-filtered subset (the D115
+// route), both as raw messages so the served bytes are the committed bytes.
+func auditCorpus(corpus, prime string) (all, inProgress []json.RawMessage, err error) {
+	if err := json.Unmarshal([]byte(corpus), &all); err != nil {
+		return nil, nil, fmt.Errorf("corpus does not parse: %w", err)
 	}
 	if len(all) == 0 {
-		log.Fatal("tbfixture: refusing to serve an EMPTY corpus (refuse-empty fence)")
+		return nil, nil, fmt.Errorf("refusing to serve an EMPTY corpus (refuse-empty fence)")
 	}
-	for _, raw := range all {
-		var probe struct {
-			Lifecycle string `json:"lifecycle_status"`
+	if len(all) < corpusFloorDocs {
+		return nil, nil, fmt.Errorf("corpus has %d docs, floor is %d — below the floor the wide spine stops overflowing and drive.sh's D119 marker asserts silently stop measuring anything", len(all), corpusFloorDocs)
+	}
+
+	type doc struct {
+		DocID     string `json:"doc_id"`
+		Title     string `json:"title"`
+		Lifecycle string `json:"lifecycle_status"`
+		ParentID  string `json:"parent_id"`
+	}
+	byID := make(map[string]bool, len(all))
+	byTitle := make(map[string]string, len(all))
+	parents := make(map[string]int)
+	counts := map[string]int{}
+	roots := 0
+	for i, raw := range all {
+		var d doc
+		if err := json.Unmarshal(raw, &d); err != nil {
+			return nil, nil, fmt.Errorf("corpus doc %d does not parse: %w", i, err)
 		}
-		if err := json.Unmarshal(raw, &probe); err != nil {
-			log.Fatalf("tbfixture: corpus doc does not parse: %v", err)
+		if d.DocID == "" || d.Title == "" || d.Lifecycle == "" {
+			return nil, nil, fmt.Errorf("corpus doc %d is missing doc_id/title/lifecycle_status", i)
 		}
-		if probe.Lifecycle == "in_progress" {
+		if byID[d.DocID] {
+			return nil, nil, fmt.Errorf("corpus doc_id %q appears twice", d.DocID)
+		}
+		byID[d.DocID] = true
+		// The rendered TITLE is the row identity drive.sh keys every
+		// churn-coupled assert on (D118) and line_of_ident takes the FIRST
+		// match — two rows sharing a title would make those asserts point at
+		// the wrong row, so a duplicate is refused here rather than debugged
+		// from a capture-pane frame later.
+		if prev, dup := byTitle[d.Title]; dup {
+			return nil, nil, fmt.Errorf("corpus title %q is shared by %s and %s — titles ARE the row identity (D118)", d.Title, prev, d.DocID)
+		}
+		byTitle[d.Title] = d.DocID
+		counts[d.Lifecycle]++
+		if d.ParentID == "" {
+			roots++
+		} else {
+			parents[d.ParentID]++
+		}
+		if d.Lifecycle == "in_progress" {
 			inProgress = append(inProgress, raw)
 		}
 	}
-	return all, inProgress
+	for parent := range parents {
+		if !byID[parent] {
+			return nil, nil, fmt.Errorf("corpus parent_id %q names no document in the corpus", parent)
+		}
+	}
+	// Epic roots = parented-to-nothing documents that actually have children.
+	// The standalone pair (fx-shed / fx-hinges) are roots with no children and
+	// paint under the synthetic "(no epic)" section, so they are not sections.
+	sections := 0
+	for id := range byID {
+		if parents[id] > 0 {
+			sections++
+		}
+	}
+	if sections < corpusFloorSections {
+		return nil, nil, fmt.Errorf("corpus has %d epic sections, floor is %d — sections carry the spine's blank separators and are load-bearing for the overflow", sections, corpusFloorSections)
+	}
+
+	// The board's truncation-honesty check compares len(tasks) against the
+	// SUMMED prime counts, so a corpus edit that forgets primeJSON makes the
+	// board declare itself truncated. Catch it at boot, in the same walk.
+	var primeDoc struct {
+		Counts map[string]int `json:"counts"`
+	}
+	if err := json.Unmarshal([]byte(prime), &primeDoc); err != nil {
+		return nil, nil, fmt.Errorf("prime slice does not parse: %w", err)
+	}
+	sum := 0
+	for _, n := range primeDoc.Counts {
+		sum += n
+	}
+	if sum != len(all) {
+		return nil, nil, fmt.Errorf("prime counts sum to %d but the corpus holds %d docs — the board would report itself truncated", sum, len(all))
+	}
+	for lifecycle, n := range counts {
+		if primeDoc.Counts[lifecycle] != n {
+			return nil, nil, fmt.Errorf("prime counts[%q]=%d but the corpus holds %d such docs", lifecycle, primeDoc.Counts[lifecycle], n)
+		}
+	}
+	return all, inProgress, nil
 }
 
 func envelope(docs []json.RawMessage) []byte {

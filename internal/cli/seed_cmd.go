@@ -251,6 +251,7 @@ func (f *seedField) UnmarshalJSON(data []byte) error {
 		RefType    string                     `json:"refType"`
 		Fields     []seedField                `json:"fields"`
 		Of         json.RawMessage            `json:"of"`
+		To         json.RawMessage            `json:"to"`
 		Format     string                     `json:"format"`
 		Validation map[string]json.RawMessage `json:"validation"`
 	}
@@ -262,11 +263,43 @@ func (f *seedField) UnmarshalJSON(data []byte) error {
 	f.Type = r.Type
 	f.Options = r.Options
 	f.RefType = r.RefType
+	if f.RefType == "" {
+		// A reference declared the v2/Sanity way carries only `to`
+		// ([{"type":"person"}]) — the demo article.author does. Without this the
+		// target fell back to the literal "ref" and every seeded reference
+		// pointed at seed-ref-N, an id no `bp seed <type>` ever creates.
+		f.RefType = decodeRefTarget(r.To)
+	}
 	f.Fields = r.Fields
 	f.Format = r.Format
 	f.Validation = r.Validation
 	f.Of = decodeOfShape(r.Of)
 	return nil
+}
+
+// decodeRefTarget returns the first target type of a reference's `to`, which a
+// schema writes as [{"type":"person"}], {"type":"person"}, ["person"] or
+// "person". Anything else yields "".
+func decodeRefTarget(raw json.RawMessage) string {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(trimmed, &s) == nil {
+		return s
+	}
+	var one struct {
+		Type string `json:"type"`
+	}
+	if trimmed[0] == '{' && json.Unmarshal(trimmed, &one) == nil {
+		return one.Type
+	}
+	var many []json.RawMessage
+	if trimmed[0] == '[' && json.Unmarshal(trimmed, &many) == nil && len(many) > 0 {
+		return decodeRefTarget(many[0])
+	}
+	return ""
 }
 
 // decodeOfShape resolves an arrayOf `of` value that may be an OBJECT (one element
@@ -356,8 +389,12 @@ func generateDoc(s seedSchema, n int) map[string]any {
 func fakeValue(f seedField, n int) any {
 	switch f.Type {
 	case "string":
-		// A pattern (e.g. a slug regex) → slug-safe value; else a readable label.
-		if _, hasPattern := f.Validation["pattern"]; hasPattern {
+		// A pattern → a value that matches it (the server enforces it on
+		// publish); else a readable label.
+		if raw, hasPattern := f.Validation["pattern"]; hasPattern {
+			if v, ok := patternedString(raw, f.Name, n); ok {
+				return v
+			}
 			return fmt.Sprintf("%s-%d", slugify(f.Name), n)
 		}
 		return fmt.Sprintf("%s %d", titleCase(f.Name), n)
@@ -426,7 +463,14 @@ func fakeValue(f seedField, n int) any {
 		// through fakeValue, so composite/string/reference elements all work). If
 		// the schema omits `of`, fall back to an empty array — still a valid draft.
 		if f.Of != nil {
-			return []any{fakeValue(*f.Of, n), fakeValue(*f.Of, n+1)}
+			// The element shape is anonymous ({"type":"string"}), so a string
+			// element was labelled by an empty name: " 1", " 2". It borrows the
+			// array's name instead ("Keywords 1").
+			elem := *f.Of
+			if elem.Name == "" {
+				elem.Name = f.Name
+			}
+			return []any{fakeValue(elem, n), fakeValue(elem, n+1)}
 		}
 		return []any{}
 	case "codelist":

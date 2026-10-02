@@ -21,7 +21,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
 
   `sites.barkpark_id` cascades on delete, so deleting a box takes its sites with
   it — that is NOT the path. The path is tenancy drift: `Registry.create_site/2`
-  stamps `team_id` from the box AT CREATE TIME (registry.ex:5689) and never
+  stamps `team_id` from the box AT CREATE TIME (registry.ex, `create_site/2`) and never
   again, so moving a box to another team leaves its sites' `team_id` pointing at
   the old one. The old team then owns rows in `sites` and no row in `barkparks`.
   §1 builds exactly that state and drives the real rail over
@@ -118,7 +118,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
     emails = delivered(2)
 
     site_body = body_for.(emails, site_owner.email)
-    assert site_body =~ "Fleet: 0 instances."
+    assert site_body =~ "Your team owns 0 instances."
     assert site_body =~ "Deploy health for this team's sites"
     refute site_body =~ "this team owns no sites"
 
@@ -126,7 +126,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
     # still told it owns no sites — the site it used to own moved teams, not
     # inboxes.
     box_body = body_for.(emails, box_owner.email)
-    assert box_body =~ "Fleet: 1 instance"
+    assert box_body =~ "Your team owns 1 instance"
     assert box_body =~ "Deploy health: this team owns no sites, so it ran no deploys"
   end
 
@@ -146,7 +146,7 @@ defmodule BarkparkCloud.Notifications.FleetDigestSiteOwningAudienceTest do
 
     assert_email_sent(fn email ->
       assert Enum.any?(email.to, fn {_name, address} -> address == owner.email end)
-      assert email.text_body =~ "Fleet: 1 instance"
+      assert email.text_body =~ "Your team owns 1 instance"
 
       assert email.text_body =~
                "Deploy health: this team owns no sites, so it ran no deploys"

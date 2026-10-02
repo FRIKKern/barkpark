@@ -120,6 +120,7 @@ registry() {
   # MUT-EMPTY
   cat <<'REGISTRY'
 .air.toml none air live-reload config for the local Go loop
+.barkpark.json none bp repo context pin (server = the guerrilla ledger); read at runtime by bp, and Go tests of the saved-config layer t.Chdir away from it
 .claude none agent harness config, workflows and worktree scaffolding
 .codex none codex agent skills and epic-cycle scripts
 .cursor none cursor editor rules
@@ -134,15 +135,14 @@ registry() {
 .mcp.json none MCP server registration for agents
 .omx none omx tooling config
 .tool-versions none the asdf production toolchain pin; toolchain-skew-check reads it
-.vercelignore none vercel build context exclusions
 AGENTS.md none agent-facing router
 CHANGELOG.md none release notes
-CLAUDE.md none the repo router doc
+CLAUDE.md elixir the repo router doc; the Elixir suite reads it
 DESIGN.md none design notes
-HYPERQUIZ.md none quiz plugin notes
 LICENSE none the licence
 Makefile none developer entry points
-README.md none human readme
+README.md cloud,elixir human readme; deploy_button_docs_test.exs reads its badge (dwb-9)
+VERSION elixir the checked-in release marker Barkpark.BuildInfo reads at compile time (tier 3, declared in ELIXIR_COMPILE_PATHS); a docker or tarball build has no .git and takes its release from it
 api elixir the Phoenix app; the Elixir suite compiles and tests it
 apps none secondary app trees
 barkpark.json none project manifest
@@ -154,30 +154,23 @@ connectors none connector definitions
 deploy cloud deploy scripts the cloud suite reads
 deploy.sh none the legacy single-box deploy entry point
 design elixir design fixtures the Elixir suite reads
-dev.sh none local dev launcher
 docker-compose.yml none the compose stack
 docs none agent and human documentation; doc-gates reads it
-docs-site none the published documentation site
 go.mod go the Go module manifest
 go.sum go the Go module checksums
 internal cloud Go internals; cloud.yml dispatches on internal/**
 js none the JS SDK monorepo
 lighthouserc.json none lighthouse CI budget
-nixpacks.toml none nixpacks build config
 package-lock.json none npm lockfile
 package.json none root npm manifest
-packages none shared JS packages
 pnpm-lock.yaml none pnpm lockfile
 pnpm-workspace.yaml none the pnpm workspace definition
-run.sh none local run helper
 scaffy none scaffy templates and catalog
 scripts cloud the gate and ops scripts; cloud-path-escape-check.sh declares scripts/** (dr-w26-s4), so cloud.yml dispatches on it
 sdk none generated SDK artefacts
 templates cloud,go project templates both suites read
 tooling none standalone tooling trees
-transplant.py none one-off transplant utility
 vercel.json none vercel project config
-watch.sh none local watch helper
 web none the Next.js web demo
 REGISTRY
 }
@@ -358,7 +351,11 @@ derive_changed_paths() {
     echo "toplevel-classifier: REFUSING — HEAD^1 is unresolvable in $ROOT, so the changed-path set cannot be determined. Check out with fetch-depth 2." >&2
     return 2
   fi
-  if ! out="$(git -C "$ROOT" diff --name-only "$base" HEAD)"; then
+  # --diff-filter=d leaves out DELETED paths. A deletion adds no unread code,
+  # and a deleted top-level entry has no row by design (its row must go too, or
+  # the STALE arm reds), so counting it would make every removal of a
+  # top-level entry impossible. Arm 13 below proves this line is load-bearing.
+  if ! out="$(git -C "$ROOT" diff --name-only --diff-filter=d "$base" HEAD)"; then
     echo "toplevel-classifier: REFUSING — git diff failed in $ROOT." >&2
     return 2
   fi
@@ -455,12 +452,12 @@ selftest() {
 
   # ── 4. a STALE row (registered, absent from the tree) REDS ────────────────
   local d4="$tmp/d4"; mk_root "$d4"
-  rm -rf "$d4/docs-site"
+  rm -rf "$d4/changelog"
   printf 'README.md\n' > "$tmp/p4"
   local out4 rc4
   out4="$(run_subject "$d4" "$tmp/p4")"; rc4=$?
   if [ "$rc4" -ne 0 ]; then ok "4a a registry row whose entry is gone reds (rc=$rc4)"; else bad "4a a stale row passed"; fi
-  case "$out4" in *"STALE registry row 'docs-site'"*) ok "4b the stale row is named" ;; *) bad "4b the stale row is not named: $out4" ;; esac
+  case "$out4" in *"STALE registry row 'changelog'"*) ok "4b the stale row is named" ;; *) bad "4b the stale row is not named: $out4" ;; esac
 
   # ── 5. a FALSE CLAIM reds — a classification is checked, not believed ─────
   local d5="$tmp/d5"; mk_root "$d5"
@@ -537,13 +534,32 @@ selftest() {
 
   # ── 12. a registry row naming a path git does not track reds ─────────────
   local d12="$tmp/d12"; mk_root "$d12"
-  git -C "$d12" rm -r -q --cached docs-site >/dev/null 2>&1
+  git -C "$d12" rm -r -q --cached changelog >/dev/null 2>&1
   git -C "$d12" -c user.email=t@e -c user.name=t commit -qm untrack >/dev/null 2>&1
   printf 'README.md\n' > "$tmp/p12"
   local out12 rc12
   out12="$(run_subject "$d12" "$tmp/p12")"; rc12=$?
   if [ "$rc12" -ne 0 ]; then ok "12a a row naming an untracked path reds (rc=$rc12)"; else bad "12a untracked row passed: $out12"; fi
-  case "$out12" in *"UNTRACKED registry row 'docs-site'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
+  case "$out12" in *"UNTRACKED registry row 'changelog'"*) ok "12b it is named" ;; *) bad "12b: $out12" ;; esac
+
+  # ── 13. DELETING a top-level entry passes: the derived diff leaves out
+  #        deleted paths, so removing an entry and its row is possible at all.
+  #        Mutation: without --diff-filter=d the deleted entry reds as unknown.
+  local d13="$tmp/d13"; mk_root "$d13"
+  : > "$d13/gone.txt"
+  git -C "$d13" add -A >/dev/null 2>&1
+  git -C "$d13" -c user.email=t@e -c user.name=t commit -qm add-gone >/dev/null 2>&1
+  git -C "$d13" rm -q gone.txt >/dev/null 2>&1
+  git -C "$d13" -c user.email=t@e -c user.name=t commit -qm delete-gone >/dev/null 2>&1
+  local out13 rc13
+  out13="$( TOPLEVEL_ROOT="$d13" bash "$d13/scripts/toplevel-classifier-check.sh" 2>&1 )"; rc13=$?
+  if [ "$rc13" -eq 0 ]; then ok "13a deleting a top-level entry passes (rc=0)"; else bad "13a a pure deletion reddened: rc=$rc13 / $out13"; fi
+  if mutate "$d13/scripts/toplevel-classifier-check.sh" 'out="\$\(git -C "\$ROOT" diff --name-only --diff-filter=d ' 's/(out="\$\(git -C "\$ROOT" diff --name-only) --diff-filter=d /\1 /'; then
+    local out13m rc13m
+    out13m="$( TOPLEVEL_ROOT="$d13" bash "$d13/scripts/toplevel-classifier-check.sh" 2>&1 )"; rc13m=$?
+    if [ "$rc13m" -ne 0 ]; then ok "13b without the filter the deletion reds, so the filter is load-bearing (rc=$rc13m)"; else bad "13b the filter is vacuous: the unfiltered diff also passed"; fi
+    case "$out13m" in *"UNRECOGNISED top-level entry 'gone.txt'"*) ok "13c and names the deleted entry" ;; *) bad "13c: $out13m" ;; esac
+  fi
 
   echo
   echo "SELFTEST: ${pass} passed, ${fail} failed"

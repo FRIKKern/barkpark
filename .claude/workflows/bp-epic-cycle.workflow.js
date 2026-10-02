@@ -2,7 +2,7 @@ export const meta = {
   name: 'bp-epic-cycle',
   description: 'One epic wave: strategize → survey → digest → verify → decide → build → review, with the bp task ledger + wave Paper as the live spine.',
   whenToUse:
-    'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: 1 Fable strategizes + OPENS the wave Paper → 5-20 Opus surveyors sweep (coverage-accounted) → 1 Fable digests + designs the verify fleet → mostly-Opus verifiers PROVE claims with run output → 1 Fable decides + files/perfects bp tasks → Opus builders (Fable on hard or visually-designed slices) claim their task, build in worktrees, stamp evidence, gate, commit → 1 Fable reviews everything, fixes in place, grades, closes the Paper as the debrief.',
+    'Run one wave of a Barkpark epic. INVOKE: Workflow({scriptPath: ".claude/workflows/bp-epic-cycle.workflow.js", args: {wish: "<the user\'s request, verbatim — REQUIRED, the run refuses to start without it (charter D68)>", charter_path: "<.claude/workflows/<epic>-charter.md — REQUIRED for any epic with a charter; default is the cloud charter>", charter_exists: true|false, epic_task_id: "<task-… slug, when the epic task exists>"}}). Launch from the repo root or pass an absolute scriptPath (it resolves against the session cwd); never launch by name (the name registry is a session-start snapshot). TWO SETTINGS ONLY — fable@high for thinking-focused work and for visual design/interface; opus@medium for everything else. Effort derives from the model; no xhigh, no max, anywhere. Shape: Fable strategizes + opens the Paper → 5-20 Opus surveyors → Fable digests → verifiers PROVE by running → Fable decides + files tasks → builders build in worktrees → Fable reviews, grades, closes the Paper. RESUME COST: resumeFromRunId replays only up to the first agent that returned null (any Fable→Opus joint fallback, any lost agent); after it ALL re-runs (~1.6M tokens per survey). Instead run `node scripts/epic-cycle-carry.mjs <runId>`, relaunch FRESH with args.carry = its stdout: carried phases dispatch 0 agents; the carry costs ~20-30k args tokens through Decide, 55-140k if it stops earlier.',
   phases: [
     { title: 'Strategize', detail: '1 Fable @ high — thinking-focused, the highest-leverage judgment in the wave: reads until reading stops changing its mind, weighs rival directions and commits to one, stress-tests it, sets 5-20 broad survey questions, OPENS the wave strategy Paper, searches prior wave Papers first (answered questions become drift-checks)', model: 'fable' },
     { title: 'Survey', detail: '5-20 Opus surveyors @ medium, read-only, ~5 min each: wide sweep — bp search first, then the repo; report COVERAGE (every file checked, what for, found/not-found)', model: 'opus' },
@@ -14,7 +14,7 @@ export const meta = {
   ],
 }
 
-// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, survey_model?, review_model?, lead_notes? }
+// args = { wish, charter_exists, charter_path?, epic_task_id?, strategist_model?, survey_model?, review_model?, lead_notes?, carry? }
 // GUARD (restored 2026-07-04 after a SECOND worktree revert wiped it — this bug
 // built 2 waves against the wrong (cloud) charter): args can arrive as a JSON
 // STRING; charter_path was hardcoded to cloud so every charter_exists wave read
@@ -28,6 +28,74 @@ if (!A.wish) throw new Error('epic-cycle requires an explicit args.wish')
 const WISH = A.wish
 const CHARTER_PATH = A.charter_path || '.claude/workflows/bp-cloud-epic-charter.md'
 const EPIC_TASK_ID = A.epic_task_id || null
+
+// ── RESUME: what the Workflow tool's cache actually replays, and args.carry ──
+//
+// THE HARNESS RULE (reconstructed from the Claude Code 2.1.281 binary and
+// checked against a real recorded run of this engine: 36 of its 37 journal
+// keys re-derived exactly, the 37th being the Review prompt, which embeds
+// budget.spent() telemetry). Each agent() call's cache key is
+//
+//     key_n = "v2:" + sha256(key_{n-1} \0 prompt \0 canon(opts))
+//
+// where canon(opts) keeps only schema/model/effort/isolation/agentType/
+// disallowedTools/bashCommandClamp (label and phase are NOT in it) and key_0 is
+// "". The key is CHAINED: it hashes the previous call's key, so a call's
+// identity is its whole call history, not its own prompt. On resume a call
+// replays when its key has a result row. On the FIRST call that does not, the
+// run latches LIVE and every later call dispatches for real, even calls whose
+// results sit in the journal. One exception: a call that was STARTED but
+// neither finished nor failed (it was in flight at the kill) respawns without
+// latching.
+//
+// THE CONSEQUENCE FOR neverLose. A dispatch that returns null writes a
+// `failed` row and never a `result` row. The resumed run makes the SAME
+// sequence of calls with the SAME keys (nothing here is non-deterministic
+// before Review), reaches that failed first attempt, finds no result, sees it
+// failed, and latches. So a joint that succeeded only on a retry or on the Opus
+// fallback is a hard replay barrier: nothing at or after it ever replays. The
+// same is true of ANY null anywhere, including one lost surveyor. Recording the
+// winning model and dispatching straight to it on resume does not help: that
+// call's key chains from "" instead of from the three failed attempts, so it
+// is a key the journal never saw, and the run latches at call one.
+//
+// So the script cannot make the harness cache replay past a null. What it can
+// do is not need the cache: args.carry hands back results the lead already
+// paid for, and a carried phase makes NO agent() call. Build the carry with
+//     node scripts/epic-cycle-carry.mjs <runId | path/to/journal.jsonl>
+// and launch a FRESH run with the same args plus `carry`. It is a prefix, in
+// order: strategist → surveys → aim → verifications → architect → built. A
+// later field without every earlier one is refused (a digest carried over
+// surveys it never read is a different wave). Fleet fields are matched by
+// assignment key (surveys, verifications) or task_id (built); an assignment
+// with no carried result dispatches live, so a partial carry finishes its
+// fleet instead of silently shrinking it. Proof and counts:
+// scripts/epic-cycle-resume.test.mjs.
+const CARRY_ORDER = ['strategist', 'surveys', 'aim', 'verifications', 'architect', 'built']
+const CARRY = (() => {
+  let c = A.carry
+  if (c == null) return {}
+  if (typeof c === 'string') { try { c = JSON.parse(c) } catch (e) { throw new Error('args.carry is a non-JSON string') } }
+  if (typeof c !== 'object' || Array.isArray(c)) throw new Error('args.carry must be an object keyed by ' + CARRY_ORDER.join(', '))
+  const unknown = Object.keys(c).filter((k) => !CARRY_ORDER.includes(k))
+  if (unknown.length) throw new Error(`args.carry has unknown field(s) ${unknown.join(', ')}; the carry keys are ${CARRY_ORDER.join(', ')}`)
+  const last = CARRY_ORDER.reduce((n, k, i) => (c[k] != null ? i : n), -1)
+  for (let i = 0; i < last; i++) {
+    if (c[CARRY_ORDER[i]] == null) throw new Error(`args.carry.${CARRY_ORDER[last]} was given without args.carry.${CARRY_ORDER[i]} — a carry is a PREFIX of the wave, in order ${CARRY_ORDER.join(' → ')}`)
+  }
+  const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v)
+  if (c.strategist != null && !(isObj(c.strategist) && Array.isArray(c.strategist.survey))) throw new Error('args.carry.strategist is not a strategist report (no survey[] array)')
+  if (c.aim != null && !(isObj(c.aim) && Array.isArray(c.aim.verification))) throw new Error('args.carry.aim is not a digest report (no verification[] array)')
+  if (c.architect != null && !(isObj(c.architect) && Array.isArray(c.architect.wave))) throw new Error('args.carry.architect is not a decide report (no wave[] array)')
+  for (const k of ['surveys', 'verifications', 'built']) {
+    if (c[k] != null && !(Array.isArray(c[k]) && c[k].every(isObj))) throw new Error(`args.carry.${k} must be an array of report objects`)
+  }
+  return c
+})()
+const carriedBy = (list, field) => new Map((list || []).map((r) => [r[field], r]))
+const CARRY_SURVEY = carriedBy(CARRY.surveys, 'key')
+const CARRY_VERIFY = carriedBy(CARRY.verifications, 'key')
+const CARRY_BUILT = carriedBy(CARRY.built, 'task_id')
 // Fan-out FLOORS. The caps below (survey 20, verify 15, wave 8) are upper bounds
 // only; nothing stopped a thinking phase from returning one assignment, or zero.
 // The ratified anti-goal — a wave must never spend FEWER agents to look decisive
@@ -123,6 +191,11 @@ const USER_WISH_BLOCK = `THE USER'S WISH (this is the focus — everything serve
 """
 ${WISH}
 """`
+
+const COLD_START_ATLAS_BLOCK = `COLD START — BUILD THE ATLAS BEFORE YOU TRAVERSE, THEN VERIFY BEFORE YOU ASSERT:
+Run \`bp context map <keyword>\` (keyword = this epic's area, e.g. its plugin, noun, or directory stem) before you start reading files one by one. It writes an atlas directory holding page_N.png (the shape: modules, self-described gists, public definitions, and the reference edges OBSERVED between them), <keyword>.laws.txt, and map.json. Read the pages with the Read tool — they cost a fraction of the text they picture.
+TWO CHANNELS, AND THE TEXT ONE WINS. The image carries topology, never rules. Every must / must not / never / only / always sentence rides <keyword>.laws.txt VERBATIM; for ANY trust-boundary claim trust that file over the picture, and over your memory of the picture.
+VERIFY BEFORE YOU ASSERT. Every relation in map.json is an OBSERVATION carrying the file and 1-based line where it was seen (edges[].from/to/via/line). Before you state that one module calls, depends on, or is constrained by another — in a report, a task, a PR body, or a commit message — open that line and see it. State no relation the atlas does not carry: an atlas is a record of what was observed, never a licence to infer what was not. If the atlas says it is CLIPPED, absence from it is not evidence of absence in the repo.`
 
 const GATES_BLOCK = `Local gates available (a slice must name at least one that proves it):
 - Cloud SPA: node --check cloud/priv/static/app.js AND node cloud/priv/static/__app.test.mjs (node:vm harness over __bpTestHook — extend it for new pure helpers)
@@ -589,7 +662,7 @@ const BUILD_SCHEMA = {
 
 const REVIEW_SCHEMA = {
   type: 'object', additionalProperties: false,
-  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'retro', 'telemetry_appended', 'journey', 'started_at', 'ended_at'],
+  required: ['reviewed', 'ledger_fixes', 'wave_log_appended', 'grade', 'commentary', 'paper_closed', 'heartbeat_stamped', 'next_wave', 'overall_verdict', 'retro', 'telemetry_appended', 'stranded_worktrees', 'journey', 'started_at', 'ended_at'],
   properties: {
     journey: JOURNEY_FIELD,
     ...FABLE_STAMPS,
@@ -633,6 +706,7 @@ const REVIEW_SCHEMA = {
       },
     },
     telemetry_appended: { type: 'boolean', description: 'true only after the wave telemetry (stat-grid headline + per-phase table, at measured grain) AND the retro landed in the Paper debrief and it re-published' },
+    stranded_worktrees: { type: 'string', description: 'step 12 VERBATIM: the headline line of `bash scripts/stranded-worktree-report.sh` plus its exit code, and for each non-CLEAN row the worktree path and diffstat. Required, because a branch sweep cannot see uncommitted work and this is the only phase that looks: `git grep`, stranded-branch-report.sh and every PR-based check read COMMITTED trees, while stranded work is by definition uncommitted. Never a judgement ("looked fine") — the report text. "not run: <why>" is the only other legal value, and it is a wave-level admission.' },
   },
 }
 
@@ -685,7 +759,7 @@ for (const [name, schema] of [
 
 // ── Phase 1: Strategize — one Fable mind, unhurried; the direction sets the wave's ceiling ──
 phase('Strategize')
-const strategist = await neverLose((m) => agent(
+const strategist = CARRY.strategist || await neverLose((m) => agent(
   `You are the STRATEGIST of a Barkpark epic wave — one Fable mind whose direction sets the CEILING for everything downstream. Take whatever time this needs: surveyors, verifiers, and builders can execute a great direction well, but nothing after you can rescue a mediocre one. Two exploration rounds of rigor follow, so you never need to PROVE claims — but read as much as sharpens your judgment. Bold is still the mandate; unhurried bold, not hedged.
 
 ${USER_WISH_BLOCK}
@@ -718,7 +792,7 @@ Your output:
    bp task stage <the returned id> considering --object <build|research> --worker strategist --yes
    \`\`\`
    THE ONE PLACEHOLDER CRITERION IS THE POINT: a \`considering\` row is a thought, not a commitment, so it carries exactly ONE unmet criterion and that criterion's whole content is that Decide must resolve it — promoted or discarded. Do not invent rubric criteria for a candidate; Decide writes those when it promotes one.
-   MECHANICS, MEASURED AGAINST THE LIVE LEDGER — get these wrong and the filing fails or, worse, half-succeeds: (a) \`bp task create\` has NO \`--id\` flag and no \`--parent\` flag; the id is SERVER-GENERATED and comes back in the \`-o json\` receipt (\`{"id":"task-…","lifecycle_status":"considering","status":"published"}\`) — read it from there, never guess it, and parent through \`--set parent_id=…\`. (b) \`--publish\` pays the publish wall IN THE SAME CALL — that is deliberate, because the boards read the published ledger only and a draft candidate is invisible — and the wall REQUIRES a 20+ char description plus 1-12 weighted tags whose strengths are DISTINCT integers 1-100 and every one of which is ALREADY a registered \`type:tag\` document. List the vocabulary with \`bp doc ls tag --all\` and never invent a tag; an unregistered one is refused BEFORE anything is created, so a failed \`--publish\` leaves no draft behind to clean up. (c) \`engagement\` is an EPHEMERAL lease the TTL sweeper deletes after ~900s, so \`engagement.object\` at birth is a live signal, not a durable record — the durable statements of what a candidate is about are \`candidates[].object\` in this report and the candidate's line in the wave Paper. Write both.
+   MECHANICS, MEASURED AGAINST THE LIVE LEDGER — get these wrong and the filing fails or, worse, half-succeeds: (a) \`bp task create\` has NO \`--id\` flag and no \`--parent\` flag; the id is SERVER-GENERATED and comes back in the \`-o json\` receipt (\`{"id":"task-…","lifecycle_status":"considering","status":"published"}\`) — read it from there, never guess it, and parent through \`--set parent_id=…\`. (b) \`--publish\` pays the publish wall IN THE SAME CALL — that is deliberate, because the boards read the published ledger only and a draft candidate is invisible — and the wall REQUIRES a 20+ char description plus 1-12 weighted tags whose strengths are DISTINCT integers 1-100 and every one of which is ALREADY a registered \`type:tag\` document. List the vocabulary with \`bp doc ls tag --all\` and never invent a tag. ONLY the walls the CLI pre-flights refuse BEFORE anything is created — the label spine (20+ char description, 1-12 weighted DISTINCT-strength tags), the tag registry (when it is readable), and the disposition vocabulary — and those refusals leave no draft (internal/cli/tasks_create_cmd.go, the wall moved in front of the write). \`--publish\` is CREATE-THEN-PUBLISH, two mutations: every OTHER refusal comes from the second one and STRANDS an unclaimable \`drafts.task-N\` the receipt already named — so does an unregistered tag when checkTagRegistry goes blind on an unreadable registry (it proceeds rather than veto). After any non-zero \`--publish\`, read the receipt: if it names a \`drafts.\` id, that draft exists and you owe its cleanup (\`bp doc discard-draft task drafts.<id> --yes\` — a filed row that leaves a phantom never happened cleanly). (c) \`engagement\` is an EPHEMERAL lease the TTL sweeper deletes after ~900s, so \`engagement.object\` at birth is a live signal, not a durable record — the durable statements of what a candidate is about are \`candidates[].object\` in this report and the candidate's line in the wave Paper. Write both.
    THEN WIRE THE IDS BACK, in two places, or the identity is lost: put each returned id on \`candidates[].task_id\`, and on the \`survey[].task_id\` of the assignment that settles it. A surveyor with no task_id stays fully read-only; a surveyor WITH one stages that exact doc to \`researching\` when it picks the question up. List every candidate with its task id in the wave Paper too, so Decide can resolve them all even if a report is lost.
 6. HEARTBEAT: ${EPIC_TASK_ID ? `stamp the epic task ${EPIC_TASK_ID}: flat wave_status ("wave: surveying — <one-line direction>") + flat wave_paper (the Paper's id), then re-publish.` : 'if a published epic parent task already exists for this epic, stamp its wave_status + wave_paper; if none exists yet, skip (Decide creates it).'}
 CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
@@ -728,26 +802,29 @@ ${PAPER_BLOCK}
 ${LEAD_NOTES}`,
   { label: 'strategist', phase: 'Strategize', schema: STRATEGY_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'strategist', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
-if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Resume the run rather than restarting.`)
+if (!strategist) throw new Error(`Strategize returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK}. There is no partial wave to salvage — nothing has been surveyed, decided, or written. Restart it; a resume would re-dispatch this same joint live anyway (every attempt is a failed journal row).`)
 const surveyAssignments = (strategist.survey || []).slice(0, 20)
 if (surveyAssignments.length < SURVEY_FLOOR) {
   throw new Error(`Survey fan-out floor: the strategist returned ${surveyAssignments.length} survey assignment(s), below the floor of ${SURVEY_FLOOR}. Width is the cheapest part of a wave and a narrow survey is how a wave misses prior art it then rebuilds. Re-run Strategize with a wider net (5-20 assignments) rather than proceeding.`)
 }
 const WAVE_PAPER = strategist.paper_id
 SPENT.strategize = budget.spent()
+if (CARRY.strategist) log(`CARRY strategist: replayed from args.carry, 0 dispatches`)
 log(`Strategist set direction; wave paper ${WAVE_PAPER} (created=${strategist.paper_created}); ${surveyAssignments.length} survey assignments`)
 
 // ── Phase 2: Survey — wide Opus sweep at medium effort, ~5 minutes each ──
 phase('Survey')
 const surveyResults = surveyAssignments.length === 0 ? [] : (await parallel(
   surveyAssignments.map((q) => () =>
-    neverLose((m) => agent(
+    CARRY_SURVEY.get(q.key) || neverLose((m) => agent(
       `You are a SURVEYOR on a Barkpark epic wave — one of up to 20 scouts in a fast, wide sweep. READ-ONLY: no edits, no commits, and exactly ONE sanctioned bp mutation — nothing else, anywhere. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, move it out of \`considering\` and into \`researching\` the moment you start, so the board shows that someone is actually looking — \`bp task stage <candidate-task-id> researching --object research --worker survey:${q.key} --yes\`, optionally followed by \`bp task pulse\` if you run long. That is the whole permission: no create, no patch, no close, no stamp, no publish, and nothing at all if your assignment names no candidate task. Budget: ~5 minutes — breadth over depth. A fast honest answer with real file:line anchors beats a deep dive; park what you can't settle in open_questions (a targeted verify round runs after you).
 
 ${USER_WISH_BLOCK}
 
 STRATEGIC DIRECTION (context for what your answer feeds):
 ${strategist.direction}
+
+${COLD_START_ATLAS_BLOCK}
 
 YOUR ASSIGNMENT [${q.key}]: ${q.question}
 WHY IT MATTERS: ${q.why}
@@ -774,12 +851,13 @@ const surveys = surveyResults.filter(Boolean)
 const surveyLost = surveyAssignments.filter((q, i) => !surveyResults[i])
 const SURVEY_DEFICIT = deficitBlock('survey', surveyLost)
 const surveyGrip = gateFactProvenance(surveys)
+if (CARRY.surveys) log(`CARRY surveys: ${surveyAssignments.filter((q) => CARRY_SURVEY.has(q.key)).length}/${surveyAssignments.length} replayed from args.carry; the rest dispatched live`)
 log(`${surveys.length}/${surveyAssignments.length} surveyors reported${surveyLost.length ? ` — ${surveyLost.length} LOST after full recovery (${surveyLost.map((q) => q.key).join(', ')}); the wave continues and carries them as unanswered` : ''}; ${surveys.filter((s) => s.recovered_on).length} recovered cross-model; provenance gate: ${surveyGrip.demoted}/${surveyGrip.total} fact(s) DEMOTED (no rerun command)`)
 SPENT.survey = budget.spent()
 
 // ── Phase 3: Digest — one Fable mind, ~10 minutes, designs the verify fleet ──
 phase('Digest')
-const aim = await neverLose((m) => agent(
+const aim = CARRY.aim || await neverLose((m) => agent(
   `You are the DIGEST strategist of a Barkpark epic wave — the same Fable judgment that set the direction, now holding ${surveys.length} survey reports. Budget: ~10 minutes. Your output designs the LAST exploration round before the plan is cut — after it, there is no more looking.
 
 ${USER_WISH_BLOCK}
@@ -815,13 +893,14 @@ ${LIVENESS_BLOCK}
 ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'digest', phase: 'Digest', schema: AIM_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'digest', model: M(STRAT_MODEL), other: M(JOINT_FALLBACK) })
-if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; resume the run rather than restarting so they are not re-bought.`)
+if (!aim) throw new Error(`Digest returned nothing after four dispatches spanning ${STRAT_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). The survey reports are intact; rebuild them with \`node scripts/epic-cycle-carry.mjs <runId>\` and relaunch with args.carry, so they are not re-bought (a plain resume re-buys them whenever any earlier dispatch returned null — see the RESUME block).`)
 const verifyAssignments = (aim.verification || []).slice(0, 15)
 if (verifyAssignments.length < VERIFY_FLOOR) {
   throw new Error(`Verify fan-out floor: the digest returned ${verifyAssignments.length} verify assignment(s), below the floor of ${VERIFY_FLOOR}. Verify is the LAST round before the plan is cut — nobody checks after it. A wave that surveyed wide and then verified nothing is deciding on unproven claims. Re-run Digest with a real verify fleet (1-15 assignments, floor ${VERIFY_FLOOR}) rather than proceeding.`)
 }
 log(`Digest done; verify fleet: ${verifyAssignments.length} (${verifyAssignments.filter((v) => v.model === 'fable').length} fable@high, rest opus@medium; ${verifyAssignments.filter((v) => v.verify_commands).length} with live proofs)`)
 SPENT.digest = budget.spent()
+if (CARRY.aim) log(`CARRY digest: replayed from args.carry, 0 dispatches`)
 
 // THE CARVE-OUT, MADE RUNNABLE. The verify prompt below granted a write and
 // named no verb, so a verifier had to rediscover the write path from scratch
@@ -863,7 +942,7 @@ WRITING A LEDGER ROW (the carve-out above, made runnable — nothing materialise
 phase('Verify')
 const verifyResults = verifyAssignments.length === 0 ? [] : (await parallel(
   verifyAssignments.map((q) => () =>
-    neverLose((m) => agent(
+    CARRY_VERIFY.get(q.key) || neverLose((m) => agent(
       `You are a VERIFIER on a Barkpark epic wave — the LAST explorer before the plan is cut; nobody checks after you. No commits, never touch main, and exactly ONE sanctioned bp mutation. THE ONE CARVE-OUT (charter D17): if your assignment below names a CANDIDATE TASK, stage it to \`researching\` as you begin — \`bp task stage <candidate-task-id> researching --object research --worker verify:${q.key} --yes\`, plus \`bp task pulse\` if you run long. Nothing else on the ledger: no create, no patch, no close, no stamp, no publish, and nothing at all when your assignment names no candidate task. REPO WRITES are a SEPARATE question with a separate answer${q.needs_worktree ? ': you are in your OWN throwaway worktree — probe edits are fine, but commit nothing, and the tooling/grip/ledger REPO-WRITE carve-out described in other runs is DENIED to you (a row written here would be stranded, because your worktree is a distinct filesystem path that Decide — which commits from the shared checkout — never sees). That denial is about repo files only; the bp-ledger stage above still stands' : ' — exactly ONE repo-write carve-out: you may WRITE re-derivation recipe rows under tooling/grip/ledger/ (one new file per write, never opening an existing one), and nothing else, anywhere. You never commit them — Decide commits them one phase later, this same run. No other repo edits'}.
 
 ${USER_WISH_BLOCK}
@@ -900,6 +979,7 @@ const verifications = verifyResults.filter(Boolean)
 const verifyLost = verifyAssignments.filter((q, i) => !verifyResults[i])
 const VERIFY_DEFICIT = deficitBlock('verify — NOTHING RUNS AFTER THIS ROUND, so these stay open for the whole wave', verifyLost)
 const verifyGrip = gateFactProvenance(verifications)
+if (CARRY.verifications) log(`CARRY verifications: ${verifyAssignments.filter((q) => CARRY_VERIFY.has(q.key)).length}/${verifyAssignments.length} replayed from args.carry; the rest dispatched live`)
 log(`${verifications.length}/${verifyAssignments.length} verifiers reported${verifyLost.length ? ` — ${verifyLost.length} LOST after full recovery (${verifyLost.map((q) => q.key).join(', ')}); these unknowns stay OPEN and Decide is told so` : ''}; ${verifications.filter((v) => v.recovered_on).length} recovered cross-model; ${verifications.reduce((n, v) => n + (v.proofs || []).length, 0)} live proofs; provenance gate: ${verifyGrip.demoted}/${verifyGrip.total} fact(s) DEMOTED (no rerun command)`)
 SPENT.verify = budget.spent()
 
@@ -908,7 +988,7 @@ phase('Decide')
 const EPIC_TASK_LINE = EPIC_TASK_ID
   ? `The epic parent task is ${EPIC_TASK_ID} — verify it exists and is published; file this wave's slice tasks as its children (parent_id=${EPIC_TASK_ID}).`
   : `Ensure ONE published epic parent task exists for this epic (create it if missing — slug it from the charter name); file this wave's slice tasks as its children via parent_id.`
-const architect = await neverLose((m) => agent(
+const architect = CARRY.architect || await neverLose((m) => agent(
   `You are the STRATEGIST-ARCHITECT of a Barkpark epic — the same Fable judgment that set direction and digested exploration, now DECIDING with two rounds of ground truth in hand. Take whatever time this needs; the IMPORTANT CHOICES get made here.
 
 ${USER_WISH_BLOCK}
@@ -981,7 +1061,7 @@ Your job:
    bp task close <candidate-id> <this run's worker id> 0 cancelled "<what settled it, and what would reopen it>"
    \`\`\`
    MEASURED AGAINST THE LIVE LEDGER, so you do not have to guess: a candidate that was never claimed closes cleanly with observed epoch \`0\` — no claim, no holder, no \`holder_override\` — and a \`cancelled\` close is EXEMPT BY NAME from the unmet-criteria gate, so the placeholder criterion staying \`met:false\` is not an obstacle; that unmet placeholder beside a \`cancelled\` status IS the honest record of a discarded thought. If the row WAS claimed (a surveyor or verifier staged it), the epoch is \`bp task get <id>\` → \`.doc.claim.epoch\`, re-read at close time. NEVER resolve a candidate by deleting or silently dropping it — a kill that leaves no row never happened.
-4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present.
+4. SEED THE BACKLOG: everything exploration surfaced that is real but NOT this wave gets filed now as a published child task (honest description, sane priority) — record the ids in backlog_filed. The ledger must show the future, not just the present. A row you MOVE to another parent (roster headroom, adoption, successor) gets a note per docs/contracts/ledger-notes.md: source parent, destination, charter clause and reason. Never write its status, criteria progress, claim or assignee into that note ("never-started", "no claim", "zero criteria met"): those are read live from the row, and a copied one goes false the moment someone works it.
 5. PERFECT THE TASKS (you are also the task reviewer — there is no one behind you): after filing, re-read every wave task back from the server and verify it is published (not a stranded draft), parented under the epic task, linked to the wave Paper, and reads to the rubric — outcome-shaped title, description a cold builder could start from, concrete evidence-bearing criteria, sane priority. Fix every defect via bp (patch, publish, re-parent, dedup stranded drafts). Set tasks_verified=true only after this read-back pass is clean.
 6. CUT THE WAVE: up to 8 slices, buildable in parallel by isolated builders (minimize file overlap; if two slices must touch the same region of a file, merge or sequence them). ROUNDS ARE LAW (three waves proved briefs alone don't stop the dispatcher): stamp every slice with \`round\`. round 1 = dependency-free, builds this run. A slice that needs another slice's code ON MAIN (imports its package, calls its seam, seeds its schema) is round ≥2 with \`after: [<dep task_ids>]\` — it will NOT build this run; the lead dispatches it after merging its deps (this exact manual-rounds recipe went 7-for-7 across two epics). Never mark a slice round 1 "optimistically" — a round-1 slice whose dep is unmerged burns a builder to produce a BLOCKED report. Write the same dependency as an "AFTER <task_id> merges" line at the TOP of the deferred task's brief so a manually-dispatched builder sees it first. Per slice pick builder_model, which sets BOTH the model and its depth ('opus' builds at medium, 'fable' at high — there is no separate effort knob and nothing above high, so this one choice is the whole decision and mis-classifying a hard slice as routine costs twice). TWO INDEPENDENT AXES, either one alone is enough to warrant fable. DIFFICULTY: 'opus' is the default and fits most well-specified building; reserve 'fable' for slices that are genuinely hard rather than merely large — subtle design judgment, cross-surface coupling, high blast radius. SURFACE: a VISUALLY DESIGNED slice gets 'fable' regardless of size — palette, layout, typography, CSS, LiveView/SPA chrome, anything judged against the Kinsta/Vercel bar; a small fully-specified CSS slice is easy on the difficulty axis and would wrongly fall to opus. (System/architecture design is not this axis — you already did that judgment here.) ${CHARTER_EXISTS ? 'Weight FINISHING what exists (quality, coherence, the Kinsta/Vercel bar) alongside net-new capability; prefer finishing journeys over starting new ones.' : 'Bold slices are fine.'} Each needs instructions complete enough to build without more context and exact local gate command(s) — DRY-RUN each gate command yourself before filing it (a gate that cannot run, or references paths/globs that don't exist, forces the builder to interpret instead of prove).
 7. UPDATE THE WAVE PAPER (${WAVE_PAPER}) — append, then re-publish, BEFORE the builders fly:
@@ -1002,7 +1082,8 @@ ${GATES_BLOCK}${LEAD_NOTES}`,
   { label: 'architect', phase: 'Decide', schema: PLAN_SCHEMA, model: m, effort: EFFORT_FOR(m) }
 ), { label: 'architect', model: M(ARCH_MODEL), other: M(JOINT_FALLBACK) })
 
-if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; resume the run rather than restarting so neither round is re-bought.`)
+if (!architect) throw new Error(`Decide returned nothing after four dispatches spanning ${ARCH_MODEL} and ${JOINT_FALLBACK} — not a model problem at that point (check auth/spend). Survey AND verify are intact and were expensive; carry them forward with \`node scripts/epic-cycle-carry.mjs <runId>\` and relaunch with args.carry, so neither round is re-bought (a plain resume latches live at the first null, and these four failed dispatches are nulls — see the RESUME block).`)
+if (CARRY.architect) log(`CARRY architect: replayed from args.carry, 0 dispatches — the wave cut, charter PR and slice tasks it reports already exist`)
 const wave = (architect.wave || []).slice(0, 8)
 log(`Architect cut ${wave.length} slices (${wave.filter((w) => w.builder_model === 'fable').length} fable); charter_written=${architect.charter_written} (PR ${architect.charter_pr || 'NONE — the charter is not published'}, referent ${architect.wave_referent_task || 'NONE — that PR cannot pass the task gate'}); tasks_verified=${architect.tasks_verified}; epic task=${architect.epic_task_id}; backlog=${architect.backlog_filed}`)
 SPENT.decide = budget.spent()
@@ -1044,10 +1125,12 @@ if (deferred.length > 0) {
 phase('Build')
 const built = (await parallel(
   buildNow.map((item, i) => () =>
-    ((m) => agent(
+    CARRY_BUILT.get(item.task_id) || ((m) => agent(
       `You are BUILDING one slice of a Barkpark epic inside your OWN isolated git worktree (safe to edit/commit; you will not collide with other builders).
 
 ${USER_WISH_BLOCK}
+
+${COLD_START_ATLAS_BLOCK}
 
 Read the epic charter at ${CHARTER_PATH} first — your slice must respect its decisions. ${architect.charter_pr ? `HEADS UP, and this is not a formality: THIS wave's charter is still an OPEN PULL REQUEST (${architect.charter_pr}), because \`main\` is protected and Decide no longer pushes to it. Your worktree branched from origin/main, so the ${CHARTER_PATH} on your disk is the PREVIOUS wave's — it will read as plausible and be silently out of date. Get this wave's decisions from the wave Paper (${WAVE_PAPER}), which is current, and from your bp task brief; if you need the charter diff itself, \`gh pr diff ${String(architect.charter_pr).replace(/[^0-9]/g, '') || architect.charter_pr}\`.` : ''} The wave Paper (${WAVE_PAPER}) carries this wave's story — decisions, verification proofs, the other slices; read it for context, NEVER write it (your bp task is your voice).
 
@@ -1171,6 +1254,9 @@ Then, once, for the wave:
    RE-CLAIM (OR PULSE) THE SLICE TASK IMMEDIATELY BEFORE ITS PR IS OPENED — one command per slice, in the same breath as the push, and NEVER in a batch at the start of step 11. You are opening these PRs HOURS after the builders stopped pulsing, and the pr-task-gate freezes its verdict at PR-open time (\`claim.expired_at >= pull_request.created_at\`, honest-gates charter D58): a slice claim that lapsed in the gap between "builder done" and "Review opens the PR" reds that PR PERMANENTLY — no re-run, no later claim, no close/reopen moves \`created_at\`, so the only escape is a brand-new PR. The lease is 2700s (\`api/lib/barkpark/tasks/ttl_sweeper.ex:158 @default_ttl_seconds 2700\`), and builders finish well outside that window. So per slice: \`bp task pulse <task_id> <your worker id> --now "opening the slice PR"\` if the task is still \`in_progress\` and held — pulse is a KEEP-ALIVE, never a resurrect (\`api/lib/barkpark/tasks/pulse.ex:130-136\` \`check_live/1\` refuses anything not \`in_progress\` with \`:not_holder\`) — otherwise \`bp task claim <task_id> <your worker id>\` first and pulse after. Then push and open the PR, and only then move to the next slice.
    \`git push -u origin <final_branch>\` then \`gh pr create --head <final_branch> --title "<conventional-commit title>" --body "<what it does + the gate you re-ran + Task: <task_id>>"\`.
    The body MUST carry a single canonical \`Task: <task_id>\` line (not \`Tasks: a + b\`) or the PR↔task gate fails — and it is checked on EVERY PR regardless of what the diff touches (\`.github/workflows/pr-task-gate.yml:43\`: "No paths filter: any change needs a task, so every PR is checked"). Do NOT merge — the lead merges. Report per slice \`pushed: true\` and \`pr\`; if a push or PR genuinely fails, report \`pushed: false\` with the verbatim error, and say so in overall_verdict — never silently. A wave that grades A with unpushed branches has not earned it, and you must say that in the commentary.
+12. **SWEEP FOR STRANDED WORK — the one corpus step 11 structurally cannot reach.** Step 11 pushes BRANCHES. \`scripts/stranded-branch-report.sh\` classifies BRANCHES. \`git grep <pattern> <rev>\` reads a COMMITTED TREE, and \`git grep\` with no rev reads only the worktree you are STANDING IN. Every instrument this wave used is blind to uncommitted work, and uncommitted work is the ONLY kind that CAN be stranded — the blind spot is congruent with the target. A wave-44 surveyor reported ZERO hits for a fold that existed; the statement was true about the wrong corpus, and the work survived only because a second surveyor happened to run a filesystem grep. So run, from anywhere in the repo:
+   \`bash scripts/stranded-worktree-report.sh\`   (add \`--repo <primary checkout path>\` if you are outside it)
+   Exit 0 = nothing uncommitted anywhere; exit 1 = at least one worktree carries work nobody is tracking; exit 3 = the sweep could not read every worktree, so its silence proves nothing and you must say so. Paste the headline line + exit code + every non-CLEAN row into \`stranded_worktrees\` — the report's own text, never your summary of it. For each DIRTY row that is not one of your own review worktrees, ANCHOR IT BEFORE YOU REPORT: \`bash scripts/stranded-worktree-report.sh --capture rescue\` writes a branch from \`git stash create\` and leaves the worktree byte-identically dirty (asserted by \`--selftest\`), so it cannot cost anyone their WIP. It anchors TRACKED modifications only; the report names the untracked files it could not capture, and those you name in \`stranded_worktrees\` and in \`overall_verdict\` so the lead can rescue them by hand. Never \`git checkout\`, \`reset\`, \`clean\`, \`stash pop\` or \`git add\` in a worktree you did not create — dozens of sessions share this machine and the cleanup IS the data loss.
 CLOCK STAMPS (telemetry, epic-memory D6): run \`date -u +%FT%TZ\` as your first command → started_at; run it again as your very last → ended_at.
 ${JOURNEY_BLOCK}
 ${TASKS_BLOCK}

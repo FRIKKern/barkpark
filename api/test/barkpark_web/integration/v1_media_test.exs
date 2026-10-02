@@ -74,6 +74,8 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
   end
 
   describe "GET /v1/media/:dataset" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "returns paginated unified assets envelope", %{conn: conn} do
       created =
         conn
@@ -99,6 +101,8 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
   end
 
   describe "POST /v1/media/:dataset/upload" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "creates blob + linked asset document", %{conn: conn} do
       resp =
         conn
@@ -141,6 +145,8 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
   end
 
   describe "SECURITY: server-derived MIME + config-gated allowlist (PART 1 + PART 2)" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "PART 1: stored mime is server-derived — a lying content_type is ignored", %{conn: conn} do
       # A real PNG whose multipart header LIES that it is text/html. The persisted
       # mimeType must be image/png (derived from the .png name, the same value the
@@ -209,6 +215,8 @@ defmodule BarkparkWeb.Integration.V1MediaTest do
   end
 
   describe "PATCH /v1/media/:dataset/:id" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "patches mediaAsset metadata", %{conn: conn} do
       created =
         conn

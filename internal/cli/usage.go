@@ -86,6 +86,7 @@ func usageTop(out *writer) {
 	out.errf("      --dry-run          print the request, do not send")
 	out.errf("      --yes              skip the prod write confirmation")
 	out.errf("      --limit/--offset/--all   pagination")
+	out.errf("      --session <slug>   session doc a task close / paper publish logs to (or BARKPARK_SESSION)")
 	// The help line NAMES THE WRITER. A flag that takes a file and never says
 	// which file sent every reader to `bp capabilities -o json`, whose rendered
 	// brief this loader cannot use (task-9f726e783347b60e).
@@ -237,7 +238,7 @@ func usageCommand(out *writer, cmd manifest.Command) {
 			// placeholder for value flags so the two are distinguishable, matching
 			// the native surfaces' `--name <value>` style.
 			name := f.Name
-			if f.Type != "bool" {
+			if !f.IsSwitch() {
 				name = f.Name + " <value>"
 			}
 			out.errf("  --%-14s %s", name, f.Summary)
@@ -259,6 +260,27 @@ func usageCommand(out *writer, cmd manifest.Command) {
 	// indistinguishable downstream. Registry and drift check:
 	// list_envelope_help.go.
 	for _, line := range listEnvelopeHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
+	// The envelope key was only half the guess. WHERE THE CLAIM SITS INSIDE A
+	// ROW also differs per verb — `.doc.claim` on `task get`, `.claim` on the
+	// flat `ls`/`ready`/`prime` rows — and each verb's path is ABSENT on the
+	// others, so the wrong one answers null on every row and reads as UNCLAIMED.
+	// Derived from taskReadShapes() so help and behaviour cannot drift
+	// (tasks_claim_path.go).
+	for _, line := range taskClaimPathHelpLines(cmd) {
+		out.errf("%s", line)
+	}
+
+	// WHICH END `bp task events --limit N` READS. The server's summary is
+	// accurate ("omit --since to replay from the start") and still does not
+	// reach the reader who types `--limit 200` wanting to know what JUST
+	// happened: they get the two hundred OLDEST events in the ledger, zero
+	// recent hits, and no error. The generic truncation notice cannot cover it
+	// — that one is gated on cmd.Paginated and this feed is keyset, not offset
+	// (tasks_events_window.go).
+	for _, line := range taskEventsHelpLines(cmd) {
 		out.errf("%s", line)
 	}
 
@@ -304,6 +326,18 @@ func usageCommand(out *writer, cmd manifest.Command) {
 		}
 		out.errf("")
 		for _, line := range stampCriterionTextHelpLines() {
+			out.errf("%s", line)
+		}
+		out.errf("")
+		for _, line := range stampAmendHelpLines() {
+			out.errf("%s", line)
+		}
+		// The out-of-row pin is undeclarable for the same reason
+		// --criterion-text-file is (tasks_stamp_expect_pin.go), and it is the
+		// ONLY guard on this verb that a scripted caller cannot satisfy by
+		// echoing the row back at itself — so it has to be discoverable here.
+		out.errf("")
+		for _, line := range stampExpectPinHelpLines() {
 			out.errf("%s", line)
 		}
 	}
@@ -679,6 +713,21 @@ func nearestSiblingVerb(n *manifest.TreeNoun, typed string) (string, bool) {
 // never says the noun is unknown (that was the bug), and it carries the fix in
 // the message itself — which matters because `-o json` renders only this string
 // in the error envelope and skips the usage help block entirely.
+// hiddenVerbTierNote is appended to a "no verb" refusal when the caller is below
+// the admin tier. The manifest tree is filtered BY TIER, so under a visible noun
+// a write verb (`bp doc create` at tier none) is simply absent — and `no verb
+// "create"` read as "bp cannot create documents", with nothing saying that a
+// credential would reveal it. The noun-level twin is suggestUnknownNoun's
+// tier-hidden branch; this is the same fact one level down. Empty at admin,
+// where the tree is complete and the refusal is a plain typo.
+func hiddenVerbTierNote(tier string) string {
+	if tier == "admin" {
+		return ""
+	}
+	return fmt.Sprintf(" (your auth tier is %s and the server hides the verbs it does not grant — "+
+		"`barkpark login` or --token <tok> with a stronger credential may reveal it)", authTierLabel(tier))
+}
+
 func noVerbMsg(n *manifest.TreeNoun, noun, typed string) string {
 	verbs := make([]string, 0, len(n.Verbs))
 	for _, c := range n.Verbs {

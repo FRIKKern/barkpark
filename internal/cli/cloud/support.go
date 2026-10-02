@@ -44,9 +44,18 @@ const SupportSSHReadyTimeout = sshReadyTimeout
 // SupportLocalHealthProbe is the LOCAL health gate a support runs INSTEAD of
 // the public https://<fqdn> poll (PDF-D59: a support has no fqdn — the baked
 // Barkpark serves localhost only, for the on-box listener + dataset import).
-// `head -c` keeps a huge schema payload out of captured output; -fsS makes a
+// `head -c` keeps a large payload out of captured output; -fsS makes a
 // non-2xx an error with the reason on stderr.
-const SupportLocalHealthProbe = `curl -fsS http://localhost:4000/api/schemas | head -c 200`
+//
+// The path is /status.json, NOT the legacy /api/schemas: that route pipes
+// through BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+// `sunset: Wed, 31 Dec 2026 23:59:59 GMT`. Because -fsS turns any non-2xx into
+// an error, a 404 from the retired route would fail EVERY support bring-up
+// closed on a healthy box. /status.json is `pipe_through(:api)` only (no
+// deprecation scope, no token) and is a strictly stronger signal:
+// StatusController.show_json/2 -> Barkpark.Status.health/0 runs bare
+// Repo.all/1, so an unreachable database raises and the probe sees 500.
+const SupportLocalHealthProbe = `curl -fsS http://localhost:4000/status.json | head -c 200`
 
 // SupportRunner is the per-host capability set the support bring-up needs:
 // step execution (configure chain), output capture (health probe + capacity
@@ -124,7 +133,7 @@ type SupportConfigureOpts struct {
 // already-created, SSH-ready support box:
 //
 //	freshen (fail-open) → secrets-mint → secrets-install → migrate →
-//	admin-token → LOCAL health probe (curl localhost:4000/api/schemas)
+//	admin-token → LOCAL health probe (curl localhost:4000/status.json)
 //
 // DROPPED vs configureHost: dns, caddy/TLS, the public health poll, and the
 // control-plane tenant register — the CP worker chain layers dns/caddy + the
@@ -201,14 +210,14 @@ func ConfigureSupportHost(ctx context.Context, runner SupportRunner, opts Suppor
 
 	// health-local — the support's health gate is the box's OWN loopback API
 	// (PDF-D59): no fqdn, no ACME warm-up, so one direct probe suffices.
-	narrate("health-local", "probing http://localhost:4000/api/schemas on the box")
+	narrate("health-local", "probing http://localhost:4000/status.json on the box")
 	probeOut, perr := runner.RunOutput(ctx, SupportLocalHealthProbe)
 	if perr != nil {
-		return Secrets{}, fmt.Errorf("health-local: localhost:4000/api/schemas not answering on the box: %w: %s",
+		return Secrets{}, fmt.Errorf("health-local: localhost:4000/status.json not answering on the box: %w: %s",
 			perr, strings.TrimSpace(probeOut))
 	}
 	if strings.TrimSpace(probeOut) == "" {
-		return Secrets{}, fmt.Errorf("health-local: localhost:4000/api/schemas answered EMPTY on the box — Barkpark is not serving")
+		return Secrets{}, fmt.Errorf("health-local: localhost:4000/status.json answered EMPTY on the box — Barkpark is not serving")
 	}
 	narrate("health-local", "ok")
 

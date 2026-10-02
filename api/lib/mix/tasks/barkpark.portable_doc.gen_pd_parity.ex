@@ -11,10 +11,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 64 blog-grammar types
+  this one freezes the REAL `:article` HTML emission for the 65 blog-grammar types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 64 in-scope types (charter D7)
+  ## The 65 in-scope types (charter D7)
 
   `compose.ex` dispatches 63 distinct block types (incl. the 3 interactive chat
   cards from #3514 — chat-approval/chat-question/chat-plan — and gauge-list from
@@ -73,7 +73,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 64 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 65 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -243,6 +243,23 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "heading" => %{"type" => "heading", "level" => 2, "text" => "The render path"},
     "eyebrow" => %{"type" => "eyebrow", "text" => "Dispatches"},
     "byline" => %{"type" => "byline", "items" => ["Jane Rae", "2026-07-16"]},
+    # The reader-synthesised pre-gate badge (#17199). NEVER stored: it is minted
+    # by `Content.Papers.PreGateRegister.badge_block/1` on the way into the reader
+    # stream, so the authored input here is exactly that function's output shape —
+    # label/title/tone from the register entry plus the `"anchor" => "byline"` the
+    # masthead anchor sets. The `blank_header_cell` class is used on purpose: it is
+    # the one register class that takes `tone: "warning"`, so this fixture exercises
+    # the explicit tone branch in compose.ex (a `neutral` fixture cannot tell the
+    # whitelist apart from its own fallback) AND the `--tucked` modifier walk.ex
+    # adds only under a byline anchor.
+    "pre-gate-badge" => %{
+      "type" => "pre-gate-badge",
+      "id" => "pre-gate-badge",
+      "label" => "Published before the block gate · one table header renders empty",
+      "title" => "One table header cell renders empty; every other block renders.",
+      "tone" => "warning",
+      "anchor" => "byline"
+    },
     "ingress" => %{
       "type" => "ingress",
       "content" => [%{"type" => "text", "value" => "A lead paragraph that opens the article."}]
@@ -638,7 +655,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "title" => "Ship the legend",
           "status" => "done",
           "criteria" => %{"met" => 2, "total" => 2}
-        }
+        },
+        # The DRAFT chip (task-0310f53709aca6de): byte-parity for the chip on a
+        # board card. Spelled as TaskResolver.row_from_task/1 emits a draft row.
+        %{"title" => "Draft-only row", "status" => "open", "draft" => true}
       ]
     },
     "roadmap" => %{
@@ -651,7 +671,15 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "left" => 0,
           "width" => 40
         },
-        %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35}
+        %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35},
+        # The DRAFT chip on a roadmap lane label (task-0310f53709aca6de).
+        %{
+          "title" => "Draft lane",
+          "status" => "ready",
+          "left" => 75,
+          "width" => 25,
+          "draft" => true
+        }
       ],
       "scale" => ["Q1", "Q2", "Q3"]
     },
@@ -662,7 +690,9 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "snapshot" => [
         %{"title" => "Author the array", "status" => "done"},
         %{"title" => "Wire the generator", "status" => "in_progress", "priority" => "0"},
-        %{"title" => "Prove parity", "status" => "ready"}
+        %{"title" => "Prove parity", "status" => "ready"},
+        # The DRAFT chip on a task-list row (task-0310f53709aca6de).
+        %{"title" => "Draft-only row", "status" => "open", "draft" => true}
       ]
     },
     "task-list" => %{
@@ -750,11 +780,14 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   }
 
   # The 15 schema-field/embed types cut by charter D7 — the ONE lever a later wave
-  # edits to pull the field-* set back into scope. Kept here as the executable
+  # edits to pull the field-* set back into scope — plus `master-ref`
+  # (task-59f078a2fd248698): a linked master instance resolves server side at
+  # read time, like `embed`, and the JS renderer emits nothing for it. Kept here as the executable
   # counterpart of the bash guard's `excluded` list (asserted equal in the test).
   @excluded ~w(
     field-string field-slug field-text field-boolean field-select field-datetime
     field-color field-reference field-image field-number composite arrayOf codelist localizedText embed
+    master-ref
   )
 
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.
@@ -778,7 +811,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 64 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 65 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."

@@ -56,7 +56,7 @@ defmodule Barkpark.StudioChat do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.StudioChat.{Message, Session}
+  alias Barkpark.StudioChat.{McpChip, Message, Session}
   alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
@@ -338,23 +338,22 @@ defmodule Barkpark.StudioChat do
   `chat_messages` carries no `owner_workspace_id` of its own, so the scope gate
   is the PARENT session's visibility: a workspace-scoped caller that cannot see
   the session (foreign / `:global` owner) gets `[]` — fail-closed, never a
-  foreign tenant's transcript. `:global` (default) is unfiltered. A `pos_integer`
-  second arg is the LEGACY limit form (see the 3-arity for a scoped limit).
-  """
-  @spec list_messages(String.t(), :global | binary() | pos_integer()) :: [Message.t()]
-  def list_messages(session_id, scope_or_limit \\ :global)
+  foreign tenant's transcript. `:global` is unfiltered.
 
+  THE SCOPE HAS NO DEFAULT, ON PURPOSE (drafts.task-bb38ed88099c9723). It used
+  to default to `:global`, and a `pos_integer` second arg was a legacy limit
+  form that applied no scope either. Every caller was fenced by a door above it
+  (`ChatController.fetch_scoped/2`), but a future caller that forgot the door
+  would have inherited an unscoped read of any session id. So the unscoped read
+  is now asked for BY NAME (`:global`), and a bounded read goes through the
+  scoped 3-arity. Anything else is a `FunctionClauseError`, not a silent read.
+  """
+  @spec list_messages(String.t(), :global | binary()) :: [Message.t()]
   def list_messages(session_id, :global), do: do_messages_all(session_id)
 
   def list_messages(session_id, ws) when is_binary(ws) do
     if scoped_session_visible?(session_id, ws), do: do_messages_all(session_id), else: []
   end
-
-  def list_messages(session_id, limit) when is_integer(limit) and limit > 0 do
-    do_messages_last(session_id, limit)
-  end
-
-  def list_messages(session_id, limit) when is_integer(limit), do: do_messages_all(session_id)
 
   @doc """
   List the LAST `limit` messages of a session (ascending `seq`), within `scope`.
@@ -833,10 +832,23 @@ defmodule Barkpark.StudioChat do
   (`ChatToolRenderer.settle_state/1`, mirrored by the Go TUI's `toolRowGlyph`).
   A non-error result never writes the key, so an untouched row's metadata is
   byte-identical to what it was before this seam existed.
-  """
-  def attach_tool_result(session_id, tool_use_id, output, error? \\ false)
 
-  def attach_tool_result(session_id, tool_use_id, output, error?)
+  `chip_source` is the FULL, uncapped result text (`output` is the capped text
+  the row stores). For an MCP-tagged row (`metadata.mcp`, charter D64) it is
+  reduced to a compact versioned chip envelope in `metadata.mcp_chip`
+  (`Barkpark.StudioChat.McpChip`) so a result past the raw-text cap still
+  replays as a chip instead of a generic row (task-5a49dc55626ea80d). The gate
+  lives HERE rather than in the Recorder because the row itself is the only
+  place that knows whether the tool was ours — the Recorder learns the tool
+  NAME one frame earlier and would have to carry it across a restart.
+
+  Defaults to `output`, so an existing `/4` caller behaves exactly as before
+  (a small result IS its own full text). An error result writes no envelope:
+  `is_error` output is a plain string, never a chip.
+  """
+  def attach_tool_result(session_id, tool_use_id, output, error? \\ false, chip_source \\ nil)
+
+  def attach_tool_result(session_id, tool_use_id, output, error?, chip_source)
       when is_binary(session_id) and is_binary(tool_use_id) and is_binary(output) and
              is_boolean(error?) do
     row =
@@ -856,12 +868,30 @@ defmodule Barkpark.StudioChat do
       %Message{} = m ->
         meta = Map.put(m.metadata || %{}, "output", output)
         meta = if error?, do: Map.put(meta, "tool_error", true), else: meta
+        meta = put_mcp_chip(meta, error?, chip_source || output)
 
         m
         |> Ecto.Changeset.change(metadata: meta)
         |> Repo.update()
     end
   end
+
+  # The D64 replay envelope, written ONLY for a row the Recorder tagged as ours
+  # and only for a non-error result. `McpChip.summarize/1` answers nil for
+  # anything that would not chip anyway, and the key is then never written — so
+  # a host tool row's metadata stays byte-identical to what it was before.
+  defp put_mcp_chip(meta, false, source) when is_binary(source) do
+    if meta["mcp"] == true do
+      case McpChip.summarize(source) do
+        %{} = envelope -> Map.put(meta, "mcp_chip", envelope)
+        _ -> meta
+      end
+    else
+      meta
+    end
+  end
+
+  defp put_mcp_chip(meta, _error?, _source), do: meta
 
   @doc """
   SETTLE every unsettled tool row of a session — the durable half of the
@@ -1908,13 +1938,54 @@ defmodule Barkpark.StudioChat do
   `slices_done` counts terminal children (`done` + `cancelled` — the
   compactor's terminal set): a cancelled slice no longer blocks the wave, so
   the line converges to n/n instead of sticking forever short.
+
+  ## The three hops are WORKSPACE-SCOPED (task-2f412e40a9d39794)
+
+  The scope key is the SESSION's `owner_workspace_id`, read here from the
+  session id every caller already passes; see `scope_tasks_to_workspace/2`
+  below for why it is resolved at the read and not per caller, what a NULL
+  owner means, and why `dataset` is still deliberately absent.
+
+  ### Two corrections to the parent row's description
+
+  A reader arriving from the parent row meets two sentences about this file
+  that are measurably false, so they are corrected HERE, where the code is:
+
+    1. It calls these "the same unscoped raw dataset-STRING reads" as
+       `Barkpark.Tasks.Board.load_task_docs/1`. They were NOT the same, and
+       the difference runs the BROADER way: `load_task_docs/1` has always
+       carried `where: d.type == "task" and d.dataset == ^dataset`, while
+       these three hops carried NO dataset predicate AND no workspace
+       predicate — strictly wider than the read it was compared to, never
+       equivalent to it.
+
+    2. It cites a line range near the middle of this file (given there as a
+       tilde-prefixed span in the eighteen-hundreds) as holding a
+       `d.dataset == ^dataset` read. No such read ever existed in this file.
+       The range is deliberately NOT repeated here as a file-and-line token:
+       quoting a citation in order to refute it would plant a fresh one, and
+       the citation guard cannot tell a quotation from a claim. The whole
+       history of the file contains exactly ONE commit that touches the
+       string `dataset` at all:
+
+           $ git log -S'dataset' --oneline -- api/lib/barkpark/studio_chat.ex
+           c8d952a6c feat(connectors): chat_sessions tenant seam —
+                     owner_workspace_id + fail-closed store seal (#2957)
+
+       That commit is 2026-07-13 — a MONTH before the parent row was filed —
+       and the only `dataset` it left behind is the word inside the scope
+       comment at the top of this module (line 87). The cited region never
+       held a dataset read; that half of the parent's description was wrong
+       on the day it was written.
   """
   @spec epic_goal(String.t() | nil, String.t()) :: map() | nil
   def epic_goal(provider, session_id) do
+    ws = epic_read_workspace_id(session_id)
+
     with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
-         parent_id when is_binary(parent_id) <- held_task_parent_id(worker),
-         %Document{} = epic <- published_task_doc(parent_id) do
-      {done, total} = epic_slice_counts(parent_id)
+         parent_id when is_binary(parent_id) <- held_task_parent_id(worker, ws),
+         %Document{} = epic <- published_task_doc(parent_id, ws) do
+      {done, total} = epic_slice_counts(parent_id, ws)
       content = epic.content || %{}
 
       %{
@@ -1929,9 +2000,67 @@ defmodule Barkpark.StudioChat do
     end
   end
 
+  # ── the tenant seal on the epic-goal fold (task-2f412e40a9d39794) ─────────
+  #
+  # The THREE hops below used to carry no workspace predicate and no dataset
+  # predicate at all, while `held_task_parent_id/1` keyed the whole fold on the
+  # `claim.worker` STRING. A workspace-B-only admin mounting the scoped ChatLive
+  # (`live_session :scoped_admin_studio`, a TARGET-workspace gate — not the
+  # instance-global `:ops` gate BoardLive sits behind) therefore rendered
+  # workspace A's `%{id, title, slices_done, slices_total, wave_status}` whenever
+  # a workspace-A task's `claim.worker` was byte-equal to a session that viewer
+  # already owned. `clamp_list_to_tenancy/1` in ChatLive fences which SESSIONS a
+  # viewer folds over; it says nothing about what the fold then READS, because
+  # the second hop is keyed on a string.
+  #
+  # The scope is resolved HERE, at the read, from the session id the caller
+  # already passes — NOT per caller. All four callers of `epic_goal/2` resolve
+  # to the same thing, the SESSION's `owner_workspace_id`: three in
+  # `chat_live.ex` (the workflow-ping one-shot in `handle_info/2`, and the two
+  # session-list folds in `refresh_epic_goals/1` and its sibling) and
+  # `put_epic/2` in `chat_controller.ex`. Grep them with
+  # `git grep -n "StudioChat.epic_goal("` rather than by line — an enumeration
+  # by line number is a snapshot, and the audit that found this bug listed
+  # three of the four. Deriving the scope from the primary key they all hand in
+  # makes it impossible for a fifth caller to get it wrong or to forget it.
+  #
+  # A NULL `owner_workspace_id` is the ADMIN/GLOBAL session by construction (see
+  # `owner_ws_from_scope/1`), so it keeps the unscoped fold — narrowing it would
+  # be a behaviour change to a different question. The residual that leaves —
+  # ChatLive's `owner_in_tenancy?/2` admits a NULL-owned session into a SCOPED
+  # viewer's sidebar (`is_nil(owner) or owner == ws_id`) — lives in that clamp,
+  # not in this read, and is recorded on task-2f412e40a9d39794 rather than fixed
+  # by widening this function's remit.
+  #
+  # DATASET is deliberately still absent. No caller of `epic_goal/2` carries a
+  # dataset, the session row has no dataset column, and `workspace_id` IS the
+  # tenancy boundary (a dataset belongs to a project belongs to a workspace), so
+  # a cross-dataset hop within one workspace is a correctness wobble and never a
+  # cross-tenant read. Pinning a literal `"production"` here would silently blank
+  # the line for every non-production dataset, which is why it is not done.
+  defp scope_tasks_to_workspace(query, nil), do: query
+
+  defp scope_tasks_to_workspace(query, ws) when is_binary(ws),
+    do: where(query, [d], d.workspace_id == ^ws)
+
+  # The session's own workspace, read from the primary key every caller passes.
+  # A session id with no row reads NULL, which takes the unscoped arm above —
+  # the fold then fails at its own `worker` hop as it always did.
+  defp epic_read_workspace_id(session_id) when is_binary(session_id) do
+    case Ecto.UUID.cast(session_id) do
+      {:ok, id} ->
+        from(s in Session, where: s.id == ^id, select: s.owner_workspace_id) |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  defp epic_read_workspace_id(_), do: nil
+
   # The newest published in_progress claim this worker holds that carries a
   # parent hop. Draft twins never count (the claim lives on the published row).
-  defp held_task_parent_id(worker) do
+  defp held_task_parent_id(worker, ws) do
     from(d in Document,
       where: d.type == "task",
       where: not like(d.doc_id, "drafts.%"),
@@ -1942,18 +2071,20 @@ defmodule Barkpark.StudioChat do
       limit: 1,
       select: fragment("?->>'parent_id'", d.content)
     )
+    |> scope_tasks_to_workspace(ws)
     |> Repo.one()
   end
 
-  defp published_task_doc(doc_id) do
+  defp published_task_doc(doc_id, ws) do
     from(d in Document,
       where: d.type == "task" and d.doc_id == ^doc_id,
       limit: 1
     )
+    |> scope_tasks_to_workspace(ws)
     |> Repo.one()
   end
 
-  defp epic_slice_counts(parent_id) do
+  defp epic_slice_counts(parent_id, ws) do
     rows =
       from(d in Document,
         where: d.type == "task",
@@ -1962,11 +2093,44 @@ defmodule Barkpark.StudioChat do
         group_by: fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content),
         select: {fragment("COALESCE(?->>'lifecycle_status', 'open')", d.content), count(d.id)}
       )
+      |> scope_tasks_to_workspace(ws)
       |> Repo.all()
 
     total = rows |> Enum.map(&elem(&1, 1)) |> Enum.sum()
     done = for {s, n} <- rows, s in ["done", "cancelled"], reduce: 0, do: (acc -> acc + n)
     {done, total}
+  end
+
+  @doc """
+  Every PUBLISHED task row whose `parent_id` is one of `parent_ids`, in any
+  lifecycle — the candidate set the Doing strip's agent↔task join resolves
+  against (task-ba42f986bb0d4594). Epic subagents claim under their OWN
+  `epic-builder-<slug>` workers, so the exact-worker fold can never see them;
+  the epic parent is the key they share with the session.
+
+  ALL lifecycles, not just `in_progress`, on purpose: the join must see every
+  sibling a label could name, or a done/open sibling whose 40-character emitter
+  slug collides with a claimed one would vanish from the index and turn an
+  AMBIGUOUS label into a confident wrong match.
+
+  Same shape as `epic_slice_counts/2` (a `parent_id` fragment read, draft twins
+  excluded — the claim lives on the published row); the workspace scope is the
+  fail-CLOSED `Scope.scope_to_workspace/3` the hand-task hydrate already uses
+  through `Tasks.prime/1`, so a nil workspace reads nothing.
+  """
+  @spec epic_children([String.t()], String.t() | nil) :: [Document.t()]
+  def epic_children([], _workspace_id), do: []
+
+  def epic_children(parent_ids, workspace_id) when is_list(parent_ids) do
+    from(d in Document,
+      where: d.type == "task",
+      where: not like(d.doc_id, "drafts.%"),
+      where: fragment("?->>'parent_id'", d.content) in ^parent_ids,
+      order_by: [asc: d.doc_id],
+      limit: 500
+    )
+    |> Barkpark.Content.Scope.scope_to_workspace(workspace_id, nil)
+    |> Repo.all()
   end
 
   defp string_presence(s) when is_binary(s) and s != "", do: s

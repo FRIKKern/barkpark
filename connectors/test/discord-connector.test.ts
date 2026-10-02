@@ -45,9 +45,14 @@ const betaInstall: ConnectorInstall = {
   credentialRef: BETA_CREDENTIAL,
 };
 
-/** The vendor's `protected readonly` credential fields, as they exist at runtime. */
+/**
+ * The vendor's credential internals, as they exist at runtime. Since
+ * @chat-adapter/discord 4.41 the bot token is held behind a credential provider
+ * (`botTokenProvider`, read via `resolveBotToken()`) rather than a plain
+ * `botToken` field; `applicationId` is a getter over the resolved id.
+ */
 interface AdapterInternals {
-  botToken: string;
+  resolveBotToken(): Promise<string>;
   publicKey: string;
   applicationId: string;
 }
@@ -103,7 +108,7 @@ describe("discord connector — per-install credential isolation (D1)", () => {
     );
   });
 
-  it("mounts TWO installs as two independent adapters with DIFFERENT bot tokens", () => {
+  it("mounts TWO installs as two independent adapters with DIFFERENT bot tokens", async () => {
     const connector = createDiscordConnector();
 
     const alpha = connector.adapterFactory(alphaInstall);
@@ -112,14 +117,16 @@ describe("discord connector — per-install credential isolation (D1)", () => {
     expect(alpha).not.toBe(beta);
     // Each tenant's adapter is constructed from THAT tenant's credential and
     // nothing else — the whole of multi-tenant isolation, made structural.
-    expect(internals(alpha).botToken).toBe("alpha-bot-token-not-real");
-    expect(internals(beta).botToken).toBe("beta-bot-token-not-real");
-    expect(internals(alpha).botToken).not.toBe(internals(beta).botToken);
+    const alphaToken = await internals(alpha).resolveBotToken();
+    const betaToken = await internals(beta).resolveBotToken();
+    expect(alphaToken).toBe("alpha-bot-token-not-real");
+    expect(betaToken).toBe("beta-bot-token-not-real");
+    expect(alphaToken).not.toBe(betaToken);
     expect(internals(alpha).applicationId).toBe("111111111111111111");
     expect(internals(beta).applicationId).toBe("222222222222222222");
   });
 
-  it("NEVER lets a process-wide DISCORD_BOT_TOKEN stand in for a tenant's own", () => {
+  it("NEVER lets a process-wide DISCORD_BOT_TOKEN stand in for a tenant's own", async () => {
     // The vendor's constructor does `config.botToken ?? process.env.DISCORD_BOT_TOKEN`.
     // In a multi-tenant bridge that fallback is a cross-tenant leak: one stray env
     // var would serve every workspace with an incomplete install row. Poison the
@@ -144,8 +151,9 @@ describe("discord connector — per-install credential isolation (D1)", () => {
 
     // And a COMPLETE install still uses its own token, never the poisoned env one.
     const adapter = connector.adapterFactory(alphaInstall);
-    expect(internals(adapter).botToken).toBe("alpha-bot-token-not-real");
-    expect(internals(adapter).botToken).not.toBe("POISON-operator-wide-token");
+    const token = await internals(adapter).resolveBotToken();
+    expect(token).toBe("alpha-bot-token-not-real");
+    expect(token).not.toBe("POISON-operator-wide-token");
   });
 });
 

@@ -4,6 +4,7 @@ import { useOptimisticDocument } from '@barkpark/nextjs/actions'
 import type { Block } from '@barkpark/react'
 import { PortableDocSurface } from './portable-doc-surface'
 import { formatDate } from '../../../lib/format-date'
+import { type SlugValue } from '../../../lib/slug'
 
 interface Author {
   _id: string
@@ -13,7 +14,7 @@ interface Author {
 interface Tag {
   _id: string
   title: string
-  slug?: { current: string }
+  slug?: SlugValue
 }
 
 interface Post {

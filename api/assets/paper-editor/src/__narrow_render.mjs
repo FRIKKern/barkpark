@@ -211,6 +211,18 @@ const WORD_CASES = [
   ["task slug", "task-0e7a1a8ed32b5de5"],
   ["branch name", "feat/deploy-with-barkpark-warm-pool-provision"],
   ["formatted money", "$1,234,567.89"],
+  // The token that actually broke the exemplar. /papers/paper-authoring-excellence
+  // is the guide a cold agent learns from, and a repo path in running prose —
+  // `@known_block_tags in api/lib/barkpark/portable_doc/bpml/parser.ex is every
+  // element …` — is 42 characters with no break opportunity: `/` offers none
+  // inside a path. Measured 2026-09-16 on the live paper rendered through
+  // tooling/paper-excellence/rig: with the prose guard removed that one
+  // paragraph is 377px wide in a 328px column and the document scrolls sideways
+  // 393 vs 360 — the 31px overflow filed as pe-bl-guide-360-overflow, still
+  // reproducible at 33px against the paper's current revision. Guide prose
+  // names repo paths constantly, so this is the corpus's most load-bearing
+  // string, not a synthetic one.
+  ["repo file path", "api/lib/barkpark/portable_doc/bpml/parser.ex"],
 ];
 
 // The baseline. Plain prose carries no wrap guard anywhere in this sheet, so
@@ -256,6 +268,37 @@ for (const width of WIDTHS) {
     console.log("      Those tokens are excluded below — a block that only matches the control");
     console.log("      is showing the surface's baseline behaviour, not a defect of its own.");
   }
+
+  // THE CONTROL IS ALSO AN ASSERTION, not only a filter.
+  //
+  // The block sweep below skips every token the control itself cannot survive,
+  // which is right for judging a BLOCK — but it means that if running prose
+  // stops wrapping, every token falls into `controlFails`, every block case is
+  // skipped, and this harness goes GREEN on the exact regression it is best
+  // placed to catch. That is not hypothetical: deleting `overflow-wrap:
+  // break-word` from `.bp-paper-surface p, .bp-paper-surface li` in
+  // paper-surface.css made gate.sh's 360px arm fail the live exemplar by 33px
+  // (scrollWidth 393 vs clientWidth 360) while this file still printed ALL PASS
+  // (measured 2026-09-16, pe-bl-guide-360-overflow). The only arm left standing
+  // was a grep in __narrow_overflow_guards.test.mjs, which asserts the rule's
+  // exact selector TEXT and so cannot tell a refactor from a removal.
+  //
+  // So the baseline is asserted in its own right. It is quiet today: at 390,
+  // 360 and 320px `controlFails` is empty for every token in WORD_CASES.
+  check(`running prose (p, li) itself does not scroll the page at ${width}px`, () => {
+    if (controlFails.size) {
+      throw new Error(
+        `plain prose overflows the viewport on ${controlFails.size} token(s): ` +
+        [...controlFails].join(", ") +
+        "\n      Running prose is the floor every other block is judged against, and " +
+        "it has no wrap guard except `overflow-wrap: break-word` on " +
+        "`.bp-paper-surface p, .bp-paper-surface li` in paper-surface.css. If that " +
+        "declaration is gone the whole block sweep below silently stops measuring, " +
+        "because every token lands in this same set and is skipped as a control " +
+        "failure. Restore the guard before reading anything else in this output.",
+      );
+    }
+  });
 
   const bad = [];
   for (const [bname, mk] of Object.entries(BLOCK_CASES)) {

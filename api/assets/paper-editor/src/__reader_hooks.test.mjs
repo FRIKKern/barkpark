@@ -923,5 +923,126 @@ await tick();
 assert.equal(conflictModeClicks, 0, 'a conflict refuses Classic and retains Beta controls');
 conflictModeBridge.destroyed();
 conflictModePanel.remove();
+
+// Studio's sidebar, pane trail, backlinks, create and scope buttons navigate
+// away from the document like anchors. Exercise the real capture listener with
+// a canvas draft still waiting for its debounce, not a pre-enqueued save.
+for (const [eventName, params] of [
+  ['select', {pane:'1', id:'next-paper'}],
+  ['expand-pane', {idx:'1'}],
+  ['open-backlink', {slug:'source-paper', type:'paper'}],
+  ['new-document', {type:'paper'}],
+  ['scope-open', {ws:'acme', proj:'books', ds:'staging'}],
+]) {
+  const panel = window.document.createElement('div');
+  panel.dataset.testId = 'studio-doc-beta-editor';
+  const main = window.document.createElement('main');
+  main.dataset.paperDocKey = `production:document:navigation-${eventName}`;
+  main.dataset.documentRev = '18';
+  const wrapper = window.document.createElement('div');
+  wrapper.id = `paper-canvas-navigation-${eventName}-run-0`;
+  wrapper.setAttribute('phx-hook', 'BarkparkPaperCanvas');
+  wrapper.dataset.canvasBlocks = '[]';
+  wrapper.innerHTML = '<bp-paper-canvas></bp-paper-canvas>';
+  main.append(wrapper);
+  const button = window.document.createElement('button');
+  button.setAttribute('phx-click', eventName);
+  for (const [key, value] of Object.entries(params)) {
+    button.setAttribute(`phx-value-${key}`, value);
+  }
+  button.innerHTML = '<span>Navigate</span>';
+  // Studio controls can sit outside the Paper main (sidebar/header).
+  panel.append(button, main);
+  window.document.body.append(panel);
+  const canvas = wrapper.querySelector('bp-paper-canvas');
+  let dirty = false;
+  let seq = 0;
+  let replayCount = 0;
+  const requests = [];
+  const acknowledgements = [];
+  const ops = [{op:'patch-block', id:'nested-text', patch:{text:'Latest draft'}}];
+  canvas.hasPendingChanges = () => dirty;
+  canvas.flushPendingChanges = () => {
+    if (!dirty) return false;
+    dirty = false;
+    canvas.dispatchEvent(new window.CustomEvent('bp-canvas-ops', {
+      bubbles:true, detail:{ops, seq:++seq},
+    }));
+    return true;
+  };
+  canvas.acknowledgeOps = (seq, saved) => acknowledgements.push({seq, saved});
+  const bridge = {...hooks.BarkparkPaperCanvas, el:wrapper,
+    handleEvent: () => {},
+    pushEvent: (name, payload) => {
+      if (name !== 'paper-ops') return Promise.resolve({});
+      return new Promise((resolve, reject) => requests.push({name, payload, resolve, reject}));
+    },
+  };
+  bridge.mounted();
+  button.addEventListener('click', () => {
+    replayCount += 1;
+    for (const [key, value] of Object.entries(params)) {
+      assert.equal(button.getAttribute(`phx-value-${key}`), value);
+    }
+  });
+  const click = () => button.firstElementChild.dispatchEvent(
+    new window.MouseEvent('click', {bubbles:true, cancelable:true}));
+  const acknowledge = (request, saved, requestId = request.payload.request_id) => {
+    request.resolve({saved, request_id:requestId, rev:Number(request.payload.if_rev) + 1});
+  };
+  assert.equal(click(), true, `${eventName}: clean navigation passes through`);
+  assert.equal(replayCount, 1);
+  assert.equal(requests.length, 0, `${eventName}: clean navigation does not write`);
+
+  dirty = true;
+  assert.equal(click(), false, `${eventName}: capture suppresses immediate navigation`);
+  assert.equal(replayCount, 1, `${eventName}: LiveView cannot navigate before the save ACK`);
+  assert.equal(requests.length, 1, `${eventName}: pending canvas ops flush immediately`);
+  assert.deepEqual(requests[0].payload.ops, ops);
+  assert.equal(requests[0].payload.if_rev, '18');
+  assert.equal(click(), false);
+  assert.equal(requests.length, 1, `${eventName}: repeated clicks do not duplicate saves`);
+  acknowledge(requests.shift(), true);
+  await tick();
+  assert.equal(replayCount, 2, `${eventName}: matching save ACK replays exactly once`);
+  assert.deepEqual(acknowledgements.at(-1), {seq:1, saved:true});
+
+  dirty = true;
+  click();
+  const failed = requests.shift();
+  acknowledge(failed, false);
+  await tick();
+  assert.equal(replayCount, 2, `${eventName}: failed save never replays`);
+  assert.equal(wrapper.isConnected, true);
+  assert.equal(bridge._opsQueue.length, 1, `${eventName}: failed draft remains retryable`);
+  click();
+  const mismatched = requests.shift();
+  assert.equal(mismatched.payload.request_id, failed.payload.request_id);
+  acknowledge(mismatched, true, 'unrelated-save-request');
+  await tick();
+  assert.equal(replayCount, 2, `${eventName}: mismatched save ACK never replays`);
+  click();
+  click();
+  assert.equal(requests.length, 1, `${eventName}: retries are also single-flight`);
+  acknowledge(requests.shift(), true);
+  await tick();
+  assert.equal(replayCount, 3, `${eventName}: successful retry replays once`);
+  assert.deepEqual(acknowledgements.at(-1), {seq:2, saved:true});
+
+  // Do not turn every LiveView button into an exit; local controls still run.
+  dirty = true;
+  for (const localEvent of [
+    'paper-toggle-expandable', 'scope-menu-toggle', 'scope-menu-close',
+    'scope-menu-ws', 'scope-menu-proj', 'toggle-create',
+  ]) {
+    button.setAttribute('phx-click', localEvent);
+    const beforeClick = replayCount;
+    assert.equal(click(), true, `${localEvent}: local controls pass through`);
+    assert.equal(replayCount, beforeClick + 1);
+    assert.equal(requests.length, 0, `${localEvent}: local controls do not force a save`);
+  }
+  bridge.destroyed();
+  panel.remove();
+}
 dom.window.close();
-console.log('PASS reader canvas: late paint, flush-before-view, save reply, refusal, in-flight save, teardown');
+console.log('PASS reader canvas: late paint, flush-before-view, Studio button navigation, save reply, refusal, in-flight save, teardown');

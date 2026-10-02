@@ -63,8 +63,24 @@ const TABS_SELECTOR = 'div.bp-tabs:not([data-hydrated="true"])'
 export interface HydrateResult {
   /** Diagrams rendered into SVGs this call. */
   mermaid: number
-  /** Asciinema players mounted this call. */
+  /**
+   * Asciinema players that MOUNTED **and LOADED** their recording this call.
+   *
+   * Mounting is not loading: `player.create` returns before the `fetch()` of
+   * `data-cast-src` resolves, so a blocked/404/CORS-refused recording used to
+   * be counted here exactly like a working one. A caller reading this field
+   * (`{asciicast: 1}`) was told a terminal recording is on the page when the
+   * reader is looking at asciinema's bare 💥 box. This is now the TRUTHFUL
+   * count: `asciicast + asciicastFailed === asciicastMounted`.
+   */
   asciicast: number
+  /** Mount points a player was attempted on this call — loaded or not. */
+  asciicastMounted: number
+  /**
+   * Mount points whose recording could not be loaded and now carry the honest
+   * fallback (message + link) instead of the player's emoji box.
+   */
+  asciicastFailed: number
   /** `code-tabs` containers wired to a click-to-switch strip this call. */
   codeTabs: number
   /** `tabs` containers wired to a click-to-switch strip this call. */
@@ -85,13 +101,20 @@ export interface HydrateResult {
 export async function hydratePortableDoc(
   root: ParentNode = document,
 ): Promise<HydrateResult> {
-  const [mermaid, asciicast] = await Promise.all([
+  const [mermaid, casts] = await Promise.all([
     hydrateMermaid(root),
     hydrateAsciicast(root),
   ])
   const codeTabs = hydrateCodeTabs(root)
   const tabs = hydrateTabs(root)
-  return { mermaid, asciicast, codeTabs, tabs }
+  return {
+    mermaid,
+    asciicast: casts.loaded,
+    asciicastMounted: casts.mounted,
+    asciicastFailed: casts.failed,
+    codeTabs,
+    tabs,
+  }
 }
 
 /**
@@ -314,11 +337,119 @@ export function activeAsciicastTheme(
   return activeMermaidTheme(doc) === 'dark' ? 'asciinema' : 'solarized-light'
 }
 
-async function hydrateAsciicast(root: ParentNode): Promise<number> {
+/**
+ * asciinema-player's OWN failure surface. On a recording it cannot fetch
+ * (404, blocked by CSP/CORS, an air-gapped reader) the player paints
+ * `div.ap-overlay-error` whose entire content is a 💥 glyph — a bordered box
+ * with an emoji in it and nothing else, which is precisely the empty box the
+ * komposisjon law forbids. asciinema-player 3.x exposes no `error` event
+ * (`create()`'s handle carries play/pause/ended/input/marker only), so its own
+ * DOM IS the error channel: this selector is the detector.
+ */
+const ASCIICAST_ERROR_SELECTOR = '.ap-overlay-error'
+/**
+ * Either marker means the player got its recording and painted: `.ap-terminal`
+ * is the rendered screen, `.ap-overlay-start` the poster/play overlay a
+ * `poster:` mount rests on. Seeing one ends the probe early — a loaded cast
+ * never waits out the deadline.
+ */
+const ASCIICAST_READY_SELECTOR = '.ap-terminal, .ap-overlay-start'
+/** Poll step and ceiling for the post-mount probe. */
+const ASCIICAST_PROBE_STEP_MS = 25
+const ASCIICAST_PROBE_TIMEOUT_MS = 4000
+
+/** The honest fallback's copy (jf-backlog-asciicast-empty-box). */
+const ASCIICAST_FALLBACK_MESSAGE = 'Opptaket kunne ikke lastes.'
+const ASCIICAST_FALLBACK_LINK = 'Åpne opptaket direkte'
+/** Inline, like every other emitter in this family: a consuming app needs no
+ * extra stylesheet for the fallback to read as prose inside the cast's frame. */
+const FALLBACK_STYLE = 'padding:1rem;font-size:0.9em;line-height:1.5'
+
+/** What one hydrate pass did to the `asciicast` mount points under `root`. */
+interface AsciicastTally {
+  /** Mount points a player was ATTEMPTED on — loaded or not. */
+  mounted: number
+  /** Players whose recording painted. */
+  loaded: number
+  /** Mount points swapped to the honest fallback. */
+  failed: number
+}
+
+/**
+ * Watch one mount point until its player either paints or faults.
+ *
+ * Resolves `'failed'` ONLY on asciinema's own error overlay — never on a
+ * timeout. A player that shows neither marker inside the ceiling is left
+ * alone and counted as loaded: replacing a slow-but-working player with a
+ * "could not be loaded" card would be its own lie, and the honest-fallback law
+ * is about the box the reader is actually staring at.
+ */
+async function probeCast(el: HTMLElement): Promise<'loaded' | 'failed'> {
+  const deadline = Date.now() + ASCIICAST_PROBE_TIMEOUT_MS
+  for (;;) {
+    if (el.querySelector(ASCIICAST_ERROR_SELECTOR)) return 'failed'
+    if (el.querySelector(ASCIICAST_READY_SELECTOR)) return 'loaded'
+    if (Date.now() >= deadline) return 'loaded'
+    await new Promise((r) => setTimeout(r, ASCIICAST_PROBE_STEP_MS))
+  }
+}
+
+/**
+ * `href` for the raw recording, or `null` when the mount's `data-cast-src` is
+ * not a fetchable web URL. Deliberately NOT `inline.tsx`'s `safeUrl`: that one
+ * returns an ATTRIBUTE-ESCAPED string for HTML interpolation (and would drag
+ * the React emitter into this framework-free entry), while this fallback is
+ * built with DOM APIs. Same allow-list shape though — http(s) or a same-origin
+ * path, protocol-relative and every other scheme (`javascript:`, `data:`)
+ * refused, so a hostile `data-cast-src` degrades to message-only.
+ */
+function castHref(src: string): string | null {
+  const trimmed = src.replace(/^[\x00-\x20]+/, '')
+  if (/^https?:\/\//i.test(trimmed)) return trimmed
+  if (trimmed.startsWith('/') && !/^\/[/\\]/.test(trimmed)) return trimmed
+  return null
+}
+
+/**
+ * Replace a faulted player with the honest fallback.
+ *
+ * The CAPTION is untouched by construction: the emitters
+ * (`figures.ex` / `blocks/core.ts`) put `<figcaption class="bp-figcaption">`
+ * NEXT TO the mount point inside the `<figure>`, so emptying the mount div
+ * cannot reach it — the test pins that, because a future markup change could.
+ */
+function renderCastFallback(el: HTMLElement, src: string): void {
+  const doc = el.ownerDocument
+  // Drops asciinema's 💥 overlay wholesale — the box the reader sees is ours.
+  el.textContent = ''
+
+  const box = doc.createElement('div')
+  box.className = 'bp-asciicast__fallback'
+  box.setAttribute('style', FALLBACK_STYLE)
+  box.textContent = ASCIICAST_FALLBACK_MESSAGE
+
+  const href = castHref(src)
+  if (href !== null) {
+    const link = doc.createElement('a')
+    link.className = 'bp-asciicast__fallback-link'
+    link.setAttribute('href', href)
+    link.textContent = ASCIICAST_FALLBACK_LINK
+    box.appendChild(doc.createElement('br'))
+    box.appendChild(link)
+  }
+
+  el.appendChild(box)
+  // A second stamp beside `data-asciicast-done`: the mount stays skipped by the
+  // idempotency guard, and a consumer (or a screenshot test) can select the
+  // faulted casts on a page without parsing our copy.
+  el.dataset.asciicastFailed = 'true'
+}
+
+async function hydrateAsciicast(root: ParentNode): Promise<AsciicastTally> {
   const nodes = Array.from(
     root.querySelectorAll<HTMLElement>(ASCIICAST_SELECTOR),
   )
-  if (nodes.length === 0) return 0
+  if (nodes.length === 0) return { mounted: 0, loaded: 0, failed: 0 }
 
   // Resolved ONCE per hydrate pass, not per node: every player on a page shares
   // the one active mode, and re-reading `data-theme` mid-loop could straddle a
@@ -330,27 +461,55 @@ async function hydrateAsciicast(root: ParentNode): Promise<number> {
     ensureAsciinemaStyles(),
   ])
 
-  let mounted = 0
+  /** Mount points a player was created on, with the src the fallback links to. */
+  const created: Array<{ el: HTMLElement; src: string }> = []
+  let failed = 0
   for (const el of nodes) {
     const src = el.dataset.castSrc
     if (!src) continue
-    // Same options the Phoenix `runAsciicast` mounts with. `poster` is the ONE
-    // per-block option: the emitter writes `data-cast-poster` only when the
-    // block names a resting frame (an npt timestamp, or `end`), so an unset
-    // one falls back to `npt:0:1` and nothing changes for existing content. A
-    // recording that opens on a banner + a reading pause is near-empty black at
-    // t=1s; naming a later frame makes the resting state show real terminal.
-    player.create(src, el, {
-      fit: 'width',
-      poster: el.dataset.castPoster || 'npt:0:1',
-      rows: el.dataset.castRows ? Number(el.dataset.castRows) : undefined,
-      idleTimeLimit: 2,
-      theme,
-    })
+    // Stamped BEFORE the outcome is known: the guard is about re-entrancy (a
+    // stream delta re-running hydration mid-probe), not about success.
     el.dataset.asciicastDone = 'true'
-    mounted += 1
+    try {
+      // Same options the Phoenix `runAsciicast` mounts with. `poster` is the ONE
+      // per-block option: the emitter writes `data-cast-poster` only when the
+      // block names a resting frame (an npt timestamp, or `end`), so an unset
+      // one falls back to `npt:0:1` and nothing changes for existing content. A
+      // recording that opens on a banner + a reading pause is near-empty black at
+      // t=1s; naming a later frame makes the resting state show real terminal.
+      player.create(src, el, {
+        fit: 'width',
+        poster: el.dataset.castPoster || 'npt:0:1',
+        rows: el.dataset.castRows ? Number(el.dataset.castRows) : undefined,
+        idleTimeLimit: 2,
+        theme,
+      })
+      created.push({ el, src })
+    } catch {
+      // A create() that throws never painted anything — straight to the card.
+      renderCastFallback(el, src)
+      failed += 1
+    }
   }
-  return mounted
+
+  // Probed in PARALLEL: three casts on a page settle in the time of the
+  // slowest, not the sum, and each resolves the moment its own DOM answers.
+  const outcomes = await Promise.all(created.map(({ el }) => probeCast(el)))
+  let loaded = 0
+  outcomes.forEach((outcome, i) => {
+    if (outcome === 'loaded') {
+      loaded += 1
+      return
+    }
+    const { el, src } = created[i]!
+    renderCastFallback(el, src)
+    failed += 1
+  })
+
+  // `mounted` counts every mount point a player was ATTEMPTED on (a create()
+  // that threw included), so the identity `loaded + failed === mounted` holds
+  // and a caller can never read a "loaded" count that quietly swallowed one.
+  return { mounted: loaded + failed, loaded, failed }
 }
 
 // ── code-tabs (I1 hydration) ────────────────────────────────────────────────

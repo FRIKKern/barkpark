@@ -127,7 +127,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   formula bar, no hook, no menus, no active-cell highlight — the tab strip
   keeps ONLY its switch buttons. The guard is server-side too:
   `Ops.send_ops/2` drops every mutation without write capability, so a forged
-  client event can never write through an unauthenticated mount.
+  client event can never write DOCUMENT state through an unauthenticated mount
+  (presence is a separate axis — see §"Presence is a write the wall does not
+  cover"; the reader never wires `presence_topic`, so it pushes nothing).
 
   PUBLISHED-ONLY without `live_session`: content comes from `@doc.content` and
   NEVER from `Session.peek` — a live session is draft-backed, so peeking it
@@ -151,12 +153,38 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   What still governs writes is unchanged: `@editable` fans the write affordances
   out across the template, and `Ops.send_ops/2`'s `write_capable: false` clause
-  is the last wall. The client's read-mode allowlist (`READ_MODE_EVENTS` in
-  bp-sheet-grid.js, derived from the absent `data-fns`) is a UX-and-honesty
-  layer on top of that wall, not the wall — with one behaviour that is its own:
-  `edit-start` is the only mutation with no `send_ops` terminus, so dropping it
-  client-side is what keeps a read-mode socket from broadcasting "editing A1" to
-  every peer while no editor renders.
+  is the last wall FOR PERSISTED DOCUMENT STATE. The client's read-mode
+  allowlist (`READ_MODE_EVENTS` in bp-sheet-grid.js, derived from the absent
+  `data-fns`) is a UX-and-honesty layer on top of that wall, not the wall.
+  `edit-start` used to be the exception that proved it — the only mutation with
+  no `send_ops` terminus, so the client drop was ALL that kept a read-mode
+  socket from broadcasting "editing A1" to every peer. It now has a
+  `write_capable: false` clause of its own (pds-w42), so the server refuses it
+  too.
+
+  ## PRESENCE IS A WRITE THE WALL DOES NOT COVER (pds-w42)
+
+  `Ops.send_ops/2` is a total wall for DOCUMENT state; it is NOT a wall for all
+  state. `Ops.push_presence/2` writes collaborator meta on the sheet presence
+  topic and is called OUTSIDE it, so "write_capable: false means no writes" is
+  false as stated — the true sentence is "no PERSISTED writes". Enumerated by
+  run in `test/barkpark_web/live/studio/sheet_grid/presence_wall_test.exs`,
+  which drives a write-denied socket through every presence-emitting event:
+
+  | event | write-denied verdict | why |
+  |---|---|---|
+  | `edit-start` | SILENT | pds-w42 guard — an unhonourable soft lock |
+  | `edit-commit` | SILENT | `send_ops` wall (the push is downstream of it) |
+  | `bar-commit` | SILENT | same |
+  | `edit-cancel` | WRITES | CLEARS a lock, never asserts one |
+  | `cell-click` / `head-click` | WRITES | click-away `editing: nil` clear |
+  | `presence-meta` | WRITES | cursor/selection — the NAVIGATION axis |
+  | `tab-switch` | WRITES | navigation, ditto |
+
+  The five that write are deliberate: presence is advisory, per-socket, dies
+  with the socket, and a write-denied member is entitled to navigate and to be
+  SEEN navigating. Making them silent would reintroduce exactly the presence
+  asymmetry the three-way split was cut to resolve.
 
   THE `/sheets/:slug` READER GETS A DIFFERENT HOOK, NOT THIS ONE
   (`pds-w43-bl-sheetgrid-reader-half`). `Geometry.grid_sel(_, _, :reader)` is
@@ -384,6 +412,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         |> assign(save_state: :saving)
         |> Ops.apply_delta(payload)
         |> GridData.derive_grid()
+        |> follow_added_tab()
 
       {:ok, if(stale?, do: socket, else: announce_remote_change(socket, payload))}
     end
@@ -713,6 +742,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # ── events: cell editing ─────────────────────────────────────────────────
 
+  # PRESENCE IS A WRITE TOO (pds-w42). `edit-start` sends no op, so
+  # `Ops.send_ops/2`'s wall never sees it — but it pushes `editing: <ref>`
+  # onto the sheet presence topic, a soft lock every peer renders. A
+  # write-DENIED member can never commit (edit-commit/bar-commit are walled
+  # below), so that lock is a claim it cannot honour; before this clause the
+  # client-side READ_MODE_EVENTS drop was the only thing preventing it, and a
+  # forged frame walked straight past it. Refused on the AUTHORIZATION axis,
+  # the same axis send_ops reads — not on `@editable`, which also folds in
+  # View mode (a write-capable member toggling View keeps the client-side
+  # drop, and their lock is honourable the moment they toggle back).
+  def handle_event("edit-start", _params, %{assigns: %{write_capable: false}} = socket),
+    do: {:noreply, socket}
+
   def handle_event("edit-start", params, socket) do
     prefill =
       case params["seed"] do
@@ -729,6 +771,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
      })}
   end
 
+  # DELIBERATELY OUTSIDE the write wall (pds-w42): this push only CLEARS
+  # `editing`, it never asserts one. Gating it on write capability would let a
+  # socket that lost write mid-edit strand a stale soft lock on its peers —
+  # the clear must always be able to run. Same for the `editing: nil` pushes
+  # in `commit_clickaway/2` and in `Ops.apply_delta`'s tab-clamp.
   def handle_event("edit-cancel", _params, socket) do
     {:noreply, socket |> assign(editing: nil) |> Ops.push_presence(%{editing: nil})}
   end
@@ -1092,6 +1139,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # The hook's client-throttled (~10/s) cursor/selection frame. Refs are
   # validated server-side; a malformed frame degrades to nil rather than
   # erroring — presence is advisory, never load-bearing.
+  #
+  # DELIBERATELY OUTSIDE the write wall (pds-w42). Cursor + selection ride the
+  # NAVIGATION axis, not the authorization one: a write-denied member is
+  # entitled to navigate (the three navigation heads refuse only
+  # `chrome: :reader`), and peers are supposed to see them reading. Gating
+  # this on `write_capable` would make such a member invisible — the presence
+  # asymmetry the read_only split had to resolve, reintroduced.
   def handle_event("presence-meta", params, socket) do
     active =
       with ref when is_binary(ref) <- params["active"],
@@ -1203,41 +1257,26 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # ── events: tab strip ────────────────────────────────────────────────────
 
+  # DELIBERATELY OUTSIDE the write wall (pds-w42): switching tabs is
+  # navigation (no op, no session call), and the push is the cursor's new
+  # coordinates on the tab the viewer moved to — the same axis as
+  # `presence-meta` above.
   def handle_event("tab-switch", %{"tab" => idx}, socket) do
-    idx = to_int(idx)
-    count = length(GridData.tabs(socket))
-
-    {:noreply,
-     socket
-     |> assign(
-       tab: idx,
-       row_offset: 0,
-       active: {1, 1},
-       anchor: nil,
-       editing: nil,
-       menu: nil,
-       renaming_tab: nil,
-       # The picker targets the active tab; switching tabs closes it so it
-       # never lingers pointed at a tab the user just left.
-       tab_color_open: false,
-       # Matches are keyed to the previous tab's cells — drop them so the
-       # highlight never bleeds onto the new tab's grid.
-       find_hits: MapSet.new(),
-       find_query: "",
-       # The filter criteria are likewise keyed to the previous tab's columns —
-       # drop them so rows of the NEW tab never vanish under a filter the
-       # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
-       filters: %{},
-       filter_panel: nil,
-       status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
-     )
-     |> GridData.derive_grid()
-     |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})}
+    {:noreply, switch_tab(socket, to_int(idx))}
   end
 
+  # Add a tab and FOLLOW it, as every spreadsheet does: the add_tab op lands
+  # through the session, and its structural delta (which carries the new tab
+  # into @content) arrives AFTER this handler returns — so the switch is armed
+  # here and taken in update/2 once the tab exists. Staying on the old tab was
+  # a trap: the editor's next keystrokes overwrote the tab they had just left.
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
-    {:noreply, send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])}
+    socket = send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])
+
+    if socket.assigns[:notice] == nil,
+      do: {:noreply, assign(socket, follow_tab: n - 1)},
+      else: {:noreply, socket}
   end
 
   # ◀ / ▶ move the active tab one slot. The move_tab op reindexes the tab list
@@ -1635,7 +1674,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # this is echo-suppression BOOKKEEPING, not peer visibility — a viewer's
   # cursor reaches peers through `Ops.push_presence/2`, which this axis (and
   # the old flag before it) never gated. A write-denied member is, and was,
-  # visible to peers.
+  # visible to peers — deliberately. The ONE presence push that axis now does
+  # gate is `edit-start`'s soft lock (pds-w42); see the moduledoc's presence
+  # table for the full per-event verdict list.
   defp note_own_refs(%{assigns: %{write_capable: false}} = socket, _refs), do: socket
 
   defp note_own_refs(socket, refs),
@@ -2500,6 +2541,50 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # The tab's display name (falls back to the 1-based default) — used for the
   # polite-region announcements on switch / move / duplicate.
+  # tab-add armed `follow_tab`; take it once the delta has delivered that tab.
+  defp follow_added_tab(socket) do
+    case socket.assigns[:follow_tab] do
+      idx when is_integer(idx) ->
+        if idx < length(GridData.tabs(socket)),
+          do: socket |> assign(follow_tab: nil) |> switch_tab(idx),
+          else: socket
+
+      _ ->
+        socket
+    end
+  end
+
+  # The tab-switch assigns, shared by a click on a tab and by tab-add's follow.
+  defp switch_tab(socket, idx) do
+    count = length(GridData.tabs(socket))
+
+    socket
+    |> assign(
+      tab: idx,
+      row_offset: 0,
+      active: {1, 1},
+      anchor: nil,
+      editing: nil,
+      menu: nil,
+      renaming_tab: nil,
+      # The picker targets the active tab; switching tabs closes it so it
+      # never lingers pointed at a tab the user just left.
+      tab_color_open: false,
+      # Matches are keyed to the previous tab's cells — drop them so the
+      # highlight never bleeds onto the new tab's grid.
+      find_hits: MapSet.new(),
+      find_query: "",
+      # The filter criteria are likewise keyed to the previous tab's columns —
+      # drop them so rows of the NEW tab never vanish under a filter the
+      # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
+      filters: %{},
+      filter_panel: nil,
+      status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
+    )
+    |> GridData.derive_grid()
+    |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})
+  end
+
   defp tab_name(socket, idx) do
     case Enum.at(GridData.tabs(socket), idx) do
       %{"name" => name} when is_binary(name) and name != "" -> name

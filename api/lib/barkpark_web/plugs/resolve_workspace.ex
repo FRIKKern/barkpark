@@ -69,19 +69,59 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
 
   def init(opts), do: opts
 
-  def call(%{assigns: %{share_public: true}} = conn, _opts), do: conn
+  # A public share is admitted by `RequireShareScope`, which resolved the
+  # workspace itself — so the archive refusal is applied here too, or a shared
+  # link would keep serving an archived workspace to anonymous readers.
+  def call(%{assigns: %{share_public: true}} = conn, _opts), do: refuse_if_archived(conn)
 
   def call(conn, opts) do
     slug = conn.path_params["workspace_slug"]
 
     case slug && Tenancy.get_workspace_by_slug(slug) do
       %Tenancy.Workspace{} = workspace ->
-        authorize(conn, workspace, opts)
+        conn
+        |> authorize(workspace, opts)
+        |> refuse_if_archived()
 
       _ ->
-        halt_envelope(conn, {:error, :not_found})
+        halt_envelope(conn, unknown_workspace(slug))
     end
   end
+
+  # task-69cd78907b82abf6: an unknown slug used to answer the bare
+  # `{:error, :not_found}`, whose envelope reads "document not found" with a
+  # hint about document ids. No document was named. The 404 now names the
+  # WORKSPACE slug the caller sent. That discloses nothing: it echoes the
+  # caller's own input, and an existing workspace the caller may not enter
+  # still answers 403, never this 404.
+  defp unknown_workspace(slug) do
+    {:error,
+     {:not_found, "workspace #{inspect(slug)} not found",
+      hint: "Check the workspace slug in the URL (/w/<workspace>/…) or the bp -w flag."}}
+  end
+
+  # ARCHIVED IS REFUSED AFTER ADMISSION, NEVER BEFORE (task-55474a106554e65a).
+  #
+  # The order is the disclosure rule. Only a caller this plug has ALREADY
+  # admitted (member, public-demo Default, grantee, public share) learns the
+  # workspace is archived — 409 `workspace_archived`. A caller the membership
+  # gate refused keeps its 403 exactly as before, and an unknown slug keeps its
+  # 404, so the three answers stay distinguishable (never-existed / forbidden /
+  # archived) without telling a stranger anything about a workspace's state.
+  #
+  # One check here covers every `/w/:workspace_slug/...` route family — data,
+  # media, plugins, Studio — instead of one per controller.
+  defp refuse_if_archived(%Plug.Conn{halted: true} = conn), do: conn
+
+  defp refuse_if_archived(
+         %Plug.Conn{assigns: %{current_workspace: %Tenancy.Workspace{} = workspace}} = conn
+       ) do
+    if Tenancy.Workspace.archived?(workspace),
+      do: halt_envelope(conn, {:error, {:workspace_archived, workspace.slug}}),
+      else: conn
+  end
+
+  defp refuse_if_archived(conn), do: conn
 
   defp authorize(conn, workspace, opts) do
     token = conn.assigns[:api_token]

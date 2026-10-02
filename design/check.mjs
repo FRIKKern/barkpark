@@ -8,19 +8,78 @@
 // Dependency-free (Node built-ins only). Pairs with design/validate.mjs (shape)
 // and design/emit.mjs (the single source of the emitted bytes).
 import {
-  evaluateAll, tokens, LIFE_ORDER, TYPE_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
+  evaluateAll, tokens, AIR_ROW_SPLIT, ruleGlyph, LIFE_ORDER, TYPE_STEPS, typeLadderFrom, LADDER_REFUSE, READING_STEPS, AIR_STEPS, EVIDENCE_KEYS, EVIDENCE_UNITS, SECTION_KEYS, SECTION_UNITS, RULE_KEYS, RULE_UNITS, MOTION_STEPS, MOTION_SURFACES, glyphOf, ARTIFACTS, repoRoot,
   INST_ORDER, PROVIDERS, INST_ROLE_CSS, instRoleChannels, hslToHex,
   readManifest, attribute, lostLines, regionDigest, MANIFEST_PATH,
   auditActions, AUDIT_ACTIONS_PATH,
 } from "./emit.mjs";
 import { evaluateMirror } from "./paper-editor-mirror.mjs";
+import { evaluateReadingMeasure, TOKENS_PATH } from "./reading-measure.mjs";
 import { derive, contrast, SLOTS, PASSTHROUGH_FAMILIES } from "./derive.mjs";
 import { readFileSync, readdirSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-let failed = false;
-const fail = (msg) => { console.error(msg); failed = true; };
+// ── --selftest: this tripwire's negative half ────────────────────────────────
+// This gate ran for its whole life with nothing exercising it, and produced two
+// ok-summary defect rows in a single day — one part printing `ok` beside its own
+// FAIL lines, then Part B swallowing a TRUE `ok` — each proven only by a
+// throwaway harness the builder wrote and threw away. --selftest is the standing
+// replacement, in the idiom scripts/check-vendor-freshness.mjs and
+// scripts/preview-parity-check.sh already use: it re-invokes THIS file as a
+// subprocess with one part's failure path forced, and asserts the ok-summary
+// gating in BOTH directions — a part that failed must WITHHOLD its ok, and a part
+// that passed must PRINT its ok even when an earlier part failed. The body lives
+// in design/check-selftest.mjs so the switch costs this file a dispatch rather
+// than an indentation level wrapped around every Part.
+if (process.argv.slice(2).includes("--selftest")) {
+  const { selftest } = await import("./check-selftest.mjs");
+  const ok = await selftest();
+  // Drain before exiting. Node does not flush a pending stdout write on
+  // process.exit(), so a piped reader can lose the verdict line while the exit
+  // code still arrives — write("", cb) calls back only once everything queued
+  // ahead of it has gone out. process.exitCode on its own will not do here: every
+  // Part below is a top-level statement and would run on regardless.
+  await new Promise((r) => process.stdout.write("", r));
+  process.exit(ok ? 0 : 1);
+}
+
+// Fault injection, driven only by the selftest above. BP_DESIGN_CHECK_FAULT is a
+// comma-separated set of part ids; each named part records ONE EXTRA failure at
+// the point it records its own. It can only ADD a failure, never suppress one, so
+// the worst a stray value in CI can do is red this gate loudly — there is no value
+// of this variable that mutes a real drift.
+//
+// There is ONE hook beside EVERY ok-gate in this file, and that is the contract
+// the selftest reads. It derives the injectable set by scanning THIS FILE for
+// `FAULT.has("<id>")`, loops it, and NAMES any Part carrying no hook as uncovered.
+// A Part added below is therefore covered by adding its hook HERE, never by
+// editing the selftest, and a Part whose author forgets the hook is named in the
+// output instead of passing in silence. Every hook prints the same shape,
+// `  Part <id> FAIL: injected fault (--selftest)`, because the selftest derives
+// that line from the id to prove the fault LANDED before it judges anything.
+// Part A's hook says more: Part A prints a per-ARTIFACT ok line and gates no
+// part-summary, so it is the one injectable part whose fault withholds no ok. That
+// exemption is declared AT THE HOOK, where a reader of either file meets it, and
+// is read back by the selftest instead of being hand-listed there. Part 0's hook
+// says more too, for the opposite reason: its real failure path exits the process
+// immediately, so its hook deliberately does NOT — an injected fault there must
+// leave the run standing for the Parts the arm judges beside it.
+const FAULT = new Set(
+  (process.env.BP_DESIGN_CHECK_FAULT || "").split(",").map((s) => s.trim()).filter(Boolean),
+);
+
+// `failed` is a COUNT, not a flag. Every part below gates its `ok` summary on
+// `failed === failedBefore<X>` — a snapshot taken at the part's head. With a
+// sticky boolean that comparison answered "has anything failed all run?", so
+// once ANY earlier part tripped it, `true === true` held even after the part
+// recorded its OWN failures, and the part printed its green line beside its own
+// red ones. Counting makes the SAME comparison ask the question it always meant:
+// "did anything fail SINCE my head?" — a per-part delta. Truthiness is unchanged
+// (0 is falsy), so the verdict arm and the process exit code are untouched, and a
+// part added later inherits the fix simply by copying the existing idiom.
+let failed = 0;
+const fail = (msg) => { console.error(msg); failed++; };
 
 // ── Part 0: the audit verb table's own shape (charter cch-w65) ────────────────
 // cloud/priv/audit-actions.json is the SOLE authority for TWO vocabularies — the
@@ -31,21 +90,46 @@ const fail = (msg) => { console.error(msg); failed = true; };
 // instead of the one sentence that says which row is wrong and why. The predicate
 // is auditActions() itself, so this gate and the emitter cannot disagree about
 // what "well-formed" means.
-try {
-  const rows = auditActions();
-  const nulls = rows.filter((r) => r.label === null);
-  console.log(
-    `design/check.mjs — Part 0: ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
-    `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
-  );
-} catch (e) {
-  console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
-  console.error(`
+//
+// Its verdict is a HEADER line plus a separately-gated `ok` line, the same shape
+// every Part below prints, rather than the one fused sentence it printed until
+// r21d. The fusion made Part 0 the last Part the selftest could say nothing
+// about: the selftest reads a Part's claim off its `  ok   ` lines, and a Part
+// with none has nothing for a fault to withhold, so it was named UNEXERCISED on
+// every green run. Splitting the sentence costs one line of output and buys the
+// arm.
+console.log(`design/check.mjs — Part 0: the audit verb table's own shape (${AUDIT_ACTIONS_PATH})`);
+{
+  const failedBefore0 = failed;
+  let rows;
+  try {
+    rows = auditActions();
+  } catch (e) {
+    console.error(`design/check.mjs — Part 0 FAIL: ${e.message}`);
+    console.error(`
   ${AUDIT_ACTIONS_PATH} is the ONE table both audit vocabularies read. Until it is
   well-formed nothing downstream can be trusted: the console's ACTION_LABELS region is
   built from it and AuditEvent's @actions allowlist is derived from it at compile time.
 `);
-  process.exit(1);
+    process.exit(1);
+  }
+  const nulls = rows.filter((r) => r.label === null);
+
+  // Part 0's hook is the one that does NOT share the real failure path's exit.
+  // A genuinely malformed table exits(1) right here, because everything below
+  // reads it; an INJECTED fault must leave the run standing so the selftest can
+  // still watch every later Part keep its own ok lines. So the hook records its
+  // failure through `fail` — the verdict arm at the bottom still reds the gate on
+  // the count — and asks exactly the question the arm is for: does Part 0's ok
+  // line answer for Part 0's own failures? The exit path needs no hook: it
+  // withholds this ok line by never reaching it.
+  if (FAULT.has("0")) fail("  Part 0 FAIL: injected fault (--selftest)");
+  if (failed === failedBefore0) {
+    console.log(
+      `  ok   ${AUDIT_ACTIONS_PATH} well-formed — ${rows.length} declared verbs, ` +
+      `${rows.length - nulls.length} labelled, ${nulls.length} declared unlabelled WITH a reason.`,
+    );
+  }
 }
 
 // ── Part A: per-artifact byte-compare against committed ──────────────────────
@@ -119,6 +203,7 @@ for (const r of evaluateAll()) {
     console.log(`  ok   ${mr.name} (${mr.path})`);
   }
 }
+if (FAULT.has("A")) fail("  Part A FAIL: injected fault (--selftest; Part A prints per-item ok lines and gates no part-summary)");
 // The blanket "Fix: --write" is safe ONLY where nothing is unattributed; where a
 // region holds hand-written bytes, --write is the destructive act, not the fix.
 if (failed && !unattributedSeen) console.error("\n  Fix: node design/emit.mjs --write\n");
@@ -130,6 +215,13 @@ else if (unattributedSeen) console.error("\n  Fix: relocate hand-written content
 //   • Go   : internal/taskboard/tokens_gen.go  (GenLifecycle literals + frames)
 //   • CSS  : paper-surface.css  .bp-lg--<state> glyph-tone classes
 console.log("\ndesign/check.mjs — Part B (§6): GUI/TUI lifecycle parity");
+// Part B's snapshot, the same declaration its nine sibling gates carry. It was
+// the one part that read the run-wide `failed` directly, so ANY earlier failure
+// suppressed a TRUE Part B ok and the part reported nothing at all about a check
+// that passed — a diagnostic that reads identically for "passed, suppressed" and
+// "did not run". Deleting the gate instead would make the line unconditional and
+// so report nothing either; the snapshot is what makes it say something.
+const failedBeforeB = failed;
 
 // tokens.lifecycle → canonical facts
 const wantGlyph = {}, wantLight = {}, wantDark = {};
@@ -226,7 +318,9 @@ for (const s of ["done", "closed"]) {
     fail(`  §6 FAIL: ${s} is not teal (#0d9488/#2dd4bf) in the Go artifact`);
 }
 
-if (!failed)
+if (FAULT.has("B")) fail("  Part B FAIL: injected fault (--selftest)");
+
+if (failed === failedBeforeB)
   console.log(`  ok   ${LIFE_ORDER.length} lifecycle states agree across Go + CSS + Studio (CSS var + TokensGen) + tokens (glyph, colour, frames); done/closed teal ≠ status.ok green`);
 
 // ── Part C: Studio chrome type-scale parity (Decision D2) ────────────────────
@@ -250,8 +344,120 @@ for (const step of TYPE_STEPS) {
     typeOk = false;
   }
 }
+if (FAULT.has("C")) { fail("  Part C FAIL: injected fault (--selftest)"); typeOk = false; }
 if (typeOk)
   console.log(`  ok   ${TYPE_STEPS.length} chrome type steps emit --text-* vars matching tokens.type.chrome (size + line-height)`);
+
+// ── Part C2: the WEB type ladder has exactly one source ──────────────────────
+// Studio reads the scale through emitted CSS vars (Part C). The web demo cannot:
+// its styleguide renders inline `style` objects, which need NUMBERS. For months
+// that meant web/components/styleguide.tsx hand-kept its own six-step
+// {size,lh,weight} array beside a comment promising a later wave would wire the
+// emitted scale in — a promise that outlived the wave (au-r4-web-type-ladder).
+//
+// The fix was to emit the numbers (web/lib/tokens.gen.ts `chromeType` /
+// `readingType`, both {size,lineHeight,weight}). This part is the gate that keeps
+// it fixed, and it has TWO arms because either alone is defeatable: arm 1 asserts
+// the emitted ladders equal tokens.json, arm 2 asserts the consumer restates
+// nothing. A page that re-typed the same numbers would pass arm 1 forever.
+console.log("\ndesign/check.mjs — Part C2: web type-ladder single source");
+let webTypeOk = true;
+const webTokensPath = "web/lib/tokens.gen.ts";
+const styleguidePath = "web/components/styleguide.tsx";
+const webTokensText = readFileSync(join(repoRoot, webTokensPath), "utf8");
+const styleguideText = readFileSync(join(repoRoot, styleguidePath), "utf8");
+const webTypeFail = (m) => { fail(m); webTypeOk = false; };
+// arm 0 — the STEP SET the rest of this part walks is tokens.json's own ladder
+// (task-039d433a1bac63ab). Arms 1 and 2 below iterate TYPE_STEPS, and for as long
+// as TYPE_STEPS was a hand-written literal that made them measure the copy
+// against the source IN THE DIRECTION THAT CANNOT FAIL: every entry of the copy
+// was checked present in tokens.json, and a rung present in tokens.json but
+// absent from the copy was walked past in silence. This arm re-derives the
+// ladder from `tokens` HERE — independently of whatever list emit.mjs chose to
+// build the artifacts from — and compares the two as ARRAYS, so a rung tokens
+// declares and the emitter does not walk reds NAMING THAT RUNG, and a
+// display-order swap reds even though the two sets are character-identical.
+let chromeFromSource = null;
+try {
+  chromeFromSource = typeLadderFrom(tokens, "chrome");
+} catch (e) {
+  webTypeFail(`  Part C2 FAIL: could not derive the chrome ladder from tokens.type.chrome: ${e.message}`);
+}
+if (chromeFromSource) {
+  // POSITIVE CONTROL: a derivation that went blind would hand back [] and every
+  // comparison below would agree with an empty emitted ladder. A guard that
+  // cannot see must not report a pass.
+  if (chromeFromSource.length < 4)
+    webTypeFail(`  Part C2 FAIL: derived only ${chromeFromSource.length} chrome step(s) from tokens.type.chrome — the derivation has gone blind`);
+  for (const step of chromeFromSource)
+    if (!TYPE_STEPS.includes(step))
+      webTypeFail(`  Part C2 FAIL: tokens.type.chrome declares the rung "${step}", which the emitted step list (emit.mjs TYPE_STEPS) does not walk — it would be emitted nowhere and checked by nothing`);
+  for (const step of TYPE_STEPS)
+    if (!chromeFromSource.includes(step))
+      webTypeFail(`  Part C2 FAIL: the emitted step list walks "${step}", which tokens.type.chrome does not declare as a rung`);
+  if (TYPE_STEPS.length === chromeFromSource.length && TYPE_STEPS.some((s2, i) => s2 !== chromeFromSource[i]))
+    webTypeFail(`  Part C2 FAIL: the emitted chrome step ORDER [${TYPE_STEPS.join(", ")}] ≠ tokens.type.chrome by descending size [${chromeFromSource.join(", ")}]`);
+}
+// NEGATIVE CONTROLS, in-process: each way of seeing nothing must THROW rather
+// than hand back an empty ladder. Without these the refusal itself can rot and
+// arm 0 quietly becomes theatre.
+//
+// THE FAMILIES ARE NOT WRITTEN HERE ANY MORE. They used to be a four-element
+// literal in this file while web/__tests__/type-ladder-emitted.test.ts carried
+// its own THREE-element one (it had no non-object arm) and design/validate.mjs'
+// chromeLadderAscending had none at all — three implementations of ONE refusal
+// contract with three different, drifting ideas of what must be refused. The
+// list now lives once, in design/ladder-refusal-fixture.json, and all three are
+// driven against it (task-833f347eaa78a2a5). The conformance table, and the two
+// measured grounds on which the three are deliberately NOT one function, are in
+// design/ladder-refusal-conformance.test.mjs.
+const ladderFixture = JSON.parse(readFileSync(join(repoRoot, "design/ladder-refusal-fixture.json"), "utf8"));
+if (ladderFixture.sentinel !== LADDER_REFUSE)
+  webTypeFail(`  Part C2 FAIL: design/ladder-refusal-fixture.json declares sentinel "${ladderFixture.sentinel}" but emit.mjs exports LADDER_REFUSE="${LADDER_REFUSE}"`);
+if (!Array.isArray(ladderFixture.cases) || ladderFixture.cases.length < 4)
+  webTypeFail(`  Part C2 FAIL: design/ladder-refusal-fixture.json carries ${(ladderFixture.cases || []).length} malformed case(s), not the four families — this negative half would prove almost nothing`);
+for (const c of ladderFixture.cases || []) {
+  const arg = c.kind === "omit" ? { type: {} } : { type: { chrome: c.family } };
+  let refused = false;
+  try { typeLadderFrom(arg, "chrome"); } catch (e) { refused = String(e.message).includes(LADDER_REFUSE); }
+  if (!refused)
+    webTypeFail(`  Part C2 FAIL: IMPLEMENTATION "emit" (typeLadderFrom) did not refuse ladder-refusal-fixture.json case "${c.id}" with "${LADDER_REFUSE}" — the ladder derivation can go blind and still report a pass. ${c.why}`);
+}
+// arm 1 — every emitted step carries tokens.json's three numbers, verbatim.
+const emittedStep = (family, step) => {
+  const re = new RegExp(`^  (?:"${step}"|${step}): \\{ size: (\\d+(?:\\.\\d+)?), lineHeight: (\\d+(?:\\.\\d+)?), weight: (\\d+) \\},$`, "m");
+  const block = webTokensText.split(`export const ${family} = {`)[1];
+  const m = block === undefined ? null : block.split("} as const")[0].match(re);
+  return m && { size: Number(m[1]), lineHeight: Number(m[2]), weight: Number(m[3]) };
+};
+for (const step of TYPE_STEPS) {
+  const spec = tokens.type.chrome[step];
+  const got = emittedStep("chromeType", step);
+  if (!got) { webTypeFail(`  Part C2 FAIL: ${webTokensPath} chromeType.${step} is MISSING`); continue; }
+  if (got.size !== spec.size || got.lineHeight !== spec.lineHeight || got.weight !== spec.weight)
+    webTypeFail(`  Part C2 FAIL: chromeType.${step} ${JSON.stringify(got)} ≠ tokens.type.chrome.${step} {size:${spec.size},lineHeight:${spec.lineHeight},weight:${spec.weight}}`);
+}
+for (const step of READING_STEPS) {
+  const spec = tokens.type.reading[step];
+  const wantWeight = spec.weight ?? (step === "body" ? 400 : tokens.type.reading.headingWeight);
+  const got = emittedStep("readingType", step);
+  if (!got) { webTypeFail(`  Part C2 FAIL: ${webTokensPath} readingType.${step} is MISSING`); continue; }
+  if (got.size !== spec.size || got.lineHeight !== spec.lineHeight || got.weight !== wantWeight)
+    webTypeFail(`  Part C2 FAIL: readingType.${step} ${JSON.stringify(got)} ≠ tokens.type.reading.${step} {size:${spec.size},lineHeight:${spec.lineHeight},weight:${wantWeight}}`);
+}
+// arm 2 — the consumer READS the ladder and restates no step of its own. A
+// literal `size: 20` or `lh: 1.3` in this file is the defect returning.
+for (const sym of ["chromeType", "chromeTypeOrder", "readingType", "readingTypeOrder"])
+  if (!styleguideText.includes(sym))
+    webTypeFail(`  Part C2 FAIL: ${styleguidePath} does not consume the emitted ${sym}`);
+if (!/from "@\/lib\/tokens\.gen"/.test(styleguideText))
+  webTypeFail(`  Part C2 FAIL: ${styleguidePath} does not import the emitted token module`);
+for (const [re, what] of [[/\bsize:\s*\d/, "a literal type size"], [/\blh:\s*\d/, "a literal line height"], [/\bfontWeight:\s*\d{3}\b/, "a literal font weight"]])
+  if (re.test(styleguideText))
+    webTypeFail(`  Part C2 FAIL: ${styleguidePath} declares ${what} — the hand-kept ladder is back beside the emitted one`);
+if (FAULT.has("C2")) webTypeFail("  Part C2 FAIL: injected fault (--selftest)");
+if (webTypeOk)
+  console.log(`  ok   ${TYPE_STEPS.length} chrome (derived from tokens.type.chrome, descending size) + ${READING_STEPS.length} reading steps emit typed {size,lineHeight,weight} into ${webTokensPath}, and ${styleguidePath} consumes them without restating a step`);
 
 // ── Part D: cloud-console family parity (charter azure-hetzner Decision 7) ────
 // The instanceLifecycle + provider-identity families are DUAL-emitted: the SPA
@@ -326,6 +532,8 @@ for (const k of PROVIDERS) {
   if (g.light !== t.light || g.dark !== t.dark)
     fail(`  Part D FAIL: ${k} Go mark {${g.light},${g.dark}} ≠ tokens {${t.light},${t.dark}}`);
 }
+
+if (FAULT.has("D")) fail("  Part D FAIL: injected fault (--selftest)");
 
 if (failed === failedBeforeD)
   console.log(`  ok   ${INST_ORDER.length} instance states + ${PROVIDERS.length} provider marks agree across CSS + Go + tokens (glyph, role→hue, tint hex)`);
@@ -449,6 +657,7 @@ for (const entry of ledger.entries) {
   console.log(`  ${pad("TOTAL", wPath)}  ${pad(ledgerBaselineTotal, 8)}  ${pad(ledgerActualTotal, 6)}`);
 }
 
+if (FAULT.has("E")) fail("  Part E FAIL: injected fault (--selftest)");
 if (failed === failedBeforeE)
   console.log(
     `  ok   ${ledgerRows.length} ledgered surface(s), ${ledgerActualTotal} hand-stamped ` +
@@ -484,8 +693,12 @@ const failedBeforeF = failed;
 // must follow). ts-w5a raised evergreen 56 → 82: promoting the neutral ladder +
 // CLI chrome ramp into skin-responsive formulas (D14ii/v) means evergreen's
 // shadcn-zinc bytes no longer match the formula, so its 26 zinc rungs are
-// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). A theme with no
-// entry here is not ratcheted (a fixture); every design/themes/*.json ships one.
+// CHARACTERIZATION-FROZEN as pins (a fresh theme re-hues natively). MEMBERSHIP is
+// NOT this map's to decide: every design/themes/*.json MUST have an entry, and a
+// theme without one is a hard FAIL below, so a sixth committed theme cannot land
+// un-ratcheted in silence. The map supplies the NUMBER; the directory listing
+// supplies the ROSTER. (Fixture themes are handed to derive() directly by tests
+// and never reach this loop, which reads design/themes/ off disk.)
 const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
@@ -532,11 +745,22 @@ try { themeFiles = readdirSync(themesDir).filter((f) => f.endsWith(".json")); }
 catch (e) { fail(`  Part F FAIL: cannot read design/themes/ — ${e.message}`); }
 if (themeFiles.length === 0) fail("  Part F FAIL: no design/themes/*.json — the theme system has no authored theme");
 
+// Part F's two PER-THEME ok lines need a PER-THEME delta, not the part-level
+// `failed === failedBeforeF` the part summary uses. `themeFaults[f]` counts the
+// failures THIS theme file recorded, across BOTH loops below: the schema loop adds
+// its own delta, the resolve loop reads that total back and adds its own. A theme
+// that fails its shape gate therefore withholds BOTH of its ok lines — its
+// `complete (0 unresolved)` line asserts a verdict about a file whose own FAIL two
+// lines above says it is broken — while every OTHER theme keeps both of its true
+// ok lines. The part-level snapshot is the WRONG gate here for exactly that
+// reason: it would silence four healthy themes over one broken one.
+const themeFaults = {};
 const themeCache = {};
 for (const f of themeFiles) {
+  const snap = failed;
   let theme;
   try { theme = JSON.parse(readFileSync(join(themesDir, f), "utf8")); }
-  catch (e) { fail(`  Part F FAIL: ${f} is not valid JSON — ${e.message}`); continue; }
+  catch (e) { fail(`  Part F FAIL: ${f} is not valid JSON — ${e.message}`); themeFaults[f] = failed - snap; continue; }
   themeCache[f] = theme;
   const name = theme.name || f.replace(/\.json$/, "");
 
@@ -564,7 +788,9 @@ for (const f of themeFiles) {
     if (!e || typeof e.slot !== "string" || typeof e.reason !== "string")
       fail(`  Part F FAIL: ${f} _aaExceptions entry must be {slot, reason} strings — got ${JSON.stringify(e)}`);
   }
-  console.log(`  ok   schema: ${name} — {bg,ink,accent}×2 modes, ${Object.keys(overrides).length} reasoned override(s), ${(theme.passthrough || []).length} declared passthrough(s)`);
+  themeFaults[f] = failed - snap;
+  if (failed === snap)
+    console.log(`  ok   schema: ${name} — {bg,ink,accent}×2 modes, ${Object.keys(overrides).length} reasoned override(s), ${(theme.passthrough || []).length} declared passthrough(s)`);
 }
 
 // (1b) PER-THEME completeness + non-vacuous + AA-exception + ratchet + native%.
@@ -583,8 +809,23 @@ for (const f of themeFiles) {
 for (const f of themeFiles) {
   const theme = themeCache[f];
   if (!theme) continue;
+  // Per-theme delta again, AND the schema loop's verdict for this same file: a
+  // theme whose shape gate failed has no business printing "complete".
+  const snap = failed;
+  const schemaFaults = themeFaults[f] || 0;
   const name = theme.name || f.replace(/\.json$/, "");
   const frozen = OVERRIDE_COUNT_FROZEN[name];
+  // COVERAGE, not membership. `frozen === undefined` used to mean "not ratcheted"
+  // silently, so a SIXTH committed theme was un-ratcheted the day it landed and no
+  // output said so (proven 2026-09-16: design/themes/w8probe.json derived 3 pins,
+  // Part F printed its ok line and its PASS verdict; adding `w8probe: 0` to the map
+  // immediately red the same run). Every design/themes/*.json must carry an entry;
+  // the map supplies the NUMBER, the directory supplies the MEMBERSHIP.
+  if (frozen === undefined)
+    fail(
+      `  Part F FAIL: ${name} (design/themes/${f}) has no OVERRIDE_COUNT_FROZEN entry — its override count is NOT ratcheted. ` +
+      "Add an entry for it to OVERRIDE_COUNT_FROZEN in design/check.mjs IN THIS SAME DIFF (its live pin count is on this theme's ok line below).",
+    );
 
   let full, bare;
   try { full = derive(theme); }
@@ -619,11 +860,12 @@ for (const f of themeFiles) {
 
   const nativePct = (100 * full.native.length / SLOTS.length).toFixed(1);
   const barePct = (100 * bare.native.length / SLOTS.length).toFixed(1);
-  console.log(
-    `  ok   ${name}: complete (0 unresolved), bare skin resolves all ${SLOTS.length} slots natively (${barePct}% formula), ` +
-    `${full.native.length} native / ${full.pinned.length} pinned = ${nativePct}% native [reported, not gated]` +
-    (full.misses.length ? `, ${full.misses.length} AA exception(s) declared` : ""),
-  );
+  if (failed === snap && schemaFaults === 0)
+    console.log(
+      `  ok   ${name}: complete (0 unresolved), bare skin resolves all ${SLOTS.length} slots natively (${barePct}% formula), ` +
+      `${full.native.length} native / ${full.pinned.length} pinned = ${nativePct}% native [reported, not gated]` +
+      (full.misses.length ? `, ${full.misses.length} AA exception(s) declared` : ""),
+    );
 }
 
 // (2) no-hole gate: the SLOTS contract must EXACTLY equal tokens' theme-varying leaf
@@ -694,6 +936,7 @@ if (!evergreenFile) {
   }
 }
 
+if (FAULT.has("F")) fail("  Part F FAIL: injected fault (--selftest)");
 if (failed === failedBeforeF)
   console.log("  ok   Part F PASS — the theme compiler reproduces evergreen byte-for-byte; adding theme N+1 is one more design/themes/*.json.");
 
@@ -709,19 +952,66 @@ console.log("\ndesign/check.mjs — Part G: [data-bp-theme] identity blocks + to
 const failedBeforeG = failed;
 
 // Every attribute surface must carry an evergreen theme block (identity reached
-// it). The media surfaces (status/sheets) + reader carry one too, but their idiom
-// varies; this asserts the five DOM-attribute surfaces at minimum.
-const ATTR_SURFACES = [
-  ["cloud SPA", "static/app.css"],
-  ["Studio", "layouts/root.html.heex"],
-  ["web demo", "web/app/globals.css"],
-  ["login", "controllers/session_html.ex"],
-  ["paper-surface", "paper-surface.css"],
-];
-for (const [name, suffix] of ATTR_SURFACES) {
-  const text = ARTIFACTS.find((a) => a.path.endsWith(suffix)).build();
+// it). ENROLMENT IS DERIVED, NEVER LISTED. This was a five-entry literal list of
+// path suffixes while TEN artifacts emitted [data-bp-theme] blocks, so five live
+// surfaces (/papers reader, /sheets reader, status page, and both search-starter
+// template globals) were outside the gate — a reader surface rebuilt with its
+// theme blocks dropped, and the tree re-emitted so Part A was in sync, left Part G
+// printing its PASS line over a surface with zero theme identity (proven 2026-09-16).
+//
+// The roster is now read off the EMITTER: a CSS/HTML surface acquires theme
+// identity by calling themeBlocks() in its builder, so the set of builders that
+// call it IS the set of themed surfaces. Scan emit.mjs for those call sites,
+// resolve each to its enclosing function name, and match against `a.build.name`.
+// A surface that starts calling themeBlocks enrols itself; one that STOPS calling
+// it drops out of the derived roster and is caught by the floor below.
+const emitSource = readFileSync(join(here, "emit.mjs"), "utf8");
+const THEMED_BUILDERS = new Set();
+{
+  let fn = null;
+  for (const line of emitSource.split("\n")) {
+    const m = line.match(/^\s*(?:export\s+)?function\s+([A-Za-z0-9_$]+)\s*\(/);
+    if (m) fn = m[1];
+    if (fn && fn !== "themeBlocks" && /\bthemeBlocks\s*\(/.test(line)) THEMED_BUILDERS.add(fn);
+  }
+}
+const ATTR_SURFACES = ARTIFACTS.filter(
+  (a) => (a.kind === "css" || a.kind === "html") && THEMED_BUILDERS.has(a.build.name),
+);
+// Shrink-only floor. The derived roster answers "who is enrolled TODAY"; it cannot
+// answer "did a surface silently stop being themed", because a builder that drops
+// themeBlocks() drops out of its own roster. This number is the recorded count and
+// may only be RAISED, in the same diff that adds the surface.
+const ATTR_SURFACE_FLOOR = 10;
+if (ATTR_SURFACES.length < ATTR_SURFACE_FLOOR)
+  fail(
+    `  Part G FAIL: only ${ATTR_SURFACES.length} artifact builder(s) call themeBlocks(), floor is ${ATTR_SURFACE_FLOOR} — ` +
+    `a surface STOPPED emitting [data-bp-theme] blocks and silently left the theme-identity gate. ` +
+    `Enrolled: ${ATTR_SURFACES.map((a) => a.name).join(", ") || "∅"}`,
+  );
+for (const a of ATTR_SURFACES) {
+  const text = a.build();
   if (!/\[data-bp-theme="evergreen"\]/.test(text))
-    fail(`  Part G FAIL: ${name} has no [data-bp-theme="evergreen"] block — theme identity did not reach this surface`);
+    fail(`  Part G FAIL: ${a.name} (${a.path}) has no [data-bp-theme="evergreen"] block — theme identity did not reach this surface`);
+}
+// The emitter-derived roster and the OUTPUT-derived roster must agree: an artifact
+// whose emitted bytes carry a [data-bp-theme] block but whose builder is not in
+// THEMED_BUILDERS means the scan above missed a call site (a hand-rolled theme
+// block, or themeBlocks reached through an alias) — i.e. the derivation itself
+// silently under-enrolled, which is the exact failure the literal list had.
+{
+  const byOutput = ARTIFACTS.filter(
+    (a) => (a.kind === "css" || a.kind === "html") && /\[data-bp-theme=/.test(a.build()),
+  );
+  const enrolled = new Set(ATTR_SURFACES.map((a) => a.name));
+  const orphans = byOutput.filter((a) => !enrolled.has(a.name));
+  if (orphans.length)
+    fail(
+      `  Part G FAIL: ${orphans.length} artifact(s) EMIT a [data-bp-theme] block but are not in the themeBlocks()-derived roster ` +
+      `(the enrolment scan under-counts): ${orphans.map((a) => `${a.name} (${a.path})`).join(", ")}`,
+    );
+  else
+    console.log(`  ok   theme-identity roster DERIVED from emit.mjs themeBlocks() call sites: ${ATTR_SURFACES.length} surface(s) (floor ${ATTR_SURFACE_FLOOR}), output-derived roster agrees (${byOutput.length})`);
 }
 
 // D25: no positional-passthrough var/class may appear inside a [data-bp-theme]
@@ -738,6 +1028,7 @@ for (const a of ARTIFACTS) {
     }
   }
 }
+if (FAULT.has("G")) fail("  Part G FAIL: injected fault (--selftest)");
 if (d25Clean && failed === failedBeforeG)
   console.log("  ok   no --life-*/--provider-*/--cc-*/.bp-lg--/.bp-inst-- leaked into any [data-bp-theme] scope");
 
@@ -908,8 +1199,616 @@ for (const p of PAIRINGS) {
     }
   }
 }
+if (FAULT.has("H")) fail("  Part H FAIL: injected fault (--selftest)");
 if (failed === failedBeforeH)
   console.log(`  ok   ${PAIRINGS.length} curated pairings × ${Object.keys(contrastThemes).length} themes × 2 modes = ${pairChecks} checks, all ≥ AA (text 4.5 / nontext 3.0)`);
+
+// ── Part H (verdict arm): the loss/peace inks on the READING page ────────────
+// The pairings above are Studio-shell selectors read out of root.html.heex. The
+// VERDICT pair (color.verdict — pe-bl-verdict-accent-tokens) never appears there:
+// it lands inside `.bp-paper-surface`, so its curated pairings are read out of
+// api/assets/paper-surface/paper-surface.css instead. Same gate, same AA floor,
+// different sheet.
+//
+// TWO grounds per ink, and both are required:
+//   • ink on its OWN soft ground — a verdict callout fills the soft wash and
+//     paints the text/rail in the ink.
+//   • ink on the bare reading page (paper.surface.bg) — a verdict stat VALUE
+//     paints the digits straight onto the tile with no wash under them.
+// derive.mjs walks the ink against soft only (soft is the worse ground in both
+// modes). That is an ARGUMENT; this arm is the MEASUREMENT, and it measures the
+// page pairing separately so the argument cannot quietly stop being true.
+//
+// The foreground token is read LIVE out of the committed rule body, exactly as
+// ruleColor() does for the Studio sheet — so deleting or re-pointing
+// `.bp-stat__v--loss` / `.bp-callout--peace` reds HERE. That is what makes these
+// tokens consumed rather than merely declared: the named test that fails if the
+// consumption goes away is `node design/check.mjs` Part H, this arm.
+{
+  const surfaceCssH = readFileSync(join(repoRoot, "api/assets/paper-surface/paper-surface.css"), "utf8");
+  // Same shape as ruleColor(), pointed at the paper-surface sheet.
+  const surfaceRuleColor = (sel) => {
+    const esc = sel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const m = surfaceCssH.match(new RegExp(`(?:^|\\n)[ \\t]*${esc}[ \\t]*\\{([\\s\\S]*?)\\}`));
+    if (!m) return { err: `rule not found in paper-surface.css: ${sel}` };
+    const c = m[1].match(/color:\s*var\((--[\w-]+)(?:\s*,[^)]*)?\)/);
+    if (!c) return { err: `no "color: var(--…)" in rule ${sel}` };
+    return { token: c[1] };
+  };
+  // --bp-verdict-* / --paper-* CSS var → derive SLOTS slot (mode appended below).
+  const VERDICT_SLOT = {
+    "--bp-verdict-loss": "verdict.loss",
+    "--bp-verdict-peace": "verdict.peace",
+    "--bp-verdict-loss-soft": "verdict.loss-soft",
+    "--bp-verdict-peace-soft": "verdict.peace-soft",
+    "--paper-bg": "paper.surface.bg",
+    "--paper-bg-deep": "paper.surface.bg-deep",
+  };
+  const VERDICT_PAIRINGS = [
+    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--bp-verdict-loss-soft",  kind: "text", where: "paper-surface.css .bp-callout--loss — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--bp-verdict-peace-soft", kind: "text", where: "paper-surface.css .bp-callout--peace — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
+    { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
+    { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },
+    { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },
+  ];
+  let verdictChecks = 0;
+  for (const p of VERDICT_PAIRINGS) {
+    const fg = surfaceRuleColor(p.sel);
+    if (fg.err) { fail(`  Part H FAIL: ${p.sel} — ${fg.err}`); continue; }
+    const fgSlot = VERDICT_SLOT[fg.token];
+    const bgSlot = VERDICT_SLOT[p.surface];
+    if (!fgSlot) { fail(`  Part H FAIL: ${p.sel} — fg token ${fg.token} has no VERDICT_SLOT mapping (the rule stopped reading a verdict ink)`); continue; }
+    if (!bgSlot) { fail(`  Part H FAIL: ${p.sel} — surface token ${p.surface} has no VERDICT_SLOT mapping`); continue; }
+    const need = AA_THRESH[p.kind];
+    for (const [name, values] of Object.entries(contrastThemes)) {
+      for (const mode of ["light", "dark"]) {
+        const fgv = values[`${fgSlot}.${mode}`];
+        const bgv = values[`${bgSlot}.${mode}`];
+        if (fgv === undefined || bgv === undefined) {
+          fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} missing slot (${fgSlot}=${fgv}, ${bgSlot}=${bgv})`);
+          continue;
+        }
+        let ratio;
+        try { ratio = contrast(fgv, bgv); }
+        catch (e) { fail(`  Part H FAIL: ${p.sel} — ${name}/${mode} contrast() threw (${e.message})`); continue; }
+        verdictChecks++;
+        if (ratio < need - 1e-9)
+          fail(`  Part H FAIL: ${p.sel} (${fg.token} on ${p.surface}, ${p.kind}) = ${ratio.toFixed(2)} < ${need} in ${name}/${mode} — ${p.where}`);
+      }
+    }
+  }
+  if (failed === failedBeforeH)
+    console.log(`  ok   verdict arm: ${VERDICT_PAIRINGS.length} loss/peace pairings (ink on soft wash + ink on page) × ${Object.keys(contrastThemes).length} themes × 2 modes = ${verdictChecks} checks, all ≥ AA 4.5`);
+}
+
+// ── Part H2: WCAG contrast of the bp-graph Canvas palette, keyed ON THE COLOUR ─
+// Part H above gates the Studio DOM. The bp-graph.js force-graph paints on a
+// <canvas>: `ctx.fillStyle` cannot consume var(), so its palette is concrete
+// bytes and NO CSS-level gate can ever see it — every node fill, edge stroke,
+// focus ring and error colour could move with every gate green.
+//
+// THIS PART IS A RE-LAND, and the thing it re-lands differently is its KEY.
+// The first version (#18162) keyed a pairing on the two NAMES it derived from,
+// and the palette then moved house into design/tokens.json (#18109). Neither
+// tree ever held both — they share no file, so git never conflicted and both
+// were green — but on main together every colour derived TWICE, once under its
+// renderer var and once under its token path. 46 failures covering NINETEEN
+// distinct colour pairs; one hex appeared five times under five names. A name
+// is not a colour. So:
+//
+//   THE KEY IS THE RESOLVED PAIR OF PAINTED COLOUR VALUES, `<ink>|<ground>`,
+//   lowercased. Names are carried for the MESSAGE only. Moving a colour between
+//   design/tokens.json and the renderer changes its names and changes nothing
+//   here — which is also what makes an entry in KNOWN_SUB_AA below survive the
+//   palette moving house, the property the first version lacked.
+//
+// The second thing it re-lands differently is WHAT VALUE IT MEASURES. A pairing
+// that never reaches the screen is not a finding, it is noise that buys a
+// waiver. 32 of those 46 were `typeHues` node fills scored at their RAW token
+// value on the light ground — but `nodeFill()` paints `shiftL(hex, -0.22)` on
+// light, never the raw hue, and the legend swatch mirrors that exact transform
+// so the key cannot lie about the dot. Measured AS PAINTED all sixteen clear the
+// non-text floor on both grounds (worst: project, 3.15 light / 11.97 dark). See
+// the TYPE-HUE rule below for the in-scope argument.
+//
+// SCOPE DECISION — typeHues node fills ARE in scope, at WCAG 1.4.11's non-text
+// floor of 3.0. Written down because it is most of this gate's surface and
+// because letting the derivation decide it by accident is what produced 46
+// blessings for 19 facts. 1.4.11 covers "Graphical Objects: parts of graphics
+// required to understand the content"; a node dot IS the graphic, and the
+// content is unreadable if the dot is invisible against the canvas. What is NOT
+// in scope is hue-versus-hue separation: 1.4.11 asks for contrast against the
+// adjacent colour, not for one node type to be distinguishable from another, and
+// the type distinction is independently carried by the node label and by the
+// legend the "Full color" toggle raises. So each hue is measured against its
+// ground and never against a sibling hue.
+//
+// ADMITTED GAPS, stated rather than smoothed over:
+//   - `isText` is NAME-keyed (label/tooltip/title/text/row) and therefore scores
+//     SLATE and AMBER at the 3.0 non-text floor, though drawCenterMessage()
+//     paints both as 14px text. Those two land on a translucent toast plate, not
+//     on the canvas ground, so no pairing derived here is the one that would
+//     need 4.5; raising them is a real question and belongs to its own row.
+//   - Overlay chrome (the `chrome` subtree / CHROME_PALETTE) is EXCLUDED: it is
+//     inline style on injected DOM sitting over a translucent glass panel, so
+//     the canvas ground is not its ground and it has no single resolved ratio.
+//   - Translucent inks are excluded for the same reason the first version
+//     excluded them: rgba() over a ground has no one ratio.
+//
+// ┌─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (BEGIN) ───────────
+// This row (task-4462bbaf17f63ec1) exists because #18162 and #18109 were each
+// green on their own branch and red only once main held both. Its last criterion
+// offers two answers and forbids blurring them. OPTION (b) IS CHOSEN: no
+// standing guard against that class is in scope here, and the exposure goes on
+// the record as ACCEPTED rather than quietly closed. The reason is mechanical,
+// not a preference.
+//
+// A guard catches a class BEFORE main only if it can stop a merge. This file has
+// exactly one CI venue: `node design/check.mjs` in .github/workflows/
+// doc-gates.yml, and there is no second invocation anywhere in .github. That
+// workflow publishes ONE check-run context, `Doc budgets + anchors`, and that
+// context is not in the required set of .github/required-checks.json — it sits in
+// that file's `exclusions` array as "S4 PATHS-FILTERED", and doc-gates.yml's own
+// header says of its red, in those words, that "none of it stops a merge". So no
+// code added to this file can catch anything before main. It can only make
+// main's red louder and better named, which is a different and smaller promise.
+//
+// The mechanism that would actually catch the class is not a checker at all: it
+// is re-evaluating a pull request's checks against the CURRENT tip before the
+// merge lands — "require branches to be up to date", or a merge queue. Both are
+// branch protection settings on the repository: owner-only, outside every lane
+// fence, and outside this file. .github/required-checks.json records that this
+// repo is user-owned with no merge queue today, so neither is switched on.
+// Writing a checker here and calling it the remedy would put the fix in the one
+// place that provably cannot deliver it, and would read afterwards as though the
+// class had been guarded.
+//
+// What IS in scope, and is shipped above: the KEY. The collision produced 46
+// blessings for 19 facts only because pairings were keyed on NAMES. They are
+// keyed on the resolved `<ink>|<ground>` bytes now, so the same colour arriving
+// under a second name from a second source is the SAME pair rather than a new
+// failure. That removes this file's own contribution to the class. It does not
+// guard the class, and this record exists so that nobody reads it as if it did.
+//
+// FINALLY, AND THIS IS WHAT KEEPS THE PARAGRAPH HONEST: none of the three facts
+// above is restated from memory. Part H2 reads them back from their sources every
+// run — the one invocation site in .github/workflows, this context's absence from
+// the required set, and the strict flag — and reds if any has moved. Two of those
+// checks fire when the repository gets BETTER, which is deliberate: an exposure
+// that has quietly been guarded must stop being carried as accepted just as
+// loudly as one whose reasoning rotted.
+// └─ ACCEPTED-EXPOSURE RECORD: green-apart/red-together (END) ─────────────
+console.log("\ndesign/check.mjs — Part H2: WCAG contrast of the bp-graph Canvas palette (keyed on the resolved colour)");
+{
+  // Part H2 counts its OWN failures. `failed` is a shared, sticky boolean, so
+  // `failed === failedBeforeH2` goes true again the moment any EARLIER part has
+  // tripped, and the ok line then prints beside this part's own FAILs. Part K
+  // carries the same own-counter idiom and the same reason.
+  let h2Failed = 0;
+  const failH2 = (msg) => { h2Failed++; fail(msg); };
+  // Set by the accepted-exposure record arm below, and printed on the ok line so
+  // a reader can see that the arm RAN rather than inferring it from silence.
+  let recordWords = 0;
+  // Set by the premise arm below, on the same principle: an arm that ran must say
+  // so on the ok line, so "the premise held" is never inferred from silence.
+  let premiseNote = "premise NOT measured";
+
+  const FAMILY = "color.graphCanvas";
+  const GRAPH_JS = "web/public/bp-graph.js";
+  // A moved or renamed renderer must reach a NAMED refusal, not an ENOENT stack
+  // trace two parts away from the sentence that says what went wrong.
+  let graphSrc = "";
+  try { graphSrc = readFileSync(join(repoRoot, GRAPH_JS), "utf8"); }
+  catch (e) { failH2(`  Part H2 FAIL: cannot read ${GRAPH_JS} (${e.code || e.message}) — the shipped renderer is one of this gate's two derivation sources; if it moved, update GRAPH_JS.`); }
+
+  // ── the two sources, unioned. Neither alone is complete: the token family is
+  // the authority on WHICH colours exist (add one and it is evaluated with no
+  // edit here), and the renderer is the authority on WHEN each is painted.
+  const entries = []; // { name, value, origin }
+  const addColour = (name, value, origin) => {
+    if (typeof value !== "string") return;
+    const v = value.trim();
+    if (!/^(#[0-9a-fA-F]{3,8}|rgba?\(|hsla?\()/.test(v)) return;
+    entries.push({ name, value: v, origin });
+  };
+  // source 1 — every leaf colour under the token family, recursively.
+  (function walk(node, path) {
+    if (!node || typeof node !== "object") return;
+    for (const [k, v] of Object.entries(node)) {
+      if (k.startsWith("_")) continue; // _note and friends are prose, not colour
+      const p = path ? `${path}.${k}` : k;
+      if (v && typeof v === "object") walk(v, p);
+      else addColour(p, v, FAMILY);
+    }
+  })(tokens?.color?.graphCanvas, "");
+  const fromFamily = entries.length;
+
+  // source 2 — the SHIPPED renderer, read live off disk (Part H's own idiom, so
+  // reverting a fix reds this gate). Both `var NAME = "<colour>";` and the
+  // `key: "<colour>"` members of the object literals inside the generated block
+  // (TYPE_HEX, CHROME_PALETTE) — the first version read only the `var` form,
+  // which is precisely why the per-type hues reached it from the token side
+  // ONLY, with no renderer call site to bind their theme.
+  const declLines = new Map(); // renderer identifier -> declaration line index
+  const srcLines = graphSrc.split("\n");
+  {
+    let objPath = null, depth = 0;
+    srcLines.forEach((line, i) => {
+      const vm = line.match(/^\s*var\s+([A-Za-z_$][\w$]*)\s*=\s*"([^"]+)"\s*;/);
+      if (vm) { declLines.set(vm[1], i); addColour(vm[1], vm[2], GRAPH_JS); return; }
+      const om = line.match(/^\s*var\s+([A-Za-z_$][\w$]*)\s*=\s*\{\s*$/);
+      if (om) { objPath = om[1]; depth = 1; declLines.set(om[1], i); return; }
+      if (objPath === null) return;
+      const pm = line.match(/^\s*"?([A-Za-z_$][\w$-]*)"?\s*:\s*"([^"]+)"\s*,?\s*$/);
+      if (pm) { addColour(`${objPath}.${pm[1]}`, pm[2], GRAPH_JS); return; }
+      const nm = line.match(/^\s*"?([A-Za-z_$][\w$-]*)"?\s*:\s*\{\s*$/);
+      if (nm) { objPath = `${objPath}.${nm[1]}`; depth++; return; }
+      if (/^\s*\}/.test(line)) { depth--; objPath = depth > 0 ? objPath.split(".").slice(0, depth).join(".") : null; }
+    });
+  }
+  const fromRenderer = entries.length - fromFamily;
+
+  // ── the paint model. Each rule is a PREDICATE over the name, never a list of
+  // names, and the last rule is the conservative one: a colour nothing claims is
+  // measured on BOTH grounds. That default is what keeps this gate able to fail
+  // — narrowing the derivation until it goes quiet is the failure mode being
+  // fixed here, not a fix.
+  const shortName = (n) => n.split(".").pop();
+  const isGround = (n) => /^(canvas|bg|BG)/.test(shortName(n)) || /^BG_/.test(shortName(n));
+  const isChrome = (n) => /(^|\.)(chrome|CHROME_PALETTE)(\.|$)/.test(n);
+  const isTypeHue = (n) => /(^|\.)(typeHues|TYPE_HEX)\./.test(n);
+  // A SLOT is the one thing the two sources genuinely share. design/emit.mjs
+  // writes the token path `graph.<k>` out as the renderer's SCREAMING_SNAKE var
+  // and `graph.typeHues.<k>` into TYPE_HEX, so `graph.a11yRing` and `A11Y_RING`
+  // are one slot under two spellings, while `graph.amber` and
+  // `graph.typeHues.book` are two slots that happen to share #FBBF24. Paint
+  // evidence pools per SLOT for exactly that reason: pooling per VALUE would let
+  // the amber slot's theme binding silently delete the book hue's light pairing.
+  // The slot is derivation-internal and fails SAFE — two spellings that fail to
+  // unify fall through to the both-grounds default below and red loudly; it is
+  // never the key anything is waived under.
+  const slot = (n) => {
+    const s = shortName(n).toLowerCase().replace(/_/g, "");
+    return isTypeHue(n) ? `typehue:${s}` : isChrome(n) ? `chrome:${s}` : `root:${s}`;
+  };
+  const isText = (n) => /label|tooltip|title|text|row/i.test(shortName(n));
+  const OPAQUE = (v) => /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(v);
+
+  // theme evidence, strongest first.
+  //  (a) the name says so: `…Light` / `…Dark`, `BG_LIGHT`, `LABEL_COLOR_DARK`.
+  const nameTheme = (n) => { const s = shortName(n); return /light/i.test(s) ? "light" : /dark/i.test(s) ? "dark" : null; };
+  //  (b) the SIBLING-PAIR convention this palette already runs on: bgDark/bgLight,
+  //      monoDark/monoLight, labelDark/labelLight — a colour whose `<name>Light`
+  //      sibling exists is the DARK member of a pair, because the renderer's job
+  //      is to choose between them. This is the rule that keeps the gate honest
+  //      across an a11y fix: while `accent` stands alone it is painted on both
+  //      grounds and its light ratio is a real finding; the day an `accentLight`
+  //      sibling lands beside it, the same rule retires that pairing with no edit
+  //      here and no waiver ever written.
+  const allSlots = new Set(entries.map((e) => slot(e.name)));
+  const hasLightSibling = (n) => allSlots.has(`${slot(n)}light`);
+  const hasDarkSibling = (n) => allSlots.has(`${slot(n)}dark`);
+  //  (c) the renderer's own branch: an identifier used ONLY inside the dark (or
+  //      only the light) arm of a `theme === "light" ? A : B` is painted only
+  //      there. That is how NODE_WHITE is dark-only despite its name.
+  const sourceTheme = (n) => {
+    const decl = declLines.get(n);
+    if (decl === undefined) return null;
+    const word = new RegExp(`\\b${n.replace(/[$]/g, "\\$")}\\b`);
+    let uses = 0, light = 0, dark = 0;
+    srcLines.forEach((line, i) => {
+      if (i === decl || !word.test(line)) return;
+      uses++;
+      const t = line.match(/theme\s*===\s*"light"\s*\?([^:]*):(.*)$/);
+      if (!t) return;
+      if (word.test(t[1])) light++;
+      else if (word.test(t[2])) dark++;
+    });
+    if (uses === 0) return null;
+    if (light === uses && dark === 0) return "light";
+    if (dark === uses && light === 0) return "dark";
+    return null;
+  };
+  const definiteTheme = (n) =>
+    nameTheme(n) || (hasLightSibling(n) ? "dark" : hasDarkSibling(n) ? "light" : null) || sourceTheme(n);
+
+  // ── grounds, deduplicated ON THE VALUE. `canvas` and `bgDark` are the same
+  // #16161a under two names; one ground, once. A ground's theme is read off its
+  // own luminance, not its name — a ground nearer black IS the dark ground.
+  const groundByTheme = new Map();
+  for (const e of entries) {
+    if (!isGround(e.name) || !OPAQUE(e.value) || isChrome(e.name)) continue;
+    const theme = contrast(e.value, "#000000") > contrast(e.value, "#ffffff") ? "light" : "dark";
+    const g = groundByTheme.get(theme);
+    if (!g) groundByTheme.set(theme, { value: e.value.toLowerCase(), names: new Set([e.name]) });
+    else if (g.value === e.value.toLowerCase()) g.names.add(e.name);
+    else failH2(`  Part H2 FAIL: two different ${theme} grounds — ${[...g.names][0]} is ${g.value} but ${e.name} is ${e.value}; the canvas has one ground per theme, so one of these is not a ground or the palette has drifted.`);
+  }
+
+  // ── theme evidence is pooled PER SLOT, not per name. `NODE_WHITE` proves
+  // #f2f3f8 is dark-only; the token path `graph.nodeWhite` carries the same
+  // bytes and simply cannot say. A name that is SILENT is not evidence of
+  // "both" — otherwise the token-side copy of every colour re-fabricates on the
+  // light ground exactly the pairings the renderer-side copy just ruled out.
+  // Only INK names vote. A ground is not an ink: #16161a is both the dark
+  // canvas and the light tooltip's title colour, and letting the ground's own
+  // "dark" reach the ink pool would pair that title against itself.
+  const themesBySlot = new Map();
+  for (const e of entries) {
+    if (isGround(e.name) || isChrome(e.name)) continue;
+    const t = definiteTheme(e.name);
+    if (!t) continue;
+    const k = slot(e.name);
+    if (!themesBySlot.has(k)) themesBySlot.set(k, new Set());
+    themesBySlot.get(k).add(t);
+  }
+  const themesOf = (name) => {
+    const s = themesBySlot.get(slot(name));
+    return s && s.size ? [...s] : ["light", "dark"];
+  };
+
+  // ── what the renderer actually PAINTS for a given ink in a given theme.
+  // The per-type hues are the one transformed family: nodeFill() paints
+  // `theme === "light" ? shiftL(hex, -0.22) : hex`, and the legend swatch
+  // repeats that transform so the key matches the dot. Scoring the raw hue on
+  // the light ground measures a colour that never reaches the screen.
+  const hexToRgb = (h) => { let s = h.replace("#", ""); if (s.length === 3) s = s.split("").map((c) => c + c).join(""); return [parseInt(s.slice(0, 2), 16), parseInt(s.slice(2, 4), 16), parseInt(s.slice(4, 6), 16)]; };
+  const rgbToHex = (r, g, b) => "#" + [r, g, b].map((v) => Math.round(Math.max(0, Math.min(255, v))).toString(16).padStart(2, "0")).join("");
+  // HSL lightness shift — a byte-for-byte port of shiftL() in bp-graph.js. It is
+  // duplicated rather than imported because the renderer is a browser artifact
+  // with no module surface; Part A's emit fence keeps the PALETTE in lockstep,
+  // and this function's own fixture below keeps THIS copy honest.
+  const shiftL = (hex, dl) => {
+    const [R, G, B] = hexToRgb(hex).map((v) => v / 255);
+    const max = Math.max(R, G, B), min = Math.min(R, G, B);
+    let l = (max + min) / 2, h = 0, s = 0;
+    if (max !== min) {
+      const d = max - min;
+      s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+      if (max === R) h = (G - B) / d + (G < B ? 6 : 0);
+      else if (max === G) h = (B - R) / d + 2;
+      else h = (R - G) / d + 4;
+      h /= 6;
+    }
+    l = Math.max(0, Math.min(1, l + dl));
+    const hue2rgb = (p, q, t) => { if (t < 0) t += 1; if (t > 1) t -= 1; if (t < 1 / 6) return p + (q - p) * 6 * t; if (t < 1 / 2) return q; if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6; return p; };
+    if (s === 0) return rgbToHex(l * 255, l * 255, l * 255);
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s, p = 2 * l - q;
+    return rgbToHex(hue2rgb(p, q, h + 1 / 3) * 255, hue2rgb(p, q, h) * 255, hue2rgb(p, q, h - 1 / 3) * 255);
+  };
+  // Fixture for the port above: a hand-checked value from the renderer's own
+  // transform. If this drifts, every typeHue verdict below is measuring a colour
+  // bp-graph.js does not paint, so it refuses rather than reports.
+  if (shiftL("#A3E635", -0.22) !== "#669813")
+    failH2(`  Part H2 FAIL: the shiftL() port disagrees with its fixture — shiftL("#A3E635", -0.22) gave ${shiftL("#A3E635", -0.22)}, expected #669813 (bp-graph.js nodeFill()'s light-ground transform). Every per-type hue verdict rests on this; REFUSING rather than reporting.`);
+  const paintedValue = (name, value, theme) => (isTypeHue(name) && theme === "light" ? shiftL(value, -0.22) : value);
+
+  // ── Known sub-AA pairings. AUTHORED EMPTY, and the key it would take is the
+  // resolved pair `"<ink>|<ground>"` — two colours, no variable name, no file:
+  // the only key that survives the palette moving house. It is empty because on
+  // a tree carrying the graph a11y fix nothing here is sub-AA; a pairing that IS
+  // sub-AA is a defect to fix, and an entry added to buy a green is the stale
+  // exemption this part exists to prevent. The table reds in BOTH directions —
+  // an unlisted failure reds, and an entry whose pairing has risen to AA or no
+  // longer exists reds as stale, so it cannot outlive its subject.
+  const KNOWN_SUB_AA = {};
+  const seenKnown = new Set();
+
+  const AA_GRAPH = { text: 4.5, nontext: 3.0 };
+  // One record per RESOLVED pair. Names accumulate into it for the message; the
+  // strictest need any contributor implies governs. Nineteen facts read as
+  // nineteen however many names carry them.
+  const pairs = new Map();
+  let inkNames = 0, translucent = 0, chromeSkipped = 0;
+  for (const e of entries) {
+    if (isGround(e.name)) continue;
+    if (isChrome(e.name)) { chromeSkipped++; continue; }
+    if (!OPAQUE(e.value)) { translucent++; continue; }
+    inkNames++;
+    for (const theme of themesOf(e.name)) {
+      const ground = groundByTheme.get(theme);
+      if (!ground) continue;
+      const ink = paintedValue(e.name, e.value, theme).toLowerCase();
+      const id = `${ink}|${ground.value}`;
+      let rec = pairs.get(id);
+      if (!rec) { rec = { ink, ground: ground.value, theme, names: new Set(), need: AA_GRAPH.nontext }; pairs.set(id, rec); }
+      rec.names.add(e.name);
+      if (isText(e.name)) rec.need = AA_GRAPH.text;
+    }
+  }
+
+  for (const [id, rec] of pairs) {
+    let ratio;
+    try { ratio = contrast(rec.ink, rec.ground); }
+    catch (err) { failH2(`  Part H2 FAIL: ${id} — contrast() threw (${err.message})`); continue; }
+    const known = Object.prototype.hasOwnProperty.call(KNOWN_SUB_AA, id);
+    if (known) seenKnown.add(id);
+    const who = [...rec.names].sort().join(", ");
+    if (ratio < rec.need - 1e-9) {
+      if (known) console.log(`  known ${id} = ${ratio.toFixed(2)} < ${rec.need} — ${KNOWN_SUB_AA[id]}`);
+      else failH2(`  Part H2 FAIL: ${id} (${rec.theme} ground, ${rec.need === AA_GRAPH.text ? "text" : "nontext"}) = ${ratio.toFixed(2)} < ${rec.need} — painted by ${who}; raise the value in ${FAMILY} / ${GRAPH_JS}, or give it a per-theme sibling, or justify the PAIR in KNOWN_SUB_AA`);
+    } else if (known) {
+      failH2(`  Part H2 FAIL: ${id} = ${ratio.toFixed(2)} ≥ ${rec.need} but is still listed in KNOWN_SUB_AA — the defect is FIXED, delete the entry (a stale exemption hides the next regression)`);
+    }
+  }
+  for (const id of Object.keys(KNOWN_SUB_AA))
+    if (!seenKnown.has(id)) failH2(`  Part H2 FAIL: KNOWN_SUB_AA lists ${id}, which the derivation never produced — the exemption names a pair nothing paints; delete it`);
+
+  // ── the refusals. A guard that resolves nothing is theatre, not a pass, and a
+  // derivation that quietly narrowed to zero looks exactly like a clean tree.
+  if (pairs.size === 0)
+    failH2(`  Part H2 FAIL: REFUSING — derived ZERO pairings from ${FAMILY} (${fromFamily} names) ∪ ${GRAPH_JS} (${fromRenderer} names). An empty read is a broken derivation, never a pass.`);
+  if (fromFamily === 0) failH2(`  Part H2 FAIL: REFUSING — the token family ${FAMILY} yielded no colours; the family was renamed, emptied, or moved.`);
+  if (fromRenderer === 0) failH2(`  Part H2 FAIL: REFUSING — ${GRAPH_JS} yielded no colours; the generated palette block was renamed, emptied, or moved.`);
+  if (groundByTheme.size < 2) failH2(`  Part H2 FAIL: REFUSING — grounds cover only [${[...groundByTheme.keys()].join(", ")}]; both light and dark must resolve or half the palette is unevaluated.`);
+  // The floor that catches a derivation narrowing without going empty: every
+  // per-type hue must produce a pairing on BOTH grounds, and the token family
+  // declares how many there are. A regex that stops matching TYPE_HEX, or a
+  // theme rule that over-binds, drops this below the count and reds here rather
+  // than presenting as a quieter green.
+  const hueNames = new Set(entries.filter((e) => isTypeHue(e.name) && OPAQUE(e.value)).map((e) => e.name));
+  const hueValues = new Set(entries.filter((e) => isTypeHue(e.name) && OPAQUE(e.value)).map((e) => e.value.toLowerCase()));
+  const huePairs = [...pairs.values()].filter((r) => [...r.names].some(isTypeHue));
+  if (hueNames.size < 2)
+    failH2(`  Part H2 FAIL: REFUSING — ${hueNames.size} per-type hue name(s) matched; the "Full color" node fills are most of this gate's surface and cannot be one colour.`);
+  if (huePairs.length < hueValues.size * 2)
+    failH2(`  Part H2 FAIL: REFUSING — ${hueValues.size} distinct per-type hues produced only ${huePairs.length} pairings, not the ${hueValues.size * 2} a both-grounds evaluation owes. A hue bound to one theme is a derivation that narrowed, which is how a gate goes quiet without going empty.`);
+
+
+  // ── the accepted-exposure record, ENFORCED rather than trusted ────────────
+  // A written finding does not fire by itself. The record above the part header
+  // is the WHOLE of this row's answer to the green-apart/red-together class, and
+  // a comment block is deletable by anyone editing this file for an unrelated
+  // reason — which is exactly how an ACCEPTED exposure turns back into a SILENT
+  // one, with nothing anywhere reporting the change. So Part H2 reads its own
+  // source and refuses to pass without it. This arm guards the RECORD, not the
+  // class; the record itself says why no guard on the class is landable here.
+  {
+    const MARK = "ACCEPTED-EXPOSURE RECORD: green-apart/red-together";
+    const SELF = fileURLToPath(import.meta.url);
+    let selfSrc = null;
+    try { selfSrc = readFileSync(SELF, "utf8"); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read own source ${SELF} (${err.code || err.message}) — the accepted-exposure record is verified by reading this file, so an unreadable self is a REFUSAL, never a pass.`); }
+    if (selfSrc !== null) {
+      const srcLines = selfSrc.split("\n");
+      const isComment = (l) => l.trim().startsWith("//");
+      // Markers are matched only on COMMENT lines, so the literals in this arm
+      // (which necessarily spell the same words) can never be mistaken for the
+      // block they delimit.
+      const markerAt = (tag) => srcLines.flatMap((l, i) => (isComment(l) && l.includes(`${MARK} (${tag})`) ? [i] : []));
+      const begins = markerAt("BEGIN"), ends = markerAt("END");
+      if (begins.length !== 1 || ends.length !== 1 || ends[0] <= begins[0] + 1) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record is missing or unbalanced — ${begins.length} BEGIN and ${ends.length} END comment marker(s) for "${MARK}" in ${SELF}, needing exactly one of each with prose between them. Criterion c4 of task-4462bbaf17f63ec1 chose option (b), a WRITTEN statement, so the statement IS the deliverable: restore it rather than deleting this arm.`);
+      } else {
+        const body = srcLines.slice(begins[0] + 1, ends[0]);
+        const stray = body.filter((l) => l.trim() !== "" && !isComment(l));
+        if (stray.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record holds ${stray.length} non-comment line(s) — the block is prose only, so code inside it means the markers have drifted onto something they do not delimit.`);
+        const prose = body.map((l) => l.trim().replace(/^\/\/ ?/, "")).join(" ").replace(/\s+/g, " ").trim();
+        const words = prose.split(" ").filter(Boolean).length;
+        const MIN_WORDS = 120;
+        if (words < MIN_WORDS)
+          failH2(`  Part H2 FAIL: the accepted-exposure record is ${words} words, under the ${MIN_WORDS}-word floor — an exposure accepted in one sentence is not on the record, it is waved through. Restore the reasoning, or re-open the criterion.`);
+        // Each phrase carries one load-bearing half of the statement: WHICH
+        // option was taken, WHAT is being accepted, WHY no venue reachable from
+        // this file can catch the class, WHERE the real remedy lives, and WHICH
+        // row owns the decision. Lose one and the record stops saying the thing
+        // it was stamped for while still looking like a paragraph.
+        const REQUIRED = ["OPTION (b) IS CHOSEN", "no standing guard", "Doc budgets + anchors", "required-checks.json", "branch protection", "task-4462bbaf17f63ec1"];
+        const missing = REQUIRED.filter((phrase) => !prose.includes(phrase));
+        if (missing.length)
+          failH2(`  Part H2 FAIL: the accepted-exposure record no longer states ${missing.map((m) => JSON.stringify(m)).join(", ")} — each names one load-bearing half of the decision (which option, what is accepted, why no venue here can catch it, where the remedy lives, which row owns it), so a record that has lost one has stopped saying what it was stamped for.`);
+        recordWords = words;
+      }
+    }
+  }
+
+  // ── the record's PREMISE, read from the repo instead of restated ──────────
+  // The arm above proves the record is PRESENT and still SAYS its five load-
+  // bearing things. It cannot tell whether any of them is still TRUE. That gap is
+  // the whole risk of an option-(b) answer: the record is not a preference, it is
+  // a DERIVATION from three facts about this repository, and if any of them
+  // changes the record keeps reading like a reasoned decision while having become
+  // a false sentence committed to main. The assertion is where people stop
+  // looking, so the three facts are checked here, at their sources:
+  //
+  //   1. VENUE. `node design/check.mjs` is invoked from exactly one workflow.
+  //      A second invocation — especially from a workflow that publishes a
+  //      REQUIRED context — is precisely the venue the record says does not
+  //      exist, and code added to this file would then be able to stop a merge.
+  //   2. AUTHORITY. That workflow's context is not in branch protection's
+  //      required set, and is still carried in required-checks.json's own
+  //      `exclusions`.
+  //   3. THE REAL REMEDY. `required_status_checks.strict` is false — that flag IS
+  //      "require branches to be up to date before merging", the mechanism the
+  //      record names as the thing that would actually catch the class.
+  //
+  // Note the direction: 2 and 3 red when the world gets BETTER. That is intended.
+  // A ratchet has two failure directions, and an exposure that has quietly BEEN
+  // guarded must stop being carried as accepted just as loudly as one whose
+  // reasoning rotted. Every message below says which way it went.
+  {
+    const REQ_PATH = ".github/required-checks.json";
+    const WF_DIR = ".github/workflows";
+    const CTX = "Doc budgets + anchors";
+    const HOME_WF = "doc-gates.yml";
+    // `node design/check.mjs` on a real command line, never in a YAML comment and
+    // never inside the `paths:` list that merely NAMES the file.
+    const INVOKES = /(?:^|[\s;&|(])node\s+design\/check\.mjs(?![\w./-])/;
+
+    let wfFiles = null;
+    try { wfFiles = readdirSync(join(repoRoot, WF_DIR)).filter((n) => /\.ya?ml$/.test(n)).sort(); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR} (${err.code || err.message}) — the accepted-exposure record's first premise is "this file has exactly one CI venue", and an unreadable workflow directory means that premise is UNMEASURED, which is a REFUSAL rather than a pass.`); }
+
+    let venues = null;
+    if (wfFiles !== null) {
+      if (wfFiles.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${WF_DIR} lists ZERO workflow files. An empty read is a broken derivation, never a pass: it would report "one venue" as "no second venue" and the premise check would measure nothing.`);
+      } else {
+        venues = [];
+        for (const n of wfFiles) {
+          let src = null;
+          try { src = readFileSync(join(repoRoot, WF_DIR, n), "utf8"); }
+          catch (err) { failH2(`  Part H2 FAIL: cannot read ${WF_DIR}/${n} (${err.code || err.message}) — one unreadable workflow is one unsearched venue, so the "exactly one CI venue" premise cannot be answered from ${wfFiles.length - 1} of ${wfFiles.length} files.`); continue; }
+          if (src.split("\n").some((l) => !/^\s*#/.test(l) && INVOKES.test(l))) venues.push(n);
+        }
+        if (venues.length === 0) {
+          failH2(`  Part H2 FAIL: REFUSING — no workflow in ${WF_DIR} (${wfFiles.length} file(s)) invokes \`node design/check.mjs\` at all. Either this gate stopped running in CI, or the invocation was reworded past ${INVOKES} — both leave the venue premise unmeasurable, and "zero venues" must never read as "one venue".`);
+        } else if (venues.length !== 1 || venues[0] !== HOME_WF) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's VENUE premise no longer holds — \`node design/check.mjs\` is invoked from [${venues.join(", ")}], not from ${HOME_WF} alone. The record (option (b)) rests on this file having exactly one CI venue, publishing one non-required context; a second venue may be able to stop a merge, in which case a standing guard here IS landable and criterion c4 of task-4462bbaf17f63ec1 must be re-opened and re-answered as (a).`);
+        } else {
+          let home = null;
+          try { home = readFileSync(join(repoRoot, WF_DIR, HOME_WF), "utf8"); } catch { /* unreachable: read above succeeded */ }
+          if (home !== null && !home.includes(`name: ${CTX}`)) {
+            failH2(`  Part H2 FAIL: ${WF_DIR}/${HOME_WF} no longer declares \`name: ${CTX}\` — the record names that exact context as the one thing this file's venue publishes, and required-checks.json is keyed on the same string. A renamed job silently detaches the record's authority premise from the check it is about; re-point both, or re-open c4.`);
+          }
+        }
+      }
+    }
+
+    let req = null;
+    try { req = JSON.parse(readFileSync(join(repoRoot, REQ_PATH), "utf8")); }
+    catch (err) { failH2(`  Part H2 FAIL: cannot read or parse ${REQ_PATH} (${err.code || err.message}) — the record cites this file BY NAME for both its authority premise and its "no merge queue, no strict" remedy premise. Unreadable means UNMEASURED, which is a refusal.`); }
+
+    let strict = null, requiredNames = null;
+    if (req !== null) {
+      const checks = req?.protection?.required_status_checks?.checks;
+      if (!Array.isArray(checks) || checks.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty protection.required_status_checks.checks array (got ${JSON.stringify(checks)}). An empty or missing required set would make "${CTX} is not required" true VACUOUSLY, which is the shape of a premise check that has stopped measuring.`);
+      } else {
+        requiredNames = checks.map((c) => c?.context);
+        if (requiredNames.includes(CTX)) {
+          failH2(`  Part H2 FAIL: the accepted-exposure record's AUTHORITY premise has FLIPPED — "${CTX}" is now in ${REQ_PATH}'s required set [${requiredNames.join(", ")}]. This is the world getting BETTER: a red from this file can now stop a merge, so a standing guard against the green-apart/red-together class IS landable here and option (b) is no longer the honest answer. Re-open criterion c4 of task-4462bbaf17f63ec1 and answer it as (a); do not restore the old setting to quiet this line.`);
+        }
+      }
+      const excl = req?.exclusions;
+      if (!Array.isArray(excl) || excl.length === 0) {
+        failH2(`  Part H2 FAIL: REFUSING — ${REQ_PATH} has no non-empty \`exclusions\` array (got ${Array.isArray(excl) ? "[]" : JSON.stringify(excl)}); the record quotes that array's reason for "${CTX}" verbatim, so its absence leaves the citation unverifiable rather than false.`);
+      } else if (!excl.some((e) => e?.context === CTX)) {
+        failH2(`  Part H2 FAIL: ${REQ_PATH} no longer carries "${CTX}" in \`exclusions\` (${excl.length} row(s): ${excl.map((e) => e?.context).filter(Boolean).slice(0, 6).join(", ")}…). The record cites that row as the reason this file's context holds no merge authority; with the row gone the citation points at nothing, whichever way the underlying fact went. Re-ground the record or re-open c4.`);
+      }
+      strict = req?.protection?.required_status_checks?.strict;
+      if (strict !== false) {
+        failH2(`  Part H2 FAIL: the accepted-exposure record's REMEDY premise has FLIPPED — ${REQ_PATH} now records protection.required_status_checks.strict = ${JSON.stringify(strict)}, not false. That flag IS "require branches to be up to date before merging", which the record names as the mechanism that would actually catch this class. If it is on, the class is guarded at the repository and the record must stop claiming it is accepted-and-unguarded. Re-open criterion c4 of task-4462bbaf17f63ec1; this is a BETTER world, not a regression to revert.`);
+      }
+    }
+
+    if (venues !== null && requiredNames !== null && strict === false) {
+      premiseNote = `premise live-checked (1 venue ${venues.join("")} of ${wfFiles.length} workflow(s), "${CTX}" absent from the ${requiredNames.length} required context(s), strict=false)`;
+    }
+  }
+
+  // The one hook this part lacked until task-e33b3fc1a5fc921b. It goes through
+  // failH2, not the shared fail(), so the injected failure is counted by the
+  // SAME counter the ok line below is gated on — a hook that bypassed h2Failed
+  // would red the gate and still print this part's ok, which is precisely the
+  // false-reassurance shape --selftest exists to catch.
+  if (FAULT.has("H2")) failH2("  Part H2 FAIL: injected fault (--selftest)");
+
+  if (h2Failed === 0)
+    console.log(`  ok   ${pairs.size} distinct colour pairs (keyed on the resolved ink|ground, from ${inkNames} ink names × ${groundByTheme.size} grounds; ${translucent} translucent and ${chromeSkipped} overlay-chrome names out of scope) derived from ${FAMILY} (${fromFamily}) ∪ ${GRAPH_JS} (${fromRenderer}), all ≥ AA (text 4.5 / nontext 3.0), ${Object.keys(KNOWN_SUB_AA).length} waived; accepted-exposure record present and intact (${recordWords} words, option (b), ${premiseNote})`);
+}
 
 // ── Part I: the write fence's own predicates, proven able to fail ────────────
 // Part A above is the fence's REPORTING half; `run()` in emit.mjs is its
@@ -959,6 +1858,7 @@ if (failed === failedBeforeH)
   if (lostLines("a\n\n\nb\n", region).length !== 0)
     fail(`  Part I FAIL: lostLines() must ignore blank lines, got ${JSON.stringify(lostLines("a\n\n\nb\n", region))}`);
 
+  if (FAULT.has("I")) fail("  Part I FAIL: injected fault (--selftest)");
   if (failed === failedBeforeI)
     console.log(`  ok   ${cases.length} attribution outcomes + 3 lostLines properties`);
 }
@@ -1016,6 +1916,7 @@ console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
           `    the step from space.air + AIR_STEPS.`,
       );
   }
+  if (FAULT.has("J")) fail("  Part J FAIL: injected fault (--selftest)");
   if (failed === failedBeforeJ)
     console.log(`  ok   ${AIR_STEPS.length} air steps emitted as beat ratios, bridged onto --bp-air-*, and each read by a live consumer`);
 }
@@ -1039,15 +1940,18 @@ console.log("\ndesign/check.mjs — Part J: air-scale consumer census");
 //      two are censused as a PAIR, per rule, and a half-breakout reds.
 console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
 {
-  // Part K counts its OWN failures rather than reading the shared `failed`
-  // boolean the parts above it use. That flag is sticky: once ANY earlier part
-  // has tripped, `failed === failedBefore<X>` is true again and the part prints
-  // its green line beside its own red ones. Proven while mutation-testing this
-  // part — dropping the gutter term reds the mirror check first, and Part K then
-  // printed both two FAILs and its `ok`. The run still exits 1, so nothing ships
-  // on it, but a green line under a red one is the kind of output that teaches a
-  // reader to skim. Parts D-J share the pattern and are left alone here: they
-  // belong to other changes in flight.
+  // Part K counts its OWN failures in `kFailed` as well as calling `fail`. That
+  // local count was once the ONLY defence against a sticky shared flag: `failed`
+  // was a boolean, so once ANY earlier part had tripped it, `failed ===
+  // failedBefore<X>` was true again and a part printed its green line beside its
+  // own red ones. Proven while mutation-testing this part — dropping the gutter
+  // term reds the mirror check first, and Part K then printed both two FAILs and
+  // its `ok`. `failed` is now a COUNT (see its declaration at the top of this
+  // file), so `failed === failedBefore<X>` is a per-part delta and Parts D-J are
+  // correct by the same construction. `kFailed` is redundant with that now, and is
+  // kept only because Parts L-O already spell the same local-count idiom (lFailed,
+  // mFailed, nFailed, oFailed); churning five parts to save five lines would cost
+  // more in review than it buys.
   let kFailed = false;
   const kFail = (msg) => { kFailed = true; fail(msg); };
   const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
@@ -1175,6 +2079,7 @@ console.log("\ndesign/check.mjs — Part K: evidence-band consumer census");
     }
   }
 
+  if (FAULT.has("K")) kFail("  Part K FAIL: injected fault (--selftest)");
   if (!kFailed)
     console.log(
       `  ok   ${EVIDENCE_KEYS.length} evidence tokens emitted with their authored units, bridged onto --bp-evidence-*, ` +
@@ -1273,6 +2178,7 @@ console.log("\ndesign/check.mjs — Part L: section-boundary consumer census");
         `    \`> #paper-body > div:not([class]) > h2\` the device is dead on the page that ships.`,
     );
 
+  if (FAULT.has("L")) lFail("  Part L FAIL: injected fault (--selftest)");
   if (!lFailed)
     console.log(
       `  ok   ${SECTION_KEYS.length} section tokens emitted, bridged and consumed on both the reader and the editor surface, ` +
@@ -1361,6 +2267,7 @@ console.log("\ndesign/check.mjs — Part M: rule-ladder consumer census + heavy-
     }
   }
 
+  if (FAULT.has("M")) mFail("  Part M FAIL: injected fault (--selftest)");
   if (!mFailed)
     console.log(
       `  ok   --tok-rule-hairline emitted, bridged and consumed on both surfaces, and neither stylesheet ` +
@@ -1536,6 +2443,7 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
     console.log(`  ${pad("TOTAL", wPath)}  ${pad(baseTotal, 8)}  ${pad(actualTotal, 6)}`);
   }
 
+  if (FAULT.has("N")) nFail("  Part N FAIL: injected fault (--selftest)");
   if (!nFailed)
     console.log(
       `  ok   the ${MOTION_STEPS.length}-rung motion ladder reaches ${MOTION_SURFACES.length} surface(s) ` +
@@ -1543,6 +2451,492 @@ console.log("\ndesign/check.mjs — Part N: motion-ladder parity + hand-typed du
         `${actualTotal} hand-typed duration literal(s) frozen — none grew, none silently shrank`,
     );
 }
+
+// ── Part O: hand-stamped TYPE/MEASURE literal ratchet ────────────────────────
+// The third literal census, after Part E (colour) and Part N (duration). Both of
+// those were written because nothing in the repo could SEE their category; type
+// was the last blind one. Part E's LEDGER_LITERAL matches colour and only colour
+// — `git grep font-size design/check.mjs` was empty before this part — so a
+// hand-stamped `font-size: 13px` added to api/assets/paper-surface/paper-surface.css
+// was invisible to every gate in CI. This part closes that hole with Part E's
+// machinery, over size instead of colour.
+//
+// FILE SET — DERIVED, NEVER HAND-LISTED. The surfaces are exactly the `.css` /
+// `.heex` members of the colour ledger (`entries` in design/exemptions.json):
+// those are, by construction, the stylesheets the design system has already
+// declared it owns. `type.entries` must COVER that derived set exactly — a new
+// colour-ledger stylesheet reds this part until its type baseline is stamped
+// too, and a stylesheet leaving the colour ledger reds it until its type row
+// goes with it. The non-CSS colour entries (bp-graph.js Canvas renderers, the
+// deploy.sh holding page) are excluded: they hold no CSS type declarations, and
+// a row frozen at 0 would be a ratchet with nothing to hold.
+//
+// COUNTING RULE (documented here, next to the implementation, as E's and N's are):
+//   A "type/measure literal" is a number carrying a `px`/`rem`/`em`/`ch` unit
+//   inside the VALUE of a `font-size` / `letter-spacing` / `line-height` /
+//   `max-width` declaration — plus, for `line-height` ONLY, a UNITLESS ratio
+//   (`line-height: 1.45`), which is that property's ordinary hand-stamped form;
+//   excluding it would leave line-height all but uncounted. `%` is not counted
+//   (a percentage is relative layout, not a stamped measure).
+//   `var(--bp-…)` is not a number and so is not counted — that is exactly what
+//   lets a literal→token sweep register as a SHRINK.
+//   PRECEDENCE — a fallback literal COUNTS: in `max-width: var(--x, 50ch)` the
+//   `50ch` is counted. It is a hand-stamped value like any other; it paints
+//   whenever the token is absent, and dropping it (the tokenized end state) must
+//   register as a shrink, exactly as dropping a dead `var(--paper-x, #hex)`
+//   colour fallback does under Part E.
+//   Blanked before counting (newline-preserving, so no regex spans the gap):
+//     1. every BEGIN/END GENERATED region — an emitted size is not a hand-stamp;
+//     2. comments (CSS block, HTML, HEEx) — both via Part N's motionBlankAll,
+//        whose extension set (.css/.heex/.html/.ex) is a superset of this one's;
+//     3. `@media` PRELUDES — `@media (max-width: 720px)` is a layout breakpoint,
+//        not a stamped measure, and counting it would red this gate on every new
+//        responsive rule for no design reason. Declarations INSIDE the block are
+//        still counted; only the condition list is blanked.
+console.log("\ndesign/check.mjs — Part O: hand-stamped type/measure literal ratchet");
+{
+  let oFailed = 0;
+  const oFail = (m) => { console.error(m); oFailed++; failed++; };
+
+  const TYPE_DECL = /\b(font-size|letter-spacing|line-height|max-width)\s*:\s*([^;{}]*)/gi;
+  const TYPE_UNIT = /(?<![\w.-])\d*\.?\d+(?:px|rem|em|ch)(?![\w-])/gi;
+  // A bare ratio: a number not glued to a unit, a word, a `%` or a `#`.
+  const TYPE_RATIO = /(?<![\w.#-])\d*\.?\d+(?![\w.%-])/g;
+  const typeBlank = (m) => m.replace(/[^\n]/g, " ");
+
+  function countTypeLiterals(path) {
+    const src = motionBlankAll(readFileSync(join(repoRoot, path), "utf8"), path)
+      .replace(/@media[^{]*/gi, typeBlank);
+    let n = 0;
+    for (const m of src.matchAll(TYPE_DECL)) {
+      const units = (m[2].match(TYPE_UNIT) || []).length;
+      n += m[1].toLowerCase() === "line-height"
+        // Strip the unit-bearing numbers first so `1.5rem` is not counted twice.
+        ? units + (m[2].replace(TYPE_UNIT, " ").match(TYPE_RATIO) || []).length
+        : units;
+    }
+    return n;
+  }
+
+  // The derived set: every stylesheet/template already on the COLOUR ledger.
+  const derived = (ledger.entries || [])
+    .map((e) => e.path)
+    .filter((p) => p.endsWith(".css") || p.endsWith(".heex"));
+  const typeLedger = (ledger.type && ledger.type.entries) || [];
+  const stamped = typeLedger.map((e) => e.path);
+
+  if (derived.length === 0)
+    oFail(
+      "  Part O FAIL: the derived file set is EMPTY — design/exemptions.json `entries` holds no " +
+        ".css/.heex surface, so this ratchet would scan nothing and pass forever.",
+    );
+  const missing = derived.filter((p) => !stamped.includes(p));
+  const orphan = stamped.filter((p) => !derived.includes(p));
+  if (missing.length)
+    oFail(
+      `  Part O FAIL: ${missing.length} colour-ledger stylesheet(s) carry NO type baseline: ` +
+        `${missing.join(", ")}.\n` +
+        `    The file set is derived from \`entries\`, so a surface joining the colour ledger joins\n` +
+        `    this one. Add a \`type.entries\` row with the COMPUTED count (run this gate to read it).`,
+    );
+  if (orphan.length)
+    oFail(
+      `  Part O FAIL: ${orphan.length} \`type.entries\` row(s) name a path that is no longer a ` +
+        `.css/.heex colour-ledger entry: ${orphan.join(", ")}. Drop the row in the same diff.`,
+    );
+
+  const oRows = [];
+  let oBaseTotal = 0, oActualTotal = 0;
+  for (const entry of typeLedger) {
+    if (!derived.includes(entry.path)) continue; // already reported as an orphan
+    let actual, firstNew = null;
+    try { actual = countTypeLiterals(entry.path); }
+    catch (e) { oFail(`  Part O FAIL: ${entry.path} — cannot count (${e.message})`); continue; }
+    const baseline = entry.count;
+    oBaseTotal += baseline;
+    oActualTotal += actual;
+    const delta = actual - baseline;
+    oRows.push({ path: entry.path, baseline, actual, delta });
+    if (delta > 0) {
+      // Name the offender, not just the number: find the LAST declaration this
+      // file holds beyond the baseline's worth, which for an appended rule is
+      // the one that was just added. Reported with line + text so the author
+      // does not have to bisect the file.
+      const src = motionBlankAll(readFileSync(join(repoRoot, entry.path), "utf8"), entry.path)
+        .replace(/@media[^{]*/gi, typeBlank);
+      const hits = [];
+      for (const m of src.matchAll(TYPE_DECL)) {
+        const units = (m[2].match(TYPE_UNIT) || []).length;
+        const k = m[1].toLowerCase() === "line-height"
+          ? units + (m[2].replace(TYPE_UNIT, " ").match(TYPE_RATIO) || []).length
+          : units;
+        for (let i = 0; i < k; i++) hits.push(m);
+      }
+      const m = hits[baseline] || hits[hits.length - 1];
+      if (m) {
+        const line = src.slice(0, m.index).split("\n").length;
+        firstNew = `${entry.path}:${line}: ${m[0].trim().replace(/\s+/g, " ").slice(0, 100)}`;
+      }
+      oFail(
+        `  Part O FAIL: ${entry.path} GREW ${baseline} → ${actual} (+${delta}). A new hand-stamped ` +
+          `type/measure literal landed in a font-size/letter-spacing/line-height/max-width ` +
+          `declaration.\n` +
+          (firstNew ? `    first literal past the baseline: ${firstNew}\n` : "") +
+          `    Consume the emitted type scale (var(--text-…)/var(--paper-…)) instead; if the value ` +
+          `is genuinely un-tokenizable, RAISE the baseline in design/exemptions.json IN THIS SAME ` +
+          `DIFF with a note saying which literal and why.`,
+      );
+    } else if (delta < 0) {
+      oFail(
+        `  Part O FAIL: ${entry.path} SHRANK ${baseline} → ${actual} (${delta}) — a type literal was ` +
+          `tokenized (good!). LOWER the baseline to ${actual} in design/exemptions.json IN THIS SAME ` +
+          `DIFF so the ratchet holds (a stale-high baseline lets a future regression hide under the slack).`,
+      );
+    }
+  }
+
+  // POSITIVE CONTROL. A census that scans zero files, or whose every row reads 0,
+  // passes forever and measures nothing — the exact failure Part E's `_retired`
+  // note records for the minified editor bundle. Assert the instrument has a
+  // subject before believing its verdict.
+  if (oRows.length === 0)
+    oFail("  Part O FAIL: no type-ledger row was measured — this part scanned nothing and would pass forever.");
+  else if (oRows.every((r) => r.actual === 0))
+    oFail(
+      "  Part O FAIL: every type-ledger row counted 0 literals. Either every stylesheet is fully " +
+        "tokenized (then retire this part deliberately) or the counting rule stopped matching — " +
+        "a census that finds nothing everywhere is a broken instrument, not a clean tree.",
+    );
+
+  {
+    const pad = (s, n) => String(s).padEnd(n);
+    const wPath = Math.max(4, ...oRows.map((r) => r.path.length));
+    console.log(`  ${pad("path", wPath)}  baseline  actual  delta`);
+    for (const r of oRows) {
+      const mark = r.delta === 0 ? "ok  " : r.delta > 0 ? "GREW" : "SHRUNK";
+      const d = r.delta > 0 ? `+${r.delta}` : String(r.delta);
+      console.log(`  ${pad(r.path, wPath)}  ${pad(r.baseline, 8)}  ${pad(r.actual, 6)}  ${pad(d, 5)} ${mark}`);
+    }
+    console.log(`  ${pad("TOTAL", wPath)}  ${pad(oBaseTotal, 8)}  ${pad(oActualTotal, 6)}`);
+  }
+
+  if (FAULT.has("O")) oFail("  Part O FAIL: injected fault (--selftest)");
+  if (!oFailed)
+    console.log(
+      `  ok   ${oRows.length} derived stylesheet(s), ${oActualTotal} hand-stamped type/measure ` +
+        `literal(s) frozen — none grew, none silently shrank`,
+    );
+}
+
+// ── Part P: the TERMINAL space ladder reaches a real Go consumer ─────────────
+// Parts J/K/L/M census the space families on the WEB surfaces, where a token is
+// a CSS custom property and "dead" means nothing reads the var(). The same
+// families now have a Go arm (internal/pdrender/tokens_gen.go), and that arm can
+// go dead in a way no CSS census can see: a Go symbol that nothing references
+// still COMPILES — package-level vars and consts are not unused-variable errors —
+// so an emitted ladder can sit in a generated file forever, byte-perfect and
+// rendering nothing. That is the exact failure mode the interim loop produced:
+// four web devices shipped and pdrender got zero.
+//
+// So Part P asserts the same chain the CSS parts do, in Go terms:
+//   1. EMITTED    — the symbol is in the generated file, with the value the
+//                   generator derives from tokens.json (ratios verbatim, the
+//                   collapse threshold, the gaps in whole rows, the two glyphs).
+//   2. CONSUMED   — some NON-generated file in internal/pdrender references it.
+//                   tokens_gen.go itself is excluded, so a symbol that only
+//                   appears in its own declaration does not count as read.
+// The ladder's SHAPE (exactly two rungs, monotonic, derived from the ratios
+// rather than hand-listed) is asserted on the Go side, where it can be executed:
+// internal/pdrender/air_test.go.
+console.log("\ndesign/check.mjs — Part P: terminal space-ladder Go consumer census");
+{
+  const failedBeforeP = failed;
+  const pFail = (m) => fail(m);
+  const genPath = "internal/pdrender/tokens_gen.go";
+  const gen = readFileSync(join(repoRoot, genPath), "utf8");
+  // Every non-generated .go file in the package is a candidate consumer. Read
+  // from disk rather than a hand list, so a consumer moved to a new file keeps
+  // working and a consumer DELETED reds here.
+  const pkgDir = join(repoRoot, "internal/pdrender");
+  const consumers = readdirSync(pkgDir)
+    .filter((f) => f.endsWith(".go") && f !== "tokens_gen.go")
+    .map((f) => ({ path: `internal/pdrender/${f}`, text: readFileSync(join(pkgDir, f), "utf8") }));
+
+  const air = tokens.space.air;
+  const sec = tokens.space.section;
+  // [symbol, the exact emitted line it must appear on]
+  // Compared against a SPACE-COLLAPSED copy of the file: the generator aligns
+  // the const block, so padding is a formatting detail and must not be the thing
+  // this census pins. The VALUE is.
+  const genFlat = gen.replace(/[ \t]+/g, " ");
+  const expected = [
+    ["GenAirRowSplit", `GenAirRowSplit = ${AIR_ROW_SPLIT}`],
+    ["GenAirRowsDefault", "GenAirRowsDefault = 1"],
+    ["GenSectionGapRows", `GenSectionGapRows = ${Math.round(sec.beat)}`],
+    ["GenSectionHeadGapRows", `GenSectionHeadGapRows = ${Math.round(sec.gap / air.beat)}`],
+    ["GenAirRatios", "var GenAirRatios = map[string]float64{"],
+    ["GenAirOrder", `var GenAirOrder = []string{${AIR_STEPS.map((k) => `"${k}"`).join(", ")}}`],
+    ["GenRuleGlyph", "var GenRuleGlyph = map[string]string{"],
+  ];
+  for (const [symbol, line] of expected) {
+    if (!genFlat.includes(line))
+      pFail(`  Part P FAIL: ${genPath} does not emit ${symbol} as \`${line}\` — the Go arm has drifted from design/tokens.json`);
+    const hits = consumers.filter(({ text }) => text.includes(symbol));
+    if (hits.length === 0)
+      pFail(
+        `  Part P FAIL: ${symbol} is emitted into ${genPath} but NOTHING in internal/pdrender reads it.\n` +
+          `    An unreferenced Go symbol still compiles, so a dead token here is SILENT — the exact\n` +
+          `    way pdrender ended up with four web devices and zero of its own. Either give it a\n` +
+          `    consumer (air.go / pdrender.go / blocks.go) or drop it from the pdrenderGo() arm in\n` +
+          `    design/emit.mjs.`,
+      );
+  }
+  // Each air ratio is emitted VERBATIM — the Go side must never round, re-rank
+  // or re-type them; the collapse is a predicate applied to these, not a table.
+  for (const step of AIR_STEPS) {
+    if (!genFlat.includes(`"${step}": ${air[step]},`))
+      pFail(`  Part P FAIL: GenAirRatios does not carry ${step}: ${air[step]} verbatim from space.air`);
+  }
+  // Both rule weights resolve to DISTINCT glyphs — a ladder whose two rungs are
+  // the same glyph draws structure and chrome at one weight, which is the drift
+  // space.rule exists to refuse.
+  const glyphs = [ruleGlyph(tokens.space.rule.hairline), ruleGlyph(sec.rule)];
+  if (glyphs[0] === glyphs[1])
+    pFail(`  Part P FAIL: hairline and section rules both resolve to ${JSON.stringify(glyphs[0])} — the terminal rule ladder has collapsed to one weight`);
+  for (const [key, glyph] of [["hairline", glyphs[0]], ["section", glyphs[1]]])
+    if (!gen.includes(`"${key}":`) || !gen.includes(JSON.stringify(glyph)))
+      pFail(`  Part P FAIL: GenRuleGlyph does not emit ${key} as ${JSON.stringify(glyph)}`);
+
+  if (FAULT.has("P")) pFail("  Part P FAIL: injected fault (--selftest)");
+  if (failed === failedBeforeP)
+    console.log(
+      `  ok   ${expected.length} terminal space symbols emitted from space.air/section/rule, ` +
+        `each read by a live consumer in internal/pdrender (${consumers.length} candidate file(s))`,
+    );
+}
+
+// ── Part Q: pdrender's DOWNSTREAM golden consumers ───────────────────────────
+// Part P above proves every emitted space symbol is READ inside internal/pdrender.
+// Being read is not the same as being RENDERED INTO SOMEONE ELSE'S COMMITTED
+// BYTES, and that gap has already cost a round: #18593 (724546d10) changed how
+// pdrender draws a section boundary, dutifully regenerated its OWN 16 fixtures,
+// and left internal/taskboard red on main — taskboard typesets task briefs
+// THROUGH pdrender, so its detail_*/compose_*/paper_* goldens are pdrender output
+// too and nothing told the author they existed. Part P was green the whole time.
+//
+// Part Q closes that. Two halves, and neither is a list:
+//
+//   1. THE CENSUS (a predicate, not a snapshot). A DOWNSTREAM CONSUMER is any
+//      package outside internal/pdrender that (a) imports
+//      github.com/FRIKKern/barkpark/internal/pdrender in a non-generated .go file
+//      and (b) owns a testdata/ directory. Derived by walking the tree on every
+//      run, so a package added later enrols itself and a package that stops
+//      importing pdrender leaves on its own. A pinned list of four package names
+//      would silently un-guard the fifth — the exact defect this repo keeps
+//      filing rows about (Part G shipped with five literal suffixes against ten
+//      real artifacts). The floors below are SHRINK-ONLY: they red when the
+//      census finds LESS than it found when this part was written, which is what
+//      a broken predicate and a deleted consumer both look like.
+//
+//   2. THE AGREEMENT. The section-boundary device is observable in committed
+//      bytes: a full-width run of the structural rule glyph, N blank rows above
+//      it and M below before the section head. pdrender's own goldens and every
+//      downstream consumer's goldens are the SAME renderer's output, so that
+//      (blanks-above, blanks-below, glyph) triple must be identical across all of
+//      them. Regenerating one side and not the other — literally what #18593 did
+//      — breaks the triple, and Part Q reds NAMING the consumer package and the
+//      command that regenerates it.
+//
+// THE LIMIT, stated rather than discovered later: if a rendering change is
+// committed with NO goldens regenerated at all, both sides are equally stale and
+// Part Q is honestly quiet — internal/pdrender's own golden tests red in that
+// case, which is the failure the author cannot miss. Part Q exists for the case
+// where the author DID regenerate, just not everywhere.
+console.log("\ndesign/check.mjs — Part Q: pdrender downstream golden-consumer agreement");
+{
+  const failedBeforeQ = failed;
+  const qFail = (m) => fail(m);
+
+  // Shrink-only floors. Raise one only alongside the change that makes it true.
+  const Q_CONSUMER_FLOOR = 4;        // cmd/barkpark, internal/chat, internal/cli, internal/taskboard
+  const Q_SELF_DEVICE_FLOOR = 4;     // section-boundary devices in internal/pdrender's own goldens
+  const Q_DOWNSTREAM_DEVICE_FLOOR = 3; // …and in its downstream consumers' goldens
+
+  const skipDir = (n) => n.startsWith(".") || n.startsWith("_") || n === "node_modules" || n === "vendor" || n === "testdata";
+  const goPkgDirs = [];
+  const walkPkgs = (rel) => {
+    let entries;
+    try { entries = readdirSync(join(repoRoot, rel || "."), { withFileTypes: true }); } catch { return; }
+    if (entries.some((e) => e.isFile() && e.name.endsWith(".go"))) goPkgDirs.push(rel);
+    for (const e of entries) if (e.isDirectory() && !skipDir(e.name)) walkPkgs(rel ? `${rel}/${e.name}` : e.name);
+  };
+  walkPkgs("");
+
+  const IMPORT = `"github.com/FRIKKern/barkpark/internal/pdrender"`;
+  const consumers = [];
+  for (const dir of goPkgDirs) {
+    if (dir === "internal/pdrender" || dir.startsWith("internal/pdrender/")) continue;
+    let entries;
+    try { entries = readdirSync(join(repoRoot, dir), { withFileTypes: true }); } catch { continue; }
+    if (!entries.some((e) => e.isDirectory() && e.name === "testdata")) continue;
+    const importers = entries
+      .filter((e) => e.isFile() && e.name.endsWith(".go"))
+      .filter((e) => readFileSync(join(repoRoot, dir, e.name), "utf8").includes(IMPORT))
+      .map((e) => e.name);
+    if (importers.length) consumers.push({ dir, importers });
+  }
+
+  // Every committed text artifact under a testdata/ tree. Read recursively: a
+  // golden moved into a subdirectory (internal/pdrender/testdata/golden/) must
+  // not fall out of the census.
+  const textFiles = (rel, out = []) => {
+    let entries;
+    try { entries = readdirSync(join(repoRoot, rel), { withFileTypes: true }); } catch { return out; }
+    for (const e of entries) {
+      if (e.isDirectory()) textFiles(`${rel}/${e.name}`, out);
+      else if (e.isFile() && !e.name.endsWith(".json")) out.push(`${rel}/${e.name}`);
+    }
+    return out;
+  };
+
+  // The section-boundary device as committed BYTES: a line that is nothing but a
+  // run of the structural glyph, with its surrounding blank-row counts. Lines
+  // that merely CONTAIN the glyph (a progress bar's filled head) are not the
+  // device and are not counted — the predicate is "the whole line is the rule".
+  const glyph = ruleGlyph(tokens.space.section.rule);
+  const devicesIn = (text) => {
+    const lines = text.split("\n");
+    const found = [];
+    for (let i = 0; i < lines.length; i++) {
+      const s = lines[i].trim();
+      if (!s || [...new Set(s)].join("") !== glyph) continue;
+      let above = 0;
+      for (let j = i - 1; j >= 0 && lines[j].trim() === ""; j--) above++;
+      let below = 0;
+      for (let k = i + 1; k < lines.length && lines[k].trim() === ""; k++) below++;
+      found.push({ line: i + 1, above, below });
+    }
+    return found;
+  };
+  const sigOf = (d) => `${d.above} blank row(s) above / ${d.below} below / ${JSON.stringify(glyph)}`;
+
+  const scanTree = (rel) => {
+    const hits = [];
+    for (const f of textFiles(rel)) {
+      let text;
+      try { text = readFileSync(join(repoRoot, f), "utf8"); } catch { continue; }
+      for (const d of devicesIn(text)) hits.push({ file: f, ...d });
+    }
+    return hits;
+  };
+
+  const self = scanTree("internal/pdrender/testdata");
+  const selfSigs = new Set(self.map(sigOf));
+
+  if (consumers.length < Q_CONSUMER_FLOOR)
+    qFail(
+      `  Part Q FAIL: the downstream-consumer census found ${consumers.length} package(s), floor is ${Q_CONSUMER_FLOOR}.\n` +
+        `    Either a consumer was deleted, or the predicate (imports ${IMPORT} AND owns testdata/)\n` +
+        `    stopped resolving. A census that shrank is indistinguishable from a census that broke —\n` +
+        `    re-derive it with:\n` +
+        `      git ls-files '*.go' | xargs grep -l ${IMPORT} | sed 's|/[^/]*$||' | sort -u\n` +
+        `    and lower Q_CONSUMER_FLOOR in the same commit that removes the consumer.`,
+    );
+  if (self.length < Q_SELF_DEVICE_FLOOR)
+    qFail(
+      `  Part Q FAIL: internal/pdrender's own goldens hold ${self.length} section-boundary device(s), floor is ${Q_SELF_DEVICE_FLOOR}.\n` +
+        `    Part Q compares downstream goldens against pdrender's own rendering of the device; with\n` +
+        `    no device of its own there is nothing to compare against and this part would pass\n` +
+        `    vacuously. Keep a fixture with an L2 heading after prose, or lower the floor deliberately.`,
+    );
+  if (selfSigs.size > 1)
+    qFail(
+      `  Part Q FAIL: internal/pdrender's own goldens disagree with EACH OTHER about the section\n` +
+        `    boundary: ${[...selfSigs].join(" vs ")}. Some of its fixtures were regenerated and some\n` +
+        `    were not — run: go test ./internal/pdrender -update`,
+    );
+
+  const selfSig = self.length ? sigOf(self[0]) : null;
+  let downstreamDevices = 0;
+  const rows = [];
+  for (const c of consumers) {
+    const hits = scanTree(`${c.dir}/testdata`);
+    downstreamDevices += hits.length;
+    const bad = selfSig ? hits.filter((h) => sigOf(h) !== selfSig) : [];
+    rows.push({ dir: c.dir, importers: c.importers.length, devices: hits.length, bad: bad.length });
+    if (bad.length)
+      qFail(
+        `  Part Q FAIL: ${c.dir} goldens are STALE pdrender output — regenerate them.\n` +
+          `    ${c.dir} renders THROUGH pdrender (imports it in ${c.importers.join(", ")}), so its goldens\n` +
+          `    are pdrender's committed bytes too. internal/pdrender's own goldens draw the section\n` +
+          `    boundary as ${selfSig}, but ${bad.length} device(s) in ${c.dir}/testdata still draw it as\n` +
+          `    ${[...new Set(bad.map(sigOf))].join(" / ")}:\n` +
+          bad.slice(0, 6).map((b) => `      ${b.file}:${b.line}`).join("\n") +
+          `\n    A pdrender rendering change regenerated its OWN fixtures and not these. Fix:\n` +
+          `      go test ./${c.dir} -update\n` +
+          `    (this is #18593's exact shape: 16 pdrender fixtures moved, internal/taskboard stayed\n` +
+          `    behind, main went red for a round and no gate had said a word.)`,
+      );
+  }
+  if (downstreamDevices < Q_DOWNSTREAM_DEVICE_FLOOR)
+    qFail(
+      `  Part Q FAIL: the downstream goldens hold ${downstreamDevices} section-boundary device(s), floor is\n` +
+        `    ${Q_DOWNSTREAM_DEVICE_FLOOR}. Part Q's agreement half has nothing to compare and is passing\n` +
+        `    vacuously — an all-clear and a nothing-measured look identical from the outside. Either a\n` +
+        `    consumer's fixtures lost their section boundary, or the device predicate stopped matching.`,
+    );
+
+  if (FAULT.has("Q")) qFail("  Part Q FAIL: injected fault (--selftest)");
+  if (failed === failedBeforeQ) {
+    for (const r of rows)
+      console.log(`       ${r.dir}  (${r.importers} pdrender importer file(s), ${r.devices} section-boundary device(s) in testdata/)`);
+    console.log(
+      `  ok   ${consumers.length} downstream golden consumer(s) derived by predicate; ` +
+        `${downstreamDevices} downstream + ${self.length} pdrender device(s) agree on ${selfSig}`,
+    );
+  }
+}
+
+// ── Part R: the reading-measure pin ─────────────────────────────────────────
+// The Studio paper surface floors at `calc(55ch + 2 * var(--paper-gutter))`
+// behind `@container content (min-width: 720px)`. `ch` resolves in the WINNING
+// FACE, so that floor holds only while the face is narrow enough — and which
+// face wins is decided by one human-gated line, design/tokens.json
+// font.reading.stack. Every face there was measured in a browser and clears the
+// gate with headroom; NOTHING held that. Part R is the hold: it re-derives the
+// gate from the sheet every run, and requires every face the stack names to
+// carry a MEASURED advance that fits.
+//
+// COVERAGE IS A PREDICATE, NOT A LIST. A sixth face is swept because it is in
+// the stack; there is no skip-list it can be quietly missing from. The pinned
+// advances live in design/reading-measure.mjs and are deliberately NOT derivable
+// from the sheet this Part checks — a guard reading its expected value out of
+// the thing it guards is inert.
+console.log("\ndesign/check.mjs — Part R: reading-face advance pin vs the paper-surface container gate");
+{
+  const failedBeforeR = failed;
+  const rFail = (m) => fail(m);
+
+  const { gate, faces, rows, failures } = evaluateReadingMeasure();
+  for (const f of failures) rFail(f);
+
+  if (FAULT.has("R")) rFail("  Part R FAIL: injected fault (--selftest)");
+  if (failed === failedBeforeR) {
+    const worst = rows.reduce((a, b) => (b.headroomPx < a.headroomPx ? b : a));
+    const crossing = (gate.containerMinPx - 2 * gate.gutterPx) / gate.chCount;
+    for (const r of rows)
+      console.log(
+        `       ${r.face.padEnd(20)} ${String(r.advance).padStart(8)} px/ch  ` +
+          `floor ${r.floorPx.toFixed(3)}px  headroom ${r.headroomPx.toFixed(3)}px`,
+      );
+    console.log(
+      `  ok   ${rows.length} face(s) from ${TOKENS_PATH} font.reading.stack swept by predicate against the ` +
+        `${gate.chCount}ch + 2*${gate.gutterPx}px floor behind @container content (min-width: ${gate.containerMinPx}px); ` +
+        `worst is ${worst.face} at ${worst.headroomPx.toFixed(3)}px headroom, crossing starts at ${crossing.toFixed(4)} px/ch`,
+    );
+  }
+}
+
 
 // ── verdict ──────────────────────────────────────────────────────────────────
 if (failed) {

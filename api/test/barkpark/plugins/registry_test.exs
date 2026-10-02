@@ -25,6 +25,8 @@ defmodule Barkpark.Plugins.RegistryTest do
     # disk walk, so the frozen baseline is always the post-discovery "real" set.
     # This test simulates the old poison order without relying on on_exit ordering.
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "reset/0 does not restore a stub registered before the first explicit reset" do
       # Simulate the poisoning scenario: register a stub, then call reset().
       # Under the old lazy logic, this first reset would freeze the stub into
@@ -130,25 +132,22 @@ defmodule Barkpark.Plugins.RegistryTest do
     # drive `collect_routes/1` against inline fakes without touching disk.
 
     setup do
-      prev = Application.get_env(:barkpark, :plugins, :unset)
+      prev = Barkpark.PluginEnv.capture()
 
       on_exit(fn ->
-        case prev do
-          :unset -> Application.delete_env(:barkpark, :plugins)
-          v -> Application.put_env(:barkpark, :plugins, v)
-        end
+        Barkpark.PluginEnv.restore(prev)
       end)
 
       :ok
     end
 
     test "returns [] when :plugins is explicitly empty" do
-      Application.put_env(:barkpark, :plugins, [])
+      Barkpark.PluginEnv.put!([])
       assert Registry.collect_routes(%{}) == []
     end
 
     test "returns the union of register_routes/1 results from configured plugins" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryTest.RoutesFakeA,
         Barkpark.Plugins.RegistryTest.RoutesFakeB
       ])
@@ -166,7 +165,7 @@ defmodule Barkpark.Plugins.RegistryTest do
     end
 
     test "isolates a plugin that raises in register_routes/1" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryTest.RoutesFakeA,
         Barkpark.Plugins.RegistryTest.RoutesRaisingFake,
         Barkpark.Plugins.RegistryTest.RoutesFakeB
@@ -186,7 +185,7 @@ defmodule Barkpark.Plugins.RegistryTest do
     end
 
     test "defaults ctx :phase to :compile" do
-      Application.put_env(:barkpark, :plugins, [
+      Barkpark.PluginEnv.put!([
         Barkpark.Plugins.RegistryTest.RoutesCtxRecorder
       ])
 

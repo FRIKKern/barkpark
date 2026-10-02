@@ -64,8 +64,25 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   alias Barkpark.Plugins.Registry
   alias Barkpark.Plugins.Settings
 
+  # The MOUNT reads the instance-wide credential record too: `load_all_rows/1`
+  # decrypts it into assigns and the form renders every non-secret field (API
+  # base URLs, roles) plus a "stored" marker per secret. The REST twin
+  # (`GET /v1/plugins/settings/:name`) and every event below are operator-tier,
+  # so the mount is as well (r4a LiveView authz sweep). Allowlist unset →
+  # `permits?/1` admits every admin, exactly like the plug.
   @impl true
-  def mount(%{"dataset" => dataset, "plugin" => plugin_name}, _session, socket) do
+  def mount(params, _session, socket) do
+    if BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token]) do
+      mount_settings(params, socket)
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Managing plugin credentials requires the platform operator.")
+       |> redirect(to: "/studio")}
+    end
+  end
+
+  defp mount_settings(%{"dataset" => dataset, "plugin" => plugin_name}, socket) do
     case Registry.lookup(plugin_name) do
       {:ok, entry} ->
         fields = resolve_schema(entry.module)
@@ -105,8 +122,35 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
   # ── events ────────────────────────────────────────────────────────────
 
+  # Plugin settings are instance-wide connector credentials: REST serves them only
+  # behind RequirePlatformOperator, so EVERY LiveView event that reads or writes
+  # them applies the same tier. Not just reveal: a non-operator admin could save
+  # an attacker oauth_token_url, keep the stored client_secret, and press
+  # test-connection, which posts that secret to the URL.
+  @operator_events ~w(save reveal clear test-connection)
+
   @impl true
-  def handle_event("save", params, socket) do
+  def handle_event(event, params, socket) when event in @operator_events do
+    if BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token]) do
+      operator_event(event, params, socket)
+    else
+      {:noreply,
+       put_flash(socket, :error, "Managing plugin credentials requires the platform operator.")}
+    end
+  end
+
+  def handle_event("hide", %{"name" => field_name}, socket) do
+    {:noreply, assign(socket, revealed: Map.delete(socket.assigns.revealed, field_name))}
+  end
+
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("admin/plugin_settings: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  defp operator_event("save", params, socket) do
     submitted = Map.get(params, "settings", %{})
 
     merged =
@@ -179,7 +223,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
-  def handle_event("reveal", %{"name" => field_name}, socket) do
+  defp operator_event("reveal", %{"name" => field_name}, socket) do
     user_id = current_user_id(socket)
     field = Enum.find(socket.assigns.fields, &(&1.name == field_name))
 
@@ -192,11 +236,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
-  def handle_event("hide", %{"name" => field_name}, socket) do
-    {:noreply, assign(socket, revealed: Map.delete(socket.assigns.revealed, field_name))}
-  end
-
-  def handle_event("clear", %{"name" => field_name}, socket) do
+  defp operator_event("clear", %{"name" => field_name}, socket) do
     user_id = current_user_id(socket)
     field = Enum.find(socket.assigns.fields, &(&1.name == field_name))
 
@@ -235,7 +275,7 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
     end
   end
 
-  def handle_event("test-connection", _params, socket) do
+  defp operator_event("test-connection", _params, socket) do
     result =
       Registry.collect_test_connection(
         socket.assigns.plugin_name,
@@ -244,13 +284,6 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
 
     {kind, msg} = flash_for_test_connection(result)
     {:noreply, put_flash(socket, kind, msg)}
-  end
-
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("admin/plugin_settings: unhandled event #{inspect(event)}")
-    {:noreply, socket}
   end
 
   # Fall-through: an unexpected message (e.g. a late PubSub delivery) must not

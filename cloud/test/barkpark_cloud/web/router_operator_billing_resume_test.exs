@@ -248,7 +248,9 @@ defmodule BarkparkCloud.Web.RouterOperatorBillingResumeTest do
     reactivation =
       event("customer.subscription.updated", sub.gateway_customer_id, %{"status" => "active"})
 
-    assert {:error, :missing_metadata} = Billing.handle_webhook(reactivation, sig())
+    # task-30d4058bf64c317b: a verified event we cannot act on is ACKNOWLEDGED
+    # (200 :ignored) so Stripe stops retrying — it still changes nothing.
+    assert {:ok, :ignored} = Billing.handle_webhook(reactivation, sig())
     assert reload_sub(sub).status == "canceled"
     assert reload_bp(bp).suspended, "the reactivation left the box suspended — THE STRANDING"
     refute Billing.entitled?(team)

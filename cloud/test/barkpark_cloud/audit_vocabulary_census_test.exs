@@ -807,6 +807,16 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "construction, not a missing one here.",
       anchor: ~r/"site\.deleted"/
     },
+    "barkpark_cloud/registry.ex|release_site_host" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "hostname_claims BOOKKEEPING, not an act (task-274fad4f639e6890): it deletes the " <>
+          "claim row mirroring a domain that remove_site_domain/2 drops from the site in the " <>
+          "SAME transaction. The act is the domain removal, and its only route runs it " <>
+          "INSIDE Accounts.audit/3 as site.domain_removed.",
+      anchor: ~r/action: "site\.domain_removed"/
+    },
     "barkpark_cloud/web/router.ex|delete_site_after_audit" => %{
       kind: :allowlisted,
       count: 1,
@@ -940,6 +950,30 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "widening it by one context would delete other people's evidence.",
       anchor: ~r/Accounts\.reap_oauth_exchange_codes\(\)/
     },
+    "barkpark_cloud/accounts.ex|reclaim_if_unproven!" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the pre-account-takeover reclaim (task-b3eb09e83fbb7cbc): an IdP-verified sign-in " <>
+          "deletes the provider identities an UNCONFIRMED squatter linked under another " <>
+          "email. No team resource is removed and there is no team actor — the rows are the " <>
+          "squatter's credentials on an account that never proved its address; the same " <>
+          "transaction's caller writes oauth.linked for the link, and the reclaim logs the user id.",
+      anchor: ~r/defp reclaim_if_unproven!\(/
+    },
+    "barkpark_cloud/accounts.ex|reap_lifecycle_tokens" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the same shape three contexts over: revoked or long-lapsed reset / confirm / " <>
+          "change_email credential rows, swept on a schedule with no actor. Each row was " <>
+          "already unusable to every reader. The where clause is deliberately narrow AND " <>
+          "deliberately graced — the expiry clause waits out a window longer than the " <>
+          "@change_email_throttle, because throttled?/3 counts every row minted in the window " <>
+          "(revoked included) without " <>
+          "filtering expires_at, so a no-grace sweep would return a resend slot early.",
+      anchor: ~r/Accounts\.reap_lifecycle_tokens\(\)/
+    },
     "barkpark_cloud/workers/agent_retention_worker.ex|perform" => %{
       kind: :allowlisted,
       count: 4,
@@ -948,6 +982,25 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "cached usage samples, and platform delivery records, each past a stated window. " <>
           "Telemetry aging out on a schedule, with no team resource removed and no actor.",
       anchor: ~r/@delivery_retention_days 180/
+    },
+    "barkpark_cloud/workers/agent_retention_worker.ex|prune_notification_deliveries" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the fifth retention arm, and it does NOT inherit the excuse above — that entry says " <>
+          "\"no team resource removed\", which is FALSE for this table and is not claimed here. " <>
+          "The four prunes in perform/1 are plane telemetry (agent events, dead tokens, usage " <>
+          "samples, and platform_deliveries — Barkpark's OWN deploys, which no team can read); " <>
+          "notification_deliveries is a TEAM resource, served to a team admin by " <>
+          "GET /v1/notifications/deliveries. What is true is the rest of the class: no actor " <>
+          "and no act. The query is keyed on inserted_at alone with no team parameter, so " <>
+          "every row it takes was already outside a window this file states in days, in " <>
+          "advance, for everyone. And a row-per-prune audit event is not merely noise here, " <>
+          "it is IMPOSSIBLE for part of the table: notification_deliveries.team_id is " <>
+          "nullable (user-scoped identity emails carry none) while audit_events.team_id is " <>
+          "null: false, so a teamless delivery's removal cannot be recorded on this trail at " <>
+          "all — the same construction delete_warm_server/2 is excused by below.",
+      anchor: ~r/@notification_delivery_retention_days 180/
     },
 
     ## ── ALLOWLISTED: fleet-internal capacity, no team to record against ──────
@@ -978,6 +1031,18 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "deployment row — the record of what happened — survives; only the payload goes, " <>
           "and keeping it would be a pure leak on the plane's only durable volume.",
       anchor: ~r/drop_artifact\(ctx\.id\)/
+    },
+    "barkpark_cloud/sites/artifact_reaper.ex|reap" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "the SWEEP half of the same class as drop_artifact above, and the same excuse: it " <>
+          "deletes stored build bytes whose deployment has already reached a terminal " <>
+          "status, plus rows the retired site-scoped upload route left bound to no " <>
+          "deployment at all. The deployment row — the record of what happened, and the " <>
+          "one a team can see — is never touched; only the payload goes. An audit event " <>
+          "per reaped tarball would be a per-minute machine trail of nothing a person did.",
+      anchor: ~r/site artifact reaper: deleted/
     },
     "barkpark_cloud/push.ex|enforce_device_cap" => %{
       kind: :allowlisted,

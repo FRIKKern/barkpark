@@ -28,6 +28,16 @@ defmodule Barkpark.ApplicationChildSpecsTest do
              "GenServer's five-second start deadline"
   end
 
+  test "application.ex does not name Studio Chat (task-2f59ba23bcad333e)" do
+    # Studio Chat starts from `Barkpark.Capability.Supervisor` only when its
+    # capability is enabled. The host naming its supervisor or its title
+    # endpoint check would start it, or check for it, on every box.
+    src = File.read!("lib/barkpark/application.ex")
+
+    refute src =~ "StudioChat.Supervisor"
+    refute src =~ "Titles.endpoint"
+  end
+
   test "plugin_children are wrapped under Barkpark.Plugins.Supervisor, not flat" do
     plugin = [{FakePluginWorker, arg: 1}]
     specs = specs(plugin)
@@ -47,7 +57,11 @@ defmodule Barkpark.ApplicationChildSpecsTest do
     assert Barkpark.Plugins.Supervisor in ks
     assert Barkpark.Plugins.Indx.Supervisor in ks
     assert Barkpark.Plugins.Sheets.Supervisor in ks
-    assert Barkpark.StudioChat.Supervisor in ks
+    assert Barkpark.Capability.Supervisor in ks
+
+    # The Studio Chat tier is started by the capability supervisor, not named by
+    # the application (task-2f59ba23bcad333e).
+    refute Barkpark.StudioChat.Supervisor in ks
 
     # The formerly-flat leaves are now NESTED (owned by the tier supervisors),
     # not direct children of Barkpark.Supervisor.
@@ -76,9 +90,10 @@ defmodule Barkpark.ApplicationChildSpecsTest do
     # Indx subsystem before Oban (its :indx queue jobs call Auth.token/0).
     assert index(specs, Barkpark.Plugins.Indx.Supervisor) < index(specs, Oban)
 
-    # PubSub before the Sheets/StudioChat tiers and the Endpoint.
+    # PubSub before the Sheets/Capability tiers and the Endpoint.
     assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.Plugins.Sheets.Supervisor)
-    assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.StudioChat.Supervisor)
+    assert index(specs, Phoenix.PubSub) < index(specs, Barkpark.Capability.Supervisor)
+    assert index(specs, Barkpark.Capability.Supervisor) < index(specs, BarkparkWeb.Endpoint)
     assert index(specs, Phoenix.PubSub) < index(specs, BarkparkWeb.Endpoint)
 
     # Endpoint is last.

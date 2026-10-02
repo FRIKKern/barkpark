@@ -1,0 +1,2192 @@
+{
+  "generated_at": "2026-09-22T14:51:09.801Z",
+  "tool": "scripts/studio-desk-scrollbar-bound.mjs",
+  "kind": "analytic bound — NOT a measurement on a classic-scrollbar platform",
+  "source_matrix": "scripts/studio-desk-measure.mjs",
+  "source_served_sha": "b8e1f8c92f55b6de116f409e89a6177f3013021f",
+  "source_platform": "darwin arm64",
+  "source_browser": "bundled 147.0.7727.15",
+  "measured_scrollbar_px": 0,
+  "bounded_scrollbar_px": 15,
+  "control": {
+    "ran": true,
+    "misses": 0,
+    "what": "every row re-derived at the matrix's own 0px scrollbar and compared against the browser's measurement; surface +/-0.01px, content +/-0.5px (content_px is rounded in the artifact), gate exact"
+  },
+  "not_covered": [
+    "the @media gutter bands: a classic bar moves the 767px/479px edges to 782px/494px of CSS viewport, and no swept width lands in either 15px window — the gutter is held fixed here",
+    "the width-bucket stamp: bucket(window.innerWidth) reads a scrollbar-INCLUSIVE width while @media/@container read a scrollbar-EXCLUSIVE one, so the two disagree by the scrollbar width near every edge on a classic platform; only the CSS side is modelled",
+    "scrollbar widths other than the one passed in",
+    "anything a classic platform changes that is not the layout viewport (font stack, DPI rounding)"
+  ],
+  "rows": [
+    {
+      "where": "1440/default/native",
+      "viewport_px": 1440,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1440/default/georgia",
+      "viewport_px": 1440,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": true
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 687.632
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 607.632,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 55.005,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1440/default/source-serif-4",
+      "viewport_px": 1440,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1280/default/native",
+      "viewport_px": 1280,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1280/default/georgia",
+      "viewport_px": 1280,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 52.503,
+        "bounded": 52.503,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "1280/default/source-serif-4",
+      "viewport_px": 1280,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1024/default/native",
+      "viewport_px": 1024,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1024/default/georgia",
+      "viewport_px": 1024,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 52.503,
+        "bounded": 52.503,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "1024/default/source-serif-4",
+      "viewport_px": 1024,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/default/native",
+      "viewport_px": 900,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 815,
+        "bounded": 800
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/default/georgia",
+      "viewport_px": 900,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 815,
+        "bounded": 800
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": true
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 687.632
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 607.632,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 55.005,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/default/source-serif-4",
+      "viewport_px": 900,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 815,
+        "bounded": 800
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "800/default/native",
+      "viewport_px": 800,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 715,
+        "bounded": 700
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "800/default/georgia",
+      "viewport_px": 800,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 715,
+        "bounded": 700
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 52.503,
+        "bounded": 52.503,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "800/default/source-serif-4",
+      "viewport_px": 800,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 715,
+        "bounded": 700
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/default/native",
+      "viewport_px": 764,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 61.2,
+        "bounded": 61.2,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/default/georgia",
+      "viewport_px": 764,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.4,
+        "bounded": 55.4,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/default/source-serif-4",
+      "viewport_px": 764,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 679,
+        "bounded": 664
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 66.726,
+        "bounded": 66.726,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "700/default/native",
+      "viewport_px": 700,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "content_px": {
+        "measured": 567,
+        "bounded": 552,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 56.7,
+        "bounded": 55.2,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "700/default/georgia",
+      "viewport_px": 700,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "content_px": {
+        "measured": 567,
+        "bounded": 552,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 51.327,
+        "bounded": 49.969,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "700/default/source-serif-4",
+      "viewport_px": 700,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 615,
+        "bounded": 600
+      },
+      "content_px": {
+        "measured": 567,
+        "bounded": 552,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 61.819,
+        "bounded": 60.184,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "640/default/native",
+      "viewport_px": 640,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "content_px": {
+        "measured": 507,
+        "bounded": 492,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 50.7,
+        "bounded": 49.2,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "640/default/georgia",
+      "viewport_px": 640,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "content_px": {
+        "measured": 507,
+        "bounded": 492,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 45.895,
+        "bounded": 44.537,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "640/default/source-serif-4",
+      "viewport_px": 640,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 555,
+        "bounded": 540
+      },
+      "content_px": {
+        "measured": 507,
+        "bounded": 492,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 55.278,
+        "bounded": 53.642,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": false
+      }
+    },
+    {
+      "where": "500/default/native",
+      "viewport_px": 500,
+      "inspector_state": "default",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "content_px": {
+        "measured": 411,
+        "bounded": 396,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 41.1,
+        "bounded": 39.6,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "500/default/georgia",
+      "viewport_px": 500,
+      "inspector_state": "default",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "content_px": {
+        "measured": 411,
+        "bounded": 396,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 37.205,
+        "bounded": 35.847,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "500/default/source-serif-4",
+      "viewport_px": 500,
+      "inspector_state": "default",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 459,
+        "bounded": 444
+      },
+      "content_px": {
+        "measured": 411,
+        "bounded": 396,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 44.811,
+        "bounded": 43.175,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "1440/user-opened/native",
+      "viewport_px": 1440,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1440/user-opened/georgia",
+      "viewport_px": 1440,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": true
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 687.632
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 607.632,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 55.005,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1440/user-opened/source-serif-4",
+      "viewport_px": 1440,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 836,
+        "bounded": 821
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1280/user-opened/native",
+      "viewport_px": 1280,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1280/user-opened/georgia",
+      "viewport_px": 1280,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 52.503,
+        "bounded": 52.503,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "1280/user-opened/source-serif-4",
+      "viewport_px": 1280,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 676,
+        "bounded": 661
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1024/user-opened/native",
+      "viewport_px": 1024,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "1024/user-opened/georgia",
+      "viewport_px": 1024,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 580,
+        "delta": -27.632
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 52.503,
+        "delta": -2.501
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": false
+      }
+    },
+    {
+      "where": "1024/user-opened/source-serif-4",
+      "viewport_px": 1024,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/user-opened/native",
+      "viewport_px": 900,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 856,
+        "bounded": 841
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/user-opened/georgia",
+      "viewport_px": 900,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 856,
+        "bounded": 841
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": true
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 687.632
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 607.632,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 55.005,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "900/user-opened/source-serif-4",
+      "viewport_px": 900,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 856,
+        "bounded": 841
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "800/user-opened/native",
+      "viewport_px": 800,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 756,
+        "bounded": 741
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 58,
+        "bounded": 58,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "800/user-opened/georgia",
+      "viewport_px": 800,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 756,
+        "bounded": 741
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": true,
+        "bounded": true
+      },
+      "surface_border_box_px": {
+        "measured": 687.632,
+        "bounded": 687.632
+      },
+      "content_px": {
+        "measured": 607.632,
+        "bounded": 607.632,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.005,
+        "bounded": 55.005,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "800/user-opened/source-serif-4",
+      "viewport_px": 800,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 756,
+        "bounded": 741
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": true
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 580,
+        "bounded": 580,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 63.237,
+        "bounded": 63.237,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/user-opened/native",
+      "viewport_px": 764,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 61.2,
+        "bounded": 61.2,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/user-opened/georgia",
+      "viewport_px": 764,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 55.4,
+        "bounded": 55.4,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "764/user-opened/source-serif-4",
+      "viewport_px": 764,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 720,
+        "bounded": 705
+      },
+      "container_gate_open": {
+        "measured": true,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 660,
+        "bounded": 660
+      },
+      "content_px": {
+        "measured": 612,
+        "bounded": 612,
+        "delta": 0
+      },
+      "content_ch": {
+        "measured": 66.726,
+        "bounded": 66.726,
+        "delta": 0
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "700/user-opened/native",
+      "viewport_px": 700,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "content_px": {
+        "measured": 608,
+        "bounded": 593,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 60.8,
+        "bounded": 59.3,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "700/user-opened/georgia",
+      "viewport_px": 700,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "content_px": {
+        "measured": 608,
+        "bounded": 593,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 55.038,
+        "bounded": 53.68,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": false
+      }
+    },
+    {
+      "where": "700/user-opened/source-serif-4",
+      "viewport_px": 700,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 656,
+        "bounded": 641
+      },
+      "content_px": {
+        "measured": 608,
+        "bounded": 593,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 66.289,
+        "bounded": 64.654,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "640/user-opened/native",
+      "viewport_px": 640,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "content_px": {
+        "measured": 548,
+        "bounded": 533,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 54.8,
+        "bounded": 53.3,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "640/user-opened/georgia",
+      "viewport_px": 640,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "content_px": {
+        "measured": 548,
+        "bounded": 533,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 49.607,
+        "bounded": 48.249,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "640/user-opened/source-serif-4",
+      "viewport_px": 640,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 596,
+        "bounded": 581
+      },
+      "content_px": {
+        "measured": 548,
+        "bounded": 533,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 59.748,
+        "bounded": 58.112,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": true,
+        "bounded": true
+      }
+    },
+    {
+      "where": "500/user-opened/native",
+      "viewport_px": 500,
+      "inspector_state": "user-opened",
+      "face": "native",
+      "probe_px_per_ch": 10,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "content_px": {
+        "measured": 452,
+        "bounded": 437,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 45.2,
+        "bounded": 43.7,
+        "delta": -1.5
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "500/user-opened/georgia",
+      "viewport_px": 500,
+      "inspector_state": "user-opened",
+      "face": "georgia",
+      "probe_px_per_ch": 11.0469,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "content_px": {
+        "measured": 452,
+        "bounded": 437,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 40.916,
+        "bounded": 39.559,
+        "delta": -1.358
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    },
+    {
+      "where": "500/user-opened/source-serif-4",
+      "viewport_px": 500,
+      "inspector_state": "user-opened",
+      "face": "source-serif-4",
+      "probe_px_per_ch": 9.1719,
+      "criterion_ch": 55,
+      "column_content_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "container_gate_open": {
+        "measured": false,
+        "bounded": false
+      },
+      "floor_binds": {
+        "measured": false,
+        "bounded": false
+      },
+      "surface_border_box_px": {
+        "measured": 500,
+        "bounded": 485
+      },
+      "content_px": {
+        "measured": 452,
+        "bounded": 437,
+        "delta": -15
+      },
+      "content_ch": {
+        "measured": 49.281,
+        "bounded": 47.646,
+        "delta": -1.635
+      },
+      "content_meets_criterion": {
+        "measured": false,
+        "bounded": false
+      }
+    }
+  ],
+  "summary": {
+    "rows": 54,
+    "layout_viewport_shift_px": -15,
+    "content_px_delta_histogram": [
+      {
+        "delta_px": 0,
+        "rows": 35
+      },
+      {
+        "delta_px": -15,
+        "rows": 18
+      },
+      {
+        "delta_px": -27.632,
+        "rows": 1
+      }
+    ],
+    "criterion_verdict_flips": [
+      {
+        "where": "640/default/source-serif-4",
+        "from": true,
+        "to": false,
+        "content_ch": "55.278 -> 53.642"
+      },
+      {
+        "where": "1024/user-opened/georgia",
+        "from": true,
+        "to": false,
+        "content_ch": "55.005 -> 52.503"
+      },
+      {
+        "where": "700/user-opened/georgia",
+        "from": true,
+        "to": false,
+        "content_ch": "55.038 -> 53.68"
+      }
+    ],
+    "container_gate_flips": [
+      {
+        "where": "1024/user-opened/native",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      },
+      {
+        "where": "1024/user-opened/georgia",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      },
+      {
+        "where": "1024/user-opened/source-serif-4",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      },
+      {
+        "where": "764/user-opened/native",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      },
+      {
+        "where": "764/user-opened/georgia",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      },
+      {
+        "where": "764/user-opened/source-serif-4",
+        "column": "720 -> 705",
+        "from": true,
+        "to": false
+      }
+    ],
+    "floor_binding_rows": {
+      "measured": [
+        "1440/default/georgia",
+        "900/default/georgia",
+        "1440/user-opened/georgia",
+        "1024/user-opened/georgia",
+        "900/user-opened/georgia",
+        "800/user-opened/georgia"
+      ],
+      "bounded": [
+        "1440/default/georgia",
+        "900/default/georgia",
+        "1440/user-opened/georgia",
+        "900/user-opened/georgia",
+        "800/user-opened/georgia"
+      ],
+      "changed": true
+    }
+  },
+  "reachability": [
+    {
+      "inspector_state": "default",
+      "gate_min_px": 720,
+      "lowest_swept_viewport_with_gate_open": 900,
+      "its_column_content_box_px": 815,
+      "headroom_px": 95,
+      "bounded_viewport_px": 915,
+      "exact": false,
+      "note": "this swept width clears the gate by 95px, so 915px is an UPPER bound on where the gate first opens, not the edge itself"
+    },
+    {
+      "inspector_state": "user-opened",
+      "gate_min_px": 720,
+      "lowest_swept_viewport_with_gate_open": 764,
+      "its_column_content_box_px": 720,
+      "headroom_px": 0,
+      "bounded_viewport_px": 779,
+      "exact": true,
+      "note": "this swept width sits EXACTLY on the gate (720.0px), so the shift is exact: 764px of CSS viewport becomes 779px on a 15px classic bar"
+    }
+  ]
+}

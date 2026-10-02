@@ -26,7 +26,16 @@ defmodule BarkparkWeb.Studio.StudioBetaTerminalEditingTest do
       )
 
     raw = "beta-terminal-writer-#{System.unique_integer([:positive])}"
-    {:ok, _token} = Auth.create_token(raw, "Beta Terminal editing", @dataset, ["read", "write"])
+
+    {:ok, _token} =
+      Auth.create_token(
+        raw,
+        "Beta Terminal editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
@@ -227,8 +236,8 @@ defmodule BarkparkWeb.Studio.StudioBetaTerminalEditingTest do
     {:ok, reloaded, _html} = live(conn, path)
     reloaded |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
 
-    assert has_element?(reloaded, "#terminal-title-terminal[value='Edited shell']")
-    assert has_element?(reloaded, "#terminal-footer-terminal[value='q quit']")
+    assert has_element?(reloaded, "#terminal-title-terminal", "Edited shell")
+    assert has_element?(reloaded, "#terminal-footer-terminal", "q quit")
     refute has_element?(reloaded, "#terminal-live-terminal[checked]")
     assert has_element?(reloaded, "#paper-ed-terminal-child")
     assert stored_blocks(doc.doc_id) == expected

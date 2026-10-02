@@ -136,10 +136,42 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
   ## 2. The SUBJECT LINE carries the corrected counts
 
+  test "no rendered byte of a team-scoped digest calls these rows a FLEET" do
+    # dr-w28-fu. `deliver_fleet_digest/1` partitions the rows BY TEAM before it
+    # builds anything — `DigestEmail.build/2` has exactly one call site and it is
+    # inside that per-team comprehension — so the subject and the header describe
+    # ONE TEAM'S OWN instances. They used to say "Your Barkpark instances — …",
+    # "Barkpark fleet — daily update digest." and "Fleet: N instances", which a
+    # reader who owns 2 of 13 boxes reads as the platform having two.
+    #
+    # This is deliberately a WORD check over the whole rendered email and not an
+    # equality assertion on one line: the counts were never wrong, so an
+    # assertion that pins bytes would have passed on every one of those three
+    # lies. Nothing else the digest renders — instance rows, the deploy block,
+    # the footer — contains the word, so a hit is always a regression here.
+    for summary <- [
+          DigestEmail.summary([stale_box(), fresh_box()]),
+          DigestEmail.summary([])
+        ] do
+      email = DigestEmail.build(summary, "ops@example.com")
+
+      refute email.subject =~ ~r/fleet/i,
+             "subject still calls a team-scoped read a fleet: #{email.subject}"
+
+      refute email.text_body =~ ~r/fleet/i,
+             "body still calls a team-scoped read a fleet: #{email.text_body}"
+
+      # And it says whose rows they ARE — removing the word is only half of it.
+      assert email.subject =~ "Your Barkpark instances"
+      assert email.text_body =~ "Your Barkpark instances — daily update digest."
+      assert email.text_body =~ "Your team owns"
+    end
+  end
+
   test "the subject line reports the stale box as behind, not current" do
     subject = DigestEmail.subject(DigestEmail.summary([stale_box(), fresh_box()]))
 
-    assert subject == "Barkpark fleet digest — 1 current / 1 behind / 0 unmeasured / 0 paused"
+    assert subject == "Your Barkpark instances — 1 current / 1 behind / 0 unmeasured / 0 paused"
 
     # BEFORE this slice the same fixture rendered "2 current / 0 behind /
     # 0 paused" — both boxes self-report `current` on the unmoved tag. That is
@@ -161,7 +193,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     subject = DigestEmail.subject(DigestEmail.summary(rows))
 
-    assert subject == "Barkpark fleet digest — 0 current / 5 behind / 0 unmeasured / 0 paused"
+    assert subject == "Your Barkpark instances — 0 current / 5 behind / 0 unmeasured / 0 paused"
   end
 
   ## 3. UNMEASURED is its own rung, with a named reason
@@ -174,7 +206,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert DigestEmail.subject(s) =~ "0 current / 0 behind / 1 unmeasured"
 
     body = DigestEmail.body(s)
-    assert body =~ "Fleet: 1 instance — 0 current, 0 behind, 1 unmeasured, 0 paused."
+    assert body =~ "Your team owns 1 instance — 0 current, 0 behind, 1 unmeasured, 0 paused."
 
     assert body =~
              "- Never (never): v0.2.25 -> v0.2.25 | state: unmeasured (release self-report: current) | commit distance unmeasured (never measured) | checked 2026-08-07 14:02 UTC"
@@ -229,7 +261,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     assert {s.current, s.behind, s.diverged} == {0, 0, 1}
 
     assert DigestEmail.subject(s) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 1 diverged / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 1 diverged / 0 unmeasured / 0 paused"
 
     assert DigestEmail.body(s) =~
              "- Fork (fork): v0.2.25 -> v0.2.25 | state: diverged (release self-report: current) | diverged from main, 7 commits not on main (measured 2026-08-08 03:11 UTC) | checked 2026-08-07 14:02 UTC"
@@ -308,7 +340,7 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     email = DigestEmail.build(DigestEmail.summary([stale_box(), fresh_box()]), "ops@example.com")
 
     assert email.subject ==
-             "Barkpark fleet digest — 1 current / 1 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 1 current / 1 behind / 0 unmeasured / 0 paused"
 
     assert email.text_body =~ "2509 commits behind main"
     assert [{_, "ops@example.com"}] = email.to
@@ -318,10 +350,10 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     s = DigestEmail.summary([])
 
     assert DigestEmail.subject(s) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(s)
-    assert body =~ "Fleet: 0 instances."
+    assert body =~ "Your team owns 0 instances."
     assert body =~ "No instances are registered yet"
   end
 
@@ -577,6 +609,158 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     refute body =~ "% failed on attempted"
   end
 
+  ## ── THE BOUNDARY STRADDLE SAYS WHEN IT STOPS ──────────────────────────────
+  ##
+  ## dr-w27-s8-f1-seven-day-door-refuses-until-boundary-ages-out. The refusal is
+  ## CORRECT and stays: a window blending two refusal vocabularies has no rate,
+  ## and clipping the window (`from = max(now - 7d, boundary)`) to rescue one
+  ## would keep the label "last 7d" over a window that is not seven days long.
+  ## What was missing was the reader's next question — is this broken, or is it
+  ## waiting — and the answer to that is a DATE.
+
+  # The instant `DeployLedger` refuses ratios across, READ rather than re-typed,
+  # so this file cannot green itself against a constant the ledger has moved.
+  @boundary BarkparkCloud.DeployLedger.refusal_boundary().instant
+
+  # A door with EXPLICIT bounds, because every other window in this file is
+  # pinned at `@read_at - 24h` and none of them straddles anything.
+  defp door_between(label, from, to, door, deferred, failed, rate, settled) do
+    %{
+      label: label,
+      from: from,
+      to: to,
+      door: door,
+      deferred: deferred,
+      failed: failed,
+      settled: settled,
+      rate: rate,
+      terminal_rate: refused_rate(settled, "boundary")
+    }
+  end
+
+  test "a 7d door straddling the boundary names the date it measures again" do
+    to = ~U[2026-08-09 06:00:00Z]
+    from = DateTime.add(to, -604_800, :second)
+
+    deploy =
+      health([
+        door_between(
+          "last 7d",
+          from,
+          to,
+          9_156,
+          6_002,
+          311,
+          refused_rate(9_156, "the window STRADDLES the deferred settle status boundary"),
+          3_154
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The window really does straddle — asserted against the ledger's OWN
+    # predicate, so a green here cannot come from a fixture that merely looks
+    # like it spans the instant.
+    assert BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+    assert DateTime.compare(from, @boundary) == :lt
+    assert DateTime.compare(to, @boundary) == :gt
+
+    # THE REFUSAL SURVIVES. This row is not a licence to print a number.
+    assert body =~ "failure rate on attempted UNMEASURED"
+    refute body =~ "% failed on attempted"
+
+    # AND THE COUNTS STILL PRINT.
+    assert body =~ "9,156 attempted, of which 6,002 deferred by a busy box"
+
+    # THE HORIZON: boundary + this door's own 7-day span = 2026-08-12 21:13 UTC.
+    assert body =~
+             "Nothing here is broken and the boundary is not being moved to rescue the percentage: this door measures again from 2026-08-12 21:13 UTC, the first moment a whole last 7d window sits after the deferred settle status boundary. Until then the attempted and deferred counts above are real and only the ratio is withheld"
+  end
+
+  test "the horizon is derived from the door's OWN span, not typed once" do
+    to = ~U[2026-08-06 06:00:00Z]
+    from = DateTime.add(to, -86_400, :second)
+
+    deploy =
+      health([
+        door_between(
+          "last 24h",
+          from,
+          to,
+          400,
+          120,
+          9,
+          refused_rate(400, "the window STRADDLES the deferred settle status boundary"),
+          280
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+
+    # boundary + 24h, NOT boundary + 7d — the same code, a different door.
+    assert body =~ "this door measures again from 2026-08-06 21:13 UTC"
+    refute body =~ "2026-08-12 21:13 UTC"
+    assert body =~ "a whole last 24h window sits after"
+  end
+
+  ## THE QUIET ARM. A rate refused for a SMALL SAMPLE is not a boundary
+  ## straddle, and a horizon there would be a date the reader waits on for
+  ## nothing — the sample does not grow because a boundary aged out.
+  test "a rate refused for a small sample collects NO boundary horizon" do
+    deploy =
+      health([window("last 24h", 74, 12, 3, refused_rate(74, "sample 74 below min_sample 200"))])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The precondition: this window is wholly AFTER the boundary, so the quiet
+    # is the predicate answering `false` and not a renderer that never fires.
+    refute BarkparkCloud.DeployLedger.straddles_refusal_boundary?(
+             DateTime.add(~U[2026-08-09 06:00:00Z], -86_400, :second),
+             ~U[2026-08-09 06:00:00Z]
+           )
+
+    assert body =~ "failure rate on attempted UNMEASURED (sample 74 below min_sample 200)"
+    refute body =~ "measures again from"
+    refute body =~ "is not being moved to rescue"
+  end
+
+  ## THE ANTI-VACUITY ARM. A door that refuses on every clock is a different
+  ## lie. Drive the SAME renderer with a clock past the boundary and the SAME
+  ## door shape renders a real percentage — no UNMEASURED, no horizon.
+  test "the same 7d door renders a real figure once the boundary has aged out" do
+    to = ~U[2026-09-16 06:00:00Z]
+    from = DateTime.add(to, -604_800, :second)
+
+    deploy =
+      health([
+        %{
+          label: "last 7d",
+          from: from,
+          to: to,
+          door: 9_156,
+          deferred: 6_002,
+          failed: 311,
+          settled: 3_154,
+          rate: measured_rate(311, 9_156),
+          terminal_rate: terminal_rate(311, 3_154, nil)
+        }
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # The window has aged past the boundary — the predicate, not the calendar in
+    # my head, says so.
+    refute BarkparkCloud.DeployLedger.straddles_refusal_boundary?(from, to)
+    assert DateTime.compare(from, @boundary) == :gt
+
+    assert body =~ "3.4% failed on attempted (311 of 9,156 attempted)"
+    assert body =~ "9.86% failed on settled (311 of 3,154 settled)"
+    refute body =~ "failure rate on attempted UNMEASURED"
+    refute body =~ "measures again from"
+  end
+
   ## ── THE DEFERRAL WAIT ─────────────────────────────────────────────────────
   ##
   ## The count answers "how often did a box say not now". Only the wait answers
@@ -694,14 +878,42 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
     }
   end
 
-  defp with_coverage(window, cohorts) do
-    Map.put(window, :coverage, %{
+  defp with_coverage(window, cohorts, opts \\ []) do
+    envelope = %{
       clock: "the SAME clock as `deferral_wait`",
       basis: "COVERAGE, and only coverage",
       as_of: @read_at,
       maturity_seconds: 86_400,
       cohorts: cohorts
-    })
+    }
+
+    # The envelope-level named tail is OPTIONAL in this helper on purpose: every
+    # pre-existing fixture below omits it, and those fixtures are the control
+    # that the clause stays silent when the ledger names nobody.
+    envelope =
+      case Keyword.fetch(opts, :sites) do
+        {:ok, sites} ->
+          Map.merge(envelope, %{
+            never_covered_sites: sites,
+            never_covered_sites_total: Keyword.get(opts, :sites_total, length(List.wrap(sites))),
+            never_covered_sites_truncated: Keyword.get(opts, :sites_truncated, false)
+          })
+
+        :error ->
+          envelope
+      end
+
+    Map.put(window, :coverage, envelope)
+  end
+
+  defp site_entry(name, environment, never_covered, opts \\ []) do
+    %{
+      site_id: Keyword.get(opts, :site_id, "00000000-0000-0000-0000-00000000000#{never_covered}"),
+      name: name,
+      slug: Keyword.get(opts, :slug),
+      environment: environment,
+      never_covered: never_covered
+    }
   end
 
   test "the coverage partition reaches the reader, with its window and its fence named" do
@@ -788,6 +1000,165 @@ defmodule BarkparkCloud.Notifications.DigestEmailTest do
 
     refute body =~ "of those,"
     refute body =~ "a cohort the digest could not read"
+  end
+
+  ## ── WHICH SITES, BY NAME (dr-w35-bl-digest-blind-to-never-covered-sites) ──
+  ##
+  ## The count says HOW MANY and the environment split says WHERE. Only this
+  ## list says WHICH, and an operator who cannot name the site cannot go and
+  ## look at it. The ledger has computed the named tail since #11534; the digest
+  ## threw the whole envelope away.
+
+  test "a never-covered site is NAMED in the digest, not merely counted" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [
+            cohort("deferred", 502, 502, 0),
+            cohort("failed", 18, 16, 2,
+              by_environment: [%{environment: "production", never_covered: 2}]
+            )
+          ],
+          sites: [
+            site_entry("Aurora Docs", "production", 2),
+            site_entry("Beacon Marketing", "preview", 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    # THE NAME IS THE ASSERTION. "the list is non-empty" would pass on a clause
+    # that printed two anonymous bullets, which is the exact anonymity this
+    # list exists to end.
+    assert body =~
+             " — the sites still not covered: Aurora Docs in production (2), Beacon Marketing in preview (1)"
+
+    # …and it rides the SAME line as the counts it names, so the sentence cannot
+    # be quoted without its population.
+    [line] = for l <- String.split(body, "\n"), l =~ "Coverage over last 24h", do: l
+    assert line =~ "Aurora Docs"
+    assert line =~ "2 still not after 24.0h"
+  end
+
+  test "a fully covered window names NOBODY — the clause cannot invent a site" do
+    # THE CONTROL. Same fixture shape, nothing sitting dark: the ledger sends an
+    # empty tail and the digest must print no name at all. A morning email that
+    # names a site next to a clean cohort is a false alarm with a real site's
+    # name on it.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("deferred", 502, 502, 0), cohort("failed", 18, 18, 0)],
+          sites: []
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "18 of 18 failed rows have since been covered by a later live build, 0 still"
+    refute body =~ "the sites still not covered"
+    refute body =~ "Aurora Docs"
+    refute body =~ "a site since deleted"
+  end
+
+  test "a site the ledger reported with a zero is not printed as sitting dark" do
+    # NON-VACUITY, THE THIRD DIRECTION: the tail is a list OF never-covered
+    # sites, so an entry whose count is zero is not one and must not be named.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 17, 1)],
+          sites: [
+            site_entry("Quiet Site", "production", 0),
+            site_entry("Loud Site", "production", 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "the sites still not covered: Loud Site in production (1)"
+    refute body =~ "Quiet Site"
+  end
+
+  test "a truncated tail says so — the top N can never read as the whole tail" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 16, 2)],
+          sites: [site_entry("Aurora Docs", "production", 2)],
+          sites_total: 37,
+          sites_truncated: true
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "Aurora Docs in production (2) (1 of 37 — the list is truncated)"
+  end
+
+  test "an untruncated tail carries NO truncation sentence" do
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 16, 2)],
+          sites: [site_entry("Aurora Docs", "production", 2)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~ "the sites still not covered: Aurora Docs in production (2)."
+    refute body =~ "the list is truncated"
+  end
+
+  test "a site whose name the ledger could not resolve falls back, and never raises" do
+    # `name` is NULLABLE at the ledger — a site deleted since the deployment was
+    # written resolves to no name. The slug survives it; when neither does, the
+    # row is still reported, because a dropped row would make the named list
+    # disagree with the count it is naming.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 15, 3)],
+          sites: [
+            site_entry(nil, "production", 2, slug: "aurora-docs"),
+            site_entry(nil, nil, 1)
+          ]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "the sites still not covered: aurora-docs in production (2), a site since deleted in an unnamed environment (1)"
+  end
+
+  test "an envelope with NO never_covered_sites key still renders — one fragment, never the email" do
+    # Every fixture written before this clause existed omits the key; the digest
+    # reads it with `Map.get/3` for the same reason its cohort head names every
+    # count it prints.
+    deploy =
+      health([
+        with_coverage(
+          window("last 24h", 760, 502, 18, measured_rate(18, 760)),
+          [cohort("failed", 18, 15, 3)]
+        )
+      ])
+
+    body = DigestEmail.body(DigestEmail.summary([fresh_box()], deploy: deploy))
+
+    assert body =~
+             "15 of 18 failed rows have since been covered by a later live build, 3 still not after 24.0h."
+
+    refute body =~ "the sites still not covered"
   end
 
   test "the reach limit is named, and it is the widest window the email reports" do

@@ -10,6 +10,7 @@ package cli
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"path/filepath"
@@ -376,5 +377,141 @@ func TestCheckEnvContractRefusalTeaches(t *testing.T) {
 	clean := checkEnvContract(func(string) (string, bool) { return "", false })
 	if !clean.ok {
 		t.Error("a clean shell must pass the env-contract check")
+	}
+}
+
+// TestPreflightNoDirNoLocalProjectRefuses is the c1 regression for
+// task-eeacff2a3f470ca0: run with NO --dir from a directory that holds no
+// package.json, the verb must REFUSE with the local-build precondition named,
+// not render a failed "local build" check that a first-run reader mistakes for
+// "my remote site is broken".
+//
+// The two assertions that carry the row: the exit code is the usage code (2),
+// and the text names the LOCAL build precondition AND denies the remote
+// reading. The engines are stubbed and runSiteSelfTest is left UNSTUBBED on
+// purpose — the refusal must land BEFORE any harness runs, so a regression that
+// moves the check below phase 1 would shell out and be visible.
+func TestPreflightNoDirNoLocalProjectRefuses(t *testing.T) {
+	stubEngines(t)
+	t.Chdir(t.TempDir()) // a real directory with no package.json in it
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	code := runCloudSitePreflight(w, globals{}, nil)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d (usage refusal); stdout=%s stderr=%s", code, exitUsage, sout.String(), serr.String())
+	}
+	msg := sout.String() + serr.String()
+	for _, want := range []string{"LOCAL build", "no package.json", "--dir", "ON THE BOX"} {
+		if !strings.Contains(msg, want) {
+			t.Errorf("refusal must name %q; got:\n%s", want, msg)
+		}
+	}
+	// It must NOT read as a failed check of anything: no check-list grammar.
+	for _, never := range []string{"observed:", "expected:", "preflight failed"} {
+		if strings.Contains(msg, never) {
+			t.Errorf("refusal must not render as a failed CHECK (%q present); got:\n%s", never, msg)
+		}
+	}
+}
+
+// TestPreflightNoDirRefusalIsTyped proves the refusal is a TYPED envelope under
+// -o json, not prose on stderr — so a caller can tell "you are not in a site"
+// from "your build is broken" mechanically.
+func TestPreflightNoDirRefusalIsTyped(t *testing.T) {
+	stubEngines(t)
+	t.Chdir(t.TempDir())
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	w.output = "json"
+	code := runCloudSitePreflight(w, globals{}, nil)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d", code, exitUsage)
+	}
+	var env struct {
+		OK    bool `json:"ok"`
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal(sout.Bytes(), &env); err != nil {
+		t.Fatalf("refusal is not JSON under -o json: %v; stdout=%s", err, sout.String())
+	}
+	if env.OK {
+		t.Errorf("ok must be false, got %v", env.OK)
+	}
+	if env.Error.Code != "no_local_site" {
+		t.Errorf("error.code = %q, want %q", env.Error.Code, "no_local_site")
+	}
+	if !strings.Contains(env.Error.Message, "LOCAL build") {
+		t.Errorf("message must name the LOCAL build precondition; got %q", env.Error.Message)
+	}
+}
+
+// TestPreflightExplicitDirStillChecks is the CONTROL for the refusal above: an
+// explicit --dir at a package.json-less tree is the caller asserting they meant
+// that tree, so it keeps the check-list path and does NOT refuse. Without this
+// arm, a refusal widened to every missing package.json would pass the two tests
+// above while breaking the documented --skip-build engine-floor run.
+func TestPreflightExplicitDirStillChecks(t *testing.T) {
+	stubEngines(t)
+	t.Setenv("BARKPARK_TOKEN", "")
+	restore := runSiteSelfTest
+	runSiteSelfTest = func(_ context.Context, _ string) (string, error) {
+		return "[selftest] 87/87 checks passed\n[selftest] PASS\n", nil
+	}
+	defer func() { runSiteSelfTest = restore }()
+
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	code := runCloudSitePreflight(w, globals{}, []string{"--dir", t.TempDir(), "--skip-build"})
+	if code == exitUsage {
+		t.Fatalf("an explicit --dir must not hit the no-local-site refusal; stdout=%s stderr=%s", sout.String(), serr.String())
+	}
+}
+
+// TestPreflightHelpNamesWhatItDoesNotCheck is the c0 regression: the help page
+// must state the subject (a LOCAL build) and deny the three things a reader
+// assumes from the verb's name — the site's content binding, its dataset, and
+// its instance.
+func TestPreflightHelpNamesWhatItDoesNotCheck(t *testing.T) {
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	if code := runCloudSitePreflight(w, globals{}, []string{"-h"}); code != exitOK {
+		t.Fatalf("exit = %d, want %d", code, exitOK)
+	}
+	out := sout.String()
+	for _, want := range []string{"LOCALLY", "WHAT IT DOES NOT CHECK", "content binding", "dataset", "instance"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("preflight -h must name %q; got:\n%s", want, out)
+		}
+	}
+}
+
+// TestCloudSiteFamilyHelpDescribesPreflight is the c0 regression on the OTHER
+// surface the criterion names: `bp cloud site -h`'s verb list. The usage line
+// alone ("preflight [--dir <path>]") is what reads as "check my site"; the
+// one-line description beside it is what fixes that.
+func TestCloudSiteFamilyHelpDescribesPreflight(t *testing.T) {
+	var sout, serr bytes.Buffer
+	w := newWriter(&sout, &serr)
+	printCloudSiteHelp(w)
+	_ = serr
+	var line string
+	for _, ln := range strings.Split(sout.String(), "\n") {
+		if strings.Contains(ln, "bp cloud site preflight") {
+			line = ln
+			break
+		}
+	}
+	if line == "" {
+		t.Fatalf("no preflight line in `bp cloud site -h`:\n%s", sout.String())
+	}
+	for _, want := range []string{"LOCAL", "NOTHING about the remote site", "dataset", "instance"} {
+		if !strings.Contains(line, want) {
+			t.Errorf("the preflight one-liner must say %q; got:\n%s", want, line)
+		}
 	}
 }

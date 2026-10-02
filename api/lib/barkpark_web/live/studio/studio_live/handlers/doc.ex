@@ -5,6 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   """
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
   alias BarkparkWeb.ScopeHelpers
@@ -31,8 +32,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
             end
 
           schema ->
-            Barkpark.Content.Validation.check(content, title, schema)
+            # The tree reading (E1.11): nested errors gate the publish just
+            # like top-level ones, nested warnings only nag.
+            Barkpark.Content.Validation.check_tree(content, title, schema)
         end
+
+      # The workspace's language, once, before any render site (E7, #87).
+      errs = BarkparkWeb.StudioLocale.localize_findings(errs)
+      warns = BarkparkWeb.StudioLocale.localize_findings(warns)
 
       socket = assign(socket, validation_warnings: warns)
 
@@ -41,7 +48,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           {:noreply,
            socket
            |> assign(validation_errors: errs)
-           |> put_flash(:error, "Fix validation errors before publishing")}
+           |> put_flash(:error, gettext("Fix validation errors before publishing"))}
 
         _ ->
           opts = Shared.hook_opts(socket)
@@ -60,7 +67,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           )
       end
     else
-      {:noreply, socket}
+      # Same rule as the refusal arms above: an ERROR arm of this case already
+      # flashes, so a press that never ran must not answer with silence.
+      {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
     end
   end
 
@@ -83,7 +92,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to unpublish — open a document first")}
     end
   end
 
@@ -139,7 +148,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           {:noreply, put_flash(socket, :error, "Failed to duplicate")}
       end
     else
-      {:noreply, socket}
+      {:noreply, put_flash(socket, :error, "Nothing to duplicate — open a document first")}
     end
   end
 end

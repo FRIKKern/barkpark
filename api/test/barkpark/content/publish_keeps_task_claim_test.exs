@@ -34,6 +34,7 @@ defmodule Barkpark.Content.PublishKeepsTaskClaimTest do
   defp task_content(extra) do
     %{
       "kind" => "task",
+      "brief" => Barkpark.TaskBriefFixtures.brief(),
       "lifecycle_status" => "open",
       "acceptance_criteria" => [
         %{"criterion" => "the original criterion", "met" => false, "evidence" => ""}
@@ -102,6 +103,8 @@ defmodule Barkpark.Content.PublishKeepsTaskClaimTest do
            "publish dropped/changed the claim: #{inspect(reread.content["claim"])}"
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a draft forked BEFORE the claim cannot publish the claim away", %{scope: scope} do
     id = mk_published_task!(scope)
     worker = uniq("w")
@@ -150,6 +153,8 @@ defmodule Barkpark.Content.PublishKeepsTaskClaimTest do
   end
 
   describe "the publish door fences every field the TASK door owns" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a claim-identical draft may not ERASE close_reason", %{scope: scope} do
       id = mk_published_task!(scope)
       worker = uniq("w")
@@ -196,6 +201,8 @@ defmodule Barkpark.Content.PublishKeepsTaskClaimTest do
              "publish erased close_reason: #{inspect(reread.content["close_reason"])}"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a claim-identical draft may not ERASE reopen_trigger", %{scope: scope} do
       id = mk_published_task!(scope, %{"reopen_trigger" => "when the upstream API ships"})
 

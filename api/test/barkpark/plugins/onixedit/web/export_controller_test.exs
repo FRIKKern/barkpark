@@ -125,7 +125,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
         Path.join([File.cwd!(), "test", "fixtures", "onix", "minimal-book.json"])
         |> File.read!()
         |> Jason.decode!()
-        |> Map.put("productForm", "ZZ")
+        |> Map.put("productForm", "QQ")
 
       {:ok, _} =
         Content.create_document(
@@ -147,7 +147,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.ExportControllerTest do
       # is `details.onix_code` — `error.code` is the ERROR code now, so the two
       # meanings of "code" no longer collide in one envelope.
       assert get_in(payload, ["error", "details", "codelist"]) == "product_form"
-      assert get_in(payload, ["error", "details", "onix_code"]) == "ZZ"
+      assert get_in(payload, ["error", "details", "onix_code"]) == "QQ"
       assert is_binary(get_in(payload, ["error", "request_id"]))
     end
   end

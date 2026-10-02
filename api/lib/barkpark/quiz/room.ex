@@ -29,16 +29,18 @@ defmodule Barkpark.Quiz.Room do
   carry the AUTHORITATIVE `player_count` so subscribers assign it directly
   rather than accumulating deltas.
 
-  Backstops (P1-level; full anti-abuse/rate-limiting is P6, `/papers/hyperquiz-risks`):
-  a per-room player cap (`@max_players`) and a global room cap
-  (`max_children` on `Barkpark.Quiz.RoomSupervisor`).
+  Backstops: a per-room player cap (`@max_players`), a PER-PRINCIPAL spawn
+  budget in front of `ensure/2` (`Barkpark.Quiz.SpawnBudget` — the brake a real
+  visitor hits, and the reason the global cap is no longer the only one), and
+  the global room cap (`max_children` on `Barkpark.Quiz.RoomSupervisor`) as the
+  last brake. Full anti-abuse is still P6 (`/papers/hyperquiz-risks`).
   """
   use GenServer, restart: :temporary
 
   require Logger
 
   alias Phoenix.PubSub
-  alias Barkpark.Quiz.{CursorFrame, Heatmap}
+  alias Barkpark.Quiz.{CursorFrame, Heatmap, SpawnBudget}
 
   @registry Barkpark.Quiz.RoomRegistry
   @supervisor Barkpark.Quiz.RoomSupervisor
@@ -96,19 +98,46 @@ defmodule Barkpark.Quiz.Room do
     end
   end
 
-  @doc "Resolve-or-start the room for `pin`. The ONLY path that starts a room."
+  @doc """
+  Resolve-or-start the room for `pin`. The ONLY path that starts a room.
+
+  `source` is the caller's transport context — a `%Plug.Conn{}` or a socket
+  `connect_info` map — and is used for ONE thing: resolving the principal a
+  NEW spawn is billed to (`Barkpark.Quiz.SpawnBudget`). EVERY reachable door
+  must pass one.
+
+  `ensure/1` is the INTERNAL form: it spends no budget, because a per-visitor
+  budget billed to server-side callers meters the server against itself. That
+  exemption holds only while no reachable door uses it, which is a grep
+  tripwire in `Barkpark.Quiz.SpawnBudgetTest`, not a convention.
+
+  Resolving an ALREADY-LIVE room never consults the budget, so a host
+  refreshing or reconnecting to its own pin costs nothing.
+
+  Refusals, in the order they are reached:
+
+    * `{:error, :spawn_budget}` — this principal has opened too many rooms in
+      the last hour. Polite, per-principal, and the one a real visitor can hit.
+    * `{:error, :max_children}` — the global 10_000-room memory backstop, LAST
+      brake and unchanged.
+  """
   @spec ensure(pin()) :: {:ok, pid()} | {:error, term()}
-  def ensure(pin) when is_binary(pin) do
+  def ensure(pin) when is_binary(pin), do: ensure(pin, :internal)
+
+  @spec ensure(pin(), SpawnBudget.source()) :: {:ok, pid()} | {:error, term()}
+  def ensure(pin, source) when is_binary(pin) do
     case Registry.lookup(@registry, pin) do
       [{pid, _}] ->
         {:ok, pid}
 
       [] ->
-        case DynamicSupervisor.start_child(@supervisor, {__MODULE__, pin}) do
-          {:ok, pid} -> {:ok, pid}
-          {:error, {:already_started, pid}} -> {:ok, pid}
-          {:error, :max_children} -> {:error, :max_children}
-          {:error, reason} -> {:error, reason}
+        with :ok <- SpawnBudget.admit(source) do
+          case DynamicSupervisor.start_child(@supervisor, {__MODULE__, pin}) do
+            {:ok, pid} -> {:ok, pid}
+            {:error, {:already_started, pid}} -> {:ok, pid}
+            {:error, :max_children} -> {:error, :max_children}
+            {:error, reason} -> {:error, reason}
+          end
         end
     end
   end

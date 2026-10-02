@@ -4,6 +4,7 @@ import { unstable_cache } from "next/cache";
 import { client } from "./barkpark-client";
 import { bpAll, bpType } from "./bp-tags";
 import { resolveDocOutcome } from "./doc-absence";
+import { docReadOptions } from "./doc-read-options";
 
 /**
  * The raw document, type-agnostic. Every reader (post / paper / sheet / meta)
@@ -32,18 +33,30 @@ export interface DocResult {
  * resolves them when the slug param is really an id. Mirrors
  * `fetchPostBySlug` / `fetchPaperBySlug`, generalised across `_type`.
  */
-async function fetchByTypeSlug(
+/**
+ * EXPORTED FOR TESTS. `getDocument` wraps this in `unstable_cache`, which
+ * throws `Invariant: incrementalCache missing` outside a Next request scope —
+ * so the cached entry point cannot be driven under `node --test`, and the
+ * per-type read shaping below would only be checkable by reading this file.
+ * A grep is not a live probe; this export is what lets one run.
+ */
+export async function fetchByTypeSlug(
   type: string,
   slug: string,
 ): Promise<GenericDoc | null> {
+  // Per-type read shaping — today, `?resolve=tasks` for papers, so query-shaped
+  // task blocks arrive with live rows instead of empty. Both legs get it: a
+  // paper resolved by the id fallback must not render a different document from
+  // the same paper resolved by slug. See `./doc-read-options.ts`.
+  const opts = docReadOptions(type);
   const bySlug = await client
-    .docs<GenericDoc>(type)
+    .docs<GenericDoc>(type, opts)
     .where("slug", "eq", slug)
     .findOne();
   if (bySlug) return bySlug;
   // The query API doesn't expose `_id` as a filterable field; the by-id doc
   // endpoint fetches it directly and returns null on 404.
-  return client.doc<GenericDoc>(type, slug);
+  return client.doc<GenericDoc>(type, slug, opts);
 }
 
 // Data Cache layer (enables ISR on the detail pane): keyed on type + slug,

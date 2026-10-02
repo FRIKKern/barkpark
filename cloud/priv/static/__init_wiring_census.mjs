@@ -21,9 +21,15 @@
 //
 // ── WHY THIS IS DERIVED AND NOT A PINNED ROSTER (criterion 2) ───────────────
 //
-// The obvious instrument is a list: "these 32 selectors must be wired." That
-// list is wrong the day someone adds the 33rd control, and it is wrong in the
-// direction that matters — it goes green on a control it was never told about.
+// The obvious instrument is a list: "these selectors, by name, must be wired."
+// Such a list is wrong the day someone wires a control it was never told about,
+// and it is wrong in the direction that matters — it goes green on wiring it
+// never looked at. It is also wrong in a quieter way this file learned the hard
+// way: a population written into PROSE stops matching the population the
+// instrument PRINTS, and then the file's own invitation to "run it and see"
+// hands the reader a contradiction. So no count is typed into the prose here;
+// the one count this file does pin (STATED_POPULATION, below) is a constant the
+// census checks against its own live measurement on every run.
 // So this census holds NO roster. It parses init() into (target, event,
 // handler) triples and then asks TWO questions that the source answers about
 // ITSELF:
@@ -237,7 +243,12 @@ for (const m of body.matchAll(CALL_RE)) {
 // — the capability test init() writes before the matchMedia legacy fallback —
 // has no paren and is deliberately not counted. If the two numbers ever diverge
 // the extractor has stopped understanding a shape init() uses, and the honest
-// answer is "I could not read it", never "31 of 32 were fine".
+// answer is "I could not read it", never a near-pass that quotes a count. The
+// FAIL(2) below therefore states BOTH counts straight out of THIS run — the
+// literal call sites and the parsed triples — and refuses. Nothing about the
+// size of the population is typed into that message, because a typed one is
+// stale the next time a control lands, and then it misdirects the operator who
+// is reading the failure.
 const rawCalls = [...body.matchAll(/\.addEventListener\s*\(/g)];
 if (rawCalls.length !== triples.length) {
   const parsedEnds = new Set(triples.map((t) => body.indexOf(".addEventListener", t.idx)));
@@ -250,17 +261,48 @@ if (rawCalls.length !== triples.length) {
   ]);
 }
 
-// ── THE FLOOR ───────────────────────────────────────────────────────────────
-// DERIVED, not invented: init() on this branch parses to 32 triples (run the
-// census — it prints the number on every green). The floor is 24, three
-// quarters of that, and it is NOT a roster: it exists solely to catch an
-// EXTRACTOR COLLAPSE (an anchor that still matches while the body walk or the
-// call regex has quietly stopped seeing shapes), which is the failure mode that
-// would otherwise report a serene green over a population of zero. A wiring
-// change is caught by the two derived arms below, not here — that is why the
-// floor has this much slack and why removing four controls in one commit does
-// not need this number edited.
+// ── THE STATED POPULATION, AND THE FLOOR ────────────────────────
+// Two constants doing two different jobs, failing in opposite directions.
+//
+// STATED_POPULATION is a RECEIPT: the population this file was last ratified
+// against. It is not a roster (it names nothing) and it is not a threshold. Its
+// arm reds when it disagrees with the live count IN EITHER DIRECTION — one
+// control removed and one control added both land here — so no number a reader
+// can take out of this file can survive disagreeing with what the census
+// prints. That is the defect this block was rewritten to close: the prose used
+// to quote a population, the console grew, and the file went on inviting the
+// reader to run it and confirm a figure it no longer printed.
+//
+// POPULATION_FLOOR is a RATCHET, and it is deliberately NOT computed from the
+// live count. A floor derived from the very population it guards cannot fail:
+// a collapsing extractor would drag the floor down with it and the guard would
+// report a serene green over a population of zero, which is the one failure the
+// floor exists to catch. So the floor is a fixed number a person raises on
+// purpose. It is slack on purpose too — a WIRING change is caught by the two
+// derived arms below, not here.
+//
+// A RATCHET FAILS IN TWO DIRECTIONS, and only one of them is obvious:
+//   * the world gets WORSE — the population falls under the floor. Exit 2; the
+//     census makes no claim in either direction.
+//   * the world gets BETTER — the console grows, and a floor left at its old
+//     value silently guards a smaller and smaller fraction of it. Nothing reds.
+//     So RATIFIED_RATIO below recomputes what the floor WOULD be at the ratio
+//     it was ratified at, and reds when the shipped floor has fallen behind.
+//     THE COMPARISON IS ONE-WAY ON PURPOSE: a derived value ABOVE the shipped
+//     floor is a demand to raise it; a derived value BELOW it changes nothing.
+//     A shrinking console therefore can never drag this floor down — a shrink
+//     reds the STATED_POPULATION pin instead, and a human decides what it means.
+//
+// WHAT THIS DOES NOT OWN (charter D40 — a check states its boundary). Nothing
+// here can stop a person editing BOTH constants downward in one commit; that is
+// two literal lines in a diff and it belongs to review, not to a guard that
+// would be reading its expected value out of the thing it guards. What these
+// arms buy is that such an edit must be DELIBERATE and VISIBLE. Drift alone
+// never gets there.
+const STATED_POPULATION = 33;
 const POPULATION_FLOOR = 24;
+const RATIFIED_RATIO = 3 / 4; // POPULATION_FLOOR === Math.floor(STATED_POPULATION * RATIFIED_RATIO)
+
 if (triples.length < POPULATION_FLOOR) {
   die2([
     `FAIL(2): init() parsed to ${triples.length} listener triple(s); the floor is ${POPULATION_FLOOR}.`,
@@ -268,6 +310,95 @@ if (triples.length < POPULATION_FLOOR) {
     "  not a console that lost two thirds of its controls. Every question below would be",
     "  vacuously satisfied, so the census refuses to ask them.",
   ]);
+}
+
+// THE PIN. Pure, so its own controls below can drive it on fabricated inputs.
+function populationPinErrors(stated, live) {
+  if (!Number.isInteger(live) || live <= 0) {
+    return [
+      `FAIL(2): the population pin has NO SUBJECT — init() parsed to ${live} triple(s).`,
+      "  A pin compared against nothing agrees with nothing and refutes nothing. Whatever this",
+      "  run reported about wiring was measured over an empty population; fix the extractor.",
+    ];
+  }
+  if (!Number.isInteger(stated) || stated <= 0) {
+    return [
+      `FAIL(2): STATED_POPULATION in this file is ${stated}, which is not a population.`,
+      "  The pin can then be neither satisfied nor refuted, so it is not a check at all. Set it to",
+      "  the number the census prints on a green run.",
+    ];
+  }
+  if (stated === live) return [];
+  const verb = live > stated ? "GREW" : "SHRANK";
+  return [
+    `FAIL(2): this file states the population is ${stated} listener triple(s); init() parses to ${live}. It ${verb}.`,
+    "  This is not a wiring failure — the derived arms below decide that. It is this FILE going",
+    "  stale: the prose, the floor's justification and the messages here are all written against a",
+    "  population that has moved, and a reader who follows the invitation to run the census now",
+    "  gets a number that contradicts the file that invited them.",
+    `  Set STATED_POPULATION to ${live} and re-read the floor: at the ratified ratio the floor`,
+    `  would be ${Math.floor(live * RATIFIED_RATIO)} and it ships as ${POPULATION_FLOOR}. Raising it is a decision someone makes;`,
+    "  lowering it is not something a shrinking console gets to do on its own.",
+  ];
+}
+
+// THE RATCHET'S SECOND DIRECTION. One-way by construction: it can only ever ASK
+// for a HIGHER floor. It returns [] whenever the derived value is at or below
+// the shipped one, which is exactly what a shrunken population produces.
+function floorRatchetErrors(stated, floor, ratio) {
+  const derived = Math.floor(stated * ratio);
+  if (!(derived > floor)) return [];
+  return [
+    `FAIL(2): the population is ratified at ${stated} but POPULATION_FLOOR is still ${floor}.`,
+    `  At the ratified ratio the floor should be ${derived}. A floor left behind a growing console`,
+    "  guards an ever smaller fraction of it: the extractor could lose a third of the shapes it",
+    "  reads and still clear a threshold set for a much smaller console. Raise POPULATION_FLOOR",
+    `  to ${derived} in the same commit that raised STATED_POPULATION.`,
+  ];
+}
+
+{
+  const pinErrs = populationPinErrors(STATED_POPULATION, triples.length);
+  if (pinErrs.length) die2(pinErrs);
+  const ratchetErrs = floorRatchetErrors(STATED_POPULATION, POPULATION_FLOOR, RATIFIED_RATIO);
+  if (ratchetErrs.length) die2(ratchetErrs);
+}
+
+// THE ARMS' OWN CONTROLS, run INSIDE the measurement rather than in a test that
+// could stop being run — CI invokes this file bare, so these ride the gate step
+// that already exists. The two calls above can only ever print a clean nothing;
+// these say whether that nothing was MEASURED. Each drives the same function
+// the gate just used, on fabricated inputs, and a failing control is itself an
+// exit-2 refusal: an instrument that cannot show its arms fire makes no claim.
+{
+  const ctl = [];
+  const grew = populationPinErrors(STATED_POPULATION, STATED_POPULATION + 1);
+  if (!(grew.length && grew[0].includes("It GREW"))) {
+    ctl.push("FAIL(2): the population pin FAILED ITS OWN CONTROL — a live count one ABOVE the stated one did not red.");
+  }
+  const shrank = populationPinErrors(STATED_POPULATION, STATED_POPULATION - 1);
+  if (!(shrank.length && shrank[0].includes("It SHRANK"))) {
+    ctl.push("FAIL(2): the population pin FAILED ITS OWN CONTROL — a live count one BELOW the stated one did not red.");
+  }
+  if (populationPinErrors(STATED_POPULATION, STATED_POPULATION).length) {
+    ctl.push("FAIL(2): the population pin FAILED ITS OWN CONTROL — an AGREEING count was reported as a mismatch, so the clean verdict this run printed is noise.");
+  }
+  if (!populationPinErrors(STATED_POPULATION, 0).length) {
+    ctl.push("FAIL(2): the population pin FAILED ITS OWN CONTROL — an EMPTY population was accepted, so an extractor that found nothing would read as a satisfied pin.");
+  }
+  if (!floorRatchetErrors(STATED_POPULATION * 10, POPULATION_FLOOR, RATIFIED_RATIO).length) {
+    ctl.push("FAIL(2): the floor ratchet FAILED ITS OWN CONTROL — a ten-fold larger ratified population did not demand a higher floor, so the world getting BETTER would stay silent.");
+  }
+  if (floorRatchetErrors(1, POPULATION_FLOOR, RATIFIED_RATIO).length) {
+    ctl.push("FAIL(2): the floor ratchet FAILED ITS OWN CONTROL — a ratified population of one DEMANDED a change, which means a shrinking console can drag the floor down. That is the ratchet running backwards, and it is worse than no ratchet.");
+  }
+  if (ctl.length) {
+    die2([
+      ...ctl,
+      "  These arms guard the numbers this file states about itself. If they cannot be shown to",
+      "  fire, nothing this run printed about the population is evidence of anything.",
+    ]);
+  }
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -383,7 +514,7 @@ for (const t of triples) byEvent[t.event] = (byEvent[t.event] || 0) + 1;
 console.log("");
 console.log(`OK: all ${lookedUp.size} control(s) init() looks up are wired, and all ${named} named handler(s) exist.`);
 console.log(`    init() at ${APP_LABEL}:${lineOf(bodyStart)}-${lineOf(bodyEnd)}`);
-console.log(`    population: ${triples.length} (target, event, handler) triple(s), floor ${POPULATION_FLOOR}; ${rawCalls.length} literal call site(s), all accounted for`);
+console.log(`    population: ${triples.length} (target, event, handler) triple(s), pinned; floor ${POPULATION_FLOOR} (raise-only); ${rawCalls.length} literal call site(s), all accounted for`);
 console.log(`    events: ${Object.entries(byEvent).sort().map(([e, n]) => `${e}×${n}`).join(", ")}`);
 console.log(`    handlers: ${named} named, ${triples.length - named} inline`);
 console.log(`    selectors: ${[...lookedUp.keys()].sort().join(" ")}`);

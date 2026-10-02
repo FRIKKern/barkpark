@@ -1098,14 +1098,17 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_collection(query, nil), do: query
   defp maybe_filter_collection(query, ""), do: query
 
+  # The membership list is matched with jsonb containment, and the parameter is
+  # the LIST itself: Postgrex's jsonb codec JSON-encodes whatever it is handed,
+  # so a pre-encoded `"[\"col-x\"]"` string arrived as a jsonb STRING scalar,
+  # which no array contains. Only the primary `collection` key ever matched, so
+  # an asset added to a second folder never appeared in it (r4-lane-c dogfood).
   defp maybe_filter_collection(query, collection) when is_binary(collection) do
-    encoded = Jason.encode!([collection])
-
     where(
       query,
       [_m, d],
       fragment("?->>? = ?", d.content, "collection", ^collection) or
-        fragment("COALESCE(?->'collections', '[]'::jsonb) @> ?::jsonb", d.content, ^encoded)
+        fragment("COALESCE(?->'collections', '[]'::jsonb) @> ?::jsonb", d.content, ^[collection])
     )
   end
 

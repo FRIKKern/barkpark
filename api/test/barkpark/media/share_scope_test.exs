@@ -81,6 +81,38 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
 
   defp share_link(_), do: nil
 
+  defp collection_with_share_link!(workspace, project, token, expires_at) do
+    suffix = System.unique_integer([:positive])
+
+    {:ok, doc} =
+      %Document{}
+      |> Document.changeset(%{
+        doc_id: "col-#{suffix}",
+        type: @collection_type,
+        dataset: @dataset,
+        title: "collection #{suffix}",
+        status: "draft",
+        rev: "rc#{suffix}",
+        content: %{
+          "kind" => "folder",
+          "shareLink" => %{
+            "enabled" => true,
+            "token" => token,
+            "expiresAt" => DateTime.to_iso8601(expires_at)
+          }
+        },
+        workspace_id: workspace.id,
+        project_id: project && project.id
+      })
+      |> Barkpark.Repo.insert()
+
+    doc
+  end
+
+  defp unique_token(label) do
+    "sharetok-#{label}-#{System.unique_integer([:positive])}-#{:erlang.unique_integer([:positive])}"
+  end
+
   describe "LEAK GATE — share-link writes isolated across workspaces" do
     # PRE-FIX CONFIRMATION (proven by reverting ONLY the controller→Share scope
     # threading + the inner Collections.get opts + the write_opts/1 upsert
@@ -193,6 +225,68 @@ defmodule Barkpark.Media.Storage.ShareScopeTest do
       assert {:ok, %Document{} = resolved} = Share.resolve(a_token, @dataset)
       assert resolved.workspace_id == ws_a.id
       assert resolved.title == "Workspace A collection"
+    end
+  end
+
+  describe "EXPIRY — a share link whose expiresAt is in the past is refused" do
+    # WHY THE FIXTURE IS WRITTEN BY HAND. `Share.create/3` only ever mints
+    # `DateTime.utc_now() |> DateTime.add(ttl, :second)` with a POSITIVE ttl,
+    # so no call to it can produce a past `expiresAt` — which is exactly why
+    # `share_active?/1`'s time comparison had no subject and could be deleted
+    # with the whole media fence still green. A test routed through the minting
+    # path would reproduce that blind spot, so the shareLink map is inserted
+    # straight through the changeset, the same shape
+    # `media_collections_share_view_scope_test.exs` uses. `Share.resolve/2`
+    # reads exactly these three keys.
+    test "Share.resolve/2 returns {:error, :expired} for a shareLink whose expiresAt is in the past" do
+      ws = create_workspace!()
+      proj = create_project!(ws)
+
+      # THE FLOOR. An enabled link with a FUTURE expiresAt built by this very
+      # helper must resolve, or the :expired verdict below would be satisfied
+      # by a fixture the resolver cannot read at all (wrong key, wrong dataset,
+      # unreadable row) rather than by the expiry comparison.
+      live_token = unique_token("live")
+
+      live =
+        collection_with_share_link!(
+          ws,
+          proj,
+          live_token,
+          DateTime.add(DateTime.utc_now(), 3600, :second)
+        )
+
+      live_result = Share.resolve(live_token, @dataset)
+
+      assert match?({:ok, %Document{}}, live_result),
+             "the hand-written shareLink fixture is unreadable by Share.resolve/2 " <>
+               "(got #{inspect(live_result)}), so the :expired assertion below " <>
+               "would prove nothing about expiry"
+
+      {:ok, resolved} = live_result
+      assert resolved.doc_id == live.doc_id
+
+      # THE SUBJECT. Same helper, same enabled flag, same parseable ISO8601 —
+      # the ONLY difference is that the instant is behind now.
+      expires_at = DateTime.add(DateTime.utc_now(), -3600, :second)
+      expired_token = unique_token("expired")
+      expired = collection_with_share_link!(ws, proj, expired_token, expires_at)
+
+      # Criterion 1's CHECK, asserted rather than assumed: the persisted
+      # expiresAt is demonstrably behind the clock at assertion time.
+      %Document{content: %{"shareLink" => %{"expiresAt" => persisted}}} =
+        Barkpark.Repo.get!(Document, expired.id)
+
+      assert {:ok, persisted_at, _} = DateTime.from_iso8601(persisted)
+
+      assert DateTime.compare(persisted_at, DateTime.utc_now()) == :lt,
+             "the fixture's expiresAt (#{persisted}) is not in the past, so this " <>
+               "test would pass against a resolver with no expiry check at all"
+
+      assert Share.resolve(expired_token, @dataset) == {:error, :expired},
+             "an EXPIRED share link resolved — Share.share_active?/1 let a shareLink " <>
+               "whose expiresAt is #{persisted} (behind now) through, so the " <>
+               "{:error, :expired} branch of Share.resolve/2 is unreachable"
     end
   end
 

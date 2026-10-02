@@ -1,6 +1,7 @@
 import "server-only";
 import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
 import { DATASET } from "@/lib/config";
+import { DOC_TYPES } from "@/lib/find";
 
 /**
  * Same-origin SSE proxy for the live-listen stream.
@@ -118,6 +119,82 @@ const DRAFT_ID_PREFIX = "drafts.";
  * Anything else that is not a verified-published `mutation` is DROPPED.
  */
 const DOCUMENTLESS_EVENTS = new Set(["welcome", "overloaded"]);
+
+/**
+ * The document types this site serves (`lib/find.ts`'s `DOC_TYPES` — the same
+ * list search and the reader routes use). A PUBLISHED frame of any other type
+ * is dropped: the stream is rendered for the SERVER token, so a published
+ * document of a private type (a `contact` submission, an internal config doc…)
+ * would otherwise reach the anonymous browser with every field the token can
+ * see. The browser only uses a frame as a "something changed, refresh" signal,
+ * so dropping types the site never renders loses nothing.
+ */
+const SERVED_TYPES: ReadonlySet<string> = new Set(DOC_TYPES.map((t) => t.type));
+
+/** Does the frame name a served type — on the frame AND on its result, if any? */
+function isServedType(payload: Record<string, unknown>): boolean {
+  const type = payload.type;
+  if (typeof type !== "string" || !SERVED_TYPES.has(type)) return false;
+  const result = payload.result;
+  if (result !== undefined && result !== null && typeof result === "object") {
+    const resultType = (result as Record<string, unknown>)._type;
+    if (resultType !== undefined && resultType !== type) return false;
+  }
+  return true;
+}
+
+/**
+ * The ONLY payload keys a forwarded mutation frame keeps: what changed (id,
+ * type, transition, revision) and its cache tags. Everything else — above all
+ * `result`, the document body rendered for the SERVER token — is stripped, so
+ * no field the anonymous reader may not see (a hidden field of a served type,
+ * the `:internal` replay snapshot) can reach the browser. `<BarkparkLive/>` only
+ * needs "something changed" to `router.refresh()`, which re-reads through the
+ * normal public read path.
+ */
+const FORWARDED_KEYS = [
+  "eventId",
+  "mutation",
+  "type",
+  "documentId",
+  "rev",
+  "previousRev",
+  "syncTags",
+] as const;
+
+/**
+ * Re-emit a mutation frame that already PASSED the filter with its `data`
+ * projected onto {@link FORWARDED_KEYS}. `id:` / `event:` / `retry:` lines are
+ * kept as they were so Last-Event-ID resume keeps working.
+ */
+function stripDocumentBody(block: string): string {
+  const kept: string[] = [];
+  const data: string[] = [];
+  for (const line of block.split(/\r\n|\r|\n/)) {
+    if (line.startsWith("data:")) {
+      let value = line.slice(5);
+      if (value.startsWith(" ")) value = value.slice(1);
+      data.push(value);
+    } else if (line !== "" && !line.startsWith(":")) {
+      kept.push(line);
+    }
+  }
+  const payload = parseData(data.join("\n")) ?? {};
+  const slim: Record<string, unknown> = {};
+  for (const key of FORWARDED_KEYS) {
+    if (payload[key] !== undefined) slim[key] = payload[key];
+  }
+  return [...kept, `data: ${JSON.stringify(slim)}`].join("\n");
+}
+
+/** Is this (already-passed) frame a mutation frame whose body must be stripped? */
+function isMutationFrame(block: string): boolean {
+  return block.split(/\r\n|\r|\n/).some((line) => {
+    const colon = line.indexOf(":");
+    if (colon <= 0 || line.slice(0, colon) !== "event") return false;
+    return line.slice(colon + 1).trim() === "mutation";
+  });
+}
 
 /** SSE frame terminators, per spec: CRLF CRLF, LF LF, or CR CR. */
 const FRAME_TERMINATORS = ["\r\n\r\n", "\n\n", "\r\r"];
@@ -243,7 +320,7 @@ function framePasses(block: string): boolean {
 
   if (event !== "mutation") return false;
   if (payload === null) return false;
-  return isPublishedPayload(payload);
+  return isPublishedPayload(payload) && isServedType(payload);
 }
 
 /**
@@ -252,9 +329,10 @@ function framePasses(block: string): boolean {
  *
  * Buffers across chunk boundaries — a frame can arrive split in half, and a
  * filter that judged each network chunk independently would leak the tail of a
- * draft frame. Passed frames are re-emitted VERBATIM, so `id:` / `event:` /
- * `retry:` semantics and the blank-line terminator survive untouched and
- * Last-Event-ID resume keeps working. Trailing bytes at end-of-stream are an
+ * draft frame. Passed frames keep their `id:` / `event:` / `retry:` lines and
+ * blank-line terminator, so Last-Event-ID resume keeps working; a passed
+ * MUTATION frame has its `data` projected onto FORWARDED_KEYS (no document
+ * body) by `stripDocumentBody`. Trailing bytes at end-of-stream are an
  * incomplete frame and are never emitted.
  */
 function clampToPublished(
@@ -291,7 +369,8 @@ function clampToPublished(
           const terminator = buffer.slice(end.index, end.index + end.length);
           buffer = buffer.slice(end.index + end.length);
           if (block !== "" && framePasses(block)) {
-            controller.enqueue(encoder.encode(block + terminator));
+            const out = isMutationFrame(block) ? stripDocumentBody(block) : block;
+            controller.enqueue(encoder.encode(out + terminator));
             emitted = true;
           }
           end = findFrameEnd(buffer);

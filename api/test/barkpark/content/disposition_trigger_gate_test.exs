@@ -26,7 +26,7 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
   already-adjudicated row. The rest of the birth/adoption surface lives in
   `Barkpark.Content.TaskBirthFenceTest`.
   """
-  use BarkparkWeb.ConnCase, async: false
+  use BarkparkWeb.ConnCase, async: true
 
   import Ecto.Query, only: [from: 2]
 
@@ -88,6 +88,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
   # ── PROBE (a) — the raw door ───────────────────────────────────────────────
 
   describe "PROBE (a): the raw door onto content.disposition" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a patch setting disposition=parked with NO reopen trigger is REFUSED, naming the verb",
          %{scope: scope} do
       id = uniq("disp-raw-a")
@@ -108,6 +110,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
       refute Map.has_key?(content_of(id, scope), "disposition")
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the refusal is scoped to ANY raw disposition write, not just a hollow park",
          %{scope: scope} do
       id = uniq("disp-raw-scope")
@@ -127,6 +131,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
       end
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "the guard runs on the compound-patch, replace and createOrReplace doors too",
          %{scope: scope} do
       # A patch-only guard leaves `createOrReplace` open, and createOrReplace is
@@ -181,6 +187,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
       assert content_of(id, scope)["disposition"] == "parked"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "erasing the reopen_trigger of a parked row is refused (hollowness by two steps)",
          %{scope: scope} do
       id = uniq("disp-raw-hollow")
@@ -196,6 +204,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
       assert content_of(id, scope)["reopen_trigger"] == "when X ships"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "replication is not collateral damage: the same write with source: :sync applies",
          %{scope: scope} do
       id = uniq("disp-raw-sync")
@@ -339,6 +349,8 @@ defmodule Barkpark.Content.DispositionTriggerGateTest do
   # ── PROBE (c) — the inherited exemption, NOW CLOSED (PDS wave 28) ──────────
 
   describe "PROBE (c): the fresh-create exemption, closed" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a createOrReplace on a BRAND-NEW id carrying a hollow park is now REFUSED",
          %{scope: scope} do
       id = uniq("disp-fresh")

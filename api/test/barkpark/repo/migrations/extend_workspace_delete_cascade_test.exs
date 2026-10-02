@@ -248,22 +248,98 @@ defmodule Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest do
     end
   end
 
+  # ── down/0 ────────────────────────────────────────────────────────────────
+  #
+  # ONE PARENT PER ROW (task-962637a90e406961). This used to delete a
+  # workspace under a webhook carrying ALL THREE scope keys, and it raised
+  # 23503 (webhooks_project_id_fkey) at random in the weekly plugins-off run
+  # 36645209662. With every scope FK SET NULL, that delete reaches the row
+  # three ways — SET NULL on workspace_id, the projects cascade (project_id),
+  # the datasets cascade (dataset_id) — and each is an UPDATE that re-checks
+  # the row's OTHER foreign keys (a row version this transaction wrote is
+  # always re-checked, key changed or not). Whether a re-check finds a scope
+  # parent the cascade already deleted depends on which RI action trigger
+  # fires first, and Postgres fires them in trigger-NAME order,
+  # `RI_ConstraintTrigger_a_<oid>`, compared as TEXT. `apply_down/1`
+  # re-creates the scope FKs with fresh OIDs while the parent cascades keep
+  # their migration-time ones, so a suite that pushes the OID counter across a
+  # digit boundary (99999 -> 100000) flips the order and the delete raises.
+  # Forcing the flipped order (re-creating projects_workspace_id_fkey and
+  # datasets_project_id_fkey after the swap) reproduces it every time, with
+  # committed fixtures too: it is a property of the down STATE, not of the
+  # sandbox. That is the legacy schema's own behaviour, which this migration
+  # removed; it is not something a test of the down arm should gamble on.
+  #
+  # So the down arm is pinned in two deterministic halves: the catalog (all 21
+  # FKs are SET NULL after apply_down, CASCADE after apply_up), and the
+  # behaviour, one parent per row, where each delete reaches the row by exactly
+  # one path.
+  @down_tables ~w(webhooks mutation_events search_intel_events search_intel_crystals
+                  search_intel_merge_patterns search_synonyms paper_events)
+
+  defp delete_actions do
+    %{rows: rows} =
+      Repo.query!(
+        """
+        SELECT conrelid::regclass::text, conname, confdeltype
+        FROM pg_constraint
+        WHERE contype = 'f'
+          AND conrelid::regclass::text = ANY($1)
+          AND conname ~ '_(workspace|project|dataset)_id_fkey$'
+        """,
+        [@down_tables]
+      )
+
+    Map.new(rows, fn [_table, name, action] -> {name, action} end)
+  end
+
+  defp absent, do: %{id: nil}
+
   describe "down/0 restores SET NULL semantics" do
-    test "after rollback a workspace delete SET-NULLs scope on a webhook + synonym" do
+    test "after rollback all 21 scope FKs are SET NULL, and CASCADE again after apply_up" do
+      before = delete_actions()
+      assert map_size(before) == 21
+      assert before |> Map.values() |> Enum.uniq() == ["c"]
+
+      ExtendWorkspaceDeleteCascade.apply_down(Repo)
+
+      try do
+        after_down = delete_actions()
+        assert Map.keys(after_down) == Map.keys(before)
+        assert after_down |> Map.values() |> Enum.uniq() == ["n"]
+      after
+        ExtendWorkspaceDeleteCascade.apply_up(Repo)
+      end
+
+      assert delete_actions() == before
+    end
+
+    test "after rollback deleting each scope parent SET-NULLs a webhook + synonym it alone scopes" do
       ExtendWorkspaceDeleteCascade.apply_down(Repo)
 
       try do
         {ws, project, dataset} = scope()
-        insert_webhook!("hook-downrev", ws, project, dataset)
-        insert_search_synonym!("syn-downrev", ws, project, dataset)
+        slug_only = %{id: nil, slug: dataset.slug}
 
+        insert_webhook!("hook-down-ws", ws, absent(), slug_only)
+        insert_search_synonym!("syn-down-ws", ws, absent(), slug_only)
+        insert_webhook!("hook-down-proj", absent(), project, slug_only)
+        insert_search_synonym!("syn-down-proj", absent(), project, slug_only)
+        insert_webhook!("hook-down-ds", absent(), absent(), dataset)
+        insert_search_synonym!("syn-down-ds", absent(), absent(), dataset)
+
+        # Leaf first, so each delete reaches its rows by exactly one path.
+        Repo.query!("DELETE FROM datasets WHERE id = $1", [uuid_in(dataset.id)])
+        Repo.query!("DELETE FROM projects WHERE id = $1", [uuid_in(project.id)])
         delete_workspace!(ws)
 
         # Rows SURVIVE — scope went NULL (legacy behaviour the fix closes).
-        assert count("webhooks", "name", "hook-downrev") == 1
-        assert count("search_synonyms", "from_query", "syn-downrev") == 1
-        assert count_orphaned("webhooks", "name", "hook-downrev") == 1
-        assert count_orphaned("search_synonyms", "from_query", "syn-downrev") == 1
+        for key <- ~w(ws proj ds) do
+          assert count("webhooks", "name", "hook-down-#{key}") == 1
+          assert count("search_synonyms", "from_query", "syn-down-#{key}") == 1
+          assert count_orphaned("webhooks", "name", "hook-down-#{key}") == 1
+          assert count_orphaned("search_synonyms", "from_query", "syn-down-#{key}") == 1
+        end
       after
         ExtendWorkspaceDeleteCascade.apply_up(Repo)
       end

@@ -48,6 +48,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
   alias Barkpark.Plugins.Sheets
   alias Barkpark.Plugins.Sheets.{Csv, XlsxImport}
   alias Barkpark.Tenancy
+  alias BarkparkWeb.ErrorResponse
 
   @byte_cap 15_000_000
   @default_dataset "production"
@@ -74,8 +75,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
     else
       {:error, status, code, message} ->
         conn
-        |> put_status(status)
-        |> json(%{error: %{code: code, message: message}})
+        |> ErrorResponse.emit_fields(status, %{code: code, message: message})
     end
   end
 
@@ -246,9 +246,15 @@ defmodule Barkpark.Plugins.Sheets.Web.ImportController do
   # seeded Default for EVERY import, so an admin token bound to workspace B
   # imported into Default and then could not export what it had just written
   # once the read became scoped. Import and export now name the SAME tenant.
-  # The nil-scope posture is unchanged: an unresolved request yields the
-  # `:shared_only` sentinel, which `resolve_write_scope/1` collapses to nil and
-  # stamps Default exactly as before.
+  # An UNRESOLVED request no longer lands in Default. `scope_opts(conn)` is the
+  # conn producer, so it yields the `:shared_only` sentinel, and since the
+  # unscoped-write ruling (task-6fa023cdabdc5f6a, on main 2026-09-05)
+  # `resolve_write_scope/1` routes that sentinel to
+  # `resolve_unscoped_request_write_scope/1`: INFER when the principal resolves
+  # to exactly one workspace, REFUSE (`workspace_scope_required`) when it
+  # resolves to none or several. It is never collapsed to nil and never stamps
+  # the seeded Default — that arm is reserved for callers that omit the key
+  # entirely (seeds, workers, sockets), which this door is not.
   defp save(conn, slug, title, dataset, content) do
     case Content.upsert_document(
            "sheet",

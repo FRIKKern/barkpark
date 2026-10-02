@@ -136,3 +136,63 @@ test("a non-array tags projection does not throw and yields no chips", () => {
   // returned `undefined`, the normalizer returns `[]` — neither throws.
   assert.deepEqual(extractTags({ tags: "dog_friendly" }, {}), []);
 });
+
+/* ══ THE BINDING ARM — what makes the arms above non-vacuous ══════════════════
+ *
+ * Everything above runs `extractTags`, a LOCAL re-derivation of the expression
+ * `lib/listings.ts` is supposed to run, next to `oldFlatOnlyFilter`, the
+ * pre-fix baseline. That proves the NORMALIZER retains what the old filter
+ * dropped. It proves nothing about which of the two `listings.ts` calls.
+ *
+ * MEASURED, not argued: replacing line 135 of `web/lib/listings.ts`
+ *
+ *     const tags = paperTags((content.tags ?? r.tags) as PaperTag[] | undefined);
+ *
+ * with the verbatim `oldFlatOnlyFilter` body quoted at the top of this file —
+ * i.e. reinstating the exact regression this suite exists to prevent — left
+ * `pnpm test` at "ran 560 tests from 69 files (pass 560, fail 0)", byte-
+ * identical to the unmutated run. The fail-before baseline was being compared
+ * against a copy of the fix rather than against the shipped call site.
+ *
+ * `listings.ts` cannot be imported here (its header explains why: `server-only`,
+ * `next/cache`, `@/` aliases), so the binding is to the bytes. `readFileSync`
+ * throws on a missing path, so a moved or renamed module reds loudly. */
+
+import { readFileSync } from "node:fs";
+
+const LISTINGS_SRC = readFileSync(
+  new URL("../lib/listings.ts", import.meta.url),
+  "utf8",
+);
+
+test("BINDING: lib/listings.ts extracts tags through the shared paperTags normalizer", () => {
+  assert.ok(
+    LISTINGS_SRC.length > 0,
+    "web/lib/listings.ts is empty — nothing was actually scanned.",
+  );
+  assert.match(
+    LISTINGS_SRC,
+    /import \{[^}]*\bpaperTags\b[^}]*\} from "@\/lib\/paper-tags"/,
+    "web/lib/listings.ts no longer imports paperTags — the weighted-tag " +
+      "normalizer this whole suite is about is not reachable from the module.",
+  );
+  assert.match(
+    LISTINGS_SRC,
+    /const tags = paperTags\(\s*\(content\.tags \?\? r\.tags\)/,
+    "web/lib/listings.ts no longer extracts tags with " +
+      "`paperTags((content.tags ?? r.tags) ...)`. Every weighted " +
+      "`{tag, strength, rationale}` tag silently loses its chip again " +
+      "(charter D8-D10) — the exact regression the cases above model.",
+  );
+});
+
+test("BINDING: lib/listings.ts does not reinstate the flat-only tag filter", () => {
+  // The pre-fix shape, keyed on its signature move: filtering the raw tags
+  // array down to entries that are ALREADY plain strings.
+  assert.doesNotMatch(
+    LISTINGS_SRC,
+    /\.filter\(\(t\)(?::\s*t is string)? =>\s*typeof t === "string"\)/,
+    "web/lib/listings.ts is filtering tags to `typeof t === \"string\"` again " +
+      "— that is `oldFlatOnlyFilter`, the baseline this suite proves wrong.",
+  );
+});

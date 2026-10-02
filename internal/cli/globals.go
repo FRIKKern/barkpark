@@ -77,6 +77,11 @@ type globals struct {
 	// local file instead of GET /v1/capabilities. Lets the CLI run before the
 	// capabilities endpoint is deployed. Empty means no override.
 	manifestPath string
+
+	// session is --session <slug>: the type:session document this invocation
+	// logs to. The highest-precedence layer of the session-doc binding
+	// (session_doc_header.go); empty means "not stated on this command line".
+	session string
 }
 
 // globalSpec maps a long/short flag to whether it takes a value. Hand-rolled so
@@ -90,6 +95,7 @@ var valueFlags = map[string]bool{
 	"-o": true, "--output": true,
 	"--limit": true, "--offset": true,
 	"--manifest": true,
+	"--session":  true,
 }
 
 var boolFlags = map[string]bool{
@@ -222,6 +228,8 @@ func (g *globals) set(key, val string) error {
 		g.outputSet = true
 	case "--manifest":
 		g.manifestPath = val
+	case "--session":
+		g.session = val
 	case "--json":
 		g.jsonOut = true
 		g.output = "json"

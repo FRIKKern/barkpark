@@ -226,14 +226,29 @@ SHA_A="$(git -C "$FIX" rev-parse HEAD~2)"
 SHA_B="$(git -C "$FIX" rev-parse HEAD~1)"
 SHA_C="$(git -C "$FIX" rev-parse HEAD)"
 
-# A `gh` stub whose `run list` answers with the sha in GH_LAST_SUCCESS_SHA.
+# A `gh` stub for the two calls the extracted step makes. The anchor is no
+# longer "the last run that SUCCEEDED" but "the last run whose control-plane or
+# instance JOB concluded success" (task-220b847a8072f82e), so the step asks
+# twice: once for the candidate runs, once for each candidate's job
+# conclusions. GH_LAST_SUCCESS_SHA is the candidate's head;
+# GH_LAST_SUCCESS_LEGS is how many of its deploy legs succeeded — 0 models a
+# run that exited superseded-at-start or already-covered and touched no box.
 mkdir -p "$TMP/bin"
 cat >"$TMP/bin/gh" <<'EOF'
 #!/usr/bin/env bash
-# harness stub: only `gh run list ... --jq .[0].headSha` is reachable from the
-# extracted step. Anything else is a loud failure, not a silent empty answer.
+# harness stub: exactly two invocations are reachable from the extracted step.
+# Anything else is a loud failure, not a silent empty answer.
 if [ "${1:-}" = "run" ] && [ "${2:-}" = "list" ]; then
-  printf '%s' "${GH_LAST_SUCCESS_SHA:-}"
+  # "<run id> <head sha>", newest first. One candidate is enough here: this
+  # harness is about the already-covered arm, not about walking a history.
+  if [ -n "${GH_LAST_SUCCESS_SHA:-}" ]; then
+    printf '111 %s\n' "$GH_LAST_SUCCESS_SHA"
+  fi
+  exit 0
+fi
+if [ "${1:-}" = "api" ]; then
+  # the step asks for a COUNT of leg jobs that concluded success
+  printf '%s\n' "${GH_LAST_SUCCESS_LEGS:-1}"
   exit 0
 fi
 echo "gh stub: unexpected invocation: $*" >&2
@@ -241,10 +256,13 @@ exit 97
 EOF
 chmod +x "$TMP/bin/gh"
 
-# run_step <event> <sha> <last-success-sha> <dispatch-targets>
+# run_step <event> <sha> <last-success-sha> <dispatch-targets> <legs>
+# <legs> is how many deploy legs the last successful run concluded success on;
+# it defaults to 1 (that run really deployed), and 0 models a run that exited
+# early and deployed nothing.
 # echoes "<cp> <instance> <marker>" where marker is COVERED or RAN.
 run_step() {
-  local event="$1" sha="$2" success="$3" targets="${4:-}"
+  local event="$1" sha="$2" success="$3" targets="${4:-}" legs="${5:-1}"
   local outfile="$TMP/gh-output.$RANDOM"
   : >"$outfile"
   local log
@@ -252,6 +270,7 @@ run_step() {
     cd "$FIX" &&
     PATH="$TMP/bin:$PATH" \
     GH_LAST_SUCCESS_SHA="$success" \
+    GH_LAST_SUCCESS_LEGS="$legs" \
     GITHUB_EVENT_NAME="$event" \
     GITHUB_OUTPUT="$outfile" \
     TEST_SHA="$sha" \
@@ -296,6 +315,16 @@ expect_step "push ahead of the last deploy -> instance=true, NOT covered" \
 # already-covered test must not fire on a fallback diff anchor.
 expect_step "no successful run on record -> NOT covered, falls through to the diff" \
   "false true RAN rc=0" push "$SHA_C" ""
+
+# B4b — THE ANCHOR DEFECT (task-220b847a8072f82e). A run is on record, it
+# SUCCEEDED, and its head C contains our sha B — but BOTH its deploy legs were
+# skipped, because it exited superseded-at-start or already-covered. It touched
+# no box, so it is not evidence of anything being deployed: `last_deployed` must
+# stay empty and the already-covered arm must NOT fire. Under the old run-level
+# anchor this case was indistinguishable from B1 and reported COVERED, which is
+# how a merged change reaches main and never reaches production.
+expect_step "last success deployed NOTHING (both legs skipped) -> NOT covered" \
+  "false true RAN rc=0" push "$SHA_B" "$SHA_C" "" 0
 
 # B5 — THE MANUAL REPAIR SURVIVES. A dispatch with targets:both must deploy even
 # when the anchor already covers its ref; that is the whole point of the repair

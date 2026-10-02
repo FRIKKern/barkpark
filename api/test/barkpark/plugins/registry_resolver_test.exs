@@ -184,7 +184,12 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
                  path: "/admin/chain-a",
                  icon: nil,
                  order: 70,
-                 active_when: nil
+                 active_when: nil,
+                 # task-e34595f816cd4bd2: EVERY normalised entry now carries the
+                 # disabled/reason pair, so nav.ex reads ONE shape. An entry the
+                 # workspace surfaces is the `false`/`nil` half.
+                 disabled: false,
+                 reason: nil
                }
              ],
              "expected B to mutate A's contribution; got: #{inspect(ours)}"
@@ -207,7 +212,12 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
                  path: "/admin/chain-a",
                  icon: nil,
                  order: 70,
-                 active_when: nil
+                 active_when: nil,
+                 # task-e34595f816cd4bd2: EVERY normalised entry now carries the
+                 # disabled/reason pair, so nav.ex reads ONE shape. An entry the
+                 # workspace surfaces is the `false`/`nil` half.
+                 disabled: false,
+                 reason: nil
                }
              ],
              "expected A's tab unmodified when A fires last; got: #{inspect(ours)}"

@@ -161,6 +161,35 @@ defmodule BarkparkCloud.Billing do
       nil ->
         {:error, :plan_invalid}
 
+      # task-8b4a4776ba35a9cd: a team that already PAYS through a live Stripe
+      # subscription must change plans in the billing portal. A second Checkout
+      # opens a second customer + subscription — billed twice — and the webhook
+      # cannot apply it. The console hid the button; the server is the gate.
+      _price_id when is_binary(plan) ->
+        if paying_subscription?(team) do
+          {:error, :already_subscribed}
+        else
+          do_checkout(team, plan)
+        end
+    end
+  end
+
+  defp paying_subscription?(team) do
+    case live_subscription(team_id(team)) do
+      %Subscription{status: status, gateway_subscription_id: gid}
+      when status == "active" and is_binary(gid) ->
+        true
+
+      _ ->
+        false
+    end
+  end
+
+  defp do_checkout(team, plan) do
+    case price_id(plan) do
+      nil ->
+        {:error, :plan_invalid}
+
       price_id ->
         case checkout_capability() do
           :available -> gateway().create_checkout_session(team_id(team), plan, price_id: price_id)
@@ -328,9 +357,17 @@ defmodule BarkparkCloud.Billing do
 
       %{suspended: length(suspended), restored: 0}
     else
+      # At most the HEADROOM (task-722ae49c93fe55d0). `overflow <= 0` means the
+      # live fleet fits, not that every quota-suspended box does: restoring all
+      # of them put 4 live boxes on a 3-box plan, and nothing re-checked. Oldest
+      # first, the mirror of the newest-first suspend above.
+      headroom = max(limit - length(live), 0)
+
       restored =
         tid
         |> Registry.list_quota_suspended_barkparks()
+        |> Enum.sort_by(& &1.inserted_at, {:asc, DateTime})
+        |> Enum.take(headroom)
         |> Enum.map(&unsuspend_one(&1, tid))
         |> Enum.reject(&is_nil/1)
 
@@ -735,7 +772,19 @@ defmodule BarkparkCloud.Billing do
     if is_binary(team_id) and is_binary(plan) do
       activate_from_session(team_id, plan, customer_id, subscription_id)
     else
-      {:error, :missing_metadata}
+      # A SIGNATURE-VERIFIED event we cannot act on (task-30d4058bf64c317b).
+      # Only the Checkout Session carries team_id/plan, so every
+      # customer.subscription.created{active} — and an updated{active} with no
+      # live row — lands here. Answering it with an error made the router send
+      # 400: Stripe retries a 4xx for days and can DISABLE the endpoint, after
+      # which payment_failed / deleted stop arriving. Acknowledge it, say so in
+      # the log, and change nothing. 4xx stays for bad signatures and payloads.
+      Logger.warning(
+        "[billing] verified Stripe event with no team_id/plan metadata ignored " <>
+          "(customer=#{inspect(customer_id)} subscription=#{inspect(subscription_id)})"
+      )
+
+      {:ok, :ignored}
     end
   end
 
@@ -765,7 +814,61 @@ defmodule BarkparkCloud.Billing do
   end
 
   defp do_activate_from_session(team_id, plan, customer_id, subscription_id) do
-    case live_subscription(team_id) do
+    live = live_subscription(team_id)
+
+    cond do
+      # task-731eb98d2a7f7097: a Stripe subscription we ALREADY hold a row for,
+      # that is not the team's live row, is a stale or redelivered session — the
+      # subscription was canceled since. Re-activating from it inserted a fresh
+      # ACTIVE row with the old ids and lifted billing_lapsed: an entitled team
+      # with no paying subscription. Stripe re-signs retries, so the signature
+      # tolerance never stopped it.
+      is_binary(subscription_id) and known_non_live_subscription?(subscription_id, live) ->
+        Logger.warning(
+          "[billing] checkout session for already-recorded, non-live subscription " <>
+            "#{subscription_id} (team #{team_id}) ignored — stale or redelivered event"
+        )
+
+        {:ok, :ignored}
+
+      # task-8b4a4776ba35a9cd: an ACTIVE team paying through a DIFFERENT Stripe
+      # subscription just completed a second checkout — the customer is now
+      # billed twice and this plan change is not applied. It used to be a
+      # silent :already_active. Still not auto-applied (swapping a live paid
+      # subscription is a human's call), but it is loud.
+      match?(%Subscription{status: "active"}, live) and is_binary(subscription_id) and
+        is_binary(live.gateway_subscription_id) and
+          live.gateway_subscription_id != subscription_id ->
+        Logger.error(
+          "[billing] DUPLICATE PAID SUBSCRIPTION: team #{team_id} is active on " <>
+            "#{live.gateway_subscription_id} and completed a second checkout " <>
+            "(#{subscription_id}, customer #{inspect(customer_id)}, plan #{plan}) — " <>
+            "the customer is billed twice; cancel one in Stripe"
+        )
+
+        :telemetry.execute([:barkpark_cloud, :billing, :duplicate_subscription], %{count: 1}, %{
+          team_id: team_id,
+          live_subscription_id: live.gateway_subscription_id,
+          new_subscription_id: subscription_id
+        })
+
+        {:ok, :already_active}
+
+      true ->
+        do_activate_from_live(live, team_id, plan, customer_id, subscription_id)
+    end
+  end
+
+  defp known_non_live_subscription?(subscription_id, live) do
+    live_id = live && live.id
+
+    from(s in Subscription, where: s.gateway_subscription_id == ^subscription_id)
+    |> Repo.all()
+    |> Enum.any?(&(&1.id != live_id))
+  end
+
+  defp do_activate_from_live(live, team_id, plan, customer_id, subscription_id) do
+    case live do
       %Subscription{plan: "trial"} = sub ->
         updated =
           sub
@@ -1333,6 +1436,9 @@ defmodule BarkparkCloud.Billing do
       %Subscription{}}`.
     * NO live sub + ledger ALREADY USED (a prior trial, now torn down) → `{:error,
       :trial_used}`. A torn-down trial can never be re-granted; it 402s.
+    * the LOSER of a concurrent first launch (its claim matched nothing because
+      the winner's trial committed first) → `{:ok, :already_entitled}`, never
+      `:trial_used` — the claim and the grant are one transaction.
   """
   @spec start_trial(Team.t() | binary()) ::
           {:ok, Subscription.t() | :already_entitled}
@@ -1347,17 +1453,73 @@ defmodule BarkparkCloud.Billing do
 
       # A live-but-lapsed sub (past_due past grace, or an expired trial) is an
       # existing billing relationship — NOT eligible for a fresh free trial.
-      not is_nil(live_subscription(tid)) ->
-        {:error, :ineligible}
+      #
+      # ASK ENTITLEMENT AGAIN before refusing (task-14a9cad0f2d7fd8e). The
+      # `entitled?/1` read above and the `live_subscription/1` read here are two
+      # statements, not one snapshot. The twin of a racing double-click can
+      # commit its freshly granted trial BETWEEN them: this request then read
+      # "not entitled" before the grant and "has a live sub" after it, and
+      # answered `:ineligible` — go_live 402'd the paywall at a team whose trial
+      # had just started, before its twin reconcile could answer the 409. The
+      # sub it now sees IS that trial, so the second read says entitled. A
+      # genuinely lapsed sub (an expired trial, past_due past grace) still reads
+      # not entitled and still gets `:ineligible`.
+      between_trial_reads(tid) == :ok and not is_nil(live_subscription(tid)) ->
+        if entitled?(tid), do: {:ok, :already_entitled}, else: {:error, :ineligible}
 
       true ->
-        case claim_trial_window(tid) do
-          # Won the atomic claim + no live sub → land the team's first-ever trial.
-          {:ok, ends} -> insert_trial_subscription(tid, ends)
-          # The ledger was already stamped (a prior, torn-down trial) → no second.
-          :already_used -> {:error, :trial_used}
-        end
+        claim_and_grant_trial(tid)
     end
+  end
+
+  # TEST SEAM, inert in production: the one point where a racing twin's trial
+  # can land between `start_trial/1`'s two reads. A test puts a 1-arity fun under
+  # `{BarkparkCloud.Billing, :between_trial_reads}` in ITS OWN process dictionary
+  # to commit that twin deterministically; the fun is removed before it runs, so
+  # it fires at most once. Nothing in `lib/` puts that key (a test in
+  # `router_launch_flow_test.exs` greps for it), so in production this is one
+  # `Process.get/1` returning nil. Same pattern as `Cloudflare`'s process-scoped
+  # config.
+  defp between_trial_reads(tid) do
+    case Process.get({__MODULE__, :between_trial_reads}) do
+      fun when is_function(fun, 1) ->
+        Process.delete({__MODULE__, :between_trial_reads})
+        fun.(tid)
+        :ok
+
+      _ ->
+        :ok
+    end
+  end
+
+  # The claim and the grant are ONE transaction (dwb-launch-flow-double-submit-
+  # test). They used to be two autocommitted statements, which broke the racing
+  # double-click on a team's FIRST launch: both requests reached this branch,
+  # one won the ledger claim, and the loser — reading `:already_used` — was
+  # answered `:trial_used`, so go_live 402'd the paywall at a team whose trial
+  # had just started. Inside one transaction the loser's conditional UPDATE
+  # blocks on the winner's row lock until the winner has committed BOTH the
+  # stamp and the `trial` row; it then matches nothing, and the re-read of
+  # `entitled?/1` sees the committed trial → `:already_entitled`. A ledger that
+  # was stamped by a PRIOR, torn-down trial still reads not-entitled → the
+  # `:trial_used` 402 stands. A failed grant rolls the stamp back with it, so a
+  # trial can no longer be burned without a subscription to show for it.
+  defp claim_and_grant_trial(tid) do
+    Repo.transaction(fn ->
+      case claim_trial_window(tid) do
+        # Won the atomic claim + no live sub → land the team's first-ever trial.
+        {:ok, ends} ->
+          case insert_trial_subscription(tid, ends) do
+            {:ok, sub} -> sub
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
+        # Lost the claim to a concurrent first launch that has now committed
+        # its trial → the team IS entitled; nothing to start.
+        :already_used ->
+          if entitled?(tid), do: :already_entitled, else: Repo.rollback(:trial_used)
+      end
+    end)
   end
 
   # Stamp the ledger window if the team has never trialed, and return the

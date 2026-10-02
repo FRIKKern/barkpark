@@ -28,8 +28,24 @@ on:
       - "**/*.go"
       - "**/*.ts"
       - "**/*.tsx"
+      # .mjs/.js added with the §13 @boundary registry: docs-anchors-check.sh's
+      # marker scan has always included them (§8's CANON_INCLUDES), but this
+      # workflow had no **/*.mjs or **/*.js trigger, so a rename inside
+      # cloud/priv/static/*.mjs — the exact surface the Cloud Console
+      # boundaries live on — never re-ran the scan here. The BLOCKING venue for
+      # §13 is elixir.yml's unfiltered path-escape job; this widening only keeps
+      # the advisory copy from going dark on the surface it audits.
+      - "**/*.mjs"
+      - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
+      - "scripts/doc-drift-check.sh"
+      - "scripts/doc-drift-check.test.sh"
+      - "scripts/doc-drift-extract.py"
+      # charter-corpus marker hygiene (docs/decisions/0008): its SUBJECT is the
+      # charter tree, which no other glob here reaches, plus its own script.
+      - "scripts/charter-corpus-hygiene-check.sh"
+      - ".claude/workflows/**"
       - ".github/workflows/doc-gates.yml"
       # never-cancel-main ratchet (honest-gates D12) — its subject IS the
       # workflow tree, so it must trigger on ANY workflow edit. Without the
@@ -81,6 +97,19 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # the ONE Part A artifact no other glob here reaches. check.mjs Part A
+      # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
+      # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
+      # a hand-edit inside styleguide.html's BEGIN/END GENERATED swatch region
+      # dispatched this workflow on NEITHER arm — the byte-parity/attribution
+      # check never ran on the one change it exists to catch.
+      - "cloud/priv/static/styleguide.html"
+      # check.mjs's own negative half. Without this glob a change that breaks the
+      # selftest — or the selftest itself — never runs the step that executes it.
+      - "design/check-selftest.mjs"
+      # ledger backfill enumerator + its offline selftest. Without this glob
+      # a change to the pager never runs the arms that prove it cannot skip.
+      - "scripts/merge-gate-backfill.mjs"
       # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
       # unit tests, and the per-theme spec files. Without these globs Part F is a
       # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
@@ -89,6 +118,31 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # stw-backlog-theme-matrix c0: the RUNTIME half of the theme matrix — every
+      # supported search template stamps one documented data-bp-theme default and
+      # reacts to bp:themechange. Its subjects ride the `templates/**` glob below,
+      # but the test itself matched nothing, so an edit that guts the gate would
+      # never have run it (the design/mirror-fence.test.mjs shape).
+      - "design/template-theme-contract.test.mjs"
+      - "design/preview-inventory.json"
+      # stw-backlog-catalog-family: the CATALOG half of the same family — every
+      # barkpark.template.json in the repo conforms to the manifest schema, and
+      # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
+      # and mirrored into cloud/priv/templates. Its subjects ride `templates/**`
+      # and the js/cloud globs, but the test itself matched nothing — the
+      # design/mirror-fence.test.mjs shape, again.
+      - "design/template-manifest-contract.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the AUTHORITY half — the emitted
+      # bp-graph palette is the SOLE source of concrete colour in bp-graph.js.
+      # Its four subjects already ride the globs above; the test itself matched
+      # nothing, the design/mirror-fence.test.mjs shape again.
+      - "design/graph-palette-authority.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half — runs the
+      # renderer and records what it paints, so a swapped light/dark arm cannot
+      # hide behind three static gates. Its four subjects ride the globs above.
+      - "design/graph-theme-runtime.test.mjs"
+      - "templates/barkpark.template.schema.json"
+      - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -99,6 +153,21 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # task-833f347eaa78a2a5: the ladder-refusal CONFORMANCE TABLE and the one
+      # fixture of malformed families it drives all three implementations of the
+      # type-ladder derivation against. Both need a glob of their own: the
+      # fixture is the gate's INPUT, so an edit that guts it (a case deleted, the
+      # sentinel changed) must re-run the gate that reads it, and the test itself
+      # is not matched by any other glob here — doc-gates has no broad **/*.mjs
+      # trigger, which is how design/mirror-fence.test.mjs shipped unrun.
+      - "design/ladder-refusal-conformance.test.mjs"
+      - "design/ladder-refusal-fixture.json"
+      # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
+      # required-state set from design/status-manifest.json. The manifest is the
+      # gate's new input, so an edit to it must re-run the gate that reads it —
+      # otherwise adding a state is exactly the silent skip this slice removed.
+      - "design/validate-life-fence.test.mjs"
+      - "design/status-manifest.json"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -116,6 +185,18 @@ on:
       # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
       # named "(advisory)".
       - "design/exemptions.json"
+      # task-d95c3e66b9177c8f: the design engagement's EXIT drift gate — the one
+      # thing in the repo that reads the archived agency handover and compares a
+      # canonical byte against the source it was copied from. Three globs, because
+      # the gate has three subjects and all three are already-existing files that
+      # would otherwise change without it running: the test itself (matched by no
+      # other glob here — doc-gates has no broad **/*.mjs trigger, which is how
+      # design/mirror-fence.test.mjs shipped unrun), and the agency handover, which
+      # is the gate's INPUT — an edit to the archive is exactly the silent
+      # re-baselining this gate exists to refuse. design/tokens.json and
+      # design/themes/** (the canonical side) already ride the globs above.
+      - "design/agency-provenance.test.mjs"
+      - "design/handover/ui-review-9/design/tokens.json"
       - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
@@ -133,6 +214,22 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # tlv-bl-js-vocab-generator: the two JS/TS status-vocabulary artifacts now
+      # emitted from design/status-manifest.json (they replaced the hand copies
+      # status-manifest-check.sh Part 5 used to byte-check). The web one rides
+      # `web/**` below, but js/packages/** matched NO glob in this workflow — so a
+      # hand-edit of the react generated file would never have run design/check.mjs
+      # Part A, the ONE gate that now catches it. Named explicitly, both of them,
+      # so neither depends on a broader glob staying broad.
+      - "js/packages/react/src/status-vocab.gen.ts"
+      - "web/lib/status-ladder.gen.ts"
+      # the THIRD of the same family (task-76f7830182282c6d): apps/mobile's
+      # taskboard.tsx was the last hand copy and is now a consumer of this
+      # artifact. apps/mobile/** matches NO glob in this workflow — the `**/*.ts`
+      # trigger above covers it today, but the react line right above exists for
+      # exactly the reason this one does: a generated file must not depend on a
+      # broader glob staying broad to reach the ONE gate that byte-checks it.
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
@@ -183,6 +280,7 @@ on:
       # itself and the golden mirror need their own triggers (a seeded/removed
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
+      - "scripts/pd-parity-completeness.test.sh"
       - "api/test/support/fixtures/pd-parity/**"
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # command files themselves, plus the only two anchored target surfaces NOT
@@ -229,6 +327,18 @@ on:
       # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
       - "scripts/.silencer-counts"
       - "api/.sobelow-skips"
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). Same dotfile hole
+      # as the two entries above: `scripts/**` does not match
+      # scripts/.paper-dialect-baseline, the pinned-count file the whole ratchet
+      # compares against, so raising a number in it triggered NOTHING. The
+      # script itself rides `scripts/**`; of its three measured corpora
+      # (scripts/paper-dialect-ratchet.sh DEFAULT_SOURCES) `cmd/barkpark/testdata`
+      # already rides "cmd/barkpark/**" above — the two under
+      # tooling/paper-excellence/ ride no glob in either block, so a new dirty
+      # fixture landed without the gate that counts it ever running.
+      - "scripts/.paper-dialect-baseline"
+      - "tooling/paper-excellence/rig/fixtures/**"
+      - "tooling/paper-excellence/twin/**"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -318,8 +428,24 @@ on:
       - "**/*.go"
       - "**/*.ts"
       - "**/*.tsx"
+      # .mjs/.js added with the §13 @boundary registry: docs-anchors-check.sh's
+      # marker scan has always included them (§8's CANON_INCLUDES), but this
+      # workflow had no **/*.mjs or **/*.js trigger, so a rename inside
+      # cloud/priv/static/*.mjs — the exact surface the Cloud Console
+      # boundaries live on — never re-ran the scan here. The BLOCKING venue for
+      # §13 is elixir.yml's unfiltered path-escape job; this widening only keeps
+      # the advisory copy from going dark on the surface it audits.
+      - "**/*.mjs"
+      - "**/*.js"
       - "scripts/check-doc-budgets.sh"
       - "scripts/docs-anchors-check.sh"
+      - "scripts/doc-drift-check.sh"
+      - "scripts/doc-drift-check.test.sh"
+      - "scripts/doc-drift-extract.py"
+      # charter-corpus marker hygiene (docs/decisions/0008): its SUBJECT is the
+      # charter tree, which no other glob here reaches, plus its own script.
+      - "scripts/charter-corpus-hygiene-check.sh"
+      - ".claude/workflows/**"
       - ".github/workflows/doc-gates.yml"
       # never-cancel-main ratchet (honest-gates D12) — its subject IS the
       # workflow tree, so it must trigger on ANY workflow edit. Without the
@@ -371,6 +497,19 @@ on:
       - "design/validate.mjs"
       - "design/emit.mjs"
       - "design/check.mjs"
+      # the ONE Part A artifact no other glob here reaches. check.mjs Part A
+      # adjudicates 28 generated artifacts; 27 are matched by a pattern in this
+      # list, but doc-gates carries no **/*.html glob, so a PR whose diff is only
+      # a hand-edit inside styleguide.html's BEGIN/END GENERATED swatch region
+      # dispatched this workflow on NEITHER arm — the byte-parity/attribution
+      # check never ran on the one change it exists to catch.
+      - "cloud/priv/static/styleguide.html"
+      # check.mjs's own negative half. Without this glob a change that breaks the
+      # selftest — or the selftest itself — never runs the step that executes it.
+      - "design/check-selftest.mjs"
+      # ledger backfill enumerator + its offline selftest. Without this glob
+      # a change to the pager never runs the arms that prove it cannot skip.
+      - "scripts/merge-gate-backfill.mjs"
       # theme-system compiler (Wave 2 D17) — the zero-dep OKLCH derive core, its
       # unit tests, and the per-theme spec files. Without these globs Part F is a
       # script nobody runs (doc-gates has no broad **/*.mjs / **/*.json trigger).
@@ -379,6 +518,31 @@ on:
       - "design/themes/**"
       # theme-system Wave 4 (D24) — the N-theme emission proof + its fixture theme.
       - "design/theme-emit.test.mjs"
+      # stw-backlog-theme-matrix c0: the RUNTIME half of the theme matrix — every
+      # supported search template stamps one documented data-bp-theme default and
+      # reacts to bp:themechange. Its subjects ride the `templates/**` glob below,
+      # but the test itself matched nothing, so an edit that guts the gate would
+      # never have run it (the design/mirror-fence.test.mjs shape).
+      - "design/template-theme-contract.test.mjs"
+      - "design/preview-inventory.json"
+      # stw-backlog-catalog-family: the CATALOG half of the same family — every
+      # barkpark.template.json in the repo conforms to the manifest schema, and
+      # every create-barkpark-app starter tree is enrolled in AVAILABLE_TEMPLATES
+      # and mirrored into cloud/priv/templates. Its subjects ride `templates/**`
+      # and the js/cloud globs, but the test itself matched nothing — the
+      # design/mirror-fence.test.mjs shape, again.
+      - "design/template-manifest-contract.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the AUTHORITY half — the emitted
+      # bp-graph palette is the SOLE source of concrete colour in bp-graph.js.
+      # Its four subjects already ride the globs above; the test itself matched
+      # nothing, the design/mirror-fence.test.mjs shape again.
+      - "design/graph-palette-authority.test.mjs"
+      # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half — runs the
+      # renderer and records what it paints, so a swapped light/dark arm cannot
+      # hide behind three static gates. Its four subjects ride the globs above.
+      - "design/graph-theme-runtime.test.mjs"
+      - "templates/barkpark.template.schema.json"
+      - "js/packages/create-barkpark-app/src/constants.ts"
       # cloud-console-hardening wave-5 (D41): the standing regression test for the
       # emit --write attribution fence. Rides the design/emit.mjs + design/check.mjs
       # dispensation (narrow wave-5 grant) so a change to emit.mjs re-proves the
@@ -389,6 +553,21 @@ on:
       # no workflow at all — a regression test nobody runs is a comment with a
       # process cost, so it is wired here beside its emit-fence sibling.
       - "design/mirror-fence.test.mjs"
+      # task-833f347eaa78a2a5: the ladder-refusal CONFORMANCE TABLE and the one
+      # fixture of malformed families it drives all three implementations of the
+      # type-ladder derivation against. Both need a glob of their own: the
+      # fixture is the gate's INPUT, so an edit that guts it (a case deleted, the
+      # sentinel changed) must re-run the gate that reads it, and the test itself
+      # is not matched by any other glob here — doc-gates has no broad **/*.mjs
+      # trigger, which is how design/mirror-fence.test.mjs shipped unrun.
+      - "design/ladder-refusal-conformance.test.mjs"
+      - "design/ladder-refusal-fixture.json"
+      # tlv: the mutation proof that validate.mjs' lifecycle gate DERIVES its
+      # required-state set from design/status-manifest.json. The manifest is the
+      # gate's new input, so an edit to it must re-run the gate that reads it —
+      # otherwise adding a state is exactly the silent skip this slice removed.
+      - "design/validate-life-fence.test.mjs"
+      - "design/status-manifest.json"
       # the attribution ledger itself (cch wave 68). A manifest-only edit — a
       # hand-tampered digest, a dropped slot — matched NO glob here, so the one
       # file the fence's memory lives in could change without the gate that
@@ -406,6 +585,18 @@ on:
       # same shape: a ledger entry whose only other trigger, bp-graph-drift.yml, is
       # named "(advisory)".
       - "design/exemptions.json"
+      # task-d95c3e66b9177c8f: the design engagement's EXIT drift gate — the one
+      # thing in the repo that reads the archived agency handover and compares a
+      # canonical byte against the source it was copied from. Three globs, because
+      # the gate has three subjects and all three are already-existing files that
+      # would otherwise change without it running: the test itself (matched by no
+      # other glob here — doc-gates has no broad **/*.mjs trigger, which is how
+      # design/mirror-fence.test.mjs shipped unrun), and the agency handover, which
+      # is the gate's INPUT — an edit to the archive is exactly the silent
+      # re-baselining this gate exists to refuse. design/tokens.json and
+      # design/themes/** (the canonical side) already ride the globs above.
+      - "design/agency-provenance.test.mjs"
+      - "design/handover/ui-review-9/design/tokens.json"
       - "api/priv/static/assets/bp-graph.js"
       # the audit verb table (cch-w65; moved into the image by cch-w69-s1 — its
       # Elixir consumer compile-time-reads it inside the cloud image build, which
@@ -423,6 +614,22 @@ on:
       - "web/app/globals.css"
       - "internal/taskboard/tokens_gen.go"
       - "internal/pdrender/tokens_gen.go"
+      # tlv-bl-js-vocab-generator: the two JS/TS status-vocabulary artifacts now
+      # emitted from design/status-manifest.json (they replaced the hand copies
+      # status-manifest-check.sh Part 5 used to byte-check). The web one rides
+      # `web/**` below, but js/packages/** matched NO glob in this workflow — so a
+      # hand-edit of the react generated file would never have run design/check.mjs
+      # Part A, the ONE gate that now catches it. Named explicitly, both of them,
+      # so neither depends on a broader glob staying broad.
+      - "js/packages/react/src/status-vocab.gen.ts"
+      - "web/lib/status-ladder.gen.ts"
+      # the THIRD of the same family (task-76f7830182282c6d): apps/mobile's
+      # taskboard.tsx was the last hand copy and is now a consumer of this
+      # artifact. apps/mobile/** matches NO glob in this workflow — the `**/*.ts`
+      # trigger above covers it today, but the react line right above exists for
+      # exactly the reason this one does: a generated file must not depend on a
+      # broader glob staying broad to reach the ONE gate that byte-checks it.
+      - "apps/mobile/src/papers/portabledoc/blocks/status-vocab.gen.ts"
       - "api/lib/barkpark_web/layouts/bulldocs.html.heex"
       # Studio literal-color gate — Studio chrome must consume emitted tokens.
       - "api/lib/barkpark_web/**/*.ex"
@@ -473,6 +680,7 @@ on:
       # itself and the golden mirror need their own triggers (a seeded/removed
       # fixture is a .json, covered by no glob above).
       - "scripts/pd-parity-completeness.sh"
+      - "scripts/pd-parity-completeness.test.sh"
       - "api/test/support/fixtures/pd-parity/**"
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # command files themselves, plus the only two anchored target surfaces NOT
@@ -519,6 +727,18 @@ on:
       # named; the lit-allow populations ride "**/*.go" and "**/*.ex".)
       - "scripts/.silencer-counts"
       - "api/.sobelow-skips"
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). Same dotfile hole
+      # as the two entries above: `scripts/**` does not match
+      # scripts/.paper-dialect-baseline, the pinned-count file the whole ratchet
+      # compares against, so raising a number in it triggered NOTHING. The
+      # script itself rides `scripts/**`; of its three measured corpora
+      # (scripts/paper-dialect-ratchet.sh DEFAULT_SOURCES) `cmd/barkpark/testdata`
+      # already rides "cmd/barkpark/**" above — the two under
+      # tooling/paper-excellence/ ride no glob in either block, so a new dirty
+      # fixture landed without the gate that counts it ever running.
+      - "scripts/.paper-dialect-baseline"
+      - "tooling/paper-excellence/rig/fixtures/**"
+      - "tooling/paper-excellence/twin/**"
       # ── the code-comment citation guard's .eex corpus (cgsiw-s5). The step
       # below runs tooling/doc-truth/retired-terms.mjs, whose TERM_EXTS includes
       # `.eex` and whose TERM_EXCLUDE covers node_modules/_build/deps/vendor/
@@ -627,6 +847,7 @@ jobs:
           # actually check anything. Every other step here reads the worktree
           # and is indifferent to depth.
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       - name: Set up Node
         uses: actions/setup-node@v4
@@ -682,8 +903,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/check-doc-budgets.sh --selftest
-          bash scripts/check-doc-budgets.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-doc-budgets.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-doc-budgets.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # --selftest FIRST (distrust vacuous green). The harness landed in #12561
       # with 18 cases — including §8's three: a duplicate capability slug, a
@@ -705,8 +935,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/docs-anchors-check.sh --selftest
-          bash scripts/docs-anchors-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/docs-anchors-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/docs-anchors-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Connectors chat_bridge DDL drift gate (connectors D54). The bridge OWNS
       # the chat_bridge.connector_installs DDL (charter D28: no Ecto migration),
@@ -723,8 +962,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/connectors-ddl-drift-check.sh --selftest
-          bash scripts/connectors-ddl-drift-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/connectors-ddl-drift-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/connectors-ddl-drift-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Connectors catalog connectable-drift gate (connectors D75). There is
       # deliberately NO catalog endpoint on the connect wire (catalog.ex moduledoc
@@ -745,8 +993,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/connectors-catalog-drift-check.sh --selftest
-          bash scripts/connectors-catalog-drift-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/connectors-catalog-drift-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/connectors-catalog-drift-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Never-cancel-main ratchet (honest-gates D12). `cancelled` is a NON-PASS:
       # a workflow that runs on push-to-main with `cancel-in-progress: true`
@@ -766,8 +1023,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/never-cancel-main-check.sh --selftest
-          bash scripts/never-cancel-main-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/never-cancel-main-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/never-cancel-main-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # ── the two deploy.yml gates get their FIRST CI caller ──────────────────
       #
@@ -790,8 +1056,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/check-deployyml-filters.sh --selftest
-          bash scripts/check-deployyml-filters.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-deployyml-filters.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-deployyml-filters.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       - name: Control-plane smoke can-fail gate (fails this job)
         id: s7
@@ -799,8 +1074,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/check-deploy-smoke.sh --selftest
-          bash scripts/check-deploy-smoke.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/check-deploy-smoke.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/check-deploy-smoke.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # --selftest FIRST (distrust vacuous green). Part 1/2 compares two SETS of
       # .bp-canvas-* classes and used to fail only on set DIFFERENCE, so an
@@ -817,8 +1101,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/paper-editor-mirror-check.sh --selftest
-          bash scripts/paper-editor-mirror-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/paper-editor-mirror-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/paper-editor-mirror-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Status vocabulary single-source (parity §2/§7). design/status-manifest.json
       # is the ONE source of the white ladder; the Elixir emitters read it at
@@ -827,13 +1120,13 @@ jobs:
       #
       # --selftest runs FIRST, IN THIS SAME STEP (cgsi-s8 idiom; the selftest
       # itself is cgsi-bl-status-manifest-no-selftest). This gate was wired BARE
-      # here — it had no --selftest to run, so none of its five parts had ever
-      # been shown to RED and CI could never catch a weakened one. The 15-arm
+      # here — it had no --selftest to run, so none of its parts had ever
+      # been shown to RED and CI could never catch a weakened one. The 13-arm
       # harness copies the gate and the six files it reads into a throwaway
       # tree, plants one violation per part in turn (a drifted tone value, an
       # orphan .bp-g--<role> class, a missing one, a drifted Go roleGlyph, a
-      # drifted Go roleLabel, a reordered STATUS_ROLES entry, a drifted mobile
-      # ROLE_LABEL), asserts the REAL gate exits 1 naming that part, and
+      # drifted Go roleLabel, a drifted mobile ROLE_LABEL), asserts the REAL gate
+      # exits 1 naming that part, and
       # restores the planted file to prove it greens again. It plants nothing in
       # this repo. Same step, not a later one: Actions skips a job's remaining
       # steps once one fails, so a trailing tripwire never runs on exactly the
@@ -844,8 +1137,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/status-manifest-check.sh --selftest
-          bash scripts/status-manifest-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/status-manifest-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/status-manifest-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Preview-contract cross-surface parity tripwire (preview-contract W4,
       # charter D20 Layer 2). Field parity is proven by the golden-fixture tests
@@ -870,8 +1172,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/preview-parity-check.sh --selftest
-          bash scripts/preview-parity-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/preview-parity-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/preview-parity-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Unified-aesthetic design-token drift gate (unified-aesthetic W1.2).
       # design/tokens.json is the ONE source of the Barkpark design language; the
@@ -887,7 +1198,65 @@ jobs:
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node design/validate.mjs
-          node design/check.mjs
+
+          # task-d95c3e66b9177c8f (agency closeout): the EXIT drift gate. The
+          # design engagement is over and its package is archived at
+          # design/handover/ui-review-9/design/tokens.json, read by no gate at
+          # all. validate.mjs above SHAPE-gates cloudChrome and check.mjs Part F
+          # proves derive(theme) is self-consistent, so a retint of evergreen's
+          # accent or a revert of the fg4 legibility fix (light #76818f) is a
+          # GREEN PR under every existing gate while the provenance the exit
+          # package exists to preserve is gone. This compares the canonical bytes
+          # against the source they were copied from: five accent ramps through
+          # derive.mjs hslToHex, and every cloudChrome shell role. Both arms
+          # enrol by predicate and both carry controls that drive the same
+          # comparator over planted input.
+          #
+          # ORDER IS LOAD-BEARING: this runs BEFORE check.mjs, not after the
+          # suite at the bottom of the step. The step is one `run: |` block, so
+          # the FIRST non-zero command ends it — and check.mjs currently carries
+          # an inherited Part O red (cloud/priv/static/app.css, the console
+          # lane's). Placed below check.mjs this gate is enrolled and
+          # UNREACHABLE: the breaker log shows it as command 13 of a step that
+          # died at command 5. A gate that cannot be reached is a gate that
+          # cannot red. It needs only validate.mjs's subject (design/tokens.json
+          # and design/themes/), so it belongs here.
+          #
+          # Proven able to fail on the real tree: retinting
+          # design/themes/evergreen.json modes.light.accent to "140 71.81% 29.22%"
+          # reds tests 1-2; walking cloudChrome.fg4.light to #8d96a5 reds 3-5.
+          node design/agency-provenance.test.mjs
+
+          # --selftest FIRST (distrust a vacuous green, same order as the preview
+          # parity gate above). check.mjs's clean run is a PASS line and 56 ok
+          # lines — which is also what a gate whose parts stopped recording
+          # failures prints. The selftest re-invokes check.mjs as a subprocess with
+          # one part's failure forced (BP_DESIGN_CHECK_FAULT, a hook that can only
+          # ADD a failure) and requires the ok-summary gating to hold in BOTH
+          # directions: a part that failed withholds its ok, a part that passed
+          # prints its ok even when an earlier part failed. Giving Part B back its
+          # pre-fix run-wide read reds it, naming Part B (proven able to fail).
+          #
+          # The arms are DERIVED, not listed: the Parts come from check.mjs's own
+          # `— Part <id>:` headers, the injectable ones from its own
+          # `FAULT.has("<id>")` hooks (one beside every ok-gate), and the selftest
+          # loops them — so covering a Part added later is a hook in check.mjs and
+          # no edit here. It also PRINTS its coverage: any Part with no hook is
+          # named as UNEXERCISED (Part 0 today, which exits on failure and prints
+          # no ok line), and any ok line no fault withholds is named as unproven.
+          # It was three hand-named arms until r19: neutering Part E's ok-gate then
+          # exited 0 and was invisible; all 15 gate-neutering mutations red now.
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; node design/check.mjs --selftest || st_rc=$?
+          gate_rc=0; node design/check.mjs || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
           # theme-system Wave 2 (D17): the zero-dep OKLCH compiler core's unit
           # tests. Runs here so a change to design/derive.mjs re-proves the colour
           # math / serializer byte-formats / AA-walk + on-accent contracts.
@@ -896,6 +1265,43 @@ jobs:
           # paper-editor mirror-scoping proofs, driven by a fixture theme OUTSIDE
           # design/themes/ so a second theme is exercised without a shipped skin.
           node design/theme-emit.test.mjs
+          # stw-backlog-theme-matrix c0: the RUNTIME half of the same matrix. The
+          # CSS gates above prove every theme is EMITTED; this one proves every
+          # supported search template stamps one documented data-bp-theme default
+          # and reacts to bp:themechange. It caught a real divergence: the Astro
+          # edition's graph pane pinned `theme: 'dark'` with no listener at all
+          # while the byte-identical renderer flipped correctly in the Next
+          # edition. Enrolment is a PREDICATE (ships public/bp-graph.js, or the
+          # manifest pins a theme), so a sixth template enrols itself.
+          node design/template-theme-contract.test.mjs
+          # stw-backlog-catalog-family: the CATALOG half. Nothing in the repo read
+          # the JSON Schema the manifests declare with `$schema` — Go validates its
+          # own struct over its own embedded copies, so a create-barkpark-app
+          # manifest was unvalidated by anything at all. Enrolment is a PREDICATE
+          # (any file NAMED barkpark.template.json, build output pruned), so a new
+          # template or a new mirror root enrols itself. The one list that must
+          # stay a list — AVAILABLE_TEMPLATES, a published TS union — gets the arm
+          # that REDS when a starter tree exists and the list does not name it.
+          node design/template-manifest-contract.test.mjs
+
+          # stw-backlog-theme-matrix c2 (partial): tokens.json calls
+          # color.graphCanvas.graph "the SOLE source for every concrete colour
+          # that renderer paints" — an assertion nothing enforced. A literal
+          # planted OUTSIDE the generated markers is byte-identical across all
+          # four mirrors and leaves every emit artifact in sync, so mirror-drift
+          # and emit --check both stay green while that colour stops tracking
+          # tokens.json; Canvas 2D never consumes var(), so no CSS gate sees it.
+          # Enrols by PREDICATE (every bp-graph.js the walk finds).
+          node design/graph-palette-authority.test.mjs
+          # stw-backlog-theme-matrix c2 (partial): the LIGHT/DARK half of the same
+          # criterion. Every gate above reads bp-graph.js STATICALLY, so none can
+          # see WHICH arm of a light/dark token pair the paint path selects —
+          # swap `theme === "light" ? BG_LIGHT : BG_DARK` and mirror-drift,
+          # emit --check and the authority gate all stay green. This one RUNS the
+          # renderer in a node:vm realm against a recording Canvas 2D context and
+          # asserts the painted colour set against design/tokens.json across
+          # explicit theme, setTheme() and "auto". Enrols by the same PREDICATE.
+          node design/graph-theme-runtime.test.mjs
           # cloud-console-hardening wave-5 (D41): the emit --write attribution
           # fence's standing regression test. Drives the real emit.mjs CLI against
           # a throwaway copy of the tree and asserts the fence REFUSES an
@@ -908,6 +1314,30 @@ jobs:
           # attribution fence — paper-editor-mirror.mjs and the Studio writer.
           # Zero-dep (node:test + node:assert), 7 assertions.
           node design/mirror-fence.test.mjs
+
+          # tlv (design/validate.mjs REQUIRED_LIFE): the lifecycle half of
+          # validate.mjs derives its required-state set from
+          # design/status-manifest.json .statuses instead of a closed 9-element
+          # literal. This suite drives the real validate.mjs CLI against a
+          # throwaway copy of design/ with a MUTATED manifest and asserts the
+          # non-zero exit names the state. Reverting the derivation to a literal
+          # reds 4 of its 5 tests (proven able to fail).
+          node design/validate-life-fence.test.mjs
+
+          # task-833f347eaa78a2a5: THE LADDER-REFUSAL CONFORMANCE TABLE. Three
+          # implementations of "derive tokens.type.<family> by size and refuse
+          # rather than go blind" — design/emit.mjs typeLadderFrom (#18275),
+          # design/validate.mjs chromeLadderAscending (#18322) and
+          # web/__tests__/type-ladder-emitted.test.ts ladderFrom (#18142) — and
+          # every gate before this one compared only the LISTS they produce,
+          # which are identical on a well-formed tokens.json WHATEVER their
+          # refusal semantics are. A relaxed tie-refusal in one copy was
+          # therefore invisible. This drives all of them against ONE fixture of
+          # malformed families and names the implementation that diverged; the
+          # web arm runs in the web suite (this job is Node 20, which cannot
+          # execute TypeScript) and the enrolment arm here reds if it is unhooked.
+          node design/ladder-refusal-conformance.test.mjs
+
 
       # Studio literal-color gate (unified-aesthetic W2.6). Studio chrome
       # (api/lib/barkpark_web/ heex + ex) must consume the emitted design tokens
@@ -966,8 +1396,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/studio-link-lint.sh --selftest
-          bash scripts/studio-link-lint.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/studio-link-lint.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/studio-link-lint.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Web literal-color gate (unified-aesthetic W3.9). The web/ demo
       # (web/app/** + web/components/** — .tsx/.ts/.css) must consume the emitted
@@ -993,8 +1432,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/web-literal-check.sh --selftest
-          bash scripts/web-literal-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/web-literal-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/web-literal-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Go (CLI/TUI) literal-color gate (unified-aesthetic W4.10). The bp CLI/TUI
       # (cmd/barkpark/** + internal/cli/** + internal/taskboard/theme.go)
@@ -1052,8 +1500,17 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node tooling/doc-truth/acceptance-code-comments.mjs
           node tooling/doc-truth/retired-terms.mjs
-          node tooling/doc-truth/lineref-sweep.mjs --selftest
-          node tooling/doc-truth/lineref-sweep.mjs
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; node tooling/doc-truth/lineref-sweep.mjs --selftest || st_rc=$?
+          gate_rc=0; node tooling/doc-truth/lineref-sweep.mjs || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # NEW linerefs, which the sweep above structurally cannot see.
       #
@@ -1086,8 +1543,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/new-lineref-check.sh --selftest
-          bash scripts/new-lineref-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/new-lineref-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/new-lineref-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Tenant fail-open read baseline gate (barkpark-w9dg scar class — the FIXED
       # public-paper cross-workspace leak). Tenant isolation on the document/graph
@@ -1116,8 +1582,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/tenant-scope-check.sh --selftest
-          bash scripts/tenant-scope-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/tenant-scope-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/tenant-scope-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
       # principal is the MOST RESTRICTIVE anonymous one — never a full-content
@@ -1133,8 +1608,17 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/nil-polarity-check.sh --selftest
-          bash scripts/nil-polarity-check.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/nil-polarity-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/nil-polarity-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Preview-env isolation gate — a test that flips the process-global
       # Application.put_env(:barkpark, :preview, …) key while other async cases
@@ -1178,7 +1662,15 @@ jobs:
         if: ${{ !cancelled() }}
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
-          bash scripts/pd-parity-completeness.sh
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd) — see the Doc byte budgets
+          # step. Two tripwires ahead of the shipping gate, both bare under
+          # `bash -e`: either one's non-zero exit aborted the step and the gate's
+          # own per-type FAIL lines never reached the log.
+          st_rc=0; bash scripts/pd-parity-completeness.sh --selftest || st_rc=$?
+          t_rc=0; bash scripts/pd-parity-completeness.test.sh || t_rc=$?
+          gate_rc=0; bash scripts/pd-parity-completeness.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  tests exit=$t_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$t_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
 
       # Scaffy anchor-drift gate (scaffy epic W6 leap 3, charter D71 L3). The
       # repo-aware validator (internal/scaffy/repocheck.go, opt-in via --repo)
@@ -1366,11 +1858,221 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           node scripts/repo-papers-freshness.mjs
 
+      # PAPER DIALECT RATCHET (pe-w2-bl-hollow-corpus-repair). A text-keyed
+      # inline leaf ({"type":"text","text":…} with no "value") and a bare-string
+      # notes/cards item both render NOTHING behind a 200 — render/inline.ex
+      # reads only "value". The write chokepoint
+      # (BlockOps.normalize_render_shapes/1, #11616) rescues both, but only for
+      # payloads that reach persistence THROUGH it; a payload committed to this
+      # repo as a fixture never does. This step pins a count per in-repo corpus
+      # in scripts/.paper-dialect-baseline and reds when one GROWS. A shrink
+      # never reds, and a NON-VACUITY FLOOR (canonical value-keyed leaves)
+      # REFUSES (2) rather than greening when the walker stops matching — the
+      # first cut of this script shipped with a dead floor and arms A/B/F all
+      # passed anyway.
+      #
+      # --selftest FIRST, per this job's standing idiom: 18 arms plant growth in
+      # both defect shapes, at top level and nested, a both-keys control that
+      # must NOT red, a shrink, and eight distinct ways the gate could go blind
+      # — each proving it exits 2 (REFUSE) rather than reporting clean. It
+      # plants nothing in this tree.
+      #
+      # HONEST LIMIT: CI holds no guerrilla token, so this measures the in-repo
+      # corpora only. The LIVE sweep is `--source <dump> --expect-zero`, run by
+      # hand from a session that holds the token.
+      #
+      # HONEST BLAST RADIUS: this job publishes "Doc budgets + anchors", which
+      # carries an S4 exclusion row in .github/required-checks.json. A red here
+      # is VISIBLE on the pull request and CANNOT block a merge. Wiring it here
+      # makes it RUN, not BLOCK.
+      - name: Paper dialect ratchet self-test (tripwire)
+        id: s36
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-dialect-ratchet.sh --selftest
+
+      - name: Paper dialect ratchet (fails this job)
+        id: s37
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/paper-dialect-ratchet.sh
+
+      # LEDGER BACKFILL ENUMERATOR — offline selftest only (tripwire).
+      #
+      # The subject is an ENUMERATOR over the live ledger, so CI can never run
+      # the sweep (no token, and a live collection is not a fixture). What CI
+      # CAN run is the half that decides whether the sweep is sound: the keyset
+      # pager driven by injected servers. Three arms are load-bearing —
+      #   * a CONTROL that shows offset paging over a MUTATING view loses a row
+      #     (the defect this replaced; without it the rewrite reads as taste),
+      #   * a server that silently CAPS --limit, proving a short page is not
+      #     treated as the end,
+      #   * rows sharing one timestamp, proving the `>=` cursor skips none.
+      # It plants nothing and touches no network.
+      - name: Ledger backfill enumerator self-test (tripwire)
+        id: s38
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          node scripts/merge-gate-backfill.mjs --selftest
+
+      # Doc drift an ORDINARY change causes (task-b97741617bf6c860). Two arms,
+      # and the order matters: the SELF-TEST runs first, so a green sweep is
+      # evidence about the tree rather than about a gate that lost the ability
+      # to see anything. Its twelve regression arms cover six fixture classes
+      # (broken link, exposed placeholder, failing allowlisted example, valid
+      # extensionless route, intentional unmarked example, excluded history),
+      # both scope arms, and a vacuity control that demands an EMPTY corpus
+      # REFUSE rather than pass clean.
+      #
+      # The sweep itself is DIFF-SCOPED against the merge base, the same shape
+      # as scripts/format-diff-scope.sh: inherited drift is printed and stays
+      # neutral, only drift in a doc THIS diff touches (or a doc whose
+      # allowlisted example declares a file this diff touches as a dependency)
+      # is owned. On push:main there is no PR diff, so the standing debt is
+      # printed and the step is green — main is where the debt is VISIBLE, the
+      # PR that touches the file is where it is ENFORCED.
+      - name: Doc drift self-test (tripwire)
+        id: s40
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/doc-drift-check.test.sh
+
+      - name: Doc drift — links, routes, placeholders, runnable examples (fails this job)
+        id: s41
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        env:
+          # Empty on push:main (no PR base) -> report-only, exit 0.
+          DOC_DRIFT_BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.event.pull_request.base.ref) || '' }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          bash scripts/doc-drift-check.sh
+
+      # Charter-corpus marker hygiene (docs/decisions/0008). Two arms with
+      # different baselines: arm A bans the redacted gyldendal.no address
+      # repo-wide (its baseline is ZERO, so it needs no allowlist), arm B bans
+      # the five remaining infrastructure markers in charters added AFTER the
+      # baseline commit — grandfathering the existing corpus by a runtime
+      # `git ls-tree` predicate, never a hand-maintained file list. Needs
+      # fetch-depth: 0, which this job already uses; the guard REFUSES rather
+      # than passing when it cannot resolve its baseline. --selftest FIRST
+      # (distrust vacuous green): 9 cases, including a positive control and the
+      # discrimination case proving arm B keys on the new-file predicate and not
+      # on the marker. It plants nothing in this repo.
+      - name: Charter-corpus marker hygiene (fails this job)
+        id: s39
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs —
+          # its per-finding lines never reach the log, and main-red-breaker.sh
+          # then reads the step as OPAQUE-RED / OWNERSHIP-UNDETERMINED because the
+          # selftest sentence names nothing. Capture both statuses, run BOTH,
+          # adjudicate after. The step still fails when either one fails.
+          st_rc=0; bash scripts/charter-corpus-hygiene-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash scripts/charter-corpus-hygiene-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+
+      # Charter adoption census (deploy-reliability D620). D616's "WHAT IS NOT
+      # DONE HERE" asserted the deploy-reliability charter "appears in no
+      # workflow path filter anywhere" — false on the day it was written, since
+      # THIS workflow selected it on both arms and by two globs. A downstream row
+      # was filed off the clause. The guard compares the charter's own declared
+      # adoption set against the set derived from .github/workflows/, and reds in
+      # both directions. It lives HERE and not in shell-harnesses.yml (which now
+      # triggers on the charter) for one reason: drift comes from BOTH sides, and
+      # this is the only job whose paths carry `**/*.md` AND `.github/workflows/**`,
+      # so it is the only one that runs on the edit that breaks the claim. Wiring
+      # it to the charter alone buys a guard blind to its commonest failure.
+      # --selftest FIRST (distrust vacuous green): 7 cases over mktemp fixtures,
+      # no network, no token, plants nothing in this repo.
+      - name: Charter adoption census (fails this job)
+        id: s42
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs.
+          # Capture both statuses, run BOTH, adjudicate after.
+          st_rc=0; bash deploy/charter-adoption-check.sh --selftest || st_rc=$?
+          gate_rc=0; bash deploy/charter-adoption-check.sh || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+
+      # P7 — the bp-command doc verifier over docs/cli/**, the corpus it was
+      # WRITTEN for (wbt-jwt-bl-wire-p7-doc-gates). It has been CI-wired since
+      # #18555 in search-template-gates.yml, but only `--offline` over
+      # templates/** — so the four canonical CLI docs, the ones whose printed
+      # `bp …` lines a reader copies, were adjudicated by nothing.
+      #
+      # NOT `--offline`, and that is not a preference: verify-bp-commands.mjs
+      # REFUSES the flag outside templates/** (offlineAllowed(), the
+      # "--offline is refused outside templates/**" law in its own selftest).
+      # `--offline` DECLARES source [A] — docs/cli/fixtures/full-manifest.json,
+      # the server-declared noun/verb tree — ABSENT rather than pretending it is
+      # present (bp-cli-sources.mjs loadBpSources: `if (offline)` drops A and
+      # labels it "(declared absent)"). Running WITHOUT it here therefore means
+      # exactly one thing: source A is loaded from the committed fixture. It is
+      # a file in the tree, not a network fetch — this step makes no request and
+      # needs no token, so the verdict stays a function of the commit.
+      #
+      # THE FILE-COUNT FLOOR IS THE POINT. `docs/cli/*.md` is a shell glob, and
+      # a glob that matches nothing does not error — bash hands the loop the
+      # LITERAL string, and the verifier would exit 2 "target not found", or,
+      # after a rename that empties the directory, a zero-target run would have
+      # nothing to disagree with. Either way a gate that checks no file reports
+      # the same green as a gate that checked every file and liked them. So the
+      # count is asserted BEFORE the verifier runs, printed either way, and the
+      # floor is 3 because docs/cli/ holds exactly three .md files today
+      # (HANDBOOK.md, error-exit-table.md, m0-decisions.md). Adding a fourth is
+      # free; removing one must come here and say so.
+      #
+      # --selftest FIRST (distrust vacuous green), as the templates copy does:
+      # its arms are this resolver's MUTATION half — drop a verb from
+      # internal/cli's dispatch and a doc still printing it must RED.
+      - name: bp-command doc parse over docs/cli (fails this job)
+        id: s43
+        continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
+        if: ${{ !cancelled() }}
+        run: |
+          if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
+          set -- docs/cli/*.md
+          # An unmatched glob comes back as its own literal, never as zero args.
+          if [ "$#" -eq 1 ] && [ ! -e "$1" ]; then set --; fi
+          echo "docs/cli/*.md matched $# file(s): $*"
+          if [ "$#" -lt 3 ]; then
+            echo "FLOOR FAIL: docs/cli/*.md matched $# file(s), floor is 3. A glob that expands to nothing FAILS here; it must never read as a pass."
+            exit 1
+          fi
+          # UNREACHABLE REPORTER (task-1c8165ef0ada4fcd). The runner runs a `run:`
+          # body as `/usr/bin/bash -e {0}`, so a bare `--selftest` that exits
+          # non-zero ABORTS THE STEP and the shipping gate below it never runs.
+          # Capture both statuses, run BOTH, adjudicate after. Never piped — a
+          # gate piped through tail or grep -q reports the PIPE's exit code.
+          st_rc=0; node tooling/doc-truth/verify-bp-commands.mjs --selftest || st_rc=$?
+          gate_rc=0; node tooling/doc-truth/verify-bp-commands.mjs "$@" || gate_rc=$?
+          echo "selftest exit=$st_rc  gate exit=$gate_rc"
+          if [ "$st_rc" -ne 0 ] || [ "$gate_rc" -ne 0 ]; then exit 1; fi
+
       - name: Decide (main-red breaker — inherited reds are neutral, own reds fail)
         if: always()
         env:
           STEP_OUTCOMES: ${{ toJSON(steps) }}
-          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\"}"
+          STEP_NAMES: "{\"s1\": \"Doc byte budgets (fails this job)\", \"s2\": \"Doc anchors + headers (fails this job)\", \"s3\": \"Connectors DDL drift gate (fails this job)\", \"s4\": \"Connectors catalog drift gate (fails this job)\", \"s5\": \"Never-cancel-main concurrency ratchet (fails this job)\", \"s6\": \"Deploy paths\u2194filters drift gate (fails this job)\", \"s7\": \"Control-plane smoke can-fail gate (fails this job)\", \"s8\": \"Paper-editor style mirror lockstep (fails this job)\", \"s9\": \"Status manifest drift gate (fails this job)\", \"s10\": \"Preview parity + D10 no-oEmbed gate (fails this job)\", \"s11\": \"Design-token drift gate (fails this job)\", \"s12\": \"Studio literal-color gate (fails this job)\", \"s13\": \"Studio literal-color gate self-test (tripwire)\", \"s14\": \"Studio link/path gate (fails this job)\", \"s17\": \"Web literal-color gate (fails this job)\", \"s18\": \"Go literal-color gate (fails this job)\", \"s19\": \"Go literal-color gate self-test (tripwire)\", \"s20\": \"Code-comment citation guard (fails this job)\", \"s21\": \"New file:line citations in comments (fails this job)\", \"s22\": \"Tenant fail-open read baseline gate (fails this job)\", \"s24\": \"Nil-polarity fail-closed gate (fails this job)\", \"s25\": \"Preview-env isolation gate (fails this job)\", \"s26\": \"Preview-env isolation gate self-test (tripwire)\", \"s27\": \"PortableDoc render-parity completeness (fails this job)\", \"s28\": \"Scaffy anchor-drift gate (fails this job)\", \"s29\": \"Scaffy anchor-drift gate self-test (tripwire)\", \"s30\": \"Dependabot root drift gate self-test (tripwire)\", \"s31\": \"Dependabot root drift gate (fails this job)\", \"s32\": \"Silencer growth ratchet self-test (tripwire)\", \"s33\": \"Silencer growth ratchet (fails this job)\", \"s34\": \"repo-papers snapshot freshness self-test (tripwire)\", \"s35\": \"repo-papers snapshot freshness (fails this job)\", \"s36\": \"Paper dialect ratchet self-test (tripwire)\", \"s37\": \"Paper dialect ratchet (fails this job)\", \"s38\": \"Ledger backfill enumerator self-test (tripwire)\", \"s39\": \"Charter-corpus marker hygiene (fails this job)\", \"s40\": \"Doc drift self-test (tripwire)\", \"s41\": \"Doc drift \u2014 links, routes, placeholders, runnable examples (fails this job)\", \"s42\": \"Charter adoption census (fails this job)\", \"s43\": \"bp-command doc parse over docs/cli (fails this job)\"}"
           JOB_NAME: "Doc budgets + anchors"
           WORKFLOW_FILE: doc-gates.yml
           GITHUB_TOKEN: ${{ github.token }}

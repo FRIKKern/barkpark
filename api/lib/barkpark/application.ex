@@ -35,9 +35,13 @@ defmodule Barkpark.Application do
     # runs while it is disabled). OnixEdit resolves it from its OWN
     # `register_workers/1` boot child instead, so it still refuses the node on
     # a malformed value wherever the plugin is enabled, and simply does not run
-    # where it is absent.
-    _ = Barkpark.Tasks.Judge.endpoint()
-    _ = Barkpark.StudioChat.Titles.endpoint()
+    # where it is absent. The task-dedup judge's endpoint check follows the
+    # same shape (task-6325dacb0e233d75): it runs from the Tasks plugin's own
+    # `register_workers/1` boot child. The Studio Chat title endpoint check
+    # reads the same `:anthropic_api_url` key; it runs from
+    # `Barkpark.Capability.Supervisor` below, only where Studio Chat is enabled
+    # (task-2f59ba23bcad333e). A box with both Tasks and Studio Chat off has no
+    # consumer of the key, so nothing checks it.
 
     # Companion to the check above, and the other half of the same defect: the
     # From can be perfectly valid while there is no relay to hand the message
@@ -73,7 +77,16 @@ defmodule Barkpark.Application do
     # (the bound silently resets) and a sibling's `:ets.insert`/`:ets.delete`
     # would raise ArgumentError, i.e. a 500 from the guard against 500s. This
     # process lives as long as the application, so the bound does too.
-    BarkparkWeb.TasksController.init_graph_corpus_slots()
+    # CORE, not the Tasks plugin: `GET /v1/graph` is core-mounted and must serve
+    # with every plugin off (see `Barkpark.Content.Graph.CorpusSlots`).
+    Barkpark.Content.Graph.CorpusSlots.init()
+
+    # The same ownership rule for three caches that used to be created lazily
+    # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
+    # cache, the tenancy default-scope cache and the codelist alias cache.
+    Barkpark.Crypto.DataKeys.init_cache()
+    Barkpark.Tenancy.DefaultScopeCache.init_cache()
+    Barkpark.Content.Codelists.init_cache()
 
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
@@ -96,6 +109,12 @@ defmodule Barkpark.Application do
     # plugin-free host still walks its drafts graph, it just has no plugin
     # edges to add).
     install_edge_extractor_seam()
+
+    # The same inversion for the codelist health roster: `Content.CodelistHealth`
+    # reads `:codelist_requirements_collector`; it never names the registry.
+    # Unset → an empty roster (the fresh-install invariant: a plugin-free host
+    # declares no codelists, so its audit is `:ok`, not a crash).
+    install_codelist_requirements_seam()
 
     # C4-1: plugins may contribute Oban Cron entries via `oban_crontab/0`.
     # Collect them here (a pure, GenServer-independent call, same as
@@ -142,7 +161,23 @@ defmodule Barkpark.Application do
     self_update_children =
       if Barkpark.SelfUpdate.enabled?(), do: [Barkpark.SelfUpdate.Checker], else: []
 
-    children = child_specs(plugin_children, oban_config, sync_children, self_update_children)
+    # C083: a managed instance refuses seed and one-shot boots outright. Their
+    # raw Repo writes never reach a door, and the serving tree's coordinator
+    # would not see them (fail closed, before any child starts).
+    :ok = refuse_managed_offline_boot!(boot_mode())
+
+    children =
+      child_specs(plugin_children, oban_config, sync_children, self_update_children, boot_mode())
+
+    # Route every Oban job body onto the job pool. Attached BEFORE the tree
+    # starts so the first job Oban runs is already routed; a no-op per job
+    # whenever the pool is not running (see `Barkpark.Repo.route_job_to_job_pool/4`).
+    :ok = Barkpark.Repo.attach_job_pool_router()
+
+    # Write admission for Oban jobs (Barkdown C083): the same seam, attached only
+    # when the instance admits writes, so an unmanaged server pays nothing.
+    if Barkpark.ManagedRuntime.WriteAdmission.Door.enabled?(),
+      do: :ok = Barkpark.ManagedRuntime.WriteAdmission.ObanAdmission.attach()
 
     # Chapter 64 (layering isolates blast radius). The top supervisor keeps the
     # OTP-default 3-restarts-in-5s budget — made EXPLICIT here — but that budget
@@ -176,13 +211,20 @@ defmodule Barkpark.Application do
         # store query is safe; refresh/0 is self-guarded, so a not-yet-ready
         # store (e.g. unmigrated DB at test boot) leaves the env baseline
         # untouched. MUST run before the banner so it reports stored shares too.
-        Barkpark.Sharing.refresh()
+        # NOT in `:one_shot`: a backfill that is not serving anything must not
+        # read the shares table, and must never print a banner announcing LAN
+        # readers this node does not expose (it has no Endpoint). Skipping the
+        # refresh also leaves the live `:shares` list untouched for the node
+        # that IS serving on the same box.
+        if boot_mode() != :one_shot do
+          Barkpark.Sharing.refresh()
 
-        # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
-        # this is a no-op (active?/0 is false) and nothing is logged. When
-        # active, warn loudly with every reachable reader URL so the operator
-        # knows the box is now exposed on the local network.
-        log_sharing_banner()
+          # P1c LAN-sharing banner. DEFAULT-OFF: with no shares (env OR stored),
+          # this is a no-op (active?/0 is false) and nothing is logged. When
+          # active, warn loudly with every reachable reader URL so the operator
+          # knows the box is now exposed on the local network.
+          log_sharing_banner()
+        end
 
         # Fresh-install safety: the Postgres search engine's fuzzy/typo recovery
         # relies on pg_trgm (similarity()). If the extension is missing — common
@@ -195,6 +237,38 @@ defmodule Barkpark.Application do
 
       other ->
         other
+    end
+  end
+
+  @typedoc """
+  How much of the tree `start/2` puts up. See `child_specs/5`.
+  """
+  @type boot_mode :: :full | :seed | :one_shot
+
+  @boot_modes [:full, :seed, :one_shot]
+
+  @doc """
+  The boot mode for THIS node, read from `:barkpark, :boot_mode` (default
+  `:full`).
+
+  A one-shot `bin/barkpark eval` sets it BEFORE `Application.ensure_all_started/1`
+  (see `Barkpark.Release.seed_boot!/0`); nothing in `config/*.exs` sets it, so
+  every ordinary boot — `bin/barkpark start`, `mix phx.server`, `mix test` —
+  takes the `:full` default. Raises on an unknown value rather than silently
+  falling back: a typo'd mode that quietly booted the FULL tree would bind a
+  listener on a box that asked not to, which is the defect this seam exists to
+  prevent.
+  """
+  @spec boot_mode() :: boot_mode()
+  def boot_mode do
+    case Application.get_env(:barkpark, :boot_mode, :full) do
+      mode when mode in @boot_modes ->
+        mode
+
+      other ->
+        raise ArgumentError,
+              "unknown :barkpark, :boot_mode #{inspect(other)} " <>
+                "(expected one of #{inspect(@boot_modes)})"
     end
   end
 
@@ -214,19 +288,165 @@ defmodule Barkpark.Application do
     * `Barkpark.Plugins.Indx.Supervisor` wraps Auth/Monitor/Recovery.
     * `Barkpark.Plugins.Sheets.Supervisor` wraps the sheets session registry/
       supervisor/replay-ring.
-    * `Barkpark.StudioChat.Supervisor` wraps the studio-chat registries/runtime/
-      notifier.
+    * `Barkpark.Capability.Supervisor` starts the capability-gated subsystems
+      (today the studio-chat tier) only when their capability is enabled.
 
   Ordering invariants held: Repo before everything that queries it; Registry
   before plugin workers; SchemaBootstrap after Repo+Registry and BEFORE Oban;
-  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/StudioChat tiers
+  Indx (Auth→Recovery) before Oban; PubSub before the Sheets/Capability tiers
   and the Endpoint; Endpoint last.
   """
   @spec child_specs(list(), keyword(), list(), list()) :: [
           Supervisor.child_spec() | {module(), term()} | module()
         ]
-  def child_specs(plugin_children, oban_config, sync_children, self_update_children)
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children),
+    do: child_specs(plugin_children, oban_config, sync_children, self_update_children, :full)
+
+  @doc """
+  The same list, narrowed for a BOOT MODE.
+
+    * `:full` — verbatim `child_specs/4`; what `bin/barkpark start` boots.
+    * `:seed` — the canonical list MINUS `BarkparkWeb.Endpoint`, with the `Oban`
+      child started INERT (`queues: false, plugins: false`).
+    * `:one_shot` — the canonical list MINUS `BarkparkWeb.Endpoint` and `Oban`,
+      with NO plugin boot workers, NO sync children and NO self-update children
+      (the three list ARGUMENTS are ignored, not filtered). What
+      `Barkpark.OneShot.boot!/0` puts up for an operator one-shot — see below.
+
+  `:seed` exists for `Barkpark.Release.seed/0`. The seed bodies are ordinary
+  application code — `Barkpark.Seeds.run/0` needs the live `Plugins.Registry`
+  populated by the `SchemaBootstrap` boot child, PubSub, `Barkpark.Vault`, the
+  validation registries, and an Oban instance (`Oban.insert/1` raises without
+  one). So the seed eval cannot run repo-only. What it must NOT do is bind a
+  listener or drain live queues: `bin/barkpark eval` runs on a box whose real
+  node may already be serving, and an inert Oban still ACCEPTS inserts (the
+  seeded jobs stay queued for the serving node) while starting no producer and
+  no plugin (no Cron, no Pruner, no Lifeline) — it enqueues, it never dequeues.
+
+  DERIVED, never hand-picked: the `:seed` clause filters the `:full` list, so a
+  child added above appears in seed mode too and boot ORDER is preserved
+  verbatim. Hand-picking a subset here would fork the order from the canonical
+  list and silently change what a seeded instance contains (charter D9).
+
+  `:one_shot` exists for the operator one-shot MIX TASKS —
+  `mix barkpark.edges.backfill`, `barkpark.media.backfill`,
+  `barkpark.paper.backfill_block_ids`, `barkpark.paper.composition_migrate` —
+  which used to call `Mix.Task.run("app.start")` and therefore booted the FULL
+  tree with whatever runtime env they inherited. On guerrilla, 2026-09-02
+  08:28–08:35Z, that meant `PHX_SERVER` was set and the backfill's endpoint
+  tried to bind the LIVE slot's port: `Running BarkparkWeb.Endpoint with Bandit
+  1.12.0 at http failed, port 4001 already in use`, and the run died before the
+  backfill started. The same boot brought up a SECOND Oban draining the live
+  queues, the Github `DrainWorker` (which raised an `Oban.Registry` error before
+  Oban was up), and `SchemaBootstrap`'s onixedit codelist seeders (one hit
+  `ERROR 57014 query_canceled` under the 60 s statement_timeout).
+
+  Why the three list arguments are IGNORED rather than filtered: `plugin_children`
+  are pollers/drainers/DrainWorkers — a backfill needs none of them, and the one
+  plugin contribution it DOES need (the edge extractors) is a PURE resolver-chain
+  call off `Barkpark.Plugins.Registry`, which stays in the tree. `sync_children`
+  and `self_update_children` are the LAN/pull sync and the upstream release poller.
+  Both are dormant-by-default anyway; a one-shot never wants either.
+
+  Why `Oban` is dropped OUTRIGHT here where `:seed` keeps it inert: a seed WRITES
+  documents through `Content.apply_mutations`, which calls `Oban.insert/1`. A
+  backfill sweep does not — `Projector.rebuild_scope/3` is a DELETE-then-
+  `Content.add_edges` transaction with no job insert on the path. Dropping the
+  child is what makes "this one-shot cannot touch the live queues" a property of
+  the tree rather than a promise about its configuration.
+
+  Why `Barkpark.SchemaBootstrap` STAYS, when the incident names its codelist
+  seeders: MEASURED, not reasoned. Dropping it took the dev corpus's projected
+  edge count from 962 to ZERO — the schema registration it performs is what the
+  extractor chain resolves reference fields against, and a one-shot that boots
+  without it writes an empty graph while exiting 0. Only the expensive half is
+  suppressed, through the gate the module already has:
+  `Barkpark.SchemaBootstrap` skips `run_all_codelist_seeders/0` +
+  `CodelistHealth.log_boot_audit/0` in `:one_shot` mode, which is the
+  `ERROR 57014 query_canceled` the incident actually hit.
+  """
+  @spec child_specs(list(), keyword(), list(), list(), boot_mode()) :: [
+          Supervisor.child_spec() | {module(), term()} | module()
+        ]
+  def child_specs(_plugin_children, oban_config, _sync_children, _self_update_children, :one_shot) do
+    []
+    |> child_specs(oban_config, [], [], :full)
+    |> Enum.reject(&(one_shot_excluded?(&1) or write_admission_child?(&1)))
+  end
+
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children, :seed) do
+    plugin_children
+    |> child_specs(oban_config, sync_children, self_update_children, :full)
+    |> Enum.reject(
+      &(&1 == BarkparkWeb.Endpoint or job_pool_child?(&1) or write_admission_child?(&1))
+    )
+    |> Enum.map(fn
+      {Oban, config} -> {Oban, Keyword.merge(config, queues: false, plugins: false)}
+      other -> other
+    end)
+  end
+
+  def child_specs(plugin_children, oban_config, sync_children, self_update_children, :full)
       when is_list(plugin_children) and is_list(sync_children) and is_list(self_update_children) do
+    plugin_children
+    |> static_full_children(oban_config, sync_children, self_update_children)
+    |> with_job_pool_before_oban()
+  end
+
+  # Write admission coordinator (C083). Only the serving tree owns the journal:
+  # seed and one-shot boots are separate OS processes on the same host, and a
+  # second opener of the DETS file would be a second admission authority. In
+  # those modes the Door finds no coordinator and refuses writes (fail closed).
+  defp write_admission_children do
+    config = Application.get_env(:barkpark, :write_admission, [])
+
+    if Keyword.get(config, :enabled, false) == true do
+      [
+        {Barkpark.ManagedRuntime.WriteAdmission,
+         journal: Keyword.fetch!(config, :journal),
+         instance_id: Keyword.fetch!(config, :instance_id),
+         initialize: Keyword.get(config, :initialize, false)},
+        # Owns HTTP-requested holds (the trusted hold endpoint).
+        Barkpark.ManagedRuntime.WriteAdmission.Holder
+      ]
+    else
+      []
+    end
+  end
+
+  @doc """
+  Refuse a `:seed` or `:one_shot` boot when write admission is enabled (C083).
+
+  Pure on its arguments so the boot-mode tests can assert it; `start/2` calls it
+  with the live mode before building the tree.
+  """
+  @spec refuse_managed_offline_boot!(boot_mode(), keyword()) :: :ok
+  def refuse_managed_offline_boot!(
+        mode,
+        config \\ Application.get_env(:barkpark, :write_admission, [])
+      )
+
+  def refuse_managed_offline_boot!(mode, config) when mode in [:seed, :one_shot] do
+    if Keyword.get(config, :enabled, false) == true do
+      raise ArgumentError,
+            "a managed instance (write admission enabled) refuses a #{inspect(mode)} boot: " <>
+              "its writes bypass every admission door; run seeds and one-shot tasks " <>
+              "with admission disabled, or through the serving node"
+    else
+      :ok
+    end
+  end
+
+  def refuse_managed_offline_boot!(_mode, _config), do: :ok
+
+  defp write_admission_child?({Barkpark.ManagedRuntime.WriteAdmission, _}), do: true
+  defp write_admission_child?(Barkpark.ManagedRuntime.WriteAdmission.Holder), do: true
+  defp write_admission_child?(_), do: false
+
+  defp static_full_children(plugin_children, oban_config, sync_children, self_update_children) do
+    # C083: the write admission coordinator starts AFTER SchemaBootstrap's
+    # synchronous init, so the boot-time schema and codelist writes are
+    # pre-open by construction, and BEFORE Oban, so the first job is admitted.
     [
       # Dedicated Finch pool for the auth/login OUTBOUND path (Felix W10,
       # task-felix-outbound-pool-isolation + task-felix-sso-explicit-timeout).
@@ -245,6 +465,9 @@ defmodule Barkpark.Application do
       # Endpoint so the first login never races an unstarted pool.
       {Finch, name: Barkpark.Auth.Finch, pools: %{default: [size: 10, count: 1]}},
       Barkpark.RateLimiter,
+      # Owns the search surface-config ETS cache for the node's lifetime. A
+      # lazily-created table died with whichever caller made it first.
+      Barkpark.Search.SurfaceConfigs.CacheOwner,
       BarkparkWeb.Telemetry,
       # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
       # (cloud-console W5). Up before the Endpoint so early traffic is counted;
@@ -281,51 +504,65 @@ defmodule Barkpark.Application do
       # supervisor blocks on its init/1 (which registers every plugin's
       # schemas) before starting Oban, so Oban can never dequeue a job
       # against an unregistered schema. No paused queues, no resume loop.
-      Barkpark.SchemaBootstrap,
-      # VOLATILE Indx retriever-seam subsystem (was Auth/Monitor/Recovery flat).
-      # Indx is NOT a registered plugin, so these are declared statically. Now
-      # wrapped so an Indx crash-loop degrades (engine=indx falls back to
-      # Postgres) instead of escalating to a whole-app shutdown. Same slot →
-      # still starts after SchemaBootstrap and BEFORE Oban (whose :indx queue
-      # jobs call Auth.token/0); internal order Auth→Monitor→Recovery preserved.
-      Barkpark.Plugins.Indx.Supervisor,
-      {Oban, oban_config},
-      {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: Barkpark.PubSub},
-      # Sheets M1 collaborative-session subsystem (was SessionRegistry +
-      # SessionSupervisor + ReplayRing flat). CORE, plugin-independent
-      # (fresh-install invariant). Wrapped for domain isolation; positioned
-      # after PubSub (delta broadcasts) + Repo (load/persist), as before.
-      Barkpark.Plugins.Sheets.Supervisor,
-      # Studio Claude-chat runtime subsystem (was the two registries +
-      # RuntimeSupervisor + Notifier flat). Wrapped for domain isolation;
-      # positioned after PubSub (Recorders rebroadcast frames on it), as before.
-      Barkpark.StudioChat.Supervisor,
-      BarkparkWeb.Presence,
-      {Task.Supervisor, name: Barkpark.TaskSupervisor},
-      # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
-      # could not clean up after itself (PDS-D210). The export engine's
-      # try/after covers raises and disconnects, but not the OOM killer — and
-      # the OOM killer is precisely the scenario the disk spill exists to
-      # survive, so a crashed BEAM's leftovers are collected by its successor.
-      # Placed BEFORE the Endpoint so stale bundles are reclaimed before this
-      # node can serve a new export into the same directory, and AFTER
-      # Barkpark.TaskSupervisor because the sweep's bounded `ps` liveness
-      # probe runs on it (task-felix-w21-bl-janitor-ps-bound) — it needs no
-      # Repo (pure filesystem work), but the supervisor must exist. A
-      # `:temporary` Task: it runs once, never restarts, and its own moduledoc
-      # explains why the sweep is boot-only rather than periodic.
-      Barkpark.Tenancy.WorkspaceBundle.Janitor,
-      # Dedicated supervisor for outbound webhook/media deliveries. The
-      # generic TaskSupervisor has max_children: :infinity, so a webhook
-      # storm or a slow endpoint (each child sleeps in-task on retry
-      # backoff + a 10s per-attempt HTTP timeout) accumulates thousands of
-      # long-lived processes → unbounded memory. Deliveries fan out through
-      # Task.Supervisor.async_stream_nolink on THIS supervisor, which
-      # backpressures beyond :webhook_delivery_concurrency (queues, never
-      # drops) instead of the old start_child-per-webhook fan-out.
-      {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
+      Barkpark.SchemaBootstrap
     ] ++
+      write_admission_children() ++
+      [
+        # VOLATILE Indx retriever-seam subsystem (was Auth/Monitor/Recovery flat).
+        # Indx is NOT a registered plugin, so these are declared statically. Now
+        # wrapped so an Indx crash-loop degrades (engine=indx falls back to
+        # Postgres) instead of escalating to a whole-app shutdown. Same slot →
+        # still starts after SchemaBootstrap and BEFORE Oban (whose :indx queue
+        # jobs call Auth.token/0); internal order Auth→Monitor→Recovery preserved.
+        Barkpark.Plugins.Indx.Supervisor,
+        {Oban, oban_config},
+        {DNSCluster, query: Application.get_env(:barkpark, :dns_cluster_query) || :ignore},
+        {Phoenix.PubSub, name: Barkpark.PubSub},
+        # Sheets M1 collaborative-session subsystem (was SessionRegistry +
+        # SessionSupervisor + ReplayRing flat). CORE, plugin-independent
+        # (fresh-install invariant). Wrapped for domain isolation; positioned
+        # after PubSub (delta broadcasts) + Repo (load/persist), as before.
+        Barkpark.Plugins.Sheets.Supervisor,
+        # Capability-gated subsystems (task-2f59ba23bcad333e). Starts the Studio
+        # chat runtime tier only when `Barkpark.Capability.enabled?(:studio_chat)`
+        # (default on). Same slot the chat tier held: after PubSub (Recorders
+        # rebroadcast frames on it), before the Endpoint.
+        Barkpark.Capability.Supervisor,
+        BarkparkWeb.Presence,
+        {Task.Supervisor, name: Barkpark.TaskSupervisor},
+        # Boot-time collector for workspace-bundle temp files a SIGKILLed BEAM
+        # could not clean up after itself (PDS-D210). The export engine's
+        # try/after covers raises and disconnects, but not the OOM killer — and
+        # the OOM killer is precisely the scenario the disk spill exists to
+        # survive, so a crashed BEAM's leftovers are collected by its successor.
+        # Placed BEFORE the Endpoint so stale bundles are reclaimed before this
+        # node can serve a new export into the same directory, and AFTER
+        # Barkpark.TaskSupervisor because the sweep's bounded `ps` liveness
+        # probe runs on it (task-felix-w21-bl-janitor-ps-bound) — it needs no
+        # Repo (pure filesystem work), but the supervisor must exist. A
+        # `:temporary` Task: it runs once, never restarts, and its own moduledoc
+        # explains why the sweep is boot-only rather than periodic.
+        Barkpark.Tenancy.WorkspaceBundle.Janitor,
+        # Admission control for the export route (PDS-D719). A permanent
+        # GenServer owning one small ETS table — it holds no connections, no
+        # files and no timers, so an idle instance is free. Placed immediately
+        # after the Janitor (its moduledoc cites this guard's ABSENCE when it
+        # justifies the pid-liveness sidecar, and the two are read together) and
+        # BEFORE the Endpoint, because the first request this node serves must
+        # already find the guard alive: `acquire/1` degrades to "admit
+        # unguarded" when it is not, which is the correct posture for a
+        # contention remedy and the wrong one to rely on at boot.
+        Barkpark.Tenancy.WorkspaceBundle.SingleFlight,
+        # Dedicated supervisor for outbound webhook/media deliveries. The
+        # generic TaskSupervisor has max_children: :infinity, so a webhook
+        # storm or a slow endpoint (each child sleeps in-task on retry
+        # backoff + a 10s per-attempt HTTP timeout) accumulates thousands of
+        # long-lived processes → unbounded memory. Deliveries fan out through
+        # Task.Supervisor.async_stream_nolink on THIS supervisor, which
+        # backpressures beyond :webhook_delivery_concurrency (queues, never
+        # drops) instead of the old start_child-per-webhook fan-out.
+        {Task.Supervisor, name: Barkpark.WebhookDeliverySupervisor}
+      ] ++
       sync_children ++
       self_update_children ++
       [
@@ -346,6 +583,34 @@ defmodule Barkpark.Application do
         BarkparkWeb.Endpoint
       ]
   end
+
+  # jpf-bl-oban-pool-partition: splice the Oban JOB pool — a second instance of
+  # Barkpark.Repo that job bodies check out of, so background work can never
+  # drain the pool HTTP requests use — immediately BEFORE the Oban child, so
+  # Oban's first job finds it up. The list is unchanged when `:oban_pool_size`
+  # is 0 (config/test.exs). Derivation and numbers:
+  # `Barkpark.Repo.job_pool_child_specs/0`.
+  defp with_job_pool_before_oban(children) do
+    Enum.flat_map(children, fn
+      {Oban, _config} = oban -> Barkpark.Repo.job_pool_child_specs() ++ [oban]
+      other -> [other]
+    end)
+  end
+
+  # The `:one_shot` exclusion predicate, spelled out beside the clause that uses
+  # it. Everything NOT named here survives, so a child added to the `:full` list
+  # above is present in one-shot mode too (the same derived-not-hand-picked rule
+  # `:seed` follows) — the list names what a one-shot must NOT do, and each entry
+  # carries the incident that put it there.
+  defp one_shot_excluded?(BarkparkWeb.Endpoint), do: true
+  defp one_shot_excluded?({Oban, _config}), do: true
+  # The Oban job pool serves only job bodies; with Oban absent it would hold
+  # `:oban_pool_size` idle connections for nothing.
+  defp one_shot_excluded?(child), do: job_pool_child?(child)
+
+  # `:seed` starts Oban inert (no queues), so it rejects the job pool too.
+  defp job_pool_child?(%{id: id}), do: id == Barkpark.Repo.job_pool_name()
+  defp job_pool_child?(_other), do: false
 
   # C4-1: fold plugin-contributed Oban Cron entries into the host's Oban
   # keyword config. Pure, side-effect-free, and unit-testable (see
@@ -396,6 +661,22 @@ defmodule Barkpark.Application do
         :barkpark,
         :edge_extractor_collector,
         &Barkpark.Plugins.Registry.collect_edge_extractors/1
+      )
+    end
+
+    :ok
+  end
+
+  # Installs the plugin codelist-roster fan-out into the key
+  # `Barkpark.Content.CodelistHealth` reads. As with the edge-extractor seam, an
+  # explicit `config :barkpark, :codelist_requirements_collector, …` WINS — the
+  # seam is substitutable, not merely indirect.
+  defp install_codelist_requirements_seam do
+    if is_nil(Application.get_env(:barkpark, :codelist_requirements_collector)) do
+      Application.put_env(
+        :barkpark,
+        :codelist_requirements_collector,
+        &Barkpark.Plugins.Registry.collect_codelist_requirements/0
       )
     end
 

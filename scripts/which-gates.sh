@@ -173,6 +173,25 @@ if [ ! -d "$WORKFLOW_DIR" ]; then
   exit 1
 fi
 
+# ── THE PINNED SHAPE (task-3a81e68f7027ca98) ────────────────────────────────
+# Since cloud.yml, console-harness.yml and elixir.yml pin their path-set script
+# to the MERGE REF, the literal primitive name no longer sits at the call site:
+# the dispatchers shell `bash "$pin_script" --match <set>` (cloud.yml through a
+# `match_set --match <set>` wrapper over the same line), and the literal lives
+# in the step's `pin_script="scripts/<x>-path-escape-check.sh"` assignment.
+#
+# Measured 2026-09-11 on the branch that landed the pin: with only the literal
+# pattern below, this scan found ZERO call sites repo-wide and the script
+# printed its CANNOT READ and exited 1. That is the guard working — and it is
+# also the whole roster gone, so the pattern has to learn the new shape rather
+# than the guard be loosened.
+#
+# The primitive for a pinned site is resolved PER FILE from that assignment. A
+# file with a pinned call site and no assignment resolves to nothing and the
+# row is dropped by the emptiness guard below — never guessed at.
+PIN_ASSIGN_RE='^[[:space:]]*pin_script="(scripts/[A-Za-z0-9_-]*path-escape-check\.sh)"'
+PINNED_SITE_RE='(^|[|;&(]|[[:space:]])(bash|sh|exec|source|match_set)[[:space:]]+("?\$\{?pin_script\}?"?[[:space:]]+)?--match[[:space:]]+[A-Za-z0-9_-]'
+
 CALL_SITE_RE='(^|[|;&(]|[[:space:]](bash|sh|exec|source)|^[[:space:]]*(-[[:space:]]+)?run:)[[:space:]]*scripts/[A-Za-z0-9_-]*path-escape-check\.sh[[:space:]]+--match'
 
 # ONE scan, so the two lists below cannot drift out of index with each other.
@@ -193,6 +212,29 @@ call_site_files="$(
   printf '%s\n' "$call_site_raw" |
     sed -E 's|:.*||'
 )"
+
+# The pinned sites, appended so the two lists stay index-aligned. One pass per
+# workflow file, because the primitive is a property of the FILE (its
+# `pin_script=` assignment), not of the line.
+for _wf in "$WORKFLOW_DIR"/*.yml; do
+  [ -r "$_wf" ] || continue
+  _prim="$(sed -nE "s|${PIN_ASSIGN_RE}.*|\\1|p" "$_wf" | sed -n 1p)"
+  [ -n "$_prim" ] || continue
+  _sets="$(
+    grep -E "$PINNED_SITE_RE" "$_wf" 2>/dev/null |
+      grep -vE '^[[:space:]]*#' |
+      sed -nE 's|.*--match[[:space:]]+([A-Za-z0-9_-]+).*|\1|p'
+  )"
+  while IFS= read -r _set; do
+    [ -n "$_set" ] || continue
+    call_sites="${call_sites:+$call_sites
+}$_prim $_set"
+    call_site_files="${call_site_files:+$call_site_files
+}$_wf"
+  done <<EOF
+$_sets
+EOF
+done
 
 if [ -z "$call_sites" ]; then
   cannot_read "$WORKFLOW_DIR/*.yml — found ZERO '--match' dispatch call sites. Either every dispatcher was rewritten or this scan is broken; either way an empty roster would print as 'no gates dispatched'."

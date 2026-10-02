@@ -37,6 +37,33 @@ defmodule Barkpark.Net.SafeOutboundTest do
       assert SafeOutbound.ip_allowed?({0, 0, 0, 0, 0, 0xFFFF, 0x0808, 0x0808})
     end
 
+    # r2c webhook audit: IPv6 forms that EMBED an IPv4 address, and two IPv4
+    # special-purpose ranges, used to pass the guard.
+    test "unwraps NAT64 / 6to4 / IPv4-compatible IPv6 and re-checks the embedded IPv4" do
+      # 64:ff9b::169.254.169.254 (NAT64 of the metadata IP)
+      refute SafeOutbound.ip_allowed?({0x64, 0xFF9B, 0, 0, 0, 0, 0xA9FE, 0xA9FE})
+      # 64:ff9b::10.0.0.1
+      refute SafeOutbound.ip_allowed?({0x64, 0xFF9B, 0, 0, 0, 0, 0x0A00, 0x0001})
+      # 2002:7f00:0001:: (6to4 of 127.0.0.1)
+      refute SafeOutbound.ip_allowed?({0x2002, 0x7F00, 0x0001, 0, 0, 0, 0, 1})
+      # ::10.0.0.1 (deprecated IPv4-compatible)
+      refute SafeOutbound.ip_allowed?({0, 0, 0, 0, 0, 0, 0x0A00, 0x0001})
+      # 64:ff9b:1::/48 local-use NAT64
+      refute SafeOutbound.ip_allowed?({0x64, 0xFF9B, 1, 0, 0, 0, 0x0808, 0x0808})
+
+      # CONTROLS: the same encodings of a PUBLIC IPv4 stay allowed.
+      assert SafeOutbound.ip_allowed?({0x64, 0xFF9B, 0, 0, 0, 0, 0x0808, 0x0808})
+      assert SafeOutbound.ip_allowed?({0x2002, 0x0808, 0x0808, 0, 0, 0, 0, 1})
+    end
+
+    test "rejects 192.0.0.0/24 and 198.18.0.0/15; neighbours stay allowed" do
+      refute SafeOutbound.ip_allowed?({192, 0, 0, 8})
+      refute SafeOutbound.ip_allowed?({198, 18, 0, 1})
+      refute SafeOutbound.ip_allowed?({198, 19, 255, 254})
+      assert SafeOutbound.ip_allowed?({192, 0, 1, 1})
+      assert SafeOutbound.ip_allowed?({198, 20, 0, 1})
+    end
+
     test "allows routable public IPv6" do
       assert SafeOutbound.ip_allowed?({0x2606, 0x2800, 0x220, 0x1, 0x248, 0x1893, 0x25C8, 0x1946})
     end

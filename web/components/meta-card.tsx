@@ -180,7 +180,7 @@ function Row({
 }) {
   return (
     <>
-      <dt className="font-medium text-zinc-500 dark:text-zinc-400">{label}</dt>
+      <dt className="font-medium text-muted-text">{label}</dt>
       <dd className="text-zinc-800 dark:text-zinc-200">{children}</dd>
     </>
   );

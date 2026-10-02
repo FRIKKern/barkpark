@@ -1,0 +1,100 @@
+{
+  "contract": "A BLOCK-level node sitting inside an INLINE array — {\"type\":\"paragraph\",\"content\":[…]} or {\"type\":\"list-item\",\"content\":[…]} — carries its text one level deeper than an inline walk looks, so it composes to nothing and the prose vanishes while it sits intact in storage. Measured 2026-09-02 on the live corpus: 75 list items across 4 published papers rendered as an empty bullet. PR #15701 fixed the Elixir engine at its shared inline-run walk; this fixture is the cross-engine lock so the Go TUI reader and the @barkpark/react SDK cannot diverge from it again. THE LAW: before walking a run of inline nodes, replace any node carrying a NON-EMPTY LIST under `content` with that list — ONE level, never recursively. Keyed on `content` rather than a type allowlist because no inline node type in any of the three engines reads `content` (inline nodes carry `value`, `text`, `children` and marks), so the key cannot shadow a legitimate inline node. The unwrap belongs to the RUN walk only (compose_inline_children/1 · InlineRenderer.Inline · renderInlines) — a mark node's own children walk (compose_inline/2 · InlineRenderer.children · renderInlineChildren) is deliberately NOT unwrapped, matching the Elixir original.",
+  "engines": {
+    "elixir": "api/lib/barkpark/portable_doc/render/inline.ex — unwrap_block_wrappers/1, tested by api/test/barkpark/portable_doc/render/inline_block_wrapper_parity_test.exs",
+    "go": "internal/pdrender/inline.go — unwrapBlockWrappers, tested by internal/pdrender/inline_block_wrapper_parity_test.go",
+    "js": "js/packages/react/src/inline.tsx — unwrapBlockWrappers, tested by js/packages/react/tests/inline-block-wrapper.parity.test.ts"
+  },
+  "cases": [
+    {
+      "name": "a paragraph wrapper carries its prose one level deep",
+      "nodes": [{ "type": "paragraph", "content": [{ "type": "text", "value": "the paragraph prose survives" }] }],
+      "text": "the paragraph prose survives"
+    },
+    {
+      "name": "a list-item wrapper carries its prose one level deep",
+      "nodes": [{ "type": "list-item", "content": [{ "type": "text", "value": "the bullet prose survives" }] }],
+      "text": "the bullet prose survives"
+    },
+    {
+      "name": "a wrapper holding several inline leaves keeps their order",
+      "nodes": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "text", "value": "one " },
+            { "type": "text", "value": "two " },
+            { "type": "text", "value": "three" }
+          ]
+        }
+      ],
+      "text": "one two three"
+    },
+    {
+      "name": "a wrapper beside plain sibling leaves splices in place",
+      "nodes": [
+        { "type": "text", "value": "before " },
+        { "type": "paragraph", "content": [{ "type": "text", "value": "inside" }] },
+        { "type": "text", "value": " after" }
+      ],
+      "text": "before inside after"
+    },
+    {
+      "name": "a wrapper holding a mark node renders that node normally",
+      "nodes": [
+        {
+          "type": "paragraph",
+          "content": [{ "type": "strong", "children": [{ "type": "text", "value": "bold prose" }] }]
+        }
+      ],
+      "text": "bold prose"
+    },
+    {
+      "name": "a heading wrapper unwraps too — keyed on content, not a type allowlist",
+      "nodes": [{ "type": "heading", "content": [{ "type": "text", "value": "heading prose" }] }],
+      "text": "heading prose"
+    },
+    {
+      "name": "an unheard-of block type unwraps too — the key is the field, not the name",
+      "nodes": [{ "type": "not-a-real-block-type", "content": [{ "type": "text", "value": "future prose" }] }],
+      "text": "future prose"
+    },
+    {
+      "name": "a wrapper with EMPTY content keeps today's behaviour (nothing)",
+      "nodes": [{ "type": "paragraph", "content": [] }],
+      "text": ""
+    },
+    {
+      "name": "a node whose content is a STRING is not a wrapper and is not unwrapped",
+      "nodes": [{ "type": "paragraph", "content": "not a list" }],
+      "text": ""
+    },
+    {
+      "name": "ONE level only — a wrapper inside a wrapper is not unwrapped twice",
+      "nodes": [
+        {
+          "type": "paragraph",
+          "content": [
+            { "type": "paragraph", "content": [{ "type": "text", "value": "two levels deep" }] }
+          ]
+        }
+      ],
+      "text": ""
+    },
+    {
+      "name": "CONTROL — a plain text leaf is untouched",
+      "nodes": [{ "type": "text", "value": "plain prose" }],
+      "text": "plain prose"
+    },
+    {
+      "name": "CONTROL — an inline mark node with children is untouched",
+      "nodes": [{ "type": "strong", "children": [{ "type": "text", "value": "strong control" }] }],
+      "text": "strong control"
+    },
+    {
+      "name": "CONTROL — an inline code leaf keeps reading value, not content",
+      "nodes": [{ "type": "code", "value": "code_control()" }],
+      "text": "code_control()"
+    }
+  ]
+}

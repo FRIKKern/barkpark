@@ -1,0 +1,320 @@
+CI PER-JOB DIET MEASUREMENT — the per-PR path, one row per (workflow, JOB)
+task-76e529e61d9e34d0 (child of task-dee226be3107a98b) · lead-gates · 2026-09-20
+
+HOW TO RE-DERIVE THIS FILE, exactly:
+
+    bash scripts/ci-measure.sh --per-job --runs 50 --pages 10 --raw-out raw.ndjson
+    bash scripts/ci-measure.sh --per-job --raw-in raw.ndjson      # no network
+
+WHAT IT IS. Every minute below is STEP-DERIVED: a job's compute is the span of
+its executed steps, so a job with zero executed steps contributed ZERO whatever
+its wall clock said (the rule at the top of scripts/ci-measure.sh, and the
+reason the first diet table was wrong). Cancelled and zero-step jobs are COUNTED
+in their own columns and are never summed into any minute column. The
+`skip` column is jobs an `if:` declined; those render a check run and cost
+nothing.
+
+WHAT IT IS NOT. It is not a run rollup. Every conclusion here comes from
+`actions/runs/<id>/jobs`; `.conclusion` is deliberately absent from the run-list
+projection, so there is nothing for `continue-on-error` to launder. Adjudicated
+in .github/run-level-readers.allow (scripts/ci-measure.sh, 21 refs, JOB-LEVEL).
+
+IT IS NOT A SAMPLE EITHER, and it is not scaled: inside the stated window every
+completed pull_request run of each workflow is walked, up to the 50-run cap, so
+the medians are real medians. What bounds it is the window the feed reaches —
+10 pages is GitHub's own 1000-item ceiling, not a choice. A workflow with fewer
+than 50 runs in the window is reported at its true, smaller n, and n is the
+`execs` column.
+
+THE SORT IS execs x median, NOT median. A 15-minute job that fires twice is not
+the diet target; a 2.58-minute job that fires on 25 of 49 pushes is.
+
+CI PER-JOB DIET TABLE — window 2026-09-18T15:02:56Z .. 2026-09-20T09:28:29Z
+  population: 1000 completed pull_request runs listed; 955 descended into (cap 50 runs per workflow)
+  3601 job rows read from actions/runs/<id>/jobs. Minutes are STEP-derived:
+  a job with zero executed steps contributed ZERO compute whatever its wall clock said.
+  `cancel` and `0step` are COUNTS, never minutes, and are excluded from every minute column.
+  Sorted by execs x median (the column `rank`), not by median.
+
+workflow                  job                                                  execs     med    total     rank cancel 0step  skip  red
+--------------------------------------------------------------------------------------------------------------------------------------
+elixir                    Test (Elixir 1.18.4 / OTP 27.0)                         30   15.82    527.4    474.8      1     0     0    6
+doc-gates                 Doc budgets + anchors                                   41    4.58    179.9    187.9      4     4     0    6
+console-harness           Console client unit harness                             10   12.44    110.1    124.4      3    38    35    1
+compose-smoke             Smoke arms (census, green boot, refusal boot — one      31    3.52    104.7    109.0      3    16    13    0
+cloud                     Cloud control-plane (test) (27.0, 1.18.1)               20    4.62     90.5     92.3      1     0     0    0
+required-checks-drift     Required-check spec gate                                 5   15.73     65.8     78.7      5    44    40    0
+required-checks-drift     Required-check spec drift (advisory)                     5   13.47     61.4     67.3      5    44    40    1
+security                  Dependency CVE audit (mix_audit over mix.lock, non-     25    2.58     61.2     64.6      0     0     0    0
+security                  Sobelow static analysis (regression gate, baseline      25    2.32     59.3     57.9      0     0     0    7
+elixir                    Elixir path-escape ratchet                              44    1.23     56.1     54.3      3     3     0    1
+cloud                     Cloud path-escape ratchet                               44    1.18     50.4     52.1      3     3     0    0
+go-tests                  go vet + test                                           10    4.88     48.9     48.8      3    37    34    7
+reland-check              Re-land advisory (already-landed overlap)               45    1.05     47.2     47.2      4     4     0    0
+architecture              Boundary gate                                           30    1.47     44.4     44.0      4     4     0   26
+cloud                     Cloud reader-corpus census (27.0, 1.18.1)               20    2.00     38.3     40.0      0     0     0    0
+console-harness           Console path-escape ratchet                             45    0.78     33.3     35.2      3     3     0    0
+elixir                    Prod compile gate (Elixir 1.18.4 / OTP 27.0)            26    1.29     32.7     33.6      0     0     0    1
+pr-meta                   PR meta gates                                           45    0.65     29.4     29.2      4     4     0   35
+elixir                    Validation perf bench (median-of-5, alarm >100ms) (     26    1.10     28.2     28.6      0     0     0    0
+pr-task-gate              PR references an active task                            49    0.47     23.6     22.9      0     0     0    4
+required-checks-drift     Head does not silently revert main (stale tree)         45    0.50     23.7     22.5      4     4     0    0
+ci                        Lighthouse CI — web/                                     9    2.33     19.7     21.0      4    39    36    0
+go-tests                  Dispatch (Go paths)                                     44    0.47     21.1     20.5      3     3     0    0
+security                  Dispatch (security paths)                               45    0.45     20.9     20.2      3     3     0    0
+pipefail SIGPIPE scan     pipefail SIGPIPE scan                                   11    1.77     17.1     19.4      3    37    34    0
+js-tests                  Build + test + gates                                     7    2.62     22.2     18.3      0     0     0    7
+console-harness           Overflow guard (rendered)                               10    1.82     18.3     18.2      3    38    35    0
+pr-task-gate              PR task gate self-test                                  49    0.33     16.2     16.3      0     0     0    0
+required-checks-drift     Every workflow job has runs-on+steps or uses            45    0.28     13.0     12.8      4     4     0    0
+elixir                    Format (mix format --check-formatted, diff-scoped)      26    0.48     12.6     12.6      0     0     0    1
+ci                        Dispatch (web paths)                                    45    0.27     11.9     12.0      3     3     0    0
+security                  Security gate shape ratchet                             45    0.27     11.9     12.0      3     3     0    0
+elixir                    Dispatch (changed-path sets)                            44    0.27     11.4     11.7      3     3     0    0
+ci                        web/ typecheck + unit tests + lint                       9    1.30     11.4     11.7      4    39    36    0
+pipefail SIGPIPE scan     pipefail scan — did the scanner's inputs move?          45    0.25     11.0     11.2      3     3     0    0
+required-checks-drift     Dispatch (required-checks inputs)                       45    0.25     11.2     11.2      4     4     0    0
+security                  Sobelow baseline rows still hash to their own finge     25    0.45     11.1     11.2      3    23    20    0
+compose-smoke             Dispatch (compose-smoke paths)                          45    0.25     11.1     11.2      2     2     0    0
+console-harness           Dispatch (console paths)                                45    0.25     11.7     11.2      3     3     0    0
+astro-finder-render-smoke Does this diff touch the Astro finder surface?          44    0.25     10.8     11.0      4     4     0    0
+cloud                     Dispatch (cloud paths)                                  44    0.25     11.2     11.0      3     3     0    0
+cloud                     Cloud control-plane (compile + format) (27.0, 1.18.     20    0.55     11.3     11.0      0     0     0    0
+POSIX vacuous-green censu census — did the population's inputs move?              46    0.23     11.2     10.7      3     3     0    0
+Shell harnesses           PDS census / parity / scratch-target harnesses           6    1.77     10.8     10.7      0     0     0    1
+dependabot-task-trailer   Dependabot trailer injector self-test                   49    0.20      9.4      9.8      0     0     0    0
+security                  Sobelow baseline does not swallow its own inline wa     25    0.38      9.1      9.6      3    23    20    8
+paper-editor              Narrow-viewport rendered sweep                           5    1.85      8.8      9.2      0     0     0    0
+Task lease renew — an ope Keep the claim alive while this PR is open              45    0.20      8.8      9.0      5     5     0    0
+required-checks-drift     Required contexts cannot conclude cancelled             45    0.20      9.0      9.0      4     4     0    0
+search-starter-smoke      Journey smoke — self-test (fixtures, no network)         4    2.07      8.5      8.3      1     1     0    0
+ci                        Golden Rule 8 observer (selftest)                       45    0.18      8.2      8.2      3     3     0    0
+ci                        Web path-escape ratchet                                 45    0.18      8.4      8.2      3     3     0    0
+paper-rig                 Render rig (gate.sh)                                     3    1.72      5.5      5.2      0     0     0    0
+js-tests                  Changeset present (PRs only)                             7    0.72      5.4      5.0      0     0     0    0
+Deploy harnesses          offline-deploy-harnesses                                 1    4.53      4.5      4.5      0     0     0    0
+main-collapse gates       main-collapse criterion + runs-window gates             15    0.30      4.6      4.5      3     3     0    0
+Shell harnesses           Dispatch (shell-harness paths)                          17    0.25      4.3      4.2      2     2     0    0
+console-harness           Modal CSSOM oracle (rendered)                           10    0.43      5.4      4.2      3    38    35    0
+search-starter-smoke      Corpus graph renders, and a phone gets none of it (      4    1.03      4.2      4.1      1     1     0    0
+Shell harnesses           reland-check / fleet-run-verdict / paper-reader-aud      1    3.68      3.7      3.7      0     0     0    0
+console-harness           CSSOM parity (authored CSS vs browser)                  10    0.36      3.7      3.6      3    38    35    0
+Shell harnesses           selftest wiring census                                   8    0.44      3.5      3.5      0     0     0    0
+console-harness           Billing tier floor (rendered)                           10    0.33      3.6      3.3      3    38    35    1
+search-starter-smoke      Finder unit specs (dep-free, no browser)                 4    0.79      3.1      3.2      1     1     0    0
+paper-editor              Round-trip smoke + bundle freshness                      5    0.60      5.0      3.0      0     0     0    4
+astro-finder-render-smoke Finder island renders (headless chromium)                3    0.90      2.7      2.7      4    45    41    0
+search-template-gates     Flagship template bp-command parse                       6    0.36      2.2      2.1      1     1     0    0
+stale-verdict-watch       Stale verdict harness                                    2    0.98      2.0      2.0      0     0     0    0
+Shell harnesses           a queued deploy or main gate run cannot be evicted       5    0.33      1.7      1.7      0     0     0    0
+main-gate-watch           Main gate watch harness                                  6    0.28      1.6      1.6      0     0     0    0
+search-template-gates     Vendored renderer block coverage                         6    0.28      1.6      1.6      1     1     0    0
+cron-overdue-probe        Cron overdue harness                                     6    0.27      1.5      1.6      0     0     0    0
+search-template-gates     Vendored SDK freshness                                   6    0.26      1.6      1.6      1     1     0    1
+Shell harnesses           .claude/workflows engines load on a machine that is      5    0.30      1.6      1.5      0     0     0    0
+Shell harnesses           every declared dispatch target actually dispatches       6    0.25      1.6      1.5      0     0     0    0
+Shell harnesses           every workflow path filter matches something             5    0.27      1.3      1.3      0     0     0    0
+search-template-gates     Astro starter content-link specs (dep-free, no brow      6    0.21      1.3      1.2      1     1     0    0
+Shell harnesses           workflow-owner-check.sh named-owner guard                5    0.23      1.1      1.2      0     0     0    0
+web-fork-drift            web <-> search-starter named invariants (advisory)       2    0.57      1.1      1.1      1     1     0    0
+search-template-gates     Starter-template contrast/focus literals                 6    0.17      1.1      1.1      1     1     0    0
+POSIX vacuous-green censu POSIX vacuous-green census                               5    0.20      1.1      1.0      3    44    41    0
+typedoc                   Generate reference                                       1    1.00      1.0      1.0      0     0     0    0
+crown-reconcile           Crown reconcile harness                                  2    0.50      1.0      1.0      0     0     0    0
+astro-search-finder-test  Browser-token build guard (both editions)                4    0.20      0.8      0.8      1     1     0    0
+Shell harnesses           console-path-escape-check.sh classification matrix       1    0.78      0.8      0.8      0     0     0    0
+Shell harnesses           cloud-static-gz-guard.sh (uncommitted siblings, bot      4    0.19      0.8      0.8      0     0     0    0
+astro-finder-drift        Astro finder byte-identity                               4    0.19      0.8      0.8      1     1     0    2
+astro-search-finder-test  Finder seed-shape contract                               4    0.19      0.8      0.8      1     1     0    0
+Shell harnesses           which-gates.sh gate-list deriver                         1    0.68      0.7      0.7      0     0     0    0
+Research-coverage suite   tooling/{aesthetics,ergonomics,risk} node --test su      1    0.60      0.6      0.6      0     0     0    1
+Go format                 gofmt -l (advisory)                                      1    0.60      0.6      0.6      0     0     0    0
+Shell harnesses           place-directory install.sh read-back claims              3    0.18      0.5      0.6      0     0     0    0
+console-harness           Destroy-vs-primary adjacency (rendered)                  1    0.45      0.5      0.5      0     0     0    0
+Go format                 gofmt drift ceiling (blocking)                           1    0.45      0.5      0.5      0     0     0    0
+Shell harnesses           shell-harnesses dispatcher partition + fixture matr      2    0.21      0.4      0.4      0     0     0    0
+Research-coverage suite   tooling/research-coverage node --test suite              1    0.35      0.3      0.3      0     0     0    0
+Shell harnesses           orchestrate-tasks launch recipe + per-session lane       1    0.27      0.3      0.3      0     0     0    0
+Shell harnesses           sunset-route health consumers survive 2027-01-01         1    0.18      0.2      0.2      0     0     0    0
+Shell harnesses           every workflow's main verdict (roll-up denominator       1    0.13      0.1      0.1      0     0     0    0
+dependabot-task-trailer   Dependabot PRs carry the standing task trailer           0    0.00      0.0      0.0      0    49    49    0
+Task lease renew — an ope Renew every open PR's claim (20-min sweep)               0    0.00      0.0      0.0      0    50    50    0
+pr-meta                   Report main-push failure to a human                      0    0.00      0.0      0.0      0    49    49    0
+pr-meta                   Filebase aesthetics critic (advisory, main + nightl      0    0.00      0.0      0.0      0    49    49    0
+ci                        Web gate                                                48    0.00      0.3      0.0      0     0     0    4
+security                  Security gate                                           48    0.00      0.2      0.0      0     0     0   11
+security                  Dependency CVE audit (mix_audit over mix.lock, non-      0    0.00      0.0      0.0      3    23    20    0
+security                  Sobelow static analysis (regression gate, baseline       0    0.00      0.0      0.0      3    23    20    0
+security                  Report main-push failure to a human                      0    0.00      0.0      0.0      5    48    43    0
+go-tests                  Go gate                                                 47    0.00      0.2      0.0      0     0     0   10
+go-tests                  Report main-push failure to a human                      0    0.00      0.0      0.0      4    47    43    0
+compose-smoke             Compose smoke                                           47    0.00      0.2      0.0      0     0     0    3
+cloud                     Cloud control-plane (test)                               0    0.00      0.0      0.0      3    27    24    0
+cloud                     Cloud control-plane (compile + format)                   0    0.00      0.0      0.0      3    27    24    0
+cloud                     Cloud gate                                              47    0.00      0.2      0.0      0     0     0    4
+cloud                     Report main-push failure to a human                      0    0.00      0.0      0.0      5    47    42    0
+elixir                    Elixir gate                                             47    0.00      0.2      0.0      0     0     0   10
+elixir                    Report main-push failure to a human                      0    0.00      0.0      0.0      4    47    43    0
+architecture              Report main-push failure to a human                      0    0.00      0.0      0.0      4    34    30    0
+console-harness           Console gate                                            48    0.00      0.3      0.0      0     0     0    4
+console-harness           Report main-push failure to a human                      0    0.00      0.0      0.0      4    48    44    0
+cloud                     Cloud reader-corpus census                               0    0.00      0.0      0.0      3    27    24    0
+elixir                    Prod compile gate (Elixir ${{ matrix.elixir }} / OT      0    0.00      0.0      0.0      3    21    18    0
+elixir                    Format (mix format --check-formatted, diff-scoped)       0    0.00      0.0      0.0      3    21    18    0
+elixir                    Validation perf bench (median-of-5, alarm >100ms)        0    0.00      0.0      0.0      3    21    18    0
+elixir                    Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.      0    0.00      0.0      0.0      3    17    14    0
+Shell harnesses           matrix.leg.name                                          0    0.00      0.0      0.0      2     2     0    0
+main-gate-watch           Main gate watch configuration fault                      0    0.00      0.0      0.0      0     6     6    0
+main-gate-watch           Report main-gate-watch configuration fault to a hum      0    0.00      0.0      0.0      0     6     6    0
+main-gate-watch           Main verdict presence                                    0    0.00      0.0      0.0      0     6     6    0
+main-gate-watch           Report main verdict absence to a human                   0    0.00      0.0      0.0      0     6     6    0
+main-gate-watch           Main gate watch                                          0    0.00      0.0      0.0      0     6     6    0
+main-gate-watch           Report main-gate-watch scream to a human                 0    0.00      0.0      0.0      0     6     6    0
+cron-overdue-probe        Cron overdue probe                                       0    0.00      0.0      0.0      0     6     6    0
+search-starter-smoke      Journey smoke — live demo (report mode, never gates      0    0.00      0.0      0.0      0     5     5    0
+search-template-gates     Report main-push failure to a human                      0    0.00      0.0      0.0      1     7     6    0
+Deploy harnesses          cp-deploy.sh's pull form works on the box's git 2.3      0    0.00      0.0      0.0      0     1     1    0
+Deploy harnesses          Report main-push failure to a human                      0    0.00      0.0      0.0      0     1     1    0
+crown-reconcile           Crown reconcile                                          0    0.00      0.0      0.0      0     2     2    0
+stale-verdict-watch       Stale verdict watch                                      0    0.00      0.0      0.0      0     2     2    0
+stale-verdict-watch       Stale verdict watch read fault                           0    0.00      0.0      0.0      0     2     2    0
+--------------------------------------------------------------------------------------------------------------------------------------
+TOTAL                                                                           2179           2199.6   2191.7    215  1422  1213  167
+
+PER-WORKFLOW ROLLUP — job-minutes and the per-run cost of carrying the workflow at all
+workflow                             runs   jobs  total_min   min/run
+elixir                                 47    243      668.7     14.23
+cloud                                  47    195      201.9      4.30
+console-harness                        48    189      186.8      3.89
+required-checks-drift                  49    190      184.1      3.76
+doc-gates                              45     41      179.9      4.00
+security                               48    238      173.6      3.62
+compose-smoke                          47    123      116.1      2.47
+go-tests                               47    101       70.2      1.49
+ci                                     48    201       59.8      1.25
+reland-check                           49     45       47.2      0.96
+architecture                           34     30       44.4      1.30
+pr-task-gate                           49     98       39.9      0.81
+Shell harnesses                        19     72       33.3      1.75
+pr-meta                                49     45       29.4      0.60
+pipefail SIGPIPE scan                  48     56       28.1      0.58
+js-tests                                7     14       27.6      3.94
+search-starter-smoke                    5     12       15.9      3.18
+paper-editor                            5     10       13.8      2.76
+astro-finder-render-smoke              48     47       13.5      0.28
+POSIX vacuous-green census             49     51       12.3      0.25
+dependabot-task-trailer                49     49        9.4      0.19
+Task lease renew — an open PR kee      50     45        8.8      0.18
+search-template-gates                   7     30        7.8      1.11
+paper-rig                               3      3        5.5      1.82
+main-collapse gates                    18     15        4.6      0.25
+Deploy harnesses                        1      1        4.5      4.53
+stale-verdict-watch                     2      2        2.0      0.98
+main-gate-watch                         6      6        1.6      0.27
+astro-search-finder-test                5      8        1.6      0.32
+cron-overdue-probe                      6      6        1.5      0.26
+web-fork-drift                          3      2        1.1      0.38
+Go format                               1      2        1.1      1.05
+typedoc                                 1      1        1.0      1.00
+crown-reconcile                         2      2        1.0      0.50
+Research-coverage suite                 1      2        0.9      0.95
+astro-finder-drift                      5      4        0.8      0.16
+
+PER PR PUSH (the number the diet is about): 44.0 job-minutes across 140 distinct job names, estimated as total_min / the busiest workflow's run count (50 runs) — i.e. one push's worth.
+
+
+────────────────────────────────────────────────────────────────────────────
+WHAT WAS MOVED, AND WHAT IT COST BEFORE
+────────────────────────────────────────────────────────────────────────────
+
+ONE JOB MOVED: security.yml `mix-audit` —
+  "Dependency CVE audit (mix_audit over mix.lock, non-blocking) (27.0, 1.18.1)"
+
+  BEFORE   if: needs.changes.outputs.api == 'true'      (any api/** change)
+  AFTER    if: needs.changes.outputs.locks == 'true'    (its own inputs only)
+
+  Its row in the table above:  25 execs · 2.58 med · 61.2 total · rank 64.6
+                               0 cancelled · 0 zero-step · 0 red
+
+THE PROPERTY THAT MAKES IT SAFE TO MOVE. It reads no source. Both its oracles
+(`mix deps.audit` and `scripts/hex-audit-oracle.sh`) resolve LOCKFILES against
+an advisory database. An `api/lib/*.ex` edit cannot change what they say. The
+new gate is the set of files that can: api/mix.lock, api/mix.exs, cloud/mix.lock,
+cloud/mix.exs, .github/hex-audit-baseline.txt, .github/workflows/security.yml,
+scripts/hex-audit-oracle.sh, scripts/main-red-breaker.sh, scripts/breaker-capture.sh,
+scripts/run-instrument.sh.
+
+AND IT IS NOT REQUIRED. The four contexts branch protection enforces on main are
+Cloud gate, Console gate, Elixir gate, PR references an active task
+(.github/required-checks.json, protection.required_status_checks.checks). This
+job is none of them, is not in any required aggregator's needs:, and its own
+comment says so ("nothing here is a merge gate"). It is an S6 exclusion.
+
+THE COVERAGE THAT IS NOT LOST. security.yml's `push: branches:[main]` arm is
+paths-filtered on api/**, and the dispatcher emits api=true AND locks=true
+unconditionally for any non-pull_request event. So every merge that touches api/
+still runs the full CVE audit on main, at the same granularity as before. What
+stops is re-asking the question on each PR push whose diff cannot change the
+answer. (The answer CAN change with no diff at all — a new upstream advisory —
+but that is a clock, not a diff, and the per-PR path never caught it either.)
+
+WHY A JOB-LEVEL `if:` AND NOT A WORKFLOW-LEVEL `paths:`. A paths-filtered
+workflow publishes NO run and NO check run, which makes every name in the file
+ABSENT; a required context that is absent can never go green and the PR blocks
+forever. A job-level `if:` inside a running workflow still renders the check run,
+with conclusion `skipped`. security.yml carries THREE required-adjacent names and
+its own header forbids a pull_request paths: key outright. Nothing in this change
+adds or widens any paths: key.
+
+────────────────────────────────────────────────────────────────────────────
+BEFORE — READ FROM THE API, ON THREE REAL HEADS
+────────────────────────────────────────────────────────────────────────────
+
+  gh api "repos/FRIKKern/barkpark/commits/<sha>/check-runs?per_page=100" --paginate \
+    -q '.check_runs[] | [.name, .conclusion] | @tsv'
+
+  PR #19408  head 11a3e4d31   74 check-run rows · 64 distinct names
+             Dependency CVE audit …  SUCCESS
+  PR #19405  head 648bb9778   74 check-run rows · 64 distinct names
+             Dependency CVE audit …  SUCCESS
+  PR #19400  head 449abf329   76 check-run rows · 64 distinct names
+             Dependency CVE audit …  SUCCESS
+
+  None of those three heads touched a lockfile. Each spent ~2.58 minutes
+  answering a question its own diff could not have changed.
+
+────────────────────────────────────────────────────────────────────────────
+THE COUNTERFACTUAL, MEASURED OVER REAL DIFFS (not predicted)
+────────────────────────────────────────────────────────────────────────────
+
+The 49 security.yml pull_request runs in the window belong to 14 distinct PRs.
+Each PR's own file list was read from the API and run through BOTH predicates —
+the old one and the new one — by the same case arms the dispatcher uses:
+
+  gh api "repos/FRIKKern/barkpark/pulls/<n>/files?per_page=100" --paginate \
+    -q '.[].filename'
+
+  api=true  locks=false   10 PRs   <- these run mix-audit today, and would not
+  api=false locks=false    4 PRs   <- these already skip it
+  api=*     locks=true      0 PRs
+
+  ZERO of the 14 touched any file in the lock set. Over this window the job's
+  25 executions and 61.2 job-minutes would have been 0 executions and 0 minutes,
+  with the check run still rendered on every head as `skipped`.
+
+  THIS IS A MEASUREMENT OF REAL INPUTS THROUGH THE NEW PREDICATE. It is not the
+  AFTER number, and it must not be quoted as one: the AFTER number is read from
+  the API on a post-merge head, and criterion 2 of the row says so.
+
+────────────────────────────────────────────────────────────────────────────
+WHAT THE CHECK-RUN COUNT DOES **NOT** DO, stated because the row asks for it
+────────────────────────────────────────────────────────────────────────────
+
+The umbrella's c1 wants "check runs per PR push under 20". A JOB-level `if:`
+CANNOT lower that number: a skipped job still renders its check run. 64 distinct
+names before, 64 after — by design, and the design is the deadlock rule. The two
+halves of the mandate pull against each other, and this change buys the minutes,
+not the count. Lowering the COUNT means removing NAMES, which for a non-required
+name is a workflow-level paths: filter — the one instrument this task forbids.
+That tension is a finding, not an omission; it is reported rather than papered
+over with a number that would have to be the count of something else.

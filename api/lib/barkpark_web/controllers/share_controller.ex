@@ -108,6 +108,7 @@ defmodule BarkparkWeb.ShareController do
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
+  alias BarkparkWeb.MediaVisibilityCopy
 
   @doc """
   `GET /v1/shares` — list every live share, env baseline + persisted, each
@@ -246,6 +247,68 @@ defmodule BarkparkWeb.ShareController do
   end
 
   @doc """
+  `POST /v1/shares/media` — publish this scope's media.
+
+  Params: `scope` (required, `ws[/project[/dataset]]`). THE ONE VERB behind
+  `bp share publish-media` and the Studio media library's "Publish this scope's
+  media" action: it adds the `:media` surface to the scope's stored share
+  through `Barkpark.Sharing.publish_media/1` and returns the resulting share
+  plus the visibility copy the asset label should now be read with.
+
+  It is a share write, not a visibility write. The RULED answer to "my website
+  cannot show its images" is the `:media` `:read` share
+  (`BarkparkWeb.Plugs.RequireShareScope`, task-8627e1a3f974693d); this action
+  touches no asset document and no `bp_visibility` value.
+
+  Same tenancy order as `create/2` — grammar -> resolve -> AUTHORIZE -> write —
+  and the same `workspace_admin?/2` predicate against the workspace the SCOPE
+  names, so it cannot become a softer door onto the same registry.
+  """
+  def publish_media(conn, params) do
+    scope = params["scope"]
+
+    if not is_binary(scope) or scope == "" do
+      unprocessable(conn, "scope is required")
+    else
+      case scope_workspace(scope) do
+        {:ok, ws_id} ->
+          if workspace_admin?(conn, ws_id),
+            do: do_publish_media(conn, scope),
+            else: forbidden(conn)
+
+        :unknown_workspace ->
+          unprocessable(conn, "could not publish media: the workspace/project does not exist")
+
+        :invalid_scope ->
+          do_publish_media(conn, scope)
+      end
+    end
+  end
+
+  defp do_publish_media(conn, scope) do
+    case Sharing.publish_media(scope) do
+      {:ok, share} ->
+        conn
+        |> put_status(:created)
+        |> json(%{
+          share: share_json(share, "stored"),
+          visibility:
+            MediaVisibilityCopy.public_option(
+              share.workspace_slug,
+              share.project_slug,
+              share.dataset
+            )
+        })
+
+      {:error, :invalid} ->
+        unprocessable(conn, "invalid scope — expected ws[/project[/dataset]]")
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        unprocessable(conn, changeset_errors(changeset))
+    end
+  end
+
+  @doc """
   `DELETE /v1/shares` — remove the stored share for a scope.
 
   Body/params: `scope` (required). Applies the same default project/dataset as
@@ -273,6 +336,16 @@ defmodule BarkparkWeb.ShareController do
   tenant's share — a live tenant has a resolvable workspace and is therefore
   403-confined above. `:require_admin` still gates the verb.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, params) do
     scope = params["scope"]
 
@@ -302,7 +375,7 @@ defmodule BarkparkWeb.ShareController do
   `POST /v1/shares/tokens` — mint a scoped-share EDIT token (P5).
 
   Body/params: `scope` (required), `surfaces` (required, comma list of
-  `docs,media`), `ttl` (optional seconds; default 7d, cap 1y), `label`
+  `docs,media`), `ttl` (optional seconds; default 7d; over 365d → 422 naming the max, never clamped), `label`
   (optional). 201 with the RAW token shown ONCE; 422 if the scope is not
   `:edit`-shared for the surfaces; 403 when the caller is not a workspace
   admin of the SCOPE's workspace (see the tenancy-confinement note above).
@@ -397,6 +470,16 @@ defmodule BarkparkWeb.ShareController do
   existence oracle. `Barkpark.Auth.revoke_token/1` itself stays UNSCOPED — 9 of
   its 12 call sites have no HTTP actor.
   """
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke_token(conn, %{"token_id" => token_id}) do
     if revocable_by?(conn, token_id) do
       do_revoke(conn, token_id)
@@ -483,7 +566,9 @@ defmodule BarkparkWeb.ShareController do
   # sibling helper just shed, and it does not guard `Tenancy.Auth` at all. It
   # guards the bare `Repo.get(ApiToken, id)` on the next line: that is Ecto's
   # own fetch, NOT a Barkpark chokepoint, and binding a non-UUID string to a
-  # `:binary_id` column raises `Ecto.Query.CastError` → 500. There is no total
+  # `:binary_id` column raises `Ecto.Query.CastError` → an opaque 400
+  # (phoenix_ecto maps that struct to 400; 500 is Plug's `Any` fallback, which
+  # covers the nil / non-binary FunctionClauseError class). There is no total
   # by-id accessor for an `ApiToken` in `Barkpark.Auth` today, so this guard is
   # the only thing standing between `DELETE /v1/shares/tokens/not-a-uuid` and a
   # crash oracle. Delete it and `share_controller_test.exs`'s "a malformed
@@ -563,6 +648,12 @@ defmodule BarkparkWeb.ShareController do
   defp describe_token_error(:no_surfaces), do: "no valid surfaces"
   defp describe_token_error(:unknown_scope), do: "the workspace/project does not exist"
   defp describe_token_error(%Ecto.Changeset{}), do: "validation failed"
+
+  # ttl over the share max age: REFUSED naming the max, never clamped
+  # (task-a0f8cfd7f4800236).
+  defp describe_token_error({:expiry_exceeds_max, _, _} = reason),
+    do: Barkpark.Auth.TokenExpiry.message(reason)
+
   defp describe_token_error(other), do: inspect(other)
 
   defp share_json(%Sharing.Share{} = s, source) do

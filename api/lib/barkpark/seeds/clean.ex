@@ -2,7 +2,9 @@ defmodule Barkpark.Seeds.Clean do
   @moduledoc """
   The clean seed profile (`BARKPARK_SEED_PROFILE=clean`) — what a fresh
   `bp setup` install gets: the Default tenancy scope, an admin token, and one
-  welcome paper. NO demo schemas, NO demo documents, NO `barkpark-dev-token`,
+  welcome paper. NO demo schemas, NO demo documents, NO `barkpark-dev-token`
+  (except on a DEV instance, where config/dev.exs names it as the Studio
+  browser token — see `maybe_install_dev_browser_token/1`),
   NO EDItEUR/Thema codelists (those serve onixedit, which is not in the clean
   plugin set). Plugin schemas (paper/mediaAsset/mediaCollection under
   `BARKPARK_PLUGINS=bulldocs,media`) land via the Bootstrap tail in
@@ -15,6 +17,7 @@ defmodule Barkpark.Seeds.Clean do
 
   alias Barkpark.Auth
   alias Barkpark.Content
+  alias Barkpark.Seeds.AdminTokenMintError
 
   @welcome_slug "welcome"
 
@@ -46,11 +49,15 @@ defmodule Barkpark.Seeds.Clean do
     %{
       "id" => "code1",
       "type" => "code",
+      # Every line here must RUN as typed: this is the first thing a new
+      # install shows. A bare `bp doc ls` / `bp paper` / `bp media` is a usage
+      # error (exit 2) — each needs a type, a verb or a slug.
       "value" =>
-        "bp doc ls            # list documents\n" <>
-          "bp paper             # papers from the terminal\n" <>
-          "bp media             # media library\n" <>
-          "bp setup --help      # reconfigure"
+        "bp schema ls           # the document types on this server\n" <>
+          "bp doc ls <type>       # the documents of one type\n" <>
+          "bp paper view welcome  # this paper, in the terminal\n" <>
+          "bp media --help        # the media library\n" <>
+          "bp setup --help        # reconfigure"
     }
   ]
 
@@ -59,6 +66,34 @@ defmodule Barkpark.Seeds.Clean do
     IO.puts("Seed profile: clean (papers + media)")
     seed_welcome_paper(scope)
     bootstrap_admin_token(scope)
+    maybe_install_dev_browser_token(scope)
+  end
+
+  # ── The DEV Studio's browser token (task-aa0e0b0a993b6435) ───────────────
+  #
+  # `config :barkpark, :dev_browser_token` is set in config/dev.exs ONLY. With
+  # the dev public-demo posture, an anonymous local browser enters Studio and
+  # its client-side API calls (reference picker, media library) carry THAT
+  # token. Only the demo profile ever minted it, so the DEFAULT
+  # `bp setup --target local` path — clean profile, `mix phx.server` in dev —
+  # served a Studio whose LiveView ran as admin while every one of those calls
+  # answered 403: the picker said "No matches" over a person that existed and
+  # the media library showed empty (measured 2026-09-30, stranger walk).
+  #
+  # Installed here with the demo profile's exact grant (Demo.ensure_dev_token/2
+  # is the one implementation). A release, a deploy.sh box and the test env
+  # have no such config, so they still never carry it — this module's
+  # "NO barkpark-dev-token" promise holds everywhere except a dev instance,
+  # where the demo profile already made the same token.
+  defp maybe_install_dev_browser_token(scope) do
+    case Application.get_env(:barkpark, :dev_browser_token) do
+      raw when is_binary(raw) and raw != "" ->
+        {:ok, _token} = Barkpark.Seeds.Demo.ensure_dev_token(scope, raw)
+        IO.puts("Dev Studio browser token installed (config :dev_browser_token, dev only).")
+
+      _ ->
+        :ok
+    end
   end
 
   # ── Welcome paper ────────────────────────────────────────────────────────
@@ -131,15 +166,69 @@ defmodule Barkpark.Seeds.Clean do
     |> Enum.any?(fn t -> is_nil(t.revoked_at) and Auth.has_permission?(t, "admin") end)
   end
 
+  # NOT a hard `{:ok, _} =` match. `api_tokens.token_hash` is unique-indexed and
+  # `admin_token_present?/1` above requires `revoked_at IS NULL`, so a FIXED
+  # BARKPARK_SEED_ADMIN_TOKEN that was later REVOKED arrives here with a hash
+  # that is already on a row: `create_token/5` declares
+  # `unique_constraint(:token_hash)`, hands back `{:error, %Ecto.Changeset{}}`,
+  # and the old match raised `MatchError` out of a private function — a stack
+  # trace that named neither the revoked token nor a way forward, taking the
+  # seed's caller down with it under `set -euo pipefail`.
+  #
+  # The refusal itself is CORRECT and stays (the gate is closed by decision:
+  # pds-bl-up-seed-remint-crash-after-revoke). Only the SHAPE changes — a named
+  # error that says what collided and what to do.
   defp mint_admin_token!(raw, scope) do
-    {:ok, _token} =
-      Auth.create_token(
-        raw,
-        "admin (bp setup)",
-        scope.dataset,
-        ["read", "write", "admin"],
-        scope.workspace_id
-      )
+    case Auth.create_token(
+           raw,
+           "admin (bp setup)",
+           scope.dataset,
+           ["read", "write", "admin"],
+           scope.workspace_id
+         ) do
+      {:ok, token} ->
+        token
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        raise AdminTokenMintError, message: mint_failure_message(changeset)
+    end
+  end
+
+  # The collision is the expected failure and gets the operator instructions;
+  # anything else is reported verbatim rather than mislabelled as a revoke.
+  defp mint_failure_message(changeset) do
+    if duplicate_token_hash?(changeset) do
+      """
+      Admin token mint REFUSED: BARKPARK_SEED_ADMIN_TOKEN names a credential
+      this box has already minted and then REVOKED.
+
+      api_tokens.token_hash is unique, and the revoked row still holds this
+      token's hash. A revoked credential is never re-minted — that is the
+      bootstrap gate closing, by decision, not a bug.
+
+      Do ONE of these, then re-run the mint:
+        * unset BARKPARK_SEED_ADMIN_TOKEN (check ~/.barkpark/.env — it is
+          sourced wholesale) and let a fresh token be generated and printed
+          once; or
+        * set BARKPARK_SEED_ADMIN_TOKEN to a DIFFERENT value.
+
+      The raw token is NOT echoed here, on purpose.
+      """
+    else
+      """
+      Admin token mint FAILED — #{inspect(changeset.errors)}.
+
+      This is NOT the revoked-token collision; the seed refused before writing
+      any credential.
+      """
+    end
+  end
+
+  defp duplicate_token_hash?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:token_hash, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   defp print_token_banner(raw) do
@@ -150,8 +239,51 @@ defmodule Barkpark.Seeds.Clean do
           #{raw}
 
       Connect with:  bp setup --target connect \\
-                       --server http://localhost:4000 --token <token>
+                       --server #{connect_url()} --token <token>
     ==========================================================\
     """)
   end
+
+  @doc """
+  The box's ACTUAL base URL — what the store-it-now banner tells the owner to
+  point `bp setup --target connect` at.
+
+  A hardcoded `http://localhost:4000` is a copy-pasteable instruction that
+  cannot work on any box not on the default port (observed against a `:47016`
+  personal box) — the same defect class as a vacuous green.
+
+  NOT `Endpoint.url/0`: `config/runtime.exs` pins the PUBLIC `url:` port to
+  80/443 because every prod box is proxy-fronted, so `url/0` renders
+  "http://localhost" on a personal box. The port a client must actually dial is
+  the LISTEN port in the `:http` config, which `runtime.exs` sets from `PORT` in
+  every env — the same `PORT` `bin/barkpark` exports.
+
+  Public (not `defp`) so the URL can be read back WITHOUT minting a token:
+  `PORT=47016 mix run -e 'IO.puts(Barkpark.Seeds.Clean.connect_url())'` is the
+  whole non-default-port proof.
+  """
+  def connect_url do
+    url = endpoint_config(:url) || []
+    http = endpoint_config(:http) || []
+    "#{url[:scheme] || "http"}://#{url[:host] || "localhost"}:#{http[:port] || 4000}"
+  end
+
+  # `BarkparkWeb.Endpoint.config/2` reads the endpoint's ETS table, and that
+  # table is created when the endpoint STARTS. `Barkpark.Release.seed/0` boots
+  # in `:seed` mode, which drops `BarkparkWeb.Endpoint` from the child list on
+  # purpose (`Barkpark.Application.child_specs/5`) — so the ETS read raised
+  #
+  #     ** (ArgumentError) the table identifier does not refer to an existing
+  #        ETS table ... :ets.lookup(BarkparkWeb.Endpoint, :url)
+  #
+  # from `print_token_banner/1`, the LAST step of a first-ever boot's seed.
+  # With `set -e` in `api/entrypoint.sh` that killed the container before
+  # `bin/barkpark start`, and it took the shown-once admin token with it.
+  # Invisible to `mix test`: the test node always has the endpoint up.
+  #
+  # ONE helper, not two: `Barkpark.Plugins.Bulldocs.own_public_host/0` carried
+  # the identical shape for the `:one_shot` boot mode. The rationale — why the
+  # fallback is not a second source of truth, why `:ets.whereis/1` — now lives
+  # once, in `Barkpark.EndpointConfig`.
+  defp endpoint_config(key), do: Barkpark.EndpointConfig.get(key)
 end

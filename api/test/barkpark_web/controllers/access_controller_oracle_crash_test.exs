@@ -127,7 +127,7 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       assert missing_conn.status == 404
 
       # Byte-identical, not merely same-status: ONE not_found/1 call site.
-      assert foreign_conn.resp_body == missing_conn.resp_body
+      assert denial_bytes(foreign_conn) == denial_bytes(missing_conn)
       assert json_response(foreign_conn, 404)["error"]["code"] == "not_found"
     end
 
@@ -140,7 +140,7 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
       missing = scoped_conn() |> bearer(stranger) |> get("/v1/access/#{Ecto.UUID.generate()}")
 
       assert real.status == 404
-      assert real.resp_body == missing.resp_body
+      assert denial_bytes(real) == denial_bytes(missing)
     end
 
     # The narrowing must NOT blanket-404 everything: a caller who legitimately
@@ -184,7 +184,7 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
 
       assert foreign_conn.status == 404
       assert missing_conn.status == 404
-      assert foreign_conn.resp_body == missing_conn.resp_body
+      assert denial_bytes(foreign_conn) == denial_bytes(missing_conn)
       assert json_response(foreign_conn, 404)["error"]["code"] == "not_found"
 
       # And the probe did NOT revoke another tenant's grant on the way out.
@@ -245,7 +245,7 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
         |> get("/v1/access", %{"workspace_id" => Ecto.UUID.generate()})
 
       assert malformed.status == 403
-      assert malformed.resp_body == nonexistent.resp_body
+      assert denial_bytes(malformed) == denial_bytes(nonexistent)
     end
 
     test "POST /v1/access with a malformed workspace_id → 403, never a CastError", %{conn: conn} do
@@ -332,6 +332,24 @@ defmodule BarkparkWeb.AccessControllerOracleCrashTest do
 
     assert unauthorized.status == 403
     assert nonexistent.status == 403
-    assert unauthorized.resp_body == nonexistent.resp_body
+    assert denial_bytes(unauthorized) == denial_bytes(nonexistent)
+  end
+
+  # A refusal's BYTES, with `request_id` removed.
+  #
+  # Since task-8737e2d7ff1884e0 routed every hand-built envelope through
+  # `BarkparkWeb.ErrorResponse`, every §9 refusal carries a `request_id` — and
+  # that value is PER-REQUEST, so two refusals that must be indistinguishable to
+  # a caller can never again be equal as raw strings. The indistinguishability
+  # this file guards is about the RESOURCE, and `request_id` says nothing about
+  # one: it is derived from the request, the caller already has it on the
+  # response's own `x-request-id` header, and it is the handle that makes the
+  # refusal correlatable to a log line. So it is elided here rather than
+  # suppressed at the emitter.
+  defp denial_bytes(conn) do
+    case Jason.decode(conn.resp_body) do
+      {:ok, %{"error" => error} = body} -> %{body | "error" => Map.delete(error, "request_id")}
+      _ -> conn.resp_body
+    end
   end
 end

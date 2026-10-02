@@ -157,6 +157,31 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "doc.history pagination flags (task-c59788170e244f51)" do
+    test "history declares BOTH `limit` and `offset` in the SERVED manifest",
+         %{conn: conn} do
+      # LIVE SHAPE, not a file read: this goes through the router and reads the
+      # manifest `bp` and the SDKs actually consume. PR #18882 gave
+      # `GET /v1/data/history/...` real offset pagination, but the capability
+      # stayed undeclared — a flag present in the source yet absent from the
+      # served manifest is undiscoverable from the client, the same shape as
+      # the stripped `--keep-rerun` (task-4d5a2dde8a02d057).
+      manifest = capabilities(conn)
+      cmd = find_cmd(manifest, "doc.history")
+
+      assert cmd != nil, "doc.history command not found in manifest"
+
+      flag_names = Enum.map(cmd["flags"], & &1["name"])
+      assert "limit" in flag_names
+
+      assert "offset" in flag_names,
+             "doc.history must declare an `offset` flag; got: #{inspect(flag_names)}"
+
+      offset_flag = Enum.find(cmd["flags"], &(&1["name"] == "offset"))
+      assert offset_flag["type"] == "int"
+    end
+  end
+
   describe "media.upload path contract (BUG 2)" do
     test "media.upload path_template is /v1/media/:dataset/upload", %{conn: conn} do
       manifest = capabilities(conn)
@@ -403,6 +428,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert "name" in Enum.map(cmd["args"], & &1["name"])
       # Schema management is admin-tier + scoped, matching schema.apply.
       assert cmd["auth_tier"] == "admin"
+    end
+
+    # The refusal for a schema that still has documents names `?force=true` as
+    # its override; the manifest must declare the flag or bp can never send it.
+    test "declares the bool force flag the schema_has_documents refusal names", %{conn: conn} do
+      cmd = find_cmd(capabilities(conn), "schema.delete")
+      force = Enum.find(cmd["flags"] || [], &(&1["name"] == "force"))
+      assert force, "schema.delete declares no force flag"
+      # "bool" is the type bp parses as a valueless switch (`--force`).
+      assert force["type"] == "bool"
     end
   end
 
@@ -752,6 +787,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       chat.unarchive chat.upload_attachment chat.get_attachment
     )
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the `chat` noun is declared and names the SSE streaming carve-out", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -766,6 +803,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "chat noun summary must name the SSE streaming carve-out; got: #{inspect(noun["summary"])}"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "exactly the twelve non-streaming chat verbs are registered (events stays absent)",
          %{conn: conn} do
       manifest = capabilities(conn)
@@ -783,6 +822,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       refute Enum.any?(manifest["commands"], &(&1["id"] == "chat.events"))
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "every chat command is admin-tier (existence-hidden from anon/lower callers)",
          %{conn: conn} do
       manifest = capabilities(conn)
@@ -799,6 +840,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "chat verbs map to the shipped /v1/chat routes (method + path)", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -828,6 +871,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "session-scoped chat verbs carry the `id` path arg + their body args", %{conn: conn} do
       manifest = capabilities(conn)
 
@@ -867,6 +912,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     # token's base tier stays "none" (chat lifts no rank), but a `+chat`
     # capability rides alongside so project/2's chat_visible?/2 side-branch
     # projects the `chat` noun + its ten verbs — and ONLY the chat noun.
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a workspace token carrying only `chat` sees the chat noun WITHOUT any rank lift (D36 orthogonal)",
          %{conn: conn} do
       ws = Barkpark.TenancyFixtures.create_workspace!()
@@ -1063,6 +1110,73 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     end
   end
 
+  describe "server.version + server.min_cli are honest values (task-ae75712d581fda87)" do
+    # The prod box answered server.version "0.1.0" (mix.exs, frozen) while its
+    # own /status.json said "0.2.26.929" — two public surfaces, two numbers.
+    # The envelope cannot gain a key (previous describe), so the fix is the
+    # VALUE: the same resolver /status.json reads.
+
+    defp server_envelope(conn) do
+      conn
+      |> put_req_header("authorization", "Bearer #{@token}")
+      |> get("/v1/capabilities")
+      |> json_response(200)
+      |> Map.fetch!("server")
+    end
+
+    test "server.version equals /status.json version on the same box", %{conn: conn} do
+      server = server_envelope(conn)
+      status = conn |> get("/status.json") |> json_response(200)
+
+      assert server["version"] == status["version"],
+             "capabilities server.version #{inspect(server["version"])} != /status.json version #{inspect(status["version"])}"
+
+      # Same source, stated by name: BuildInfo, "A.B.C.D" or "unknown" — never
+      # the mix.exs project version, which is what the old code published.
+      assert server["version"] == Barkpark.BuildInfo.version()
+      assert server["version"] =~ ~r/^(\d+\.\d+\.\d+\.\d+|unknown)$/
+    end
+
+    test "server.version is not the mix.exs project version", %{conn: conn} do
+      # mix.exs says "0.1.0" and is never bumped; a release is "A.B.C.D". The
+      # guard is shape-keyed (four segments), not value-keyed, so it holds even
+      # if mix.exs is ever bumped to a real three-segment release.
+      server = server_envelope(conn)
+      mix_vsn = :barkpark |> Application.spec(:vsn) |> List.to_string()
+
+      refute server["version"] == mix_vsn,
+             "server.version still reports the mix.exs project version #{inspect(mix_vsn)}"
+    end
+
+    test "min_cli defaults to 1.0.0 and reads the :capabilities_min_cli app-env VALUE", %{
+      conn: conn
+    } do
+      previous = Application.get_env(:barkpark, :capabilities_min_cli)
+
+      on_exit(fn ->
+        case previous do
+          nil -> Application.delete_env(:barkpark, :capabilities_min_cli)
+          value -> Application.put_env(:barkpark, :capabilities_min_cli, value)
+        end
+      end)
+
+      Application.delete_env(:barkpark, :capabilities_min_cli)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      # An operator raises the floor by VALUE: the one channel a strict-decoding
+      # released bp can hear (serverFloorStaleness on the doctor/whoami leg).
+      Application.put_env(:barkpark, :capabilities_min_cli, "1.21.0")
+      assert server_envelope(conn)["min_cli"] == "1.21.0"
+
+      # Not `A.B.C` -> never published; a client cannot compare "latest".
+      Application.put_env(:barkpark, :capabilities_min_cli, "latest")
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+
+      Application.put_env(:barkpark, :capabilities_min_cli, 121)
+      assert server_envelope(conn)["min_cli"] == "1.0.0"
+    end
+  end
+
   describe "command-level `views` descriptor (wave axi-brief-views, ?views=1 opt-in)" do
     # The commands that support the brief/full projection.
     @views_commands ~w(task.ready task.prime search.query)
@@ -1090,6 +1204,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
                "it must be withheld unless ?views=1 is sent"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "?views=1 declares the frozen `views` descriptor on exactly the three brief-capable commands",
          %{conn: conn} do
       manifest =
@@ -1117,6 +1233,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "views key appeared on unexpected commands: #{inspect(declaring)}"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "task.get NEVER declares `views` — it is the full-only escape hatch", %{conn: conn} do
       # Both with and without the opt-in, task.get must stay views-free.
       default = capabilities(conn)
@@ -1153,6 +1271,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert json_response(with_views, 200)["etag"] == views_etag
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "manifest.schema.json wires `views` as an ADDITIVE optional command-level $def", %{
       conn: conn
     } do
@@ -1235,6 +1355,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       assert get_resp_header(plain, "etag") == get_resp_header(twin, "etag")
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "?chat=1 carries claude caps and empty-array codex (the degrade signal)",
          %{conn: conn} do
       body = caps_conn(conn, "?chat=1") |> json_response(200)
@@ -1268,6 +1390,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              "an anonymous caller must not discover the chat surface via ?chat=1"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "chat and non-chat bodies get DISTINCT etags; the plain etag does NOT 304 ?chat=1",
          %{conn: conn} do
       plain = caps_conn(conn)
@@ -1376,6 +1500,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
              """
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the 16 commands that shipped mislabelled are present and now honest",
          %{conn: conn} do
       commands = capabilities(conn)["commands"]
@@ -1441,6 +1567,8 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     # `ReadOnlyHint: true` — a mutator advertised to every MCP client as a safe
     # read, and `bp`'s prod write confirmation skipped for it.
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "the plugin split is non-empty and every command in it reaches the wire with a BOOLEAN writes bit (the omission itself is caught by WritesFixturePlugin, not here)",
          %{conn: conn} do
       cmds = plugin_commands(conn)
@@ -1652,7 +1780,17 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
 
       # the attribute contract agents generate types from
       assert blocks["callout"] == ["id", "tone", "title"]
-      assert blocks["stat"] == ["label", "value", "denom"]
+      # `verdict` LAST, added on purpose by task-8bdef19b5acef8a8: BPML used to
+      # drop a stat's verdict on round-trip while the render leg painted
+      # `.bp-stat__v--loss`/`--peace` off it. This line is the tripwire that
+      # makes the grammar-digest move visible to a reviewer — a client
+      # regenerating types off the digest sees exactly this one new key.
+      # `source` after it, added on purpose by the Run-4 round-trip matrix: a
+      # stat's provenance ref (THE KILDE LAW) was dropped by an unedited
+      # pull → push. Same widening rule: only the new key moves.
+      assert blocks["stat"] == ["label", "value", "denom", "verdict", "source"]
+      assert blocks["lineage-node"] == ["title", "overline", "source", "tone", "unit", "value"]
+      assert blocks["expandable"] == ["id", "summary", "open"]
       assert blocks["paper"] == ["slug", "title"]
       # aliases ride the table — <strong> teaches nothing new
       assert inline["b"] == "strong"
@@ -1825,7 +1963,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "app_token.* (mobile app-token exchange) live routes" do
     setup do
       admin = "ucv-appt-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-appt-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-appt-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       reader = "ucv-appt-reader-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(reader, "ucv-appt-reader", "test", ["read"])
 
@@ -1947,7 +2094,16 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
   describe "fleet_support_token.* (Personal Dev Fleet) live routes" do
     setup do
       admin = "ucv-fst-admin-#{System.unique_integer([:positive])}"
-      {:ok, _} = Auth.create_token(admin, "ucv-fst-admin", "test", ["read", "write", "admin"])
+
+      {:ok, _} =
+        Auth.create_token(
+          admin,
+          "ucv-fst-admin",
+          "test",
+          ["read", "write", "admin"],
+          Barkpark.TenancyFixtures.default_workspace_id!()
+        )
+
       junior = "ucv-fst-junior-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(junior, "ucv-fst-junior", "test", ["read", "write"])
 
@@ -2128,6 +2284,70 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
         |> get("/v1/capabilities")
 
       assert resp.status == 304
+    end
+  end
+
+  # task-1bf751b276f81cfd: a subsystem switched off by Barkpark.Capability
+  # (BARKPARK_CAPABILITIES_OFF) 404s every route through RequireCapability, so
+  # the manifest must stop advertising its verbs — one test per capability.
+  describe "switched-off capabilities leave the manifest (Barkpark.Capability)" do
+    setup do
+      previous = Application.get_env(:barkpark, Barkpark.Capability)
+      on_exit(fn -> restore_app_env(Barkpark.Capability, previous) end)
+      :ok
+    end
+
+    defp prefixed(manifest, prefix),
+      do: Enum.filter(manifest["commands"], &String.starts_with?(&1["id"], prefix))
+
+    defp noun?(manifest, name), do: Enum.any?(manifest["nouns"], &(&1["name"] == name))
+
+    test "all on (the default): chat.* and cycle.* are advertised", %{conn: conn} do
+      Application.delete_env(:barkpark, Barkpark.Capability)
+      body = capabilities(conn)
+
+      assert length(prefixed(body, "chat.")) == 12
+      assert length(prefixed(body, "cycle.")) == 11
+      assert noun?(body, "chat") and noun?(body, "cycle")
+    end
+
+    test "studio_chat off: no chat.* commands, no chat noun, no ?chat=1 root key",
+         %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, studio_chat: false)
+      body = caps_conn(conn, "?chat=1") |> json_response(200)
+
+      assert prefixed(body, "chat.") == []
+      refute noun?(body, "chat")
+      refute Map.has_key?(body, "chat")
+      assert length(prefixed(body, "cycle.")) == 11
+    end
+
+    test "cycle_fleet off: no cycle.* commands and no cycle noun", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, cycle_fleet: false)
+      body = capabilities(conn)
+
+      assert prefixed(body, "cycle.") == []
+      refute noun?(body, "cycle")
+      assert length(prefixed(body, "chat.")) == 12
+    end
+
+    test "epic_fleet off: cycle.* goes too (CycleFleet requires EpicFleet)", %{conn: conn} do
+      Application.put_env(:barkpark, Barkpark.Capability, epic_fleet: false)
+      body = capabilities(conn)
+
+      assert prefixed(body, "cycle.") == []
+      refute noun?(body, "cycle")
+      assert length(prefixed(body, "chat.")) == 12
+    end
+
+    test "the etag moves with the switch, so a cached manifest is not replayed", %{conn: conn} do
+      Application.delete_env(:barkpark, Barkpark.Capability)
+      on_etag = caps_conn(conn) |> get_resp_header("etag")
+
+      Application.put_env(:barkpark, Barkpark.Capability, studio_chat: false)
+      off_etag = caps_conn(scoped_conn()) |> get_resp_header("etag")
+
+      refute on_etag == off_etag
     end
   end
 end

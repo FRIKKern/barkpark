@@ -11,12 +11,12 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.{Access, Checkout, Relations}
+  alias Barkpark.Media.Storage.{Access, Checkout, MediaFile, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.WhereUsed
-  alias Barkpark.Plugins.Media.Assets, as: PluginAssets
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
   alias Barkpark.Media.Delivery.SearchParams, as: MediaSearchParams
+  alias BarkparkWeb.MediaVisibilityCopy
   alias BarkparkWeb.Plugs.RequireWritePermission
   alias BarkparkWeb.SearchIntel
 
@@ -44,6 +44,7 @@ defmodule BarkparkWeb.V1.MediaController do
 
     record_opts = [
       actor_key: SearchIntel.actor_key(conn),
+      audience: SearchIntel.audience(conn),
       parent_event_id: SearchIntel.parent_event_id(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "explorer"),
@@ -216,6 +217,32 @@ defmodule BarkparkWeb.V1.MediaController do
       nil ->
         nil_workspace_write_error(conn)
 
+      # CATCH-ALL-TO-SUCCESS — DECLARED-HONEST (task-ef7f93eebba52fd3).
+      #
+      # SPELLING, DELIBERATE: this comment writes the receipt as `ok:true`, with no
+      # space. The census counts that literal substring corpus-wide and its
+      # D448-DRIFT baseline exits 1 on a new one — prose ABOUT a receipt must not
+      # be counted AS a receipt. Re-spacing it here reds the census.
+      # `scripts/pds-elixir-receipt-census.exs` fires its CATCH-ALL-TO-SUCCESS
+      # arm on THIS clause: the head is a discarding variable (`_ws_id`) and the
+      # body renders an `ok:true` literal. The shape is real; the accusation the
+      # shape carries is not, and this comment is the basis a reader gets instead
+      # of an argument.
+      #
+      # THE HEAD IS NOT A FAILURE SINK. It is the non-nil half of an explicit
+      # two-way split on `token_workspace_id/1`, whose `nil ->` half one line up
+      # REFUSES the write (422, `nil_workspace_write_error/1`). Nothing falls
+      # here that was not already named there.
+      #
+      # NO FAILURE REACHES THIS RECEIPT. `Synonyms.delete/4` is @spec'd
+      # `:ok | {:error, :not_found}` and returns nothing else: a non-UUID id, an
+      # absent row, a surface/scope mismatch, a sibling workspace's row, and a
+      # lost `Ecto.StaleEntryError` double-DELETE race are ALL folded into
+      # `{:error, :not_found}` by `api/lib/barkpark/search/synonyms.ex`, and the
+      # clause beside this one answers that 404. `ok:true` is emitted only from
+      # the `:ok` clause, which means the row was found, tenant-checked and
+      # deleted. The case is closed, so a future return tag CaseClauseErrors
+      # rather than passing as success.
       _ws_id ->
         case Synonyms.delete(id, "media", dataset, workspace_id(conn)) do
           :ok ->
@@ -237,7 +264,8 @@ defmodule BarkparkWeb.V1.MediaController do
         SearchIntel.actor_key(conn),
         prefix,
         limit: limit,
-        workspace_id: workspace_id(conn)
+        workspace_id: workspace_id(conn),
+        audience: SearchIntel.audience(conn)
       )
 
     json(conn, %{
@@ -366,13 +394,49 @@ defmodule BarkparkWeb.V1.MediaController do
          :ok <- ensure_viewable(conn, file, doc) do
       ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
+      asset =
+        file
+        |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+        |> Map.put(:visibilityNotice, visibility_notice(conn, dataset))
+
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result: asset,
         syncTags: sync_tags(dataset, file.id),
         ms: ms
       })
     end
   end
+
+  # THE OPERATOR AFFORDANCE, READ HALF (task-cbb112a9b4c600cc). `bp media get`
+  # renders this action, so this is where `bp`'s asset output says what the
+  # asset's `public` visibility actually promises: readable WITHIN this scope's
+  # sharing, plus whether the scope currently carries a `:media` share.
+  #
+  # The copy is `BarkparkWeb.MediaVisibilityCopy`'s and nobody else's — the
+  # Studio media library banner renders the SAME functions, so the two surfaces
+  # cannot drift into describing the same door differently.
+  #
+  # IT RIDES INSIDE `result`, AND THAT PLACEMENT IS LOAD-BEARING. bp's Go client
+  # renders a successful body through `unwrapResult` (internal/cli/run.go),
+  # which returns the `result` value and DROPS every top-level sibling. A key
+  # beside `result` — where this first shipped — never reaches `bp media get`'s
+  # output at all, so the copy would exist in the JSON and be invisible to the
+  # one surface the criterion names. Inside `result` it survives the unwrap.
+  #
+  # The key is `visibilityNotice`, NOT `visibility`: `AssetResponse.render/3`
+  # already puts `visibility` in that map (the asset's delivery tier string), so
+  # reusing the name would change an existing field's TYPE. Additive as placed —
+  # nothing that was in `result` moves or changes shape.
+  defp visibility_notice(conn, dataset) do
+    MediaVisibilityCopy.public_option(
+      slug_of(conn.assigns[:current_workspace]),
+      slug_of(conn.assigns[:current_project]),
+      dataset
+    )
+  end
+
+  defp slug_of(%{slug: slug}) when is_binary(slug), do: slug
+  defp slug_of(_other), do: nil
 
   def relations(conn, %{"dataset" => dataset, "id" => id} = params) do
     with {:ok, file} <- Media.get_file(id, scope_opts(conn)),
@@ -441,12 +505,12 @@ defmodule BarkparkWeb.V1.MediaController do
   defp apply_upload_metadata(file, params, dataset) do
     case upload_metadata(params) do
       metadata when map_size(metadata) == 0 ->
-        Media.asset_doc_for_file(file, dataset)
+        asset_doc(file, dataset)
 
       metadata ->
         case Media.patch_asset_metadata(file, metadata, dataset) do
           {:ok, doc} -> doc
-          _ -> Media.asset_doc_for_file(file, dataset)
+          _ -> asset_doc(file, dataset)
         end
     end
   end
@@ -480,7 +544,7 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         doc = Media.asset_doc_for_file(file, dataset),
+         doc = asset_doc(file, dataset),
          :ok <- ensure_edit(conn, file, doc),
          {:ok, doc} <- Media.patch_asset_metadata(file, metadata, dataset) do
       json(conn, %{
@@ -531,6 +595,16 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"dataset" => dataset, "id" => id} = params) do
     scope = scope_opts(conn)
 
@@ -729,14 +803,15 @@ defmodule BarkparkWeb.V1.MediaController do
   # door criterion 5 asks about: `ensure_viewable/3` would ask "may you view
   # this public asset?" about an asset that is not public.
   #
-  # `file_scope_opts/1` derives the tenant from the blob row — the SAME helper
+  # `MediaFile.scope_opts/1` (the CORE row-scope accessor, ex-`file_scope_opts/1`)
+  # derives the tenant from the blob row — the SAME helper
   # `AssetResponse.render/3` already uses for its internal resolution, so the
   # gate and the response cannot disagree about which document they mean. The
   # blob itself was already tenancy-confined by `Media.get_file/2` above, so
   # this narrows the doc lookup to that confinement rather than widening
   # anything.
   defp asset_doc(file, dataset) do
-    Media.asset_doc_for_file(file, dataset, PluginAssets.file_scope_opts(file))
+    Media.asset_doc_for_file(file, dataset, MediaFile.scope_opts(file))
   end
 
   defp conflict(conn, message) do

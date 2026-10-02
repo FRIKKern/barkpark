@@ -7,7 +7,7 @@ All routes here are **[token]**; anonymous callers get `404`, never an empty `20
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id`: `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
+Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id` (a bare id or `{_ref: id}`): `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap (Σ `LEAST(src,cand)/100` + main_tag bonus) + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`. Anon 404.
 
@@ -17,4 +17,6 @@ Counts — `GET /v1/data/counts/:dataset` [token]: per-type **published** counts
 
 ## History [token]
 
-Under `/v1/data`: `GET history/:dataset/:type/:doc_id` → `{revisions:[{id,action,rev,timestamp}], count}`; `GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.
+`GET /v1/data/history/:dataset/:type/:doc_id` (`?limit=`, default 50, ≤200; `?offset=`, floor 0, uncapped — junk reads as 0) → `{revisions:[{id,action,rev,timestamp}], count, limit, offset, has_more}`. The order key is TOTAL (`{inserted_at, id}`), so a page boundary cannot skip or duplicate a row; `has_more` is one row fetched past the page, never a second COUNT. Retention is INDEFINITE — the policy and the enumeration behind it live in `Barkpark.Content.Revisions`' moduledoc, not restated here.
+
+`GET revision/:dataset/:id` → `{revision:{rev,…content}}`, where `:id` is EITHER the revision UUID or the document `_rev` hash (disjoint shapes; a null `rev` resolves by UUID only); `POST revision/:dataset/:id/restore` restores as a draft.

@@ -326,7 +326,8 @@ func runCloudSitePreflight(out *writer, g globals, args []string) int {
 
 	// Resolve the site dir: --dir wins, else cwd. It must exist before we promise
 	// to build in it.
-	dir := strings.TrimSpace(a.val("dir"))
+	dirFlag := strings.TrimSpace(a.val("dir"))
+	dir := dirFlag
 	if dir == "" {
 		cwd, werr := os.Getwd()
 		if werr != nil {
@@ -340,6 +341,22 @@ func runCloudSitePreflight(out *writer, g globals, args []string) int {
 	}
 	if fi, serr := os.Stat(dir); serr != nil || !fi.IsDir() {
 		return useError(out, "usage", fmt.Sprintf("--dir %q is not a directory", dir), exitUsage)
+	}
+
+	// THE PRECONDITION, STATED BEFORE ANY WORK. Preflight builds a LOCAL site
+	// tree; it reads nothing about a remote site. Called with no --dir from a
+	// directory that is not a site, it used to run the engine harnesses and then
+	// render a failed "local build" CHECK — which a first-run reader takes as
+	// "my site is broken" when the truth is "you are not standing in a site, and
+	// the starter lives on the box, not here". A missing precondition is a
+	// REFUSAL, never a check result. An explicit --dir is the caller asserting
+	// they meant that tree, so it keeps the check-list path.
+	if dirFlag == "" {
+		if _, serr := os.Stat(filepath.Join(dir, "package.json")); serr != nil {
+			return useError(out, "no_local_site", fmt.Sprintf(
+				"preflight checks a LOCAL build and nothing else — it never reads your remote site, its dataset, or its instance — but %s has no package.json, so there is no local build to check. Run it from your site's source tree, or pass --dir <path>. A site created with 'bp cloud site create' is provisioned ON THE BOX: there is no local tree until you make one.",
+				dir), exitUsage)
+		}
 	}
 
 	// Locate the engine scripts (env-override-then-walk-up). A miss here is fatal:
@@ -650,10 +667,19 @@ func renderPreflight(out *writer, dir, staticScript, nodeScript string, checks [
 
 // printCloudSitePreflightHelp writes `bp cloud site preflight` usage.
 func printCloudSitePreflightHelp(out *writer) {
-	const help = `bp cloud site preflight — catch a broken site deploy BEFORE it reaches the box.
+	const help = `bp cloud site preflight — build your site LOCALLY and check that build, before you ship it.
 
 USAGE
   bp cloud site preflight [--dir <path>] [--skip-build]
+
+WHAT IT DOES NOT CHECK
+  Nothing about the remote site. It does not read the site's content binding,
+  its dataset, its instance, or any deployment — it never contacts the API and
+  needs no login. The subject is the tree in --dir (or cwd) and the build it
+  produces. With no --dir and no package.json where you are standing, it
+  REFUSES rather than reporting a failed check: a site created with
+  'bp cloud site create' is provisioned ON THE BOX, so there is no local tree
+  until you make one.
 
 WHAT IT DOES
   Runs, all locally and offline, in two gates:

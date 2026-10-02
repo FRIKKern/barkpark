@@ -47,10 +47,15 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
   # these is required to be compliant. It exists so the scan cannot go green by
   # finding nothing — if a site is renamed away, fix this list deliberately.
   @known_sites [
+    "lib/barkpark/accounts.ex",
+    "lib/barkpark/accounts/user_notifier.ex",
+    "lib/barkpark/plugins/bulldocs/web/bulldocs_form_controller.ex",
+    "lib/barkpark/plugins/forms/web/submission_controller.ex",
+    "lib/barkpark/quiz/spawn_budget.ex",
     "lib/barkpark_web/channels/user_socket.ex",
     "lib/barkpark_web/controllers/app_token_controller.ex",
-    "lib/barkpark_web/controllers/bulldocs_form_controller.ex",
     "lib/barkpark_web/controllers/pulse_controller.ex",
+    "lib/barkpark_web/live/studio/account_live.ex",
     "lib/barkpark_web/plugs/auth_write_rate_limit.ex",
     "lib/barkpark_web/plugs/rate_limit.ex",
     "lib/barkpark_web/plugs/ticket_rate_limit.ex"
@@ -129,9 +134,15 @@ defmodule Barkpark.RateLimiterScopedKeyCoverageTest do
            "a file matched the text `RateLimiter.check(` but the AST walk found no " <>
              "call in it — the matcher has drifted: #{inspect(counts)}"
 
-    # pulse_controller carries two (write bucket + read bucket).
-    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 8,
-           "expected the 8 call sites the row names, found #{inspect(counts)}"
+    # pulse_controller carries two (write bucket + read bucket); quiz
+    # spawn_budget added the ninth; the Forms submission controller the tenth
+    # (one `check` call serving its per-IP and per-endpoint buckets); the
+    # Studio "Your data" page's per-user erase-password cap the eleventh; the
+    # per-account TOTP attempt budget in Accounts the twelfth
+    # (task-4d52cfb35cbb0b08); UserNotifier's per-recipient auth-mail budget
+    # the thirteenth (task-7943350f12d1d5e1).
+    assert Enum.sum(Enum.map(counts, &elem(&1, 1))) == 13,
+           "expected the 13 call sites the row names, found #{inspect(counts)}"
   end
 
   test "POSITIVE CONTROL: the scanner catches a call site that bypasses the helper" do

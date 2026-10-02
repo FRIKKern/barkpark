@@ -138,6 +138,30 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert resp["user"]["email"] == "pk@example.com"
   end
 
+  test "a passkey registered before GDPR erasure no longer signs in after it", %{token: token} do
+    cred = register!(token)
+
+    authed(token)
+    |> post("/v1/auth/erase", Jason.encode!(%{password: @password}))
+    |> json_response(200)
+
+    ch =
+      scoped_conn()
+      |> json_conn()
+      |> post("/v1/auth/webauthn/login/challenge", "{}")
+      |> json_response(200)
+
+    assertion = make_assertion(cred, ch["challenge"], 1)
+
+    assert scoped_conn()
+           |> json_conn()
+           |> post(
+             "/v1/auth/webauthn/login",
+             Jason.encode!(Map.put(assertion, :challenge_token, ch["challenge_token"]))
+           )
+           |> json_response(401)
+  end
+
   test "a forged/mismatched assertion is rejected", %{token: token} do
     _cred = register!(token)
     # A DIFFERENT authenticator (wrong key) for the same cred id-less challenge.
@@ -288,9 +312,9 @@ defmodule BarkparkWeb.WebauthnControllerTest do
   end
 
   # Binary_id scar: a non-UUID :id must fold into not_found, NOT raise
-  # Ecto.CastError → 500 inside the id: get_by cast. Any authed user could
+  # Ecto.Query.CastError → an opaque 400 inside the id: get_by cast. Any authed user could
   # trigger the 500 trivially by DELETEing a garbage id.
-  test "DELETE a non-UUID credential id → 404 not_found, never a CastError 500", %{
+  test "DELETE a non-UUID credential id → 404 not_found, never an Ecto.Query.CastError 400", %{
     token: token,
     user: user
   } do

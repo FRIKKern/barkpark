@@ -12,6 +12,8 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
   alias BarkparkCloud.Notifications.Delivery
   alias BarkparkCloud.Notifications.EmailSettings
   alias BarkparkCloud.Notifications.EventEmail
+  alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Registry
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Web.Router
 
@@ -148,6 +150,47 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
     assert conn.status == 422
     assert body(conn)["error"] == "invalid"
     assert is_map(body(conn)["details"])
+  end
+
+  # r3b sweep: the control plane dials the team relay itself, so an internal
+  # relay host turned the settings form into a probe of the plane's network.
+  test "PUT settings refuses an internal SMTP relay host (loopback, metadata, private, internal names)" do
+    {_user, team, token} = user_with_team()
+
+    for host <- [
+          "127.0.0.1",
+          "169.254.169.254",
+          "10.0.0.5",
+          "localhost",
+          "relay.internal",
+          "[::1]"
+        ] do
+      conn =
+        call(
+          :put,
+          "/v1/notifications/settings",
+          %{"transport" => "smtp", "smtp_host" => host, "smtp_port" => 25},
+          token
+        )
+
+      assert conn.status == 422, "smtp_host #{host} must be refused, got #{conn.status}"
+      assert body(conn)["error"] == "invalid"
+      assert Map.has_key?(body(conn)["details"], "smtp_host")
+    end
+
+    # Nothing was stored for any of them.
+    assert BarkparkCloud.Notifications.get_or_create_settings(team).smtp_host_encrypted == nil
+
+    # CONTROL: a public relay name still saves.
+    conn =
+      call(
+        :put,
+        "/v1/notifications/settings",
+        %{"transport" => "smtp", "smtp_host" => "smtp.example.com", "smtp_port" => 587},
+        token
+      )
+
+    assert conn.status == 200
   end
 
   test "POST test sends once then 429s on the immediate retry" do
@@ -613,31 +656,201 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
     end
   end
 
+  # dr-w20-bl — THE TEAM READS ITS OWN FLEET-DIGEST RECEIPT.
+  #
+  # The task that filed this said the receipts were "unreadable by the team they
+  # belong to", the only reader being the operator-gated
+  # GET /v1/operator/deliveries. That premise was already half-stale when it was
+  # written: #9686 dropped this route from `require_team_admin` to `require_user`
+  # with a self-scope, and #11015 (cch-w56-s3) RETRACTED in the router comment
+  # the claim that digest rows are "structurally invisible to the team-scoped
+  # /v1/notifications/deliveries". What was still missing is the thing a
+  # retraction in a comment cannot supply: a test that DRIVES the writer and
+  # reads the row back over the TEAM door. A prose retraction is not a reader.
+  #
+  # These tests therefore drive `Notifications.deliver_fleet_digest/1` — real
+  # team, real membership rows, real Mailer, real `record_delivery/5` insert —
+  # and then dispatch the real route, exactly as `router_operator_test.exs` §4
+  # does for the operator door. A hand-inserted `%Delivery{}` cannot stand in:
+  # the shape a fixture is free to invent is precisely the shape the writer can
+  # never produce, and that is how the operator tests stayed 8/8 green under a
+  # reader that returned nothing on prod.
+  #
+  # THE NON-MEMBER ARM IS A 200 WITH THE ROW ABSENT, NOT A 404 — and the filing
+  # asked for "404/403". Both are honest here and neither is a choice this route
+  # gets to make: it takes NO team id in the request, so there is no id to say
+  # "not found" about. `Auth.resolve_team/2` honours `x-barkpark-team` only after
+  # `get_membership/2` succeeds and otherwise falls back to the caller's own
+  # primary team, so a foreign team's owner is answered from THEIR log (200, no
+  # receipt) and a user with no membership anywhere resolves `current_team = nil`
+  # and is refused 403 before any query runs. Both arms are pinned below.
+  describe "GET /v1/notifications/deliveries — the fleet-digest receipt" do
+    # One real digest run for `team`, returning the Delivery rows it wrote.
+    defp drive_digest(team) do
+      before = Repo.all(Delivery) |> MapSet.new(& &1.id)
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+      assert {:ok, %{sent: sent}} = Notifications.deliver_fleet_digest([bp])
+      assert sent > 0, "the digest must actually send for this drive to prove anything"
+      Repo.all(Delivery) |> Enum.reject(&MapSet.member?(before, &1.id))
+    end
+
+    test "an owner reads the receipt a REAL DailyDigestWorker send wrote for their team" do
+      {owner, team, token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      # The writer's own shape, restated so the reader is tested against reality.
+      assert receipt.event == "fleet_digest"
+      assert receipt.team_id == team.id
+      assert receipt.recipient == owner.email
+
+      rows = filtered(token, "event=fleet_digest")
+
+      assert receipt.id in Enum.map(rows, & &1["id"]),
+             "the team door must return the row a real deliver_fleet_digest/1 run just wrote"
+
+      row = Enum.find(rows, &(&1["id"] == receipt.id))
+      assert row["event"] == "fleet_digest"
+      assert row["status"] == "sent"
+      assert row["recipient"] == receipt.recipient
+    end
+
+    test "a plain MEMBER reads their own digest receipt (self-scoped, not 403)" do
+      {_owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      receipts = drive_digest(team)
+      mine = Enum.find(receipts, &(&1.recipient == member.email))
+
+      assert mine,
+             "the digest addresses every member, so the member must have a receipt of their own"
+
+      rows = filtered(member_token, "event=fleet_digest")
+      assert mine.id in Enum.map(rows, & &1["id"])
+
+      # And the self-scope is real: the owner's copy of the same send is not on
+      # this member's page.
+      others = Enum.reject(receipts, &(&1.id == mine.id))
+      assert others != [], "this arm needs a second recipient to be a fence test at all"
+
+      for other <- others do
+        refute other.id in Enum.map(rows, & &1["id"])
+      end
+    end
+
+    test "a NON-MEMBER never sees the team's digest receipt" do
+      {_owner, team, _token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      # A member of a DIFFERENT team: answered from their own log, 200, no row.
+      {_outsider, _other_team, outsider_token} = user_with_team()
+      conn = call(:get, "/v1/notifications/deliveries?event=fleet_digest", nil, outsider_token)
+      assert conn.status == 200
+      refute receipt.id in Enum.map(body(conn)["deliveries"], & &1["id"])
+
+      # And the header cannot be used to reach across: `resolve_team/2` only
+      # honours `x-barkpark-team` after a membership check.
+      spoofed =
+        conn(:get, "/v1/notifications/deliveries?event=fleet_digest")
+        |> put_req_header("authorization", "Bearer #{outsider_token}")
+        |> put_req_header("x-barkpark-team", team.slug)
+        |> Router.call(@opts)
+
+      assert spoofed.status == 200
+      refute receipt.id in Enum.map(body(spoofed)["deliveries"], & &1["id"])
+    end
+
+    test "a user with NO membership anywhere is refused 403, not handed a log" do
+      {_owner, team, _token} = user_with_team()
+      [receipt] = drive_digest(team)
+
+      {:ok, stranger} =
+        Accounts.register_user(%{
+          email: "stranger-#{System.unique_integer([:positive])}@example.com",
+          password: @password
+        })
+
+      {:ok, stranger_token} = Accounts.create_user_session_token(stranger)
+
+      conn = call(:get, "/v1/notifications/deliveries?event=fleet_digest", nil, stranger_token)
+      assert conn.status == 403
+      assert body(conn)["error"] == "forbidden"
+      refute conn.resp_body =~ receipt.id
+    end
+  end
+
   # wave 13 S2. `EventEmail.detail/1` is the SOLE reader of the event's free-text
   # detail in the email channel, and for provision_failed / deployment_failed /
   # agent_unreachable that string is the RAW failure reason. An email leaves our
   # boundary for good, so it is scrubbed on the way out.
+  #
+  # ## WHAT THESE ARMS DO AND DO NOT PROVE (cchi-w27-bl-scrub-test-green-by-construction)
+  #
+  # Every arm below hand-builds `%{detail: capture}` and calls `EventEmail.build/4`
+  # DIRECTLY. The assertions are live — neuter `FailureCopy.raw/1` to
+  # `def raw(value), do: value` and all three red — but a unit arm cannot say
+  # whether any producer in `cloud/lib` ever emits the payload it just invented.
+  # That question is answered next door, and the two answers differ per event:
+  #
+  #   * `:provision_failed`   — LIVE. `router.ex`'s
+  #     `POST /v1/internal/provision-jobs/:id/fail` dispatches
+  #     `%{detail: job.error}`, the off-box provisioner's own string.
+  #   * `:deployment_failed`  — LIVE. `Registry.maybe_dispatch_deployment_failed/2`
+  #     and the reaper's `DeploymentAlertWorker` both carry the deployment's
+  #     `failure_reason` through `deployment_failed_payload/2` as `:detail`.
+  #   * `:agent_unreachable`  — PROPHYLACTIC. Its two producers pass NO `:detail`:
+  #     `router.ex`'s health flip calls `dispatch_barkpark_event/2` with no
+  #     payload at all, and `health/staleness_worker.ex` passes `%{name: …}`.
+  #     `detail/1` therefore returns "" on every live dispatch of this event, so
+  #     the arm below exercises a state production cannot currently reach. It is
+  #     KEPT — a prophylactic assertion is the cheap half of the guard that makes
+  #     adding a detail-carrying producer safe — but its green is NOT coverage of
+  #     a live path, and nothing here should be read as saying it is.
+  #
+  # THE PROPHYLACTIC LABEL IS NOT SELF-MAINTAINING, AND THE FILING PROVES IT.
+  # This row was filed saying `:deployment_failed` had "ZERO dispatch sites
+  # anywhere in the repository". True when written; wave 28 S6 then gave it two,
+  # and the suite stayed 34/34 green while the premise rotted. So the label is
+  # backed by a TEST, not by this comment:
+  # `test/barkpark_cloud/notifications/alert_detail_reachability_test.exs` derives
+  # the dispatch census from `cloud/lib` and reds the moment `:agent_unreachable`
+  # gains a payload that can carry `:detail` — naming this arm as the thing to
+  # promote. The same file drives the two LIVE producers end to end.
   describe "EventEmail — the alert body is scrubbed before it leaves the boundary" do
     @email_secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
     @email_capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
 
-    for event <- [:provision_failed, :deployment_failed, :agent_unreachable] do
+    # The events a real producer can reach `detail/1` with. Producer-level arms
+    # for both live in `alert_detail_reachability_test.exs` §2; these stay as the
+    # unit floor.
+    for event <- [:provision_failed, :deployment_failed] do
       test "#{event}: the secret never reaches the inbox" do
-        email =
-          EventEmail.build(
-            %EmailSettings{},
-            unquote(event),
-            %{name: "My Barkpark", detail: @email_capture},
-            "owner@example.com"
-          )
-
-        refute email.text_body =~ @email_secret
-        assert email.text_body =~ "Authorization: Bearer [redacted]"
-
-        # The surrounding sentence is intact — a scrubbed alert is still an
-        # actionable alert.
-        assert email.text_body =~ "My Barkpark"
+        assert_capture_scrubbed(unquote(event))
       end
+    end
+
+    # PROPHYLACTIC — no producer passes `:detail` for this event, so this green
+    # is not live-path coverage. See the block comment above; the reachability
+    # census reds if that stops being true.
+    test "agent_unreachable (PROPHYLACTIC — no producer passes :detail): the secret never reaches the inbox" do
+      assert_capture_scrubbed(:agent_unreachable)
+    end
+
+    defp assert_capture_scrubbed(event) do
+      email =
+        EventEmail.build(
+          %EmailSettings{},
+          event,
+          %{name: "My Barkpark", detail: @email_capture},
+          "owner@example.com"
+        )
+
+      refute email.text_body =~ @email_secret
+      assert email.text_body =~ "Authorization: Bearer [redacted]"
+
+      # The surrounding sentence is intact — a scrubbed alert is still an
+      # actionable alert.
+      assert email.text_body =~ "My Barkpark"
     end
 
     test "a git SHA in the alert body survives — the commit is still readable" do

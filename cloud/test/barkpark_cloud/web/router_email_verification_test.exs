@@ -119,7 +119,14 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       user = user_fixture()
       target = "changed-#{System.unique_integer([:positive])}@example.com"
 
-      conn = call(:post, "/v1/account/email/change", %{new_email: target}, session(user))
+      conn =
+        call(
+          :post,
+          "/v1/account/email/change",
+          %{current_password: @password, new_email: target},
+          session(user)
+        )
+
       assert conn.status == 202
       assert json_body(conn) == %{"ok" => true}
       assert_email_sent(subject: "Confirm your new Barkpark Cloud email")
@@ -130,7 +137,12 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       attacker = user_fixture()
 
       conn =
-        call(:post, "/v1/account/email/change", %{new_email: victim.email}, session(attacker))
+        call(
+          :post,
+          "/v1/account/email/change",
+          %{current_password: @password, new_email: victim.email},
+          session(attacker)
+        )
 
       # Indistinguishable from success — a prober learns nothing.
       assert conn.status == 202
@@ -144,14 +156,119 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
     test "a malformed / missing new_email → 422 email_invalid" do
       user = user_fixture()
 
-      assert call(:post, "/v1/account/email/change", %{new_email: "not-an-email"}, session(user)).status ==
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: "not-an-email"},
+               session(user)
+             ).status ==
                422
 
-      assert call(:post, "/v1/account/email/change", %{}, session(user)).status == 422
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password},
+               session(user)
+             ).status ==
+               422
+    end
+
+    # task-9a30ab22cf0842f2 — a bare session no longer moves the address.
+    test "no or wrong current_password → 401 invalid_password, and nothing is staged or mailed" do
+      user = user_fixture()
+      target = "stolen-#{System.unique_integer([:positive])}@example.com"
+
+      for body <- [
+            %{new_email: target},
+            %{current_password: "wrong-password-1", new_email: target}
+          ] do
+        conn = call(:post, "/v1/account/email/change", body, session(user))
+        assert conn.status == 401
+        assert json_body(conn) == %{"error" => "invalid_password"}
+      end
+
+      assert is_nil(BarkparkCloud.Accounts.get_user(user.id).pending_email)
+      refute_email_sent()
+    end
+
+    # task-9a30ab22cf0842f2 — with 2FA on, the right password alone is not
+    # enough: a stolen session plus a phished password must not move the address.
+    test "2FA on: the right password without a valid OTP → 401 invalid_otp, nothing staged" do
+      user = user_fixture()
+      token = session(user)
+
+      %{"secret" => b32} =
+        json_body(call(:post, "/v1/account/two-factor/enroll", %{}, token))
+
+      {:ok, secret} = Base.decode32(b32, padding: false)
+
+      assert call(
+               :post,
+               "/v1/account/two-factor/confirm",
+               %{code: BarkparkCloud.TotpTestHelper.totp_code_stable!(secret)},
+               token
+             ).status == 200
+
+      target = "stolen-#{System.unique_integer([:positive])}@example.com"
+
+      for body <- [
+            %{current_password: @password, new_email: target},
+            %{current_password: @password, otp: "000000", new_email: target}
+          ] do
+        conn = call(:post, "/v1/account/email/change", body, token)
+        assert conn.status == 401
+        assert json_body(conn) == %{"error" => "invalid_otp"}
+      end
+
+      assert is_nil(BarkparkCloud.Accounts.get_user(user.id).pending_email)
     end
 
     test "unauthenticated → 401" do
       assert call(:post, "/v1/account/email/change", %{new_email: "x@example.com"}).status == 401
+    end
+  end
+
+  describe "the swap's side effects (task-9a30ab22cf0842f2)" do
+    test "confirm signs out OTHER sessions, keeps the acting one, and notifies the OLD address" do
+      user = user_fixture()
+      acting = session(user)
+      other = session(user)
+      old = user.email
+      target = "swapped-#{System.unique_integer([:positive])}@example.com"
+
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: target},
+               acting
+             ).status == 202
+
+      code = last_email_code()
+      assert call(:post, "/v1/account/email/confirm", %{code: code}, acting).status == 200
+
+      assert call(:get, "/v1/me", nil, acting).status == 200
+      assert call(:get, "/v1/me", nil, other).status == 401
+      assert_email_sent(to: old, subject: "Your Barkpark Cloud email was changed")
+    end
+
+    test "a reset link minted before the swap no longer works after it" do
+      user = user_fixture()
+      token = session(user)
+      {:ok, {_u, reset}} = BarkparkCloud.Accounts.request_password_reset(user.email)
+      target = "swapped2-#{System.unique_integer([:positive])}@example.com"
+
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: target},
+               token
+             ).status == 202
+
+      code = last_email_code()
+      assert call(:post, "/v1/account/email/confirm", %{code: code}, token).status == 200
+
+      assert {:error, :invalid_token} =
+               BarkparkCloud.Accounts.reset_password_by_token(reset, "brand new password 9")
     end
   end
 
@@ -161,7 +278,13 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       token = session(user)
       target = "confirmed-#{System.unique_integer([:positive])}@example.com"
 
-      assert call(:post, "/v1/account/email/change", %{new_email: target}, token).status == 202
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: target},
+               token
+             ).status == 202
+
       code = last_email_code()
 
       conn = call(:post, "/v1/account/email/confirm", %{code: code}, token)
@@ -174,7 +297,13 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       token = session(user)
       target = "pending-#{System.unique_integer([:positive])}@example.com"
 
-      assert call(:post, "/v1/account/email/change", %{new_email: target}, token).status == 202
+      assert call(
+               :post,
+               "/v1/account/email/change",
+               %{current_password: @password, new_email: target},
+               token
+             ).status == 202
+
       _code = last_email_code()
 
       conn = call(:post, "/v1/account/email/confirm", %{code: "999999"}, token)
@@ -189,6 +318,23 @@ defmodule BarkparkCloud.Web.RouterEmailVerificationTest do
       conn = call(:post, "/v1/account/email/confirm", %{code: "123456"}, session(user))
       assert conn.status == 422
       assert json_body(conn) == %{"error" => "no_pending_email"}
+    end
+  end
+
+  describe "GET /v1/me confirmed flag" do
+    # The console SPA does not read `confirmed` — the router comment now says
+    # so instead of claiming an unverified-account nudge that was never built.
+    # Correcting the comment must NOT take the field off the wire: an API
+    # consumer outside this repo may read it, so /v1/me keeps serving the key
+    # for an UNVERIFIED account too — present and false, never absent.
+    test "an unverified account still gets the key, served false (not absent)" do
+      user = user_fixture()
+      refute Repo.get!(User, user.id).confirmed_at
+
+      me = call(:get, "/v1/me", nil, session(user))
+      assert me.status == 200
+      assert Map.has_key?(json_body(me)["user"], "confirmed")
+      assert json_body(me)["user"]["confirmed"] == false
     end
   end
 end

@@ -133,7 +133,7 @@ func explainStaleEpoch(out *writer, ctx manifest.Context, docID, worker string) 
 	// (taskReadbackClient, tasks_close_pulse_cmd.go) and the SAME claim decode
 	// the pulse read-back uses — one definition, so the epoch this line names
 	// can never drift from the epoch the pulse receipt printed.
-	stored, _, err := taskboard.FetchPulse(taskReadbackClient(ctx), docID)
+	stored, rb, err := taskboard.FetchPulse(taskReadbackClient(ctx), docID)
 	if err != nil {
 		out.errf("  (could not read %s back to name the current epoch: %v)", docID, err)
 		return
@@ -146,6 +146,84 @@ func explainStaleEpoch(out *writer, ctx manifest.Context, docID, worker string) 
 		out.errf("  the claim on %s is held by %s, not %s — this refusal is about the HOLDER, not a stale epoch", docID, stored.ClaimWorker, w)
 		return
 	}
+	// THE SWEPT LEASE (task-32a37bd92afdb79f). `TtlSweeper.apply_reap/1` does
+	// NOT delete the claim map: it bumps the epoch, clears `worker` to null and
+	// stamps `expired_at` + `previous_worker`, and flips lifecycle back to
+	// `open`. So the read-back after a swept close answers epoch > 0 with an
+	// EMPTY holder — which fell straight through to the line below and told the
+	// caller "you still hold this claim" (false: the sweeper took it) and
+	// "retry with N" (a recovery that cannot work: the row has no holder, so
+	// close refuses again). The whole reason this row exists is that a builder
+	// reads `fenced_off` as "somebody took my row"; the honest answer is the
+	// opposite, and it is readable right here.
+	if strings.TrimSpace(stored.ClaimWorker) == "" {
+		if reap, ok := reapedClaim(rb.Claim); ok {
+			out.errf("  the lease on %s LAPSED — swept at %s; nobody else has taken it (the row is %s with no holder%s). One line to recover: `bp task claim %s %s`, then retry the close on the new epoch.",
+				docID, reap.expiredAt, lapsedLifecycle(rb.LifecycleStatus), reap.previousWorkerSuffix(), docID, recoveryWorker(worker))
+			return
+		}
+		out.errf("  the store holds epoch %d on %s with NO holder — the claim is not held by anyone else, but the read-back does not say whether it lapsed or was released. Re-claim with `bp task claim %s %s` before writing again.",
+			stored.ClaimEpoch, docID, docID, recoveryWorker(worker))
+		return
+	}
 	out.errf("  epoch advanced by pulse to %d — you still hold this claim; every `bp task pulse` advances the epoch, so the number you were given at claim time is stale. Retry with %d.",
 		stored.ClaimEpoch, stored.ClaimEpoch)
+}
+
+// reapedMarks are the two fields `TtlSweeper.apply_reap/1` stamps and nothing
+// else writes: they are what separates "the sweeper reaped this lease" from
+// "the read-back simply did not render a holder". Without one of them present
+// the CLI says the WEAKER, true thing rather than naming a sweep it cannot see.
+type reapedMarks struct {
+	expiredAt      string
+	previousWorker string
+}
+
+func (r reapedMarks) previousWorkerSuffix() string {
+	if r.previousWorker == "" {
+		return ""
+	}
+	return ", previous holder " + r.previousWorker
+}
+
+// reapedClaim decodes the reap marks off the raw `doc.claim`. ok is false when
+// neither mark is present — an absent mark is never read as a sweep.
+func reapedClaim(raw json.RawMessage) (reapedMarks, bool) {
+	if len(raw) == 0 {
+		return reapedMarks{}, false
+	}
+	var c struct {
+		ExpiredAt      string `json:"expired_at"`
+		PreviousWorker string `json:"previous_worker"`
+	}
+	if err := json.Unmarshal(raw, &c); err != nil {
+		return reapedMarks{}, false
+	}
+	m := reapedMarks{expiredAt: strings.TrimSpace(c.ExpiredAt), previousWorker: strings.TrimSpace(c.PreviousWorker)}
+	if m.expiredAt == "" && m.previousWorker == "" {
+		return reapedMarks{}, false
+	}
+	if m.expiredAt == "" {
+		m.expiredAt = "an unrecorded time"
+	}
+	return m, true
+}
+
+// lapsedLifecycle names the seal the store holds, so the "nobody else took it"
+// claim is anchored to a field rather than asserted. An empty read-back says so
+// instead of inventing "open".
+func lapsedLifecycle(status string) string {
+	if s := strings.TrimSpace(status); s != "" {
+		return s
+	}
+	return "back in the queue"
+}
+
+// recoveryWorker keeps the recovery line copy-pasteable: the worker id the
+// refused write was attributed to, or a placeholder when it was not given.
+func recoveryWorker(worker string) string {
+	if w := strings.TrimSpace(worker); w != "" {
+		return w
+	}
+	return "<your-worker-id>"
 }

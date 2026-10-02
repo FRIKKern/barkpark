@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.PresenceState
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
   alias BarkparkWeb.Studio.StudioLive.{PaperCanvas, Shared}
 
   # `current_path` is NOT set here — `BarkparkWeb.StudioChrome`'s
@@ -39,7 +40,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       # document must not license folding an empty value on the next one.
       |> assign(editor_dirty: false, doc_conflict: false, editor_touched_paths: MapSet.new())
 
-    {:noreply, socket}
+    # E3.5 (Gyldendal friction 67): a deep link whose head was a dead display
+    # group (`/studio/content-types/<type>/<id>` on a declared desk) opened its
+    # document through the alias in `PaneBuilder.build/3`; rewrite the address
+    # bar to the canonical path ONCE so bookmarks and row clicks agree. The
+    # canonical path never aliases again, so the patch converges.
+    case socket.assigns[:editor_canonical_path] do
+      canonical when is_list(canonical) and canonical != path ->
+        {:noreply,
+         push_patch(socket, to: Shared.studio_path(socket, canonical, dataset, desk: desk))}
+
+      _ ->
+        {:noreply, socket}
+    end
   end
 
   # A remote save of the open document arrived (another editor/session — the
@@ -49,9 +62,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # behaviour). With unsaved local edits (`editor_dirty`), do NOT overwrite the
   # buffer — that would silently drop the user's pre-debounce edits. Instead
   # raise the `doc_conflict` banner and let the user choose to reload.
-  def doc_updated(%{sender: sender, doc: doc_data}, socket) do
+  #
+  # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
+  # topic is keyed by id + type + workspace + dataset NAME, which a same-id
+  # document in another project of the workspace shares; replacing the form
+  # with it streamed an unshared project's content to a share viewer, and could
+  # autosave it into this project's document for a member.
+  def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
     cond do
       sender == self() or is_nil(socket.assigns[:editor_doc]) ->
+        {:noreply, socket}
+
+      other_project?(msg, socket) ->
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
@@ -67,6 +89,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            doc_conflict: false,
            save_status: "Updated by another user"
          )}
+    end
+  end
+
+  defp other_project?(msg, socket) do
+    case {Map.get(msg, :project_id), socket.assigns[:current_project]} do
+      {msg_proj, %{id: mounted}} when is_binary(msg_proj) and is_binary(mounted) ->
+        msg_proj != mounted
+
+      _ ->
+        false
     end
   end
 
@@ -240,15 +272,74 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   end
 
   def autosave_form(form, socket) do
-    {:noreply, Shared.do_autosave(socket, form)}
+    {:noreply, Shared.do_autosave(socket, form, :autosave_form)}
   end
 
   def paper_op(%{"op" => _} = op, socket) do
     {:noreply, Shared.paper_op(socket, op)}
   end
 
+  # pds-w42-bl-tree-codelist-readonly-guard-inert — THE GUARD, ARMED WHERE THE
+  # PRINCIPAL IS.
+  #
+  # `TreeCodelistField.handle_event("tree_node_select", …)` carries a
+  # `readonly` guard, but on the Studio path that guard is INERT by
+  # construction: `PaperFieldBlock` mounts the component without a `readonly`
+  # assign, so `CodelistField`'s `attr :readonly, default: false` hands it
+  # `false` for every principal. The one callsite that DOES pass `readonly`
+  # (codelist_field.ex) passes no `notify_id`, so `maybe_notify_select/2`
+  # short-circuits there and that path cannot write at all. Guard and danger
+  # were disjoint.
+  #
+  # The component cannot be the place to fix it: a LiveComponent has no
+  # principal. Nor can a `:handle_event` hook see this hop —
+  # `maybe_notify_select/2` does `send(self(), {:tree_codelist_change, …})`,
+  # a handle_INFO, exactly the blindness `Shared.Paper.write_denied?/1`
+  # documents for `{:paper_op, …}`. So the question is asked HERE, on the
+  # parent socket, which is the first place that holds the principal.
+  #
+  # ONE PREDICATE, NOT A FORK: `Shared.Paper.write_denied?/1` and
+  # `grant_target_denied?/3` are the SAME copies the chokepoint asks, in the
+  # same order, with the same refusals.
+  #
+  # WHAT THIS DOES NOT CLOSE, SAID PLAINLY. `TreeCodelistField` still assigns
+  # its own `:selected` in `handle_event("tree_node_select", …)` before the
+  # notify, and LiveView does not re-invoke a component whose assigns did not
+  # change — so a denied principal's PICKER still paints the clicked row until
+  # something else moves the block's value. Closing that needs the `readonly`
+  # prop to actually reach the component, i.e. a capability attr plumbed
+  # through `PaperEditor.paper_block_fields/1` (14 callsites) to the
+  # `codelist`+`variant: "tree"` render head in `PaperFieldBlock`. It is a UI
+  # AFFORDANCE, exactly like `SheetGrid`'s snapshot prop: a stale-TRUE one
+  # costs a denied write at this seam, never a persisted one.
+  #
+  # DEFENCE IN DEPTH, NOT THE ONLY WALL. The chokepoint already refuses the
+  # resulting `{:paper_op, …}`, so persisted state was safe. What was NOT safe
+  # is what a refusal at the chokepoint leaves behind: `send_update` runs
+  # `PaperFieldBlock.update(%{tree_value: code}, …)`, which moves the
+  # component's OWN `:value` and sets `pending_value?`, so a denied principal's
+  # editor renders the forged code back as if it had been accepted, and that
+  # pending value survives the parent's echo. Stopping the hop stops that too.
   def tree_codelist_change(%{id: id, value: code}, socket) do
-    send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
-    {:noreply, socket}
+    doc = socket.assigns[:editor_doc] || socket.assigns[:paper_doc]
+    type = doc_field(doc, :type) || socket.assigns[:editor_type]
+
+    cond do
+      Paper.write_denied?(socket) ->
+        {:noreply, Paper.refuse_write_denied(socket)}
+
+      Paper.grant_target_denied?(socket, type, doc_field(doc, :doc_id)) ->
+        {:noreply, Paper.refuse_outside_grant(socket)}
+
+      true ->
+        send_update(BarkparkWeb.Studio.PaperFieldBlock, id: id, tree_value: code)
+        {:noreply, socket}
+    end
   end
+
+  # Read a pane doc's field TOTALLY — the live path carries a
+  # `%Content.Document{}` while unit fixtures carry a bare map, and `doc.type`
+  # would raise a KeyError on the latter. Mirrors `Shared.Paper.doc_field/2`.
+  defp doc_field(doc, key) when is_map(doc), do: Map.get(doc, key)
+  defp doc_field(_doc, _key), do: nil
 end

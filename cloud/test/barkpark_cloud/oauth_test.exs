@@ -225,10 +225,14 @@ defmodule BarkparkCloud.OAuthTest do
       assert Accounts.get_user_by_external_identity("google", "g-9").id == gh_user.id
     end
 
-    test "converges onto an existing PASSWORD account (same email) — links, never forks or takes over" do
-      # A human first signs up with email + password and owns a team.
+    test "converges onto an existing CONFIRMED password account (same email) — links, never forks or takes over" do
+      # A human first signs up with email + password, CONFIRMS the address, and
+      # owns a team. (An UNCONFIRMED account is the pre-account-takeover case —
+      # see the "unconfirmed squatter" tests below.)
       {:ok, pw_user} =
         Accounts.register_user(%{email: "human@example.com", password: "correct horse battery"})
+
+      {:ok, pw_user} = pw_user |> User.confirm_changeset() |> Repo.update()
 
       {:ok, team} = Accounts.create_team(%{name: "Human Co", slug: "human-co"})
       {:ok, _} = Accounts.add_member(team, pw_user, "owner")
@@ -262,6 +266,67 @@ defmodule BarkparkCloud.OAuthTest do
       # Exactly one identity, linked to the existing account.
       assert Accounts.get_user_by_external_identity("github", "gh-conv").id == pw_user.id
       assert Repo.aggregate(ExternalIdentity, :count) == 1
+    end
+
+    # PRE-ACCOUNT TAKEOVER (task-b3eb09e83fbb7cbc): register_user logs in at once
+    # and never requires confirmation, so an attacker can pre-register a victim's
+    # address. The victim's IdP-verified sign-in must RECLAIM that account, never
+    # share it with the squatter.
+    test "an UNCONFIRMED squatter account is reclaimed: password, sessions, foreign identities and 2FA all die" do
+      {:ok, squatter} =
+        Accounts.register_user(%{email: "victim@example.com", password: "attacker-known-pw-1"})
+
+      assert is_nil(squatter.confirmed_at)
+      {:ok, session} = Accounts.create_user_session_token(squatter)
+      assert Accounts.verify_user_session_token(session)
+
+      # A foreign provider identity the squatter linked under THEIR own address.
+      {:ok, _} =
+        Accounts.link_external_identity(squatter, %{
+          provider: "github",
+          provider_uid: "attacker-gh",
+          email: "attacker@evil.example"
+        })
+
+      assert {:ok, user, :linked} =
+               Accounts.get_or_create_user_from_oauth(%{
+                 provider: "google",
+                 provider_uid: "victim-g",
+                 email: "victim@example.com"
+               })
+
+      assert user.id == squatter.id
+      refute Accounts.get_user_by_email_and_password("victim@example.com", "attacker-known-pw-1")
+      refute Accounts.verify_user_session_token(session)
+      assert is_nil(Accounts.get_user_by_external_identity("github", "attacker-gh"))
+      assert Accounts.get_user_by_external_identity("google", "victim-g").id == squatter.id
+
+      reloaded = Repo.get!(User, squatter.id)
+      refute is_nil(reloaded.confirmed_at)
+      assert is_nil(reloaded.two_factor_confirmed_at)
+    end
+
+    test "an OAuth-born account (confirmed_at NULL, identity email matches) is NOT reclaimed by a second provider" do
+      {:ok, gh_user, :created} =
+        Accounts.get_or_create_user_from_oauth(%{
+          provider: "github",
+          provider_uid: "gh-own",
+          email: "owner@example.com"
+        })
+
+      assert is_nil(gh_user.confirmed_at)
+      {:ok, session} = Accounts.create_user_session_token(gh_user)
+
+      assert {:ok, same, :linked} =
+               Accounts.get_or_create_user_from_oauth(%{
+                 provider: "google",
+                 provider_uid: "g-own",
+                 email: "owner@example.com"
+               })
+
+      assert same.id == gh_user.id
+      assert Accounts.verify_user_session_token(session)
+      assert Accounts.get_user_by_external_identity("github", "gh-own").id == gh_user.id
     end
 
     test "a second link to the SAME (provider, provider_uid) is a unique violation (conflict guard)" do

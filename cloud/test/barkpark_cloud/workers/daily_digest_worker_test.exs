@@ -217,12 +217,12 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # dr-w25-s6: the rungs are the control plane's MEASURED `commit_ancestry`,
     # not the box's release-tag self-grade, and `unmeasured` is always shown.
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 1 current / 2 behind / 0 unmeasured / 1 paused"
+             "Your Barkpark instances — 1 current / 2 behind / 0 unmeasured / 1 paused"
 
     body = DigestEmail.body(summary)
 
     # Header: totals + semver-aware latest (v1.10.0 beats v1.9.0 — a lexical max fails).
-    assert body =~ "Fleet: 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
+    assert body =~ "Your team owns 3 instances — 1 current, 2 behind, 0 unmeasured, 1 paused."
     assert body =~ "Latest available release: v1.10.0"
 
     # Per-instance honest lines: running -> latest, state, flags, last checked.
@@ -242,10 +242,10 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     assert summary.total == 0
 
     assert DigestEmail.subject(summary) ==
-             "Barkpark fleet digest — 0 current / 0 behind / 0 unmeasured / 0 paused"
+             "Your Barkpark instances — 0 current / 0 behind / 0 unmeasured / 0 paused"
 
     body = DigestEmail.body(summary)
-    assert body =~ "Fleet: 0 instances."
+    assert body =~ "Your team owns 0 instances."
     assert body =~ "No instances are registered yet"
     assert body =~ "Latest available release: unknown"
   end
@@ -280,7 +280,7 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     # ...and a real digest actually went to the admin (not a silent empty send).
     assert_email_sent(fn email ->
       assert Enum.any?(email.to, fn {_, a} -> a == admin.email end)
-      assert email.subject =~ "Barkpark fleet digest"
+      assert email.subject =~ "Your Barkpark instances"
       assert email.text_body =~ "- Prod"
     end)
   end
@@ -309,8 +309,9 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
   ##
   ##    This section used to be titled "a logged no-op", and it asserted exactly
   ##    the no-op: `{:ok, :no_admins}`, no email. Both of those are still true and
-  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` is unset, so
-  ##    this is the arm that runs EVERY day, and the pin below said nothing about
+  ##    both are still asserted — but on prod `PLATFORM_ADMIN_EMAILS` was unset
+  ##    (until gr-ops-platform-admin-emails, 2026-09-25), so this was the arm that
+  ##    ran EVERY day, and the pin below said nothing about
   ##    whether anyone could tell. Oban recorded 5 of 5 digest jobs `completed`
   ##    and `notification_deliveries` held zero `fleet_digest` rows across 37
   ##    unpruned days: a push channel succeeding at sending nothing.
@@ -335,16 +336,22 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     test = self()
     handler = "digest-probe-#{System.unique_integer([:positive])}"
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :notifications, :fleet_digest, :settled],
       fn _event, measurements, metadata, _ ->
-        send(test, {:fleet_digest, ref, measurements, metadata})
+        # OURS ONLY. The handler runs in whichever process emits, and other
+        # async modules settle fleet digests too (DailyDigestWorkerTest,
+        # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+        # main push run 36885879832. Keep events from this test's lineage.
+        if self() == test or test in List.wrap(Process.get(:"$callers")) do
+          send(test, {:fleet_digest, ref, measurements, metadata})
+        end
       end,
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
     ref
   end
 
@@ -560,6 +567,51 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     digest_rows = Enum.filter(rows, &(&1.event == "fleet_digest"))
     assert Enum.count(digest_rows, &(&1.status == "sent")) == 1
     assert Enum.count(digest_rows, &(&1.status == "failed")) == 1
+  end
+
+  ## 7. A CRASH is not a completed digest (task-db39f46df0b3ac21)
+  ##
+  ##    The worker's `rescue` used to return `:ok`, so a digest that raised
+  ##    mid-send wrote `state = "completed"` — the same active false claim §4b
+  ##    refuses for the empty audience, one arm over. A raising transport is the
+  ##    honest seam: `Mailer.deliver/1` is not rescued inside the digest send.
+
+  test "a digest that CRASHES mid-send lands the Oban row in `discarded`, never `completed`" do
+    admin = user("op-#{System.unique_integer([:positive])}@example.com")
+    t = team(admin)
+    _bp = instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{})
+
+    set_admins([])
+    swap_mailer_adapter(BarkparkCloud.Workers.DailyDigestWorkerTest.ExplodingAdapter)
+
+    {:ok, job} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    log =
+      capture_log(fn ->
+        Oban.drain_queue(queue: :maintenance, with_safety: false)
+      end)
+
+    row = Repo.get!(Oban.Job, job.id)
+
+    refute row.state == "completed",
+           "a crashed digest must not read as a healthy run: #{inspect(row.state)}"
+
+    assert row.state == "discarded"
+    assert row.attempt == 1
+
+    assert Enum.any?(row.errors, fn e ->
+             e |> Map.get("error", "") |> to_string() =~ "smtp relay exploded"
+           end),
+           "the discarded row must carry the crash reason: #{inspect(row.errors)}"
+
+    assert log =~ "DailyDigestWorker crashed: smtp relay exploded"
+  end
+
+  defmodule ExplodingAdapter do
+    use Swoosh.Adapter
+
+    @impl true
+    def deliver(%Swoosh.Email{}, _config), do: raise("smtp relay exploded")
   end
 
   # Swap the platform mailer adapter for one test and restore it after. The

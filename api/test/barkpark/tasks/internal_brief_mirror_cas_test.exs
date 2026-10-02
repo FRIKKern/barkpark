@@ -99,6 +99,8 @@ defmodule Barkpark.Tasks.InternalBriefMirrorCasTest do
   defp reload(%Document{id: id}), do: Repo.get!(Document, id)
 
   describe "fenced_content_write/4 and the mirrored blocks" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a description change through the CAS door re-derives the brief" do
       doc = create_task("the create-time text", [criterion("prove it")])
 
@@ -123,6 +125,8 @@ defmodule Barkpark.Tasks.InternalBriefMirrorCasTest do
                "dispatched worker reads first"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a criterion text change through the CAS door re-derives the criteria list" do
       doc = create_task("stable prose", [criterion("prove it"), criterion("and prove that")])
 

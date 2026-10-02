@@ -148,6 +148,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # document count). nil or 0 → no count chip. Callers pass the already-filtered
   # count (only :doc items) so :divider/:header/:plugin_link never inflate it.
   attr :count, :integer, default: nil
+  # The list behind `count` was truncated — the count is a floor ("100+").
+  attr :count_more, :boolean, default: false
   # Optional extra class appended to the (non-collapsed) column wrapper —
   # used by callers to mark structurally-significant panes (e.g.
   # `bp-doc-list` on the document-list pane so Beta focus mode can hide it
@@ -210,14 +212,24 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         aria-label={"Back to #{@title}"}
         aria-controls={@controls}
       >
-        <div class="pane-header">
+        <%!-- PHRASING CONTENT ONLY. This is a <button>, whose HTML5 content
+             model is phrasing content — a <div> child is invalid markup (every
+             browser renders it, no validator accepts it). Both children are
+             therefore <span>, and neither needs a CSS change to keep its box:
+             `.pane-header` declares `display: flex` and
+             `.pane-column-collapsed-label` declares `display: flex` in
+             root.html.heex, so the class rule overrides the UA `display:inline`
+             a bare <span> would take. The expanded branch below keeps its
+             <div class="pane-header"> — that one is not inside a button.
+             <svg> IS phrasing content (embedded content), so it stays. --%>
+        <span class="pane-header">
           <svg xmlns="http://www.w3.org/2000/svg" width="12" height="12" viewBox="0 0 24 24"
             fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"
             style="display:inline-block;vertical-align:middle;flex-shrink:0;" aria-hidden="true">
             <path d="m15 18-6-6 6-6"/>
           </svg>
-        </div>
-        <div class="pane-column-collapsed-label"><%= @title %></div>
+        </span>
+        <span class="pane-column-collapsed-label"><%= @title %></span>
       </button>
     <% else %>
       <div
@@ -231,7 +243,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <div class="pane-header">
           <span class="pane-header-titlewrap">
             <span class="pane-header-title"><%= @title %></span>
-            <span :if={@count && @count > 0} class="pane-header-count"><%= @count %></span>
+            <span :if={@count && @count > 0} class="pane-header-count"><%= @count %><%= if @count_more, do: "+" %></span>
           </span>
           <%= if @header_actions != [] do %>
             <div class="pane-header-actions"><%= render_slot(@header_actions) %></div>

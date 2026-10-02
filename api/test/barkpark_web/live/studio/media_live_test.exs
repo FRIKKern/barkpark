@@ -16,7 +16,13 @@ defmodule BarkparkWeb.Studio.MediaLiveTest do
     raw = "media-live-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
-      Barkpark.Auth.create_token(raw, "media-live", "production", ["read", "write", "admin"])
+      Barkpark.Auth.create_token(
+        raw,
+        "media-live",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     conn =
       build_conn()

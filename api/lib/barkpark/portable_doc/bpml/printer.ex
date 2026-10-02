@@ -72,7 +72,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
     do: heading_line(String.to_integer(l), b, d)
 
-  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d)
+  # `align` rides the row on <p> and <h1..3> (Barkdown plan #21): render/compose.ex reads it
+  # ("center" | "right"), so a pulled paper that lost it came back flush left on push.
+  defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d, ["id", "align"])
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
   defp block(%{"type" => "ingress"} = b, d), do: inline_tag("ingress", b, d)
 
@@ -92,15 +94,24 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
       inline(Map.get(b, "content", [])) <> "</callout>"
   end
 
+  # `ordered` rides the attribute row: the render side reads it
+  # (compose.ex `Map.get(b, "ordered") == true` -> PdList ordered), so dropping
+  # it turned every numbered list in a pulled paper back into bullets on push.
+  # `start` (an ordered list's first number) rides beside it.
   defp block(%{"type" => "list"} = b, d) do
-    items = Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}<li>#{inline(&1)}</li>")
-    wrap("ul", attr_str(b, ["id"]), items, d)
+    items = Enum.map(Map.get(b, "items", []), &list_item_tag(&1, d))
+    wrap("ul", attr_str(b, ["id", "ordered", "start", "task"]), items, d)
   end
 
+  # `lang` likewise: components.ex `code_html/2` and pdrender's code.go both
+  # read it, and the Studio's code editor renders `Map.get(@block, "lang", "")`.
+  # NOTE the sibling spelling `language` (pdrender prefers it) is NOT read here
+  # — no stored paper in the seal set uses it, and inventing a rekey is a
+  # separate, deliberate decision.
   defp block(%{"type" => "code"} = b, d),
     do:
       pad(d) <>
-        "<code#{attr_str(b, ["id"])}>" <>
+        "<code#{attr_str(b, ["id", "lang"])}>" <>
         "#{esc(plain_alias(b, ["value", "code", "content", "text"]) || "")}</code>"
 
   defp block(%{"type" => "diagram"} = b, d),
@@ -118,7 +129,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     items =
       Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}#{stat_item(&1)}")
 
-    wrap("stats", attr_str(b, ["id"]), items, d)
+    wrap("stats", attr_str(b, ["id", "sourceDefault"]), items, d)
   end
 
   # The notes grid — the browser twin ships at
@@ -194,17 +205,47 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
           []
 
         cells ->
-          ths = Enum.map_join(cells, "", &"<th>#{head_cell(&1)}</th>")
+          ths = Enum.map_join(cells, "", &"<th#{cell_align_attr(&1)}>#{head_cell(&1)}</th>")
           ["#{pad(d + 1)}<tr>#{ths}</tr>"]
       end
 
+    # Merged cells (Barkdown plan #24): `spans` rides as colspan/rowspan attributes on the
+    # origin's <td>; every grid cell still prints (a covered position is an empty <td>), so the
+    # round trip is byte-exact.
+    spans = Map.get(b, "spans", []) |> List.wrap()
+
     rows =
-      Enum.map(Map.get(b, "rows", []), fn cells ->
-        tds = Enum.map_join(cells, "", &"<td>#{inline(&1)}</td>")
+      Map.get(b, "rows", [])
+      |> Enum.with_index()
+      |> Enum.map(fn {cells, r} ->
+        tds =
+          cells
+          |> Enum.with_index()
+          |> Enum.map_join("", fn {cell, c} ->
+            "<td#{td_span_attrs(spans, r, c)}#{cell_align_attr(cell)}>#{cell_inline(cell)}</td>"
+          end)
+
         "#{pad(d + 1)}<tr>#{tds}</tr>"
       end)
 
-    wrap("table", attr_str(b, ["id"]), head ++ rows, d)
+    # Columns (type for the reader's numeric/spark columns, width for Barkdown plan #25) print as
+    # self-closing <col> lines ahead of the rows, so a pull/push no longer drops them.
+    cols =
+      case Map.get(b, "cols") do
+        list when is_list(list) and list != [] ->
+          Enum.map(list, fn col ->
+            attrs = if is_map(col), do: attr_str(col, ["type", "width"]), else: ""
+            "#{pad(d + 1)}<col#{attrs}/>"
+          end)
+
+        _ ->
+          []
+      end
+
+    table_attrs =
+      attr_str(b, ["id"]) <> if(Map.get(b, "headCol") == true, do: ~s( headcol="true"), else: "")
+
+    wrap("table", table_attrs, cols ++ head ++ rows, d)
   end
 
   defp block(%{"type" => "section"} = b, d) do
@@ -228,7 +269,16 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     body = alias_get(b, ["children", "blocks"]) || []
     children = Enum.map(body, &block(&1, d + 1))
     summary = plain_alias(b, ["summary", "title"])
-    attrs = attr_str(%{"id" => Map.get(b, "id"), "summary" => summary}, ["id", "summary"])
+    # `open` (initially expanded) rides only when stored as a boolean, so an
+    # expandable without the key prints byte-identically to before.
+    open = if is_boolean(Map.get(b, "open")), do: Map.get(b, "open")
+
+    attrs =
+      attr_str(
+        %{"id" => Map.get(b, "id"), "summary" => summary, "open" => open},
+        ["id", "summary", "open"]
+      )
+
     wrap("expandable", attrs, children, d)
   end
 
@@ -310,7 +360,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     end
 
     items = Enum.map(alias_get(b, ["items", "stats"]) || [], &"#{pad(d + 1)}#{stat_item(&1)}")
-    wrap("stat-grid", attr_str(b, ["id"]), items, d)
+    wrap("stat-grid", attr_str(b, ["id", "sourceDefault"]), items, d)
   end
 
   # `blockquote` — an attributed quotation. Inline body read the way the
@@ -353,11 +403,11 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "lineage"} = b, d) do
     nodes =
       Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
-        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source"])}>" <>
+        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source", "tone", "unit", "value"])}>" <>
           "#{esc(plain_alias(n, ["body"]) || "")}</lineage-node>"
       end)
 
-    wrap("lineage", attr_str(b, ["id"]), nodes, d)
+    wrap("lineage", attr_str(b, ["id", "sourceDefault"]), nodes, d)
   end
 
   # `card` — the composition-doctrine SPLIT of the `cards` grid: one standalone
@@ -431,6 +481,49 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     wrap("chart", attr_str(head, ["id", "kind", "caption", "min", "max", "xlabels"]), series, d)
   end
 
+  # ── the flagship taste tier (task-2957c0caa1ffd1b0) ────────────────────────
+  #
+  # `figure`, `asciicast` and `columns` are the three block types the two SEAL
+  # papers use that the kernel could not spell — heggemsnes-act needed none of
+  # them, eight-minute-erasure needs all three (4 figures, 4 asciicasts, 1
+  # columns block). They are worth ~5, ~5 and ~9 papers by frequency; the row
+  # justifies them by WHICH papers, not how many.
+
+  # `figure` — caption chrome around exactly ONE child block (compose.ex
+  # `figure_html/3` composes `child` through the normal path and wraps it). The
+  # child is a real block, so it recurses through `block/2`: a child the kernel
+  # cannot spell still refuses, loudly, rather than printing an empty frame.
+  # A figure with no map `child` has nothing to show and falls through to the
+  # catch-all — the honest typed refusal, not a `<figure/>` that would parse
+  # back without the key it was printed from.
+  defp block(%{"type" => "figure", "child" => child} = b, d) when is_map(child),
+    do: wrap("figure", attr_str(b, ["id", "caption"]), [block(child, d + 1)], d)
+
+  # `asciicast` — a terminal recording. A LEAF (the `action`/`hr` shape): the
+  # payload is a `.cast` file behind `src`, never inline content, so there is
+  # nothing for a body to hold. `poster` and `rows` are player options the
+  # renderer reads (compose.ex `asciicast_rows/1` takes an integer 6..40), so
+  # they ride the attribute row rather than being silently dropped; `rows`
+  # re-parses through `put_num_attr` so an integer stays an integer.
+  defp block(%{"type" => "asciicast"} = b, d),
+    do: pad(d) <> "<asciicast#{attr_str(b, ["id", "src", "caption", "poster", "rows"])}/>"
+
+  # `columns` — a side-by-side grid; the stored shape is a LIST OF LISTS of
+  # blocks (`compose_block(%{"type" => "columns"}, :article)` maps each column
+  # through `render_blocks/2`). BPML needs a positional child element for the
+  # column boundary, so `<column>` wraps each one — the `<card>`/`<slot>`
+  # precedent, minus the name. An empty column self-closes (`<column/>`) and
+  # parses back to `[]`, so the empty grid is symmetric too. A non-list
+  # `columns` value takes the catch-all refusal.
+  defp block(%{"type" => "columns", "columns" => cols} = b, d) when is_list(cols) do
+    columns =
+      Enum.map(cols, fn col ->
+        wrap("column", "", Enum.map(List.wrap(col), &block(&1, d + 2)), d + 1)
+      end)
+
+    wrap("columns", attr_str(b, ["id"]), columns, d)
+  end
+
   # THE HEADING-LEVEL DECISION, recorded. A NIL/ABSENT level (20 blocks / 4
   # papers: barkpark-cli-reliability-wave-2026-07-22,
   # bp-cloud-build-doneset-audit-2026-08-18,
@@ -455,6 +548,24 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # FunctionClauseError, which escaped the callers' rescue as a raw 500.
   defp block(%{"type" => type}, _d), do: raise(UnprintableError.new(:block, type))
   defp block(_other, _d), do: raise(UnprintableError.new(:block, nil))
+
+  # A checklist item is a map ({content|text, checked}); its `checked` rides as an
+  # attribute and its body prints like any inline array.
+  defp list_item_tag(item, d) do
+    pad(d + 1) <> "<li" <> li_attrs(item) <> ">" <> inline(list_item_inline(item)) <> "</li>"
+  end
+
+  defp li_attrs(%{"checked" => true}), do: ~s( checked="true")
+  defp li_attrs(_), do: ""
+
+  defp list_item_inline(%{} = item) do
+    case Map.get(item, "content") do
+      content when is_list(content) -> content
+      _ -> [%{"type" => "text", "value" => to_string(Map.get(item, "text") || "")}]
+    end
+  end
+
+  defp list_item_inline(item), do: item
 
   # `variant` must be a SCALAR string to print — `attr_str`'s `to_string/1`
   # raises Protocol.UndefinedError on a map. A non-binary variant is DROPPED
@@ -504,9 +615,17 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # `vocabulary/0` — clients generate types off its digest), which is a
   # deliberate decision someone should make on purpose, not a side effect of
   # widening the kernel. Until then the honest answer is the typed refusal.
+  #
+  # `verdict` is the one attribute that decision HAS been made for
+  # (task-8bdef19b5acef8a8): render/data_viz.ex `stat_html/1` paints the digits
+  # `.bp-stat__v--loss` / `--peace` off it and js/packages/react mirrors that, so
+  # dropping it here repainted an authored verdict back to `--paper-ink` with no
+  # error. It rides LAST in the row so the attribute order of every pre-existing
+  # verdict-free stat stays byte-identical; the grammar digest moves once, on
+  # purpose. `caption`/`note` keep their refusal.
   defp stat_item(%{} = i) do
     if Map.get(i, "caption") in [nil, ""] and Map.get(i, "note") in [nil, ""] do
-      "<stat#{attr_str(i, ["label", "value", "denom"])}>#{esc(Map.get(i, "body", ""))}</stat>"
+      "<stat#{attr_str(i, ["label", "value", "denom", "verdict", "source"])}>#{esc(Map.get(i, "body", ""))}</stat>"
     else
       raise(UnprintableError.new(:block, "stat"))
     end
@@ -702,6 +821,9 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp mark_tag("em"), do: "i"
   defp mark_tag("code"), do: "code"
   defp mark_tag("underline"), do: "u"
+  defp mark_tag("highlight"), do: "mark"
+  defp mark_tag("sub"), do: "sub"
+  defp mark_tag("sup"), do: "sup"
   defp mark_tag("strike"), do: "s"
   # The corpus's HTML-ish aliases for the same two marks; the parser returns
   # the canonical name, so a `bold` mark canonicalizes to `strong` on push the
@@ -797,15 +919,17 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp heading_line(l, b, d),
-    do: pad(d) <> "<h#{l}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
+    do:
+      pad(d) <>
+        "<h#{l}#{attr_str(b, ["id", "align"])}>#{plain_body(b, ["text", "content"])}</h#{l}>"
 
   defp text_tag(tag, b, d),
     do: pad(d) <> "<#{tag}#{attr_str(b, ["id"])}>#{plain_body(b, ["text", "content"])}</#{tag}>"
 
-  defp inline_tag(tag, b, d),
+  defp inline_tag(tag, b, d, attrs \\ ["id"]),
     do:
       pad(d) <>
-        "<#{tag}#{attr_str(b, ["id"])}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
+        "<#{tag}#{attr_str(b, attrs)}>#{inline(alias_get(b, ["content", "text"]) || [])}</#{tag}>"
 
   defp wrap(tag, attrs, [], d), do: pad(d) <> "<#{tag}#{attrs}/>"
 
@@ -832,5 +956,27 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp esc(other), do: esc(to_string(other))
 
+  # A body cell is an inline list or a content-map (plan #26 alignment rides the map).
   defp esc_attr(s), do: s |> esc() |> String.replace("\"", "&quot;")
+  defp cell_inline(%{"content" => content}) when is_list(content), do: inline(content)
+  defp cell_inline(cell), do: inline(cell)
+
+  defp cell_align_attr(%{"align" => a}) when a in ["center", "right"], do: ~s( align="#{a}")
+  defp cell_align_attr(_cell), do: ""
+
+  defp td_span_attrs(spans, r, c) do
+    case Enum.find(spans, fn s ->
+           is_map(s) and Map.get(s, "row") == r and Map.get(s, "col") == c
+         end) do
+      nil ->
+        ""
+
+      s ->
+        cs = Map.get(s, "colspan", 1)
+        rs = Map.get(s, "rowspan", 1)
+
+        if(is_integer(cs) and cs > 1, do: ~s( colspan="#{cs}"), else: "") <>
+          if is_integer(rs) and rs > 1, do: ~s( rowspan="#{rs}"), else: ""
+    end
+  end
 end

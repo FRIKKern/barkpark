@@ -26,6 +26,7 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       forever. It is proven born ADJUDICATED (term + reason on the row read
       back) and proven NOT to 500, end-to-end through the real signed edge.
   """
+  # sync: swaps node-global Application env (the GitHub plugin config key) — one value for the whole node
   use BarkparkWeb.ConnCase, async: false
 
   import Ecto.Query, only: [from: 2]
@@ -96,6 +97,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
   # ── BIRTH: the door may not accept what the verb would refuse ──────────────
 
   describe "birth fence — hard refusals" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a plain create with NO _id carrying a hollow park is REFUSED (bp task create shape)",
          %{scope: scope} do
       title = uniq("birth-hollow-park")
@@ -111,6 +114,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       assert titled_task_ids(title) == []
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "an OFF-VOCABULARY birth term is REFUSED, and so is a mis-CASED one", %{scope: scope} do
       for term <- ["wontfix", "OPEN", "Parked", " open "] do
         title = uniq("birth-term")
@@ -151,6 +156,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       assert [_ | _] = titled_task_ids(open)
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a createOrReplace on a BRAND-NEW id carrying a hollow park is REFUSED", %{scope: scope} do
       # The wave-24 inversion, from the other create-family door. Same fence:
       # createOrReplace with no existing row lands in create_document with
@@ -172,6 +179,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
   end
 
   describe "birth fence — the unadjudicated birth is ALLOWED and LOGGED" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a birth with no disposition passes, and says so in the log", %{scope: scope} do
       title = uniq("birth-bare")
 
@@ -187,6 +196,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
   end
 
   describe "birth fence — the replication carve-out rides opts, not content" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a hollow park born with source: :sync is :ok; the SAME content on :api is refused",
          %{scope: scope} do
       # The carve-out transfers verbatim from mutations.ex:
@@ -211,6 +222,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
   # ── ADOPTION: the side door a birth-scoped fence cannot see ────────────────
 
   describe "adoption-by-reparent" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "reparenting a task that carries NO adjudication into a closure is REFUSED",
          %{scope: scope} do
       epic = uniq("adopt-epic")
@@ -242,6 +255,8 @@ defmodule Barkpark.Content.TaskBirthFenceTest do
       assert content_of(adopted, scope)["parent_id"] == epic
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a PRESENT-BUT-MEANINGLESS disposition does not satisfy the adoption guard",
          %{scope: scope} do
       # Mere presence would be a vacuous check: the raw door has no normaliser,

@@ -52,6 +52,56 @@ require_root() {
 require_root
 
 # ── 1. apt: postgres + caddy + build toolchain ───────────────────────────────
+# install_caddy_pkg BEGIN
+# ONE Caddy installer, byte-identical in deploy.sh (and its go:embedded copy),
+# deploy/azure-base-install.sh, and — extracted from the embedded deploy.sh at
+# run time — internal/cli/setup/caddy.go. internal/cli/setup/caddy_test.go reds
+# if the copies drift (task-8fcdc94b07a9dc60).
+#
+# 1. The upstream apt repo FIRST, so a box keeps apt-managed Caddy updates.
+# 2. If that repo cannot be used, the SAME upstream package from the pinned
+#    GitHub release, verified against a pinned sha512 before it is installed.
+#    Measured 2026-10-01: cloudsmith signs caddy/stable's InRelease with subkey
+#    531A6B20FA058A70, expired 2024-03-30, so `apt-get update` exits 100
+#    (EXPKEYSIG; upstream caddyserver/caddy issue 8095). The repo's source list is
+#    then REMOVED, so it cannot fail every later `apt-get update` on the box.
+# BARKPARK_CADDY_SKIP_APT=1 skips step 1 (the harness uses it to keep step 2
+# tested after the upstream repo recovers). Bumping the fallback: version plus
+# both sha512 lines, from that release's caddy_<v>_checksums.txt.
+install_caddy_pkg() {
+  local v=2.11.4 arch sum deb
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq || true
+  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg curl ca-certificates >/dev/null || return 1
+  if [ "${BARKPARK_CADDY_SKIP_APT:-0}" != 1 ]; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+    if apt-get update -qq && apt-get install -y -qq caddy; then
+      echo ">> caddy: installed from the upstream apt repo"
+      return 0
+    fi
+    echo "!! caddy: the upstream apt repo is unusable; removing its source list and installing the pinned v$v release .deb" >&2
+    rm -f /etc/apt/sources.list.d/caddy-stable.list
+  fi
+  arch="$(dpkg --print-architecture)"
+  case "$arch" in
+    amd64) sum=1c6f5404f3622e46d401d81f4af59677d46b886229c6694d60fd936b87c72d3bb5d1fcf42b55c8d555769fa75acf434ab618fc7e0df2c79cf8512ee580d38d06 ;;
+    arm64) sum=c43c62b7b583b31c682b3c3e1a31cf03759fbab01dcb0fc7d7fc3a5ce1bef43403583e26133920634a730a9fe31dae1386af4d3f9f3fc19fcc2c29ebf19de235 ;;
+    *) echo "!! caddy: no pinned release checksum for architecture $arch" >&2; return 1 ;;
+  esac
+  deb="/tmp/caddy_${v}_linux_${arch}.deb"
+  curl -fsSL --retry 3 -o "$deb" "https://github.com/caddyserver/caddy/releases/download/v${v}/caddy_${v}_linux_${arch}.deb" || return 1
+  if ! echo "$sum  $deb" | sha512sum -c - >/dev/null; then
+    echo "!! caddy: sha512 mismatch for $deb — refusing to install it" >&2
+    rm -f "$deb"
+    return 1
+  fi
+  apt-get install -y -qq "$deb" || return 1
+  rm -f "$deb"
+  echo ">> caddy: installed v$v from the pinned, sha512-verified release .deb"
+}
+# install_caddy_pkg END
+
 install_apt() {
   log "apt: base packages (postgres, caddy prereqs, build toolchain)"
   export DEBIAN_FRONTEND=noninteractive
@@ -65,13 +115,8 @@ install_apt() {
 
   # Caddy from its official apt repo (idempotent — skip if the binary is present).
   if ! command -v caddy >/dev/null 2>&1; then
-    log "apt: installing Caddy from the official repo"
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' \
-      | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' \
-      | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-    apt-get update -qq
-    apt-get install -y -qq caddy
+    log "apt: installing Caddy (official apt repo, else the pinned verified release .deb)"
+    install_caddy_pkg || { log "FATAL: Caddy install failed"; exit 1; }
   else
     log "caddy already installed — skipping"
   fi

@@ -12,6 +12,15 @@ defmodule BarkparkCloud.DomainStatusOfflineGuard do
   @spec getaddrs(charlist(), :inet.address_family()) :: {:error, :offline_guard}
   def getaddrs(_host, _family), do: {:error, :offline_guard}
 
+  @doc """
+  The offline default for `DomainOwnership.platform_label_free?/3`'s
+  `:platform_label_dns` seam: every platform name is unheld (NXDOMAIN), so
+  a test never reaches real DNS and the pre-existing platform-attach tests keep
+  their meaning.
+  """
+  @spec nxdomain(charlist(), :inet.address_family()) :: {:error, :nxdomain}
+  def nxdomain(_host, _family), do: {:error, :nxdomain}
+
   @spec tls(String.t(), :inet.port_number()) :: {:error, :offline_guard}
   def tls(_host, _port), do: {:error, :offline_guard}
 

@@ -311,10 +311,45 @@ if [ "$rc" -ne 0 ]; then
 else
   no "reported CLEAN with 1 read — a neutered scanner would pass"
 fi
-if has "$out" "SCANNER is broken, not the repo clean"; then
-  ok "says the scanner is broken, not that the repo is clean"
+if has "$out" "THE SCANNER IS NEUTERED"; then
+  ok "names a neutered scanner as a cause"
 else
-  no "wrong diagnosis: $out"
+  no "the below-floor message no longer names a neutered scanner: $out"
+fi
+
+# THE DROP DIRECTION (dr-w17-bl-escape-floor-cannot-lose-in-either-direction).
+# The floor can lose in BOTH directions. A population under it is EITHER a blind
+# scanner on an unchanged tree OR a cross-tree read that was legitimately
+# DELETED — retire a producer-reading test and the population really does drop,
+# with nothing broken anywhere. The message used to assert exactly one of those
+# ("The SCANNER is broken, not the repo clean"), which is a MISDIAGNOSIS SHIPPED
+# AS AN ERROR STRING at the one moment an operator is reading it. These arms pin
+# that both causes are named and that neither is asserted over the other.
+if has "$out" "DELETED"; then
+  ok "…and names a DELETED cross-tree read as the other possible cause"
+else
+  no "the below-floor message blames only the scanner — a legitimate deletion reds here too: $out"
+fi
+if has "$out" "SCANNER is broken, not the repo clean"; then
+  no "the message still ASSERTS the scanner is at fault; a deletion produces this same red"
+else
+  ok "…and does not assert one cause over the other"
+fi
+# It must also tell the operator how to DISCRIMINATE, not merely list two
+# possibilities — a message that names both causes and no way to separate them
+# is the same dead end in longer words.
+if has "$out" "--list-escapes"; then
+  ok "…and points at --list-escapes as the way to tell the two causes apart"
+else
+  no "the message names two causes but no way to tell them apart: $out"
+fi
+# And it must not restate the floor as the population: the floor is a lower
+# bound, and the old line ("the floor IS the measured population") is what made
+# the drop direction unthinkable in the first place.
+if has "$out" "LOWER BOUND"; then
+  ok "…and says out loud that the floor is a lower bound, not the population"
+else
+  no "the message does not say the floor is a lower bound: $out"
 fi
 # and the floor is NOT overridable outside the harness
 out="$(CLOUD_PATH_ESCAPE_ROOT="$FX3" CLOUD_ESCAPE_MIN=1 "$SCRIPT" 2>&1)" && rc=0 || rc=$?
@@ -351,7 +386,12 @@ check_match "js/packages/create-barkpark-app/templates/package.json" cloud true
 check_match "js/packages/create-barkpark-app/templates" cloud true
 # …and the whole point of the shim: these must NOT run the Cloud suite.
 check_match "docs/ops/merge-gates.md" cloud false
-check_match "README.md" cloud false
+check_match "CHANGELOG.md" cloud false
+# dwb-9: README.md and the launch page ARE read by deploy_button_docs_test.exs,
+# so they dispatch the suite. Exact files only — a sibling doc still does not.
+check_match "README.md" cloud true
+check_match "docs/setup/DEPLOY-WITH-BARKPARK.md" cloud true
+check_match "docs/setup/QUICKSTART.md" cloud false
 # …and the whole point of the shim: these must NOT run the Cloud suite. api/,
 # web/ and js/ are three of `ReaderScan.roots/0`'s five trees and they stay
 # FALSE on purpose — declaring them was built and costed at 2233 newly-
@@ -371,6 +411,118 @@ check_match "tooling/grip/ledger/x.md" cloud false
 # just the handful the set used to name by hand.
 check_match "scripts/some-new-caller.sh" cloud true
 check_match ".github/workflows/elixir.yml" cloud true
+
+# ── WHAT THE LINES ABOVE ARE, AND WHAT THEY ARE NOT ────────────────────────
+# (task-babc3e4205843165 c3.) Every `check_match … cloud true` above is a
+# HAND-PINNED FIXTURE. It is a SECOND, WEAKER INSTRUMENT than the entry-decision
+# arm (`--audit-set`, case 14), and the two must not be described as if either
+# one settles the set:
+#
+#   * these lines cover ONLY the paths they name. A path nobody typed here is
+#     not covered by them, and they cannot tell you whether a declared entry
+#     buys anything — a `cloud true` assertion passes identically whether the
+#     entry that produced it is load-bearing or dead text.
+#   * `--audit-set` decides the WHOLE set by rule, but says nothing about
+#     whether a particular concrete path lands where a reader expects. A
+#     subsumed entry is provably harmless AND its `check_match` line is the only
+#     thing asserting that its subject still resolves to `true`.
+#
+# So: neither is a superset of the other, and the honest reading of a green here
+# is "these named paths behave", never "the set is right".
+#
+# THE COUNT IS RECORDED so the weakness is a measured size rather than a mood.
+# Derived from this file, not typed, so it follows edits to the lines above.
+hand_pinned="$(grep -c '^check_match .* cloud true$' "${BASH_SOURCE[0]}" || true)"
+hand_pinned_false="$(grep -c '^check_match .* cloud false$' "${BASH_SOURCE[0]}" || true)"
+declared_n="$("$SCRIPT" --print-set cloud | sed '/^$/d' | wc -l | tr -d ' ')"
+if [ "${hand_pinned:-0}" -gt 0 ]; then
+  ok "the hand-pinned --match fixture covers $hand_pinned named paths true / $hand_pinned_false false, against $declared_n declared entries — a SECOND, weaker instrument, not a verdict on the set"
+else
+  no "no hand-pinned --match true fixtures found; the accounting above is stale"
+fi
+
+# ── THE CENSUS TIER — the second, cheaper verdict ──────────────────────────
+# (dr-w26-followup-reader-corpus-dispatch.) The pairs matter more than either
+# column: `census true / cloud false` is the whole claim — the reader census
+# re-runs on an api-only diff WITHOUT the diff also buying compile+test.
+check_match "api/lib/barkpark/foo.ex" census true
+check_match "api/lib/barkpark/foo.ex" cloud false
+check_match "web/src/app/page.tsx" census true
+check_match "web/src/app/page.tsx" cloud false
+check_match "js/packages/sdk/src/client.ts" census true
+check_match "js/packages/sdk/src/client.ts" cloud false
+# internal/ is in BOTH sets (declared in CLOUD_PATHS and walked by ReaderScan);
+# the job-level `if:` is what stops it running the census twice.
+check_match "internal/agent/report.go" census true
+check_match "internal/agent/report.go" cloud true
+# a cloud/**-only diff selects the SUITE, not this tier — `test` already runs
+# the census file, so the census job must be able to skip legitimately.
+check_match "cloud/lib/barkpark_cloud/web/router.ex" census false
+check_match "cloud/lib/barkpark_cloud/web/router.ex" cloud true
+# …but cloud/priv/static IS a corpus root, so it selects both.
+check_match "cloud/priv/static/app.js" census true
+# neither set: the tier must not have become a synonym for "anything".
+check_match "docs/ops/merge-gates.md" census false
+check_match "README.md" census false
+check_match "scripts/some-new-caller.sh" census false
+check_match "tooling/grip/ledger/x.md" census false
+
+# THE DERIVATION IS REAL, PROVED BY MOVING THE THING IT DERIVES FROM.
+# Every assertion above passes identically if `census_globs` were a hardcoded
+# list — which is the exact defect the tier exists to avoid. So: run a COPY of
+# the script from a fixture root whose census file declares a SYNTHETIC corpus,
+# and require the verdicts to follow the fixture rather than the real tree.
+CEN="$TMPROOT/census-derivation"
+CENSRC="$("$SCRIPT" --census-source)"
+mkdir -p "$CEN/scripts" "$CEN/$(dirname "$CENSRC")"
+cp "$SCRIPT" "$CEN/scripts/"
+printf '  @roots ~w(zzz-synthetic-root vendor/second-root)\n' >"$CEN/$CENSRC"
+cset="$(bash "$CEN/scripts/cloud-path-escape-check.sh" --print-set census)"
+if [ "$cset" = "zzz-synthetic-root/**
+vendor/second-root/**" ]; then
+  ok "the census roots are DERIVED from \$CENSUS_TEST (the synthetic corpus took)"
+else
+  no "the census set did not follow the declaration file — it is transcribed, not derived. got: $cset"
+fi
+ccheck() {
+  local got
+  got="$(bash "$CEN/scripts/cloud-path-escape-check.sh" --match census <<<"$1")"
+  if [ "$got" = "$2" ]; then ok "synthetic corpus: '$1' -> $2"; else no "synthetic corpus: '$1' -> $got, wanted $2"; fi
+}
+ccheck "zzz-synthetic-root/x.ex" true
+ccheck "vendor/second-root/x.ex" true
+# …and the REAL roots stop matching, which is what proves the earlier `api ->
+# true` came out of the file and not out of this script.
+ccheck "api/lib/barkpark/foo.ex" false
+ccheck "web/src/app/page.tsx" false
+
+# NON-VACUITY: the tier must REFUSE, never answer `false`, when its declaration
+# cannot be read. An empty set answers false for every diff and the census job
+# silently never runs again — green, and about nothing.
+cen_refuses() {
+  local label="$1" out rc
+  out="$(bash "$CEN/scripts/cloud-path-escape-check.sh" --match census <<<'api/lib/x.ex' 2>&1)" && rc=0 || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    ok "$label -> exit $rc (refuses)"
+  else
+    no "$label -> exit 0 answering '$out' — an unreadable declaration must never resolve to a verdict"
+  fi
+}
+rm -f "$CEN/$CENSRC"
+cen_refuses "census source MISSING"
+printf 'defmodule Nope do\nend\n' >"$CEN/$CENSRC"
+cen_refuses "census source carries NO @roots declaration"
+printf '  @roots ~w()\n' >"$CEN/$CENSRC"
+cen_refuses "census source declares an EMPTY corpus"
+# …and the same copy answers again once the declaration is restored, so the
+# three refusals above measure the DECLARATION and not a broken copy.
+printf '  @roots ~w(zzz-synthetic-root)\n' >"$CEN/$CENSRC"
+if [ "$(bash "$CEN/scripts/cloud-path-escape-check.sh" --match census <<<'zzz-synthetic-root/x.ex')" = "true" ]; then
+  ok "…and the copy answers again once the declaration is restored (control)"
+else
+  no "the copy stayed broken — the three refusals above prove nothing about the declaration"
+fi
+
 # every declared glob selects the set it is declared in
 while IFS= read -r g; do
   [ -n "$g" ] || continue
@@ -455,6 +607,11 @@ if [ "$rc" -ne 0 ]; then ok "exit $rc on an unknown set"; else no "unknown set r
 # elixir.yml's set names must not silently work here and select an empty pattern
 out="$("$SCRIPT" --match compile <<<'cloud/x' 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then ok "exit $rc on elixir's set name"; else no "'compile' returned '$out' instead of failing"; fi
+# …while `census` IS a known set name — the negative cases above are only
+# meaningful next to a positive one, or a script that rejected EVERY name would
+# pass them all.
+out="$("$SCRIPT" --match census <<<'api/lib/x.ex' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && [ "$out" = "true" ]; then ok "'census' is a known set name -> $out"; else no "'census' answered '$out' (exit $rc)"; fi
 out="$("$SCRIPT" --bogus-flag 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then ok "exit $rc on an unknown flag"; else no "unknown flag silently accepted"; fi
 echo
@@ -563,9 +720,15 @@ emit("dispatcher_outputs", ",".join(sorted(disp.get("outputs", {}))))
 esc = jobs.get("path-escape", {})
 emit("escape_if", str(esc.get("if", "")))
 emit("escape_needs", ",".join(esc.get("needs", [])))
-for n in ("compile", "test"):
+for n in ("compile", "test", "census"):
     emit(f"if::{n}", str(jobs.get(n, {}).get("if", "")))
     emit(f"matrix::{n}", "strategy" in jobs.get(n, {}))
+# THE CENSUS JOB RUNS ONE FILE, AND WHICH ONE IS A FACT. A job that dispatches
+# on one census's corpus while running a different file is the same drift the
+# tier exists to close, wearing a new costume — so the exact `mix test`
+# invocation is emitted and compared against `--census-source` in the harness.
+cen_runs = [str(s.get("run", "")).strip() for s in jobs.get("census", {}).get("steps", []) if "run" in s]
+emit("census_mix_test", next((r for r in cen_runs if r.startswith("mix test")), ""))
 out.close()
 PY
   python3 "$EMIT" "$WF" "$FACTS"
@@ -632,16 +795,29 @@ PY
   # `coe_jobs` if that assertion is ever relaxed.
   assert_fact post_verdict_muted ""
   assert_fact needs_without_decide ""
-  assert_fact_min needs_count 4
-  assert_fact_min needs_results_count 4
-  assert_fact_min decide_consumes_count 4
+  assert_fact_min needs_count 5
+  assert_fact_min needs_results_count 5
+  assert_fact_min decide_consumes_count 5
   assert_fact dispatcher_if ""
   assert_fact dispatcher_matrix False
-  assert_fact dispatcher_outputs "cloud"
+  # BOTH verdicts, sorted. The census job's `if:` reads the second one, and an
+  # `if:` against an output the dispatcher never emits is an empty string —
+  # falsy, forever, with nothing red.
+  assert_fact dispatcher_outputs "census,cloud"
   assert_fact escape_if ""
   assert_fact escape_needs ""
   assert_fact "if::compile" "needs.changes.outputs.cloud == 'true'"
   assert_fact "if::test" "needs.changes.outputs.cloud == 'true'"
+  # ── THE ROW'S CLAIM, AS A MECHANICAL FACT ─────────────────────────────────
+  # dr-w26-followup-reader-corpus-dispatch: an api-/web-/js-only diff must
+  # dispatch the reader-corpus CENSUS and must NOT dispatch compile+test. Both
+  # halves are in this one string — the first clause runs it, the second refuses
+  # to run it twice — and the two `if::` lines above are what keeps the suite out
+  # of the deal.
+  assert_fact "if::census" "needs.changes.outputs.census == 'true' && needs.changes.outputs.cloud != 'true'"
+  assert_fact "matrix::census" True
+  # …and the file it runs is the file the tier derives its roots FROM.
+  assert_fact census_mix_test "mix test ${CENSRC#cloud/}"
   # …and the reason the aggregator had to be a NEW job rather than a rename of a
   # leaf: both gated jobs ARE matrixed, so their published names carry the matrix
   # tuple (or the uninterpolated template when they never start).
@@ -842,7 +1018,12 @@ gate() {
   local label="$1" want="$2"
   shift 2
   local rc
-  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  # R_CENSUS/O_CENSUS carry DEFAULTS rather than being added to every call site:
+  # the step body reads them under `set -u`, so an unset one would crash the
+  # aggregator and every case below would "pass" at exit 1 for the wrong reason.
+  # `env` applies its assignments in order, so anything in "$@" overrides these.
+  env -i PATH="$PATH" HOME="$HOME" R_CENSUS=skipped O_CENSUS=false "$@" \
+    bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
   else
@@ -950,6 +1131,55 @@ gate "an empty result string" 1 \
 gate "skip against a garbage gate value" 1 \
   R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_ESCAPE=success O_CLOUD=maybe
 
+# ── THE CENSUS TIER's arms (dr-w26-followup-reader-corpus-dispatch) ────────
+# Its gate is a CONJUNCTION, so it is the one job here whose allow-set cannot be
+# read straight off a dispatcher output — every legitimate skip has to be
+# derived, and a derivation that got it wrong would either red honest PRs or
+# green a job that never ran.
+
+# (l) the api-only PR this row is about: the census RAN, the suite did not.
+gate "api-only PR: census ran, compile+test legitimately skipped" 0 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=success \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=true
+
+# (m) a cloud/** PR: the census job skips because `test` already ran that file.
+gate "cloud PR: census skipped because the suite covers it" 0 \
+  R_CHANGES=success R_COMPILE=success R_TEST=success R_CENSUS=skipped \
+  R_ESCAPE=success O_CLOUD=true O_CENSUS=true
+
+# (n) a docs-only PR: nothing was selected, and the gate says NOTHING RAN.
+gate "docs-only PR: neither set selected" 0 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=false
+gate_says "NOTHING CLOUD RAN" "…and still says nothing ran, with the census in the tally"
+
+# (o) THE BYPASS, census edition: skipped behind a LIVE gate (census=true,
+#     cloud=false) means the job never started — an upstream died — and that
+#     must red exactly as it does for `test`.
+gate "census skipped behind a live gate" 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=true
+gate_names "census" "compile"
+
+# (p) a census FAILURE reds the required context — the point of the whole row.
+gate "census failed" 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=failure \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=true
+gate_names "census" "test"
+
+# (q) an uninterpretable census output must not license a skip. This is the
+#     `*)` fall-through arm of the derived gate: never a default of 'false'.
+gate "census skip against a garbage census output" 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=maybe
+gate_names "census" "compile"
+
+# (r) …and an EMPTY census output (the dispatcher stopped emitting it) is the
+#     silent version of the same thing.
+gate "census skip against an EMPTY census output" 1 \
+  R_CHANGES=success R_COMPILE=skipped R_TEST=skipped R_CENSUS=skipped \
+  R_ESCAPE=success O_CLOUD=false O_CENSUS=
+
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
 #     for the wrong reason — so assert it produced a real verdict line.
@@ -965,20 +1195,58 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point CLOUD_DISPATCH_WF at
+# another copy of cloud.yml — `git show origin/main:.github/workflows/cloud.yml
+# > /tmp/main.yml` — and the SAME fixtures below are driven through THAT file's
+# dispatcher. It is how the version-skew arm is quoted red on the pre-fix shape
+# instead of being asserted about.
+DISP_WF="${CLOUD_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim and
+# bash dies on it with `bad substitution`, which reaches the reader as nine
+# unexplained arm failures rather than as "the extraction is out of date".
+# Measured 2026-09-11: adding `${{ github.event.pull_request.number }}` to the
+# step turned case 10 into `258 passed, 9 failed` with that one bash error as
+# the only clue. So: substitute, then REFUSE any leftover by name.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/cloud/lib" "$DR/docs" "$DR/api/lib" "$DR/scripts" \
   "$DR/js/packages/create-barkpark-app/templates"
 cp "$SCRIPT" "$REAL_ROOT/scripts/cloud-path-escape-check.test.sh" "$DR/scripts/"
+# THE CENSUS TIER DERIVES ITS ROOTS FROM A FILE, so the fixture repo must carry
+# that file — the REAL one, copied, not a stub: the dispatcher step below calls
+# `--match census`, and a copy of the script whose parent has no census
+# declaration REFUSES (exit 2) rather than answering. That refusal is asserted
+# in case 6; here the file's presence is what makes the api-only arm below a
+# measurement of the DECLARED corpus.
+mkdir -p "$DR/$(dirname "$CENSRC")"
+cp "$REAL_ROOT/$CENSRC" "$DR/$CENSRC"
 : >"$DR/cloud/lib/a.ex"
 # NON-EMPTY on purpose: the rename cases below need git's rename detection to
 # actually fire, and an empty blob is not a rename source worth the name.
@@ -991,12 +1259,28 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
-# dispatch <label> <expected-rc> <expected-cloud> <event> <base>
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — and not the fallback. An arm
+# that wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
+# dispatch <label> <expected-rc> <expected-cloud> <event> <base> [expected-census]
+#
+# The census column is OPTIONAL only in the sense that the pre-existing arms
+# below predate it; every arm this row cares about passes it. An arm that omits
+# it asserts nothing about the second verdict.
 dispatch() {
-  local label="$1" want="$2" wc="$3" ev="$4" bs="$5"
-  local rc gotc
+  local label="$1" want="$2" wc="$3" ev="$4" bs="$5" wcen="${6-}"
+  local rc gotc gotcen
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -1015,6 +1299,21 @@ dispatch() {
   else
     no "  …emitted cloud=$gotc, wanted cloud=$wc"
   fi
+  # EVERY exit path must set BOTH outputs. An `if:` reading an output the
+  # dispatcher forgot on one branch sees an empty string — falsy forever, and
+  # nothing goes red — so the presence of the line is asserted even where the
+  # caller has no expectation about its value.
+  gotcen="$(sed -n 's/^census=//p' "$TMPROOT/gh_output")"
+  case "$gotcen" in
+    true | false) ;;
+    *) no "  …emitted census='$gotcen' — this exit path does not set the second output" ; return 0 ;;
+  esac
+  [ -n "$wcen" ] || return 0
+  if [ "$gotcen" = "$wcen" ]; then
+    ok "  …emits census=$gotcen"
+  else
+    no "  …emitted census=$gotcen, wanted census=$wcen"
+  fi
 }
 
 # a docs-only PR is the whole point of the shim: skip the suite, honestly, and
@@ -1023,19 +1322,23 @@ git -C "$DR" checkout -q -b docs-only
 : >"$DR/docs/another.md"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm docs >/dev/null 2>&1
-dispatch "docs-only PR" 0 false pull_request "$BASE_SHA"
+dispatch "docs-only PR" 0 false pull_request "$BASE_SHA" false
 
-# an api-only PR must ALSO skip — this is the one D89 named as the deadlock the
-# workflow-level filter caused, and the shim's reason for existing. It stays
-# `false` HERE while the reader census still walks api/: declaring `api/**` was
-# measured at 1438 newly-dispatching commits over 60 days and held, with the
-# remedy re-filed for the gates lane as a job-level condition on that one test
-# (re-filed for gates 2026-09-10). This arm is where that flip will be shown.
+# THE ROW, END TO END (dr-w26-followup-reader-corpus-dispatch). An api-only PR
+# must STILL skip the suite — that is D89's deadlock and the shim's reason for
+# existing, and declaring `api/**` in CLOUD_PATHS was measured at 1438 newly-
+# dispatching commits per 60 days and refused. But it must now select the CENSUS
+# tier, because api/ is one of the trees `ReaderScan` walks and a reader added
+# there is precisely what should re-run the census that scores it.
+#
+# Shown through cloud.yml's OWN dispatcher step over a real git diff, not
+# asserted about the set: cloud=false AND census=true, from one commit that
+# touches nothing but api/.
 git -C "$DR" checkout -q -b apionly "$BASE_SHA"
 printf 'x\n' >"$DR/api/lib/a.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm api >/dev/null 2>&1
-dispatch "api-only PR" 0 false pull_request "$BASE_SHA"
+dispatch "api-only PR (census dispatches, the suite does not)" 0 false pull_request "$BASE_SHA" true
 
 # A SCRIPTS-ONLY PR NOW DISPATCHES — the caller-corpus widening, shown END TO END
 # through cloud.yml's own dispatcher step rather than asserted about the set.
@@ -1047,7 +1350,7 @@ mkdir -p "$DR/scripts"
 printf 'x\n' >"$DR/scripts/some-new-caller.sh"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm scripts >/dev/null 2>&1
-dispatch "scripts-only PR (the caller-corpus widening)" 0 true pull_request "$BASE_SHA"
+dispatch "scripts-only PR (the caller-corpus widening)" 0 true pull_request "$BASE_SHA" false
 
 # …and a docs-only PR still skips, so the pair above measures the SET and not a
 # dispatcher that lost the ability to answer either way.
@@ -1070,10 +1373,13 @@ git -C "$DR" checkout -q -b cloudchange "$BASE_SHA"
 printf 'x\n' >"$DR/cloud/lib/a.ex"
 git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm cloud >/dev/null 2>&1
-dispatch "cloud/** PR" 0 true pull_request "$BASE_SHA"
+# …and a cloud/**-only PR selects the SUITE and NOT the census tier: the `test`
+# job already runs that file, and the census job's `cloud != 'true'` half is
+# what stops a second runner buying the same assertions.
+dispatch "cloud/** PR" 0 true pull_request "$BASE_SHA" false
 
 # push to main never skips, regardless of what changed
-dispatch "push event" 0 true push ""
+dispatch "push event" 0 true push "" true
 
 # ── THE FIVE FALSE-GREEN CLASSES the plain `--name-only` producer let through ─
 # Every probe above this line is ASCII and rename-free, which is exactly why the
@@ -1105,6 +1411,146 @@ git -C "$DR" checkout -q -b renamein "$BASE_SHA"
 git -C "$DR" mv docs/guide.md cloud/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: CLOUD_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+# The cloud and census sets are `dir/**` trees and exact literals only, so NO
+# in-set path can be skipped by a split: a newline after the prefix leaves a
+# fragment that still carries it, and a literal cannot hold a newline. The
+# false skip is UNREACHABLE here (it is reachable in elixir's two-ended
+# families). What a split CAN do here is misclassify the other way:
+#   (4b) a newline inside the DIRECTORY of an in-set path, cloud/li<LF>b/x.ex —
+#        cloud=true on both producers; the TRUE this row asks for.
+#   (4c) cloud<LF>foo/x.ex is not under cloud/ (its top directory is
+#        `cloud<LF>foo`), so the true answer is cloud=false. The tr producer
+#        answered cloud=true off the `cloud` fragment — RED on the pre-fix
+#        workflow, and the arm that fails if a matcher still splits records.
+#   (4d) THE --null SKEW: a pinned copy without MATCH-INPUT-NUL would IGNORE
+#        `--null` and grep the NUL stream as ONE line (a silent false). The
+#        dispatcher must dispatch true and say so.
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/cloud/li"$'\n'"b"
+printf 'x\n' >"$DR/cloud/li"$'\n'"b/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (cloud/li<LF>b/x.ex)' 0 true pull_request "$BASE_SHA" false
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/cloud"$'\n'"foo"
+printf 'x\n' >"$DR/cloud"$'\n'"foo/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) cloud<LF>foo/x.ex is NOT under cloud/ — one record, not two' 0 false pull_request "$BASE_SHA" false
+git -C "$DR" checkout -q -b prenul "$BASE_SHA"
+grep -v MATCH-INPUT-NUL "$REAL_ROOT/scripts/cloud-path-escape-check.sh" >"$DR/scripts/cloud-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm prenul >/dev/null 2>&1
+if grep -q MATCH-INPUT-NUL "$DR/scripts/cloud-path-escape-check.sh"; then
+  no "(4d) the fixture head still carries MATCH-INPUT-NUL — the skew arm measures nothing"
+else
+  ok "(4d) the fixture head's copy carries no MATCH-INPUT-NUL token"
+fi
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch '(4d) a copy that predates --null: dispatches true, never a silent false' 0 true pull_request "$BASE_SHA" true
+gate_says "predates '--match … --null'" "  …and names the --null skew"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# Measured 2026-09-11 on PR #17575 (job 103113143741): the required `Cloud gate`
+# was RED with the dispatcher exiting 2 on
+# `cloud-path-escape-check: unknown path set 'census' (want cloud)`.
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (the D34 note), so main's `--match census`
+# invocation ran against the branch's OLDER script. It is a CLASS: every future
+# flag this step learns reds every PR branched before it, until each is
+# update-branched.
+#
+# The fixture head carries a script with the census set name REMOVED. The pin
+# points at a ref that carries the CURRENT one. The verdict must come from the
+# pinned script.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    cloud | census) ;;$/    cloud) ;;/' \
+  "$REAL_ROOT/scripts/cloud-path-escape-check.sh" >"$DR/scripts/cloud-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from the
+# verdict. A sed that matched nothing leaves the CURRENT script on the head and
+# the arm below passes having measured no skew at all: a vacuous green wearing
+# the proof's clothes.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/cloud-path-escape-check.sh --match census <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'census'"; then
+  ok "the fixture head's script REFUSES --match census (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match census (rc=$skew_rc, '$skew_out') — the arms below cannot fail for the right reason"
+fi
+# …and the pinned ref must carry a script that DOES answer it, or the arm would
+# be measuring two broken copies agreeing.
+# A HERE-STRING, not `git show … | grep -q`: under this file's `set -o pipefail`
+# a matching `grep -q` exits on the first hit, `git show` takes SIGPIPE part-way
+# through a 1000-line script, and pipefail hands back 141 — so a pinned ref that
+# DOES know the census set would read as one that does not, and this
+# precondition arm would red for a reason that never happened.
+if (cd "$DR" && grep -q 'cloud | census' <<<"$(git show pinned-merge:scripts/cloud-path-escape-check.sh)"); then
+  ok "the pinned ref carries a script that KNOWS the census set"
+else
+  no "the pinned ref's script does not know the census set either — nothing here discriminates"
+fi
+
+# The changed file is scripts/cloud-path-escape-check.sh: cloud=true (scripts/**
+# is declared, the caller-corpus widening) and census=false (scripts/ is not a
+# census root). The `false` is the load-bearing half — a pin that silently
+# failed would answer census=true through match_set's warning path.
+dispatch "version skew: the head's script predates --match census" 0 true pull_request "$BASE_SHA" false
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+if grep -q "could not answer '--match census'" "$GATE_OUT"; then
+  no "  …the census verdict came from the FALLBACK, not from the pinned script"
+else
+  ok "  …and the census verdict came from the pinned script, not from the fallback"
+fi
+
+# THE NEGATIVE CONTROL for the pin itself: an unreadable pin ref (a conflicted
+# PR has no merge ref) must NOT brick the dispatcher. It warns by name, falls
+# back to the head's own copy — which here is the census-less one — and STILL
+# emits both outputs, with the verdict it could not compute set to true.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns, falls back, still answers" 0 true pull_request "$BASE_SHA" true
+gate_says "could NOT read scripts/cloud-path-escape-check.sh out of" "  …names the pin read that failed"
+gate_says "could not answer '--match census'" "  …and names the set the fallback could not compute"
+gate_says "Dispatching census=true" "  …and says it is running more, not skipping"
+
+# ── D34, RE-PROVEN, BOTH DIRECTIONS ────────────────────────────────────────
+# The script is pinned to the merge ref; the DIFF must still be the head
+# checkout's three-dot against the PR base. Advance the fixture's main with a
+# cloud/** commit, then send a one-file docs PR branched before it.
+git -C "$DR" checkout -q -b advmain "$BASE_SHA"
+printf 'advanced\n' >"$DR/cloud/lib/advance.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm "main advances with a cloud/** change" >/dev/null 2>&1
+
+git -C "$DR" checkout -q -b onefile "$BASE_SHA"
+printf 'x\n' >"$DR/docs/one-file.md"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm onefile >/dev/null 2>&1
+dispatch "D34: a one-file docs PR still dispatches as ONE FILE after main advanced" 0 false pull_request "$BASE_SHA" false
+gate_says "^docs/one-file.md$" "  …and the changed-file set is that one file"
+if grep -q "^cloud/lib/advance.ex$" "$GATE_OUT"; then
+  no "  …main's advance leaked into the changed-file set"
+else
+  ok "  …and main's advance did NOT leak into the changed-file set"
+fi
+
+# THE CONTROL that makes the arm above mean something: run the SAME PR from a
+# MERGE-REF checkout and main's advance DOES sweep in (cloud flips false->true).
+# That is the checkout D34 refuses, and why the fix pins the SCRIPT and not the
+# CHECKOUT.
+git -C "$DR" checkout -q -b mergeref onefile
+git -C "$DR" -c user.email=t@t -c user.name=t merge -q --no-edit advmain >/dev/null 2>&1
+dispatch "D34 control: the same PR from a MERGE-REF checkout sweeps main's advance in" 0 true pull_request "$BASE_SHA" false
+gate_says "^cloud/lib/advance.ex$" "  …and the control's changed-file set DOES carry main's advance"
 
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
@@ -1542,6 +1988,323 @@ if has "$real_out" "DEAD DECLARATION"; then
   no "a CLOUD_PATHS entry names a path that is not in this tree: $real_out"
 else
   ok "every CLOUD_PATHS entry names something that exists in this tree"
+fi
+echo
+
+
+# ── case 14: the ENTRY-DECISION arm and the CENSUS-TIER coverage arm ────────
+# (task-babc3e4205843165 / task-a00a72a027c5f698.)
+#
+# Case 3 proves an UNCOVERED READ reds. Nothing proved that a NARROWING of the
+# declared set reds — and measured on c42fde07c it mostly does not: planting the
+# removal of each of the 24 entries in turn, NINE removals red and FIFTEEN are
+# silent. This case pins the rule that decides the fifteen, and — the part that
+# matters — pins that the deciding arm can still FAIL IN BOTH DIRECTIONS.
+#
+# THE MIRROR. These arms read the DECLARATION's own repository ($DECL_ROOT, the
+# parent of the running script), so a mutated copy must sit in a scripts/ dir
+# whose parent looks like this repo. It is built as a directory of SYMLINKS to
+# the real top-level entries plus a REAL scripts/ holding the copy — so the
+# copy's DECL_ROOT resolves to live trees while the file itself is disposable.
+# The census stays the real one via CLOUD_PATH_ESCAPE_ROOT.
+echo "case 14: every CLOUD_PATHS entry is decided by rule, and the rule can fail"
+
+MIR="$TMPROOT/mirror"
+mkdir -p "$MIR/scripts"
+for _e in "$REAL_ROOT"/* "$REAL_ROOT"/.[!.]*; do
+  [ -e "$_e" ] || continue
+  case "$(basename -- "$_e")" in scripts) continue ;; esac
+  ln -sf "$_e" "$MIR/$(basename -- "$_e")"
+done
+for _e in "$REAL_ROOT"/scripts/*; do
+  [ -e "$_e" ] || continue
+  ln -sf "$_e" "$MIR/scripts/$(basename -- "$_e")"
+done
+MIRC="$MIR/scripts/cloud-path-escape-check.sh"
+rm -f "$MIRC"
+cp "$SCRIPT" "$MIRC"
+
+# `mutate <sed-free python replacement>`: rewrite the copy from the ORIGINAL
+# every time, so mutations never stack.
+mut() {
+  python3 - "$SCRIPT" "$MIRC" "$1" "$2" <<'PY'
+import sys
+src, dst, old, new = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
+t = open(src).read()
+if t.count(old) != 1:
+    sys.stderr.write("MUTATION ANCHOR NOT UNIQUE (%d): %r\n" % (t.count(old), old[:60]))
+    sys.exit(3)
+open(dst, "w").write(t.replace(old, new))
+PY
+}
+mirrun() { ( cd "$MIR" && CLOUD_PATH_ESCAPE_ROOT="$REAL_ROOT" bash "$MIRC" "$@" ) 2>&1; }
+
+# (a) the real set is decidable, and BOTH arms are non-empty. A tally with
+#     red=0 or silent=0 is a classifier that has stopped discriminating.
+audit_out="$("$SCRIPT" --audit-set 2>&1)" && audit_rc=0 || audit_rc=$?
+if [ "$audit_rc" -eq 0 ]; then
+  ok "--audit-set decides every entry in this tree (exit 0)"
+else
+  no "--audit-set failed on the real tree: $audit_out"
+fi
+tally="$(printf '%s\n' "$audit_out" | grep '^entries=' || true)"
+if [ -n "$tally" ]; then
+  ok "the run prints the scored tally: $tally"
+else
+  no "--audit-set printed no tally line"
+fi
+# ANCHORED on purpose: an unanchored `.*red=` matches the `red=` inside
+# `decla`+`red=` and silently reads the wrong field (measured: it read 3 for a
+# run whose red was 9).
+a_red="$(printf '%s\n' "$tally" | sed -n 's/^entries=[0-9][0-9]* red=\([0-9][0-9]*\) .*/\1/p')"
+a_sil="$(printf '%s\n' "$tally" | sed -n 's/^entries=[0-9][0-9]* red=[0-9][0-9]* silent=\([0-9][0-9]*\) .*/\1/p')"
+if [ "${a_red:-0}" -gt 0 ] && [ "${a_sil:-0}" -gt 0 ]; then
+  ok "both arms scored in one run: $a_red removals RED, $a_sil SILENT"
+else
+  no "one arm is empty (red=$a_red silent=$a_sil) — the classifier is not discriminating"
+fi
+if has "$audit_out" "UNDECIDABLE"; then
+  no "an entry is undecidable on the real tree: $audit_out"
+else
+  ok "no entry is UNDECIDABLE on the real tree"
+fi
+
+# (b) a NEW entry that buys nothing is the red. The mutation is a plausible
+#     one: somebody declares a tree "to be safe".
+mut "CLOUD_PATHS='cloud/**" "CLOUD_PATHS='docs/**
+cloud/**"
+out="$(mirrun --check)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) with an undecidable entry in the set"
+else
+  no "--check PASSED with an entry nothing can justify: $out"
+fi
+if has_fixed "$out" "UNDECIDABLE	docs/**"; then
+  ok "names the undecidable entry (docs/**)"
+else
+  no "did not name the undecidable entry: $out"
+fi
+
+# (c) THE STALE REASON. A declaration that no longer holds is a red on its own,
+#     not a silent downgrade to SUBSUMED.
+mut "CLOUD_PATHS_REASON='cloud/**	scanned-root	" "CLOUD_PATHS_REASON='cloud/**	census-neighbour	"
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has_fixed "$out" "STALE-REASON	cloud/**"; then
+  ok "a declared reason that stopped holding reds by name (exit $rc)"
+else
+  no "a stale declared reason did not red: rc=$rc $out"
+fi
+
+# (d) THE PLANT IS CONTROLLED. A removal that does not apply must be a HARD
+#     ERROR, never a clean sheet: an inert plant uncovers nothing, so every
+#     entry would score SUBSUMED and the run would print a green tally about a
+#     mutation that never ran.
+mut '    reduced="$(printf '"'"'%s\n'"'"' "$entries" | grep -Fxv -- "$e" || true)"' '    reduced="$entries"'
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+if [ "$rc" -eq 2 ]; then
+  ok "a non-applying plant is exit 2, not a pass"
+else
+  no "a non-applying plant returned $rc: $out"
+fi
+if has_fixed "$out" "PLANT DID NOT APPLY"; then
+  ok "the refusal says the plant did not apply"
+else
+  no "the refusal did not name the cause: $out"
+fi
+
+# (e) THE RED ARM CAN FAIL. Disarm the sole-cover predicate and the nine reds
+#     must become silence — the proof that the nine are a measurement and not
+#     nine constants.
+mut '    if [ -n "$lost" ]; then' '    lost=""
+    if [ -n "$lost" ]; then'
+out="$(mirrun --audit-set)" && rc=0 || rc=$?
+dis_red="$(printf '%s\n' "$out" | sed -n 's/^entries=.* red=\([0-9][0-9]*\).*/\1/p')"
+if [ "${dis_red:-x}" = "0" ]; then
+  ok "disarming the sole-cover predicate turns $a_red reds into silence (red=0)"
+else
+  no "the sole-cover predicate is not what produces the reds (disarmed red=$dis_red): $out"
+fi
+if [ "$rc" -ne 0 ]; then
+  ok "…and the disarmament itself reds (exit $rc) rather than going quietly green"
+else
+  no "a disarmed sole-cover arm exited 0"
+fi
+
+# (f) THE LAZY REMEDY, SIMULATED AND SHOWN BLIND. The obvious cheap fix for
+#     "15 of 24 removals are silent" is to PIN THE TWO NUMBERS. Run that remedy
+#     against a real narrowing — `.github/workflows/**` cut down to the single
+#     file cloud.yml, which stops every OTHER workflow edit from dispatching the
+#     Cloud suite — and it passes at exit 0 with the tally UNCHANGED, because
+#     the narrowed entry is silent in exactly the way the one it replaced was.
+#     The predicate reds on the same mutation. This is measured here rather than
+#     argued in a comment, because a ratchet argument that is not run is a
+#     prediction.
+narrow_old="CLOUD_PATHS='cloud/**
+cloud/lib/**
+.github/workflows/**"
+narrow_new="CLOUD_PATHS='cloud/**
+cloud/lib/**
+.github/workflows/cloud.yml"
+mut "$narrow_old" "$narrow_new"
+pred_out="$(mirrun --audit-set)" && pred_rc=0 || pred_rc=$?
+if [ "$pred_rc" -ne 0 ] && has_fixed "$pred_out" "UNDECIDABLE	.github/workflows/cloud.yml"; then
+  ok "the predicate reds on the narrowing (exit $pred_rc)"
+else
+  no "the predicate did not red on the narrowing: rc=$pred_rc $pred_out"
+fi
+# the same narrowing, plus the count-pinning remedy in place of the classifier
+# The two numbers are READ from the unmutated run above, never typed: a lazy
+# remedy hard-coding 9 and 15 would rot the moment CLOUD_PATHS changes and this
+# case would then be failing about its own constants.
+python3 - "$MIRC" "$a_red" "$a_sil" <<'PY'
+import sys
+p, red, sil = sys.argv[1], sys.argv[2], sys.argv[3]
+t = open(p).read()
+old = '''  [ "$undecidable" -eq 0 ] && [ "$stale" -eq 0 ] && return 0
+  return 1'''
+new = '''  [ "$sole" -eq %s ] && [ "$((base_n - sole))" -eq %s ] && return 0
+  return 1''' % (red, sil)
+if t.count(old) != 1:
+    sys.stderr.write("LAZY ANCHOR NOT UNIQUE\n"); sys.exit(3)
+open(p, "w").write(t.replace(old, new))
+PY
+lazy_out="$(mirrun --audit-set)" && lazy_rc=0 || lazy_rc=$?
+if [ "$lazy_rc" -eq 0 ]; then
+  ok "the count-pinning remedy passes the SAME narrowing at exit 0 — it is blind"
+else
+  no "the lazy remedy was not blind (rc=$lazy_rc), so this simulation proves nothing: $lazy_out"
+fi
+# THE TWO FIELDS THE LAZY REMEDY PINS, and only those. The rest of the tally
+# (declared=, undecidable=) moves because the PREDICATE saw the narrowing — that
+# movement is the thing the count-pinning remedy cannot read.
+lazy_tally="$(printf '%s\n' "$lazy_out" | grep '^entries=' || true)"
+l_red="$(printf '%s\n' "$lazy_tally" | sed -n 's/^entries=[0-9][0-9]* red=\([0-9][0-9]*\) .*/\1/p')"
+l_sil="$(printf '%s\n' "$lazy_tally" | sed -n 's/^entries=[0-9][0-9]* red=[0-9][0-9]* silent=\([0-9][0-9]*\) .*/\1/p')"
+if [ "$l_red" = "$a_red" ] && [ "$l_sil" = "$a_sil" ]; then
+  ok "…and the two numbers it pins never moved (red=$l_red silent=$l_sil), which is why it cannot see the narrowing"
+else
+  no "the pinned numbers moved (red=$l_red silent=$l_sil vs red=$a_red silent=$a_sil) — pick a narrowing that keeps them still"
+fi
+
+rm -f "$MIRC"
+cp "$SCRIPT" "$MIRC"
+
+# (g) THE CENSUS-TIER COVERAGE ARM, both directions plus the positive control.
+#     $CENSUS_TEST is the ONE file the census job dispatches on, so a repo-root
+#     read of a census root FROM IT is dispatched on and must be accepted. The
+#     same read from any other cloud/test file must still be refused — that file
+#     is not in the census job, so its suite would skip and green.
+CENFX="$TMPROOT/census-tier"
+CENSRC2="$("$SCRIPT" --census-source)"
+rm -rf "$CENFX"
+# The DERIVED fixture, not a hand-built one: it carries a population above the
+# floor, so the arms below read the coverage verdict instead of every run dying
+# on `only 1 repo-root read(s) found`. (Measured: a three-file fixture redded on
+# the floor and both census-tier arms scored against a run that never reached
+# the coverage loop.)
+make_fixture "$CENFX"
+mkdir -p "$CENFX/$(dirname "$CENSRC2")" "$CENFX/cloud/test/other" "$CENFX/api"
+: >"$CENFX/api/fixture-probe.txt"
+: >"$CENFX/$CENSRC2"
+cenrun() { ( CLOUD_PATH_ESCAPE_ROOT="$CENFX" "$SCRIPT" --check ) 2>&1; }
+
+#   positive control FIRST: with no api read anywhere, the fixture is clean and
+#   nothing reports an api escape. Without this the two arms below could both be
+#   scoring a run that never mentions api at all.
+out="$(cenrun)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "control: the fixture with NO api read is green (exit 0)"
+else
+  no "control: the census-tier fixture is not clean before the mutation: $out"
+fi
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  no "control FAILED: an api read was reported with no api literal in the fixture"
+else
+  ok "control: no api read is reported when the fixture holds none"
+fi
+
+#   ARM 1 — the read from $CENSUS_TEST is ACCEPTED, because the census job
+#   dispatches on that file's own corpus.
+printf '  @probe Path.join([__DIR__, "..", "..", "..", "api"])\n' >>"$CENFX/$CENSRC2"
+out="$(cenrun)" && rc=0 || rc=$?
+if has_fixed "$out" "census-tier: api"; then
+  ok "a census-root read from \$CENSUS_TEST is covered by the census tier"
+else
+  no "the census tier did not cover a read from its own source file: $out"
+fi
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  no "the census-tier arm did not actually take: $out"
+else
+  ok "…and it is no longer reported UNCOVERED (exit $rc)"
+fi
+
+#   ARM 2 — the SAME read from ANY OTHER cloud/test file is still REFUSED. That
+#   file is not what the census job dispatches on, so its suite would skip and
+#   green on an api-only PR. This is the arm that keeps the widening narrow.
+printf '  @x Path.join([__DIR__, "..", "..", "..", "..", "api"])\n' >"$CENFX/cloud/test/other/ordinary_test.exs"
+out="$(cenrun)" && rc=0 || rc=$?
+if has_fixed "$out" "UNCOVERED repo-root read: api"; then
+  ok "the same read from an ordinary cloud/test file is still UNCOVERED (exit $rc)"
+else
+  no "the census-tier arm leaked coverage to a file the census job does not dispatch: $out"
+fi
+
+# (h) THE DISPATCH DERIVATION. Every workflow that consumes this script's
+#     verdict must run on the PR that edits it — derived from the workflow
+#     files, not asserted in a comment.
+out="$("$SCRIPT" --audit-dispatch 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "--audit-dispatch: every consuming workflow dispatches on this file"
+else
+  no "a workflow consumes this verdict without dispatching on the file: $out"
+fi
+if has "$out" "consuming-workflows=[1-9]"; then
+  ok "…and it found consumers: $(printf '%s\n' "$out" | tail -1)"
+else
+  no "--audit-dispatch found no consuming workflow — the derivation is vacuous: $out"
+fi
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match cloud --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "cloud/li"$'\n'"b/x.ex" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match cloud --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: cloud/li<LF>b/x.ex is IN the set -> true"
+else
+  no "--null: cloud/li<LF>b/x.ex answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "cloud"$'\n'"foo/x.ex" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match cloud --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: cloud<LF>foo/x.ex is ONE record, not in the set -> false"
+else
+  no "--null: cloud<LF>foo/x.ex answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "cloud/li"$'\n'"b/x.ex" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match cloud --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "cloud/li"$'\n'"b/x.ex" | bash "$SCRIPT" --match cloud 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "control: the same bytes read as LINES answer true — newline mode is unchanged"
+else
+  no "control: newline mode answered '$nul_out', wanted true"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match cloud --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
 fi
 echo
 

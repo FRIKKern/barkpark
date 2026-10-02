@@ -23,6 +23,11 @@ Scenarios:
   fork-anon     no token, anonymous read works     -> status=ok + a LOUD anon notice
                                                       (the live shape: task
                                                       visibility is public today)
+  no-signal     ledger answers, but NOT ONE task    -> status=ok, findings=0 + the
+                carries a content.landed digest        NO SIGNAL ::warning, which
+                                                       must name the landed-mark
+                                                       REGRESSION rather than the
+                                                       retired never-built gap
 
 Usage:
   python3 reland_workflow_sim.py --scenario <name> [--repo-root .]
@@ -54,7 +59,17 @@ PAGE_ONE = 1000
 LANDED_FILE = "shipped.ex"
 
 
-def stub_corpus():
+def stub_corpus(scenario="healthy"):
+    # `no-signal` reproduces the state the NO SIGNAL banner exists to describe:
+    # a ledger that answers with real closed tasks, none of which carries a
+    # content.landed digest. Since 2026-09-13 that state means landed-mark
+    # REGRESSED (it stamps digests on every push to main), so the banner has to
+    # say so — and this scenario is what makes that wording falsifiable.
+    if scenario == "no-signal":
+        return [
+            {"doc_id": "closed-%04d" % i, "content": {"lifecycle_status": "done"}}
+            for i in range(3)
+        ]
     docs = [
         {
             "doc_id": "filler-%04d" % i,
@@ -176,13 +191,13 @@ def main():
     ap.add_argument(
         "--scenario",
         required=True,
-        choices=("healthy", "short", "error", "rotated", "fork-refused", "fork-anon"),
+        choices=("healthy", "short", "error", "rotated", "fork-refused", "fork-anon", "no-signal"),
     )
     ap.add_argument("--repo-root", default=".")
     args = ap.parse_args()
 
     root = os.path.abspath(args.repo_root)
-    docs = stub_corpus()
+    docs = stub_corpus(args.scenario)
 
     srv, base = stub_server(args.scenario, docs)
     sandbox = tempfile.mkdtemp(prefix="reland-sim-")
@@ -240,6 +255,19 @@ def main():
     print("SIM_WARN_DID_NOT_RUN=%d" % ("DID NOT RUN" in log))
     print("SIM_WARN_ANON=%d" % ("ANONYMOUSLY" in log))
     print("SIM_WARN_TRUNCATED=%d" % ("PARTIAL ledger" in log))
+    # The NO SIGNAL banner and — separately — whether it names the CURRENT cause.
+    # Two keys, not one: a banner that fires while still blaming the retired
+    # "no closer passes landed" gap would send the next reader to a task that
+    # shipped, so "it fired" and "it said the right thing" are asserted apart.
+    print("SIM_WARN_NO_SIGNAL=%d" % ("NO SIGNAL to read" in log))
+    print("SIM_NO_SIGNAL_NAMES_REGRESSION=%d" % (
+        "NO SIGNAL to read" in log
+        and "REGRESSION" in log
+        and "landed-mark" in log
+    ))
+    print("SIM_NO_SIGNAL_BLAMES_RETIRED_GAP=%d" % (
+        "NO SIGNAL to read" in log and "no closer does" in log
+    ))
     print("SIM_ERROR_ANNOTATION=%d" % ("::error" in log))
     print("SIM_SUMMARY_HAS_STATUS=%d" % (("| status | `%s` |" % outputs.get("status", "")) in summary))
     print("SIM_SUMMARY_HAS_PAGES=%d" % ("ledger pages walked | %s" % outputs.get("pages", "") in summary))

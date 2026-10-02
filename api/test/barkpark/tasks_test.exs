@@ -228,6 +228,8 @@ defmodule Barkpark.TasksTest do
       assert doc.status == "draft"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "rejects a task document missing content.kind", %{scope: scope} do
       assert {:error, {:invalid_task_content, errors}} =
                Content.create_document(
@@ -244,6 +246,8 @@ defmodule Barkpark.TasksTest do
       assert errors["kind"]
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "rejects a task document with an unknown lifecycle_status", %{scope: scope} do
       assert {:error, {:invalid_task_content, errors}} =
                Content.create_document(
@@ -261,6 +265,8 @@ defmodule Barkpark.TasksTest do
       assert msg =~ "must be one of"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "rejects a task document missing content.lifecycle_status", %{scope: scope} do
       assert {:error, {:invalid_task_content, errors}} =
                Content.create_document(

@@ -37,7 +37,6 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
   @dataset "production"
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]
 
@@ -75,6 +74,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
           "title" => slug,
           "content" => %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => lifecycle,
             "description" => @desc
           }
@@ -92,7 +92,12 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
   defp mk_twins!(scope, slug, lifecycle \\ "open") do
     content =
       Barkpark.LabelFixtures.with_registered_labels(
-        %{"kind" => "task", "lifecycle_status" => lifecycle, "description" => @desc},
+        %{
+          "kind" => "task",
+          "brief" => Barkpark.TaskBriefFixtures.brief(),
+          "lifecycle_status" => lifecycle,
+          "description" => @desc
+        },
         @dataset
       )
 
@@ -195,6 +200,7 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
         Barkpark.LabelFixtures.with_registered_labels(
           %{
             "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
             "lifecycle_status" => "open",
             "description" => @desc,
             "dataset_twin_intended" => true
@@ -253,7 +259,12 @@ defmodule Barkpark.Tasks.EdgesTwinCanonicalTest do
 
       foreign_content =
         Barkpark.LabelFixtures.with_registered_labels(
-          %{"kind" => "task", "lifecycle_status" => "open", "description" => @desc},
+          %{
+            "kind" => "task",
+            "brief" => Barkpark.TaskBriefFixtures.brief(),
+            "lifecycle_status" => "open",
+            "description" => @desc
+          },
           @dataset
         )
 

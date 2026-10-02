@@ -45,7 +45,12 @@ defmodule Barkpark.Content.MutationEchoTest do
       }
     }
 
-    {:ok, {_tx, [result]}} = Content.apply_mutations([mutation], @dataset, opts)
+    # CLASS (c) DECLARATION (task-e6523cc7154304f0): this suite tests the
+    # mutation ECHO's field visibility, not tenancy. The caller_context is here
+    # for the visibility grade; the write itself is instance-wide.
+    {:ok, {_tx, [result]}} =
+      Content.apply_mutations([mutation], @dataset, [instance_wide: true] ++ opts)
+
     result.document
   end
 

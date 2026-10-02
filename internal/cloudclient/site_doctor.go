@@ -18,7 +18,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"net/http"
 	"time"
 )
 
@@ -102,10 +101,13 @@ const SiteDoctorTimeout = 90 * time.Second
 func (c *Client) SiteDoctor(ctx context.Context, id string) (SiteDoctorReport, error) {
 	// Widen only the lazily-built fallback client, and only for this call — an
 	// injected HTTP client (tests) is honored untouched. Same shape as
-	// DomainStatus above it.
+	// DomainStatus above it. newHTTPClient, never a bare &http.Client{…}: the
+	// fallback must carry the package retry policy (retry.go) or a 429 from the
+	// control plane's throttle is a hard failure here and nowhere else — this
+	// call was the eighth bare client, born after #17479 enumerated seven.
 	dc := *c
 	if dc.HTTP == nil {
-		dc.HTTP = &http.Client{Timeout: SiteDoctorTimeout}
+		dc.HTTP = newHTTPClient(SiteDoctorTimeout)
 	}
 	status, raw, err := dc.do(ctx, "GET", "/v1/sites/"+esc(id)+"/doctor", true, nil)
 	if err != nil {

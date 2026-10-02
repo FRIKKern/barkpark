@@ -42,6 +42,50 @@ defmodule BarkparkCloud.DomainOwnership do
     if expected_ip in observed, do: :ok, else: {:error, observed}
   end
 
+  @doc """
+  Is the PLATFORM-zone `host` free for this box (task-6f85554a4e0cbc4c)?
+
+  We own the platform zone, and the attach job's DNS upsert creates OR REPLACES
+  the record. So before a platform host is persisted, the name must either not
+  resolve at all (NXDOMAIN on both families: nobody's record) or resolve only
+  to `box_ip` (a re-attach of this box's own record). Anything else is somebody
+  else's record, possibly the control plane's own. Answers `:ok` or
+  `{:error, observed}`.
+
+  FAIL-CLOSED: a resolver answer other than an address list or `:nxdomain` (a
+  timeout, SERVFAIL, a raise) is `{:error, [:unresolved]}`. Replacing a record
+  we could not read is the one outcome this check exists to prevent.
+
+  Its own seam (`opts[:dns]` or the `:platform_label_dns` application env),
+  separate from the external-FQDN moat's `:attach_domain_dns`. In test it
+  defaults to an offline NXDOMAIN answer, so no test touches real DNS.
+  """
+  @spec platform_label_free?(String.t(), String.t() | nil, keyword()) ::
+          :ok | {:error, [String.t() | :unresolved]}
+  def platform_label_free?(host, box_ip, opts \\ []) when is_binary(host) do
+    dns =
+      opts[:dns] || Application.get_env(:barkpark_cloud, :platform_label_dns, &default_getaddrs/2)
+
+    charlist = to_charlist(host)
+
+    answers =
+      for family <- [:inet, :inet6] do
+        case safe_call(fn -> dns.(charlist, family) end) do
+          {:ok, list} when is_list(list) -> {:ok, Enum.map(list, &ip_to_string/1)}
+          {:error, :nxdomain} -> {:ok, []}
+          _ -> :unresolved
+        end
+      end
+
+    if :unresolved in answers do
+      {:error, [:unresolved]}
+    else
+      observed = answers |> Enum.flat_map(fn {:ok, l} -> l end) |> Enum.uniq()
+
+      if Enum.all?(observed, &(&1 == box_ip)), do: :ok, else: {:error, observed}
+    end
+  end
+
   # Resolve a host over inet + inet6 (the DomainStatus.resolve_all idiom) and
   # return de-duplicated address STRINGS. A resolver error/raise on either
   # family is an empty contribution, never a crash.

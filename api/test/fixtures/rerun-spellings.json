@@ -3,14 +3,15 @@
   "loader_contract": "Both loaders MUST refuse an empty or unparseable read (zero cases) rather than pass vacuously. A lock that can go quiet is not a lock. Elixir: api/test/barkpark/tasks/rerun_spelling_mirror_test.exs. JS: tooling/pds/rerun-adjudicate.test.mjs section 3b.",
   "precedence": {
     "why": "A fixture that pins only the VALUE SET is blind to an arm ORDER swapped on one side: a command can breach two rules, and the screen reports the FIRST match, which is the one the author has to fix first. Wave 28 shipped the two screens with arms 2 and 4 transposed — `test -f x && git merge-base --is-ancestor a b` was :merge_base_ancestor to the writer and TEST-F to the reader. So the order is pinned too, and multi_breach cases below only pass while both orders hold.",
-    "elixir": ["repo_redirect", "merge_base_ancestor", "command_substitution", "filesystem_predicate", "pipe_masked"],
-    "js": ["GIT-DASH-C", "MERGE-BASE-IS-ANCESTOR", "COMMAND-SUBSTITUTION", "TEST-F"]
+    "elixir": ["repo_redirect", "merge_base_ancestor", "command_substitution", "filesystem_predicate", "prefix_match_probe", "pipe_masked"],
+    "js": ["GIT-DASH-C", "MERGE-BASE-IS-ANCESTOR", "COMMAND-SUBSTITUTION", "TEST-F", "PREFIX-MATCH-PROBE"]
   },
   "class_map": {
     "repo_redirect": "GIT-DASH-C",
     "merge_base_ancestor": "MERGE-BASE-IS-ANCESTOR",
     "command_substitution": "COMMAND-SUBSTITUTION",
     "filesystem_predicate": "TEST-F",
+    "prefix_match_probe": "PREFIX-MATCH-PROBE",
     "pipe_masked": "PIPE-MASKED-RC"
   },
   "class_map_note": "pipe_masked maps to PIPE-MASKED-RC, which is NOT a spellings.mjs rule name — it is variance.mjs's over-claim label. The mismatch is deliberate and is exactly what forces the divergence sentence on that case: the two seams handle pipe masking at DIFFERENT layers, and the lock must not be able to call that agreement.",
@@ -114,6 +115,80 @@
       "js": null,
       "divergence": "INTENDED, AND RECORDED RATHER THAN CLOSED. The write seam refuses a formatting pipeline tail as a fifth shape (check_rerun_pipe_tail/1) because a stored rerun that cannot fail is worthless at write time. The read seam deliberately does NOT refuse it at the SPELLING layer: tooling/pds/variance.mjs already grades it one layer over as the PIPE-MASKED-RC over-claim, which demotes the claim instead of discarding the row, and that is a more informative answer for an already-stored command. Adding a fifth RULE here would double-screen it and change adjudication output. The direction is safe: the writer is stricter, so the failure mode is a false REFUSAL at write time, never a false accept.",
       "why": "`git show origin/main:<gone>` exits 128; the same command piped to `head -1` exits 0 — the formatter launders the failure into a pass"
+    },
+    {
+      "command": "git grep -n 'defp apply_engagement' -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": "prefix_match_probe",
+      "js": "PREFIX-MATCH-PROBE",
+      "why": "PDS-D750 MEASURED SPECIMEN, INERT: rc=0 at origin/main AND rc=0 at a synthetic ref carrying the rename — it prints `defp apply_engagement_RENAMED(` back as its hit. A definition keyword + identifier with a bare identifier tail is a PREFIX match."
+    },
+    {
+      "command": "git grep -n 'defp apply_engagement(' -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "PDS-D750 MEASURED SPECIMEN, RED: the same probe with its one-character terminator went rc=0 -> rc=1 under the rename. This is the remedy the refusal names, so both seams must accept it."
+    },
+    {
+      "command": "git grep -n 'def round_done_predicate' -- scripts/pds-ledger-census.sh",
+      "elixir": "prefix_match_probe",
+      "js": "PREFIX-MATCH-PROBE",
+      "why": "PDS-D750 MEASURED SPECIMEN, INERT: rc=0 / rc=0, printing `def round_done_predicate_MUT(report):` as the hit"
+    },
+    {
+      "command": "git grep -n 'def round_done_predicate(report):' -- scripts/pds-ledger-census.sh",
+      "elixir": null,
+      "js": null,
+      "why": "PDS-D750 MEASURED SPECIMEN, RED: rc=0 / rc=1 once the pattern carries its delimiter"
+    },
+    {
+      "command": "git grep -nE 'defp apply_engagement\\b' origin/main -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "CONTROL: a `\\b` end-anchor terminates the pattern. Its last CHARACTER is `b`, an identifier character, so this is the case a naive [A-Za-z0-9_]$ tail test reds."
+    },
+    {
+      "command": "git grep -n -e 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": "prefix_match_probe",
+      "js": "PREFIX-MATCH-PROBE",
+      "why": "`-e PAT` puts the pattern in the flag's slot; the reader seam's first cut read straight past it (scripts/pds-rerun-symbol-coverage.py control I), so the writer pins it too"
+    },
+    {
+      "command": "git grep -n ROSTER_PAGE_LIMIT origin/main -- cloud/priv/static/__preview__/seal-predicate.mjs",
+      "elixir": null,
+      "js": null,
+      "why": "REFERENCE, NOT DEFINITION: ends in a bare identifier and is just as prefix-matching, but it is the corpus's most-shared rerun (317 rows) and has no language delimiter to add. PDS-D750 rules the arm NARROW — 432 of 440 identifier-tail reruns are references — so both seams stay quiet."
+    },
+    {
+      "command": "git grep -n \"THE FILING LAW\" -- .claude/workflows/bp-felix-pristine-charter.md",
+      "elixir": null,
+      "js": null,
+      "why": "REFERENCE, NOT DEFINITION: a sentence quoted out of a charter. Telling its writer to 'terminate' it is a riddle, not advice (PDS-D750)."
+    },
+    {
+      "command": "git grep -n 'defp handle_' origin/main -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": "prefix_match_probe",
+      "js": "PREFIX-MATCH-PROBE",
+      "why": "THE ARM'S STATED FALSE POSITIVE: a deliberate FAMILY probe is prefix-matching on purpose, and this arm refuses it anyway. Measured frequency in the corpus: 0 of 470. Pinned so the price stays visible."
+    },
+    {
+      "command": "git grep -n 'defp handle_[a-z]' origin/main -- api/lib/barkpark/tasks/stage.ex",
+      "elixir": null,
+      "js": null,
+      "why": "THE FAMILY PROBE'S ONE-CHARACTER REMEDY, named in both refusal messages — so both seams must accept it"
+    },
+    {
+      "command": "git grep -n 'defp apply_engagement' origin/main -- x && test -f y",
+      "elixir": "filesystem_predicate",
+      "js": "TEST-F",
+      "multi_breach": ["filesystem_predicate", "prefix_match_probe"],
+      "why": "THE ORDER CASE FOR THE FIFTH ARM. prefix_match_probe is LAST among the regex arms, so a command an earlier arm already refuses keeps its code."
+    },
+    {
+      "command": "git grep -n 'defp apply_engagement' origin/main -- x | head -1",
+      "elixir": "prefix_match_probe",
+      "js": "PREFIX-MATCH-PROBE",
+      "multi_breach": ["prefix_match_probe", "pipe_masked"],
+      "why": "pipe_masked is not a regex arm: rerun_refusal_code/1 tests it only after every @forbidden_rerun_shapes arm misses, so a regex arm placed last still OUTRANKS it. Before PDS-D750 this command was :pipe_masked; it is now :prefix_match_probe. Pinned so that relabel is a decision, not an accident."
     },
     {
       "command": "git rev-list --count origin/main..abc | grep -x 0",

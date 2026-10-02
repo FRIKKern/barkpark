@@ -14,6 +14,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
   alias BarkparkWeb.Components.ExternalSyncPill
 
   describe "external_sync_pill/1 — Bokbasen states" do
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders gray pill for nil state with 'Not synced' label" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -28,6 +30,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       assert html =~ "Not synced"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders blue pill for 'staged'" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -40,6 +44,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       assert html =~ "Staged"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders blue pill for 'polling'" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -51,6 +57,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       assert html =~ "Polling"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders green pill for 'accepted'" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -62,6 +70,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       assert html =~ "Accepted"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders red pill for 'rejected'" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -73,6 +83,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       assert html =~ "Rejected"
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "renders orange pill for terminal-error trio (failed, cancelled, cannot_cancel)" do
       for {state, label} <- [
             {"failed", "Failed"},
@@ -90,6 +102,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       end
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "accepts atom states (atom → string normalisation)" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{
@@ -141,6 +155,8 @@ defmodule BarkparkWeb.Components.ExternalSyncPillTest do
       refute html =~ ~s(external-sync-pill-bokbasen)
     end
 
+    # Plugins-off: the github plugin starts Plugins.Github.Auth and owns intake, mirror and webhooks
+    @tag :requires_plugins
     test "still renders when state is non-nil and hide_when_unsynced is true" do
       html =
         render_component(&ExternalSyncPill.external_sync_pill/1, %{

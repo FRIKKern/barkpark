@@ -65,11 +65,15 @@ defmodule BarkparkWeb.ExportControllerTest do
     :ok
   end
 
+  # `?perspective=raw` explicitly: the fixture documents are drafts, and a
+  # read-only token's export now defaults to `published` like its query does
+  # (task-c14e213b4a7b0ef1). This file's subject is redaction, so it asks for
+  # every row, which is what the export streamed when these tests were written.
   defp raw_export(token) do
     resp =
       scoped_conn()
       |> put_req_header("authorization", "Bearer #{token}")
-      |> get("/v1/data/export/#{@dataset}")
+      |> get("/v1/data/export/#{@dataset}?perspective=raw")
 
     assert resp.status == 200
     resp.resp_body

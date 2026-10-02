@@ -275,6 +275,14 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
 
     # Global (nil-workspace) docs so the global owner_scoped schema resolves and
     # owner_id is stamped — this test isolates the ROW/owner ACL, not tenancy.
+    #
+    # `instance_wide: true` is the class-(c) DECLARATION from WriteScope's
+    # classified door (#18085): these writes carry an attributable caller_context
+    # but are deliberately global, so without the declaration the door correctly
+    # refuses them `{:error, :workspace_scope_required}` as class (a). The
+    # declaration says "this write is meant to be instance-wide"; it does NOT
+    # make the test claim a workspace it does not mean, and an UNMARKED
+    # unresolved write from an attributable caller still refuses.
     user_a = Ecto.UUID.generate()
     user_b = Ecto.UUID.generate()
     ctx_a = CallerContext.from_user(user_a)
@@ -284,7 +292,8 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
         "owned_post",
         %{"doc_id" => "a-own", "title" => "#{@term} A"},
         @ds,
-        caller_context: ctx_a
+        caller_context: ctx_a,
+        instance_wide: true
       )
 
     {:ok, _} =
@@ -292,7 +301,8 @@ defmodule Barkpark.Search.IndxEngineScopeTest do
         "owned_post",
         %{"doc_id" => "b-own", "title" => "#{@term} B"},
         @ds,
-        caller_context: CallerContext.from_user(user_b)
+        caller_context: CallerContext.from_user(user_b),
+        instance_wide: true
       )
 
     parsed = QueryParser.parse(@term)

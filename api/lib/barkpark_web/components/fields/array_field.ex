@@ -29,12 +29,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{CodelistField, CompositeField, LocalizedTextField}
 
   attr :field, :map, required: true
   attr :value, :list, default: []
   attr :errors, :map, default: %{}
+  # Gyldendal parity E1.11 — warning subtree, same shape as `:errors`.
+  attr :warnings, :map, default: %{}
   attr :on_change, :string, default: nil
   attr :on_reorder, :string, default: "array_op"
   attr :plugin_name, :string, default: "core"
@@ -60,6 +63,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       assigns
       |> Map.put_new(:value, [])
       |> Map.put_new(:errors, %{})
+      |> Map.put_new(:warnings, %{})
       |> Map.put_new(:on_change, nil)
       |> Map.put_new(:on_reorder, "array_op")
       |> Map.put_new(:plugin_name, "core")
@@ -99,7 +103,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == 0}
-                  aria-label="Move up"
+                  aria-label={gettext("Move up")}
                 >▲</button>
                 <button
                   type="button"
@@ -111,7 +115,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                   phx-value-path={@path}
                   phx-value-index={idx}
                   disabled={@readonly or idx == length(@rows) - 1}
-                  aria-label="Move down"
+                  aria-label={gettext("Move down")}
                 >▼</button>
               <% end %>
               <button
@@ -124,11 +128,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
                 phx-value-path={@path}
                 phx-value-index={idx}
                 disabled={@readonly}
-                aria-label="Remove row"
+                aria-label={gettext("Remove row")}
               >×</button>
             </div>
             <%= for err <- row_errors(@errors, idx) do %>
               <span class="error" data-error-for-row={idx}><%= err %></span>
+            <% end %>
+            <%= for warn <- row_errors(@warnings, idx) do %>
+              <span class="warning" role="note" data-warning-for-row={idx}><%= warn %></span>
             <% end %>
           </li>
         <% end %>
@@ -142,7 +149,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         phx-value-field={@field.name}
         phx-value-path={@path}
         disabled={@readonly}
-      >+ Add</button>
+      >+ <%= gettext("Add") %></button>
     </fieldset>
     """
   end
@@ -208,13 +215,15 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           item: item,
           idx: idx,
           preview: preview,
-          open: row_empty?(row_value),
+          # A row carrying a finding opens so the author sees it (E1.11).
+          open: row_empty?(row_value) or row_findings?(assigns, idx),
           row_id: "bp-item-" <> sanitize_id("#{assigns.field.name}#{row_path}"),
           body:
             CompositeField.composite_field(%{
               field: item,
               value: row_value || %{},
               errors: row_subfield_errors(assigns.errors, idx),
+              warnings: row_subfield_errors(assigns.warnings, idx),
               on_change: assigns.on_change,
               plugin_name: assigns.plugin_name,
               path: row_path,
@@ -269,6 +278,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           field: item,
           value: row_value || [],
           errors: row_subfield_errors(assigns.errors, idx),
+          warnings: row_subfield_errors(assigns.warnings, idx),
           on_change: assigns.on_change,
           on_reorder: assigns.on_reorder,
           plugin_name: assigns.plugin_name,
@@ -308,7 +318,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         reference_row(%{
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
-          row_value: to_string(row_value || ""),
+          row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
           ref_type: ref_type_of(item),
           dataset: assigns[:dataset] || "production",
           scope_prefix: assigns[:scope_prefix] || "",
@@ -460,7 +470,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@row_value}
         value-mode="reference"
         dataset={@dataset}
@@ -482,7 +492,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@row_value}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -559,7 +569,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         value={@row_value}
         phx-change={@on_change}
       />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@row_value}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
@@ -665,4 +675,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   end
 
   defp row_subfield_errors(_, _), do: %{}
+
+  defp row_findings?(assigns, idx) do
+    row_subfield_errors(assigns.errors, idx) != %{} or
+      row_subfield_errors(assigns.warnings, idx) != %{}
+  end
 end

@@ -44,6 +44,15 @@ if config_env() == :prod do
     config :barkpark_cloud, :audit_retention_days, String.to_integer(days)
   end
 
+  # The control plane's own EGRESS address(es) — comma-separated BARE IPs, the
+  # same value deploy.yml passes instance-deploy.sh as BARKPARK_CLOUD_EGRESS_IPS
+  # (the CP_HOST secret). Sent on every self-update trigger so a self-updating
+  # box backfills BARKPARK_TRUSTED_PROXIES too (task-b4b2bb60b63e28ea).
+  # Registry.self_update_body/0 validates it; unset, the trigger body stays {}.
+  if egress = System.get_env("BARKPARK_CLOUD_EGRESS_IPS") do
+    config :barkpark_cloud, :cloud_egress_ips, egress
+  end
+
   # Billing (cloud-5): in prod, route money through the real Stripe gateway. The
   # LIVE secret key + the per-plan price ids are HUMAN task cloud-17 — but the
   # control plane must not BOOT in prod without a key wired, so we raise here
@@ -194,12 +203,43 @@ if config_env() == :prod do
       token: nil
   end
 
+  # cf-origin-ca-wire-and-provision: the Cloudflare ORIGIN CA KEY — a SECOND,
+  # distinct credential from the per-team scoped API token (which lives in
+  # Registry.Vault, never here). It is the account-wide key Cloudflare mints on
+  # its Origin CA page and the ONLY thing `POST /certificates` accepts, in an
+  # `X-Auth-User-Service-Key` header. Env-fed, never a literal: absent, this key
+  # is nil, `Cloudflare.OriginCA.configured?/0` is false and
+  # `Cloudflare.Real.create_origin_ca_cert/2` fails closed with :not_configured
+  # BEFORE building a request — it can NEVER fall back to the API token.
+  #
+  # `:client` is deliberately NOT set here: it stays at its `Cloudflare.Fake`
+  # default, so wiring this key alone changes no behaviour on any live path.
+  # ORIGIN_CA_CERT_DIR overrides the on-box directory the cert/key PATHS are
+  # derived from (default /etc/caddy/cloudflare) — paths only; no bytes are
+  # written on the control plane.
+  config :barkpark_cloud, BarkparkCloud.Cloudflare,
+    origin_ca_key: System.get_env("CLOUDFLARE_ORIGIN_CA_KEY"),
+    origin_ca_dir: System.get_env("ORIGIN_CA_CERT_DIR")
+
   # azure-retail-pricing: wire the REAL transport for the credential-free Azure
   # Retail Prices client only in prod — the same built-in verified-TLS :httpc
   # client the billing/oauth/github seams use (no new dep). The Retail Prices API
   # is unauthenticated and global, so no credential is threaded here; dev/test
   # leave this nil (config.exs) and never hit the wire.
   config :barkpark_cloud, BarkparkCloud.Azure.Pricing,
+    http_client: &BarkparkCloud.Billing.HttpClient.request/1
+
+  # azure-transport-wiring (task-2772b2cdd5001bfc): wire the REAL transport for
+  # the CREDENTIAL Azure client too. Without this key,
+  # `BarkparkCloud.Azure.RealClient.request/1` fell closed with
+  # :http_client_not_configured in EVERY environment — so in prod
+  # `Azure.verify/1` and `Azure.list_catalog/1` could never succeed and
+  # GET /v1/providers/azure/overview and …/catalog were a flat 502
+  # catalog_unavailable for every connected azure provider. Same built-in
+  # verified-TLS :httpc client as the billing/oauth/github/pricing seams (no new
+  # dep). No credential is threaded here: the service principal comes per-call
+  # from the team's vault, so this wires only the WIRE, never an identity.
+  config :barkpark_cloud, BarkparkCloud.Azure,
     http_client: &BarkparkCloud.Billing.HttpClient.request/1
 
   # portable-archives (S14/D39): wire the S3 read conduit's credentials + bucket
@@ -256,6 +296,21 @@ if config_env() == :prod do
   # volume) and the 32 MB cap is a module attribute on the router — a size that
   # bounds a build OUTPUT rather than a whole project dir needs no per-deploy
   # tuning knob.
+  #
+  # The PER-TEAM ceiling, however, IS a knob (ssw9-bl-artifact-retention-quota):
+  # 32 MB bounds one request, and nothing bounded the loop. ARTIFACT_QUOTA_BYTES
+  # sets the total live artifact bytes a team may hold; the upload route answers
+  # 429 `artifact_quota_exceeded` past it. Default 512 MB (see
+  # `Sites.ArtifactQuota`); the literal string "infinity" disables the ceiling,
+  # which is an explicit operator choice and never a default.
+  artifact_quota_bytes =
+    case System.get_env("ARTIFACT_QUOTA_BYTES") do
+      nil -> 512 * 1024 * 1024
+      "infinity" -> :infinity
+      raw -> String.to_integer(raw)
+    end
+
+  config :barkpark_cloud, :artifact_quota_bytes, artifact_quota_bytes
 
   # Provisioning: the shared WORKER token the off-box Go warm-pool
   # provisioner presents to /v1/internal/provision-jobs/*. May be nil here — the
@@ -263,6 +318,13 @@ if config_env() == :prod do
   # internal request 401s) until WORKER_TOKEN is set. The SAME secret is handed
   # to the Go provisioner (--token / --token-file).
   config :barkpark_cloud, :worker_token, System.get_env("WORKER_TOKEN")
+
+  # Optional second factor on the worker token (dr-w24): comma-separated client
+  # IPs the worker may call from. Unset = token alone, as before. Set = a correct
+  # token from any other source is refused; an unparseable list admits nobody.
+  config :barkpark_cloud,
+         :worker_allowed_ips,
+         String.split(System.get_env("WORKER_ALLOWED_IPS", ""), ",", trim: true)
 
   # oban-substrate: let prod tune queue concurrency / pause the engine without a
   # redeploy (e.g. during a migration window). Additive — the queues/plugins from

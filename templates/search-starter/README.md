@@ -123,6 +123,24 @@ rides the same-origin HTTP `/api/find` route. That's a soft degrade, not a
 failure. One public-read site token satisfies both the search channel and the
 flat `/v1/graph` corpus route.
 
+### `BARKPARK_TOKEN` is READ-ONLY, and this site ships no control that needs more
+
+Because the same value is inlined into the browser bundle above, it must be a
+**public-read** token — and a public-read token is refused on every non-`GET`
+against the API's token-gated pipeline (it answers `403 {"code":"forbidden"}`,
+never a partial success). So a spawned site cannot trigger an index rebuild, and
+**this template ships no admin control that pretends otherwise**: there is no
+`app/api/admin/*` route here. A Next route handler that attached
+`Authorization: Bearer ${BARKPARK_TOKEN}` to a `POST .../reindex` used to exist
+and could only ever 403; handing it a write token instead would have shipped a
+write credential to every visitor, which is strictly worse. Rebuild the index
+from a trusted machine with a write-scoped token instead — `bp` on your laptop
+or CI, never from the site.
+
+`token-guard.test.mjs` pins this: the route stays deleted, no file under
+`templates/search-starter` references `admin/reindex`, and no route handler in
+the template builds an upstream `/reindex` URL.
+
 ## Serving under `/sites/<slug>/`
 
 Unlike a single-page site, the finder is **multi-route** (`/d/[type]/[slug]`,
@@ -156,6 +174,32 @@ Production build is what the deploy engine boots:
 BARKPARK_SITE_BASE=/sites/<slug>/ npm run build
 node .next/standalone/server.js
 ```
+
+### The graph smoke — is the desktop graph real, and is the phone sent nothing?
+
+`scripts/graph-smoke.mjs` builds this starter against a stdlib-only fixture
+(`scripts/smoke-stub-api.mjs`), boots the **real** `.next/standalone/server.js`,
+and drives two headless chromium contexts:
+
+```sh
+BP_PLAYWRIGHT=<repo>/js/node_modules/playwright node scripts/graph-smoke.mjs
+```
+
+Six beats. `LAND` proves the built page actually loaded — without it every claim
+below could be satisfied by a blank page. `GDESK` is the desktop **control**:
+`/bp-graph.js` is fetched and `[data-bp-graph-mount]` is present. `GWIDTH` proves
+the two arms really were different viewports. `GPHONE` and `GMOUNT` prove a
+390x844 viewport is sent no renderer and mounts no subtree — **hidden is not
+undelivered**: `hidden md:block` stops paint, only `<DesktopOnly>` stops the
+~131 KB download.
+
+Exit `0` all beats pass, `1` a beat failed (that is the finding), `2` the gate
+could not run at all (no playwright, no chromium, build failed, port taken) —
+never reported as a pass. Playwright is deliberately **not** a dependency of this
+template: it is resolved from the runner, so scaffolding a site never downloads a
+browser.
+
+The Astro edition's twin is `templates/astro-search-starter/scripts/render-smoke.mjs`.
 
 ---
 

@@ -280,7 +280,7 @@ defmodule Barkpark.Tasks.Landed do
         {:error, :criterion_already_met}
 
       not merge_shaped?(entry) ->
-        {:error, :criterion_not_merge_shaped}
+        {:error, not_merge_shaped_reason(entry)}
 
       # MERGE-SHAPED, BUT A MERGE CANNOT DISCHARGE IT. The shape question is
       # answered; this is the second one, and it is the only guard between a
@@ -325,6 +325,19 @@ defmodule Barkpark.Tasks.Landed do
   # See the moduledoc: this is a PERMIT predicate, so the explicit author
   # declaration wins in BOTH directions and prose decides only its absence.
   #
+  # THE POLARITY IS RULED, NOT UNDECIDED (task-573618865e3c2b3f, 2026-09-17,
+  # by main as orchestrator): an explicit `merge_gate: true` STAYS the
+  # candidate a landing notice may flip. The inversion task-4dca6c8453fb1f7c
+  # asked for (refuse to flip any flagged criterion) is NOT implemented; the
+  # fence it wanted already exists per row as `merge_discharges: false`
+  # (#16619), read by `merge_discharges?/1` below. Effect, measured 2026-09-17
+  # over every row carrying a `landed:pr-*` label and pinned BY ID in
+  # internal/cli/tasks_landed_polarity_fence_test.go: 11 rows carry a
+  # resolvable candidate, 7 of them only because of this polarity, so the
+  # inversion would have cut the cure from 11 rows to 4. The Go mirror of this
+  # predicate, `landedMergeShaped` in internal/cli/tasks_landed_cmd.go, carries
+  # the same note; a reader of either side lands on the ruling.
+  #
   # SHAPE ONLY. "Is this the lead's row rather than the builder's?" — the same
   # question `Tasks.Stamp` and `Tasks.Close.autostamp_merge_gate/6` ask, read
   # off the same field, unchanged. `merge_discharges?/1` asks the other one.
@@ -333,6 +346,34 @@ defmodule Barkpark.Tasks.Landed do
       true -> true
       false -> false
       _ -> Criteria.merge_gated?(entry) or landing_worded?(criterion_text(entry))
+    end
+  end
+
+  # WHICH DOOR THE REFUSAL CAME THROUGH (task-c5ca82cb0a49ab53). `merge_shaped?/1`
+  # says NO for two structurally different reasons, and until this split the 409
+  # said the same sentence for both — a sentence that is FALSE for one of them:
+  #
+  #   * `:vetoed` — the author wrote an explicit `"merge_gate": false`. The
+  #     predicate SHORT-CIRCUITS on that flag and never reads the prose, so the
+  #     old message's "its wording says nothing about being merge-gated" claimed
+  #     a property of an arm it did not take. Measured on 2026-09-22 over the
+  #     live corpus (9,463 published task rows / 39,394 criteria), 29 criteria
+  #     carry an explicit `false` TOGETHER WITH marker wording — for every one of
+  #     them the old sentence was a lie, and the documented exemption door is
+  #     precisely the case where the wording IS merge-shaped. A reader who
+  #     believed it went looking for a rewrite instead of the field.
+  #   * `:unmarked` — no flag at all, and the stored text really does say nothing
+  #     merge-shaped. Here the old sentence was and stays TRUE.
+  #
+  # The two need DIFFERENT remedies from the reader (delete/flip the flag vs.
+  # stamp it as work, or mark the row), so they get different messages. The wire
+  # `reason` token is unchanged for both — `Params.reason_to_string/1` collapses
+  # the tuple back to `criterion_not_merge_shaped`, which the bp CLI and every
+  # existing caller string-match on.
+  defp not_merge_shaped_reason(entry) do
+    case explicit_key(entry, "merge_gate", :merge_gate) do
+      false -> {:criterion_not_merge_shaped, :vetoed}
+      _ -> :criterion_not_merge_shaped
     end
   end
 
@@ -656,6 +697,146 @@ defmodule Barkpark.Tasks.Landed do
   end
 
   def check_files(_), do: {:error, @files_message}
+
+  # ─── The LAND DIGEST shape check (task-4ab4a5b58bce97a6) ──────────────────
+  #
+  # `content.landed` has TWO writers — this verb and `Tasks.Close` — and until
+  # now only one of them checked what it was handed. `/landed` runs
+  # `check_files/1` at the door; `close` piped `params["landed"]` straight into
+  # `Tasks.Internal.merge_landed/2`, which normalises whatever it finds and
+  # SILENTLY DROPS the rest. So a close could post `{"files": 3}` or
+  # `{"pr": 17}` (a key the union has never merged) and get a 2xx asserting a
+  # landing the ledger does not hold.
+  #
+  # This is that check, and it lives HERE — beside `check_files/1`, in the
+  # module that owns the stored shape — precisely so the close door cannot grow
+  # an UNLOCKED MIRROR of it. `files` is not re-implemented: the arm below CALLS
+  # `check_files/1`, so the two doors cannot drift into disagreeing about what a
+  # storable path list is.
+  #
+  # The key vocabulary is `merge_landed/2`'s `@landed_keys` plus `commit`, the
+  # singular `Close.landed_summary/1` reads for its evidence sentence. An
+  # UNKNOWN key is NAMED and refused rather than ignored, because "ignored" is
+  # exactly how a typo (`"pr"` for `"prs"`) became a 2xx that recorded nothing.
+  @digest_keys ~w(prs commits commit files file_digests capability_slugs notes landings)
+
+  @digest_message ~s|landed must be a MAP of land-digest keys — | <>
+                    ~s|{"prs": ["17070"], "commit": "f7610ed6a", "files": ["api/lib/x.ex"]}. |
+
+  @doc """
+  The SHAPE check on a close's `landed` digest, returning the message the HTTP
+  door renders as a NAMED 4xx.
+
+  Public for the same reason `check_files/1` is: the refusal has to happen at
+  the door AND the store has to hold the verdict, so a direct
+  `Tasks.Close.close_with_receipt/3` cannot write a digest the door would have
+  refused.
+
+    * absent / `nil` → `{:ok, nil}` (close without a landing digest)
+    * a map of known keys whose values are scalars or lists of scalars →
+      `{:ok, cleaned}`; blanks are dropped and a map that cleans down to
+      nothing is the same as absent
+    * anything else → `{:error, message}`, and NOTHING is written
+  """
+  @spec check_digest(term()) :: {:ok, map() | nil} | {:error, String.t()}
+  def check_digest(nil), do: {:ok, nil}
+
+  def check_digest(digest) when is_map(digest) do
+    with :ok <- check_digest_keys(digest),
+         {:ok, cleaned} <- clean_digest(digest) do
+      if map_size(cleaned) == 0, do: {:ok, nil}, else: {:ok, cleaned}
+    end
+  end
+
+  def check_digest(_),
+    do: {:error, @digest_message <> "It was not a map, so NOTHING was recorded."}
+
+  defp check_digest_keys(digest) do
+    case digest |> Map.keys() |> Enum.map(&to_string/1) |> Enum.reject(&(&1 in @digest_keys)) do
+      [] ->
+        :ok
+
+      unknown ->
+        {:error,
+         @digest_message <>
+           "These keys are not land-digest keys and would have been SILENTLY DROPPED: " <>
+           Enum.map_join(Enum.sort(unknown), ", ", &inspect/1) <>
+           ". The storable keys are " <>
+           Enum.join(@digest_keys, ", ") <> "."}
+    end
+  end
+
+  defp clean_digest(digest) do
+    Enum.reduce_while(@digest_keys, {:ok, %{}}, fn key, {:ok, acc} ->
+      case check_digest_value(key, Map.get(digest, key)) do
+        {:ok, nil} -> {:cont, {:ok, acc}}
+        {:ok, value} -> {:cont, {:ok, Map.put(acc, key, value)}}
+        {:error, message} -> {:halt, {:error, message}}
+      end
+    end)
+  end
+
+  defp check_digest_value(_key, nil), do: {:ok, nil}
+
+  # `files` is NOT re-implemented here — one checker, two doors, and the raw
+  # value goes STRAIGHT in: wrapping a bare string into a one-element list would
+  # make this door ACCEPT the exact shape `/landed` refuses, which is the drift
+  # sharing the checker exists to prevent.
+  defp check_digest_value("files", raw), do: check_files(raw)
+
+  # `commit` is the SINGULAR the evidence sentence reads, so it stays a scalar.
+  defp check_digest_value("commit", raw) do
+    case scalar_token(raw) do
+      nil -> {:error, digest_key_message("commit", "a non-empty string (a commit sha)")}
+      token -> {:ok, token}
+    end
+  end
+
+  # The two MAP-valued keys: `landings` pairs a pr with its commit,
+  # `file_digests` is the bounded spelling of `files`. Both are lists of maps.
+  defp check_digest_value(key, raw) when key in ["landings", "file_digests"] do
+    entries = List.wrap(raw)
+
+    if entries != [] and Enum.all?(entries, &is_map/1) do
+      {:ok, entries}
+    else
+      {:error, digest_key_message(key, "a list of MAPS")}
+    end
+  end
+
+  # Everything else is a scalar or a list of scalars (strings or integers).
+  defp check_digest_value(key, raw) do
+    entries = List.wrap(raw)
+
+    cond do
+      Enum.any?(entries, &(not is_binary(&1) and not is_integer(&1))) ->
+        {:error, digest_key_message(key, "a string/number or a list of them")}
+
+      true ->
+        case entries |> Enum.map(&scalar_token/1) |> Enum.reject(&is_nil/1) |> Enum.uniq() do
+          [] -> {:ok, nil}
+          cleaned -> {:ok, cleaned}
+        end
+    end
+  end
+
+  defp digest_key_message(key, expected) do
+    @digest_message <>
+      "#{inspect(key)} must be #{expected}; it was not, so NOTHING was recorded — " <>
+      "a landed value this close cannot store is refused HERE rather than dropped " <>
+      "with a 2xx that says the landing was recorded."
+  end
+
+  defp scalar_token(value) when is_integer(value), do: Integer.to_string(value)
+
+  defp scalar_token(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp scalar_token(_), do: nil
 
   defp top_level_dirs(files) do
     files

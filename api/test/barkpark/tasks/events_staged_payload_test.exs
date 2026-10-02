@@ -173,7 +173,13 @@ defmodule Barkpark.Tasks.EventsStagedPayloadTest do
       assert Map.keys(row) |> Enum.sort() == [:at, :doc_id, :event, :id, :payload, :rev]
       # The Envelope half of `mutation_events.document` (the whole row content
       # and the caller_token_id audit stamp) is NEVER on the wire.
-      assert Map.keys(row.payload) == ["staged"]
+      # EXACT, and the list GREW BY ONE on purpose (task-56adb45f973e242f):
+      # `caller` is the server-measured principal, a typed stamp that projects
+      # BECAUSE it is not an audit key — unlike `caller_token_id`, which this
+      # arm's comment above names and which is still excluded.
+      assert Enum.sort(Map.keys(row.payload)) == ["caller", "staged"]
+      assert row.payload["caller"]["kind"] == "api_token"
+      refute Map.has_key?(row.payload, "caller_token_id")
       refute Map.has_key?(row, :document)
     end
 

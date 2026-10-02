@@ -12,14 +12,14 @@ A Next.js 15 marketing site powered by [Barkpark](https://github.com/barkpark/ba
 - `docker-compose.yml` bundling the Phoenix API + PostgreSQL
 - Sample schemas (`page`, `post`, `author`, `contact`) + seed script
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
-- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
+- Graceful states: a branded `not-found.tsx` served with a real 404 status, and an `error.tsx` boundary
 
 ## Quick start
 
 ```sh
 cp .env.example .env.local
 docker compose up -d          # Phoenix API on :4000, Postgres on :5432
-{{pmCommand}} install
+npm install                   # or: pnpm install · yarn · bun install
 {{pmCommand}} codegen         # generate TypeScript types (runs barkpark generate; requires @barkpark/codegen in devDependencies)
 {{pmCommand}} seed            # 2 authors, 3 pages, 3 posts — all published
 {{pmCommand}} dev             # Next.js on :3000
@@ -60,9 +60,20 @@ your API host, dataset, workspace/project slugs, or schema fields.
 
 Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}`. See [webhook-realtime.md](https://github.com/barkpark/barkpark/blob/main/docs/contracts/webhook-realtime.md) for the full wire contract.
 
+Register the webhook with the `bp` CLI (Studio has no webhook screen), then mint its signing secret:
+
 ```sh
-BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
+bp webhook create https://<your-app>/api/barkpark/webhook my-site   # prints: id: <webhook-id>
+bp webhook rotate <webhook-id> -o json                             # {"secret":"whsec_…", …} — shown once
 ```
+
+Set that secret in the app's environment:
+
+```sh
+BARKPARK_WEBHOOK_SECRET=whsec_…
+```
+
+A webhook with no secret sends unsigned deliveries, and this route answers every one of them 401.
 
 ## Deploy
 

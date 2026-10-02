@@ -164,7 +164,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   def save(_params, socket), do: {:noreply, socket}
 
   defp do_save(params, socket) do
-    socket = Shared.do_autosave(socket, params)
+    socket = Shared.do_autosave(socket, params, :save)
 
     case socket.assigns[:save_status] do
       "Saved" ->
@@ -225,18 +225,49 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     case value do
       t when is_binary(t) and t != "" ->
         {:noreply,
-         mark_dirty(Shared.do_autosave(socket, %{field => Barkpark.Tenancy.slugify(t)}))}
+         mark_dirty(Shared.do_autosave(socket, %{field => document_slug(t)}, :slug_derive))}
 
       _ ->
         {:noreply, socket}
     end
   end
 
+  @doc """
+  The slug Generate derives from a title: Latin letters with accents or
+  ligatures TRANSLITERATED before `Tenancy.slugify/1` keeps only `[a-z0-9]`.
+
+  Stranger walk (2026-09-30): "Blåbær & Søt! Æøå" generated `bl-b-r-s-t` — every
+  non-ASCII letter became a hyphen, so a Norwegian (or French, German, Polish…)
+  title produced a slug that names nothing. Accented letters fold to their base
+  (NFD, combining marks dropped: å→a, é→e, ü→u); letters NFD cannot split get
+  their conventional spelling (æ→ae, ø→o, ß→ss, œ→oe, þ→th, ð→d, đ→d, ł→l).
+  Workspace/project slugs keep `Tenancy.slugify/1` byte-identically — only the
+  document-field Generate button reads through here.
+  """
+  @spec document_slug(String.t()) :: String.t()
+  def document_slug(title) when is_binary(title) do
+    title
+    |> String.downcase()
+    |> String.replace(["æ", "ø", "ß", "œ", "þ", "ð", "đ", "ł"], fn
+      "æ" -> "ae"
+      "ø" -> "o"
+      "ß" -> "ss"
+      "œ" -> "oe"
+      "þ" -> "th"
+      "ð" -> "d"
+      "đ" -> "d"
+      "ł" -> "l"
+    end)
+    |> :unicode.characters_to_nfd_binary()
+    |> String.replace(~r/\p{Mn}/u, "")
+    |> Barkpark.Tenancy.slugify()
+  end
+
   def autosave(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
 
     case fold_dot_paths(params, socket) do
-      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc))}
+      %{"doc" => doc} -> {:noreply, mark_dirty(Shared.do_autosave(socket, doc, :change))}
       _ -> {:noreply, socket}
     end
   end
@@ -499,7 +530,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         end
 
       new_form = StudioLive.put_value_at(form, key_path, new_list)
-      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form))}
+      {:noreply, mark_dirty(Shared.do_autosave(socket, new_form, :array_op))}
     end
   end
 

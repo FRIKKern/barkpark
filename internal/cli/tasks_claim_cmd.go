@@ -31,12 +31,38 @@ import (
 // nothing more); the true predicate is server-side (task-eb2b6170e19f1611
 // tracks that half) and this stays purely diagnostic.
 func runTaskClaim(out *writer, g globals, ctx manifest.Context, m *manifest.Manifest, cmd manifest.Command, tail []string) int {
+	// THE LOADOUT IS BUILT BEFORE THE POST, ONCE (task-a42dccec2fe4a406). The
+	// ledger and the local directory must carry the SAME record, and two builds
+	// differ in ClaimedAt and therefore in Digest — so this value is what rides
+	// the wire AND what is later written to disk. No priming dir configured
+	// (the default) yields no manifest and no wire key: absent stays ABSENT.
+	preq, _ := claimRequestOf(cmd, tail)
+	built, inject, err := primingWireArgs(out, defaultPrimingEnv(), preq.docID, preq.workerID)
+	if err != nil {
+		out.errf("priming: %v\n", err)
+		return exitGeneric
+	}
+	if len(inject) > 0 {
+		tail = append(append([]string{}, tail...), inject...)
+	}
+
 	rc := runCommand(out, g, ctx, m, cmd, tail)
 	if rc == exitOK {
 		// CLAIMING AND PROTECTING ARE ONE ACT (task-f79e39f4992749a5). The
 		// claim landed; now it has to reach the file the pulse loop reads, and
 		// the append has to be PROVEN by a readback. See recordHeldClaim.
-		return recordClaimInHeldFile(out, cmd, tail)
+		if held := recordClaimInHeldFile(out, cmd, tail); held != exitOK {
+			return held
+		}
+		// PRIMING RIDES THE SAME SUCCESS PATH as the held-file append, for the
+		// same reason: what the agent was holding when it claimed is only
+		// recoverable if it is written down AT the claim, not remembered after
+		// it. Opt-in (BARKPARK_PRIMING_DIR); see tasks_priming_manifest.go. A
+		// request whose doc id could not be resolved passes "" through on
+		// purpose — recordPrimingManifest is the one place that decides whether
+		// that is a loud failure (a priming dir IS configured) or a no-op.
+		pr, _ := claimRequestOf(cmd, tail)
+		return recordPrimingManifestOf(out, defaultPrimingEnv(), pr.docID, pr.workerID, built)
 	}
 	if rc != exitConflict {
 		return rc
@@ -201,6 +227,13 @@ var openLifecycleStates = map[string]bool{
 	"in_progress": true,
 }
 
+// terminalLifecycleStates are the closed states. A claim map left on such a
+// row records who held it last; it is never a live hold.
+var terminalLifecycleStates = map[string]bool{
+	"done":      true,
+	"cancelled": true,
+}
+
 // claimVerdict is the PURE decision at the center of this wrapper: given what
 // the read-back showed and who asked, name which of the causes it supports.
 // It never claims more than the read-back can prove.
@@ -227,6 +260,19 @@ var openLifecycleStates = map[string]bool{
 // "unknown" AND no queue gate AND an open row — a refusal with no explanation
 // anywhere, which is what task-eb2b6170e19f1611 tracks.
 func claimVerdict(requestedWorker, lifecycle string, claim apiclient.ClaimInfo, gate queueGate, serverArm string) string {
+	// WHETHER before WHO. The server refuses a done/cancelled row for its
+	// lifecycle before it consults any holder (its not_claimable_status arm runs
+	// first, task-4753f80a2ec47d03), and closing a row does not clear
+	// claim.worker. Calling that leftover worker a live holder ("wait for them")
+	// or telling the caller to re-claim prescribes a remedy that cannot work
+	// (task-f788ace33b5ff892).
+	if terminalLifecycleStates[lifecycle] {
+		v := fmt.Sprintf("genuinely not ready: lifecycle_status is %q, and a closed row has no live holder", lifecycle)
+		if claim.Present && claim.Worker != "" {
+			v += fmt.Sprintf(" (claim.worker=%s is left over from before it closed)", claim.Worker)
+		}
+		return v + "; reopen it with `bp task stage <id> open` first, then claim"
+	}
 	hasWorker := claim.Present && claim.Worker != ""
 	if !hasWorker {
 		if gate.gating() {

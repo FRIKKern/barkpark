@@ -936,6 +936,299 @@ function selftest() {
         );
       }
     }
+
+    // ── (o)(p)(q) DOC-LOCAL SHORTHAND ────────────────────────────────────────
+    // Long-form comment prose introduces a file by its full path once and then
+    // refers to it by bare basename. The grammar keeps only `<base>:<N>` for the
+    // shorthand, so the resolver used to match it against whatever TRACKED files
+    // share that basename and judge a line number written for a different file.
+    // Measured on main at 3e358f87f: 7 of 17 novel findings and 1 BASELINED
+    // entry were this one shape.
+    //
+    // THE THREE ARMS ARE A TRIPLE, AND ONLY THE TRIPLE PROVES ANYTHING.
+    //   (o) the shorthand is BOUND to the path the doc gave — silent,
+    //   (o-control) the SAME citation with the qualifying line REMOVED still
+    //       REDS, so the silence in (o) comes from the binding and not from the
+    //       checker having gone deaf to this citation shape,
+    //   (p) two different paths for one basename REFUSE rather than pick,
+    //   (q) a doc-local binding to a TRACKED file that genuinely cannot hold the
+    //       line still REDS — the binding is a resolver, never an amnesty.
+    //
+    // (o) alone would pass on a checker that simply stopped reporting bare
+    // stems, which is the failure this whole file exists to catch.
+    if (!amb) {
+      fails.push("(o) SETUP: shares (h)'s corpus pair and it was unavailable");
+    } else {
+      // A line no tracked candidate can hold, so the OLD resolver reported it
+      // stale against a namesake with the AMBIGUOUS-stem evidence string.
+      const beyond = Math.max(amb.longLines, amb.shortLines) + 1000;
+      // Deliberately synthetic and guaranteed untracked — `deps/` would work on
+      // a machine that has run `mix deps.get` and go vacuous on one that has
+      // not. The predicate under test is "the cited path is not a tracked file",
+      // which is a RULE; naming `deps/` would be a snapshot of one instance.
+      const vendored = `__lineref_selftest_vendor__/lib/${amb.base}`;
+
+      // (o) QUALIFIED THEN SHORTHANDED → silent.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${vendored}:${beyond}\` formats the error, so \`${amb.base}:${beyond}\`\n` +
+          "  # is the same file said twice.\n" +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const bound = linerefFindings([probeRel]);
+      if (bound.length !== 0) {
+        fails.push(
+          `(o) DOC-LOCAL: a bare \`${amb.base}:${beyond}\` that this same file had already ` +
+            `qualified as \`${vendored}\` produced ${bound.length} finding(s) — the shorthand is ` +
+            "being re-bound to a tracked namesake the comment never named: " +
+            (bound[0].evidence || ""),
+        );
+      }
+
+      // (o-control) THE SAME CITATION, UNQUALIFIED → must still RED. This is the
+      // arm that can differ from its subject: one line of context is the only
+      // difference between the two probes, and it must be the only difference in
+      // the verdict.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.base}:${beyond}\` is the same file said twice.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const unbound = linerefFindings([probeRel]);
+      if (unbound.length === 0) {
+        fails.push(
+          `(o-control) UNQUALIFIED: a bare \`${amb.base}:${beyond}\` with NO path anywhere in the ` +
+            "file produced NO finding — so arm (o)'s silence proves nothing: the gate has stopped " +
+            "reporting this citation shape outright rather than resolving it.",
+        );
+      }
+
+      // (p) TWO PATHS, ONE BASENAME → REFUSE, never pick.
+      //
+      // Each explicit path gets its OWN comment line: the grammar reads at most
+      // one file token per span, so both on one line means the second is never
+      // seen as a citation and the doc looks singly-qualified — which is arm (q),
+      // not this one. It cost a red to find out; the split is load-bearing.
+      // The cited line must also be 2+ digits (the grammar's `\d{2,5}` cue), so
+      // a namesake shorter than ten lines cannot carry this arm — say so rather
+      // than let it pass on a citation that was never parsed.
+      if (amb.shortLines < 10) {
+        fails.push(
+          `(p) SETUP: ${amb.short} is ${amb.shortLines} lines, too short to cite at a 2-digit ` +
+            "line — the arm would pass on a span the grammar never classified",
+        );
+      } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.long}:${amb.line}\` is one file.\n` +
+          `  # \`${amb.short}:10\` is a different file.\n` +
+          `  # \`${amb.base}:${beyond}\` does not say which.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      // Only the SHORTHAND's verdict is this arm's business. The two explicit
+      // citations are scaffolding and carry their own honest verdicts.
+      const refused = linerefFindings([probeRel]).filter((f) => f.raw.startsWith(amb.base + ":"));
+      if (refused.length !== 0) {
+        fails.push(
+          `(p) REFUSE: this file cites BOTH ${amb.long} and ${amb.short}, so the bare stem ` +
+            `\`${amb.base}\` names no one file — the resolver must refuse, not pick one and judge ` +
+            "a line against it: " + (refused[0].evidence || ""),
+        );
+      }
+      }
+
+      // (q) THE BINDING IS A RESOLVER, NOT AN AMNESTY. Qualify the stem to a
+      //     TRACKED file that genuinely cannot hold the cited line: still red.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${amb.long}:${beyond}\` is out of range, and so is \`${amb.base}:${beyond}\`.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const stillBites = linerefFindings([probeRel]);
+      if (stillBites.length === 0) {
+        fails.push(
+          `(q) NOT AN AMNESTY: \`${amb.base}:${beyond}\` bound by this file's own ` +
+            `\`${amb.long}\` (${amb.longLines} lines) cannot hold line ${beyond}, and produced NO ` +
+            "finding — doc-local binding has become a blanket pass for every shorthand citation.",
+        );
+      }
+    }
+
+    // ── (r) A QUOTED BYTE COUNT IS NOT A CITATION ─────────────────────────────
+    // The specimen: api/test/barkpark/doc_budget_cap_test.exs quotes the doc-budget
+    // gate's own refusal string inside a comment —
+    //
+    //   docs/cheatsheets/bp.md: 3298 B > cap 2400 B (over by 898 B)
+    //
+    // and the sweep reported `cited line(s) 3298 exceed file length (40)` at HIGH
+    // confidence. Nothing in that sentence cites anything; it reproduces an
+    // instrument's output. The unit guard already existed for `12px` and
+    // `~180-400s`, but it requires the unit to be GLUED to the digits, and the only
+    // difference here is ONE SPACE: the slice after `3298` is `" B >"`, which the
+    // glued test reads as no-unit.
+    //
+    // THE TWO CONTROLS ARE THE POINT. Widening a guard is exactly how a false
+    // positive becomes a blind spot, so (r-control-a) keeps the same `<file>: <n>`
+    // shape with NO unit and (r-control-b) trails the number with an ordinary WORD
+    // — the shape the tempting "any letter after whitespace" fix would have
+    // silently swallowed corpus-wide. Both must still RED.
+    if (!plant) {
+      fails.push("(r) SETUP: shares the plant target and it was unavailable");
+    } else {
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # The cap arm fails with "${plant.base}: ${plant.beyond} B > cap 2400 B (over by 898 B)".\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      const byteFindings = linerefFindings([probeRel]);
+      if (byteFindings.length !== 0) {
+        fails.push(
+          `(r) BYTE COUNT: "${plant.beyond} B", a size printed beside ${plant.base}, was read as a ` +
+            "line number — a quoted instrument refusal now reports drift: " + (byteFindings[0].evidence || ""),
+        );
+      }
+      // (r-control-a) SAME SHAPE, NO UNIT → must still RED.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is built at ${plant.base}: ${plant.beyond} (the head of the clause).\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(r-control-a) BLIND SPOT: a real \`${plant.base}: ${plant.beyond}\` citation — colon, space, ` +
+            "digits, NO unit — went SILENT past EOF. The unit guard has swallowed the citation shape it " +
+            "was supposed to stand beside.",
+        );
+      }
+      // (r-control-b) NUMBER TRAILED BY AN ORDINARY WORD → must still RED. This is
+      // the arm that refutes the one-token "unit letter may follow whitespace" fix.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` sits at ${plant.base}:${plant.beyond} and is where the guard runs.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(r-control-b) BLIND SPOT: \`${plant.base}:${plant.beyond} and is where …\` went SILENT. Any ` +
+            "citation followed by a word now reads as a measurement — the guard was widened to letters " +
+            "instead of to UNITS.",
+        );
+      }
+    }
+
+    // ── (s) A QUANTITY BEING COMPARED TO A BUDGET IS NOT A LINE NUMBER ────────
+    // (r) closed the byte count LEXICALLY — a closed list of unit words. The
+    // same instrument refusal reworded one notch drops the unit entirely:
+    //
+    //   docs/cheatsheets/bp.md: 3298 over cap 2400
+    //
+    // and the enumeration cannot see it, because an enumeration is a snapshot
+    // and the next tool to print a quantity beside a filename will use a word
+    // nobody listed. So (s) is the PREDICATE arm: whatever the unit, the number
+    // is followed by the COMPARISON it was printed for.
+    //
+    // THE FOUR CONTROLS ARE THE POINT, AND THEY ARE WHY THE RULE IS
+    // NUMBER-ADJACENT RATHER THAN SPAN-LEVEL. The obvious tell — "the quoted
+    // span carries a verdict token somewhere" — was measured against the live
+    // corpus: 27 of 1006 lineref claims match it and ALL 27 ARE GENUINE
+    // CITATIONS, while ZERO false positives come off. (s-control-b) and
+    // (s-control-c) are two of those 27 specimens, reproduced verbatim in
+    // shape, and they must still RED.
+    if (!plant) {
+      fails.push("(s) SETUP: shares the plant target and it was unavailable");
+    } else {
+      const silent = [
+        ["(s)", `${plant.base}: ${plant.beyond} over cap 2400`, "an over-cap refusal with NO unit token"],
+        ["(s-b)", `${plant.base}: ${plant.beyond} exceeds the cap`, "an `exceeds` verdict"],
+        ["(s-c)", `${plant.base}: ${plant.beyond} kb > 2400 kb`, "a comparison carrying a unit no list enumerates"],
+        ["(s-d)", `${plant.base}: ${plant.beyond}% of budget`, "a percentage of a budget"],
+      ];
+      for (const [arm, sentence, what] of silent) {
+        writeFileSync(
+          probeAbs,
+          "defmodule LinerefSelftestProbe do\n" +
+            `  # The gate refused with "${sentence}".\n` +
+            "  def noop, do: :ok\n" +
+            "end\n",
+        );
+        const found = linerefFindings([probeRel]);
+        if (found.length !== 0) {
+          fails.push(
+            `${arm} MEASURED QUANTITY: ${what} — "${sentence}" — was read as a citation of line ` +
+              `${plant.beyond}: ` + (found[0].evidence || ""),
+          );
+        }
+      }
+
+      // (s-control-a) A GENUINE CITATION INSIDE A BACKTICKED SPAN STILL BINDS.
+      // The classification rule must key on the number's own continuation, never
+      // on the citation sitting in quotes — quoting is how people write
+      // citations, so a quote-level rule blinds the corpus.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is the enclosing def at \`${plant.base}:${plant.beyond}\`.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-a) BLIND SPOT: a real \`${plant.base}:${plant.beyond}\` citation inside a BACKTICKED ` +
+            "span went SILENT past EOF. A citation does not stop being one because it is quoted.",
+        );
+      }
+
+      // (s-control-b) A VERDICT WORD LATER IN THE SENTENCE IS PROSE. Shape taken
+      // from the live corpus — quoted EVIDENCE for the measurement, not a
+      // citation this file is making, so re-pointing it would destroy the datum:
+      // `ops.ex:429) — the ONE cap path that does not route through`  [lineref-ok]
+      // The word `cap` is there; it is not what the number is compared against.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` (${plant.base}:${plant.beyond}) — the ONE cap path that does not route through.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-b) BLIND SPOT: \`${plant.base}:${plant.beyond}) — the ONE cap path …\` went SILENT. ` +
+            "The rule has drifted from the NUMBER to the SPAN, and every citation in a sentence that " +
+            "mentions a cap is now invisible.",
+        );
+      }
+
+      // (s-control-c) A BARE DIRECTION WORD IS PROSE. Live specimens:
+      // `Sync.Finch:~51 below),` and `app.js:674-682 over instanceLifecycle`. lineref-ok
+      // `over`/`below` count only with a BUDGET NOUN behind them.
+      writeFileSync(
+        probeAbs,
+        "defmodule LinerefSelftestProbe do\n" +
+          `  # \`${plant.symbol}\` is wired at ${plant.base}:${plant.beyond} below), the same boolean ladder.\n` +
+          "  def noop, do: :ok\n" +
+          "end\n",
+      );
+      if (linerefFindings([probeRel]).length === 0) {
+        fails.push(
+          `(s-control-c) BLIND SPOT: \`${plant.base}:${plant.beyond} below),\` went SILENT. A bare ` +
+            "direction word has been read as a comparison, and prose like `:~51 below)` is now a measurement.",
+        );
+      }
+    }
   } finally {
     rmSync(probeAbs, { force: true });
     rmSync(dir, { recursive: true, force: true });
@@ -962,6 +1255,17 @@ function selftest() {
   process.stdout.write("  ok: (l) silent on PROSE — a number glued to a word, and a date inside the target's filename\n");
   process.stdout.write("  ok: (m) bites on a citation PAST EOF carrying no harvestable anchor at all\n");
   process.stdout.write("  ok: (n) silent on a citation whose only anchor is a HYPHENATED fragment of its own path\n");
+  process.stdout.write("  ok: (o) a bare stem this file already QUALIFIED binds to the path it gave\n");
+  process.stdout.write("  ok: (o-control) the SAME citation, unqualified, still REDS — (o) is a binding, not a blind spot\n");
+  process.stdout.write("  ok: (p) two paths for one basename REFUSE — `cannot resolve`, never a pick\n");
+  process.stdout.write("  ok: (q) a doc-local binding to a file that cannot hold the line still REDS\n");
+  process.stdout.write("  ok: (r) silent on a QUOTED BYTE COUNT — `<file>: <n> B` is a size, not a line\n");
+  process.stdout.write("  ok: (r-control-a) the SAME `<file>: <n>` shape with NO unit still REDS\n");
+  process.stdout.write("  ok: (r-control-b) a citation trailed by an ordinary WORD still REDS — the guard widened to UNITS, not to letters\n");
+  process.stdout.write("  ok: (s/s-b/s-c/s-d) silent on a QUANTITY COMPARED TO A BUDGET — `over cap`, `exceeds`, `kb >`, `% of budget` — with no unit list to enumerate\n");
+  process.stdout.write("  ok: (s-control-a) a genuine citation inside a BACKTICKED span still REDS\n");
+  process.stdout.write("  ok: (s-control-b) a citation in a sentence that merely MENTIONS a cap still REDS — the rule keys on the number, not the span\n");
+  process.stdout.write("  ok: (s-control-c) a citation trailed by a bare direction word (`below),`) still REDS\n");
   process.stdout.write(`${bar}\nSELFTEST PASSED\n`);
   process.exit(0);
 }

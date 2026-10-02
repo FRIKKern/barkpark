@@ -61,6 +61,8 @@ survive a projection.
 `?expand=author` inlines the referenced document. `?expand=tags` inlines every
 element of an `arrayOf` whose element type is `reference` — **ref arrays are
 not excluded**. `?expand=true` expands every reference field on the type.
+A field's target may be named by `refType`, `to` or `refTypes`; with several
+types, the stored document's own type decides.
 
 Depth is one hop. A dotted spec (`?expand=author.employer`) names no top-level
 reference field and expands nothing; there is no `expand=a.b` grammar.
@@ -169,7 +171,7 @@ are load-bearing for a client:
 | `GET /v1/data/revision/:ds/:id` | `{revision}` | predates the envelope |
 | `GET /v1/data/analytics/:dataset` | `{dataset, total_documents, types, recent_activity}` | flat stats shape |
 | `GET /v1/data/listen/:dataset` | SSE stream | not a JSON body |
-| `GET /v1/data/export/:dataset` | NDJSON stream | not a JSON body |
+| `GET /v1/data/export/:dataset` | NDJSON; `?perspective` default raw (write) / published (read) | not a JSON body |
 
 **`?filterresponse=false` — or `Accept: ...+filterresponse=false` — strips the
 envelope** and returns the inner payload flat: `{documents, count, ...}` for a

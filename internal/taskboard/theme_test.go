@@ -148,9 +148,11 @@ func TestRoleForClaimlessInProgressIsInfo(t *testing.T) {
 // away.
 func TestClaimEscalationStaysBoardOnly(t *testing.T) {
 	claimedAt := time.Unix(0, 0)
-	fresh := claimedAt.Add(time.Minute)                   // <70% of the 5m lease
-	leaning := claimedAt.Add(leaseTTL*7/10 + time.Second) // past ~70%
-	spent := claimedAt.Add(leaseTTL + time.Minute)        // past the lease
+	// The bands are the SERVER's lease (2700s), not the old 5-minute constant
+	// (task-f30dab8c54c605e6).
+	fresh := claimedAt.Add(time.Minute)                               // <70% of the lease
+	leaning := claimedAt.Add(defaultClaimLeaseTTL*7/10 + time.Second) // past ~70%
+	spent := claimedAt.Add(defaultClaimLeaseTTL + time.Minute)        // past the lease
 	inProg := func() Task {
 		return Task{Lifecycle: "in_progress", Claim: &Claim{ClaimedAt: claimedAt}}
 	}

@@ -120,8 +120,12 @@ defmodule Barkpark.Plugins.OnixEditTest do
     test "ContributorRole codelist 17 is declared (D17)" do
       reqs = OnixEdit.codelist_requirements()
 
+      # ONIX list 17 at the bundled issue 73. It used to read issue "17": the
+      # list NUMBER in the issue slot, so the health audit called it stale
+      # even once the role name resolved (task-7c9dafd4a99a8207).
       assert Enum.any?(reqs, fn r ->
-               r.list_id == "onixedit:contributor_role" and r.issue == "17"
+               r.list_id == "onixedit:list_17" and r.issue == "73" and
+                 r.name == "onixedit:contributor_role"
              end),
              "ContributorRole list 17 must be in the codelist requirements (D17)"
     end

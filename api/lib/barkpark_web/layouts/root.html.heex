@@ -34,6 +34,9 @@
       }
       var stored = localStorage.getItem(KEY);
       document.documentElement.dataset.theme = stored || osTheme();
+      // spd-b1 — remembered inspector collapse (written only at `wide`, by the
+      // phx:inspector-pref listener at the bottom of <body>).
+      if (localStorage.getItem("barkpark_inspector") === "closed") document.documentElement.dataset.inspectorPref = "closed";
       // Follow OS live ONLY while the user has made no explicit choice.
       window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", function (e) {
         if (localStorage.getItem(KEY)) return;
@@ -76,7 +79,11 @@
       });
     })();
   </script>
-  <title>Barkpark Studio</title>
+  <%!-- The LiveViews assign page_title ("Media Library", "Workspace Settings", …);
+        a static <title> threw it away, so every Studio tab read the same. The
+        default carries NO site name: live_title appends the suffix to it too
+        (same pattern as sheets.html.heex / bulldocs.html.heex). --%>
+  <.live_title default="Studio" suffix=" · Barkpark">{assigns[:page_title]}</.live_title>
   <style>
     /* ── Inter — self-hosted chrome font (variable woff2 in priv/static/fonts/,
        served at /fonts/ by Plug.Static). One file carries weights 100–900;
@@ -226,6 +233,8 @@
       --text-base: 14px; --text-base-lh: 1.5;
       --text-sm: 13px; --text-sm-lh: 1.45;
       --text-xs: 12px; --text-xs-lh: 1.4;
+      --text-2xs: 11px; --text-2xs-lh: 1.4;
+      --text-3xs: 10px; --text-3xs-lh: 1.4;
       --dur-1: 0.15s;
       --dur-2: 0.18s;
       --dur-3: 0.28s;
@@ -798,6 +807,36 @@
     }
 
     /* ── Schema-driven field-group tabs (editor pane) ─────────────────── */
+    /* Document views (Gyldendal parity E10). A second, quieter tab row above
+       the field groups: it switches the whole editor body between the form and
+       a list of related documents, so it reads as a level above the group tabs
+       rather than a sibling of them. */
+    .bp-view-bar {
+      display: flex; gap: 4px; align-items: center;
+      padding: 0 0 10px 0; margin-bottom: 14px;
+      border-bottom: 1px solid var(--border-muted);
+      overflow-x: auto;
+    }
+    .bp-view-tab {
+      appearance: none; background: transparent;
+      border: 1px solid transparent; border-radius: 999px;
+      padding: 4px 12px;
+      color: var(--fg-muted); cursor: pointer;
+      font-size: var(--text-sm); font-family: inherit; white-space: nowrap;
+      transition: color var(--dur-1), background var(--dur-1), border-color var(--dur-1);
+    }
+    .bp-view-tab:hover { color: var(--fg); background: var(--bg-muted); }
+    .bp-view-tab.is-active {
+      color: var(--fg); background: var(--bg-accent);
+      border-color: var(--border); font-weight: 500;
+    }
+    .bp-view-list { display: flex; flex-direction: column; }
+    .bp-view-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 12px; text-decoration: none;
+      border-bottom: 1px solid var(--border-muted);
+    }
+
     .bp-tab-bar {
       display: flex; gap: 2px; padding: 0 0 12px 0;
       border-bottom: 1px solid var(--border-muted);
@@ -910,7 +949,7 @@
     .badge {
       display: inline-flex; align-items: center; gap: 5px;
       height: 22px; padding: 0 8px;
-      border-radius: 999px; font-size: 11px; font-weight: 600;
+      border-radius: 999px; font-size: var(--text-2xs); font-weight: 600;
       letter-spacing: 0.02em;
     }
     .badge-published { background: var(--ok-soft); color: var(--success); }
@@ -978,7 +1017,7 @@
       transition: all var(--dur-1);
     }
     .schema-card:hover { border-color: var(--primary); background: var(--bg-muted); }
-    .schema-card-icon { font-size: 28px; }
+    .schema-card-icon { font-size: 28px; } /* off-ladder: display glyph on the schema card, not chrome text */
     .schema-card-name { font-size: var(--text-base); font-weight: 600; }
     .schema-card-meta { display: flex; align-items: center; gap: 8px; }
 
@@ -1020,8 +1059,11 @@
     /* Boolean fields render as a labeled switch (Sanity-style), not a bare
        checkbox. The real checkbox stays in the DOM (form semantics, a11y,
        keyboard toggle) but is visually replaced by the track + thumb; the
-       On/Off text states the value in words. */
-    .form-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+       On/Off text states the value in words. `position: relative` makes the
+       switch the hidden checkbox's containing block — without it the checkbox
+       lays out on <html>, outside any page scroller, and focusing one below
+       the fold scrolls the whole Studio shell off-screen. */
+    .form-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
     .form-switch input[type="checkbox"] {
       position: absolute; width: 1px; height: 1px; opacity: 0;
     }
@@ -1080,7 +1122,7 @@
     }
     .mode-tab {
       height: 20px; padding: 0 10px; border: none;
-      border-radius: 999px; font-size: 11px; font-weight: 600;
+      border-radius: 999px; font-size: var(--text-2xs); font-weight: 600;
       letter-spacing: 0.02em; line-height: 1;
       display: inline-flex; align-items: center;
       background: transparent; color: var(--fg-muted); cursor: pointer;
@@ -1109,12 +1151,12 @@
       width: 100%; height: 130px; object-fit: cover;
       background: var(--bg-muted);
       display: flex; align-items: center; justify-content: center;
-      color: var(--fg-dim); font-size: 32px;
+      color: var(--fg-dim); font-size: 32px; /* off-ladder: placeholder glyph filling the 130px media thumb */
     }
     .media-thumb img { width: 100%; height: 100%; object-fit: cover; }
     .media-info { padding: 10px 12px; }
     .media-name { font-size: var(--text-xs); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .media-size { font-size: 11px; color: var(--fg-dim); margin-top: 2px; }
+    .media-size { font-size: var(--text-2xs); color: var(--fg-dim); margin-top: 2px; }
 
     /* ── Flash messages ───────────────────────────────────────────────── */
     .flash {
@@ -1129,7 +1171,7 @@
       display: flex; flex-direction: column; align-items: center; justify-content: center;
       padding: 64px 24px; text-align: center; color: var(--fg-muted);
     }
-    .empty-state-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.5; }
+    .empty-state-icon { font-size: 40px; margin-bottom: 16px; opacity: 0.5; } /* off-ladder: empty-state display glyph */
     .empty-state-text { font-size: var(--text-base); margin-bottom: 20px; }
 
     /* ── Upload zone ──────────────────────────────────────────────────── */
@@ -1184,7 +1226,7 @@
       display: flex; align-items: center; gap: 8px;
     }
     .studio-bar-actions-label {
-      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      font-size: var(--text-3xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--fg-dim);
     }
 
@@ -1239,7 +1281,7 @@
     .bp-update-bar {
       display: flex; flex-direction: column; flex-shrink: 0;
       background: var(--bg-card); border-bottom: 1px solid var(--border-muted);
-      font-size: 12.5px;
+      font-size: 12.5px; /* off-ladder: half-step between xs (12) and sm (13) — the admin strip is quieter than sm without dropping to xs */
     }
     .bp-update-bar-main {
       display: flex; align-items: center; gap: 10px;
@@ -1292,10 +1334,10 @@
     }
     .bp-update-notes-link:hover { text-decoration: underline; }
     .bp-update-changelog code {
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       padding: 1px 4px; border-radius: 3px; background: var(--bg-card);
     }
-    .bp-update-fork { padding: 2px 16px 6px 33px; color: var(--fg-dim); font-size: 11px; }
+    .bp-update-fork { padding: 2px 16px 6px 33px; color: var(--fg-dim); font-size: var(--text-2xs); }
     .bp-update-bar--muted { background: var(--bg-muted); }
     .bp-update-bar--muted .bp-update-bar-main { min-height: 28px; }
 
@@ -1340,8 +1382,14 @@
       background: var(--bg-card);
       /* spd-s5: the space negotiation is a MOVE, not a jump. Collapsing a
          pane swaps .pane-column ⇄ .pane-column--collapsed, i.e. 260px ⇄
-         44px; without a transition the row teleports and reads as a glitch
-         (measured live: transitionDuration 0s on every desk element).
+         44px; without a transition the row teleports and reads as a glitch.
+         (That parenthesis used to read "measured live: transitionDuration 0s
+         on every desk element" in the PRESENT tense, directly above the rule
+         that makes it false — it described the desk BEFORE this line existed.
+         Re-measured on deployed guerrilla at f703de669, in a real browser, in
+         both motion regimes: this element reports 0.15s on width/min-width/
+         max-width, and `.bp-paper-surface` / `.editor-panel-main` report 0s.
+         scripts/studio-desk-motion-probe.mjs, spd-b30.)
          Both states declare the same box transition so the morph plays in
          BOTH directions. The duration was a hardcoded 0.15s until spd-b21:
          design/tokens.json carried motion.dur-* but design/emit.mjs emitted
@@ -1368,7 +1416,7 @@
     .pane-header-title { font-size: var(--text-sm); font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Dimmed doc count next to a pane title (only :doc items counted). */
     .pane-header-count {
-      flex-shrink: 0; font-size: 11px; font-weight: 600; color: var(--fg-muted);
+      flex-shrink: 0; font-size: var(--text-2xs); font-weight: 600; color: var(--fg-muted);
       background: var(--bg-muted); border-radius: 999px; padding: 1px 7px;
     }
     .pane-header-actions { display: flex; align-items: center; gap: 6px; }
@@ -1554,24 +1602,30 @@
            so — 0.18 read as a panel that mysteriously floats. */
         box-shadow: -16px 0 48px hsl(var(--bp-shadow-hsl) / 0.28);
       }
-      /* The scrim. It is the missing half of "this thing is ON TOP": without
-         it the document underneath still reads as live, editable surface.
-         ABSOLUTE, never fixed — the overlay is anchored to .editor-panel's
-         `position: relative`, so a fixed scrim would dim the whole viewport
-         (sidebar, topbar and neighbouring panes included) instead of the
-         document it covers. It also renders zero times outside this width,
-         because the :has() only matches while the sidebar is overlaid.
-         `pointer-events: none` is deliberate: CSS cannot carry a phx-click,
-         so a click-catching scrim would be a dead zone that swallows edits.
-         Tap-to-dismiss is spd-b12's job, in the .ex half. */
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        z-index: 4;
-        background: hsl(var(--bp-scrim-hsl) / 0.55);
-        pointer-events: none;
-      }
+      /* NO SCRIM — the overlay does NOT dim the document underneath (D127).
+         This block used to generate one here, at 55% black:
+         `.editor-with-preview:has(.bp-doc-sidebar.is-open)::after`, so that
+         an inspector sitting OVER the prose would read as on top. Four
+         later rules then cancelled it one bucket at a time — the b29 guard
+         (below wide, never asked for), D170 (wide, unconditional), D155
+         (narrow/phone, user-opened) and D175/D187 (standard, user-opened) —
+         and between them they covered every shipped bucket x user-opened
+         cell. Measured before removal, with all five rules in place: `none`
+         at 861px AND at 860px in 8 of 8 cells. The generator painted nowhere.
+
+         SO THE RULING IS NOW EXPRESSED BY ABSENCE, not by one unreachable
+         rule propped up by four cancellations. D127's finding is that a 55%
+         wash over live prose is INDETERMINACY — a half-suspended read that is
+         neither a clean mode nor a viable dock — and every bucket has since
+         agreed. A panel that covers the pane says it is on top by being the
+         only thing there; a panel that does not cover it is not on top.
+
+         DO NOT RE-ADD ONE HERE. `scripts/studio-scrim-abolition-check.mjs`
+         reds if any rule in this sheet attaches a generated box to
+         `.editor-with-preview`, in either direction — a new generator and a
+         new `content: none` cancellation are both the shape this family grew
+         out of. `inspector_summoned_destination_test.exs` is the ExUnit half
+         of the same predicate. */
       /* Inspector label/value rows crowd once the panel can sit over
          arbitrary content — let them wrap instead of colliding. */
       .bp-doc-field { flex-wrap: wrap; }
@@ -1619,6 +1673,19 @@
        this the classic editor would keep a 48ch floor on a 375px viewport. */
     html[data-width-bucket="phone"] .editor-panel .editor-body.editor-panel-main:not(.bp-paper-body) {
       min-inline-size: 0;
+    }
+    /* No document open at phone: the list IS the surface. The nothing-selected
+       placeholder is `.editor-empty { flex: 1 }` (basis 0) and the lone list is
+       `.pane-column--last { flex: 1 1 auto }`, so the two shared the free
+       space: live at 375 the placeholder took a 61.8px strip, the list shrank
+       to 313.2px and the sentence wrapped one word per line (80px / 340px at
+       420). Its only content is "pick one from the list", and the list is the
+       thing it was squeezing, so at phone it yields entirely. Keyed on
+       `data-reason="nothing_selected"`: the not-found / no-schema notices are
+       real errors and are not touched. The `:has(> .pane-column--last)` guard
+       keeps the placeholder if a desk ever renders with no list column. */
+    html[data-width-bucket="phone"] .pane-layout:has(> .pane-column--last) > .editor-empty[data-reason="nothing_selected"] {
+      display: none;
     }
 
     /* Secondary editor pane (D36) — the LAST unconditional crush. The E2
@@ -1680,7 +1747,7 @@
     }
     .bp-desk-crumb:hover { color: var(--fg); background: var(--bg-muted); }
     .bp-desk-crumb:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
-    .bp-desk-crumb-sep { color: var(--fg-dim); font-size: 11px; flex-shrink: 0; user-select: none; }
+    .bp-desk-crumb-sep { color: var(--fg-dim); font-size: var(--text-2xs); flex-shrink: 0; user-select: none; }
     /* The trail's last entry is a document TITLE — arbitrary, user-authored
        length — and the trail is `overflow-x: auto; white-space: nowrap` with
        `flex-shrink: 0` crumbs. Unbounded, one long title pushes the whole
@@ -1707,7 +1774,7 @@
       padding: 3px 9px; border-radius: 999px;
       border: 1px solid var(--border-muted);
       background: transparent; color: var(--fg-muted);
-      font-size: 11px; font-weight: 500;
+      font-size: var(--text-2xs); font-weight: 500;
       text-decoration: none; cursor: pointer;
       transition: background var(--dur-1), color var(--dur-1), border-color var(--dur-1);
       white-space: nowrap;
@@ -1728,7 +1795,7 @@
     .bp-pane-notice {
       display: flex; align-items: flex-start; gap: 6px;
       padding: 8px 12px; border-bottom: 1px solid var(--border-muted);
-      font-size: 11px; line-height: 1.45;
+      font-size: var(--text-2xs); line-height: 1.45;
     }
     .bp-pane-notice-error {
       color: var(--destructive);
@@ -1759,7 +1826,7 @@
     .pane-item:hover { background: var(--bg-muted); color: var(--fg); }
     .pane-item:focus-visible { outline: 2px solid var(--ring); outline-offset: -2px; }
     .pane-item.selected { background: var(--bg-accent); color: var(--fg); border-left-color: var(--primary); }
-    .pane-item-icon { width: 18px; text-align: center; font-size: 15px; }
+    .pane-item-icon { width: 18px; text-align: center; font-size: 15px; } /* off-ladder: pane icon glyph fitted to an 18px column */
     .pane-item-label { flex: 1; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     /* Drill chevron, hover-revealed (matches .pane-doc-chevron): the affordance
        appears when the row is hovered or already the drilled/selected ancestor,
@@ -1770,7 +1837,7 @@
 
     .pane-section-header {
       display: flex; align-items: center; gap: 6px;
-      padding: 16px 16px 8px; font-size: 11px; font-weight: 600;
+      padding: 16px 16px 8px; font-size: var(--text-2xs); font-weight: 600;
       color: var(--fg-dim); text-transform: uppercase; letter-spacing: 0.05em;
       background: none; border: 0; width: 100%; text-align: left;
       font-family: inherit; cursor: default;
@@ -1803,7 +1870,7 @@
       border-top: 1px solid var(--border-muted);
     }
     .pane-divider-label {
-      font-size: 10px;
+      font-size: var(--text-3xs);
       letter-spacing: 0.08em;
       text-transform: uppercase;
       color: var(--fg-dim);
@@ -1820,6 +1887,36 @@
     /* nav-plugin-entry's own specificity (0,2,1) beats .pane-item:hover (0,2,0),
        so the shared hover lift needs a matching rule to reach link rows. */
     a.pane-item.nav-plugin-entry:hover { color: var(--fg); }
+
+    /* Desk search (Gyldendal parity E8). The box sits at the top of the ROOT
+       pane and looks like a pane row, not a form: no card, one hairline under
+       it, the magnifier and the clear button flanking a borderless input. */
+    .bp-desk-search {
+      display: flex; align-items: center; gap: 6px;
+      padding: 6px 12px; border-bottom: 1px solid var(--border-muted);
+      flex-shrink: 0;
+    }
+    .bp-desk-search-icon { display: inline-flex; color: var(--fg-muted); flex-shrink: 0; }
+    .bp-desk-search-input {
+      flex: 1 1 auto; min-width: 0;
+      background: transparent; border: 0; box-shadow: none;
+      padding: 2px 0; font-size: var(--text-sm); color: var(--fg);
+    }
+    .bp-desk-search-input:focus { outline: none; box-shadow: none; }
+    .bp-desk-search-input::placeholder { color: var(--fg-muted); }
+    /* The pane's own clear button is the one clear control; hide the native
+       type="search" cancel glyph that rendered a second x beside it. */
+    .bp-desk-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+    /* A hit is an <a>, so it needs the row's block layout and its own link
+       reset; the rest of the row look comes from .pane-doc-item above.
+       Compound selector on purpose: the later `.pane-doc-item { padding: 0 }`
+       (doc rows moved their padding onto an inner button) otherwise zeroes a
+       hit's padding and leaves 21px rows flush against the pane edge. */
+    .pane-doc-item.bp-desk-search-hit {
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+      padding: 8px 12px; text-decoration: none;
+    }
+    .bp-desk-search-hit .pane-doc-sub { flex-shrink: 0; }
 
     .pane-doc-item {
       cursor: pointer;
@@ -1868,7 +1965,7 @@
     .pane-doc-badge {
       margin-left: auto; flex-shrink: 0;
       padding: 1px 7px; border-radius: 999px;
-      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      font-size: var(--text-3xs); font-weight: 600; letter-spacing: 0.02em;
       background: var(--bg-muted); color: var(--muted-text);
       border: 1px solid var(--border-muted);
     }
@@ -1947,6 +2044,20 @@
       .pane-column, .pane-column--collapsed { transition: background var(--dur-1); }
       .pane-column--collapsed > * { animation: none; }
     }
+    /* The collapsed strip's two children are <span>s, NOT <div>s: their
+       parent is a <button>, whose HTML5 content model admits phrasing content
+       only. A <span> takes `display:inline` from the UA sheet, so the flex box
+       both boxes rely on has to be ASSERTED by class, never inherited from the
+       tag. `.pane-header` above already declares `display: flex` and
+       `.pane-column-collapsed-label` below already declares `display: flex`, so
+       the computed display is `flex` in both cases exactly as it was while they
+       were divs, and NO rule had to be added here to keep it that way.
+       Consequence to respect: `display: flex` on `.pane-header` is now
+       LOAD-BEARING for the collapsed strip, not merely a restatement of what
+       a <div> already was. Deleting it would drop this box to an inline one.
+       It is deliberately NOT re-stated inside this rule: `display` counts as
+       box geometry to wide_geometry_lock_test's census, and an unscoped
+       geometry declaration on a pane family reds that lock. */
     .pane-column--collapsed .pane-header {
       justify-content: center;
       padding: 0;
@@ -1958,7 +2069,7 @@
       padding: 12px 6px;
       writing-mode: vertical-rl;
       transform: rotate(180deg);
-      font-size: 11px; font-weight: 600;
+      font-size: var(--text-2xs); font-weight: 600;
       color: var(--fg-muted);
       letter-spacing: 0.02em;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -2077,6 +2188,9 @@
     /* Paper actions are direct links/buttons, not the classic overflow menu.
        Give them their own row when the pane is narrow: flex-end overflow would
        otherwise paint Open standalone over the title. Desktop stays unchanged. */
+    /* The Classic/Beta mode switch is one unit: never wrap its two buttons
+       apart, never shrink it (task-43fe1756e8ae8120). */
+    .editor-mode-toggle { display: inline-flex; flex: none; gap: 4px; }
     @container panel (max-width: 720px) {
       .editor-panel[data-test-id="studio-paper-editor"] > .editor-header {
         display: grid; grid-template-columns: minmax(0, 1fr);
@@ -2084,6 +2198,17 @@
       }
       .editor-panel[data-test-id="studio-paper-editor"] > .editor-header > div:last-child {
         flex-wrap: wrap;
+      }
+      /* A doc editor carrying the mode toggle gets the same second row off the
+         wide desk: the toggle and the collapsible doc-action menu share it,
+         the menu takes what is left and folds its overflow into "•••"
+         (task-43fe1756e8ae8120). Bucket-scoped: the wide desk is untouched. */
+      html:not([data-width-bucket="wide"]) .editor-panel > .editor-header:has(.editor-mode-toggle) {
+        display: grid; grid-template-columns: minmax(0, 1fr);
+        height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+      }
+      html:not([data-width-bucket="wide"]) .editor-panel > .editor-header:has(.editor-mode-toggle) > div:last-child {
+        justify-content: flex-start;
       }
     }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }
@@ -2093,7 +2218,7 @@
       display: block; margin-bottom: 6px; font-size: var(--text-xs); font-weight: 600;
       color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.04em;
     }
-    .editor-field-type { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-dim); margin-left: 6px; font-size: 11px; }
+    .editor-field-type { font-weight: 400; text-transform: none; letter-spacing: 0; color: var(--fg-dim); margin-left: 6px; font-size: var(--text-2xs); }
     .editor-actions { padding-top: 16px; border-top: 1px solid var(--border-muted); display: flex; align-items: center; gap: 12px; }
     .editor-empty {
       flex: 1; display: flex; align-items: center; justify-content: center;
@@ -2136,7 +2261,7 @@
     .bp-violation-item     { font-size: var(--text-xs); padding: 2px 0; color: var(--fg); }
     .bp-violation-item.bp-violations-error   { color: var(--destructive); }
     .bp-violation-item.bp-violations-warning { color: var(--warning); }
-    .bp-violation-fields { color: var(--fg-dim); font-family: var(--font-mono); font-size: 11px; }
+    .bp-violation-fields { color: var(--fg-dim); font-family: var(--font-mono); font-size: var(--text-2xs); }
 
     /* ── Content preview side-pane (Goal barkpark-G1, task s3).
        Doc-type-agnostic. The shell wraps the editor-body and an
@@ -2163,7 +2288,7 @@
     .bp-doc-rel-group { margin: 0 0 10px; }
     .bp-doc-rel-group:last-child { margin-bottom: 0; }
     .bp-doc-rel-group__h {
-      margin: 0 0 4px; font-size: 11px; font-weight: 600; color: var(--fg-dim);
+      margin: 0 0 4px; font-size: var(--text-2xs); font-weight: 600; color: var(--fg-dim);
       text-transform: uppercase; letter-spacing: 0.04em;
     }
     .bp-doc-backlinks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
@@ -2175,7 +2300,7 @@
     .bp-doc-backlink.is-clickable { cursor: pointer; }
     .bp-doc-backlink.is-clickable:hover { background: var(--bg-hover, hsl(var(--bp-neutral-hsl) / 0.08)); }
     .bp-doc-backlink__title { font-size: var(--text-xs); font-weight: 500; color: var(--fg); }
-    .bp-doc-backlink__meta { font-size: 11px; color: var(--fg-dim); }
+    .bp-doc-backlink__meta { font-size: var(--text-2xs); color: var(--fg-dim); }
     /* t6 — WordPress-style metadata sidebar. Status tones mirror the bp
        manifest (ok/warn/danger/info); scoped locally since --st-* only cascade
        under .bp-paper-surface. Light + dark, media-query and data-theme. */
@@ -2235,8 +2360,20 @@
        SCOPE IS LOAD-BEARING (D92): `html:not([data-width-bucket="wide"])`.
        At viewport 1280 and 1440 the inspector docks and costs nothing, epic
        criterion 2 is measured there, and the round-2 floor slice takes its
-       676px input from those rows. This rule may not move one pixel there. */
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) {
+       676px input from those rows. This rule may not move one pixel there.
+
+       THE ONE WIDE EXCEPTION IS OPT-IN (spd-b1-pane-state-persistence):
+       `html[data-inspector-pref="closed"]` — stamped by the pre-paint head
+       script ONLY when the user collapsed the inspector at `wide` on an
+       earlier visit (localStorage `barkpark_inspector`). The default wide
+       desk never carries it, so D92's band is untouched. It exists for the
+       static render alone: connect_params is nil there, so the server still
+       paints `.is-open`, and this alternative paints it as the strip the user
+       left. The connected render then seeds `sidebar_open: false`
+       (`.is-collapsed`, the same geometry), after which this alternative can
+       no longer match. It never paints anything OPEN, at any bucket. */
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]),
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) {
       position: static;
       flex: 0 0 auto;
       width: auto;
@@ -2252,57 +2389,10 @@
       z-index: auto;
     }
     html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
-    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
+    html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
+    html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
-    }
-    /* The scrim guard. The overlay scrim keys on `:has(.bp-doc-sidebar.is-open)`
-       and is otherwise correct — but `.is-open` is now true for a panel that
-       paints as a strip, so without this the desk would dim the document under
-       an inspector nobody can see. Suppressed, not rewritten: the scrim must
-       still render for a wide-bucket pane narrow enough to overlay, and for
-       any panel the user actually opened, so the condition being subtracted is
-       exactly "below wide AND never asked for". */
-    html:not([data-width-bucket="wide"])
-      .editor-with-preview:has(.bp-doc-sidebar.is-open:not([data-user-opened]))::after {
-      content: none;
-    }
-    /* …AND THE WIDE SCRIM IS ABOLISHED TOO (charter D170). The guard above
-       carves `wide` out because a wide pane squeezed under 860px was assumed to
-       overlay a document that stays visible beside it — the one state where
-       dimming reads as an honest signal. Wave-11 measured that assumption and
-       it does not hold: the state is REACHABLE BY ARITHMETIC AND UNREACHABLE IN
-       FACT.
-
-       THE PAPER-ROUTING INVARIANT IS WHAT CARRIES IT. A document that has an
-       inspector at all is a paper, and papers route to a fixed two-pane shell —
-       a 44px yielded rail plus a 260px list column — so `.editor-panel` is
-       `vw - 304` at every wide viewport. The narrowest wide viewport is 1280,
-       giving panel = 976; the `@container panel (max-width: 860px)` generator
-       needs 860. Measured on the deployed sheet: 976 at 1280 and 1136 at 1440,
-       both clear of the threshold by more than 100px. The two shapes that could
-       breach 860 do not apply — deeper drills carry no inspector at all, and
-       the 360px `.bp-secondary-pane` that would eat the difference is
-       unreachable from the paper editor. So the wide scrim never painted for a
-       real desk; keeping the carve-out only preserved a rule nobody could
-       reach, over a document nobody could see dimmed.
-
-       WHAT THIS COSTS D153. The `wide` row used to be this sheet's POSITIVE
-       CONTROL — the proof that the scrim generator is live code rather than a
-       rule the suppressions had quietly killed everywhere. It cannot be that
-       any more, and the honest replacement is NOT this rule but the
-       FORCED-CONTAINER CONTROL: force `.editor-panel` to 861px and the computed
-       `::after` content is `none`, force it to 860px and it is `""`, verified at
-       both 1280 and 1440. That control exercises the generator's own threshold
-       instead of asserting a bucket keeps a scrim it never rendered — and it
-       still fails loudly if the generator is ever deleted.
-
-       Unconditional at `wide`, deliberately: `[data-user-opened]` is not
-       qualified here because the arithmetic above is indifferent to it. Both a
-       server-defaulted and a user-summoned inspector sit in the same [44,260]
-       shell, so neither can bring the pane under 860. */
-    html[data-width-bucket="wide"]
-      .editor-with-preview:has(.bp-doc-sidebar.is-open)::after {
-      content: none;
     }
 
     /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
@@ -2322,18 +2412,20 @@
        box dims the prose rather than hiding it, so the reader is left in a
        half-suspended read that is neither a clean mode nor a viable dock. A
        panel that covers the pane completely needs no scrim to say it is on
-       top — it says so by being the only thing there. The scrim is therefore
-       switched OFF for this state (below), not lightened: nowhere does this
-       desk end up with prose at 55% black under a panel.
+       top — it says so by being the only thing there. This state therefore
+       ships with NO scrim rule at all: not a lightened one, and no longer a
+       `content: none` cancelling a generator elsewhere in the sheet, because
+       the generator is gone too. See the NO SCRIM note in the
+       `@container panel (max-width: 860px)` block above.
 
        WHY THIS IS A NEW SELECTOR AND NOT AN EDIT (D91/b29). The bucket-aware
-       default above carries `:not([data-user-opened])` on both its geometry
-       rule and its scrim guard, so neither of them fires for the state below —
-       the panel the user explicitly asked for is exactly what they carve out.
-       This rule is the other half of that carve-out, finally saying what the
-       asked-for panel DOES below `wide`, and `data-user-opened` is already
-       server-stamped from the `sidebar_user_opened` assign (components.ex), so
-       the signal it keys on is in the DOM at first paint.
+       default above carries `:not([data-user-opened])` on its geometry rule,
+       so it does not fire for the state below — the panel the user explicitly
+       asked for is exactly what it carves out. This rule is the other half of
+       that carve-out, finally saying what the asked-for panel DOES below
+       `wide`, and `data-user-opened` is already server-stamped from the
+       `sidebar_user_opened` assign (components.ex), so the signal it keys on
+       is in the DOM at first paint.
 
        WHY IT DECLARES ITS OWN GEOMETRY rather than leaning on the
        `@container panel (max-width: 860px)` overlay block above: that block is
@@ -2366,53 +2458,93 @@
       border-left: 0;
       box-shadow: none;
     }
-    /* Dimming abolished for the summoned state. The overlay scrim is a
-       `::after` on `.editor-with-preview` keyed on `:has(.bp-doc-sidebar.is-open)`,
-       and `.is-open` is true here — so without this the desk would dim a
-       document that is already completely covered, which is both pointless and
-       the half-suspended read D127 ruled a defect. `content: none` is the same
-       suppression idiom as the b29 scrim guard directly above (a `::after` with
-       no `content` generates no box at all — this is zero rendered scrims, not
-       a transparent one). Specificity (0,5,1) over the container rule's (0,3,1)
-       and later in source order, so it wins on both counts. */
-    html[data-width-bucket="narrow"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after,
-    html[data-width-bucket="phone"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
-    }
-    /* THE STANDARD BUCKET IS RULED, NOT LEFT TO ARITHMETIC (charter D175/D187;
-       D127 harden). A clean standard desk never brings the pane under the
-       860px generator — panel = vw − 44, which crosses 860 only at
-       viewport ≤ 904, inside `narrow` — but the COMPOUND state is real and
-       was executed on the deployed build: a 360px `.bp-secondary-pane` opened
-       on a task survives navigation into a paper (`Scope.select/2` is
-       push_patch, so `secondary_doc` rides along), and at standard/1024 the
-       pane is 620 = 1024 − 44 − 360 exactly. The generator matched and
-       PAINTED — mean luminance over the reading column 240.493 → 175.104
-       (Δ 65.389) — the exact half-suspended read D127 ruled a defect, with
-       the inspector genuinely docked beside the prose it dims. No suppressor
-       covered standard + `[data-user-opened]`: the b29 guard excludes
-       user-opened, the narrow/phone rule above is bucket-scoped away, and
-       D170's is wide-only. This rule closes that gap.
 
-       BOTH HALVES SHIP, DELIBERATELY (D175/D199). The behavioural half clears
-       `secondary_doc` on primary-document navigation; this suppressor is the
-       CSS half, and neither stands down because the other exists. Resting an
-       abolition on a routing invariant alone is precisely the mistake D170
-       already made once: its supporting arithmetic — panel = vw − 304 at
-       every wide viewport — is FALSIFIED the moment a 360px secondary pane
-       is open. Wide stays safe today only because D170's kill switch above
-       is UNCONDITIONAL — specificity (0,4,2) over the generator's (0,3,1) —
-       not because the geometry holds. An invariant can break; the
-       suppressor cannot.
+    /* ── THE STANDARD-BUCKET DOCK IS 260px, AND WIDE IS NOT TOUCHED ──────────
+       (task inspector-dock-260px-and-the-1024-900-non-monotonicity; lead ruling
+       2026-09-06; D83/D103 on ceiling-trimming; D149 on the 300px dock.)
 
-       Same idiom as the narrow/phone sibling directly above: `content: none`
-       on the `::after` generates no box at all — zero rendered scrims, not a
-       transparent one. Specificity (0,5,1) over the generator's (0,3,1) and
-       later in source order, so it wins on both counts; and it sits OUTSIDE
-       the 860px @container on purpose, unbounded by pane width, so no future
-       pane composition can slip back under the threshold and re-dim. */
-    html[data-width-bucket="standard"] .editor-with-preview:has(.bp-doc-sidebar.is-open[data-user-opened])::after {
-      content: none;
+       ONE SHAPE, TIER-SCOPED, NOT A GLOBAL TRIM. The docked inspector keeps its
+       `flex: 0 0 300px` basis everywhere the base rule reaches. This rule is an
+       additive bucket-scoped override that moves the BASIS ONLY inside
+       `standard` (the width-bucket stamp's 1024–1279 band, EDGES [640,1024,1280]
+       in the pre-paint head script) and ONLY for the panel the user actually
+       asked for. `wide` is UNREACHABLE from this selector — an attribute
+       equality on a value `wide` never carries — so the wide bucket's
+       zero-pixel constraint is PRESERVED STRUCTURALLY, not by inspection: at
+       viewport 1280 and 1440 the dock is still 300px and the reading measure is
+       still 676px / 720px. Nothing here is a renegotiation of that constraint.
+
+       WHY 260 AND NOT 292. 292.42px is the exact arithmetic ceiling at which
+       ONE face (forced Georgia at 18px, 11.0469 px/ch probe-derived) crosses
+       55ch, and trimming a shipped dock to a single face's ceiling is the
+       threshold-gerrymandering D83 and D103 forbid by name — the next probe
+       run, the next face, or a 0.5px advance drift puts it back under. 260px is
+       not derived from a face at all: it is the shell's OWN list-column width
+       (`.pane-column` basis 260px, the second term of the measured
+       `visible_pane_widths_px: [44, 260]` shell), so the inspector docks at the
+       same width as the column it replaces on screen.
+
+       WHY A BUCKET ATTRIBUTE AND NOT A MEDIA OR CONTAINER QUERY. A media query
+       would re-derive the tier from raw `innerWidth` and drift from the stamp's
+       +32px widen-side dead-band, so the CSS and the desk's own tier contract
+       would disagree inside the hysteresis band. A container query would key on
+       PANE width — the one quantity the shell composition (a 360px
+       `.bp-secondary-pane`, a collapsed list column) changes underneath the
+       tier, which is exactly how D170's panel-arithmetic invariant was
+       falsified. The bucket stamp is the contract; the rule keys on the
+       contract.
+
+       WHERE IT ACTUALLY BITES, measured on a replica of this sheet, not
+       assumed. `.editor-panel` on the paper route is `vw - 304` (the [44, 260]
+       shell), and the `@container panel (max-width: 860px)` generator above
+       promotes the open inspector to an ABSOLUTE overlay whenever the pane is
+       <= 860px — where a flex basis does not apply at all. panel > 860 needs
+       vw > 1164, so inside `standard` this basis is live only from viewport
+       1165 up. Above it the `.bp-paper-surface` 660px cap takes over from the
+       dock as the binder, so the delta closes: it is a flat +40px of reading
+       column from 1165 to 1223, then decays to 0 by 1264. Replica-measured,
+       user-opened, forced Georgia 18px (11.0469 px/ch, probe-derived):
+       viewport 1165 content 481px = 43.54ch -> 521px = 47.16ch; viewport 1200
+       content 516px = 46.71ch -> 556px = 50.33ch; viewport 1224 content 540px
+       = 48.88ch -> 580px = 52.50ch. Viewports 1024, 1100, 1264, 1279, 1280 and
+       1440 are byte-identical across the two arms. Horizontal overflow on
+       `.editor-body.bp-paper-body` is 0px in every cell of both arms.
+
+       AND IT DOES NOT REACH 55ch, DELIBERATELY NOT CHASED. The 55ch floor
+       `calc(55ch + 2 * var(--paper-gutter))` sits behind
+       `@container content (min-width: 720px)`, and the content container IS
+       the reading column — `panel - dock`. Opening that gate inside `standard`
+       needs `vw - 304 - dock >= 720`, i.e. dock <= 255 at the very top of the
+       band (viewport 1279) and narrower still below it. Trimming to 255 to
+       clear a gate by 1px, for one face, at one viewport, is the
+       threshold-gerrymandering this rule already refused at 292.42px. Forced
+       Georgia therefore stays a MISS across the whole standard docked band and
+       that is an accepted, stated outcome of choosing a non-gerrymandered
+       width — not an oversight.
+
+       ── OWNED SHORTFALL: 1024 STILL READS WORSE THAN 900, AND NO DOCK NUMBER
+       FIXES IT (task criterion 2). In the DEFAULT state, replica-measured on
+       this sheet: viewport 900 forced Georgia content 607.625px = 55.00ch,
+       viewport 1024 content 580px = 52.50ch. The desk is genuinely
+       non-monotonic across the narrow->standard edge, on the Georgia face
+       only — native (Iowan, 10.0 px/ch) and the Source Serif slot measure
+       580px = 58.00ch at both widths.
+
+       THE CAUSE IS THE PANE SHELL AND THE FLOOR GATE, NOT THE DOCK. `narrow`
+       serves ONE visible pane (the 44px strip; panel 856) while `standard`
+       serves TWO (the [44, 260] shell; panel 720), so 1024 LOSES 136px of pane
+       to the very edge it crosses. Subtract the b29 41px in-flow strip and the
+       reading column is 815px at 900 against 679px at 1024 — 815 clears
+       `@container content (min-width: 720px)` and 679 does not, so the 55ch
+       floor binds at 900 (687.632px resolved) and is switched off at 1024,
+       where the 660px `max-inline-size` cap then rules. Neither term is a dock
+       width, and the default-state inspector is not docked at all: this rule
+       is inert there by construction. Recorded as an OWNED shortfall here
+       rather than silently left to the next reader of the ladder; the lever
+       that could move it is spd-b42's 1024 lever (the 41px strip against a
+       ~32px ceiling), or the shell itself. */
+    html[data-width-bucket="standard"] .bp-doc-sidebar.is-open[data-user-opened] {
+      flex-basis: 260px;
     }
     .bp-doc-sidebar__head {
       display: flex; align-items: center; gap: 8px;
@@ -2461,6 +2593,23 @@
       min-height: 44px;
       justify-content: center;
     }
+    /* The CLOSED strip's toggle at phone gets a 24px target (WCAG 2.2 SC
+       2.5.8). The rule above deliberately leaves the painted-closed strip's
+       button at its 16x16 icon box; at phone that box was measured live at
+       16x16 (x=347 at 375), under the 24px floor, and it is the only way to
+       summon the inspector there. `:not([data-user-opened])` keeps this
+       disjoint from the 44px Tier-3 exit above.
+
+       The negative margin is the point: the border box grows to 24x24, but
+       -4px on every side gives it back, so the flex footprint stays 16x16 and
+       the 41px strip, the 36px head and the 328px reader do not move. The 4px
+       overhang lands in the head's own `8px 12px` padding. */
+    html[data-width-bucket="phone"] .bp-doc-sidebar:not([data-user-opened]) .bp-doc-sidebar__collapse {
+      min-width: 24px;
+      min-height: 24px;
+      margin: -4px;
+      justify-content: center;
+    }
     /* The only affordance that closes the inspector once it overlays the
        document — it must be able to receive focus visibly. */
     .bp-doc-sidebar__collapse:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; border-radius: 4px; }
@@ -2474,7 +2623,7 @@
     .bp-doc-sec__toggle {
       display: flex; align-items: center; gap: 6px; width: 100%;
       padding: 10px 12px; background: none; border: 0; cursor: pointer;
-      font-size: 11px; font-weight: 600; color: var(--fg-muted); text-align: left;
+      font-size: var(--text-2xs); font-weight: 600; color: var(--fg-muted); text-align: left;
       text-transform: uppercase; letter-spacing: 0.04em;
     }
     .bp-doc-sec__toggle:hover { color: var(--fg); }
@@ -2488,7 +2637,7 @@
     .bp-doc-field__label { font-size: var(--text-xs); color: var(--fg-dim); }
     .bp-doc-field__val { font-size: var(--text-xs); color: var(--fg); font-weight: 500; }
     .bp-doc-badge {
-      font-size: 11px; font-weight: 600; padding: 2px 8px;
+      font-size: var(--text-2xs); font-weight: 600; padding: 2px 8px;
       border-radius: 999px; text-transform: capitalize;
       /* base = the draft treatment, so an unexpected status string still
          renders as a legible neutral pill; known statuses override below */
@@ -2500,7 +2649,7 @@
     .bp-doc-slug__input {
       width: 100%; font-family: var(--paper-font-mono, ui-monospace, monospace); font-size: var(--text-xs);
     }
-    .bp-doc-slug__fb { margin: 0; font-size: 11px; }
+    .bp-doc-slug__fb { margin: 0; font-size: var(--text-2xs); }
     .bp-doc-slug__fb--ok { color: var(--st-ok); }
     .bp-doc-slug__fb--warn { color: var(--st-warn); }
     .bp-doc-slug__fb--danger { color: var(--st-danger); }
@@ -2508,13 +2657,13 @@
     .bp-doc-tags { list-style: none; margin: 0; padding: 0; display: flex; flex-wrap: wrap; gap: 6px; }
     .bp-doc-tag {
       display: inline-flex; align-items: center; gap: 4px;
-      font-size: 11px; padding: 2px 8px; border-radius: 999px;
+      font-size: var(--text-2xs); padding: 2px 8px; border-radius: 999px;
       background: var(--bg-hover, hsl(var(--bp-neutral-hsl) / 0.1)); color: var(--fg-muted);
     }
     .bp-doc-rels { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
     .bp-doc-rel { display: flex; flex-direction: column; gap: 1px; }
     .bp-doc-rel__label { font-size: var(--text-xs); color: var(--fg); font-weight: 500; }
-    .bp-doc-rel__id { font-size: 11px; color: var(--fg-dim); font-family: var(--paper-font-mono, ui-monospace, monospace); }
+    .bp-doc-rel__id { font-size: var(--text-2xs); color: var(--fg-dim); font-family: var(--paper-font-mono, ui-monospace, monospace); }
     .bp-onix-preview {
       display: flex; flex-direction: column;
       background: var(--bg-card);
@@ -2536,7 +2685,7 @@
       margin: 0; padding: 12px 14px;
       background: var(--bg);
       font-family: var(--font-mono);
-      font-size: 11px; line-height: 1.45;
+      font-size: var(--text-2xs); line-height: 1.45;
       color: var(--fg-muted);
       white-space: pre;
     }
@@ -2585,7 +2734,7 @@
     .bp-diff-status { font-family: var(--font-mono); }
     .bp-diff-draft, .bp-diff-published {
       margin: 0; padding: 0;
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       white-space: pre-wrap; word-break: break-word;
     }
 
@@ -2607,7 +2756,7 @@
       cursor: pointer; color: var(--fg-muted); transition: all var(--dur-1);
     }
     .image-upload-zone:hover { border-color: var(--primary); color: var(--fg); background: hsl(var(--primary-hsl) / 0.03); }
-    .image-upload-icon { font-size: 24px; font-weight: 300; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
+    .image-upload-icon { /* off-ladder: "+" glyph centred in a 36px circle */ font-size: 24px; font-weight: 300; width: 36px; height: 36px; border-radius: 50%; border: 1px solid var(--border); display: flex; align-items: center; justify-content: center; }
     .image-upload-text { font-size: var(--text-sm); }
     .image-picker-overlay { position: fixed; inset: 0; background: hsl(var(--bp-scrim-hsl) / 0.5); z-index: 50; }
     .image-picker {
@@ -2624,31 +2773,31 @@
     .image-picker-item { cursor: pointer; border: 2px solid transparent; border-radius: var(--radius-sm); overflow: hidden; transition: border-color var(--dur-1); }
     .image-picker-item:hover { border-color: var(--primary); }
     .image-picker-item img { width: 100%; height: 100px; object-fit: cover; display: block; }
-    .image-picker-name { font-size: 11px; color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .image-picker-name { font-size: var(--text-2xs); color: var(--fg-muted); padding: 4px 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
     /* Network shares panel (scoped-sharing P6). Reuses .image-picker chrome. */
     .shares-modal { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
     .shares-add-form { display: grid; gap: 10px; padding: 16px; border-bottom: 1px solid var(--border-muted); }
     .shares-field { display: grid; gap: 4px; }
-    .shares-field-label { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .shares-field-label { font-size: var(--text-2xs); font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
     .shares-surfaces { display: flex; gap: 16px; font-size: var(--text-sm); }
     .shares-surfaces label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     /* Airdrop duration radios + capability checkboxes flow as one wrapping
        inline row — the kit's .form-radio/.form-checkbox labels are flex
        (block-level), so a bare wrapper would stack them vertically. */
     .airdrop-duration, .airdrop-caps { display: flex; flex-wrap: wrap; gap: 6px 18px; font-size: var(--text-sm); }
-    .shares-note { font-size: 11px; color: var(--fg-muted); margin: 0; }
+    .shares-note { font-size: var(--text-2xs); color: var(--fg-muted); margin: 0; }
     .shares-error { font-size: var(--text-xs); color: var(--destructive); margin: 0; }
     .shares-add-actions { display: flex; justify-content: flex-end; }
     .shares-list { overflow-y: auto; padding: 12px 16px 16px; }
-    .shares-list-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }
+    .shares-list-title { font-size: var(--text-2xs); font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin-bottom: 8px; }
     .shares-empty { font-size: var(--text-xs); color: var(--fg-muted); padding: 12px 0; text-align: center; }
     .share-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-muted); border-radius: var(--radius-sm); margin-bottom: 8px; }
     .share-row-main { min-width: 0; }
     .share-row-scope { font-size: var(--text-sm); font-weight: 600; }
-    .share-row-meta { font-size: 11px; color: var(--fg-muted); margin-top: 2px; }
+    .share-row-meta { font-size: var(--text-2xs); color: var(--fg-muted); margin-top: 2px; }
     .share-row-source { text-transform: uppercase; letter-spacing: 0.04em; }
-    .share-row-url { font-size: 11px; font-family: var(--font-mono); color: var(--primary); margin-top: 4px; word-break: break-all; }
+    .share-row-url { font-size: var(--text-2xs); font-family: var(--font-mono); color: var(--primary); margin-top: 4px; word-break: break-all; }
     .share-row-remove { color: var(--destructive); flex-shrink: 0; }
     /* Thin toolbar above the hand-rolled media explorer (carries Share media). */
     .media-explorer-bar { display: flex; justify-content: flex-end; padding: 6px 10px; border-bottom: 1px solid var(--border-muted); flex-shrink: 0; }
@@ -2662,9 +2811,9 @@
     .item-share-lead-sub { font-size: var(--text-xs); color: var(--fg-muted); margin-top: 1px; }
     .item-share-empty { font-size: var(--text-xs); color: var(--fg-muted); padding: 4px 0; }
     .item-share-link-row { display: flex; align-items: center; gap: 8px; }
-    .item-share-access { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 4px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); flex-shrink: 0; }
+    .item-share-access { font-size: var(--text-3xs); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; padding: 3px 7px; border-radius: 4px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); flex-shrink: 0; }
     .item-share-access-edit { color: var(--primary); }
-    .item-share-url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: 11px; }
+    .item-share-url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-2xs); }
     .item-share-revoke { color: var(--destructive); }
     .item-share-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
 
@@ -2672,14 +2821,14 @@
     .access-panel { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
     .access-panel-body { padding: 16px 20px 20px; display: flex; flex-direction: column; gap: 18px; overflow-y: auto; }
     .access-section { display: flex; flex-direction: column; gap: 8px; }
-    .access-section-title { font-size: 11px; font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
+    .access-section-title { font-size: var(--text-2xs); font-weight: 600; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; margin: 0; }
     .access-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
     .access-row { display: flex; align-items: center; gap: 12px; padding: 10px 12px; border: 1px solid var(--border-muted); border-radius: var(--radius-sm); }
     .access-row-main { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
     .access-grantee { font-size: var(--text-sm); font-weight: 600; word-break: break-all; }
     .access-scope { font-size: var(--text-xs); }
-    .access-caps { font-size: 11px; color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
-    .access-chip { flex-shrink: 0; font-size: 11px; font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
+    .access-caps { font-size: var(--text-2xs); color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.03em; }
+    .access-chip { flex-shrink: 0; font-size: var(--text-2xs); font-weight: 600; padding: 3px 8px; border-radius: 999px; background: var(--bg-subtle, hsl(var(--bp-neutral-hsl) / 0.12)); color: var(--fg-muted); font-variant-numeric: tabular-nums; }
     .access-chip-expiry[data-expired="true"] { color: var(--destructive); }
 
 
@@ -2699,7 +2848,7 @@
       padding: 16px 12px; overflow-y: auto;
     }
     .bp-ae-sidebar-title {
-      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.06em; color: var(--fg-dim); margin-bottom: 12px;
     }
     .bp-ae-filters { display: flex; flex-direction: column; gap: 4px; }
@@ -2734,7 +2883,7 @@
       border-top: 1px solid var(--border-muted); margin-top: 4px; padding-top: 4px;
     }
     .bp-ae-suggest-title {
-      padding: 4px 12px 2px; font-size: 10px; font-weight: 600;
+      padding: 4px 12px 2px; font-size: var(--text-3xs); font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
     }
     .bp-ae-suggest-item {
@@ -2746,7 +2895,7 @@
       background: var(--bg-subtle); outline: none;
     }
     .bp-ae-suggest-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-    .bp-ae-suggest-meta { flex-shrink: 0; font-size: 11px; color: var(--fg-dim); }
+    .bp-ae-suggest-meta { flex-shrink: 0; font-size: var(--text-2xs); color: var(--fg-dim); }
     html[data-theme="light"] .bp-ae-suggest {
       box-shadow: 0 8px 24px hsl(var(--bp-shadow-hsl) / 0.08);
       border-color: var(--border);
@@ -2776,7 +2925,7 @@
     .bp-ae-card.is-selected { border-color: var(--primary); }
     .bp-ae-file-icon {
       width: 100%; height: 100%; display: flex; align-items: center; justify-content: center;
-      font-size: 11px; text-transform: uppercase; color: var(--fg-muted);
+      font-size: var(--text-2xs); text-transform: uppercase; color: var(--fg-muted);
     }
     .bp-ae-filmstrip {
       border-top: 1px solid var(--border-muted); padding: 8px 12px;
@@ -2792,7 +2941,7 @@
     .bp-ae-strip-item img { width: 100%; height: 100%; object-fit: cover; }
     .bp-ae-strip-item span {
       display: flex; align-items: center; justify-content: center;
-      width: 100%; height: 100%; font-size: 9px; text-transform: uppercase;
+      width: 100%; height: 100%; font-size: 9px; text-transform: uppercase; /* off-ladder: extension glyph fitted to the 56px strip tile, not chrome text */
     }
     .bp-ae-inspector {
       width: 300px; flex-shrink: 0; border-left: 1px solid var(--border-muted);
@@ -2807,11 +2956,11 @@
       background: var(--bg-subtle); border-radius: var(--radius-sm);
       text-transform: uppercase; color: var(--fg-muted); margin-bottom: 12px;
     }
-    .bp-ae-inspector-title { font-size: 15px; font-weight: 600; margin: 0 0 12px; }
+    .bp-ae-inspector-title { font-size: 15px; font-weight: 600; margin: 0 0 12px; } /* off-ladder: panel title between sm (13) and lg (16); a 15px rung for two titles would inflate the scale */
     .bp-ae-meta { font-size: var(--text-xs); margin: 0 0 16px; }
     .bp-ae-meta dt { color: var(--fg-dim); margin-top: 8px; }
     .bp-ae-meta dd { margin: 2px 0 0; word-break: break-all; }
-    .bp-ae-meta code { font-size: 11px; }
+    .bp-ae-meta code { font-size: var(--text-2xs); }
     .bp-ae-inspector-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: auto; }
 
     /* Media Desk v2 — facets, pills, governance, share */
@@ -2839,7 +2988,7 @@
     .bp-ae-new-collection:hover { opacity: 1; }
     .bp-ae-facet-group { margin-bottom: 12px; }
     .bp-ae-facet-label {
-      font-size: 10px; font-weight: 600; text-transform: uppercase;
+      font-size: var(--text-3xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.05em; color: var(--fg-dim); margin-bottom: 6px;
     }
     .bp-ae-facet {
@@ -2854,7 +3003,7 @@
       color: var(--primary); font-weight: 600;
     }
     .bp-ae-facet-count {
-      font-size: 11px; color: var(--fg-dim); font-variant-numeric: tabular-nums;
+      font-size: var(--text-2xs); color: var(--fg-dim); font-variant-numeric: tabular-nums;
     }
     .bp-ae-toolbar-pills {
       display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
@@ -2900,17 +3049,17 @@
       background: var(--bg-subtle); display: flex; align-items: center; justify-content: center;
     }
     .bp-ae-list-thumb img { width: 100%; height: 100%; object-fit: cover; }
-    .bp-ae-list-thumb .bp-ae-file-icon { font-size: 9px; padding: 0; min-height: 40px; }
+    .bp-ae-list-thumb .bp-ae-file-icon { font-size: 9px; padding: 0; min-height: 40px; } /* off-ladder: extension glyph fitted to the 40px list thumb */
     .bp-ae-list-title {
       font-size: var(--text-sm); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
     .bp-ae-list-kind, .bp-ae-list-mime, .bp-ae-list-size {
-      font-size: 11px; color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      font-size: var(--text-2xs); color: var(--fg-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    .bp-ae-list-mime { font-family: var(--font-mono); font-size: 10px; }
+    .bp-ae-list-mime { font-family: var(--font-mono); font-size: var(--text-3xs); }
     .bp-ae-list-head {
       display: grid; grid-template-columns: 48px 1fr 72px minmax(100px, 1.2fr) 72px;
-      gap: 12px; padding: 4px 12px 8px; font-size: 10px; font-weight: 600;
+      gap: 12px; padding: 4px 12px 8px; font-size: var(--text-3xs); font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
       border-bottom: 1px solid var(--border-muted); margin-bottom: 4px;
     }
@@ -2918,13 +3067,13 @@
     .bp-ae-scroll-sentinel { height: 1px; width: 100%; }
     .bp-ae-tag {
       display: inline-block; padding: 2px 8px; margin: 0 4px 4px 0;
-      border-radius: 999px; font-size: 11px; background: var(--bg-subtle);
+      border-radius: 999px; font-size: var(--text-2xs); background: var(--bg-subtle);
       border: 1px solid var(--border-muted); color: var(--fg-muted);
     }
     .bp-ae-inspector-preview { position: relative; }
     .bp-ae-preview-badge {
       position: absolute; bottom: 8px; left: 8px; padding: 2px 8px;
-      border-radius: var(--radius-sm); font-size: 10px; font-weight: 600;
+      border-radius: var(--radius-sm); font-size: var(--text-3xs); font-weight: 600;
       background: hsl(var(--bp-scrim-hsl) / 0.55); color: #fff; /* lit-allow: on-scrim white foreground over a fixed dark overlay */
     }
     html[data-theme="light"] .bp-ae-preview-badge { background: hsl(var(--bp-scrim-hsl) / 0.65); }
@@ -2932,7 +3081,7 @@
     .bp-ae-pill {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 4px 10px; border-radius: 999px; border: 1px solid var(--border-muted);
-      background: var(--bg-subtle); color: var(--fg-muted); font-size: 11px;
+      background: var(--bg-subtle); color: var(--fg-muted); font-size: var(--text-2xs);
       cursor: pointer; transition: background 0.12s, border-color 0.12s;
     }
     .bp-ae-pill:hover {
@@ -2965,11 +3114,12 @@
     }
     .bp-ae-badge {
       display: inline-flex; align-items: center; padding: 3px 8px;
-      border-radius: 999px; font-size: 11px; font-weight: 500;
+      border-radius: 999px; font-size: var(--text-2xs); font-weight: 500;
       background: var(--bg-subtle); color: var(--fg-muted);
       border: 1px solid var(--border-muted);
     }
     .bp-ae-badge--ready { color: var(--ok); border-color: hsl(var(--ok-hsl) / 0.4); }
+    .bp-ae-badge--failed { color: var(--danger); border-color: hsl(var(--danger-hsl) / 0.4); }
     .bp-ae-badge--processing { color: var(--primary); border-color: hsl(var(--primary-hsl) / 0.4); }
     .bp-ae-badge--visibility { text-transform: capitalize; }
     .bp-ae-badge--lock { color: var(--warn); border-color: hsl(var(--warn-hsl) / 0.4); }
@@ -3015,7 +3165,7 @@
     .bp-ae-add-collection { width: 100%; margin-top: 4px; font-size: var(--text-xs); }
     .bp-ae-collection-icon {
       width: 48px; height: 48px; display: flex; align-items: center; justify-content: center;
-      font-size: 24px; background: var(--bg-subtle); border-radius: var(--radius);
+      font-size: 24px; background: var(--bg-subtle); border-radius: var(--radius); /* off-ladder: collection glyph centred in a 48px tile */
       margin-bottom: 12px;
     }
     .bp-ae-collection-desc { margin: 0 0 16px; line-height: 1.5; }
@@ -3024,7 +3174,7 @@
     .bp-ae-share-row {
       display: flex; gap: 6px; margin-bottom: 8px;
     }
-    .bp-ae-share-url { flex: 1; font-size: 11px; font-family: var(--font-mono); }
+    .bp-ae-share-url { flex: 1; font-size: var(--text-2xs); font-family: var(--font-mono); }
     .bp-ae-share-actions { display: flex; gap: 8px; flex-wrap: wrap; }
 
     /* Reference field */
@@ -3036,7 +3186,7 @@
     }
     .ref-selected-info { display: flex; flex-direction: column; gap: 2px; }
     .ref-selected-title { font-size: var(--text-base); font-weight: 500; }
-    .ref-selected-type { font-size: 11px; color: var(--fg-dim); }
+    .ref-selected-type { font-size: var(--text-2xs); color: var(--fg-dim); }
     .ref-candidate {
       display: flex; align-items: center; justify-content: space-between;
       padding: 10px 16px; cursor: pointer; border-bottom: 1px solid var(--border-muted);
@@ -3045,7 +3195,7 @@
     .ref-candidate:hover { background: var(--bg-muted); }
     .ref-candidate:last-child { border-bottom: none; }
     .ref-candidate-title { font-size: var(--text-base); font-weight: 500; }
-    .ref-candidate-id { font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono); }
+    .ref-candidate-id { font-size: var(--text-2xs); color: var(--fg-dim); font-family: var(--font-mono); }
 
     /* History */
     .history-modal {
@@ -3062,9 +3212,9 @@
     .history-item-info { display: flex; flex-direction: column; gap: 4px; }
     .history-item-action { display: flex; align-items: center; gap: 8px; }
     .history-item-title { font-size: var(--text-sm); font-weight: 500; }
-    .history-item-time { font-size: 11px; color: var(--fg-dim); }
+    .history-item-time { font-size: var(--text-2xs); color: var(--fg-dim); }
     .history-action-badge {
-      font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
+      font-size: var(--text-3xs); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em;
       padding: 2px 6px; border-radius: 4px;
     }
     .history-action-create { background: var(--primary-soft); color: var(--primary); }
@@ -3095,7 +3245,7 @@
     }
     .delete-ref-item:last-child { border-bottom: none; }
     .delete-ref-title { font-size: var(--text-sm); font-weight: 500; }
-    .delete-ref-meta { font-size: 11px; color: var(--fg-dim); }
+    .delete-ref-meta { font-size: var(--text-2xs); color: var(--fg-dim); }
 
     /* Presence */
     /* Presence renders INSIDE .studio-bar-right (it was a position:fixed
@@ -3133,7 +3283,7 @@
     .presence-tooltip-name { font-size: var(--text-sm); font-weight: 600; }
     .presence-tooltip-location { font-size: var(--text-xs); color: var(--fg-muted); margin-top: 2px; }
     .presence-tooltip-location strong { color: var(--fg); }
-    .presence-tooltip-hint { font-size: 10px; color: var(--fg-dim); margin-top: 6px; }
+    .presence-tooltip-hint { font-size: var(--text-3xs); color: var(--fg-dim); margin-top: 6px; }
     .presence-me-group {
       display: flex; align-items: center; gap: 8px; cursor: pointer;
       padding: 2px 4px 2px 10px; border-radius: 20px;
@@ -3144,7 +3294,7 @@
        the hover tooltip + the profile popover the avatar opens. */
     .presence-me-info { display: none; }
     .presence-me-name { font-size: var(--text-xs); font-weight: 600; display: block; line-height: 1.2; }
-    .presence-me-location { font-size: 10px; color: var(--fg-dim); display: block; line-height: 1.2; }
+    .presence-me-location { font-size: var(--text-3xs); color: var(--fg-dim); display: block; line-height: 1.2; }
     .presence-me {
       width: 30px; height: 30px; border-radius: 50%;
       display: flex; align-items: center; justify-content: center;
@@ -3184,12 +3334,15 @@
     .field-errors { font-size: var(--text-xs); color: var(--destructive); margin-top: 4px; }
     /* Gyldendal parity E1.6 — warning-level validation, inline + publish bar */
     .field-warnings { font-size: var(--text-xs); color: var(--warning); margin-top: 4px; }
+    /* Gyldendal parity E1.11 — a finding under the subfield / row it names. */
+    .bp-subfield > .error, .bp-array-row > .error { font-size: var(--text-xs); color: var(--destructive); }
+    .bp-subfield > .warning, .bp-array-row > .warning { font-size: var(--text-xs); color: var(--warning); }
     .editor-field.has-warning:not(.has-error) .form-input { border-color: var(--warning); }
     .bp-validation-warnings { font-size: var(--text-xs); color: var(--warning); margin-left: 12px; }
 
     /* Dataset switcher (hoisted from BarkparkWeb.Studio.DatasetSwitcher) */
     .dataset-switcher { display: inline-flex; align-items: center; gap: 8px; margin-left: 12px; font-size: var(--text-xs); }
-    .dataset-switcher-label { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; font-size: 10px; }
+    .dataset-switcher-label { color: var(--fg-muted); text-transform: uppercase; letter-spacing: 0.5px; font-weight: 600; font-size: var(--text-3xs); }
     /* The base themed chrome comes from `.form-input` / `select.form-input`
        (appearance, token border/bg/text, custom caret, focus ring); these
        compact overrides (specificity 0,1,1 → beat select.form-input) shrink it
@@ -3233,7 +3386,7 @@
     /* Dataset badge: same tokens as .pane-doc-badge (Part-H covered pairing). */
     .scope-dataset-badge {
       flex-shrink: 0; padding: 1px 7px; border-radius: 999px;
-      font-size: 10px; font-weight: 600; letter-spacing: 0.02em;
+      font-size: var(--text-3xs); font-weight: 600; letter-spacing: 0.02em;
       background: var(--bg-muted); color: var(--muted-text);
       border: 1px solid var(--border-muted);
     }
@@ -3252,7 +3405,7 @@
     .scope-menu-col { display: flex; flex-direction: column; min-width: 160px; max-width: 220px; padding: 2px 4px; }
     .scope-menu-col + .scope-menu-col { border-left: 1px solid var(--border); }
     .scope-menu-col-title {
-      font-size: 10px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
+      font-size: var(--text-3xs); font-weight: 600; letter-spacing: .08em; text-transform: uppercase;
       color: var(--fg-dim); padding: 4px 8px 6px;
     }
     .scope-menu-col-items { display: flex; flex-direction: column; gap: 1px; max-height: 320px; overflow-y: auto; }
@@ -3328,7 +3481,7 @@
       border-top: 1px solid var(--border-muted); margin-top: 4px; padding-top: 4px;
     }
     bp-reference-picker .bp-ref-suggest-title {
-      padding: 4px 12px 2px; font-size: 10px; font-weight: 600;
+      padding: 4px 12px 2px; font-size: var(--text-3xs); font-weight: 600;
       text-transform: uppercase; letter-spacing: 0.04em; color: var(--fg-dim);
     }
     bp-reference-picker .bp-ref-suggest-item {
@@ -3340,7 +3493,7 @@
     bp-reference-picker .bp-ref-suggest-label {
       flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
     }
-    bp-reference-picker .bp-ref-suggest-meta { flex-shrink: 0; font-size: 11px; color: var(--fg-dim); }
+    bp-reference-picker .bp-ref-suggest-meta { flex-shrink: 0; font-size: var(--text-2xs); color: var(--fg-dim); }
 
     /* bp-overflow-menu — priority+ pattern (Task barkpark-smn).
        Host is a single-row flex container; rightmost items get
@@ -3419,7 +3572,7 @@
     .bp-field-body { display: flex; flex-direction: column; gap: 12px; margin-top: 8px; }
     .bp-subfield { display: flex; flex-direction: column; gap: 4px; }
     .bp-field-label {
-      font-size: 11px; font-weight: 600; text-transform: uppercase;
+      font-size: var(--text-2xs); font-weight: 600; text-transform: uppercase;
       letter-spacing: 0.04em; color: var(--fg-dim);
     }
     /* ONIX 3.0 element hint — small muted helper under the field label. Surfaces
@@ -3428,14 +3581,14 @@
        level v2 fields via studio_components) and by composite sub-fields. */
     .bp-onix-hint {
       display: block;
-      font-size: 10px;
+      font-size: var(--text-3xs);
       color: var(--fg-dim);
       margin-bottom: 4px;
       letter-spacing: 0.02em;
     }
     .bp-onix-hint code {
       font-family: var(--font-mono);
-      font-size: 10px;
+      font-size: var(--text-3xs);
       color: var(--fg-muted);
       background: var(--bg-card);
       padding: 1px 4px;
@@ -3540,7 +3693,7 @@
       color: var(--fg-dim); cursor: pointer; padding: 0;
       width: 18px; height: 18px;
       display: inline-flex; align-items: center; justify-content: center;
-      font-size: 9px; line-height: 1;
+      font-size: 9px; line-height: 1; /* off-ladder: disclosure caret glyph fitted to the 18px toggle box */
       transition: color 0.08s;
     }
     .bp-tree-toggle:hover { color: var(--fg); }
@@ -3556,7 +3709,7 @@
     .bp-tree-row-button-selected { font-weight: 500; }
     .bp-tree-code {
       flex: 0 0 auto;
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       color: var(--fg-dim);
     }
     .bp-tree-row-selected .bp-tree-code,
@@ -3586,7 +3739,7 @@
       display: inline-block; margin-left: 8px; padding: 1px 8px;
       background: var(--bg-muted); border: 1px solid var(--border-muted);
       border-radius: 999px; color: var(--fg-muted);
-      font-size: 11px; font-weight: 500; line-height: 1.6;
+      font-size: var(--text-2xs); font-weight: 500; line-height: 1.6;
     }
     .bp-array-btn {
       display: inline-flex; align-items: center; justify-content: center;
@@ -3615,11 +3768,11 @@
     /* LocalizedText rows */
     .bp-localized-row { display: flex; flex-direction: column; gap: 4px; margin-top: 8px; }
     .bp-localized-warning {
-      display: inline-block; font-size: 11px; color: var(--warning);
+      display: inline-block; font-size: var(--text-2xs); color: var(--warning);
       background: hsl(var(--warn-hsl) / 0.08);
       padding: 4px 8px; border-radius: var(--radius-sm); margin-bottom: 6px;
     }
-    .bp-localized-empty { display: inline-block; font-size: 11px; color: var(--destructive); margin-bottom: 6px; }
+    .bp-localized-empty { display: inline-block; font-size: var(--text-2xs); color: var(--destructive); margin-bottom: 6px; }
 
     /* ── Document actions chrome (Task barkpark-3yq) ─────────────────────
        Bulk-publish list-pane checkboxes, the floating action bar, and the
@@ -3664,7 +3817,7 @@
       width: 14px; height: 14px; border: 1px solid var(--border);
       border-radius: 3px; background: var(--bg);
       display: inline-flex; align-items: center; justify-content: center;
-      font-size: 10px; line-height: 1; color: var(--bg);
+      font-size: var(--text-3xs); line-height: 1; color: var(--bg);
       transition: background var(--dur-1), border-color var(--dur-1);
     }
     .bp-doc-checkbox-box.is-checked {
@@ -3702,12 +3855,12 @@
       font-size: var(--text-sm); flex-wrap: wrap;
     }
     .bp-secondary-pane-type {
-      font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim);
+      font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--fg-dim);
     }
     .bp-secondary-pane-body { flex: 1; overflow-y: auto; padding: 16px; }
     .bp-secondary-pane-fields { margin: 0; }
     .bp-secondary-pane-fields dt {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em;
       color: var(--fg-muted); margin-top: 12px;
     }
     .bp-secondary-pane-fields dt:first-child { margin-top: 0; }
@@ -3721,7 +3874,7 @@
          light+dark, ember/fjord light) — the exact fg-dim-on-bg-muted defect
          D15 caught for .pane-doc-badge. Escalate to --muted-text (4.57–6.88,
          AA everywhere). Locked by Part H in design/check.mjs (revert → red). */
-      font-size: 11px; color: var(--muted-text); font-style: italic;
+      font-size: var(--text-2xs); color: var(--muted-text); font-style: italic;
       background: var(--bg-muted); border-radius: 4px;
     }
 
@@ -3815,7 +3968,7 @@
     }
     .bp-secondary-candidate:hover { background: var(--bg-muted); }
     .bp-secondary-candidate-id {
-      font-size: 11px; color: var(--fg-dim); font-family: var(--font-mono);
+      font-size: var(--text-2xs); color: var(--fg-dim); font-family: var(--font-mono);
     }
     .bp-secondary-empty {
       padding: 14px 10px; color: var(--fg-dim); font-size: var(--text-sm);
@@ -3838,7 +3991,7 @@
     .bp-plugins-actions { display: flex; gap: 8px; align-items: center; }
     .bp-plugins-meta { margin-bottom: 20px; }
     .bp-plugins-meta code {
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       color: var(--fg-muted); background: var(--bg-card);
       padding: 1px 5px; border-radius: 3px;
     }
@@ -3862,9 +4015,9 @@
       gap: 12px;
     }
     .bp-plugin-card-title { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
-    .bp-plugin-card-title strong { font-size: 15px; }
+    .bp-plugin-card-title strong { font-size: 15px; } /* off-ladder: card title between sm (13) and lg (16), the same deliberate half-step as .bp-ae-inspector-title */
     .bp-plugin-card-version {
-      font-family: var(--font-mono); font-size: 11px; color: var(--fg-dim);
+      font-family: var(--font-mono); font-size: var(--text-2xs); color: var(--fg-dim);
     }
     .bp-plugin-rows {
       display: grid; grid-template-columns: max-content 1fr;
@@ -3872,7 +4025,7 @@
     }
     .bp-plugin-row { display: contents; }
     .bp-plugin-row dt {
-      font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+      font-size: var(--text-2xs); text-transform: uppercase; letter-spacing: 0.04em;
       color: var(--fg-muted); padding-top: 1px;
     }
     .bp-plugin-row dd {
@@ -3880,7 +4033,7 @@
       word-break: break-word;
     }
     .bp-plugin-row dd code {
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       color: var(--fg-muted);
     }
     .bp-plugin-desc { color: var(--fg-muted); font-size: var(--text-xs); }
@@ -3897,13 +4050,13 @@
       align-items: center; gap: 6px;
     }
     .bp-callback-item code {
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       color: inherit; background: transparent;
     }
     .bp-callback-mark {
       text-align: center; font-weight: 600; font-family: var(--font-mono);
     }
-    .bp-callback-detail { color: var(--fg-muted); font-size: 11px; }
+    .bp-callback-detail { color: var(--fg-muted); font-size: var(--text-2xs); }
     .bp-callback-impl { color: var(--fg); }
     .bp-callback-impl .bp-callback-mark { color: var(--success); }
     .bp-callback-default { color: var(--fg-dim); }
@@ -3915,7 +4068,7 @@
     }
     .bp-plugin-run-row { display: flex; gap: 8px; align-items: baseline; }
     .bp-plugin-run-label { color: var(--fg-muted); min-width: 140px; }
-    .bp-plugin-run-value { color: var(--fg); font-family: var(--font-mono); font-size: 11px; }
+    .bp-plugin-run-value { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-2xs); }
     .bp-plugin-card-header-actions { display: flex; gap: 6px; align-items: center; }
 
     /* ── Plugin settings admin LV (Task barkpark-dbg) ──────────────────
@@ -3930,7 +4083,7 @@
     }
     .bp-settings-meta { font-size: var(--text-xs); margin: 4px 0 0 0; }
     .bp-settings-meta code {
-      font-family: var(--font-mono); font-size: 11px;
+      font-family: var(--font-mono); font-size: var(--text-2xs);
       color: var(--fg-muted); background: var(--bg-card);
       padding: 1px 5px; border-radius: 3px;
     }
@@ -3957,14 +4110,14 @@
       border: 1px solid var(--border-muted); border-radius: var(--radius-sm);
     }
     .bp-settings-field-hint {
-      font-size: 11px; color: var(--fg-dim); margin-top: 4px;
+      font-size: var(--text-2xs); color: var(--fg-dim); margin-top: 4px;
     }
     .bp-settings-field-error {
-      font-size: 11px; color: var(--destructive); margin-top: 4px;
+      font-size: var(--text-2xs); color: var(--destructive); margin-top: 4px;
     }
     .bp-settings-secret-actions { display: flex; gap: 6px; margin-top: 4px; }
     .bp-settings-secret-reveal {
-      font-family: var(--font-mono); font-size: 11px; padding: 8px;
+      font-family: var(--font-mono); font-size: var(--text-2xs); padding: 8px;
       margin-top: 6px;
       background: var(--bg-muted, var(--bg-card)); border-radius: 4px;
       word-break: break-all;
@@ -4039,16 +4192,23 @@
        phx-click element inside #studio-panes — Structure rows, doc rows, pane
        header actions — not just the two row components.
 
+       spd-w19-press-answer-outside-panes widens the SAME rule to `.studio-bar`,
+       the chrome bar that holds the top-bar actions and (as `.studio-bar-tabs`)
+       the studio-tab strip. One rule, two roots: the eye gets the same moving
+       bar wherever the press landed, and there is still exactly one vocabulary.
+
        A MOVING bar, not another static tint: the complaint the parent row
        exists to answer is that a still grey wash reads as a dead control, and
        motion is the thing that says "this is working" without words. It rides
        ::after pinned to the row's bottom edge so it cannot shift layout, and it
        is additive — `.phx-click-loading{opacity:.6}` above is untouched. */
-    #studio-panes [aria-busy="true"] {
+    #studio-panes [aria-busy="true"],
+    .studio-bar [aria-busy="true"] {
       position: relative;
       border-left-color: var(--primary);
     }
-    #studio-panes [aria-busy="true"]::after {
+    #studio-panes [aria-busy="true"]::after,
+    .studio-bar [aria-busy="true"]::after {
       content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 2px;
       background: var(--primary); border-radius: 2px;
       transform-origin: left center; pointer-events: none;
@@ -4063,7 +4223,8 @@
        accent rule under the pressed row. Never `animation: none` alone, which
        would leave scaleX(0) and hide the bar outright. */
     @media (prefers-reduced-motion: reduce) {
-      #studio-panes [aria-busy="true"]::after {
+      #studio-panes [aria-busy="true"]::after,
+      .studio-bar [aria-busy="true"]::after {
         animation: none; transform: scaleX(1); opacity: 1;
       }
     }
@@ -4258,7 +4419,7 @@
     }
     .sheet-bar-form { flex: 1; display: flex; }
     .sheet-bar-input {
-      flex: 1; font-size: 12.5px; font-family: monospace;
+      flex: 1; font-size: 12.5px; font-family: monospace; /* off-ladder: formula bar tracks .sheet-table's 12.5px grid density, not the chrome ladder */
       background: var(--bg); color: var(--fg);
       border: 1px solid var(--border); border-radius: 4px; padding: 4px 8px;
     }
@@ -4272,9 +4433,9 @@
     }
     html[data-theme="light"] .sheet-notice { color: #b54708; background: rgba(247, 144, 9, 0.08); }
     /* Quiet, right-aligned autosave status — pushed to the toolbar's far end. */
-    .sheet-save-status { margin-left: auto; font-size: 11px; color: var(--fg-dim, var(--fg)); white-space: nowrap; }
+    .sheet-save-status { margin-left: auto; font-size: var(--text-2xs); color: var(--fg-dim, var(--fg)); white-space: nowrap; }
     .sheet-cap-notice {
-      padding: 3px 12px; font-size: 11px; color: var(--fg-dim, var(--fg));
+      padding: 3px 12px; font-size: var(--text-2xs); color: var(--fg-dim, var(--fg));
       border-bottom: 1px solid var(--border);
     }
     .sheet-grid-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; outline: none; }
@@ -4287,7 +4448,7 @@
     .sheet-scroll { flex: 1; overflow: auto; min-height: 0; position: relative; }
     /* tabular-nums: digits share a fixed advance width so number columns line
        up vertically — the load-bearing "reads like a spreadsheet" detail. */
-    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+    .sheet-table { border-collapse: separate; border-spacing: 0; table-layout: fixed; font-size: 12.5px; font-variant-numeric: tabular-nums; } /* off-ladder: grid density half-step between xs (12) and sm (13); the whole Sheets grid is tuned to it */
     /* Value-shaped default alignment (Cells.default_align_class/1 stamps
        these): numbers/number-fmts right, booleans + checkboxes center. A
        class, NOT an inline style — the sheets-parity suite pins the inline
@@ -4307,7 +4468,7 @@
     }
     .sheet-corner, .sheet-colhead, .sheet-rowhead {
       background: var(--bg-alt, var(--bg)); color: var(--fg-dim, var(--fg));
-      font-weight: 500; font-size: 11px; text-align: center; user-select: none;
+      font-weight: 500; font-size: var(--text-2xs); text-align: center; user-select: none;
     }
     .sheet-corner { position: sticky; top: 0; left: 0; z-index: 6; }
     .sheet-colhead { position: sticky; top: 0; z-index: 4; }
@@ -4335,7 +4496,7 @@
     .sheet-peer-tag {
       position: absolute; top: 0; right: 0; z-index: 1; pointer-events: none;
       max-width: 90%; overflow: hidden; text-overflow: ellipsis;
-      color: #fff; font-size: 9px; line-height: 1.3; padding: 0 4px;
+      color: #fff; font-size: 9px; line-height: 1.3; padding: 0 4px; /* off-ladder: presence tag overlaid in a grid cell corner, sized to the cell not the scale */
       border-radius: 0 0 0 4px; opacity: 0.85;
     }
     .sheet-peer-tag.sheet-peer-editing { opacity: 1; font-weight: 700; }
@@ -4365,7 +4526,7 @@
     }
     .sheet-head-menu-btn {
       background: none; border: none; color: inherit; cursor: pointer;
-      font-size: 9px; padding: 0 2px; opacity: 0;
+      font-size: 9px; padding: 0 2px; opacity: 0; /* off-ladder: header menu chevron glyph, sized to the column header strip */
     }
     /* WCAG 2.4.7: reveal the header menu affordance for keyboard focus too —
        a hover-only reveal is invisible to a keyboard/AT user. */
@@ -4433,11 +4594,11 @@
     .sheet-pager {
       display: flex; align-items: center; gap: 8px;
       padding: 3px 12px; border-top: 1px solid var(--border);
-      font-size: 11px; color: var(--fg-dim, var(--fg));
+      font-size: var(--text-2xs); color: var(--fg-dim, var(--fg));
     }
     .sheet-statsbar {
       padding: 3px 12px; border-top: 1px solid var(--border);
-      font-size: 11px; color: var(--fg-dim, var(--fg)); text-align: right;
+      font-size: var(--text-2xs); color: var(--fg-dim, var(--fg)); text-align: right;
       font-variant-numeric: tabular-nums;
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
@@ -4559,7 +4720,7 @@
       white-space: nowrap; overflow: hidden;
     }
     .sheet-popover-fn-name { font-family: var(--font-mono); font-weight: 600; color: var(--fg); flex: none; }
-    .sheet-popover-doc { color: var(--fg-dim, var(--fg)); font-size: 11px; overflow: hidden; text-overflow: ellipsis; }
+    .sheet-popover-doc { color: var(--fg-dim, var(--fg)); font-size: var(--text-2xs); overflow: hidden; text-overflow: ellipsis; }
     /* Active-descendant + hover share a fill; the selected row ALSO gets an
        inset ring so it never relies on colour alone (WCAG 1.4.1). */
     .sheet-popover-fn:hover { background: hsl(var(--bp-neutral-hsl) / 0.12); }
@@ -4570,7 +4731,7 @@
     /* Honest empty state — "No matching functions", never a blank box. */
     .sheet-popover-empty {
       padding: 8px 10px; color: var(--fg-dim, var(--fg));
-      font-size: 11px; font-style: italic;
+      font-size: var(--text-2xs); font-style: italic;
     }
     /* --sig: a single signature strip, e.g. SUM(value1, [value2, …]) with
        the current argument emphasised by WEIGHT + UNDERLINE (never colour
@@ -4594,7 +4755,7 @@
     .sheet-mode-chip {
       display: inline-flex; align-items: center; gap: 4px;
       padding: 0 6px; margin-right: 8px; border-radius: 3px;
-      font-size: 10px; font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
+      font-size: var(--text-3xs); font-weight: 600; letter-spacing: 0.05em; text-transform: uppercase;
       border: 1px solid var(--border); color: var(--fg-dim, var(--fg));
     }
     /* POINT mode borrows ref-hue-0 for its accent — a text label carries the
@@ -4696,15 +4857,15 @@
       border: 1px solid var(--border);
     }
     .sheet-cf-summary {
-      flex: 1 1 auto; min-width: 0; font-size: 11px; color: var(--fg);
+      flex: 1 1 auto; min-width: 0; font-size: var(--text-2xs); color: var(--fg);
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
-    .sheet-cf-empty { margin: 0; font-size: 11px; font-style: italic; color: var(--fg-dim, var(--fg)); }
+    .sheet-cf-empty { margin: 0; font-size: var(--text-2xs); font-style: italic; color: var(--fg-dim, var(--fg)); }
     .sheet-cf-form {
       display: flex; flex-direction: column; gap: 7px;
       border-top: 1px solid var(--border); padding-top: 8px;
     }
-    .sheet-cf-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
+    .sheet-cf-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--text-2xs); color: var(--fg-dim, var(--fg)); }
     /* CF controls ride the kit (.form-input via bp_input/bp_select, sup-w2
        sheet-grid sweep): base chrome — token border/bg/text, custom caret and
        the focus ring — comes from .form-input / select.form-input; these
@@ -4747,11 +4908,11 @@
     .sheet-filter-head { display: flex; align-items: center; justify-content: space-between; }
     .sheet-filter-title { font-weight: 600; font-size: 12px; color: var(--fg); }
     .sheet-filter-form { display: flex; flex-direction: column; gap: 7px; }
-    .sheet-filter-field { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--fg-dim, var(--fg)); }
+    .sheet-filter-field { display: flex; flex-direction: column; gap: 3px; font-size: var(--text-2xs); color: var(--fg-dim, var(--fg)); }
     /* Filter controls ride the kit (.form-input), same compact treatment as CF. */
     .sheet-filter-field > .form-input { height: 30px; padding: 4px 8px; font-size: 12px; }
     .sheet-filter-field > select.form-input { padding-right: 26px; }
-    .sheet-filter-error { margin: 0; font-size: 11px; color: #f87171; }
+    .sheet-filter-error { margin: 0; font-size: var(--text-2xs); color: #f87171; }
     html[data-theme="light"] .sheet-filter-error { color: #dc2626; }
     .sheet-filter-actions { display: flex; justify-content: space-between; gap: 6px; }
     /* studio-literal-check: skip-end */
@@ -4765,7 +4926,7 @@
        the machine gate because it lived in a style="" attribute. */
     .scenario-scroll { overflow-y: auto; max-height: calc(100vh - 140px); }
     .scenario-cat-header {
-      padding: 4px 12px; font-weight: 600; font-size: 11px; text-transform: uppercase;
+      padding: 4px 12px; font-weight: 600; font-size: var(--text-2xs); text-transform: uppercase;
       color: var(--muted-text); border-bottom: 1px solid var(--border-muted);
       background: var(--bg-muted);
     }
@@ -4780,14 +4941,46 @@
     .scenario-endpoint { color: var(--muted-text); }
     .scenario-label { margin-left: 6px; }
     .scenario-verdict { display: flex; align-items: center; gap: 8px; }
-    .scenario-duration { font-size: 11px; color: var(--muted-text); font-family: var(--font-mono); }
+    .scenario-duration { font-size: var(--text-2xs); color: var(--muted-text); font-family: var(--font-mono); }
 
     /* Schema browser cards (sup-w3-api-tester-kit) — extraction only. Text uses
        the existing utility classes; these rules are pure geometry, not AA-critical. */
     .api-schema-card { margin: 8px 0; border: 1px solid var(--border); border-radius: 6px; padding: 8px 12px; }
-    .api-schema-summary { display: flex; gap: 12px; align-items: center; cursor: pointer; }
+    /* studio-r22: the summary WRAPS. `.pane-column` above is explicitly a
+       squeezing column (flex-shrink:1 down to a clamp(140px, 18vw, 260px)
+       floor), so the docs pane at viewport 900 is narrow — and a no-wrap flex
+       row of four intrinsically-sized chips (name, title, visibility badge,
+       field count) cannot fit there for a long schema name. It did not:
+       MEASURED in Chrome on the real served document, 15 of 38 cards
+       overflowed at viewport 900, worst 82px (coordinatorLoop), with the
+       field-count chip cut at or pushed outside the card border.
+       That measurement read the docs column at 336px. The originating report
+       read it at ~255px and counted 9 of 40; the gap between the two column
+       widths is UNRECONCILED — most likely a wider studio shell or a fourth
+       pane the measured render does not carry. Which way it cuts is the part
+       worth keeping: the wider column found MORE overflow, not less, so 15 of
+       38 is a conservative floor and the real page is worse.
+       Two things make the invariant hold for ANY name length:
+         - `flex-wrap` lets the chips fall to a second line instead of
+           overflowing. Chosen over `min-width:0` + `text-overflow: ellipsis`
+           on the name because the NAME is the identifying content of this
+           list — you scan it to find a schema, so truncating it costs the
+           reader the one thing the row is for. Wrapping costs vertical space
+           in an already-scrolling pane, which is the cheap axis.
+         - `min-width: 0` + `overflow-wrap` on the children so a single chip
+           LONGER than the whole line breaks instead of overflowing; wrap
+           alone cannot save a line with one over-long item, because a flex
+           item's automatic minimum size is its min-content width.
+       Row gap is tightened to 4px so a wrapped card does not read as two
+       unrelated rows; the 12px COLUMN gap is unchanged, so the 23 cards that
+       already fit at 900 render exactly as before. This is not a `.text-xs`
+       consequence: nothing here touches the type scale, and the originating
+       report reproduced the overflow with an 11px control in place of the
+       shipped 12px. */
+    .api-schema-summary { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: center; cursor: pointer; }
+    .api-schema-summary > * { min-width: 0; overflow-wrap: anywhere; }
     .api-schema-fields { margin-top: 8px; }
-    .api-schema-json { font-size: 11px; }
+    .api-schema-json { font-size: var(--text-2xs); }
   </style>
 </head>
 <body>
@@ -5033,6 +5226,23 @@
     let userName = localStorage.getItem("barkpark_user_name") || "";
     let userColor = localStorage.getItem("barkpark_user_color") || "";
 
+    // spd-b1-pane-state-persistence — the remembered inspector collapse. The
+    // server pushes `inspector-pref` only from a toggle at `wide`
+    // (Handlers.Paper.remember_inspector_pref/3); this writes the key the
+    // head pre-paint reads and keeps the <html> stamp in step with it, so a
+    // later reload's first paint agrees with the socket. Read back into the
+    // socket via the `inspector_closed` connect param below — connected mount
+    // only; the static render never sees it.
+    window.addEventListener("phx:inspector-pref", (e) => {
+      const closed = !!(e.detail && e.detail.closed);
+      try {
+        if (closed) localStorage.setItem("barkpark_inspector", "closed");
+        else localStorage.removeItem("barkpark_inspector");
+      } catch (_) {}
+      if (closed) document.documentElement.dataset.inspectorPref = "closed";
+      else delete document.documentElement.dataset.inspectorPref;
+    });
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
@@ -5137,33 +5347,142 @@
         this._bucket = next;
         this.pushEvent("width-bucket", { bucket: next });
       },
+      mounted() {
+        this._bucket = null;
+        this._raf = 0;
+        this._onResize = () => {
+          if (this._raf) return;
+          this._raf = window.requestAnimationFrame(() => {
+            this._raf = 0;
+            this._sync();
+          });
+        };
+        this._sync();
+        window.addEventListener("resize", this._onResize);
+      },
+      destroyed() {
+        window.removeEventListener("resize", this._onResize);
+        if (this._raf) window.cancelAnimationFrame(this._raf);
+      }
+    };
+
+    // PressAnswer — see the block comment inside. Mounted on the Studio
+    // chrome bar, which every Studio route renders; WidthBucket, which used to
+    // host this, is on `#studio-panes` and StudioLive's desk is the only route
+    // that has one.
+    Hooks.PressAnswer = {
       // ── THE PRESS ANSWER (spd-w19 / charter D263) ────────────────────────
       //
-      // WHY IT LIVES IN THIS HOOK. The only press acknowledgement in the Studio
-      // was `.phx-click-loading{opacity:.6}` above — wordless, AT-silent and
-      // unbounded. The SERVER route to a pending state is closed: a push_patch
-      // from handle_event replies with the event's OWN ref
-      // (channel.ex:911-918 → sync_handle_params_with_live_redirect), so
-      // handle_params + render collapse into the single reply frame (D242), and
-      // finish_handle_params does not blanket-reset assigns, so a pending
-      // assign would STICK. D225 additionally bans phx-disable-with. So the
-      // answer is a CLIENT one, and it goes HERE because LiveView reads exactly
-      // ONE hook name per element (view.js:995-999) and #studio-panes already
-      // carries this one — a second phx-hook on that container is impossible.
-      // WidthBucket's other half is a resize listener, so nothing collides.
+      // WHY IT IS ITS OWN HOOK, AND WHY THAT IS A CORRECTION. The only press
+      // acknowledgement in the Studio was `.phx-click-loading{opacity:.6}`
+      // above — wordless, AT-silent and unbounded. The SERVER route to a
+      // pending state is closed: a push_patch from handle_event replies with
+      // the event's OWN ref (`Phoenix.LiveView.Channel`'s reply path →
+      // `sync_handle_params_with_live_redirect`), so handle_params + render
+      // collapse into the single reply frame (D242), and finish_handle_params
+      // does not blanket-reset assigns, so a pending assign would STICK. D225
+      // additionally bans phx-disable-with. So the answer is a CLIENT one.
       //
-      // WHY A DELEGATED LISTENER ON THIS CONTAINER WORKS. LiveView's own click
-      // binding is on `window` (live_socket.js:830-833); ours is on a
-      // descendant, so ours runs FIRST. That is what makes
+      // It used to live inside `Hooks.WidthBucket`, whose element is
+      // `#studio-panes`, and the comment there argued that was free: "LiveView
+      // reads exactly ONE hook name per element and #studio-panes already
+      // carries this one". True, and it hid a hole. `#studio-panes` is
+      // rendered by StudioLive's desk ONLY (components.ex `<.pane_layout
+      // id="studio-panes" phx_hook="WidthBucket">`, the single render site in
+      // the tree), so on `…/studio/media` and `…/studio/api-tester` — which are
+      // their own LiveViews — the hook never mounted and the whole press
+      // answer was never installed, while the chrome it answers for was served
+      // in full. MEASURED on deployed guerrilla (served e02e4296d), by
+      // enumerating `phx-hook` on the authenticated served bodies:
+      //
+      //   …/d/production/studio               4 hooks — EditorFocus,
+      //                                       PresenceIdentity, ThemeToggle,
+      //                                       WidthBucket#studio-panes   (CONTROL)
+      //   …/d/production/studio/media         1 hook  — ThemeToggle only
+      //   …/d/production/studio/api-tester    1 hook  — ThemeToggle only
+      //
+      // and all three serve exactly one `.studio-bar` carrying 10 `.studio-tab`
+      // anchors plus 2-3 `phx-click` buttons. The control is the point: a route
+      // reporting an empty set beside a route reporting four is a measurement,
+      // not a probe that listed nothing.
+      //
+      // So the mount element is now the Studio chrome bar itself
+      // (`Nav.studio_topbar/1`, `<div class="studio-bar" id="studio-bar"
+      // phx-hook="PressAnswer">`), which every Studio route renders INSIDE its
+      // LiveView root — verified on the same three served bodies by walking the
+      // tree from `data-phx-session`. WidthBucket keeps the width half and
+      // nothing else moves: `_paScopeFor` still resolves `#studio-panes` first,
+      // so a pane press is answered over exactly the scope it always was.
+      //
+      // WHY A DELEGATED LISTENER ON `document` WORKS. LiveView's own click
+      // binding is on `window` in the bubble phase (`LiveSocket#bindClicks` in
+      // live_socket.js); `window` is the LAST bubble target, strictly after
+      // `document`, so ours runs FIRST. That is what makes
       // `data-phx-ref-src` READ AT CLICK TIME an exact discriminator for "this
       // press is about to be DISCARDED" — it is the same condition as
       // bindClick's early return (live_socket.js:857-859), which is the drop
       // mechanism that alone reproduces the owner's "the buttons do nothing".
       //
-      // COVERAGE: anything with a `phx-click` inside #studio-panes — Structure
-      // rows, document rows, row checkboxes, pane header actions, the collapsed
-      // strip. The studio-tab strip and the top bar sit OUTSIDE this container
-      // and are NOT covered by this slice.
+      // COVERAGE (widened by spd-w19-press-answer-outside-panes): anything with
+      // a `phx-click` inside #studio-panes — Structure rows, document rows, row
+      // checkboxes, pane header actions, the collapsed strip — AND the Studio
+      // chrome bar `.studio-bar`, which is where the top-bar actions and the
+      // studio-tab strip (`.studio-bar-tabs`, a child of `.studio-bar`) live.
+      // Same region, same words, same honesty rule, and NO second EMPTY live
+      // region.
+      //
+      // THAT WORDING IS NARROWER THAN IT USED TO BE, and the narrowing is a
+      // measurement, not a softening. It used to read "NO second live region:
+      // two aria-live nodes race" — and the served body already carries a
+      // second one whenever a Phoenix flash is set. Measured on a real
+      // post-login redirect body (POST /login -> follow): the aria-live census
+      // is 2 and the status/alert/log role census is 2, the second node being
+      // the flash-info banner from
+      // `BarkparkWeb.StudioComponents.Nav.studio_flash/1`
+      // (components/studio_components/nav.ex), markup that predates this hook.
+      // A clean authenticated desk serves 1 and 1, which is what makes the 2
+      // and 2 mean something. (This comment deliberately SPELLS those
+      // attributes out in prose rather than in attribute form: the census in
+      // `press_answer_region_guard_test.exs` is a regex over the whole served
+      // body, this script is served inline, and an attribute-shaped mention
+      // here is counted as a live region. That is not the census being wrong —
+      // it is the served body really containing the string.)
+      //
+      // THEY DO NOT RACE, and three measured facts are why:
+      //   1. The flash node ships PRE-POPULATED in the initial response body
+      //      ("Signed in."). A live region announces CHANGES made after it is
+      //      registered; content present at parse time is not announced. This
+      //      region ships EMPTY, so at load exactly one announcer is armed.
+      //   2. The two nodes sit in DISJOINT subtrees. The flash is inside the
+      //      patchable LiveView tree (studio.html.heex / app.html.heex render
+      //      it, and `render(view)` contains it); this node is a sibling of
+      //      `{@inner_content}` and does NOT appear in `render(view)` at all,
+      //      so morphdom can never touch it and neither write reaches the
+      //      other node.
+      //   3. Their writes cannot land in the same tick. This region is written
+      //      SYNCHRONOUSLY in the delegated click handler; the flash only
+      //      changes when a LiveView `put_flash` diff arrives over the socket,
+      //      a full server round trip later. Two POLITE regions changing in
+      //      different ticks QUEUE; they do not interleave and neither is
+      //      dropped.
+      // The one preemption that remains is the flash-error banner (an alert
+      // role, assertive politeness) interrupting a polite answer, and that is
+      // the DESIGNED semantics of assertive: the error is the better answer to
+      // the press.
+      //
+      // So the invariant this hook actually depends on — and the one
+      // `press_answer_region_guard_test.exs` now asserts in BOTH the clean and
+      // the flash state — is ONE EMPTY live region, not one live region.
+      //
+      // THE TAB STRIP IS NOT A phx-click SURFACE, and that corrects the premise
+      // this slice was filed on. Read off the served authenticated desk
+      // (guerrilla f23cd4f88): every `.studio-tab` is a plain `<a href>`
+      // (the `<a href={tab.path}>` arm of `Nav.studio_tabs/1`) and the strip puts
+      // ZERO phx-click attributes on the
+      // page — so it never got the `.phx-click-loading{opacity:.6}` tint
+      // either. It got NOTHING. A full-document navigation is still a press
+      // that deserves an answer, so it gets one, through `_paOnChromeAnchor`
+      // below and in a shape that cannot arm the socket watchdog.
       _PA_PROBE: 16,     // ms — is the ref stamped yet? (measured at dt≈1ms)
       _PA_POLL: 100,     // ms — has the ref dropped / the row detached?
       _PA_WITNESS_GRACE: 750, // ms — allow a stable selection control's reply rerender
@@ -5171,6 +5490,18 @@
       _PA_FADE: 6000,    // ms — how long a settled answer stays readable
 
       _paRegion() { return document.getElementById("bp-press-answer"); },
+
+      // The two surfaces this hook answers for, nearest-first: the pane row it
+      // is mounted on, and the Studio chrome bar. A pane press resolves to
+      // `#studio-panes`, which IS `this.el`, so every witness below is computed
+      // over exactly the scope it was computed over before this slice and no
+      // shipped row behaviour moves. A chrome press resolves to `.studio-bar`.
+      // Anything else — the Papers editor, a modal, a plugin surface — resolves
+      // to null and is left alone: this hook answers for the desk it can see.
+      _paScopeFor(el) {
+        if (!el || !el.closest) return null;
+        return el.closest("#studio-panes") || el.closest(".studio-bar");
+      },
 
       _paSay(text) {
         var el = this._paRegion();
@@ -5196,8 +5527,12 @@
       // that license a success word (D263: #item-rest ANSWERS in 1944ms and
       // changes nothing — a ref-drop clear that said "Opened." would announce a
       // success for a dead row, i.e. trade the old silence for a new lie).
-      _paCurrentSig() {
-        var nodes = this.el.querySelectorAll("[aria-current]"), out = [], i, n;
+      // `root` is the press's own surface (`_paScopeFor`). It is NOT widened to
+      // `document`: the tab strip's `aria-current="page"` never moves without a
+      // full navigation, so a document-wide signature would add no witness and
+      // would let an unrelated surface certify a press it had nothing to do with.
+      _paCurrentSig(root) {
+        var nodes = (root || this.el).querySelectorAll("[aria-current]"), out = [], i, n;
         for (i = 0; i < nodes.length; i++) {
           n = nodes[i];
           out.push(String(n.id || n.getAttribute("aria-label") || (n.textContent || "").trim()).slice(0, 40));
@@ -5227,9 +5562,10 @@
         };
       },
 
-      _paPressedChanged(witness) {
+      _paPressedChanged(witness, root) {
         if (!witness || !witness.el) return false;
-        var el = this.el.contains(witness.el) ? witness.el : null;
+        var scope = root || this.el;
+        var el = scope.contains(witness.el) ? witness.el : null;
 
         // LiveView may replace the clicked node while applying the reply. In
         // that case reacquire ONLY its stable exact identity — never text,
@@ -5237,7 +5573,7 @@
         // ambiguous identity fails closed, so an unrelated toggle cannot
         // certify this action.
         if (!el && (witness.id || witness.testId)) {
-          var nodes = this.el.querySelectorAll("[aria-pressed]"), match = null, i, n;
+          var nodes = scope.querySelectorAll("[aria-pressed]"), match = null, i, n;
           for (i = 0; i < nodes.length; i++) {
             n = nodes[i];
             if (witness.id && n.id !== witness.id) continue;
@@ -5251,15 +5587,17 @@
         return !!el && el.getAttribute("aria-pressed") !== witness.value;
       },
 
-      // Drop the pending press and every timer it owns, then say `text` (empty
-      // = the region disappears). This is the ONLY place a pending is released,
-      // so ref-drop, detach, ceiling and unload all clear through one path and
-      // none of them can strand.
-      _paRelease(text) {
+      // Drop the pending press and every timer it owns, and touch NOTHING the
+      // reader can see. `keepFade` leaves the fade timer armed, and exactly one
+      // caller passes it: a teardown that must not wipe a word written in the
+      // same click dispatch (`_paKeepWordThroughTeardown` below). The fade is
+      // then the only thing left that can ever clear the region, which is why
+      // it must survive — a dropped fade there would strand the word forever.
+      _paDropPending(keepFade) {
         if (this._paPoll) { window.clearInterval(this._paPoll); this._paPoll = 0; }
         if (this._paProbe) { window.clearTimeout(this._paProbe); this._paProbe = 0; }
         if (this._paCeil) { window.clearTimeout(this._paCeil); this._paCeil = 0; }
-        if (this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
+        if (!keepFade && this._paFadeT) { window.clearTimeout(this._paFadeT); this._paFadeT = 0; }
         // THE ROW-LEVEL CLEAR (charter D263 follow-up). `#bp-press-answer`
         // above is PAGE-level: a screen-reader user is told what happened, a
         // sighted user looking at the pressed row still sees only the wordless
@@ -5276,7 +5614,16 @@
         // arm `row_press_state_guard_test.exs` mutates for.
         var prev = this._paPending;
         if (prev && prev.el) prev.el.removeAttribute("aria-busy");
+        if (prev && prev.refWatch) { prev.refWatch.disconnect(); prev.refWatch = null; }
         this._paPending = null;
+      },
+
+      // Drop the pending press and every timer it owns, then say `text` (empty
+      // = the region disappears). This is the ONLY place a pending is released,
+      // so ref-drop, detach, ceiling and unload all clear through one path and
+      // none of them can strand.
+      _paRelease(text) {
+        this._paDropPending(false);
         this._paSay(text || "");
         if (text) {
           this._paFadeT = window.setTimeout(() => {
@@ -5291,19 +5638,52 @@
       // aria-current move is a selection ("Selected"), and NEITHER is a
       // success this hook is allowed to name.
       _paSettleWord(p) {
+        // AN ACTION'S ANSWER IS THE SERVER'S OWN SENTENCE. The words below name
+        // the PRESSED control, which is right for a row ("Opened “Hello”.") and
+        // wrong for an action button: "Unpublish" moved the row's status, so
+        // this said "Selected “Unpublish”."; "Duplicate" navigated to the copy,
+        // so it said "Opened “Duplicate”."; History's "Restore" said "Selected
+        // “Restore”." (stranger walk, 2026-09-30) — each beside the server's own
+        // "Unpublished" / "Duplicated as …" / "Restored from history". A flash
+        // sentence that APPEARED since the press is the strongest witness there
+        // is (the server wrote it), so it is the answer, quoted, never invented.
+        var doc = (this.el && this.el.ownerDocument) || (p.el && p.el.ownerDocument);
+        var flash = !doc ? "" : Array.prototype.map.call(doc.querySelectorAll(".flash"), function (n) {
+          return (n.textContent || "").replace(/\s+/g, " ").trim();
+        }).join(" | ");
+        if (flash && flash !== (p.flash || "")) return flash.length > 80 ? flash.slice(0, 79) + "…" : flash;
         if (location.href !== p.url) return p.name ? "Opened “" + p.name + "”." : "Opened.";
-        if (this._paCurrentSig() !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
-        if (this._paPressedChanged(p.pressed)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paCurrentSig(p.root) !== p.sig) return p.name ? "Selected “" + p.name + "”." : "Selected.";
+        if (this._paPressedChanged(p.pressed, p.root)) return p.name ? "Selected “" + p.name + "”." : "Selected.";
         return null;
       },
 
       _paSettle(p) {
         var word = this._paSettleWord(p);
-        // NEUTRAL BY LAW when nothing observable moved (D263). The server
-        // answered — the ref appeared and dropped — but this desk looks the
-        // same, and the hook does not know why. "Done." reports the round trip
-        // and claims no outcome.
-        this._paRelease(word || "Done.");
+        // NO WITNESS, NO WORD. The server answered — the ref appeared and
+        // dropped — but nothing this hook watches moved, so the hook cannot
+        // tell a refusal from a success whose effect it does not watch.
+        //
+        // This used to release "Done.", justified as neutral. It is not
+        // neutral to the person hearing it: "Done." is the word an interface
+        // uses for a completed action, and every handler that answers a press
+        // with an unchanged socket — an authorization refusal in
+        // `switch_workspace/2`, a `publish` with no open document — was
+        // getting it. A user who saw nothing presses again; a user told
+        // "Done." walks away, so the old wordless tint was traded for a FALSE
+        // COMPLETION, which is worse.
+        //
+        // The outcome word belongs to the SERVER, which knows the reason and
+        // already owns an announced banner of its own — `Nav.studio_flash/1`,
+        // which carries the polite status role for info and the assertive
+        // alert role for errors. (Spelled in prose on purpose: the attribute
+        // literals would be counted by the served-body live-region census in
+        // `press_answer_region_guard_test.exs`, which reads THIS file's
+        // rendered output.) Every branch of this hook that
+        // HAS evidence still speaks — "Opened"/"Selected" above, the
+        // lost-press line, the discard line and the 8s ceiling below. Only
+        // the evidence-free branch goes quiet.
+        this._paRelease(word || "");
       },
 
       _paTick(p) {
@@ -5337,12 +5717,80 @@
         );
       },
 
+      // IS THE WORD ON SCREEN THE ONE THIS HOOK JUST WROTE FOR A NAVIGATION IT
+      // IS LOSING THE PAGE TO? Two conditions, and both are needed. `_paNavAway`
+      // says the anchor branch wrote a navigation word; a live `_paFadeT` says
+      // that word is still the region's contents and has not already faded, so
+      // the flag cannot go stale and silence an unrelated teardown minutes
+      // later. It is deliberately NOT a timestamp: the fade timer already is
+      // the lifetime of the announcement, and a second clock would be a second
+      // thing to keep in sync.
+      _paKeepWordThroughTeardown() {
+        return !!(this._paNavAway && this._paFadeT);
+      },
+
+      // A CHROME ANCHOR IS A NAVIGATION, NOT A SOCKET PRESS, and the difference
+      // is load-bearing. There is no ref to watch, no settle and no ceiling, so
+      // this shape must never arm the watchdog: doing so would announce "that
+      // press did not reach the server" about a navigation that is working
+      // perfectly, which is a worse lie than the silence it replaces.
+      //
+      // SAYING THE WORD IS NOT KEEPING IT, and this comment used to claim it
+      // was: "the words are on screen before the browser tears the page down."
+      // Measured on the deployed desk (served e02e4296d), they were not. The
+      // SAME synchronous click dispatch that ran this branch at dt=0.4ms ran
+      // `LiveSocket.destroyAllViews -> View.destroy -> destroyHook ->
+      // destroyed() -> _paRelease("")` at dt=0.9ms, and the first
+      // requestAnimationFrame after the press read the region EMPTY: zero
+      // painted frames, nothing for assistive technology to announce. So the
+      // word is written here and DEFENDED in two places — `destroyed()` and
+      // the `pagehide` handler both refuse to clear a region whose contents
+      // they did not write, while `_paKeepWordThroughTeardown()` holds. The
+      // fade timer, which survives both, is what finally clears it.
+      _paOnChromeAnchor(ev, t) {
+        // Something already claimed this press (a JS command, a menu, a hook).
+        if (ev.defaultPrevented) return;
+        // A modified click opens a BACKGROUND tab. This page changes nothing,
+        // and "opened in a new tab" is a claim no witness on this page supports.
+        if (ev.metaKey || ev.ctrlKey || ev.shiftKey || ev.altKey || ev.button) return;
+        var a = t.closest("a[href]");
+        if (!a || !this._paScopeFor(a)) return;
+        if (a.target && a.target !== "_self") return;
+        if (a.hasAttribute("download")) return;
+        var href = a.getAttribute("href") || "";
+        // A bare fragment scrolls; a javascript: url is not a navigation.
+        if (!href || href.charAt(0) === "#" || /^javascript:/i.test(href)) return;
+        var to;
+        try { to = new URL(a.href, location.href); } catch (e) { return; }
+        if (to.protocol !== "http:" && to.protocol !== "https:") return;
+        // PAST THE LAST REFUSAL: this press IS a navigation off this document,
+        // so every word below has to outlive the teardown it is about.
+        this._paNavAway = true;
+        var name = this._paName(a);
+        // THE HONESTY RULE, ANCHOR SHAPE. The ACTIVE tab's href IS the page you
+        // are already on: the press answers, the browser re-fetches, and the
+        // desk is the same desk. It gets the same evidence-free clear a
+        // witness-less socket press gets in `_paSettle` — and for the same
+        // reason it is a CLEAR rather than "Done.": nothing moved, so there is
+        // no outcome this hook is entitled to name. "Opening “Structure”"
+        // would name a move that does not happen.
+        if (to.href === location.href) { this._paRelease(""); return; }
+        // Present tense on purpose: the navigation is IN FLIGHT. "Opened" is
+        // reserved for a URL that has already moved.
+        this._paRelease(name ? "Opening “" + name + "”…" : "Opening…");
+      },
+
       _paOnPress(ev) {
         var t = ev.target;
         if (!t || !t.closest) return;
         var el = t.closest("[phx-click]");
         if (this._paNativeDisclosureOnly(t, el)) return;
-        if (!el || !this.el.contains(el)) return;
+        if (!el) { this._paOnChromeAnchor(ev, t); return; }
+        var root = this._paScopeFor(el);
+        // A phx-click OUT of scope is not handed to the anchor branch: an
+        // ancestor <a> would then be announced for a press the hook already
+        // decided it does not answer for.
+        if (!root) return;
         var spec = el.getAttribute("phx-click") || "";
         // A pure client-side JS command list never reaches the server and never
         // gets a ref, so there is nothing to wait for and saying "working"
@@ -5361,10 +5809,16 @@
 
         var p = {
           el: el,
+          root: root,
           name: this._paName(el),
           url: location.href,
-          sig: this._paCurrentSig(),
+          sig: this._paCurrentSig(root),
           pressed: this._paPressedWitness(el),
+          // The flash text standing BEFORE the press, so only a sentence the
+          // server wrote in reply to THIS press becomes its answer.
+          flash: Array.prototype.map.call(el.ownerDocument.querySelectorAll(".flash"), function (n) {
+            return (n.textContent || "").replace(/\s+/g, " ").trim();
+          }).join(" | "),
         };
         // Newest press owns the region; the previous one's timers die with it.
         this._paRelease("");
@@ -5373,6 +5827,22 @@
         // page-level region. Set after the release above, so the previous
         // press's row is cleared before this one is marked.
         p.el.setAttribute("aria-busy", "true");
+        // A REF THAT CAME AND WENT IS AN ANSWER, NOT A LOST PRESS
+        // (task-bd7f6c26b182d9c0). LiveView stamps `data-phx-ref-src` on this
+        // control synchronously in the same click dispatch, and removes it when
+        // the reply lands. On a fast link the reply lands BEFORE the 16ms probe
+        // below looks — measured on a local server: ref set at 0.4ms, cleared by
+        // the ok reply at 10.4ms, and the shipped probe then announced "That
+        // press did not reach the server" at 16.5ms over a section toggle whose
+        // aria-expanded had already flipped. Sampling the attribute cannot tell
+        // "never stamped" from "stamped and already dropped"; watching it can.
+        // The attribute is absent at this point (a present ref took the discard
+        // branch above), so ANY mutation of it means LiveView stamped a ref,
+        // i.e. the press was put on the wire.
+        if (window.MutationObserver) {
+          p.refWatch = new window.MutationObserver(function () { p.sawRef = true; });
+          p.refWatch.observe(el, { attributes: true, attributeFilter: ["data-phx-ref-src"] });
+        }
         // Within this same task, so the words are on screen at the next paint —
         // this is TIME-TO-FEEDBACK, not speed. Nothing here makes the server
         // faster (the root-cause slice is filed separately).
@@ -5382,12 +5852,16 @@
           this._paProbe = 0;
           if (this._paPending !== p) return;
           if (p.el.hasAttribute("data-phx-ref-src")) { p.sawRef = true; return; }
-          // NO REF 16ms AFTER THE CLICK — and that is not ambiguous. LiveView
-          // generates the ref SYNCHRONOUSLY inside the click dispatch, and only
-          // AFTER the connection check — `pushWithReply` returns
-          // `Promise.reject(new Error("no connection"))` when `isConnected()` is
-          // false, BEFORE any ref exists — so a press that was pushed always has
-          // its ref by now, and a press with no ref
+          // The ref was stamped and is already gone: the server ANSWERED inside
+          // the probe window. Settle it exactly as the poll would have.
+          if (p.sawRef) { this._paTick(p); return; }
+          // NO REF WAS EVER STAMPED 16ms AFTER THE CLICK — and that is not
+          // ambiguous. LiveView generates the ref SYNCHRONOUSLY inside the click
+          // dispatch, and only AFTER the connection check — `pushWithReply`
+          // returns `Promise.reject(new Error("no connection"))` when
+          // `isConnected()` is false, BEFORE any ref exists — so a press that was
+          // pushed has HAD its ref by now (`refWatch` above saw it even if the
+          // reply already removed it), and a press that never had one
           // was never put on the wire (independently confirmed: a discarded
           // press puts ZERO "type":"click" frames on /live/websocket, D265).
           // This is the owner's actual complaint, so it gets WORDS rather than
@@ -5437,36 +5911,48 @@
       },
 
       mounted() {
-        this._bucket = null;
-        this._raf = 0;
-        this._onResize = () => {
-          if (this._raf) return;
-          this._raf = window.requestAnimationFrame(() => {
-            this._raf = 0;
-            this._sync();
-          });
-        };
-        this._sync();
-        window.addEventListener("resize", this._onResize);
-
         this._paPending = null;
         this._paPoll = 0;
         this._paProbe = 0;
         this._paCeil = 0;
         this._paFadeT = 0;
-        // Bubble phase on this container — never capture, and never on window:
-        // running before LiveView's window listener is the whole mechanism.
+        this._paNavAway = false;
+        // BUBBLE PHASE ON DOCUMENT — never capture, and never on window.
+        // Running before LiveView's click listener is the whole mechanism:
+        // LiveView binds on `window` in the bubble phase
+        // (`LiveSocket#bindClicks` in live_socket.js) and `window` is the LAST
+        // bubble target, strictly after `document`. So `data-phx-ref-src` read
+        // at click time is still the exact discriminator for "this press is
+        // about to be DISCARDED".
+        //
+        // It is `document` rather than `this.el`, and it stays that way after
+        // the move onto `.studio-bar`: `#studio-panes` is a SIBLING of this
+        // hook's element, not a descendant, so a container listener would now
+        // miss every PANE press the way it used to miss every chrome press.
+        // Scope is enforced by `_paScopeFor`, never by where the listener sits
+        // — the same choice, for the same reason, as the in-flight guard below.
         this._paOnClick = (ev) => this._paOnPress(ev);
-        this.el.addEventListener("click", this._paOnClick);
-        // A navigation away must not leave a pending announcement behind.
-        this._paOnPageHide = () => this._paRelease("");
+        document.addEventListener("click", this._paOnClick);
+        // A navigation away must not leave a pending announcement behind — but
+        // the ANSWER TO THAT NAVIGATION is not a leftover, it is the whole
+        // point, and `pagehide` fires while the outgoing document is still the
+        // one on screen. Clearing there would wipe the word during exactly the
+        // window a reader has to hear it.
+        this._paOnPageHide = () => {
+          if (this._paKeepWordThroughTeardown()) { this._paDropPending(true); return; }
+          this._paRelease("");
+        };
         window.addEventListener("pagehide", this._paOnPageHide);
       },
       destroyed() {
-        window.removeEventListener("resize", this._onResize);
-        if (this._raf) window.cancelAnimationFrame(this._raf);
-        this.el.removeEventListener("click", this._paOnClick);
+        document.removeEventListener("click", this._paOnClick);
         window.removeEventListener("pagehide", this._paOnPageHide);
+        // THE TEARDOWN IS PART OF THE PRESS, NOT AFTER IT. A tab-strip anchor
+        // click runs this hook and then `LiveSocket.destroyAllViews` in ONE
+        // synchronous dispatch, so an unconditional clear here wipes the
+        // navigation word before a single frame is painted. Timers and the
+        // row's `aria-busy` still go; the region does not.
+        if (this._paKeepWordThroughTeardown()) { this._paDropPending(true); return; }
         this._paRelease("");
       }
     };
@@ -6011,28 +6497,184 @@
     // control is blocked from the keyboard too, and a control that is NOT
     // in-flight matches nothing here and is untouched.
     //
-    // THE WORDS. When the blocked control is inside #studio-panes the
-    // press-answer region says the same sentence the press-answer hook's
-    // discard branch says (D263), because this listener now runs BEFORE that
-    // hook and would otherwise have turned a named drop back into silence.
-    // Outside the desk this guard is silent — the press-answer slice covers
-    // #studio-panes only, and a guard is not the place to widen it.
+    // THE KEY IS THE REF, NOT THE TINT (task-b1254cbd3115c3e2). The first
+    // shape of this guard asked only `closest(".phx-click-loading,
+    // .phx-submit-loading")`, and that class is CONDITIONAL. In
+    // phoenix_live_view.js, `putRef` stamps `data-phx-ref-src` on every element
+    // it is given BEFORE it decides anything else, and reaches
+    // `classList.add("phx-<type>-loading")` only on the `loading` branch:
+    //
+    //     if(a.setAttribute(N,this.refSrc()),   // N = "data-phx-ref-src"
+    //        h&&a.setAttribute(ve,r), l&&a.setAttribute(C,r),
+    //        !h||…)continue;                    // ← not loading: LEAVE NOW
+    //     …
+    //     a.classList.add(`phx-${i}-loading`);  // ← only reached when loading
+    //
+    // and `pushLinkPatch` is the one caller whose loading flag can be false:
+    // `o=e.isTrusted&&e.type!=="popstate"`. An UNTRUSTED click therefore puts
+    // the element in flight with NO class at all — and this repo produces
+    // untrusted clicks itself, in BP-PREJOIN-QUEUE's `el.click()` replay. The
+    // class implies the ref; the ref does not imply the class, so the ref is
+    // the unconditional key and the class is a symptom.
+    //
+    // WHY IT IS SCOPED TO THE ACTIVATION TARGET rather than a bare
+    // `[data-phx-ref-src]`. `#studio-panes` carries a ref of its own whenever
+    // the WidthBucket hook pushes (the `pane_layout id="studio-panes"` in
+    // studio_live/components.ex) — measured on the
+    // fixture: `data-phx-ref-src="phx-main"` on the CONTAINER. A bare
+    // attribute selector would then make `closest()` succeed for every press
+    // anywhere on the desk and blanket-block it. So the second arm asks
+    // LiveView's own question — the closest `[phx-click]`/`[data-phx-link]`
+    // ancestor, which is the element bindClick and bindNav would activate —
+    // and blocks only when THAT element holds the ref. Both arms and the
+    // container mutation are measured by
+    // `scripts/studio-lockonly-ref-control.mjs --self-test`.
+    //
+    // THE WORDS. When the blocked control is on a surface the press answer
+    // covers, the region says the same sentence the press-answer hook's discard
+    // branch says (D263), because this listener runs BEFORE that hook and would
+    // otherwise have turned a named drop back into silence. The scope is the
+    // hook's own (`_paScopeFor`: `#studio-panes` or `.studio-bar`) and it is
+    // kept in step with it deliberately — spd-w19-press-answer-outside-panes
+    // widened the hook to the chrome, and leaving this guard on the pane row
+    // would have re-silenced every chrome press the guard swallows. Beyond
+    // those two surfaces it stays silent: a guard is not the place to widen
+    // coverage the hook has not taken.
     //
     // BP-INFLIGHT-GUARD-BEGIN
     document.addEventListener("click", function (ev) {
       var t = ev.target;
       if (!t || !t.closest) return;
       var blocked = t.closest(".phx-click-loading, .phx-submit-loading");
+      if (!blocked) {
+        var activated = t.closest("[phx-click], [data-phx-link]");
+        if (activated && activated.hasAttribute("data-phx-ref-src")) blocked = activated;
+      }
       if (!blocked) return;
       ev.preventDefault();
       ev.stopImmediatePropagation();
-      var desk = document.getElementById("studio-panes");
       var region = document.getElementById("bp-press-answer");
-      if (!desk || !region || !desk.contains(blocked)) return;
+      if (!region || !blocked.closest("#studio-panes, .studio-bar")) return;
       var say = "Still working on your last press — that one was not sent.";
       if (region.textContent !== say) region.textContent = say;
     }, true);
     // BP-INFLIGHT-GUARD-END
+
+    // ── PRE-JOIN PRESS QUEUE (spd-w18 / task-c2dd40c6f433a787) ────────────
+    //
+    // A SECOND, DIFFERENT SWALLOW, and it is not the in-flight one above.
+    // Measured on served e02e4296d: `#item-paper` is in the DOM and pressable
+    // at t=61ms after load, and the LiveView joins at t=254ms. A real press
+    // inside that 193ms window puts ZERO `"type":"click"` frames on
+    // /live/websocket and the URL never moves. In the SAME session, joined,
+    // the same button on the same page puts one frame on the wire and patches
+    // the URL — so the counter can report the opposite and the window, not the
+    // button, is what is broken.
+    //
+    // IT IS NOT bindClick's EARLY RETURN. `data-phx-ref-src` cannot arrive in
+    // this window at all: `View.pushWithReply` returns
+    // `Promise.reject(new Error("no connection"))` BEFORE it calls the ref
+    // generator, so `putRef` never runs and no ref is ever stamped. A
+    // MutationObserver armed before the first byte of page script saw its
+    // FIRST self-arriving `data-phx-ref-src` at t=254ms — at join, on
+    // `#studio-panes`, from the WidthBucket hook's own mount push — and none
+    // before it. The pre-join press is dropped by the connection check; the
+    // in-flight press is dropped by bindClick. Two mechanisms, two remedies.
+    //
+    // WHY QUEUE-AND-REPLAY HERE AND UNPRESSABLE THERE. A pre-join press is
+    // unambiguous: nothing has patched the DOM yet, so the element the user
+    // aimed at is still the element the replay will hit, and the join either
+    // arrives or the socket is dead — there is no third outcome to guess at.
+    // An in-flight press is the opposite: the reply that clears the ref is
+    // precisely the thing that re-renders the row under the pointer, so
+    // replaying it could fire an event at a control that no longer means what
+    // it meant, which is the "press goes somewhere WRONG" hazard that
+    // removing `pointer-events: none` was about. And unpressable loses here
+    // for a reason a reader can weigh: the pre-join window covers EVERY
+    // control on a freshly loaded desk, so disabling the desk for the duration
+    // of socket join makes the desk visibly dead on 100% of loads to fix a
+    // press that is lost on some of them — a worse trade than the one it
+    // replaces. Shrinking the window further is not on this list: it is what
+    // already happened (4.9s join then, 0.2s now) and the press is still lost.
+    //
+    // ONLY AN ELEMENT WITH AN ID IS QUEUED. The replay re-resolves the control
+    // by id, because the join patch may replace the node the listener saw. An
+    // id-less `phx-click` cannot be re-resolved honestly, so it is released
+    // with the words rather than replayed at a guess.
+    //
+    // BP-PREJOIN-QUEUE-BEGIN
+    (function () {
+      var PREJOIN_CEILING = 8000; // ms — the same named ceiling as the press answer
+      var pendingId = null, pendingTimer = 0;
+
+      function region() { return document.getElementById("bp-press-answer"); }
+      function say(text) {
+        var el = region();
+        if (!el || el.textContent === text) return;
+        el.textContent = text;
+      }
+      function joined() {
+        var main = document.querySelector("[data-phx-main]");
+        return !!main && main.classList.contains("phx-connected");
+      }
+      function release(text) {
+        if (pendingTimer) { window.clearTimeout(pendingTimer); pendingTimer = 0; }
+        pendingId = null;
+        if (text !== null) say(text);
+      }
+      function replay() {
+        if (!pendingId) return;
+        var id = pendingId;
+        release(null);
+        var el = document.getElementById(id);
+        if (!el) { say("That press was not sent — press it again."); return; }
+        // The press-answer hook's bubble listener sees this synthetic click and
+        // says "Working on …" itself, so nothing is announced here.
+        el.click();
+      }
+
+      document.addEventListener("click", function (ev) {
+        var t = ev.target;
+        if (!t || !t.closest) return;
+        var el = t.closest("[phx-click]");
+        if (!el || !el.closest("#studio-panes, .studio-bar")) return;
+        if (joined()) return;                              // the socket is up: not ours
+        if (el.hasAttribute("data-phx-ref-src")) return;   // in-flight: the guard above owns it
+        // A real anchor navigates without the socket and must keep working.
+        var href = el.getAttribute("href");
+        if (el.tagName === "A" && href && href !== "#") return;
+        ev.preventDefault();
+        ev.stopImmediatePropagation();
+        if (!el.id) { say("Still connecting — that press was not sent. Press it again in a moment."); return; }
+        release(null);
+        pendingId = el.id;
+        say("Still connecting — your press will be sent when the desk is ready.");
+        pendingTimer = window.setTimeout(function () {
+          pendingTimer = 0;
+          release("The desk never finished connecting — that press was not sent.");
+        }, PREJOIN_CEILING);
+      }, true);
+
+      var mo = new MutationObserver(function () { if (joined()) replay(); });
+      // ARMING IS NOT OPTIONAL. A first draft bailed out when
+      // `document.documentElement` was null and armed nothing — the click
+      // listener above still swallowed the press, the watcher never fired, and
+      // the queue held it until the ceiling. That is a WORSE desk than the one
+      // this fixes, and it was silent. Caught by
+      // `scripts/studio-prejoin-live-probe.mjs --with-fix`, which injects this
+      // fence ahead of the served page's own scripts and so reaches the state
+      // the shipped body script never does. The retry is the whole point.
+      function arm() {
+        if (!document.documentElement) {
+          document.addEventListener("readystatechange", arm, { once: true });
+          return;
+        }
+        mo.observe(document.documentElement, { attributes: true, subtree: true, attributeFilter: ["class"] });
+        if (joined()) replay();
+      }
+      arm();
+    })();
+    // BP-PREJOIN-QUEUE-END
 
     let liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
       params: () => ({
@@ -6040,6 +6682,7 @@
         user_id: userId,
         user_name: userName,
         user_color: userColor,
+        inspector_closed: document.documentElement.dataset.inspectorPref === "closed",
         ...(window.BarkparkPaperEditorConnectParams?.() || {})
       }),
       hooks: Hooks,

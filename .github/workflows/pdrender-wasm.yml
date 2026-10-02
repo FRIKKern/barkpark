@@ -23,18 +23,56 @@ on:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      # Every OTHER first-party package the blob links. This list is not a
+      # guess: `GOOS=js GOARCH=wasm go list -deps ./cmd/pdrender-wasm` grepped
+      # to github.com/FRIKKern/barkpark returns exactly three packages —
+      # cmd/pdrender-wasm, internal/pdrender, and internal/wasmimages — and
+      # the third was absent, so the image-budget code COMPILED INTO the blob
+      # (MaxEntries, Build) could change and this gate stayed silent. Re-run
+      # that go list when the entry grows an import; a package in the closure
+      # and not in this filter is the defect, every time.
+      - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
+      # The recipe this gate exists to prove, and the committed loader the smoke
+      # harness instantiates the fresh blob against. Both were absent until
+      # task-519d5ea68ddca27f: `make wasm` could be broken, emptied, or re-pointed
+      # and this gate stayed silent (live: PR #18481 touched only Makefile and
+      # rendered no pdrender-wasm row). Bare `Makefile`, not `**/Makefile` — the
+      # root Makefile is the only tracked Makefile in the repo and the only one
+      # carrying the `wasm` / `wasm-siblings-check` targets; the recursive glob
+      # would fire this gate on any future nested Makefile that cannot affect it.
+      - "Makefile"
+      - "api/priv/static/assets/bp-wasm-exec.js"
   pull_request:
     paths:
       - "cmd/pdrender-wasm/**"
       - "internal/pdrender/**"
+      # Every OTHER first-party package the blob links. This list is not a
+      # guess: `GOOS=js GOARCH=wasm go list -deps ./cmd/pdrender-wasm` grepped
+      # to github.com/FRIKKern/barkpark returns exactly three packages —
+      # cmd/pdrender-wasm, internal/pdrender, and internal/wasmimages — and
+      # the third was absent, so the image-budget code COMPILED INTO the blob
+      # (MaxEntries, Build) could change and this gate stayed silent. Re-run
+      # that go list when the entry grows an import; a package in the closure
+      # and not in this filter is the defect, every time.
+      - "internal/wasmimages/**"
       - "api/test/support/fixtures/nested-list-carriers.json"
       - ".github/workflows/pdrender-wasm.yml"
       - "go.mod"
       - "go.sum"
+      # The recipe this gate exists to prove, and the committed loader the smoke
+      # harness instantiates the fresh blob against. Both were absent until
+      # task-519d5ea68ddca27f: `make wasm` could be broken, emptied, or re-pointed
+      # and this gate stayed silent (live: PR #18481 touched only Makefile and
+      # rendered no pdrender-wasm row). Bare `Makefile`, not `**/Makefile` — the
+      # root Makefile is the only tracked Makefile in the repo and the only one
+      # carrying the `wasm` / `wasm-siblings-check` targets; the recursive glob
+      # would fire this gate on any future nested Makefile that cannot affect it.
+      - "Makefile"
+      - "api/priv/static/assets/bp-wasm-exec.js"
 
 concurrency:
   # Never cancel main; collapse superseded PR runs.

@@ -186,9 +186,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Errors
-  alias Barkpark.Content.Labels
   alias Barkpark.Media.Storage.MediaFile
-  alias Barkpark.PortableDoc.Render
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
   alias BarkparkWeb.ErrorResponse
@@ -299,6 +297,14 @@ defmodule BarkparkWeb.ShareLinkController do
     end
   end
 
+  # The ONE cache policy for a media share link's bytes, on every arm: the
+  # local `send_file`, the 302, and the presigned URL's signed
+  # `response-cache-control` (so a bucket-served byte carries it too). Not
+  # `Delivery.file_cache_control/1`: see the `{:file, full}` comment below for
+  # why a share link has no `bp_visibility` to key on and must never be the
+  # 24h shared-cache store.
+  @media_cache_control "private, max-age=0, must-revalidate"
+
   # @sobelow_skip — both findings on this clause are accepted false-positives:
   #   * Traversal.SendFile (send_file/3): `file` is resolved by
   #     `Media.get_file/2` scoped to the LINK's own workspace/project; `.path` is
@@ -327,7 +333,8 @@ defmodule BarkparkWeb.ShareLinkController do
         # the same flat path. Same seal as MediaController.serve/2.
         case Barkpark.Media.Blobstore.serve_strategy(file,
                response_content_type: MediaFile.serve_content_type(mime),
-               response_content_disposition: disposition
+               response_content_disposition: disposition,
+               response_cache_control: @media_cache_control
              ) do
           {:file, full} ->
             # ONE POLICY FOR BOTH BRANCHES (het-bl-sharelink-local-cache-policy).
@@ -352,12 +359,12 @@ defmodule BarkparkWeb.ShareLinkController do
             |> put_resp_content_type(MediaFile.serve_content_type(mime))
             |> put_resp_header("x-content-type-options", "nosniff")
             |> put_resp_header("content-disposition", disposition)
-            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+            |> put_resp_header("cache-control", @media_cache_control)
             |> send_file(200, full)
 
           {:redirect, url} ->
             conn
-            |> put_resp_header("cache-control", "private, max-age=0, must-revalidate")
+            |> put_resp_header("cache-control", @media_cache_control)
             |> redirect(external: url)
 
           {:error, :not_found} ->
@@ -449,6 +456,16 @@ defmodule BarkparkWeb.ShareLinkController do
   end
 
   @doc "DELETE /v1/shares/links/:id — revoke one link."
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def revoke(conn, %{"id" => id}) do
     case revoke_scoped(conn, id) do
       # RECEIPT LAW (pds w39): `Links.revoke/1` returns the UPDATED link
@@ -631,37 +648,25 @@ defmodule BarkparkWeb.ShareLinkController do
   # (which would distinguish "redacted content exists here" from "this paper is
   # empty") is never disclosed to the token holder.
   #
-  # This deliberately does NOT copy Studio's raw read: an editor is an
+  # This deliberately does NOT copy Studio's editor read: an editor is an
   # authenticated author looking at their own document, so it may see the
-  # unredacted, unsanitized source. This surface may not.
+  # unredacted source. This surface may not.
+  #
+  # `Content.Papers.reader_html/3` renders a blocks paper from its blocks on
+  # every read and never serves the stored `body_html` cache for it; only a
+  # legacy paper with no blocks is served its sanitized `body_html`.
   #
   # Reference resolution stays bound to the LINK scope (not request/global
   # scope) — `reader_schema_scope/2` only fills in the paper's own ids where
   # the caller passed none, so the ids from `scope/1` win.
-  defp paper_body_html(%Content.Document{} = paper, %ShareLink{} = link) do
-    case Content.Papers.reader_source(paper, link.dataset, scope(link)) do
-      {:blocks, blocks} ->
-        render_opts =
-          Labels.paper_render_opts(
-            link.dataset,
-            Map.get(paper.content || %{}, "style"),
-            scope(link)
-          )
-
-        {:ok, Render.render_blocks(blocks, render_opts)}
-
-      {:html, sanitized_html} ->
-        {:ok, sanitized_html}
-
-      {:error, reason} ->
-        {:error, reason}
-    end
-  end
+  defp paper_body_html(%Content.Document{} = paper, %ShareLink{} = link),
+    do: Content.Papers.reader_html(paper, link.dataset, scope(link))
 
   defp paper_body_html(_paper, _link), do: {:error, :not_found}
 
-  defp paper_article?(%{content: content}),
-    do: Map.get(content || %{}, "style") in ["article", "article-wide"]
+  # The SAME chrome decision as BulldocsLive's `@article?` (article, or no
+  # style at all — the web default); one predicate so the doors cannot drift.
+  defp paper_article?(paper), do: BarkparkWeb.PaperReaderStyle.article?(paper)
 
   # Canonical v1 error envelope (code + request_id) for the JSON API paths — the
   # same contract as the content endpoints; was a bare `%{error: msg}` with

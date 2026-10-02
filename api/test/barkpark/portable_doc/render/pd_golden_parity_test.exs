@@ -48,7 +48,8 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # scaffy:add-block-type CodeTabs MARK:parity-count-test-code-tabs
     # scaffy:add-block-type Tabs MARK:parity-count-test-tabs
     # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
-    assert length(GenPdParity.types()) == 64
+    # docgates-s27: +pre-gate-badge (#17199's compose.ex clause, goldenless until now)
+    assert length(GenPdParity.types()) == 65
   end
 
   test "both members of all 3 alias pairs are present" do

@@ -75,11 +75,17 @@ try {
       const beforeBreak = ed.getJSON();
       position(ed, "Build", 2);
       ed.commands.setHardBreak();
-      assert.deepEqual(ed.getJSON(), beforeBreak, "hard breaks remain rejected");
-      const invalidStart = ed.state.schema.nodes.orderedList.create({ start: 3 },
+      assert.match(JSON.stringify(saved().items), /Bu.*\\n.*ild/, "nested breaks serialize without losing the child");
+      ed.commands.undo();
+      assert.deepEqual(ed.getJSON(), beforeBreak, "nested break Undo restores exact carriers");
+      // An ordered list's first number is PortableDoc now (`start`): a custom start is
+      // accepted and saves as the number the canvas shows, and Undo restores the list.
+      const customStart = ed.state.schema.nodes.orderedList.create({ start: 3 },
         ed.state.schema.nodes.listItem.create(null, ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("Custom start"))));
-      ed.view.dispatch(ed.state.tr.replaceWith(0, ed.state.doc.content.size, invalidStart));
-      assert.deepEqual(ed.getJSON(), beforeBreak, "unsupported ordered starts cannot look saved");
+      ed.view.dispatch(ed.state.tr.replaceWith(0, ed.state.doc.content.size, customStart));
+      assert.equal(saved().start, 3, "a custom ordered start saves as shown");
+      ed.commands.undo();
+      assert.deepEqual(ed.getJSON(), beforeBreak, "custom start Undo restores exact carriers");
       const invalidItem = ed.state.schema.nodes.listItem.create(null, [
         ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("First")),
         ed.state.schema.nodes.paragraph.create(null, ed.state.schema.text("Second")),
@@ -143,5 +149,54 @@ try {
       assert.deepEqual(pasted.saved().items, items);
     } finally { pasted.host.remove(); }
   }
-  console.log("mounted nested list authoring and source ownership passed");
+  // Checklists share the canvas list carriers and boundary. A nested task frame
+  // must not disable unrelated edits, drop its metadata or weaken shape guards.
+  const checklist = { id: "mixed-checklist", type: "list", ordered: true, items: [
+    { id: "parent", text: "Parent", children: [
+      { id: "tasks-frame", type: "list", task: true, audit: "retain frame", items: [
+        { id: "task-a", text: "Checked child", checked: true, audit: "retain item", children: [
+          { type: "list", ordered: false, items: ["Deep child"] },
+        ] },
+        { id: "task-b", text: "Next task", checked: false },
+      ] },
+    ] },
+  ] };
+  const m3 = mount("bp-paper-canvas", checklist);
+  try {
+    assert.deepEqual(m3.saved().items, checklist.items, "nested checklist mounts with exact source metadata");
+    position(m3.ed, "Parent", 1); m3.ed.commands.insertContent("X");
+    const edited = clone(checklist.items); edited[0].text = "PXarent";
+    assert.deepEqual(m3.saved().items, edited, "nested checklist does not block parent text input");
+    m3.ed.commands.undo(); assert.deepEqual(m3.saved().items, checklist.items);
+    position(m3.ed, "Deep child", 1); m3.ed.commands.insertContent("X");
+    const deep = clone(checklist.items); deep[0].children[0].items[0].children[0].items[0] = "DXeep child";
+    assert.deepEqual(m3.saved().items, deep, "deep text edit retains task/frame identity and checked state");
+    m3.ed.commands.undo(); assert.deepEqual(m3.saved().items, checklist.items);
+    position(m3.ed, "Checked child", 1); m3.ed.commands.updateAttributes("taskItem", { checked: false });
+    const toggled = clone(checklist.items); toggled[0].children[0].items[0].checked = false;
+    assert.deepEqual(m3.saved().items, toggled, "toggle changes only checked state");
+    m3.ed.commands.undo(); assert.deepEqual(m3.saved().items, checklist.items);
+    position(m3.ed, "Checked child", 7); m3.ed.commands.setHardBreak();
+    assert.equal(m3.saved().items[0].children[0].items[0].text, "Checked\n child");
+    m3.ed.commands.undo(); assert.deepEqual(m3.saved().items, checklist.items, "checklist break Undo retains source carriers");
+    const before = m3.ed.getJSON(), schema = m3.ed.state.schema;
+    const invalid = schema.nodes.taskItem.create({ checked: true }, [
+      schema.nodes.paragraph.create(null, schema.text("First")),
+      schema.nodes.paragraph.create(null, schema.text("Second")),
+    ]);
+    m3.ed.view.dispatch(m3.ed.state.tr.replaceWith(0, m3.ed.state.doc.content.size, schema.nodes.taskList.create(null, invalid)));
+    assert.deepEqual(m3.ed.getJSON(), before, "checklist multiple paragraphs remain refused");
+  } finally { m3.host.remove(); }
+  const flatTasks = { id: "flat-tasks", type: "list", task: true, items: [
+    { id: "first-task", text: "First", checked: true },
+    { id: "second-task", text: "Second", checked: false },
+  ] };
+  const m4 = mount("bp-paper-canvas", flatTasks);
+  try {
+    position(m4.ed, "Second");
+    m4.ed.view.dom.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Backspace", code: "Backspace", bubbles: true, cancelable: true }));
+    assert.deepEqual(m4.saved().items, [{ ...flatTasks.items[0], text: "FirstSecond" }], "checklist join retains the surviving item's identity and state");
+    m4.ed.commands.undo(); assert.deepEqual(m4.saved().items, flatTasks.items, "checklist join Undo restores both exact items");
+  } finally { m4.host.remove(); }
+  console.log("mounted nested list/checklist authoring and source ownership passed");
 } finally { window.close(); }

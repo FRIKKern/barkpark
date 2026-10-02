@@ -29,6 +29,12 @@ defmodule Barkpark.StructurePluginStructGatingTest do
     @moduledoc false
     # Simulates a plugin whose resolve_desk_items/2 override hands back a
     # full %Node{} struct instead of a desk-item map.
+    #
+    # It OWNS `gated_type` — the desk gate classifies a plugin node's type
+    # against plugin-owned types, never against another workspace's catalog
+    # (task-5ae31d6d9f13965f), so the plugin declares what it gates on.
+    def owned_schema_types, do: ["gated_type"]
+
     def resolve_desk_items(prev, _ctx) do
       prev ++
         [
@@ -76,7 +82,7 @@ defmodule Barkpark.StructurePluginStructGatingTest do
 
   test "a %Node{} returned by a plugin override is workspace-gated like any plugin item",
        ctx do
-    # `gated_type` exists in the catalog but is registered ONLY in workspace A.
+    # `gated_type` is plugin-owned and registered ONLY in workspace A.
     register_schema!("gated_type", "Gated", scope(ctx.ws_a, ctx.proj_a))
     # Workspace B owns some content so its desk isn't empty.
     register_schema!("post", "Posts", scope(ctx.ws_b, ctx.proj_b))

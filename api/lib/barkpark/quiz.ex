@@ -13,8 +13,21 @@ defmodule Barkpark.Quiz do
 
   alias Barkpark.Quiz.Room
 
-  @doc "Resolve-or-start the room for `pin`."
+  @doc """
+  Resolve-or-start the room for `pin` as an INTERNAL caller — no spawn budget
+  is spent. Every reachable door must pass its transport context instead
+  (`ensure_room/2`); `Barkpark.Quiz.SpawnBudgetTest` fails if one does not.
+  """
   defdelegate ensure_room(pin), to: Room, as: :ensure
+
+  @doc """
+  Resolve-or-start the room for `pin`, billing a NEW spawn to the principal
+  behind `source` (a `%Plug.Conn{}` or a socket `connect_info` map).
+
+  `{:error, :spawn_budget}` when that principal has opened too many rooms in
+  the last hour — see `Barkpark.Quiz.SpawnBudget`.
+  """
+  defdelegate ensure_room(pin, source), to: Room, as: :ensure
 
   @doc """
   Add (or refresh) a player in a live room; returns `{:ok, snapshot}`, or
@@ -55,6 +68,11 @@ defmodule Barkpark.Quiz do
   defdelegate bind_quiz(pin, quiz_id, dataset \\ "production"),
     to: Barkpark.Quiz.Bridge,
     as: :bind
+
+  @doc "Bind on behalf of a host surface (`Bridge.bind_as_host/4`): first host owns the PIN."
+  defdelegate bind_quiz_as_host(pin, quiz_id, host_key, dataset \\ "production"),
+    to: Barkpark.Quiz.Bridge,
+    as: :bind_as_host
 
   @doc "Report a player's normalized `0.0..1.0` cursor position (fire-and-forget)."
   defdelegate move(pin, player_id, x, y), to: Room

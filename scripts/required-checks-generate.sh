@@ -115,6 +115,23 @@
 # quietly re-implementing at leaf granularity, forever, the aggregator the run
 # just disqualified.
 #
+# AND A PULL_REQUEST-ONLY NAME IS CLASSIFIED, NOT WAITED FOR (S8)
+#
+# Stage 2 iterates the S1 intersection, i.e. names that RENDERED on the sampled
+# shas, and the sampled shas are branch heads. A workflow triggered only by
+# `pull_request` publishes against a PR's merge ref and never against a commit
+# on main, so no window can put its names in front of the selection: the census
+# was structurally blind to EVERY pull_request-only check name, and the three
+# committed rows for such names each arrived by hand and had to be re-typed as
+# `--expect-unrendered` on every regeneration. S8 derives those candidates from
+# the workflow source — a pull_request trigger, no branch-head trigger, no paths
+# filter — and applies the STATIC exclusion grounds only. It can never promote:
+# a required context must be a byte-for-byte copy of a name GitHub was observed
+# to publish, and an S8 candidate's string came from a `name:` template, so a
+# candidate with no static ground stays unaccounted and a candidate the
+# committed spec REQUIRES is skipped outright. Its rows defer to a committed row
+# for the same context.
+#
 # USAGE
 #   scripts/required-checks-generate.sh --sha <sha> --sha <sha> [--out FILE]
 #   scripts/required-checks-generate.sh --sha <sha> --explain      # the ledger
@@ -557,6 +574,158 @@ tmpl_to_regex() {
   printf '%s' "$t"
 }
 
+# ── FINITE EXPANSION of a matrix name template ───────────────────────────────
+# A job whose `name:` is NOTHING BUT `${{ … }}` renders one check run per matrix
+# leg, each carrying a LITERAL name the template never spells. tmpl_to_regex can
+# only turn that template into `^.+$`, which assert_no_catchall_job_names below
+# correctly refuses — a `.+` row is a takeover, not a match.
+#
+# The refusal's own prescription (static job name, interpolate in a STEP name)
+# is right for cp-ops.yml and WRONG for a job whose rendered names are a
+# committed contract: GitHub appends ` (leg)` to a matrix job that has no name
+# of its own, so taking the template away RENAMES every leg at once.
+# `.github/shell-harness-check-runs.txt` is exactly such a contract.
+#
+# So the resolution runs the other way. When the workflow DECLARES where its
+# legs come from — a committed file plus a jq filter, in a comment inside the
+# job block:
+#
+#     # required-checks: matrix-name-legs .github/shell-harness-legs.json .[].name
+#
+# the index is expanded at BUILD time into one row per leg carrying the leg's
+# LITERAL name. The index gets strictly MORE precise (N exact names with this
+# job's real continue-on-error / paths-filter / needs, instead of one pattern
+# with none), and the catch-all probe then never sees a catch-all because there
+# is no longer a `.+` row to see.
+#
+# WHAT SURVIVES, AND IT IS THE POINT: every template that CANNOT be resolved to
+# a finite literal set is still refused. No declaration, an unreadable or
+# missing file, a filter that yields nothing, a "literal" that is itself an
+# interpolation, a duplicate — each one leaves (or puts) the row back in front
+# of assert_no_catchall_job_names, or dies here by name. A declaration is a
+# promise to enumerate, never a licence to match anything. Expansion can only
+# ever produce LITERALS: no path through this function can widen a regex.
+MATRIX_NAME_LEGS_DIRECTIVE='required-checks: matrix-name-legs'
+
+# The `<file> <jq-filter>` a job declares, or empty. Scoped to the job BLOCK —
+# a comment above `  harness:` belongs to the job before it, not to this one.
+matrix_legs_directive() {
+  local file="$1" job="$2"
+  [ -f "$file" ] || return 0
+  awk -v want="$job" '
+    /^jobs:/ { injobs = 1; next }
+    injobs && /^[a-z]/ { injobs = 0 }
+    injobs && /^  [A-Za-z0-9_.-]+:/ {
+      j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); cur = j; next
+    }
+    injobs && cur == want && /^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]/ {
+      line = $0
+      sub(/^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]+/, "", line)
+      sub(/[ \t]+$/, "", line)
+      print line
+      exit
+    }
+  ' "$file"
+}
+
+# idx in, idx out. Rows that are not whole-template names pass through untouched.
+expand_matrix_name_legs() {
+  local idx="$1" file job tmpl matrixed coe pf launder needs
+  local bare d legsfile filter names nm seen
+  while IFS=$'\t' read -r file job tmpl matrixed coe pf launder needs; do
+    [ -n "$job" ] || continue
+
+    # Only a name that is ENTIRELY interpolation is the shape at issue. A
+    # partial template (`Test (${{ matrix.otp }})`) is already not a catch-all
+    # and is left exactly as it was — this function must not change any verdict
+    # it is not here to change.
+    bare="$(printf '%s' "$tmpl" | sed -E 's/\$\{\{[^}]*\}\}//g')"
+    if [ -n "$bare" ] || ! grep -q '\${{' <<<"$tmpl"; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$tmpl" "$matrixed" "$coe" "$pf" "$launder" "$needs"
+      continue
+    fi
+
+    d="$(matrix_legs_directive "$WORKFLOW_DIR/$file" "$job")"
+    if [ -z "$d" ]; then
+      # UNDECLARED: pass it through UNCHANGED so the catch-all refusal below
+      # says its own sentence about it. Silently dying here instead would move
+      # the guard's message and break every arm that greps for it.
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$tmpl" "$matrixed" "$coe" "$pf" "$launder" "$needs"
+      continue
+    fi
+
+    legsfile="${d%%[[:space:]]*}"
+    filter="${d#*[[:space:]]}"
+    [ -n "$legsfile" ] && [ -n "$filter" ] && [ "$filter" != "$d" ] \
+      || die "MATRIX LEG SOURCE IS INCOMPLETE: $file job '$job' declares \`# $MATRIX_NAME_LEGS_DIRECTIVE $d\`, which is not \`<committed-file> <jq-filter>\`. A declaration that cannot be read is not an enumeration, and the template it claims to resolve matches every name."
+    case "$legsfile" in
+      /*|*..*) die "MATRIX LEG SOURCE IS NOT REPO-RELATIVE: $file job '$job' declares \`$legsfile\` — the leg set must be a committed file inside the repo, so the index is derived from the tree under review and not from whatever the runner happens to have on disk." ;;
+    esac
+    # ANCHORED TO THE TREE UNDER REVIEW, not to this script's own checkout.
+    # `--workflows <dir>` is how every caller points the generator at a tree,
+    # and the mutation suite runs COPIES of this script out of a mktemp dir —
+    # where `$REPO_ROOT` is that temp dir and no leg file has ever existed. An
+    # anchor on $0 therefore turns "read the legs of the workflows you were
+    # given" into "read the legs of wherever the binary happens to live", and
+    # the whole suite reds with MATRIX LEG SOURCE IS MISSING. The workflow dir
+    # names its own root: `<root>/.github/workflows`.
+    local legsroot="" legspath=""
+    legsroot="$(cd "$WORKFLOW_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
+    if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then
+      legspath="$legsroot/$legsfile"
+    elif [ -f "$REPO_ROOT/$legsfile" ]; then
+      # A synthetic `--workflows` dir that is not inside a repo at all (the
+      # suite's own fixture trees): fall back to this checkout. Both anchors
+      # are committed files in a repo; neither can widen a regex.
+      legspath="$REPO_ROOT/$legsfile"
+    fi
+    [ -n "$legspath" ] \
+      || die "MATRIX LEG SOURCE IS MISSING: $file job '$job' declares its legs live in \`$legsfile\`, which exists under neither the workflow tree (\`${legsroot:-?}\`) nor this checkout (\`$REPO_ROOT\`). The template \`name: $tmpl\` therefore resolves to NOTHING and stays a catch-all — commit the leg file or take the declaration off."
+    # jq is handed the filter as ONE argv element, so there is no shell here to
+    # inject into; the charset guard is about keeping the declaration readable
+    # and reviewable, not about escaping.
+    # `]` leads the bracket expression on purpose: an ERE class ends at the
+    # first `]` that is not in leading position, and `\]` does NOT escape it.
+    grep -qE '^[]A-Za-z0-9_.@:|()[ "'"'"'-]+$' <<<"$filter" \
+      || die "MATRIX LEG FILTER IS NOT A PLAIN jq PATH: $file job '$job' declares filter \`$filter\` — keep it to a readable path expression (\`.[].name\`) so a reviewer can see the leg set it names."
+
+    # WRAPPED, not run bare. `jq -r .[].nope` over a 53-element array prints the
+    # WORD `null` 53 times — a filter that names a field the leg file does not
+    # have looks, to a bare read, like 53 successfully-enumerated names. The
+    # wrapper makes a non-string leg an ERROR instead of a string, which is the
+    # only way "this filter resolved nothing" and "this filter resolved" differ.
+    names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"leg name \" + tojson + \" is not a string\") end) | .[]" "$legspath" 2>&1)" \
+      || die "MATRIX LEG SOURCE DOES NOT RESOLVE: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, and jq refused it: $(head -1 <<<"$names"). A leg source that does not yield a list of strings resolves to no finite set, so \`name: $tmpl\` is still a catch-all."
+    [ -n "$names" ] \
+      || die "MATRIX LEG SOURCE IS EMPTY: $file job '$job' declares \`$legsfile\` with filter \`$filter\`, which yielded ZERO names. An empty enumeration is not a finite resolution of \`name: $tmpl\` — it is a template with nothing behind it."
+
+    seen=""
+    while IFS= read -r nm; do
+      [ -n "$nm" ] \
+        || die "MATRIX LEG NAME IS EMPTY: $file job '$job' — \`$legsfile\` yielded a blank name through \`$filter\`. A blank row cannot be matched against a rendered check-run name."
+      case "$nm" in
+        *'${{'*) die "MATRIX LEG NAME IS ITSELF A TEMPLATE: $file job '$job' — \`$legsfile\` yielded \`$nm\`, which still interpolates. Expansion produces LITERALS or it produces nothing; a template here would re-introduce the catch-all one level down." ;;
+        *'	'*) die "MATRIX LEG NAME CONTAINS A TAB: $file job '$job' — \`$legsfile\` yielded \`$nm\`. The workflow index is tab-separated, so a tab inside a name would silently shift this job's continue-on-error / paths-filter / needs into the wrong columns." ;;
+      esac
+      case "$seen" in
+        *"$(printf '\001')$nm$(printf '\001')"*) die "MATRIX LEG NAME IS DUPLICATED: $file job '$job' — \`$legsfile\` yielded \`$nm\` more than once. Two index rows for one rendered name means job_for_name's verdict depends on row order, which is exactly the non-determinism the catch-all refusal exists to stop." ;;
+      esac
+      seen="$seen$(printf '\001')$nm$(printf '\001')"
+      # matrixed is forced to 0: the expanded row IS the rendered name, so the
+      # ` (tuple)` suffix branch in job_for_name must not also fire and let this
+      # job claim `<leg name> (anything)`.
+      printf '%s\t%s\t%s\t0\t%s\t%s\t%s\t%s\n' \
+        "$file" "$job" "$nm" "$coe" "$pf" "$launder" "$needs"
+    done <<INNER
+$names
+INNER
+  done <<EOF
+$idx
+EOF
+}
+
 # A name template that matches an ARBITRARY string is a CATCH-ALL, and a
 # catch-all is not a match — it is a takeover. `.github/workflows/cp-ops.yml`
 # declared `jobs.run.name: ${{ inputs.operation }}`, which tmpl_to_regex turns
@@ -782,6 +951,12 @@ main() {
   local idx
   idx="$(build_workflow_index)"
   [ -n "$idx" ] || die "the workflow index is empty — the parser is broken, not the repo"
+  # `|| exit 1` explicitly: `die` fires inside a COMMAND SUBSTITUTION, so its
+  # exit reaches this shell only through `set -e`. A copy of this script with
+  # `-e` weakened would otherwise carry on with an EMPTY index and a refusal
+  # that printed but did not stop anything.
+  idx="$(expand_matrix_name_legs "$idx")" || exit 1
+  [ -n "$idx" ] || die "the workflow index came back empty from matrix-name expansion — refusing to reason about a tree it can no longer see"
   assert_no_catchall_job_names "$idx"
   assert_no_laundered_jobs "$idx"
 
@@ -974,6 +1149,136 @@ $file	$job	$needs
 $intersection
 EOF
 
+  # ── S8 PULL-REQUEST-ONLY: the census's structural blind spot ────────────────
+  #
+  # STAGE 2 ABOVE ITERATES THE INTERSECTION, so every classification this script
+  # makes is a classification of a name that RENDERED on the sampled shas — and
+  # the sampled shas are BRANCH HEADS. A workflow triggered only by
+  # `pull_request` / `pull_request_target` publishes its check runs against a
+  # PR's merge ref and never against a commit on main, so no sampling window,
+  # however wide, can put its names in front of stage 2. The census is
+  # structurally blind to EVERY pull_request-only check name, and the evidence is
+  # in the committed spec: `PR task gate self-test` and both dependabot rows
+  # arrived BY HAND, and each has to be re-acknowledged with
+  # `--expect-unrendered` on every regeneration, forever
+  # (cgsi-bl-pr-task-gate-selftest-unclassified).
+  #
+  # This stage offers those names to the selection instead of waiting for a
+  # sample that cannot exist. The candidate set is DERIVED FROM THE WORKFLOW
+  # SOURCE, never from a list: a job whose workflow carries a pull_request
+  # trigger, carries NO branch-head trigger (`workflow_has_head_trigger`, the
+  # same predicate `unrenderable_hint` already answers with), and is NOT
+  # paths-filtered.
+  #
+  # WHY A PATHS FILTER DISQUALIFIES A CANDIDATE. An UNFILTERED pull_request
+  # workflow renders on EVERY pull request, so the only thing standing between
+  # its name and a classification is which event type the census sampled — that
+  # is this stage's business, and nothing else's. A paths-filtered one is absent
+  # on some PRs too: its ground is S4, its absence is a fact about the PR rather
+  # than about the sample, and the LOSS refusal's own PULL_REQUEST-ONLY hint
+  # already names it. Claiming it here would state a SAMPLING ground for an
+  # absence the sampling did not cause.
+  #
+  # IT CAN ONLY EXCLUDE, AND IT MUST NEVER PROMOTE. That is why it is narrower
+  # than stage 2 rather than a copy of it. Every context in the spec is a
+  # byte-for-byte copy of a name GitHub was OBSERVED to publish, because `PUT
+  # …/protection` accepts a typo and deadlocks main forever (D21) — and a name
+  # derived from a `name:` TEMPLATE has been observed by nobody. So a candidate
+  # no static exclusion ground catches is left exactly as it is today
+  # (unaccounted, answered by `--expect-unrendered`), and a candidate the
+  # COMMITTED spec REQUIRES is skipped outright rather than contradicting live
+  # branch protection on the strength of a string this run never saw.
+  #
+  # THE GROUNDS ARE THE STATIC ONES ONLY: a job-level `continue-on-error`, the
+  # advisory-by-intent list, and the S7 hold list. S5 is a COLOUR and no static
+  # read knows it. S3 and S6 are relations among names this run SELECTED, and
+  # this stage selects nothing.
+  #
+  # A MATRIXED JOB, OR ONE WHOSE `name:` INTERPOLATES, IS NOT A CANDIDATE: the
+  # RENDERED name carries a matrix tuple the source does not spell, so the string
+  # this stage would write down is a guess. `job_for_name` tolerates that suffix
+  # when matching an OBSERVED name; there is no observed name here.
+  #
+  # AND THE ROW IT WRITES DEFERS TO A COMMITTED ONE. Every other stage's reason
+  # is a live statement about the source and rightly overwrites a stale committed
+  # one (the `.exclusions` union keeps the LAST row per context). An S8 reason
+  # says only "this name cannot reach the census, and here is the static ground
+  # for holding it out" — which is a strict subset of what a hand row for the
+  # same name already says, and those hand rows carry dated grounds and
+  # retirement triggers no derivation can restate. So S8 rows are marked
+  # `derived_class: "S8"` and the merge lets the BASE row win for them; the
+  # marker never reaches the emitted file. On a greenfield emit (`--no-merge`)
+  # there is no base and the derived row stands alone.
+  # The trigger questions are answered ONCE PER WORKFLOW FILE, not once per job:
+  # a repo of this size indexes hundreds of jobs and both predicates spawn awk.
+  local s8_pronly="" s8f
+  while IFS= read -r s8f; do
+    [ -n "$s8f" ] || continue
+    [ -f "$WORKFLOW_DIR/$s8f" ] || continue
+    workflow_has_pr_trigger "$s8f" || continue
+    workflow_has_head_trigger "$WORKFLOW_DIR/$s8f" && continue
+    s8_pronly="$s8_pronly,$s8f"
+  done <<EOF
+$(cut -f1 <<<"$idx" | sort -u)
+EOF
+
+  local s8_seen="" ifile ijob iname imatrixed icoe ipf ineeds
+  while IFS=$'\t' read -r ifile ijob iname imatrixed icoe ipf _ilaunder ineeds; do
+    [ -n "$ifile" ] && [ -n "$ijob" ] || continue
+    case ",$s8_pronly," in *",$ifile,"*) : ;; *) continue ;; esac
+    [ "$imatrixed" = "0" ] || continue
+    case "$iname" in *'${{'*) continue ;; esac
+    [ "$ipf" = "0" ] || continue
+    # It rendered after all — then stage 2 owns it, on evidence rather than on
+    # a template. (Unreachable on a correct tree; cheap, and the alternative is
+    # two rows for one context.)
+    grep -qxF "$iname" <<<"$intersection" && continue
+    case ",$s8_seen," in *",$iname,"*) continue ;; esac
+    s8_seen="$s8_seen,$iname"
+
+    if [ -n "$committed_required" ] && grep -qxF "$iname" <<<"$committed_required"; then
+      note "  s8 skip  $iname — the COMMITTED spec REQUIRES it; a static derivation never demotes an observed, live required context"
+      continue
+    fi
+
+    local s8ground="" s8i
+    if [ "$icoe" != "-" ]; then
+      s8ground="S2 ADVISORY: job '$ijob' carries continue-on-error: $icoe — needs.<job>.result reads success even when it failed"
+    fi
+    if [ -z "$s8ground" ]; then
+      s8i=0
+      while [ "$s8i" -lt "${#ADVISORY_BY_INTENT_NAMES[@]}" ]; do
+        if [ "$iname" = "${ADVISORY_BY_INTENT_NAMES[$s8i]}" ]; then
+          s8ground="S2 ADVISORY BY INTENT: ${ADVISORY_BY_INTENT_REASONS[$s8i]}"
+          break
+        fi
+        s8i=$((s8i + 1))
+      done
+    fi
+    if [ -z "$s8ground" ]; then
+      s8i=0
+      while [ "$s8i" -lt "${#EXCLUDED_BY_DECISION_NAMES[@]}" ]; do
+        if [ "$iname" = "${EXCLUDED_BY_DECISION_NAMES[$s8i]}" ]; then
+          s8ground="${EXCLUDED_BY_DECISION_REASONS[$s8i]}"
+          break
+        fi
+        s8i=$((s8i + 1))
+      done
+    fi
+    if [ -z "$s8ground" ]; then
+      note "  s8 unaccounted  $iname ($ifile job '$ijob') — pull_request-only and unfiltered, but no STATIC ground holds it out, and this stage never promotes; it stays answerable by --expect-unrendered"
+      continue
+    fi
+
+    exclusions_json="$(printf '%s' "$exclusions_json" | jq \
+      --arg c "$iname" \
+      --arg r "S8 PULL-REQUEST-ONLY: $ifile job '$ijob' — the workflow carries a pull_request trigger, NO branch-head trigger and no pull_request paths filter, so this name renders on EVERY pull request head and on NO commit of $BRANCH. The census samples branch heads, so no sampling window can ever offer this name to the selection; it is classified here from the workflow's own \`on:\` block rather than left unaccounted. It is CLASSIFIED, NEVER PROMOTED: a required context must be a byte-for-byte copy of a name GitHub was observed to publish (D21), and this string came from a \`name:\` template. The static ground for holding it out is — $s8ground" \
+      '. + [{context: $c, reason: $r, derived_class: "S8"}]')"
+    note "  exclude  $iname  — S8 PULL-REQUEST-ONLY ($ifile job '$ijob')"
+  done <<EOF
+$idx
+EOF
+
   # ── S6: an EXCLUDED aggregator DEMOTES its leaves ───────────────────────────
   #
   # S3 (below) subsumes upstreams of the aggregators that SURVIVED. The mirror
@@ -1163,10 +1468,22 @@ EOF
   # appended beside it, and the emit put ONE CONTEXT ON BOTH LISTS at exit 0.
   # Reproduced by adding `continue-on-error: true` to an already-required job:
   # `{"both":["Cloud gate"]}`, nothing on stderr. Nothing downstream can notice
-  # it either — scripts/required-checks-verify.sh contains zero reads of
-  # `.exclusions`, so the spec would go on requiring a context this run just
-  # said must never gate a merge, with the sentence explaining why sitting in
-  # the same file.
+  # it either, and the reason is narrower than the one that stood here until
+  # 2026-09-17 ("required-checks-verify.sh contains zero reads of
+  # `.exclusions`", which was simply false — its census_check reads the array
+  # twice, on the live --full/--ci path). What is true is that every read is a
+  # UNION and never an intersection: census_check builds `required ∪
+  # exclusions` as one "accounted" set, so a context on BOTH lists is accounted
+  # twice over and passes, and the advisory-prose clause derives its subject set
+  # as a COMPLEMENT that deliberately never joins `.exclusions` at all (its own
+  # "THE SUBJECT SET IS A COMPLEMENT, NEVER AN `.exclusions` JOIN (D1)" block
+  # says why). No clause anywhere compares the two arrays for overlap — check
+  # with `grep -n exclusions scripts/required-checks-verify.sh` and read each
+  # hit. So the spec would go on requiring a context this run just said must
+  # never gate a merge, with the sentence explaining why sitting in the same
+  # file. THE FLAG'S JUSTIFICATION SURVIVES THE CORRECTION INTACT: it never
+  # rested on the absence of reads, only on the absence of a downstream
+  # refusal, and that absence is unchanged.
   #
   # This is a CONTRADICTION, not an absence, so `--expect-unrendered` (which
   # means "the sample could not see it") must not answer for it — and it points
@@ -1178,8 +1495,14 @@ EOF
   # a name an operator types and never a filter the derivation computes.
   #
   # It ships DORMANT: the committed spec's required × excluded intersection is
-  # `[]` today (4 required, 25 exclusions), so an unplanted regeneration is
-  # untouched by this block.
+  # `[]` today, so an unplanted regeneration is untouched by this block. Verify
+  # it rather than trusting the sentence — and note that the array sizes are
+  # deliberately NOT written down, because a count typed into a comment has no
+  # producer and goes stale in its own commit (the `25 exclusions` that stood
+  # here was 7x low by the time anyone read it):
+  #   jq '[.protection.required_status_checks.checks[].context] as $r
+  #       | [.exclusions[].context] | map(select(. as $c | $r|index($c)))' \
+  #     .github/required-checks.json
   local demoted_drop='[]'
   if [ -n "$committed_required" ]; then
     local derived_ex_now contra="" rxname rxacked rxack
@@ -1242,19 +1565,44 @@ EOF
   # The check list is a UNION on the context string, base first so a committed
   # app_id pin wins over a freshly derived one, then sorted by context so the
   # diff of a regeneration is a diff of DECISIONS and not of sampling order.
+  # THE BIG INPUTS GO THROUGH FILES, NEVER ARGV. `--argjson base "$base_json"`
+  # put the whole committed spec into ONE execve argument, and Linux caps a
+  # SINGLE argument at MAX_ARG_STRLEN (128 KiB = 131072 bytes) independently of
+  # ARG_MAX, so no amount of total-size headroom helps. Measured 2026-09-13:
+  # .github/required-checks.json reached 136,352 bytes at a9f727cbc (first over
+  # the cap at 661e87d9f / #17989, 98,463 -> 133,127), and from that commit every
+  # generator call on a Linux runner died `jq: Argument list too long` (exit 126).
+  # The mutation suite reads that as "the producer refused", so required-checks-
+  # drift concluded failure on every main head from 661e87d9f onward — a drift
+  # detector that had stopped measuring anything. macOS has no per-argument cap,
+  # so the fault is INVISIBLE locally; §14e of scripts/required-checks.test.sh
+  # asserts the argv SHAPE (no single jq argument over the cap) instead of
+  # waiting for the platform to raise it.
+  local argdir
+  argdir="$(mktemp -d)" || die "could not create a temp dir for the emit's jq inputs"
+  printf '%s\n' "$base_json"       >"$argdir/base.json"
+  printf '%s\n' "$exclusions_json" >"$argdir/exclusions.json"
+  printf '%s\n' "$checks_json"     >"$argdir/checks.json"
+
   local spec
   spec="$(jq -n \
     --arg repo "$REPO" \
     --arg branch "$BRANCH" \
     --arg enforced "$ENFORCED" \
-    --argjson base "$base_json" \
-    --argjson checks "$checks_json" \
-    --argjson exclusions "$exclusions_json" \
+    --slurpfile base_in "$argdir/base.json" \
+    --slurpfile checks_in "$argdir/checks.json" \
+    --slurpfile exclusions_in "$argdir/exclusions.json" \
     --argjson promoted_drop "$promoted_drop" \
     --argjson demoted_drop "$demoted_drop" \
     --argjson shas "$(printf '%s\n' "${SHAS[@]}" | jq -R . | jq -s '.')" \
     '
-    ($enforced == "true") as $on
+    # `--slurpfile` wraps the single JSON value in each file in an array; unwrap it
+    # here so every reference below is the same `$base`/`$checks`/`$exclusions`
+    # the argv form bound.
+    ($base_in[0]) as $base
+    | ($checks_in[0]) as $checks
+    | ($exclusions_in[0]) as $exclusions
+    | ($enforced == "true") as $on
     | ($shas | map(.[0:9]) | join(" and ")) as $shortshas
     | ($base | if type == "object" then . else {} end) as $b
     | [
@@ -1330,8 +1678,21 @@ EOF
         # emit one context on both lists.
         exclusions: ((($b.exclusions // [] | map(select(.context as $c | $promoted_drop | index($c) | not)))
                       + $exclusions)
-                     | group_by(.context) | map(.[-1]) | sort_by(.context))
+                     | group_by(.context)
+                     # The LAST row in each group wins — except for an S8 row,
+                     # which DEFERS to a committed one. An S8 reason states only
+                     # that the name cannot reach the census plus the static
+                     # ground for holding it out; a hand row for the same
+                     # context carries a dated ground and a retirement trigger
+                     # that no derivation can restate, and letting the shorter
+                     # derived text overwrite it is the wave-57 disease with the
+                     # arrow reversed. The marker is stripped either way, so it
+                     # never reaches the emitted file.
+                     | map((if ((.[-1].derived_class // "") == "S8") and (length > 1)
+                            then .[0] else .[-1] end) | del(.derived_class))
+                     | sort_by(.context))
       }')"
+  rm -rf "$argdir"
 
   local emitted
   emitted="$(jq '.protection.required_status_checks.checks | length' <<<"$spec")"

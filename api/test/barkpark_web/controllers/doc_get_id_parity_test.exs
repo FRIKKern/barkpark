@@ -41,7 +41,14 @@ defmodule BarkparkWeb.DocGetIdParityTest do
   setup do
     Barkpark.LabelFixtures.register_tags!(@dataset)
 
-    {:ok, _} = Auth.create_token(@token, "doc-get-parity", @dataset, ["read", "write"])
+    {:ok, _} =
+      Auth.create_token(
+        @token,
+        "doc-get-parity",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]

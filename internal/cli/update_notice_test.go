@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -177,8 +178,13 @@ func TestNoticeStaleCacheFetchesAndStamps(t *testing.T) {
 	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
 
 	got := readNoticeCache(t, root)
-	if got.Latest != "0.0.2" {
-		t.Errorf("latest = %q, want 0.0.2 (fetched from the redirect)", got.Latest)
+	// The fetched version lands in the ONE store that holds it — the release
+	// cache — not in a second copy inside update-check.json.
+	if rc, fresh := readReleaseCache(); !fresh || rc.Latest != "0.0.2" {
+		t.Errorf("release cache = %+v fresh=%v, want fresh latest 0.0.2 (fetched from the redirect)", rc, fresh)
+	}
+	if got.Latest != "" {
+		t.Errorf("update-check.json must keep no copy of the version, got %q", got.Latest)
 	}
 	stamped, err := time.Parse(time.RFC3339, got.CheckedAt)
 	if err != nil || !stamped.After(before) {
@@ -272,8 +278,11 @@ func TestNoticeCorruptCacheTreatedAsEmpty(t *testing.T) {
 		t.Errorf("corrupt cache should be treated as empty and re-fetch, got %q", stderr.String())
 	}
 	got := readNoticeCache(t, root)
-	if got.Latest != "0.0.2" || got.Notified != "0.0.2" || got.CheckedAt == "" {
+	if got.Notified != "0.0.2" || got.CheckedAt == "" {
 		t.Errorf("cache should be rebuilt cleanly after corruption: %+v", got)
+	}
+	if rc, fresh := readReleaseCache(); !fresh || rc.Latest != "0.0.2" {
+		t.Errorf("release cache after corruption = %+v fresh=%v, want fresh latest 0.0.2", rc, fresh)
 	}
 }
 
@@ -295,5 +304,123 @@ func TestNoticeUpToDateIsSilent(t *testing.T) {
 	}
 	if got := readNoticeCache(t, root); got.Notified != "" {
 		t.Errorf("no notice → notified must stay empty, got %q", got.Notified)
+	}
+}
+
+// writeStaleReleaseCacheFile plants a release-cache reading with an arbitrary
+// resolve stamp, which writeReleaseCache (always "now") cannot produce.
+func writeStaleReleaseCacheFile(t *testing.T, root, latest string, checkedAt time.Time) {
+	t.Helper()
+	dir := filepath.Join(root, "barkpark")
+	if err := os.MkdirAll(dir, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := json.Marshal(releaseCache{Latest: latest, CheckedAt: checkedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, releaseCacheFile), raw, 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestNoticeReadsVersionResolvedElsewhere is the RED-on-revert arm for the
+// single-source-of-truth change. `bp upgrade` and `bp doctor --onboarding`
+// resolve the newest release and write ONLY cli-release-cache.json. While the
+// notice kept its own copy in update-check.json, that resolve was invisible to
+// it: the throttle said "checked recently", the private copy was empty, and the
+// operator was told nothing. Reading the one store fixes it with no network.
+func TestNoticeReadsVersionResolvedElsewhere(t *testing.T) {
+	root := noticeFixture(t)
+	deadReleaseBase(t) // a fresh throttle stamp means NO lookup; prove it
+	withCLIVersion(t, "0.0.1")
+
+	// The throttle is fresh — as it is for the 24h after any bp run.
+	writeNoticeCache(t, root, updateCheckCache{
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	// ...and a sibling surface (upgrade/doctor) just resolved a newer release.
+	if err := writeReleaseCache("9.9.9"); err != nil {
+		t.Fatalf("writeReleaseCache: %v", err)
+	}
+
+	var stderr bytes.Buffer
+	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
+
+	if !bytes.Contains(stderr.Bytes(), []byte("bp 9.9.9 is available")) {
+		t.Errorf("notice must compare against the release cache a sibling surface wrote, got %q", stderr.String())
+	}
+	if note := staleClientNote(); !strings.Contains(note, "9.9.9 is released") {
+		t.Errorf("stale-client note must read the same store, got %q", note)
+	}
+}
+
+// TestNoticeAndWhoamiGateTheSameValueDifferently is the QUIET arm: the two
+// lifetimes this row proposed to merge must stay separate. One store now holds
+// the version, but its age means different things to its two consumers — past
+// releaseCacheTTL whoami must report UNREPORTED (never compare against a day-
+// stale reading) while the notice and the refusal-time note must KEEP naming
+// the newer release (an offline operator is still behind). A merge that gave
+// both consumers one gate would break exactly one of these two assertions.
+func TestNoticeAndWhoamiGateTheSameValueDifferently(t *testing.T) {
+	root := noticeFixture(t)
+	deadReleaseBase(t)
+	withCLIVersion(t, "0.0.1")
+	writeNoticeCache(t, root, updateCheckCache{
+		CheckedAt: time.Now().UTC().Format(time.RFC3339),
+	})
+	writeStaleReleaseCacheFile(t, root, "9.9.9", time.Now().Add(-48*time.Hour).UTC())
+
+	// whoami's leg: a reading older than the TTL is ABSENT.
+	if rc, fresh := readReleaseCache(); fresh {
+		t.Errorf("whoami's freshness leg must treat a 48h-old reading as absent, got %+v", rc)
+	}
+	// The notice's leg: same record, no TTL.
+	var stderr bytes.Buffer
+	finishUpdateNotice(&stderr, startUpdateCheck("whoami"))
+	if !bytes.Contains(stderr.Bytes(), []byte("bp 9.9.9 is available")) {
+		t.Errorf("the notice must not inherit whoami's TTL, got %q", stderr.String())
+	}
+	if note := staleClientNote(); !strings.Contains(note, "9.9.9 is released") {
+		t.Errorf("the stale-client note must not inherit whoami's TTL, got %q", note)
+	}
+}
+
+// TestNoticeThrottleSurvivesAFailedResolve is the second QUIET arm: the other
+// lifetime, the ATTEMPT throttle. update-check.json's checked_at is stamped
+// BEFORE the fetch and kept when the fetch fails, so an outage cannot make
+// every bp invocation re-dial. Anchoring the throttle on the release cache's
+// resolve stamp instead (the obvious "one cache" collapse) would make this run
+// hit the network again.
+func TestNoticeThrottleSurvivesAFailedResolve(t *testing.T) {
+	noticeFixture(t)
+	withCLIVersion(t, "0.0.1")
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		http.NotFound(w, r)
+	}))
+	defer srv.Close()
+	t.Setenv("BARKPARK_CLI_RELEASE_BASE", srv.URL)
+
+	// First run: cold cache → a lookup is attempted and fails (404s).
+	var first bytes.Buffer
+	finishUpdateNotice(&first, startUpdateCheck("whoami"))
+	if hits == 0 {
+		t.Fatalf("the first run must attempt a lookup")
+	}
+	if _, fresh := readReleaseCache(); fresh {
+		t.Fatalf("a failed resolve must leave the release cache cold")
+	}
+
+	// Second run: the failed attempt is still an attempt. No network.
+	after := hits
+	var second bytes.Buffer
+	finishUpdateNotice(&second, startUpdateCheck("whoami"))
+	if hits != after {
+		t.Errorf("a failed resolve must still throttle the next run: %d extra request(s)", hits-after)
+	}
+	if second.Len() != 0 {
+		t.Errorf("no known release → silence, got %q", second.String())
 	}
 }

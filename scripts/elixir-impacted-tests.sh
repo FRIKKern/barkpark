@@ -44,10 +44,50 @@
 # from a plugin list. The ALWAYS set below is the deliberate net under that
 # blind spot, and main-per-sha plus the nightly is the net under the net.
 #
+# ONE INSTANCE OF THAT RISK WAS PAID FOR, AND IS NOW NARROWED. #17153 (elixir.yml
+# run 34413856059, job 102674795600) changed api/lib/barkpark/tasks/landed.ex,
+# narrowed to `selection: 263 of 1676 test files`, went 4/4 green, and reddened
+# main at api/test/barkpark_web/controllers/tasks_landed_test.exs:115 — a
+# `use BarkparkWeb.ConnCase` HTTP contract test that reaches Tasks.Landed over
+# the router and never names the module, so neither the closure (runtime edge)
+# nor the by-name test grep (no module name in the file) could see it.
+#
+# RULE 3 below (`web_surface_tests`) now CATCHES that class: one extra by-name
+# hop through the LIB tree finds the web-surface module that DOES name the
+# changed context (`alias Barkpark.Tasks.Landed` in tasks_controller.ex), and
+# the contract-test family named after that surface inside its own test
+# directory is selected. It is derived from the tree on every run, not pinned.
+#
+# A SECOND INSTANCE WAS PAID FOR, AND IS NOW A CLASS. #18085 (job 103713658033)
+# changed api/lib/barkpark/content/write_scope.ex — a fail-closed POLICY DOOR —
+# narrowed to 563 files, went 4/4 green, and reddened main at
+# api/test/barkpark/search/indx_engine_scope_test.exs. That test calls
+# `Content.create_document/4` and reaches the door at RUNTIME without naming it,
+# so neither the closure, nor the by-name net, nor RULE 3 could see it.
+#
+# RULE 4 below catches that class: a module whose own source returns a POLICY
+# REFUSAL (`{:error, :…_required|_forbidden|_denied|_not_allowed}`,
+# `:unauthorized`, `:forbidden`), or which declares itself with `@impact door`,
+# is not narrowed at all — its impact is every test that performs the guarded
+# operation, which no closure can enumerate. Derived from the changed file on
+# every run, not pinned.
+#
+# IT STILL CANNOT SEE: a contract test whose basename shares no stem with the
+# surface it exercises; a surface that reaches the changed module through a
+# SECOND runtime hop (registry, plugin route, configured implementation) rather
+# than by naming it; a test outside the surface's own test directory; a door
+# that refuses with a vocabulary RULE 4 does not know and has not stamped
+# itself. Those remain the ALWAYS set's job, and main-per-sha plus the
+# nightly's after that.
+#
 # ── USAGE ─────────────────────────────────────────────────────────────────
 #
 #   git diff --name-only HEAD^1 HEAD | scripts/elixir-impacted-tests.sh --select
 #   scripts/elixir-impacted-tests.sh --print-always     # the safety net, derived
+#   scripts/elixir-impacted-tests.sh --doors            # the RULE 4 door census
+#   scripts/elixir-impacted-tests.sh --is-door <path>   # one path, exit 0/1
+#   scripts/elixir-impacted-tests.sh --closure <path>   # one lib file's compile closure
+#   scripts/elixir-impacted-tests.sh --xref-probe       # is the closure instrument alive?
 #   scripts/elixir-impacted-tests.sh --selftest         # the mutation matrix
 #
 # `--select` reads REPO-ROOT-relative changed paths on stdin and prints
@@ -58,8 +98,31 @@
 #   BP_IMPACTED_XREF_DIR   directory to run `mix xref` in (default: api)
 #   BP_IMPACTED_NO_XREF=1  skip xref entirely; the closure degrades to the
 #                          changed file plus the by-name net. Used by the
-#                          selftest, which has no compiled build.
+#                          selftest, which has no compiled build (its §6-§8
+#                          put a stub `mix` on PATH instead).
 set -euo pipefail
+
+# INTERPRETER GUARD — must stay POSIX-parseable and must stay ABOVE the first
+# process substitution (the `comm` at line ~300). bash reads a script
+# incrementally, so anything a guard sits AFTER is code a POSIX-mode shell has
+# already run. Under `sh` this file dies on that token with a bare
+# `syntax error near unexpected token (` and prints NOTHING on stdout, while
+# bash prints `ALL` — and its stdout IS the selection `elixir.yml` consumes
+# (`out="$(... | bash scripts/elixir-impacted-tests.sh --select)"`). An empty
+# selection reads exactly like "this diff impacts no tests", which is the
+# vacuous green scripts/posix-vacuous-green-census.sh exists to prevent. Every
+# caller in this repo already invokes it as `bash scripts/...`, so this refusal
+# is unreachable in production and changes no behaviour there.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "elixir-impacted-tests.sh: needs bash (this script uses process substitution); run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "elixir-impacted-tests.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/elixir-impacted-tests.sh${1:+ $1}" >&2
+    exit 2
+    ;;
+esac
 
 SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="${BP_IMPACTED_ROOT:-$(cd -- "$SCRIPT_DIR/.." && pwd)}"
@@ -119,10 +182,34 @@ API_DIR="${BP_IMPACTED_XREF_DIR:-$REPO_ROOT/api}"
 #       If that ratchet is ever wrong, it is wrong for the dispatcher too — the
 #       whole suite is already skipped on such a path today.
 #
-#   (d) in the TEST-ONLY set but NOT in the census -> ALL. The set says the
-#       suite reads it; the census cannot say WHO reads it (a computed path, a
-#       shelled-out binary). Unknown reader, so unknown impact, so everything.
-#       `cloud/test/**` and `web/node_modules/**` land here.
+#   (d1) in the TEST-ONLY set, no census row, but the census's OWN SOURCE FILES
+#       name it ONE HOP FURTHER -> those rows' readers ARE the impact, exactly
+#       as in (b). This is the documented blind spot of the census, not a new
+#       policy: list_escapes resolves the path literals it finds IN api/lib and
+#       api/test, so an api test that shells a repo-root script gets a row for
+#       THE SCRIPT and none for what the script itself opens.
+#       `scripts/elixir-path-escape-check.sh` states the case in full at its
+#       `cloud/test/**` entry: async_global_seam_guard_test.exs requires
+#       `../../../scripts/async_env_seam_scan.exs` (a literal the census DOES
+#       resolve) and that scanner reads `Path.join(repo_root(), "cloud/test")`
+#       (a literal the census CANNOT). `extended_census` takes that one step:
+#       for every census source file, its own quoted repo-root path literals
+#       that EXIST ON DISK inherit that source's readers. It is derived from
+#       the tree on every run, so a reader added tomorrow is in the net
+#       tomorrow, with no registration step and no list to rot.
+#       MEASURED 2026-09-20 on 769c39bd6: `cloud/test/**` went from ALL (1,892
+#       api test files) to 3 derived readers plus the ALWAYS set.
+#       ONE SELF-EXCLUSION, and it is a self-reference rather than a list: the
+#       census producer itself (`elixir-path-escape-check.sh`) DECLARES every
+#       path in both sets, and declaring a path is not reading it. Its own
+#       direct census rows are untouched.
+#
+#   (d2) in the TEST-ONLY set and named by NEITHER the census nor its one-hop
+#       extension -> ALL. The set says the suite reads it; nothing can say WHO
+#       (a path computed at runtime, a shelled-out binary, a name assembled
+#       from parts). Unknown reader, so unknown impact, so everything.
+#       `internal/taskboard/board.go` — a sibling of three censused files, but
+#       itself unread — and `web/node_modules/**` land here.
 #
 # Branch (c) is the only one that can shrink a selection on a path nobody
 # classified, and it shrinks it to "no tests OF ITS OWN" — the ALWAYS set still
@@ -158,6 +245,79 @@ census_readers() {
       row = $1
       if (row == p || index(p, row "/") == 1 || index(row, p "/") == 1) print $2
     }' <<<"$CENSUS" | LC_ALL=C sort -u
+}
+
+
+# ── THE ONE-HOP EXTENSION OF THE CENSUS — branch (d1) ─────────────────────
+# `--list-escapes` resolves the repo-root path literals it finds IN api/lib and
+# api/test. An api test that hands its reading to a repo-root script therefore
+# gets a row for THE SCRIPT and no row at all for what the script opens, and
+# the path the script opens is exactly the one a PR changes. That is not a
+# scanner bug; elixir-path-escape-check.sh names the class at its
+# `cloud/test/**` entry and pays for it with a declared full-suite trigger.
+#
+# THE HOP, and why it is a rule rather than a list: a file the census names as
+# a SOURCE, which itself writes this path as a quoted literal, is reading it on
+# its readers' behalf — so that source's readers are this path's readers.
+# Derived from the tree on every call, against the census computed on every
+# call: a scanner that grows a third root, or an api test that starts requiring
+# a new script, is covered the day it lands, with no registration step.
+#
+# THREE THINGS KEEP IT TIGHT, so this cannot become "everything reads
+# everything":
+#   * exactly ONE hop. The extension is never fed back into itself.
+#   * the literal must be one of THIS PATH'S OWN ANCESTORS and must EXIST on
+#     disk. `"cloud/test"` covering cloud/test/foo_test.exs qualifies; a URL, a
+#     module name, a glob (`cloud/test/**` is not a file) and a prose fragment
+#     do not, and neither does a SIBLING — internal/taskboard/components.go
+#     being censused says nothing about internal/taskboard/board.go.
+#   * the census producer is excluded as a SOURCE. elixir-path-escape-check.sh
+#     literally contains every declared path in both sets, and DECLARING a path
+#     is not READING it — a self-reference, not a skip list. Its own direct
+#     census rows are untouched.
+#
+# COST. This runs at most once per selector process, and only when a TEST-set
+# path with no direct census row shows up — i.e. never on an ordinary api/ PR.
+# It is ONE `grep -l` over the census's ~60 distinct source files, not a grep
+# per file and not a scan of the tree.
+transitive_readers() {
+  local p="$1" d self n nf srcs files hits
+  load_census
+  [ -n "$CENSUS" ] || return 0
+
+  # p's own ancestors, each written the way a source would write it, and only
+  # the ones that exist on disk.
+  nf="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-needles.XXXXXX")" || return 0
+  d="$p"
+  while [ -n "$d" ] && [ "$d" != "." ] && [ "$d" != "/" ]; do
+    [ -e "$REPO_ROOT/$d" ] && printf '"%s"\n' "$d" >>"$nf"
+    case "$d" in */*) d="${d%/*}" ;; *) break ;; esac
+  done
+  if [ ! -s "$nf" ]; then rm -f -- "$nf"; return 0; fi
+
+  self="$(basename -- "$SCRIPT_DIR")/elixir-path-escape-check.sh"
+  srcs="$(printf '%s\n' "$CENSUS" | cut -f1 | LC_ALL=C sort -u | sed '/^$/d' | grep -vxF -- "$self" || true)"
+  files=""
+  while IFS= read -r n; do
+    [ -n "$n" ] || continue
+    [ -f "$REPO_ROOT/$n" ] || continue
+    files="$files $n"
+  done <<EOT
+$srcs
+EOT
+  if [ -z "$files" ]; then rm -f -- "$nf"; return 0; fi
+
+  # ONE grep, and `-l` so a multi-megabyte source stops at its first hit. Census
+  # source paths carry no spaces (they are repo-root paths resolved from Elixir
+  # string literals), so the unquoted expansion here is the file list and not a
+  # word-splitting accident.
+  hits="$( (cd -- "$REPO_ROOT" 2>/dev/null && grep -laF -f "$nf" -- $files 2>/dev/null) </dev/null || true)"
+  rm -f -- "$nf"
+  [ -n "$hits" ] || return 0
+
+  # back to the readers of every source that matched.
+  awk -F'\t' 'NR == FNR { hit[$0] = 1; next } ($1 in hit) { print $2 }' \
+    <(printf '%s\n' "$hits") <(printf '%s\n' "$CENSUS") | LC_ALL=C sort -u
 }
 
 is_narrowable_lib() { case "$1" in api/lib/*.ex) return 0 ;; *) return 1 ;; esac; }
@@ -245,71 +405,180 @@ always_set() {
 }
 
 # ---------------------------------------------------------------------------
-# the compile closure
+# the compile closure — computed HERE, from DIRECT compile edges
 # ---------------------------------------------------------------------------
-# `mix xref graph --sink <file> --label compile-connected` prints the files
-# whose compilation is connected to <file> — i.e. what recompiles when it
-# changes. It needs a compiled build, which the mix-test job has by the time
-# this runs (the step sits after `Compile (dev)`).
+# WHAT "IMPACTED" MEANS AT THIS STEP: the changed file, plus every file that
+# compile-depends on it, TRANSITIVELY through compile edges. A compile edge
+# A -> B (`use B`, `require B` + a macro call, `import B` used at compile time,
+# a `@behaviour`/module-attribute evaluation of B) means B's code runs while A
+# compiles and its output is baked into A's .beam — so a change to B changes A
+# even though A's source did not move, and A's tests are B's tests too. If C in
+# turn compile-depends on A, the same holds one level further, so the walk is a
+# fixed point, not one hop.
 #
-# TEST FILES ARE NOT IN THAT GRAPH. `mix compile` does not compile api/test,
-# so xref can never name a *_test.exs. The closure is therefore over LIB files
-# only, and the lib->test hop is made by the two mappers below. Saying so here
-# because "xref selects the tests" is the intuitive and wrong reading.
+# HOW IT IS COMPUTED, and why this script walks the graph itself.
+# `mix xref graph --label compile --only-direct --format dot --output -` prints
+# every DIRECT compile edge of the app, once, as one self-contained dot line
 #
-# FAIL-SAFE: any non-zero exit, any unusable output, or an output that does not
-# contain the sink itself, returns 1 and the caller emits ALL. A closure that
-# silently came back short is the failure mode this whole file exists to avoid,
-# so "xref answered something" is not accepted as "xref answered correctly".
+#     "lib/barkpark/plugins/media.ex" -> "lib/barkpark/plugin.ex" [label="(compile)"]
+#
+# `compile_graph_load` parses those lines into `<src>TAB<dst>` pairs ONCE per
+# run, and `compile_closure` walks them in reverse (dependents of the sink) to
+# a fixed point in awk. A cycle cannot loop: the visited set only grows, and it
+# is bounded by the number of nodes.
+#
+# WHY NOT `mix xref graph --sink X --label compile-connected`, which this file
+# used until task-26088fc6682c9dcb. MEASURED on CI's own pin (mix-test job:
+# Elixir 1.18.4 / OTP 27), fresh compile of 7c028e699, MIX_ENV=test: it printed
+# the SAME 10 lines (md5 6d8d306d06f1628f5a38755f53898b71) for tasks/landed.ex,
+# media.ex, accounts.ex and plugin.ex. Mix.Tasks.Xref's `sink_tree` walks
+# reverse edges of EVERY kind, runtime included, and this app's runtime graph is
+# one near-complete cycle, so every sink reaches nearly the whole app; the label
+# filter is applied after that and prints the app-wide compile-connected edge
+# set. For plugin.ex — which 13 modules `use` — not one of the 13 appeared: the
+# selector erred NARROW, not only wide (task-37b4448cb9ccb000, #20217).
+#
+# WHAT THE WALK DELIBERATELY DOES NOT FOLLOW, stated so the next miss is not a
+# surprise:
+#   * RUNTIME edges. Following them is the sink-invariant answer again: RULE 4's
+#     measurement below puts 85% of lib files at a runtime fan-in of 500+. The
+#     by-name net (tests that NAME a closure module), RULE 3, RULE 4 and the
+#     ALWAYS set are what cover runtime callers, and main-per-sha is the net
+#     under them.
+#   * "compile-connected" recompilation: Mix also recompiles A when a RUNTIME
+#     dependency of A's compile dependency B changes (B's code may call it while
+#     A compiles). On this tree that is 30 edges (`--label compile-connected`,
+#     no --sink), e.g. router.ex -> router/plugins.ex and the 13 plugin modules
+#     -> plugin.ex; because their targets sit in the runtime cycle, following it
+#     would put those ~29 files into EVERY closure. They recompile; whether their
+#     compiled output changes depends on a compile-time call into the changed
+#     module, which the graph does not record. Their tests are largely pinned in
+#     the ALWAYS set (plugin routes, registry, manifest).
+#   * EXPORT edges (a `%B{}` struct literal, 714 direct edges on this tree): A
+#     recompiles when B's struct/exports change. A test of A that does not name
+#     B is not selected by that path.
+#
+# TEST FILES ARE NOT IN THE GRAPH. `mix compile` does not compile api/test
+# (test/support IS compiled under MIX_ENV=test and may appear), so the closure
+# is over compiled files only, and the lib->test hop is made by the mappers
+# below. "xref selects the tests" is the intuitive and wrong reading.
+#
+# FAIL-SAFE: a non-zero `mix` exit, a graph with no parseable edge, or a graph
+# that fails the controls in `xref_probe` returns 1 and the caller emits ALL.
+COMPILE_EDGES=""
+COMPILE_GRAPH_LOADED=0
+
+# dot lines on stdin -> `<src>TAB<dst>` for (compile) edges only. Anything else
+# — a `Compiling N files` banner, the digraph braces, a node declaration, a
+# runtime edge (no label) or an export edge — is not an edge of this graph. The
+# label filter is the parser's own, so a `mix` that ignored `--label compile`
+# still yields only compile edges.
+parse_compile_edges() {
+  sed -nE 's/^[[:space:]]*"([^"]+)"[[:space:]]*->[[:space:]]*"([^"]+)"[[:space:]]*\[label="\(compile\)"\][[:space:]]*;?[[:space:]]*$/\1	\2/p' \
+    | LC_ALL=C sort -u
+}
+
+# Loads COMPILE_EDGES in the CALLING shell. Must therefore run outside `$(...)`
+# — `xref_probe` calls it, and `xref_probe` is always called bare.
+compile_graph_load() {
+  local out rc=0
+  [ "$COMPILE_GRAPH_LOADED" -eq 1 ] && return 0
+  # `out=$(...)` under `set -e` EXITS on a non-zero substitution, which would
+  # kill the selector instead of falling back to ALL. `|| rc=$?` keeps the
+  # failure a value. `</dev/null`: see the fd note in select_tests.
+  out="$(cd -- "$API_DIR" && mix xref graph --label compile --only-direct --format dot --output - 2>&1 </dev/null)" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "elixir-impacted-tests: mix xref graph (the direct compile graph) exited rc=${rc} — falling back to ALL. Its last lines:" >&2
+    tail -n 5 <<<"$out" | sed 's/^/    /' >&2
+    return 1
+  fi
+  COMPILE_EDGES="$(parse_compile_edges <<<"$out")"
+  if [ -z "$COMPILE_EDGES" ]; then
+    # A compiled Phoenix app always has compile edges: every `use BarkparkWeb,
+    # :live_view` is one. None means the output is not the graph this parser
+    # reads (a moved flag, a changed format, a banner in place of the graph).
+    echo "elixir-impacted-tests: mix xref graph printed NO parseable compile edge — the instrument is not answering in the shape this script reads. Falling back to ALL. Its first lines:" >&2
+    sed -n '1,5s/^/    /p' <<<"$out" >&2
+    return 1
+  fi
+  COMPILE_GRAPH_LOADED=1
+  return 0
+}
+
+# api-relative file -> every file that compile-depends on it, transitively,
+# excluding the file itself. Reads COMPILE_EDGES.
+#
+# TERMINATION IS BOUNDED, NOT ARGUED. Each pass either adds a node or ends the
+# walk, so a correct walk needs at most (edges + 1) passes. A walk that has not
+# reached its fixed point by then is a walker bug, and it EXITS NON-ZERO rather
+# than spinning: the caller turns that into ALL. A hang here would hold the
+# required Elixir gate until the job timeout, which is the one outcome worse
+# than a wide selection.
+compile_dependents() {
+  [ -n "$COMPILE_EDGES" ] || return 0
+  local out rc=0
+  out="$(awk -F'\t' -v sink="$1" '
+    NF == 2 { src[++n] = $1; dst[n] = $2 }
+    END {
+      seen[sink] = 1
+      grew = 1
+      passes = 0
+      while (grew) {
+        if (++passes > n + 1) {
+          print "elixir-impacted-tests: the compile-closure walk for " sink " did not reach a fixed point in " n + 1 " passes — a walker bug; falling back to ALL." > "/dev/stderr"
+          exit 3
+        }
+        grew = 0
+        for (i = 1; i <= n; i++)
+          if ((dst[i] in seen) && !(src[i] in seen)) { seen[src[i]] = 1; grew = 1 }
+      }
+      for (f in seen) if (f != sink) print f
+    }' <<<"$COMPILE_EDGES")" || rc=$?
+  [ "$rc" -eq 0 ] || return 1
+  [ -n "$out" ] && printf '%s\n' "$out" | LC_ALL=C sort
+  return 0
+}
+
 compile_closure() {
-  local sink="$1" rel out rc
+  local sink="$1" rel
   rel="${sink#api/}"
   if [ "${BP_IMPACTED_NO_XREF:-0}" = "1" ]; then
     printf '%s\n' "$rel"
     return 0
   fi
-  # `out=$(...)` under `set -e` EXITS on a non-zero substitution, which would
-  # kill the selector instead of falling back to ALL — the exact inversion this
-  # file is written against. `|| rc=$?` keeps the failure a value.
-  rc=0
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$rel" --label compile-connected --format plain 2>&1)" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo "elixir-impacted-tests: mix xref failed (rc=$rc) for ${rel} — falling back to ALL." >&2
+  # Never narrow on a graph nobody loaded. `xref_probe` loads it and always
+  # runs first; this is the belt to that brace.
+  if [ "$COMPILE_GRAPH_LOADED" -ne 1 ]; then
+    echo "elixir-impacted-tests: compile_closure for ${rel} ran before the compile graph was loaded — falling back to ALL." >&2
     return 1
   fi
-  # `--format plain` prints `<file>` or `<file> (compile)` per line, one per
-  # edge, with the sink itself as a root. Strip the annotation and dedupe.
-  out="$(printf '%s\n' "$out" | sed -e 's/ (compile)$//' -e 's/ (compile-connected)$//' -e 's/ (runtime)$//' -e 's/ (export)$//' -e 's/^[[:space:]|`-]*//' | sed '/^$/d' | LC_ALL=C sort -u)"
-  # An EMPTY graph here is legitimate: a true leaf that nothing compile-depends
-  # on has no dependents to print. What is NOT legitimate is an empty graph
-  # because xref answered wrong — a version whose flags moved, a banner instead
-  # of a tree, a stale manifest. Both look identical at this call site, and the
-  # wrong one narrows the suite to almost nothing under a green tick.
-  #
-  # So emptiness is not judged here at all. It is judged ONCE per run by a
-  # POSITIVE CONTROL (`xref_probe` below) over a file that is depended on by
-  # most of the application: if the instrument can find THAT file's dependents,
-  # an empty answer for some leaf is an answer. If it cannot, nothing in this
-  # run is trusted and everything falls back to ALL.
-  printf '%s\n' "$out"
-  # Always include the sink itself: `--sink` prints DEPENDENTS, and the file
-  # that changed is impacted by definition.
+  compile_dependents "$rel" || return 1
+  # The file that changed is impacted by definition.
   printf '%s\n' "$rel"
 }
 
-# ── THE POSITIVE CONTROL ──────────────────────────────────────────────────
-# `mix xref graph --sink X --label compile-connected` printing nothing is the
-# one output shape this script cannot tell apart from a broken instrument, and
-# it is also the shape that does maximum damage: it narrows a change to a
-# widely-used module down to its convention test. So before any closure is
-# trusted, the same invocation is run against a file the whole application
-# compile-depends on, and a non-empty answer there is what licenses reading an
-# empty answer elsewhere as "leaf" rather than "blind".
+# ── THE CONTROLS ──────────────────────────────────────────────────────────
+# An EMPTY closure is legitimate — a true leaf that nothing compile-depends on
+# — and it is also exactly what a broken instrument prints. So before any
+# closure is trusted, one pair of files whose TRUE answers are known and differ
+# is walked through the same code:
 #
-# `lib/barkpark/repo.ex` is the probe: the Ecto repo, aliased or imported by
-# essentially every context module in the tree. If it is ever deleted or
-# renamed, the probe fails and the selector falls back to ALL — loudly, and in
-# the safe direction.
+#   hub  lib/barkpark/plugin.ex         13 direct compile dependents (`use Barkpark.Plugin`:
+#                                       the 12 plugins + test/support's hello fixture)
+#   leaf lib/barkpark/tasks/landed.ex   0 compile dependents
+#
+# POSITIVE: the hub's closure is non-empty (the instrument can find dependents).
+# DISCRIMINATING (#20217): hub and leaf closures DIFFER, and the leaf's is
+# strictly smaller. Identical closures mean the answer does not depend on the
+# file asked about — the sink-invariant fault above — and a selection computed
+# from a constant is refused -> ALL.
+#
+# The old positive control, lib/barkpark/repo.ex, is NOT a compile hub: it is
+# reached by runtime calls and aliases, and it has ZERO direct compile
+# dependents. Under the xref --sink instrument it "passed" only because that
+# instrument printed the app-wide set for every sink.
+XREF_PROBE_HUB="lib/barkpark/plugin.ex"
+XREF_PROBE_LEAF="lib/barkpark/tasks/landed.ex"
 XREF_PROBE_DONE=0
 XREF_PROBE_OK=0
 xref_probe() {
@@ -319,19 +588,29 @@ xref_probe() {
     XREF_PROBE_OK=1
     return 0
   fi
-  local probe="lib/barkpark/repo.ex" out rc=0
-  if [ ! -f "$API_DIR/$probe" ]; then
-    echo "elixir-impacted-tests: the xref positive control ${probe} is gone — no way to tell a leaf from a blind instrument, falling back to ALL." >&2
+  local f hub leaf hub_n leaf_n
+  for f in "$XREF_PROBE_HUB" "$XREF_PROBE_LEAF"; do
+    if [ ! -f "$API_DIR/$f" ]; then
+      echo "elixir-impacted-tests: the compile-closure control ${f} is gone — no way to tell a leaf from a blind instrument, falling back to ALL." >&2
+      return 1
+    fi
+  done
+  compile_graph_load || return 1
+  hub="$(compile_dependents "$XREF_PROBE_HUB")" || return 1
+  leaf="$(compile_dependents "$XREF_PROBE_LEAF")" || return 1
+  hub_n="$(printf '%s' "$hub" | awk 'NF{n++} END{print n+0}')"
+  leaf_n="$(printf '%s' "$leaf" | awk 'NF{n++} END{print n+0}')"
+  if [ "$hub" = "$leaf" ]; then
+    echo "elixir-impacted-tests: the compile closure is SINK-INVARIANT: ${XREF_PROBE_HUB} and ${XREF_PROBE_LEAF} have the IDENTICAL closure (${hub_n} files), so a closure here does not depend on the changed file. Refusing to narrow on a constant — falling back to ALL. The identical closure:" >&2
+    printf '%s\n' "$hub" | sed -n '1,20s/^/    /p' >&2
     return 1
   fi
-  out="$(cd -- "$API_DIR" && mix xref graph --sink "$probe" --label compile-connected --format plain 2>&1)" || rc=$?
-  if [ "$rc" -ne 0 ]; then
-    echo "elixir-impacted-tests: the xref positive control exited rc=${rc} — falling back to ALL." >&2
+  if [ "$hub_n" -eq 0 ]; then
+    echo "elixir-impacted-tests: the compile closure of ${XREF_PROBE_HUB} is EMPTY, but 13 modules use it. The graph is not answering — falling back to ALL." >&2
     return 1
   fi
-  # `.ex` on a line is the weakest thing that must be true of a real graph.
-  if ! grep -q '\.ex' <<<"$out"; then
-    echo "elixir-impacted-tests: the xref positive control found NO dependents of ${probe}, which the whole application compile-depends on. The instrument is not answering — falling back to ALL." >&2
+  if [ "$leaf_n" -ge "$hub_n" ]; then
+    echo "elixir-impacted-tests: the compile closure does not discriminate: the leaf ${XREF_PROBE_LEAF} (0 compile dependents) has ${leaf_n}, not fewer than the hub ${XREF_PROBE_HUB}'s ${hub_n} — falling back to ALL." >&2
     return 1
   fi
   XREF_PROBE_OK=1
@@ -376,6 +655,241 @@ tests_naming_modules() {
 }
 
 # ---------------------------------------------------------------------------
+# RULE 3 — THE WEB-SURFACE HOP. The fix for the runtime-only-caller blind spot,
+# measured on a real miss rather than imagined.
+# ---------------------------------------------------------------------------
+# THE INCIDENT (#17153, elixir.yml run 34413856059, job 102674795600). That PR
+# changed api/lib/barkpark/tasks/landed.ex and added a `landings` key to the
+# landed record. The selector narrowed to `selection: 263 of 1676 test files`,
+# the required Elixir gate went green, and on merge main reddened at
+# api/test/barkpark_web/controllers/tasks_landed_test.exs:115 — an exact-equality
+# assert on the landed map, broken by #17153's own change.
+#
+# WHY BOTH EXISTING HALVES MISSED IT, precisely:
+#   * the compile closure yields LIB files only, and a plain remote call from a
+#     controller into a context is a RUNTIME edge, so `--label compile-connected`
+#     never names the controller;
+#   * the by-name net greps the TEST tree for the closure's module names, and
+#     tasks_landed_test.exs is a `use BarkparkWeb.ConnCase` HTTP contract test
+#     that reaches Tasks.Landed over the router. It names the URL, not the
+#     module: `grep -n 'Tasks\.Landed' test/barkpark_web/controllers/tasks_landed_test.exs`
+#     is EMPTY (verified 2026-09-11).
+#
+# THE MISSING HOP is therefore lib -> lib, not lib -> test: the controller DOES
+# name the context (`alias Barkpark.Tasks.Landed`, tasks_controller.ex:106). So
+# this rule takes one extra by-name step through the LIB tree, keeps only the
+# callers that sit on a web surface (`lib/barkpark_web/**` — controllers, live
+# views, channels, plugs: the modules a ConnCase/LiveViewTest file exercises
+# over the wire instead of by name), and maps each to the FAMILY of tests named
+# after it inside its own test directory.
+#
+# A PREDICATE, NOT A LIST. `tasks_controller.ex` -> stem `tasks` ->
+# `test/barkpark_web/controllers/tasks_*_test.exs`. A contract test added
+# tomorrow for a route of an existing controller is in the net tomorrow, with no
+# registration step. Pinning tasks_landed_test.exs by name would have fixed one
+# file and left the class open (D-"an enumeration is a snapshot, a predicate is
+# a rule").
+#
+# WHAT IT STILL CANNOT SEE, stated so the next miss is not a surprise:
+#   * a contract test whose basename shares NO stem with the controller it
+#     exercises (`test/barkpark_web/controllers/foo_test.exs` hitting
+#     BarkparkWeb.BarController) — the name family is the only link this rule
+#     has, because the route table is assembled by macros;
+#   * a web surface that reaches the changed module through ANOTHER runtime hop
+#     (a registry lookup, a `Application.get_env` implementation, a plugin route)
+#     rather than by naming it — one lib->lib step is taken, not a closure;
+#   * a test outside the caller's own test directory.
+# For all three, main-per-sha and the nightly remain the net under the net.
+#
+# `_controller` / `_live` / `_channel` / `_plug` / `_html` / `_json` are stripped
+# from the stem because the Phoenix convention puts them on the MODULE and not
+# on the contract test (`tasks_controller.ex` <-> `tasks_landed_test.exs`). A
+# stem shorter than 3 characters is dropped rather than globbed: `a_*_test.exs`
+# would be a directory scan wearing the shape of a rule.
+WEB_SURFACE_PREFIX='lib/barkpark_web/'
+# A PLUGIN'S OWN WEB LAYER is a web surface too (task-4a1e72163d614a13): its
+# controllers move into lib/barkpark/plugins/<plugin>/web/ with module names
+# unchanged, while their ConnCase contract tests stay where they were written,
+# under test/barkpark_web/controllers. Without this root a moved controller
+# stops being a caller RULE 3 can see, and the #17153 miss reopens for it.
+PLUGIN_WEB_ROOT='lib/barkpark/plugins/'
+
+web_surface_tests() {
+  # module names on stdin; api-relative test paths on stdout
+  local mods callers c reldir stem d
+  mods="$(LC_ALL=C sort -u | sed '/^$/d')"
+  [ -n "$mods" ] || return 0
+  # ONE grep for the whole module set, same reason as tests_naming_modules: a
+  # per-module pass over lib/ would cost more than the tests it saves.
+  callers="$(cd -- "$API_DIR" 2>/dev/null && printf '%s\n' "$mods" \
+    | grep -rlF -f - "$WEB_SURFACE_PREFIX" "$PLUGIN_WEB_ROOT" --include='*.ex' 2>/dev/null \
+    | sed 's#//*#/#g' | grep -E "^${WEB_SURFACE_PREFIX}|^${PLUGIN_WEB_ROOT}[^/]+/web/" || true)"
+  [ -n "$callers" ] || return 0
+  while IFS= read -r c; do
+    [ -n "$c" ] || continue
+    case "$c" in
+      "$PLUGIN_WEB_ROOT"*)
+        # a plugin web module: its family lives in the plugin's own test/…/web
+        # dir when it has one, else where the host's contract tests live.
+        stem="$(basename "$c" .ex)"
+        case "$stem" in
+          *_controller) stem="${stem%_controller}" ;;
+          *_live) stem="${stem%_live}" ;;
+          *_html) stem="${stem%_html}" ;;
+          *_json) stem="${stem%_json}" ;;
+        esac
+        [ "${#stem}" -ge 3 ] || continue
+        reldir="$(dirname "${c#lib/}")"
+        for d in "test/$reldir" test/barkpark_web/controllers test/barkpark_web/live; do
+          [ -d "$API_DIR/$d" ] || continue
+          (
+            cd -- "$API_DIR" 2>/dev/null || exit 0
+            find "$d" -maxdepth 1 -name "${stem}_test.exs" -o -maxdepth 1 -path "$d/${stem}_*_test.exs" 2>/dev/null || true
+          )
+        done
+        continue
+        ;;
+    esac
+    reldir="${c#lib/}"
+    reldir="$(dirname "$reldir")"
+    stem="$(basename "$c" .ex)"
+    # A module that lives in its own subdirectory (tasks_controller/params.ex)
+    # has no test directory of its own; the contract tests sit one level up,
+    # named after the PARENT. One fallback level, then give up — a deeper walk
+    # would climb to test/barkpark_web and glob the world.
+    if [ ! -d "$API_DIR/test/$reldir" ]; then
+      stem="$(basename "$reldir")"
+      reldir="$(dirname "$reldir")"
+      [ -d "$API_DIR/test/$reldir" ] || continue
+    fi
+    case "$stem" in
+      *_controller) stem="${stem%_controller}" ;;
+      *_live) stem="${stem%_live}" ;;
+      *_channel) stem="${stem%_channel}" ;;
+      *_plug) stem="${stem%_plug}" ;;
+      *_html) stem="${stem%_html}" ;;
+      *_json) stem="${stem%_json}" ;;
+    esac
+    [ "${#stem}" -ge 3 ] || continue
+    d="test/$reldir"
+    (
+      cd -- "$API_DIR" 2>/dev/null || exit 0
+      # `ls` on a no-match glob would print an error and, under set -e in the
+      # caller, is not worth the risk; `find -name` returns empty quietly.
+      find "$d" -maxdepth 1 -name "${stem}_test.exs" -o -maxdepth 1 -path "$d/${stem}_*_test.exs" 2>/dev/null || true
+    )
+  done <<EOF
+$callers
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# RULE 4 — THE FAIL-CLOSED DOOR. The fix for the runtime-only POLICY call,
+# measured on a real miss rather than imagined.
+# ---------------------------------------------------------------------------
+# THE INCIDENT (#18085, head 02d74f815, job 103713658033). That PR changed
+# api/lib/barkpark/content/write_scope.ex so an unresolved write from an
+# attributable caller REFUSES instead of stamping the seeded Default workspace.
+# The selector narrowed to `running 563 selected test files` -> 8,679 tests,
+# 0 failures, the required Elixir gate went 4/4, it merged, and main went red
+# on the same base at api/test/barkpark/search/indx_engine_scope_test.exs
+# with `MatchError {:error, :workspace_scope_required}` — 20,832 tests, 1
+# failure. That test file appears ZERO times in the PR job's log.
+#
+# WHY EVERY EXISTING HALF MISSED IT, measured on this tree at 9c95a26fe:
+#   * the compile closure: `mix xref graph --sink lib/barkpark/content/
+#     write_scope.ex --label compile-connected` names NOTHING. The module is
+#     reached by ordinary remote calls, which are runtime edges, so no
+#     recompilation depends on it and the closure is correctly empty;
+#   * the by-name test net: the failing test calls `Content.create_document/4`
+#     and the call routes through WriteScope at runtime. `grep -F
+#     'Barkpark.Content.WriteScope' test/barkpark/search/indx_engine_scope_test.exs`
+#     is EMPTY — the test names the context it calls, never the door it passes
+#     through;
+#   * RULE 3: write_scope.ex is not named by any lib/barkpark_web/ module, and
+#     the failing test is not a contract test of a web surface anyway.
+#   * the camouflage: #18085 also edited five sibling TEST files, and those five
+#     WERE selected — because they were EDITED. The selection therefore LOOKED
+#     complete. The one unedited test the change actually broke was invisible.
+#
+# THE CLASS, and why it is a PREDICATE and not a pin. The set of tests that can
+# break on a door change is "every test that performs the guarded operation",
+# which is an enumeration where a rule is needed (D-"an enumeration is a
+# snapshot, a predicate is a rule"): pinning indx_engine_scope_test.exs would
+# have covered one file and left the class open, and a pin per affected test
+# cannot cover a policy module somebody adds next month.
+#
+# A DOOR IS RECOGNISED FROM THE MODULE'S OWN SOURCE, by the refusal vocabulary
+# this repo already writes: a module that returns `{:error, :…_required}`,
+# `:…_forbidden`, `:…_denied`, `:…_not_allowed`, `:unauthorized` or `:forbidden`
+# is a fail-closed policy gate by construction — it exists to REFUSE an
+# operation its callers perform without naming it. A door may also declare
+# itself with `# @impact door` in its own source, for a gate whose refusal
+# vocabulary is idiosyncratic; that is a marker the MODULE owns, in the same
+# shape as the repo's `@canonical capability:` markers, not a list in this file.
+# Either arm selects ALL.
+#
+# WHY THE DERIVED ARM IS THE RIGHT SHAPE, measured 2026-09-13 on 9c95a26fe:
+#   * 59 of 904 api/lib .ex files match the refusal vocabulary — 6.5%, so this
+#     is a narrow class and not a synonym for "any lib file";
+#   * ALL 59 have a compile-connected dependent set of EXACTLY ZERO files
+#     (computed by parsing `mix xref graph --label compile-connected --format
+#     dot` over the whole tree and taking each node's reverse transitive
+#     closure). That is the mechanical statement of the blind spot: for every
+#     module in this class, the compile closure can reach none of its callers;
+#   * write_scope.ex is in the set, with 5 test files naming it out of 1,458.
+#
+# THE REMEDY THE ROW SUGGESTED AND THIS FILE REJECTS, also measured: "a second
+# index carrying runtime call edges". `mix xref graph --sink X` WITHOUT
+# `--label compile-connected` gives exactly that index, and it is useless here.
+# Reverse transitive closures over the full-label graph put 766 of 904 lib
+# files (84.7%) at a runtime fan-in of 500+ dependents, write_scope.ex among
+# them at 512 — this application's runtime graph is one nearly-complete
+# component, so a runtime index answers "essentially everything" for 85% of lib
+# changes. A selector that says ALL for 85% of its inputs is correct and buys
+# nothing. The refusal predicate says ALL for the 6.5% where the compile
+# closure is provably blind, and leaves the other 93.5% narrowed.
+#
+# WHAT IT COSTS, measured over the last 200 commits on origin/main (2026-09-13):
+# 61 touch api/. 24 of those already select ALL for an unrelated reason (a
+# non-narrowable api/ path in the same diff). Of the 37 that narrow today, 7
+# (18.9%) touch a door file and would now select ALL — 11.5% of api-touching
+# commits. That is the price of the class, and it is paid only by PRs that
+# change a fail-closed gate.
+#
+# WHAT IT STILL CANNOT SEE: a door that refuses with a vocabulary neither arm
+# knows and that has not stamped itself — `{:error, :nope}`. `--doors` prints
+# the census so the class can be audited against the tree, and a module the
+# author knows is a door can always stamp itself. main-per-sha and the nightly
+# remain the net under the net.
+DOOR_REFUSAL_ERE='\{:error, :[a-z_]*(_required|_forbidden|_denied|_not_allowed)\}|\{:error, :(unauthorized|forbidden)\}'
+DOOR_DECLARE_ERE='@impact[[:space:]]+door([[:space:]]|$)'
+
+# A repo-root path -> is it a fail-closed door? Non-zero for everything else,
+# INCLUDING a path whose file is not on disk: a deleted lib file cannot be read,
+# and that case already reaches ALL through the `defines no module` arm below,
+# so this predicate never has to guess from an absent file.
+is_door_module() {
+  local p="$1" f
+  case "$p" in api/lib/*.ex) ;; *) return 1 ;; esac
+  f="$API_DIR/${p#api/}"
+  [ -f "$f" ] || return 1
+  if grep -qE "$DOOR_DECLARE_ERE" -- "$f" 2>/dev/null; then return 0; fi
+  if grep -qE "$DOOR_REFUSAL_ERE" -- "$f" 2>/dev/null; then return 0; fi
+  return 1
+}
+
+# The census, derived from the tree on every call — api-relative paths.
+door_census() {
+  (
+    cd -- "$API_DIR" 2>/dev/null || exit 0
+    { grep -rlE "$DOOR_DECLARE_ERE" lib --include='*.ex' 2>/dev/null || true
+      grep -rlE "$DOOR_REFUSAL_ERE" lib --include='*.ex' 2>/dev/null || true
+    } | LC_ALL=C sort -u | sed '/^$/d'
+  )
+}
+
+# ---------------------------------------------------------------------------
 # --select
 # ---------------------------------------------------------------------------
 select_tests() {
@@ -391,15 +905,70 @@ select_tests() {
     return 0
   fi
 
+  # ── WHY THE CHANGED LIST IS NOT ON STDIN (task-627ab62e43790c0e) ─────────
+  #
+  # This loop used to be fed `done <<EOF\n$changed\nEOF`, which puts the list
+  # on the loop body's fd 0. Every child started inside the body inherits it,
+  # and a child that reads stdin EATS THE REST OF THE LIST. `read` then returns
+  # EOF and the loop ends early — silently, with no non-zero status, no stderr
+  # and no `ALL`: the remaining paths are never classified, so the ones that
+  # would have widened the selection (a changed *_test.exs, an `api/**` path
+  # that forces ALL) are simply not there. The selector narrows over a file set
+  # it never read, which is the exact fault this whole file is written against.
+  #
+  # MEASURED, NOT IMAGINED. #19303 (e58d8bbcd) changed 40 paths: two
+  # `api/lib/**.ex` files, 37 `*_test.exs`, and `api/test/support/
+  # task_brief_fixtures.ex` — that last one is neither a lib .ex nor a
+  # *_test.exs, so the `api/*` arm below MUST have emitted ALL. The gate's own
+  # uploaded selection artifact (run 35432412311, job 105870352514) instead
+  # holds 596 narrowed files, with NO `ALL` token and NOT ONE stderr line from
+  # this script. Every changed path after the two lib files is missing from it —
+  # including `test/barkpark_web/controllers/mutate_task_brief_gate_test.exs`,
+  # which the PR ADDED and which `is_narrowable_test` selects unconditionally.
+  # The only commands between path 2 and path 3 are the `mix xref` calls in
+  # `xref_probe`/`compile_closure`; on the runner the BEAM drains the pipe that
+  # bash 5.x backs a here-document with. The required Elixir gate went green;
+  # elixir-nightly found 31 failures 23 hours later.
+  #
+  # TWO THINGS FIX IT, and the second one is the one that lasts:
+  #
+  #   1. The list is read from a dedicated fd (9), never fd 0, and every child
+  #      in the body gets `</dev/null`. No child can reach the data.
+  #   2. THE COUNT IDENTITY, below: the loop must classify exactly as many
+  #      paths as it was handed. That is a PREDICATE over this run's own input,
+  #      not a list of known-bad children, so it holds for the NEXT stdin-eating
+  #      child too — one nobody has thought of, in a helper added next year.
+  #      A truncated read is then structurally unable to look like a narrow
+  #      answer: it emits ALL, loudly, on stderr.
   local closure_all="" mods_here readers r
-  while IFS= read -r p; do
+  local _in_count=0 _seen_count=0 _feed
+  _in_count="$(printf '%s\n' "$changed" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+  _feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-feed.XXXXXX")" || {
+    echo "elixir-impacted-tests: cannot create the changed-path feed file — selecting ALL." >&2
+    echo "ALL"
+    return 0
+  }
+  printf '%s\n' "$changed" | sed '/^$/d' >"$_feed"
+  exec 9<"$_feed"
+  rm -f -- "$_feed"
+  while IFS= read -r p <&9; do
     [ -n "$p" ] || continue
+    _seen_count=$((_seen_count + 1))
     if is_narrowable_test "$p"; then
       sel="${sel}${p#api/}
 "
       continue
     fi
     if is_narrowable_lib "$p"; then
+      # RULE 4 FIRST: a fail-closed door is reached by callers that do not name
+      # it, on runtime edges no closure can follow. Its impact is every test
+      # that performs the guarded operation, which is not a set this script can
+      # enumerate — so it is not narrowed at all. See RULE 4 above (#18085).
+      if is_door_module "$p"; then
+        echo "elixir-impacted-tests: ${p} is a FAIL-CLOSED DOOR (it returns a policy refusal, or declares itself with @impact door) — every test that performs the guarded operation can break on it and none of them has to name it, so no closure can narrow this. Selecting ALL." >&2
+        echo "ALL"
+        return 0
+      fi
       # A lib file that defines no module (a bare script, a `defimpl`-only
       # file) leaves the by-name net empty, and an empty net on a real code
       # change is indistinguishable from a working one. Run everything instead.
@@ -410,6 +979,7 @@ select_tests() {
         return 0
       fi
       if ! xref_probe || ! closure="$(compile_closure "$p")"; then
+        echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${p})." >&2
         echo "ALL"
         return 0
       fi
@@ -437,15 +1007,47 @@ select_tests() {
       echo "ALL"
       return 0
     fi
+    local is_test_path=0
+    in_set "$p" test && is_test_path=1
     readers="$(census_readers "$p")"
+    if [ -z "$readers" ] && [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d1). The census has no row for this path, but a file the census
+      # DOES have rows for opens it one hop further. Those rows' readers are the
+      # impact, and they are classified below by exactly the same rules as a
+      # direct census reader — no separate, weaker path through this function.
+      readers="$(transitive_readers "$p")"
+      if [ -n "$readers" ]; then
+        echo "elixir-impacted-tests: ${p} has no direct census row, but the census's own source files open it one hop further; its DERIVED readers are: $(printf '%s' "$readers" | tr '\n' ' ')" >&2
+      fi
+    fi
     if [ -n "$readers" ]; then
-      while IFS= read -r r; do
+      # Same fd discipline as the outer loop: this body calls `compile_closure`,
+      # which starts `mix`. On fd 0 the reader list would be drained the same
+      # way, and a half-read reader list narrows just as silently.
+      local _r_in=0 _r_seen=0 _r_feed
+      _r_in="$(printf '%s\n' "$readers" | sed '/^$/d' | wc -l | tr -d '[:space:]')"
+      _r_feed="$(mktemp "${TMPDIR:-/tmp}/bp-impacted-readers.XXXXXX")" || {
+        echo "elixir-impacted-tests: cannot create the reader feed file — selecting ALL." >&2
+        echo "ALL"
+        return 0
+      }
+      printf '%s\n' "$readers" | sed '/^$/d' >"$_r_feed"
+      exec 8<"$_r_feed"
+      rm -f -- "$_r_feed"
+      while IFS= read -r r <&8; do
+        _r_seen=$((_r_seen + 1))
         [ -n "$r" ] || continue
         case "$r" in
           api/test/*_test.exs) sel="${sel}${r#api/}
 " ;;
           api/lib/*.ex)
+            if is_door_module "$r"; then
+              echo "elixir-impacted-tests: ${p} is read by ${r}, which is a FAIL-CLOSED DOOR — selecting ALL." >&2
+              echo "ALL"
+              return 0
+            fi
             if ! xref_probe || ! closure="$(compile_closure "$r")"; then
+              echo "elixir-impacted-tests: narrowing unavailable: running ALL (the compile-closure instrument failed its probe or could not close ${r})." >&2
               echo "ALL"
               return 0
             fi
@@ -460,22 +1062,39 @@ select_tests() {
             return 0
             ;;
         esac
-      done <<EOF
-$readers
-EOF
+      done
+      exec 8<&-
+      if [ "$_r_seen" -ne "$_r_in" ]; then
+        echo "elixir-impacted-tests: classified ${_r_seen} of ${_r_in} census readers of ${p} — the reader list was TRUNCATED mid-loop. Selecting ALL." >&2
+        echo "ALL"
+        return 0
+      fi
       continue
     fi
-    if in_set "$p" test; then
-      echo "elixir-impacted-tests: ${p} is in the TEST path set but the escape census names no reader for it — unknown reader, unknown impact, selecting ALL." >&2
+    if [ "$is_test_path" -eq 1 ]; then
+      # BRANCH (d2), the unchanged fail-safe: in the TEST set, and named by
+      # NEITHER the census nor its one-hop extension.
+      echo "elixir-impacted-tests: ${p} is in the TEST path set but neither the escape census nor its one-hop extension names a reader for it — unknown reader, unknown impact, selecting ALL." >&2
       echo "ALL"
       return 0
     fi
     # Branch (c). Dispatched on by neither set, named by no census row: the
     # path-escape ratchet's guarantee is that nothing in this suite reads it.
     echo "elixir-impacted-tests: ${p} is in NEITHER path set and in no census row — nothing in the suite reads it; it contributes no tests." >&2
-  done <<EOF
-$changed
-EOF
+  done
+  exec 9<&-
+
+  # THE COUNT IDENTITY. Every path handed in must have been classified. A short
+  # count means the loop stopped before the end of the list — a drained fd, a
+  # read error, a `read` that met a NUL — and whatever the cause, the paths it
+  # did not see cannot be assumed harmless: the one that widens to ALL is
+  # exactly the one most likely to be missing. This is the assertion that makes
+  # a FAILED read impossible to mistake for a narrow answer.
+  if [ "$_seen_count" -ne "$_in_count" ]; then
+    echo "elixir-impacted-tests: classified ${_seen_count} of ${_in_count} changed paths — the changed-path list was TRUNCATED mid-loop, so ${_in_count} minus ${_seen_count} paths were never classified and any one of them could have widened this selection. Selecting ALL." >&2
+    echo "ALL"
+    return 0
+  fi
 
   closure_all="$(printf '%s\n' "$closure_all" | sed '/^$/d' | LC_ALL=C sort -u)"
   if [ -n "$closure_all" ]; then
@@ -487,6 +1106,10 @@ EOF
 $closure_all
 EOF
     sel="${sel}$(printf '%s\n' "$closure_all" | modules_of | tests_naming_modules)
+"
+    # RULE 3: the lib->lib hop onto a web surface, then that surface's own
+    # contract-test family. See web_surface_tests above for the incident.
+    sel="${sel}$(printf '%s\n' "$closure_all" | modules_of | web_surface_tests)
 "
   fi
 
@@ -510,13 +1133,49 @@ case "${1:---select}" in
     # between "the closure was not needed" and "the closure has been dead since
     # August".
     if xref_probe; then
-      echo "xref-probe: OK — mix xref answers, so an empty closure means a leaf."
+      echo "xref-probe: OK — the direct compile graph loaded ($(printf '%s\n' "$COMPILE_EDGES" | awk 'NF{n++} END{print n+0}') edges), and its closure depends on the file asked about (hub ${XREF_PROBE_HUB} and leaf ${XREF_PROBE_LEAF} differ), so an empty closure means a leaf."
       exit 0
     fi
     echo "xref-probe: DEAD — the compile closure is unavailable; every selection will fall back to ALL."
     exit 1
     ;;
+  --closure)
+    # One api/-relative or repo-root lib path -> its compile closure (the
+    # changed file's compile dependents, transitively, then the file itself),
+    # after the same controls --select runs. The instrument, inspectable on its
+    # own: `--closure api/lib/barkpark/plugin.ex` must name the plugin modules.
+    if [ "$#" -lt 2 ]; then
+      echo "elixir-impacted-tests: --closure needs a lib path" >&2
+      exit 2
+    fi
+    if ! xref_probe; then
+      echo "elixir-impacted-tests: the compile-closure controls failed — no closure is trustworthy." >&2
+      exit 1
+    fi
+    compile_closure "api/${2#api/}"
+    ;;
   --print-pins) printf '%s\n' "$ALWAYS_PINS" ;;
+  --doors)
+    # The RULE 4 census, derived from the tree. Printed so the class can be
+    # audited against a real diff instead of argued about: `--doors | wc -l`
+    # against `find lib -name '*.ex' | wc -l` is the widening number.
+    door_census
+    ;;
+  --is-door)
+    # One repo-root path -> exit 0 when RULE 4 classifies it as a door. Exists
+    # so the harness can pick a NON-door leaf fixture by asking the predicate
+    # rather than by hard-coding a filename that may become a door tomorrow.
+    if [ "$#" -lt 2 ]; then
+      echo "elixir-impacted-tests: --is-door needs a repo-root path" >&2
+      exit 2
+    fi
+    if is_door_module "$2"; then
+      echo "door: $2"
+      exit 0
+    fi
+    echo "not-a-door: $2"
+    exit 1
+    ;;
   --check-pins)
     # A pinned entry that no longer exists is a hole in the net wearing the
     # shape of a full list. Red on it.
@@ -530,6 +1189,14 @@ case "${1:---select}" in
     done <<EOF
 $(pins_paths)
 EOF
+    # The xref controls are pins too: a renamed one turns every selection into
+    # ALL for good, safely but with no symptom. Red on it here instead.
+    for p in "$XREF_PROBE_HUB" "$XREF_PROBE_LEAF"; do
+      if [ ! -f "$API_DIR/$p" ]; then
+        echo "elixir-impacted-tests: compile-closure control '$p' does not exist — pick a replacement with the same property (see xref_probe in $0)." >&2
+        rc=1
+      fi
+    done
     if [ "$rc" -eq 0 ]; then
       # `grep -c` prints a count AND exits 1 on zero, so it is not usable bare
       # under `set -e`; count with awk, which cannot.
@@ -540,7 +1207,7 @@ EOF
   --selftest) exec bash "$SCRIPT_DIR/elixir-impacted-tests.test.sh" ;;
   *)
     echo "elixir-impacted-tests: unknown argument '$1'" >&2
-    echo "usage: $0 [--select|--print-always|--print-pins|--check-pins|--selftest]" >&2
+    echo "usage: $0 [--select|--print-always|--print-pins|--check-pins|--doors|--is-door <path>|--closure <path>|--xref-probe|--selftest]" >&2
     exit 2
     ;;
 esac

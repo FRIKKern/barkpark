@@ -13,14 +13,14 @@ A Next.js 15 blog starter powered by [Barkpark](https://github.com/barkpark/bark
 - Schemas: `post`, `author`, `tag` + seed script with sample content
 - Paginated home feed, author pages, tag archives, draft-mode preview with `useOptimisticDocument`
 - SEO out of the box: per-page metadata + OpenGraph, `sitemap.ts`, `robots.ts`, `metadataBase`
-- Graceful states: branded `not-found.tsx`, an `error.tsx` boundary, and a `loading.tsx` skeleton
+- Graceful states: a branded `not-found.tsx` served with a real 404 status, and an `error.tsx` boundary
 
 ## Quick start
 
 ```sh
 cp .env.example .env.local
 docker compose up -d          # Phoenix API on :4000, Postgres on :5432
-{{pmCommand}} install
+npm install                   # or: pnpm install · yarn · bun install
 {{pmCommand}} seed            # 2 authors, 3 tags, 7 posts (6 published, 1 draft)
 {{pmCommand}} dev             # Next.js on :3000
 ```
@@ -50,11 +50,20 @@ While active, `app/posts/[slug]/page.tsx` renders `DraftModePreview`, which uses
 
 Webhook handler at `app/api/barkpark/webhook/route.ts`. HMAC signing is the combined `t=<unix>,v1=<hex>` header, HMAC-SHA256 over `<timestamp>.<rawBody>`. Tags follow `bp:ws:<workspace>:p:<project>:ds:<dataset>:{_all|doc:<id>|type:<type>}` when workspace and project are set (the default); the legacy flat shape `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}` is used as back-compat fallback when they are not. See `docs/contracts/webhook-realtime.md` for the full wire contract.
 
+Register the webhook with the `bp` CLI (Studio has no webhook screen), then mint its signing secret:
+
 ```sh
-BARKPARK_WEBHOOK_SECRET=<shared-secret-with-studio>
+bp webhook create https://<your-app>/api/barkpark/webhook my-site   # prints: id: <webhook-id>
+bp webhook rotate <webhook-id> -o json                             # {"secret":"whsec_…", …} — shown once
 ```
 
-Register the webhook in Studio pointing at `https://<your-app>/api/barkpark/webhook`.
+Set that secret in the app's environment:
+
+```sh
+BARKPARK_WEBHOOK_SECRET=whsec_…
+```
+
+A webhook with no secret sends unsigned deliveries, and this route answers every one of them 401.
 
 ## Deploy
 
@@ -73,7 +82,7 @@ app/
   api/preview/route.ts         enable draftMode()
   api/exit-preview/route.ts    disable draftMode()
   sitemap.ts / robots.ts       SEO discovery (absolute URLs from NEXT_PUBLIC_SITE_URL)
-  not-found.tsx / error.tsx / loading.tsx   branded 404 / error boundary / skeleton
+  not-found.tsx / error.tsx    branded 404 / error boundary
 lib/
   barkpark.ts                  typed server-only fetchers
   queries.ts                   reusable query strings

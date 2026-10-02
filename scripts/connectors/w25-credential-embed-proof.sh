@@ -58,6 +58,14 @@
 set -uo pipefail
 export LC_ALL=C
 
+# SUBSTRING TESTS ARE A BUILTIN `case`, NEVER `printf | grep -q`.  Under this
+# script's `set -o pipefail` a matching `grep -q` exits on the FIRST hit, the
+# printf then takes SIGPIPE, and pipefail promotes 141 over the match — so a
+# TRUE assertion reads as FAIL as soon as the payload outgrows the pipe buffer
+# (~512 B on darwin, 64 KB on the Linux runners).  `has_sub NEEDLE HAYSTACK`
+# has no producer process to kill, so the verdict cannot depend on length.
+has_sub() { case "$2" in *"$1"*) return 0 ;; *) return 1 ;; esac; }
+
 SCRIPT_NAME="w25-credential-embed-proof.sh"
 CHARTER=".claude/workflows/bp-connectors-charter.md"
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -494,9 +502,9 @@ run_proof() {
     fi
   done
   [ -n "$script" ] || fail "(c) no bash script captured after the '-lc' token"
-  printf '%s' "$script" | grep -q -- "'--mcp-config' '/tmp/bp-cloud-mcp.json' '--strict-mcp-config'" ||
+  has_sub "'--mcp-config' '/tmp/bp-cloud-mcp.json' '--strict-mcp-config'" "$script" ||
     fail "(c) in-VM claude exec lost --mcp-config /tmp/bp-cloud-mcp.json --strict-mcp-config"
-  if printf '%s' "$script" | grep -q "base64 -d > '/tmp/bp-cloud-mcp.json'"; then
+  if has_sub "base64 -d > '/tmp/bp-cloud-mcp.json'" "$script"; then
     fail "(c) in-VM script still embeds the mcp config via printf|base64 — the credential would ride argv"
   fi
   echo "    PASS (c): --mcp-config /tmp/bp-cloud-mcp.json --strict-mcp-config kept; in-VM mcp embed line SKIPPED."
@@ -515,7 +523,13 @@ run_proof() {
 
   # (f) the host tmpfile is gone (unlinked in finally).
   echo "==> (f) host tmpfile absent post-run ..."
-  if find "$TMP" -name 'bp-cloud-mcp-*' | grep -q .; then
+  # `find … | grep -q .` is the same hazard with a file-sized producer, and it
+  # FAILS OPEN: grep -q matches on the first surviving tmpfile, find takes
+  # SIGPIPE, pipefail returns 141, and the `if` falls through to "PASS" exactly
+  # when there is MORE leak evidence than the pipe holds.  Capture, then test.
+  local surviving_tmpfiles
+  surviving_tmpfiles="$(find "$TMP" -name 'bp-cloud-mcp-*' 2>/dev/null || true)"
+  if [ -n "$surviving_tmpfiles" ]; then
     fail "(f) a bp-cloud-mcp-* tmpfile survived the run — the finally unlink is broken"
   fi
   echo "    PASS: no bp-cloud-mcp-* tmpfile survives under the leg TMPDIR."
@@ -581,9 +595,9 @@ run_proof() {
       script="${CAP_TOKENS[$((i + 1))]}"
     fi
   done
-  printf '%s' "$script" | grep -q "base64 -d > '/tmp/bp-cloud-mcp.json'" ||
+  has_sub "base64 -d > '/tmp/bp-cloud-mcp.json'" "$script" ||
     fail "(byte-identity) ticket-less payload lost the in-VM printf|base64 mcp embed line"
-  printf '%s' "$script" | grep -q -- "'--mcp-config' '/tmp/bp-cloud-mcp.json' '--strict-mcp-config'" ||
+  has_sub "'--mcp-config' '/tmp/bp-cloud-mcp.json' '--strict-mcp-config'" "$script" ||
     fail "(byte-identity) ticket-less payload lost the --mcp-config flags"
   echo "    PASS: ticket-less ⇒ no fetch, no copy, in-VM embed line + mcp flags intact."
 

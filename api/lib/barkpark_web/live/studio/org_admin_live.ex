@@ -11,7 +11,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     * **Members & Roles** — the user-member count.
     * **Audit Log** — the recent audit activity.
 
-  Note: gating is the existing global `:admin` (API-token) hook; a fully
+  Note: gating is the existing global `:admin` (API-token) hook PLUS the
+  platform-operator tier (task-05cf6cbd1b0460fe): every org's SCIM mint and
+  MFA/session/sign-in policy is INSTANCE-wide authority, so with the operator
+  allowlist armed only a principal it names may mount the portal or fire any
+  event — the same `RequirePlatformOperator.permits?/1` the REST admin surface
+  reads. With the allowlist unset (single-tenant) nothing changes. A fully
   org-scoped self-serve login is the follow-up that rides the user-principal
   request-pipeline threading. Visual polish is a browser-verification follow-up.
   """
@@ -24,6 +29,9 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   alias Barkpark.{Audit, Repo, Scim, Tenancy}
   alias Barkpark.Sso.{Oidc, Saml}
   alias Barkpark.Tenancy.Membership
+  alias BarkparkWeb.Plugs.RequirePlatformOperator
+
+  @operator_only "The organization admin portal is reserved for the platform operator on this instance."
 
   @impl true
   def mount(params, _session, socket) do
@@ -32,6 +40,10 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     # against open-redirect; nil when arrived at flat/directly.
     socket = assign(socket, return_to: BarkparkWeb.Studio.ReturnTo.sanitize(params["return_to"]))
 
+    if operator?(socket), do: mount_portal(socket), else: refuse_mount(socket)
+  end
+
+  defp mount_portal(socket) do
     # NAMED COST (doctrine lever #2): the disconnected mount render is DISCARDED
     # the moment the WebSocket connects and mount re-runs. `load/1` fans out to
     # `list_organizations` + per-org status (SSO/SAML/SCIM/member-count) +
@@ -60,8 +72,25 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   # is airtight without needing an async round trip. A genuine re-mint (e.g.
   # provisioning a second IdP) needs a fresh page load, same as the existing
   # "shown once" plaintext banner already requires.
+  # Every event re-checks the operator tier (a socket mounted before the
+  # allowlist was armed must not keep minting).
   @impl true
-  def handle_event("mint_scim", %{"org" => org_id}, socket) do
+  def handle_event(event, params, socket) do
+    if operator?(socket),
+      do: do_event(event, params, socket),
+      else: {:noreply, put_flash(socket, :error, @operator_only)}
+  end
+
+  defp operator?(socket),
+    do:
+      RequirePlatformOperator.permits?(
+        socket.assigns[:api_token] || socket.assigns[:current_user]
+      )
+
+  defp refuse_mount(socket),
+    do: {:ok, socket |> put_flash(:error, @operator_only) |> redirect(to: "/studio")}
+
+  defp do_event("mint_scim", %{"org" => org_id}, socket) do
     if Map.has_key?(socket.assigns.minted, org_id) do
       {:noreply, socket}
     else
@@ -78,8 +107,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
 
   # era-w2-org-require-mfa: flip the org-wide MFA requirement. `to` carries
   # the target state so the click is idempotent against a stale render.
-  @impl true
-  def handle_event("toggle_require_mfa", %{"org" => org_id, "to" => to}, socket) do
+  defp do_event("toggle_require_mfa", %{"org" => org_id, "to" => to}, socket) do
     case Tenancy.set_organization_require_mfa(org_id, to == "true") do
       {:ok, _org} ->
         {:noreply, load(socket)}
@@ -92,8 +120,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   # era-w8-org-session-policy: set the org-wide idle timeout + absolute lifetime
   # (seconds). Blank clears an axis (no limit → zero-tax). A non-positive /
   # non-numeric entry is rejected with a flash, not persisted.
-  @impl true
-  def handle_event("set_session_policy", %{"org" => org_id} = params, socket) do
+  defp do_event("set_session_policy", %{"org" => org_id} = params, socket) do
     with {:ok, idle} <- parse_policy_seconds(params["idle"]),
          {:ok, absolute} <- parse_policy_seconds(params["absolute"]) do
       policy = %{idle_timeout_seconds: idle, absolute_lifetime_seconds: absolute}
@@ -119,8 +146,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   # era-bl-allowed-auth-methods: set the org-wide allow-list of sign-in methods.
   # Checkboxes, so an UNCHECKED box simply does not appear in the params — see
   # `methods_param/1` for why "none checked" must clear to NULL and never [].
-  @impl true
-  def handle_event("set_allowed_auth_methods", %{"org" => org_id} = params, socket) do
+  defp do_event("set_allowed_auth_methods", %{"org" => org_id} = params, socket) do
     case Tenancy.set_organization_allowed_auth_methods(org_id, methods_param(params["methods"])) do
       {:ok, _org} ->
         {:noreply, socket |> put_flash(:info, "Allowed sign-in methods updated.") |> load()}

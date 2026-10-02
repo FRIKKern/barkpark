@@ -235,6 +235,75 @@ defmodule BarkparkCloud.Notifications.SitePublishWaitingAlertTest do
     end
   end
 
+  describe "which site (task-eccb439bfa5ccccc)" do
+    # The site line used to print `site #{site.site_id}` — an operator read a
+    # UUID and had to hand-join the sites table. The rows come from
+    # `DeployLedger.delivery/3`, which carries nullable `name`/`slug` beside
+    # `site_id`; the label is slug, else name, else the id marked
+    # `(no site row)` — the Go census's `deploySiteLabel` precedence.
+    test "the sent notice names the site by its SLUG, not its UUID" do
+      {_user, team} = team_with_waiting_site(@waited_seconds)
+      site = team |> Registry.list_sites_for_team() |> hd()
+      sweep(@now)
+
+      assert_email_sent(fn email ->
+        assert email.text_body =~
+                 "  - site #{site.slug}: waiting at least 2h 0m (1 of 1 attempts in this window not yet delivered)"
+
+        # `assert_email_sent/1` needs a truthy return; `refute` returns false.
+        refute email.text_body =~ site.id
+        true
+      end)
+    end
+
+    test "every rung of the fallback renders a literal, and a nil never renders as empty" do
+      node = fn fields ->
+        Map.merge(
+          %{
+            site_id: "0b6f9c2e-5d1a-4c3b-9e8f-7a6b5c4d3e2f",
+            still_waiting: true,
+            oldest_waiting_seconds: 7200,
+            censored: 1,
+            sample: 1
+          },
+          fields
+        )
+      end
+
+      line = fn fields ->
+        SitePublishWaitingAlert.body(%{sites: [node.(fields)]})
+        |> String.split("\n")
+        |> Enum.find(&String.starts_with?(&1, "  - site "))
+      end
+
+      # slug wins over name
+      assert line.(%{slug: "live-auto", name: "Live Auto"}) ==
+               "  - site live-auto: waiting at least 2h 0m (1 of 1 attempts in this window not yet delivered)"
+
+      # nil slug: the name, never an empty string
+      assert line.(%{slug: nil, name: "Live Auto"}) ==
+               "  - site Live Auto: waiting at least 2h 0m (1 of 1 attempts in this window not yet delivered)"
+
+      # nil name AND nil slug (a site row deleted between delivery/3's two reads)
+      assert line.(%{slug: nil, name: nil}) ==
+               "  - site 0b6f9c2e-5d1a-4c3b-9e8f-7a6b5c4d3e2f (no site row): waiting at least 2h 0m (1 of 1 attempts in this window not yet delivered)"
+
+      # a node with no name/slug keys at all is the same honest fallback
+      assert line.(%{}) ==
+               "  - site 0b6f9c2e-5d1a-4c3b-9e8f-7a6b5c4d3e2f (no site row): waiting at least 2h 0m (1 of 1 attempts in this window not yet delivered)"
+
+      # blank strings are absences too — `site : waiting` is the defect in another shape
+      assert line.(%{slug: "  ", name: ""}) =~
+               "site 0b6f9c2e-5d1a-4c3b-9e8f-7a6b5c4d3e2f (no site row): "
+
+      # team-authored text cannot break the line
+      assert SitePublishWaitingAlert.site_label(%{slug: nil, name: "Live\nAuto"}) == "Live Auto"
+
+      assert SitePublishWaitingAlert.site_label(%{site_id: nil, slug: nil, name: nil}) ==
+               "(unidentified)"
+    end
+  end
+
   describe "the mute path" do
     test "a team that turned deployment_failed off is not told about its waits" do
       {_user, team} = team_with_waiting_site(@waited_seconds)

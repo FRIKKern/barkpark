@@ -75,7 +75,15 @@ defmodule Barkpark.SheetsM3M5ProofTest do
   setup do
     Barkpark.TenancyFixtures.ensure_default_scope!()
     Barkpark.LabelFixtures.register_tags!(@dataset, @wall_tag_names)
-    Barkpark.Auth.create_token(@write_token, "m3-m5-proof", @dataset, ["read", "write"])
+
+    Barkpark.Auth.create_token(
+      @write_token,
+      "m3-m5-proof",
+      @dataset,
+      ["read", "write"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     :ok
   end
 
@@ -404,6 +412,8 @@ defmodule Barkpark.SheetsM3M5ProofTest do
     assert micros < 5_000_000
   end
 
+  # Plugins-off: the sheets plugin owns the sheet schema and its before_save gate
+  @tag :requires_plugins
   test "hostile: a mutate writing a cell at ZZZZZ9 is rejected by the write gate" do
     resp =
       mutate([

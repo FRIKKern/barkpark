@@ -55,6 +55,9 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
 
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
@@ -83,7 +86,13 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
     raw = "pds-chat-admin-#{System.unique_integer([:positive])}"
 
     {:ok, token} =
-      Auth.create_token(raw, "pds chat wsb admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        raw,
+        "pds chat wsb admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
     {:ok, _} = TenancyAuth.create_membership(ws_b.id, token.id, "admin")
 
@@ -277,8 +286,12 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
+      # Guarded: with studio_chat off there is no RuntimeSupervisor, and a raise
+      # here would skip the env restores below (public_demo_studio leak).
+      if(Process.whereis(Barkpark.StudioChat.RuntimeSupervisor),
+        do: DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
+        else: []
+      )
       |> Enum.each(fn
         {_, pid, _, _} when is_pid(pid) ->
           DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)

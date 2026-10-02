@@ -41,12 +41,21 @@ defmodule Barkpark.Plugins.TasksZeroCriteriaAdvisoryTest do
   @code "zero_acceptance_criteria"
 
   setup do
-    Barkpark.Auth.create_token("barkpark-dev-token", "dev", @dataset, ["read", "write", "admin"])
+    Barkpark.Auth.create_token(
+      "barkpark-dev-token",
+      "dev",
+      @dataset,
+      ["read", "write", "admin"],
+      Barkpark.TenancyFixtures.default_workspace_id!()
+    )
+
     register_task_schemas!()
     :ok
   end
 
   describe "the birth advisory rides the mutate SUCCESS envelope" do
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a create with ZERO acceptance_criteria puts the advisory ON THE RESPONSE", %{conn: conn} do
       resp = mutate(conn, [task_create("zc-advisory-empty", [])])
 
@@ -68,6 +77,8 @@ defmodule Barkpark.Plugins.TasksZeroCriteriaAdvisoryTest do
       assert warning["message"] =~ "save proceeds"
     end
 
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
     test "a create with the acceptance_criteria KEY ABSENT is advised too", %{conn: conn} do
       resp = mutate(conn, [task_create("zc-advisory-absent", :absent)])
 

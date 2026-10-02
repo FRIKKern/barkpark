@@ -103,9 +103,28 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         |> List.wrap()
         |> kilde_html()
 
+      # THE VERDICT: "loss" or "peace" paints the DIGITS in the verdict ink
+      # (design/tokens.json color.verdict; paper-surface.css .bp-stat__v--loss /
+      # --peace). Only the value moves — the label, body and rule keep the page
+      # voice, so the number is the one thing carrying the judgement and the tile
+      # does not become a coloured box. Off-vocabulary or absent → the bare class,
+      # so every stat that existed before this field stays byte-identical.
+      # Mirrored in js/packages/react/src/blocks/dataviz.ts statHtml.
+      # Every branch is a STRING LITERAL, deliberately: the attr-escape guard
+      # (attr_escape_guard_test.exs) discharges a case whose arms are all
+      # literals, and " bp-stat__v--#{v}" off a guard-bound v is not something
+      # its prover can close. A literal per arm costs one line and keeps the
+      # site off the hand-reviewed residue list.
+      verdict_mod =
+        case block |> get("verdict") |> display_string() do
+          "loss" -> " bp-stat__v--loss"
+          "peace" -> " bp-stat__v--peace"
+          _ -> ""
+        end
+
       ~s|<div class="bp-stat">| <>
         bar <>
-        ~s|<div class="bp-stat__v">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
+        ~s|<div class="bp-stat__v#{verdict_mod}">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
         label_html <> body_html <> spark_svg(spark) <> kilde <> "</div>"
     end
   end
@@ -328,7 +347,14 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         ) <>
         if body == "", do: "", else: ~s|<div class="bp-lineage__body">#{escape_html(body)}</div>|
 
-    ~s|<li class="bp-lineage__node">| <> parts <> "</li>"
+    # Per-stop VERDICT. `tone` is optional and rides the same four-word
+    # vocabulary the chart regions use (info/ok/warn/danger, tone_class/2), so a
+    # clock strip can colour the stop where the thing went wrong without a new
+    # attribute grammar. An absent or unrecognised tone emits the bare class —
+    # every lineage authored before this stays byte-identical.
+    cls = tone_class("bp-lineage__node", get(n, "tone"))
+
+    ~s|<li class="#{cls}">| <> parts <> "</li>"
   end
 
   # ── heatmap ──────────────────────────────────────────────────────────────────
@@ -1295,9 +1321,17 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
   # ── the sparkline primitive (stat) ───────────────────────────────────────────
 
-  defp spark_svg([]), do: ""
+  # The ONE sparkline primitive. Public (2-arity, class-parameterised) so the
+  # table typed-`spark` column composes THIS svg instead of minting a second
+  # ladder — the class is the only thing that differs (`bp-stat__spark` inside a
+  # stat cell, `bp-table__spark` inside a table cell), and the default keeps
+  # every existing stat call byte-identical.
+  @doc false
+  def spark_svg(values, class \\ "bp-stat__spark")
 
-  defp spark_svg(values) do
+  def spark_svg([], _class), do: ""
+
+  def spark_svg(values, class) do
     n = length(values)
     min_v = Enum.min(values)
     max_v = Enum.max(values)
@@ -1314,7 +1348,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         "#{fmt(x)},#{fmt(y)}"
       end)
 
-    ~s|<svg class="bp-stat__spark" viewBox="0 0 #{w} #{h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="#{pts}"/></svg>|
+    ~s|<svg class="#{class}" viewBox="0 0 #{w} #{h}" preserveAspectRatio="none" aria-hidden="true"><polyline points="#{pts}"/></svg>|
   end
 
   # ── email variants (gp-w3 email view) ────────────────────────────────────────
@@ -1364,6 +1398,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
       empty_email("stat", theme)
     else
       label = block |> get("label") |> display_string()
+      denom = block |> get("denom") |> display_string()
       unit = block |> get("unit") |> display_string()
       body = block |> get("body") |> display_string()
       max = numeric(get(block, "max"))
@@ -1387,6 +1422,11 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
           else:
             ~s|<div style="font-size:12px;color:#{sk.muted};margin-top:2px">#{escape_html(label)}</div>|
 
+      denom_html =
+        if denom == "",
+          do: "",
+          else: ~s|<span style="font-weight:400;color:#{sk.muted}">/#{escape_html(denom)}</span>|
+
       unit_html =
         if unit == "",
           do: "",
@@ -1409,7 +1449,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       ~s|<div style="display:inline-block;min-width:120px;background:#{sk.ground};border:1px solid #{sk.border};border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         bar <>
-        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{unit_html}</div>| <>
+        ~s|<div style="font-family:#{Barkpark.PortableDoc.Render.Palettes.font_mono()};font-size:24px;font-weight:700;color:#{sk.ink};line-height:1.1">#{escape_html(value)}#{denom_html}#{unit_html}</div>| <>
         label_html <> body_html <> kilde <> "</div>"
     end
   end

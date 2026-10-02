@@ -1,15 +1,16 @@
 import Link from 'next/link'
-import { countDocs, getDocs } from '../lib/barkpark'
+import { POST_ORDER, countDocs, getDocs } from '../lib/barkpark'
 import { POSTS_PER_PAGE } from '../lib/queries'
 import { pageCount, resolvePageParam } from '../lib/page-param'
 import { Pagination } from './components/Pagination'
 import { formatDate } from '../lib/format-date'
+import { slugOf, type SlugValue } from '../lib/slug'
 
 interface Post {
   _id: string
   title: string
   excerpt?: string
-  slug?: { current: string }
+  slug?: SlugValue
   publishedAt?: string
   author?: { _ref: string }
 }
@@ -37,6 +38,7 @@ export default async function HomePage({ searchParams }: HomeProps) {
   const posts = await getDocs<Post>('post', {
     limit: POSTS_PER_PAGE,
     offset,
+    order: POST_ORDER,
   })
 
   return (
@@ -53,7 +55,7 @@ export default async function HomePage({ searchParams }: HomeProps) {
       ) : (
         <ul className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {posts.map((post) => {
-            const slug = post.slug?.current ?? post._id
+            const slug = slugOf(post.slug) ?? post._id
             return (
               <li
                 key={post._id}

@@ -16,7 +16,7 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
   drafts-exact prev_doc (or skipping the gate call) turns the forgery-door
   test red-in-the-other-direction (the twin is born, the dependent unblocks).
   """
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   alias Barkpark.{Content, Tasks, TenancyFixtures}
 
@@ -47,7 +47,11 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
 
   defp mk_task!(doc_id, scope, content_extra \\ %{}) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       # Unique description per call — keeps Tasks.Dedup AND the E4 publish
       # dedup wall quiet, so only the transitions under test drive outcomes.
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
@@ -67,7 +71,11 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
   # A whole-document createOrReplace payload — the fleet file-order.sh shape.
   defp task_doc(id, lifecycle) do
     content =
-      %{"kind" => "task", "lifecycle_status" => lifecycle}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => lifecycle
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
 
     %{"_id" => id, "_type" => "task", "title" => "Gate fixture #{id}", "content" => content}
@@ -84,6 +92,8 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
 
   # ── (a) the forgery door, CLOSED ─────────────────────────────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "forgery door: createOrReplace on a PUBLISHED-ONLY open task carrying done is refused — " <>
          "no drafts twin born, the dependent stays gated in Queue.ready",
        %{scope: scope} do
@@ -207,6 +217,8 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
 
   # ── (d) replication is exempt, and the exemption is not vacuous ──────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a source :sync mirror of open → done passes; the same shape from :api is refused " <>
          "even WITH the revision escape",
        %{scope: scope} do
@@ -258,6 +270,8 @@ defmodule Barkpark.Content.WriterTransitionGateTest do
 
   # ── the refusal names the sanctioned verb per target ─────────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "each illegal target names ITS sanctioned verb: claim for in_progress, stage for thought states",
        %{scope: scope} do
     # open → in_progress and open → researching are illegal from `open`;

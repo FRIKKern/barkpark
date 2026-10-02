@@ -3137,3 +3137,98 @@ to avoid a collision.*
   (`:861`), classic `studio_components/editor.ex:552` (`:367`), graph `live/studio/graph_view.ex:113` (correct),
   sheet `live/studio/sheet_grid.ex:2589` (`:2478`). Six roots, exactly as D42 corrected D29 — cite the roster by
   name, never by the line.
+
+## spd inspector-scrim amendment (THE 860px SCRIM GENERATOR IS RETIRED, 2026-09-22) — D272
+
+*Numbered D272, following D271. This records a retirement that already shipped; it does not authorise one.*
+
+- **D272 — THE `@container panel (max-width: 860px)` INSPECTOR SCRIM GENERATOR AND ALL FOUR OF ITS
+  SUPPRESSORS ARE RETIRED TOGETHER.** Landed by task-aeb351758966b019. The ruling this records was already
+  unanimous across every bucket before the code caught up: D127 → D170 → D155 → D175/D187 each removed the
+  scrim from one more state, and D175/D187 removed the last one. The honest expression of a unanimous ruling
+  is **zero rules**, not one unreachable rule held down by four cancellations.
+
+- **FOUR SUPPRESSORS, NOT FIVE.** The count was DERIVED from the file, not inherited: the inbound report from
+  infra #19673 said five and the fixture copied four, and the fixture was the artefact alleged to be wrong.
+  Four is the measured number. A count taken from the party whose own work is under question is a lead.
+
+- **THE GENERATOR WAS UNREACHABLE AND POTENT.** Both halves matter. A forced-container control read `none` in
+  8 of 8 bucket × user-opened cells on BOTH sides of the threshold (861px and 860px), so it was unreachable in
+  every shipped state — and it still reddened under mutation, which is what kept the four suppressors from
+  being decoration. "Dead code" without that second half would have been an overclaim.
+
+- **THE COMMENT AT root.html.heex:2360-2366 WAS A SECOND DEFECT, and this is the part worth carrying.** It
+  claimed to be a CONTROL "proving the scrim generator is live code rather than a dead rule". All three of its
+  clauses were false: 860px was not `""`; "verified at both 1280 and 1440" is impossible, since D170 is
+  unconditional at wide so both readings are identical with the generator present or deleted; and it did not
+  "fail loudly if the generator is deleted". It was not a control that could not fail — it was a **comment
+  asserting a property the instrument it described explicitly disclaims**. A control is a run, never a sentence.
+
+- **THE REPLACEMENT REFUSES RATHER THAN PASSES.** The retired apparatus (a playwright control, its fixture, and
+  the drift check tying them) went with its subject because **its ability to fail was parasitic on the dead
+  generator** — its self-test had to delete a suppressor before it could red. `scripts/studio-scrim-abolition-check.mjs`
+  replaces it: no browser, no fixture, 10/10 self-test arms, and two liveness gates that REFUSE an unreadable
+  sheet instead of passing it. For an absence assertion this is the whole game, because a dead parser passes
+  for free. Net −1237 lines.
+
+- **KNOWN GAP, recorded rather than quietly closed.** D210's wave table at `:1395` still names the deleted
+  control. Those are dated records of runs that already happened and are left standing: rewriting history to
+  match today's code would destroy the evidence that the runs occurred.
+
+## spd-b30 amendment (THE BROWSER AXIS IS SAID OUT LOUD, 2026-09-22) — D273
+
+*Numbered D273, following D272. This records a boundary that now exists as a committed
+artifact; it does not authorise new coverage.*
+
+- **D273 — EVERY MATRIX THIS EPIC PUBLISHES IS CHROMIUM-ON-macOS AND NOW SAYS SO AT THE
+  MATRIX, NOT IN PROSE.** `COVERAGE_BOUNDARY` in `scripts/studio-desk-measure.mjs` is one
+  object with two renderings — `run.coverage_boundary` in every run, and the table footer
+  under every matrix — recording platform, engine, document, path, surface, scrollbar and
+  motion in one place. `scripts/studio-desk-coverage-boundary.test.mjs` asserts it rides in
+  the run, drops no axis, and that its motion ruling still matches the committed probe. A
+  boundary stated somewhere else is a boundary nobody reads, which is why it lives where the
+  numbers do.
+
+- **THE BROWSER AXIS IS 1 OF 3 AND NO STUDIO ROW HAD SAID IT OUT LOUD.** D83 already
+  qualified the px figures as "headless Chromium on macOS"; D41 already kept a carve-out as
+  cross-engine insurance and said plainly that "no ExUnit test can ever see it". Both were
+  right and neither was a coverage claim. What was missing was a machine-readable statement
+  that the engine axis is UNMEASURED rather than merely unmentioned — and a guard that
+  refuses to let it be softened. A test now refuses any rewording into "other engines should
+  agree".
+
+- **THE HONEST BRANCH WAS TAKEN THREE TIMES OF FIVE, AND THAT IS THE PRECEDENT.** spd-b30's
+  criteria each offered "measure it OR name it explicitly". Uncovered surfaces are NAMED,
+  because `.bp-paper-surface` does not exist on a sheet, ticket or quiz editor and the
+  instrument asserts selector match counts before trusting a number — it would have refused
+  rather than reported a confident zero. Chromium-only is NAMED, because the playwright cache
+  holds `chromium-1217` and nothing else. The classic-scrollbar shift is an ANALYTIC BOUND,
+  because no such host exists in this epic. **Each refusal is recorded as a refusal.** An
+  explicit "this says nothing about other engines" is worth more than a second engine
+  measured badly.
+
+- **THE BOUND CARRIES ITS OWN POSITIVE CONTROL.** `scripts/studio-desk-scrollbar-bound.mjs`
+  refuses to publish unless its model first reproduces all 54 rows of the committed matrix at
+  the width that matrix was measured at, and a deliberately wrong model is pushed through the
+  same guard and must be refused. The 764 → 779px reachability shift is EXACT, not
+  approximate, and it names TWO cells rather than one: `1024/user-opened` sits on the same
+  720.0px knife edge. The floor-binding set changes 6 → 5.
+
+- **MOTION IS REAL, AND NOT WHERE THE MATRIX LOOKS.** `.pane-column` — the pane that sets the
+  reading column's width — carries a live transition, reduced-motion-guarded. The MEASURED
+  elements have none, in both emulated regimes, with non-zero match counts. So the matrix is
+  motion-regime-independent BY MEASUREMENT rather than by assumption. The stylesheet had
+  asserted, present tense, directly above the declaration that falsifies it, that
+  `transitionDuration` was 0s on every desk element; that comment is corrected and dated.
+
+- **SCOPE, stated so nobody re-derives it the hard way.** `scripts/studio-desk-measure.mjs`
+  cannot run from an agent session at all: it reads provenance over `ssh` (D47) and exits with
+  `Permission denied (publickey,password)`. No new 54-row matrix is takeable here, and the
+  boundary artifact says so.
+
+- **WHAT THIS DOES NOT DO.** It does not touch **D168**, which lives in the cloud-console
+  charter and was corrected there by **D904** — measured in Firefox 156 over WebDriver BiDi by
+  the console lane, which found that Gecko drops `animation-timeline` but KEEPS the animation,
+  so the `@supports` fallback is inert in the engine it targets. That correction is console's
+  and is already written. `spd-b36-cross-browser-surface-measure-coverage` is **cancelled** and
+  folded into spd-b30; its slug stays resolvable as a provenance record and points here.

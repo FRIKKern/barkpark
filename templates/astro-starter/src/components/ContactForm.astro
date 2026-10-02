@@ -1,0 +1,128 @@
+---
+/**
+ * The opt-in contact form (task-71082f5541c13b53, N-08). Rendered by
+ * `pages/index.astro` ONLY when `resolveFormsUrl()` returns a URL — i.e. when
+ * the site's owner turned forms on in the Barkpark Cloud console and the site
+ * was redeployed. Submissions land as `form_submission` documents in the
+ * site's own dataset and show up in the console's per-site inbox.
+ *
+ * Without JavaScript the form still works: it is a plain POST to the intake
+ * (the browser then shows the intake's JSON answer). With JavaScript the
+ * script below posts it in place and says what happened.
+ */
+import { CONTACT_FIELDS, HONEYPOT_FIELD } from '../lib/forms'
+
+export interface Props {
+  action: string
+}
+
+const { action } = Astro.props
+const [nameField, emailField, messageField] = CONTACT_FIELDS
+---
+
+<section class="bp-contact" aria-labelledby="bp-contact-title">
+  <h2 id="bp-contact-title">Get in touch</h2>
+  <form class="bp-contact-form" method="post" action={action} data-bp-contact>
+    <label>
+      <span>Name</span>
+      <input name={nameField} autocomplete="name" maxlength="200" required />
+    </label>
+    <label>
+      <span>Email</span>
+      <input name={emailField} type="email" autocomplete="email" maxlength="320" required />
+    </label>
+    <label>
+      <span>Message</span>
+      <textarea name={messageField} rows="5" maxlength="5000" required></textarea>
+    </label>
+    <!-- Honeypot: invisible to people, irresistible to bots. A filled one is
+         answered like a success and never stored. -->
+    <div class="bp-contact-hp" aria-hidden="true">
+      <label>
+        Leave this empty
+        <input name={HONEYPOT_FIELD} tabindex="-1" autocomplete="off" />
+      </label>
+    </div>
+    <button type="submit">Send</button>
+    <p class="bp-contact-status" role="status" aria-live="polite"></p>
+  </form>
+</section>
+
+<style>
+  .bp-contact {
+    margin-top: 2.5rem;
+    border: 1px solid var(--border);
+    background: var(--card);
+    border-radius: 12px;
+    padding: 1.5rem;
+  }
+  .bp-contact h2 {
+    margin: 0 0 1rem;
+    font-size: 1.15rem;
+  }
+  .bp-contact-form {
+    display: grid;
+    gap: 0.9rem;
+  }
+  .bp-contact-form label {
+    display: grid;
+    gap: 0.3rem;
+    font-size: 0.9rem;
+  }
+  .bp-contact-form input,
+  .bp-contact-form textarea {
+    font: inherit;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 0.55rem 0.7rem;
+  }
+  .bp-contact-form button {
+    justify-self: start;
+    font: inherit;
+    font-weight: 600;
+    color: #fff;
+    background: var(--accent);
+    border: 0;
+    border-radius: 8px;
+    padding: 0.55rem 1.1rem;
+    cursor: pointer;
+  }
+  .bp-contact-form button[disabled] {
+    opacity: 0.6;
+    cursor: progress;
+  }
+  .bp-contact-hp {
+    position: absolute;
+    left: -10000px;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+  }
+  .bp-contact-status {
+    margin: 0;
+    min-height: 1.4em;
+    color: var(--muted);
+    font-size: 0.9rem;
+  }
+</style>
+
+<script>
+  import { submitContactForm } from '../lib/forms'
+
+  for (const form of document.querySelectorAll<HTMLFormElement>('form[data-bp-contact]')) {
+    form.addEventListener('submit', async (event) => {
+      event.preventDefault()
+      const button = form.querySelector('button')
+      const status = form.querySelector('.bp-contact-status')
+      if (button) button.disabled = true
+      const entries: [string, string][] = []
+      new FormData(form).forEach((v, k) => entries.push([k, String(v)]))
+      const outcome = await submitContactForm(form.action, entries, (url, init) => fetch(url, init))
+      if (status) status.textContent = outcome.message
+      if (outcome.ok) form.reset()
+      if (button) button.disabled = false
+    })
+  }
+</script>

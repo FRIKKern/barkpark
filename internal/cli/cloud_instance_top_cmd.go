@@ -137,6 +137,16 @@ func runCloudInstanceTop(out *writer, g globals, args []string) int {
 		return cloudFail(out, "instance top", merr)
 	}
 
+	// The control plane clamps ?points= (router.ex parse_limit) and the envelope
+	// echoes the window it actually applied, so a narrowed request is visible
+	// here as a DISAGREEMENT between the two numbers — never as a cap literal
+	// the CLI would have to keep in sync. progressf keeps the notice out of the
+	// json/yaml document (stderr) while a human sees it on stdout, so `-o json`
+	// stays the CP bytes verbatim.
+	if n := serverClampedBy(points, res.Points); n > 0 {
+		out.progressf("%s", clampNotice("points", n, res.Points))
+	}
+
 	if out.output == "json" || out.output == "yaml" {
 		emitMetricsRaw(out, res)
 		return exitOK

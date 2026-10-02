@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"encoding/json"
+	"math"
 	"sort"
 	"strings"
 
@@ -52,7 +53,7 @@ func (h headingRenderer) Render(b Block, ctx RenderCtx) []string {
 		if ruleW < 1 {
 			ruleW = 1
 		}
-		rule := ctx.Theme.Rule.Render(strings.Repeat("─", ruleW))
+		rule := ctx.Theme.Rule.Render(strings.Repeat(RuleGlyph("hairline"), ruleW))
 		lines = append(lines, rule)
 	}
 	return lines
@@ -95,11 +96,12 @@ type listRenderer struct{ ir InlineRenderer }
 func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 	ordered := attrBool(b.Attrs, "ordered") || b.Type == "ordered-list" || b.Type == "numbered_list"
 	items := attrSlice(b.Attrs, "items")
+	start := listStart(b.Attrs)
 	var out []string
 	for i, item := range items {
 		prefix := "• "
 		if ordered {
-			prefix = itoa(i+1) + ". "
+			prefix = itoa(start+i) + ". "
 		}
 		indent := lipgloss.Width(prefix)
 		// Wrap the item body to the width left after the prefix, then hang.
@@ -143,6 +145,23 @@ func (lr listRenderer) Render(b Block, ctx RenderCtx) []string {
 		return []string{""}
 	}
 	return out
+}
+
+// listStart is an ordered list's first number: the block's integer `start`, else
+// 1. A JSON number only (a whole float64 is how it decodes) — a string "5" is
+// not a start, matching compose.ex list_start/1 and @barkpark/react listStart.
+func listStart(m map[string]any) int {
+	switch v := m["start"].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		if v == math.Trunc(v) && v >= math.MinInt32 && v <= math.MaxInt32 {
+			return int(v)
+		}
+	}
+	return 1
 }
 
 // orderedListRenderer forces ordered:true, then defers to the list renderer.
@@ -338,6 +357,17 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 		return strings.Split(frame.Render(strings.Join(body, "\n")), "\n")
 	}
 
+	// ONE RULE PER BOUNDARY (task-a4d1ae76fdb2a6b0). An UNTITLED stack-mode
+	// section whose first child is a heading draws NO rule pair: the heading IS
+	// the boundary, and drawing a band around it stacks a hairline, the head's
+	// own rule, and a trailing hairline the NEXT section's head duplicates —
+	// three lines for one boundary. The Elixir engine settled that grammar in
+	// #16233 (SectionLayout.stack_rules?/2) and this reader kept drawing both
+	// rules on the same published papers; sectionStackRules below is the mirror.
+	if !sectionStackRules(b) {
+		return sr.body(b, ctx)
+	}
+
 	w := clampWidth(ctx.Width)
 	rule := ctx.Theme.Rule.Render(strings.Repeat("─", w))
 
@@ -345,6 +375,38 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 	out = append(out, sr.body(b, ctx)...)
 	out = append(out, rule)
 	return out
+}
+
+// sectionStackRules mirrors compose.ex's SectionLayout.stack_rules?/2 — the ONE
+// predicate that decides whether a section container draws its boundary rule
+// pair. It reports true (draw the pair) unless ALL of:
+//
+//   - the section carries NO title. Elixir gates on `is_nil`, so an
+//     empty-STRING title still counts as a title and keeps the pair; the key
+//     must be absent or JSON null for the suppression to apply. That is why
+//     this reads the map directly instead of going through attrStr, which
+//     cannot tell "" from missing.
+//   - the section is NOT declared grid mode. A grid section is a layout box,
+//     not a chapter (compose.ex routes it to section_grid_html, which keeps its
+//     pair unconditionally). The gate is the DECLARED mode, never the runtime
+//     degrade verdict — a grid that falls back to the stack loop because the
+//     terminal is narrow must not silently change its boundary grammar.
+//   - its FIRST child is a heading of any level.
+//
+// The shared fixture api/test/support/fixtures/section-boundary-rules.json is
+// read by all three engines' parity tests; the framed variant returns before
+// this call and is out of scope (the frame REPLACES the band by design).
+func sectionStackRules(b Block) bool {
+	if title, ok := b.Attrs["title"]; ok && title != nil {
+		return true
+	}
+	if layout, ok := b.Attrs["layout"].(map[string]any); ok && attrStr(layout, "mode") == "grid" {
+		return true
+	}
+	if len(b.Children) == 0 {
+		return true
+	}
+	return b.Children[0].Type != "heading"
 }
 
 // body renders the section's interior — optional bold title + child blocks

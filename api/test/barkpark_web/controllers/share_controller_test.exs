@@ -214,11 +214,11 @@ defmodule BarkparkWeb.ShareControllerTest do
       assert is_binary(nfb["error"]["request_id"])
     end
 
-    test "a malformed (non-UUID) token id is a clean 404, not an Ecto CastError 500", %{
+    test "a malformed (non-UUID) token id is a clean 404, not an Ecto.Query.CastError 400", %{
       conn: conn
     } do
       # revoke_token queries ApiToken by :binary_id; before the UUID-cast guard a
-      # garbage id raised Ecto.CastError → 500. Now it's a canonical 404.
+      # garbage id raised Ecto.Query.CastError → an opaque 400. Now it's a canonical 404.
       resp = conn |> admin_conn() |> delete("/v1/shares/tokens/not-a-uuid")
       assert json_response(resp, 404)["error"]["code"] == "not_found"
     end
@@ -247,7 +247,7 @@ defmodule BarkparkWeb.ShareControllerTest do
       #
       # MUTATION RECEIPT: disarm `Barkpark.Repo.uuid_or_nil/1` (make it return
       # its argument unchanged) and the first assertion below reds with
-      # `Ecto.Query.CastError` — a 500 in controller terms. That is the proof
+      # `Ecto.Query.CastError` — an opaque 400 in controller terms. That is the proof
       # the denial rests on the chokepoint and not on the removed wrapper.
       real_ws = Ecto.UUID.generate()
 

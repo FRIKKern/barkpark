@@ -77,7 +77,7 @@ var cloudSetupDeviceLogin = func(out *writer) (*Config, error) {
 	// URL + code browser approve as bare `bp login`. runDeviceLoginFlow saves the
 	// config itself (0600) and prints its own success surface.
 	if deviceRequested(false, "", "") {
-		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName()); derr != nil {
+		if derr := runDeviceLoginFlow(out, cfg, base, deviceClientName(), ""); derr != nil {
 			return nil, derr
 		}
 		return cfg, nil
@@ -176,19 +176,32 @@ func fleetLabel(b cloudclient.Barkpark) string {
 // never a dead end. The admin token is saved as the server token (charter-accepted
 // posture) and is never printed here.
 func cloudResolveTarget(out *writer, reader *bufio.Reader, client cloudFleetClient, picked cloudclient.Barkpark) (setup.CloudLoginResult, error) {
-	if picked.Team != nil && strings.EqualFold(strings.TrimSpace(picked.Team.Role), "member") {
-		out.outf("")
-		out.outf("%q belongs to %s, where your member role cannot retrieve its admin token.", picked.Name, fleetTeamName(picked))
-		out.outf("You stay logged in. Ask a team owner or admin for access, or connect with your own token.")
-		return setup.CloudLoginResult{LoggedInOnly: true}, nil
-	}
-
+	// AUTHORITY IS THE SERVER'S — the same rule finishSingleBarkpark follows.
+	// There is no local role test here any more: it failed open on a nil Team and
+	// on an empty Role, so the member it was written for was the caller it most
+	// often missed. See fleet_credential_refusal.go.
 	creds, gerr := client.GetCredentialsForTeam(cloudCtx(), picked.ID, fleetTeamID(picked))
 	if gerr != nil {
-		if strings.Contains(gerr.Error(), "no_admin_token") {
+		switch outcome, refusal := classifyFleetCredentialError(gerr); outcome {
+		case fleetCredNoAdminToken:
 			return cloudNoAdminToken(out, reader, picked)
+		case fleetCredForbidden:
+			// A refusal is a COMPLETE OUTCOME, not a wizard failure: the caller is
+			// logged in, they just cannot mint this box's admin token. Returning an
+			// error here would dead-end a setup run that succeeded at logging in.
+			out.outf("")
+			out.outf("%s", fleetRefusalSentence(picked, refusal))
+			if req := fleetRefusalRequirement(refusal); req != "" {
+				out.outf("%s", req)
+			}
+			if hint := fleetRefusalCLIHint(refusal); hint != "" {
+				out.outf("%s", hint)
+			}
+			out.outf("You stay logged in. Ask a team owner or admin for access, or connect with your own token.")
+			return setup.CloudLoginResult{LoggedInOnly: true}, nil
+		default:
+			return setup.CloudLoginResult{}, fmt.Errorf("get credentials for %q: %w", picked.Name, gerr)
 		}
-		return setup.CloudLoginResult{}, fmt.Errorf("get credentials for %q: %w", picked.Name, gerr)
 	}
 
 	target := fleetTarget(creds.URL, creds.Host)
@@ -256,7 +269,7 @@ func promptFleetChoice(out *writer, reader *bufio.Reader, n int) (int, bool) {
 	return num - 1, true
 }
 
-// cloudNoAdminToken handles GetCredentials' 404 no_admin_token: the picked
+// cloudNoAdminToken handles GetCredentialsForTeam's 404 no_admin_token: the picked
 // Barkpark never had an admin token captured (an older or ip-only provision). It
 // explains, then offers a manual token paste (feeds the same connect) or a
 // logged-in-only finish — never a dead end.

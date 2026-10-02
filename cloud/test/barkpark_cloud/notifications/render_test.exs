@@ -32,6 +32,8 @@ defmodule BarkparkCloud.Notifications.RenderTest do
 
   alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Notifications.Channels
+  alias BarkparkCloud.Notifications.EmailSettings
+  alias BarkparkCloud.Notifications.EventEmail
   alias BarkparkCloud.Notifications.Render
 
   # The reaper's own stale-lease prose and the provision path's fallback-ladder
@@ -162,8 +164,55 @@ defmodule BarkparkCloud.Notifications.RenderTest do
       assert {_, "acme finished provisioning and is live.", :info} =
                Render.render("provision_succeeded", %{"site" => "acme", "detail" => "ignored"})
 
-      assert {_, "acme stopped responding to health checks.", :warning} =
-               Render.render("agent_unreachable", %{"site" => "acme"})
+      # cch-w29-bl-agent-unreachable-letter-has-no-next-step: `agent_unreachable`
+      # is still cause-free — it gained a NEXT STEP, not a cause — so it stays in
+      # this describe block. The lead sentence is unchanged; what follows it is
+      # the shared block, asserted for parity with the inbox below.
+      assert {_, chat, :warning} = Render.render("agent_unreachable", %{"site" => "acme"})
+
+      assert chat ==
+               "acme stopped responding to health checks." <> Render.unreachable_next_step()
+    end
+  end
+
+  describe "cch-w29-bl — the unreachable next step has ONE owner" do
+    # THE ROW'S THIRD CRITERION. One dispatch must not produce two stories: the
+    # letter and the chat message must carry the SAME next step, byte for byte.
+    # Asserting containment of `unreachable_next_step/0` in both — rather than
+    # two hand-typed copies — is what makes a second copy impossible to add
+    # without reddening here.
+    test "the inbox and the chat channel carry the identical block" do
+      step = Render.unreachable_next_step()
+
+      {_subject, chat, :warning} = Render.render("agent_unreachable", %{"site" => "acme"})
+
+      letter =
+        EventEmail.build(
+          %EmailSettings{},
+          :agent_unreachable,
+          %{"name" => "acme"},
+          "ops@example.com"
+        ).text_body
+
+      assert String.contains?(chat, step)
+      assert String.contains?(letter, step)
+
+      # …and the block is not empty, which is the vacuity arm: `assert
+      # contains?(x, "")` is true of everything.
+      assert String.length(step) > 200
+      assert step =~ "Worth checking on the box, in this order:"
+    end
+
+    # CONTROL — the block is scoped to the event that needs it. `agent_reachable`
+    # is the same fact's good half and must stay a single clean sentence.
+    test "CONTROL: the sibling events do not carry it" do
+      step = Render.unreachable_next_step()
+
+      for event <- ["agent_reachable", "provision_succeeded", "deployment_succeeded"] do
+        {_subject, body, _sev} = Render.render(event, %{"site" => "acme"})
+        refute String.contains?(body, step), "#{event} leaked the unreachable next step"
+        refute body =~ "Worth checking on the box"
+      end
     end
   end
 

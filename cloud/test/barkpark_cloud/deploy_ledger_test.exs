@@ -33,6 +33,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
   alias BarkparkCloud.BoxCapacityRefusalFixture
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Sites.Deploy
+  alias BarkparkCloud.UnknownDeploymentStatus
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -228,8 +229,9 @@ defmodule BarkparkCloud.DeployLedgerTest do
                     @abandon_busy
   # The OTHER terminal 409 `defer/3` writes — a prebuilt deploy, which is never
   # deferred because its bytes cannot be rebuilt. It is not an abandoned chain,
-  # and must keep the ordinary name.
-  @prebuilt_terminal @r409_coded <> " — re-run the upload once the in-flight deploy finishes"
+  # but it IS a lost publish: nothing retries it. Built through the PRODUCER, so
+  # a reword of the clause reds here instead of silently degrading the class.
+  @prebuilt_terminal BarkparkCloud.Sites.Deploy.prebuilt_refusal_reason(@r409_coded)
 
   ## Fixtures
 
@@ -448,11 +450,47 @@ defmodule BarkparkCloud.DeployLedgerTest do
              }) == "BOX_AT_CAPACITY_DEFERRED"
 
       # The other terminal 409 `defer/3` writes — the prebuilt refusal — is not
-      # an abandoned chain and keeps the ordinary name.
-      assert DeployLedger.classify("PLAN", @prebuilt_terminal) == "BOX_BUSY_409"
+      # an abandoned chain, and it no longer wears the transient name either
+      # (dr-w9-followup-prebuilt-terminal-409-also-lost): see the next test.
+      refute DeployLedger.classify("PLAN", @prebuilt_terminal) == "BOX_BUSY_409"
       # It really does carry a terminal clause, so this is not a fixture that
       # quietly dropped the thing under test.
       assert String.contains?(@prebuilt_terminal, "re-run the upload")
+    end
+
+    test "a PREBUILT deploy a busy box refused is a named lost publish, not the transient BOX_BUSY_409" do
+      # Both shapes the box's 409 arrives in, through the producer's own clause.
+      for refusal <- [@r409_coded, @r409_bare] do
+        reason = BarkparkCloud.Sites.Deploy.prebuilt_refusal_reason(refusal)
+        assert DeployLedger.classify("PLAN", reason) == "PREBUILT_REFUSED_409"
+
+        assert DeployLedger.classify(%{status: "failed", stage: "PLAN", failure_reason: reason}) ==
+                 "PREBUILT_REFUSED_409"
+      end
+
+      class = "PREBUILT_REFUSED_409"
+      # Registered in the taxonomy and labelled (D8: a named class, not a bucket).
+      assert class in DeployLedger.classes()
+      refute DeployLedger.label(class) == class
+      assert DeployLedger.label(class) =~ "never retried"
+      assert DeployLedger.label(class) =~ "lost"
+      # A FAILURE: attempted, terminal, in the numerator.
+      refute DeployLedger.deferred?(class)
+      refute DeployLedger.not_attempted?(class)
+      # …and NOT an abandonment: that prefix would send the "rebuild chain given
+      # up on … a later publish starts a new chain" alert, which is false for
+      # bytes the fleet cannot rebuild.
+      refute String.starts_with?(class, "ABANDONED_")
+
+      # ANCHORED AT THE END. A box whose own message merely quotes the clause,
+      # with more text after it, is still an ordinary busy box.
+      quoted =
+        "the instance refused the deploy (HTTP 409): already_running — re-run the upload once the in-flight deploy finishes, said nobody"
+
+      assert DeployLedger.classify("PLAN", quoted) == "BOX_BUSY_409"
+
+      # A chain-terminal abandonment still wins over the prebuilt reader.
+      assert DeployLedger.classify("PLAN", @a_busy) == "ABANDONED_BOX_STUCK"
     end
 
     test "both ABANDONED classes are named, labelled, and counted as failures" do
@@ -1019,6 +1057,62 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert deferred.(@d_busy_bare) == "BOX_BUSY_DEFERRED"
     end
 
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE HOLE S6 NAMED AND COULD NOT
+    # CLOSE, closed.
+    #
+    # `Sites.Deploy.refusal_detail/1` renders `{code, message}` as
+    # `"code — message"` and a CODELESS `{nil, message}` as the bare message. So
+    # a codeless envelope whose message is byte-for-byte
+    # `box_at_capacity — <the capacity prose>` persists to THE SAME
+    # `failure_reason` BYTES as a genuine coded refusal. S6's `@code_token`
+    # comment says it outright: "no rule over that column can tell them apart".
+    # It is right, which is why the code is now a COLUMN and this test compares
+    # two rows whose only difference is that column.
+    test "a CODELESS envelope with byte-identical capacity prose is NOT a capacity deferral" do
+      # THE PRECONDITION, ASSERTED AND NOT ASSUMED (else this test proves that
+      # two DIFFERENT strings classify differently, which nobody doubted).
+      spoof = %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_capacity,
+        box_refusal_code: DeployLedger.no_box_code()
+      }
+
+      genuine = %{spoof | box_refusal_code: "box_at_capacity"}
+      assert spoof.failure_reason === genuine.failure_reason
+
+      # THE CRITERION.
+      refute DeployLedger.classify(spoof) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and it lands where a codeless 409 belongs (D7's busy slug), NOT in the
+      # tail: the box did answer, it simply named no cause.
+      assert DeployLedger.classify(spoof) == "BOX_BUSY_DEFERRED"
+
+      # THE CONTROL, which is the whole reason the refute above means anything:
+      # the same bytes WITH the box's code still classify as capacity.
+      assert DeployLedger.classify(genuine) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # D115 — A ROW NO CODE-AWARE WRITER TOUCHED DOES NOT MOVE. `nil` on the
+      # column is "nobody recorded a code", not "the box named none", and it
+      # keeps the prose fallback. The verbatim 2026-08 corpus above rides on
+      # exactly this.
+      assert DeployLedger.classify(%{
+               status: "deferred",
+               stage: "PLAN",
+               failure_reason: @d_capacity
+             }) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # The sentinel cannot COLLIDE with a real code, by construction rather than
+      # by luck: `@code_token` is `^[a-z][a-z0-9_]*$` and no parenthesis
+      # satisfies it. If someone widens that token, this reds.
+      refute Regex.match?(~r/^[a-z][a-z0-9_]*$/, DeployLedger.no_box_code())
+
+      # A column that names a code the ledger has never seen rises in the TAIL —
+      # it is not absorbed by the busy bucket the sentinel fills (D8).
+      assert DeployLedger.classify(%{spoof | box_refusal_code: "slot_reservation_denied"}) ==
+               "DEFERRED_UNCLASSIFIED"
+    end
+
     # The DEFERRED-SIDE MIRROR of "UNCLASSIFIED CAN GO UP" (D8) — which did not
     # exist: D8 was honoured for failed rows and violated for deferred ones,
     # because the deferred arm had exactly one answer and could not be wrong.
@@ -1340,10 +1434,12 @@ defmodule BarkparkCloud.DeployLedgerTest do
       # ARCHIVE_UNSUPPORTED_ENTRY_400, BOX_UNAUTHORIZED_401,
       # BOX_ROUTE_UNKNOWN_404, CONTAINER_START_REFUSED_125) take it to 28, and
       # each one is asserted BY NAME below so a rename cannot be absorbed by the
-      # count alone.
-      assert length(DeployLedger.classes()) == 28
+      # count alone. PREBUILT_REFUSED_409 (the prebuilt lost publish) takes it
+      # to 29.
+      assert length(DeployLedger.classes()) == 29
 
       for named <- [
+            "PREBUILT_REFUSED_409",
             "ARCHIVE_TOO_LARGE_400",
             "ARCHIVE_UNSUPPORTED_ENTRY_400",
             "BOX_UNAUTHORIZED_401",
@@ -2192,10 +2288,18 @@ defmodule BarkparkCloud.DeployLedgerTest do
     end
 
     # THE RESIDUE CAN GO UP — the D8 discipline applied to statuses.
-    # `deployments.status` is a CHECK-less varchar (pg_constraint contype='c'
-    # returns zero rows for this table), so a producer can invent a status
-    # tomorrow. The honest answer is a number that RISES and says "the census
-    # does not name this", never a success count that quietly absorbs it.
+    #
+    # `deployments.status` WAS a CHECK-less varchar; migration 20260916080000
+    # closed the vocabulary in the database, so a fresh row can no longer carry
+    # an invented status. `residual` does not retire with it: the 31k rows
+    # already on cloud-db-1 were written with no constraint at all, and a CHECK
+    # is droppable, widenable and restorable-around. The honest answer for a
+    # status the census cannot name is a number that RISES and says so, never a
+    # success count that quietly absorbs it.
+    #
+    # `without_status_constraint/1` drops the CHECK inside this test's sandbox
+    # transaction (see the helper for why that is safe) so the fixture can reach
+    # the shape the schema now refuses.
     test "an UNKNOWN status is residue, loudly — it is not folded into `live`", %{site: site} do
       from = ~U[2026-07-26 00:00:00Z]
       to = ~U[2026-07-27 00:00:00Z]
@@ -2218,14 +2322,16 @@ defmodule BarkparkCloud.DeployLedgerTest do
       end
 
       # A status no arm of this census has ever been taught.
-      for i <- 1..3 do
-        deployment!(site, %{
-          status: "quarantined",
-          stage: "SWITCH",
-          failure_reason: nil,
-          inserted_at: DateTime.add(from, 200 + i, :second)
-        })
-      end
+      UnknownDeploymentStatus.without_status_constraint(fn ->
+        for i <- 1..3 do
+          deployment!(site, %{
+            status: "quarantined",
+            stage: "SWITCH",
+            failure_reason: nil,
+            inserted_at: DateTime.add(from, 200 + i, :second)
+          })
+        end
+      end)
 
       census = DeployLedger.census(from, to)
 
@@ -2281,7 +2387,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       deployment!(site, %{
         status: "cancelled",
         stage: "PLAN",
-        failure_reason: "the operator cancelled the deploy",
+        failure_reason: "auto-deploy refused the publish",
         inserted_at: DateTime.add(from, 100, :second)
       })
 
@@ -2292,7 +2398,7 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert DeployLedger.classify(%{
                status: "cancelled",
                stage: "PLAN",
-               failure_reason: "the operator cancelled the deploy"
+               failure_reason: "auto-deploy refused the publish"
              }) == nil
 
       refute Enum.any?(census.classes, &(&1.count == 4))
@@ -3581,6 +3687,43 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert census.coverage_cohorts.basis =~ "bounded on the LEFT only"
     end
 
+    # THE SAME BOUND, ON THE OTHER CONSUMER OF THE SAME QUERY.
+    #
+    # `live_marks/1` is folded by TWO nodes — `coverage_cohorts/2` and
+    # `deferral_wait/2` — so both publish numbers computed against the same
+    # right-unbounded covering query. Shipping the token on one and leaving the
+    # other with an English paragraph is the prose-is-not-a-key defect one node
+    # over: a decoder reading the deferral-wait node had no way to branch on it.
+    #
+    # DRIFT LOCK: the two values are read out of ONE census return and compared
+    # to EACH OTHER. A second literal typed into the deferral node would pass a
+    # per-node `== "left_only"` forever and still be free to drift; this arm can
+    # only pass while both nodes read the one attribute.
+    test "covering_bound rides on BOTH consumers of live_marks/1, with ONE shared value",
+         %{site: site} do
+      # A deferred row with a later live build on the same site: a real COVERED
+      # observation, so the node under test is publishing numbers and not just a
+      # shape.
+      deployments!(site, [
+        %{status: "deferred", inserted_at: DateTime.add(@cov_from, 1_000, :second)},
+        %{status: "live", inserted_at: DateTime.add(@cov_from, 2_000, :second)}
+      ])
+
+      census = DeployLedger.census(@cov_from, @cov_to)
+
+      assert census.deferral_wait.population.covered == 1
+
+      # The token is THERE, and it says the same word the coverage node says.
+      assert census.deferral_wait.covering_bound == "left_only"
+
+      assert census.deferral_wait.covering_bound == census.coverage_cohorts.covering_bound
+
+      # The prose still ships, and now it POINTS AT the key rather than being
+      # the only place the fact lives.
+      assert census.deferral_wait.basis =~ "bounded on the LEFT only"
+      assert census.deferral_wait.basis =~ "covering_bound"
+    end
+
     # ONE `as_of` PER ENVELOPE. The operator route builds its body as
     # `census(from, to) |> Map.put(:delivery, delivery(from, to))` — two calls
     # that used to read two different clocks, measured 15.7s apart on the live
@@ -4431,13 +4574,16 @@ defmodule BarkparkCloud.DeployLedgerTest do
     # ── dr-w11-bl-cancelled-rows-count-as-waiting ─────────────────────────
     #
     # Before this cohort existed, EVERY non-live row was a candidate wait, so a
-    # deploy a human deliberately stopped read as "still waiting" — and
-    # `dr-w11-s5-waiting-alert` is specified to read exactly this cohort.
+    # publish the FLEET refused read as "still waiting" — and
+    # `dr-w11-s5-waiting-alert` is specified to read exactly this cohort. Every
+    # `cancelled` row is fleet-produced (an auto-deploy refusal, a preview
+    # supersede or teardown, or a build box filing the terminal); no person can
+    # cancel a deploy (charter D614(c), D621).
 
     test "a site whose ONLY non-live row is CANCELLED appears, and is NOT still waiting",
          %{site: site} do
-      # The whole window for this site is one deploy a human stopped. No live
-      # row, no live mark, nothing in flight.
+      # The whole window for this site is one publish the fleet cancelled
+      # (D614(c)). No live row, no live mark, nothing in flight.
       deployments!(site, [
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 100, :second)}
       ])
@@ -4512,10 +4658,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       # A GENUINE waiter: in flight, no live mark. The alert SHOULD see this.
       deployments!(waiting_site, [
-        %{status: "in_flight", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
+        %{status: "deferred", inserted_at: DateTime.add(@dw_from, 1_000, :second)}
       ])
 
-      # A site whose every row was stopped by hand. The alert must NEVER see it.
+      # A site whose every row the fleet cancelled (D614(c)). The alert must
+      # NEVER see it.
       deployments!(cancelled_site, [
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 10, :second)},
         %{status: "cancelled", inserted_at: DateTime.add(@dw_from, 20, :second)}
@@ -4599,9 +4746,11 @@ defmodule BarkparkCloud.DeployLedgerTest do
                :cancelled,
                :censored,
                :delivered,
+               :name,
                :oldest_waiting_seconds,
                :sample,
                :site_id,
+               :slug,
                :still_waiting,
                :unmetered
              ]

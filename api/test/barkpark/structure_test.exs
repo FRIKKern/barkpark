@@ -139,6 +139,8 @@ defmodule Barkpark.StructureTest do
   end
 
   describe "build/1" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "with OnixEdit disabled by default, book is NOT top-level and its docs fall into …Rest" do
       dataset = "structure_test_book_rest"
       seed_legacy(dataset)
@@ -596,6 +598,8 @@ defmodule Barkpark.StructureTest do
   end
 
   describe "tiered desk — MAIN / Plugins / …Rest (studio-structure-polish)" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "media is hidden from the tree by default (top-menu placement), never in …Rest" do
       dataset = "structure_test_media_hidden"
       seed_legacy(dataset)
@@ -745,6 +749,8 @@ defmodule Barkpark.StructureTest do
              "book is under Plugins, not top-level"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "a disabled plugin's PRIVATE doc type falls into …Rest, never Settings" do
       dataset = "structure_test_disabled_rest"
       seed_legacy(dataset)
@@ -881,6 +887,8 @@ defmodule Barkpark.StructureTest do
       end
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "reflects a real plugin's schema ownership (bulldocs owns `paper`)" do
       map = Structure.owned_schema_types_map()
 
@@ -890,6 +898,8 @@ defmodule Barkpark.StructureTest do
              "the public map must mirror the desk's harvested ownership"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "is the SAME harvest the desk build uses, not a replica" do
       # Equivalence with the private map that feeds the tiered tree: both read
       # `owned_schema_types/0` off every registered plugin, so a consumer outside

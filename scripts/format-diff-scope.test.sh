@@ -89,7 +89,15 @@ want format_present True
 # coe job. Both halves are asserted, so neither can be reintroduced alone.
 want format_coe False
 want format_if "needs.changes.outputs.compile == 'true'"
-want format_outputs "unformatted_in_diff,unformatted_total"
+# SET EQUALITY, KEPT DELIBERATELY — not relaxed to "contains". Equality is what
+# catches the OTHER direction: an output deleted or renamed out from under the
+# aggregator, which `agg_binds_names` alone would not see until the binding
+# silently resolved to empty. `verdict` is the refusal channel (rc 2 = COULD
+# NOT MEASURE, distinct from a measured defect); it is here because the format
+# job publishes it and `elixir-gate` binds AND reads it as V_FORMAT — the
+# refusal-vocabulary guard reds if either half goes missing. Adding a key to
+# an equality set does not widen it: a FOURTH, undeclared output still reds.
+want format_outputs "unformatted_in_diff,unformatted_total,verdict"
 want guard_present True
 want guard_coe True      # the WHOLE-TREE read is data, never the verdict
 want scope_present True
@@ -116,8 +124,17 @@ PY
                 || no "the Decide step body extracted EMPTY — every case below would be a straw man"
 
 OUT="$TMP/decide.out"
+# The Decide body folds the Test partitions' records first
+# (task-8345bf4c2ca2b989) and is red without them, so every run below gets the
+# complete clean set a green mix-test matrix uploads. This file's subject is
+# format, not partitions; elixir-path-escape-check.test.sh proves the fold.
+CELLS_OK="$TMP/mix-test-cells"
+for part in 1 2; do
+  mkdir -p "$CELLS_OK/mix-test-cell-p$part"
+  printf 'partition=%s\nof=2\nverdict=\n' "$part" >"$CELLS_OK/mix-test-cell-p$part/cell.txt"
+done
 decide() { # decide <R_FORMAT> <F_IN_DIFF>; leaves rc in $rc, output in $OUT
-  env -i PATH="$PATH" HOME="$HOME" \
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
     R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
     R_FORMAT="$1" F_IN_DIFF="$2" O_COMPILE=true O_TEST=true \
     bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -149,19 +166,65 @@ mute "C2 …and never names a file it is not enforcing" "$o" "$F"
 # C3 — push:main. No PR diff exists, so nothing is diff-scoped: the format job
 #      prints the standing debt and succeeds. Main is where the debt is VISIBLE,
 #      never where it is enforced.
-decide success ""
-[ "$rc" = 0 ] && ok "C3 push:main (no PR diff) is neutral — the gate does not red on standing debt" \
-              || no "C3 expected exit 0, got $rc"
+#
+#      THIS CASE USED TO BE `decide success ""` — byte-identical to C2, one
+#      `decide` call with the same arguments. It therefore measured the
+#      AGGREGATOR a second time and said nothing whatever about the push arm,
+#      which the aggregator never sees: the reader is what runs on a push, and
+#      the reader was not invoked. A green with no subject. The task this
+#      harness serves is "a permanently red gate teaches every reader to dismiss
+#      it" — and its mirror image is a permanently SILENT green, which teaches
+#      the same dismissal by making main's debt invisible. So C3 now runs THE
+#      READER on the push shape (guard says unformatted, changed-file EMPTY) and
+#      requires both halves: exit 0, and the debt named, counted and labelled.
+PUSH_LOG="$TMP/push-verdict.log"
+PUSH_R="$TMP/push-root"; mkdir -p "$PUSH_R"
+printf '** (Mix) mix format failed due to --check-formatted.\nThe following files are not formatted:\n\n  * %s\n  * test/barkpark/content/errors_envelope_table_test.exs\n' \
+  "lib/barkpark/content/papers/block_ops.ex" > "$PUSH_LOG"
+PUSH_CHANGED="$TMP/push-changed.txt"; : > "$PUSH_CHANGED"
+push_out="$(FORMAT_DIFF_SCOPE_ROOT="$PUSH_R" bash "$SCOPE" \
+  --verdict-log "$PUSH_LOG" --guard-rc 1 --changed "$PUSH_CHANGED" 2>&1)"; push_rc=$?
+[ "$push_rc" = 0 ] && ok "C3 push:main (no PR diff) is neutral — the gate does not red on standing debt" \
+                   || no "C3 expected exit 0, got $push_rc: $push_out"
+says "C3 …and it NAMES the debt — main green must never mean main silent" "$push_out" "block_ops.ex"
+says "C3 …and it SIZES it"                                               "$push_out" "2 file(s) are unformatted"
+says "C3 …and it says why nothing is enforced here"                      "$push_out" "no PR diff on this event"
+mute "C3 …and it makes no accusation against a diff that does not exist" "$push_out" "UNFORMATTED IN THIS DIFF"
+
+# C3b — the mutation that makes C3 a real catch. A reader that exits 0 without
+#       printing the offenders passes the exit-code half and fails the
+#       visibility half; if it passed BOTH, C3's new assertions measure nothing.
+PUSH_MUT="$TMP/scope-silent.sh"
+# grep -vF on the offender-printing line: the only place the reader echoes the
+# file list on the push arm. FIXED-STRING, because the sed program inside it
+# ('s/^/   - /') is not a pattern this harness wants re-interpreted — the first
+# draft of this mutation used `sed` and died of "bad flag in substitute
+# command", left $PUSH_MUT EMPTY, and an empty script exits 0 printing nothing,
+# so the check below PASSED while measuring nothing. Hence C3a.
+grep -vF "sed 's/^/   - /'" "$SCOPE" > "$PUSH_MUT"
+if [ -s "$PUSH_MUT" ] && [ "$(wc -l < "$PUSH_MUT")" -lt "$(wc -l < "$SCOPE")" ]; then
+  ok "C3a the silencing mutation APPLIED (non-empty, and the offender-print line is gone)"
+else
+  no "C3a the silencing mutation did NOT apply — C3b below would be vacuous"
+fi
+mut_out="$(FORMAT_DIFF_SCOPE_ROOT="$PUSH_R" bash "$PUSH_MUT" \
+  --verdict-log "$PUSH_LOG" --guard-rc 1 --changed "$PUSH_CHANGED" 2>&1)"; mut_rc=$?
+if [ "$mut_rc" = 0 ] && printf '%s' "$mut_out" | grep -q 'no PR diff on this event' \
+   && ! printf '%s' "$mut_out" | grep -q 'block_ops.ex'; then
+  ok "C3b a silent-but-green push arm is REACHABLE, so C3's name assertion is a real catch"
+else
+  no "C3b the mutant exited $mut_rc and did not go silent-while-green — C3's visibility half is unproven"
+fi
 
 # C4 — the format job SKIPPED. Legitimate only when the dispatcher said this
 #      path set was untouched; on a compile=true diff a skip means it never ran.
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=skipped R_PROD=skipped R_PERF=skipped R_ESCAPE=success \
   R_FORMAT=skipped F_IN_DIFF= O_COMPILE=false O_TEST=false \
   bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
 [ "$rc" = 0 ] && ok "C4 a docs-only diff legitimately skips format (gate='false') — green" \
               || no "C4 expected exit 0, got $rc: $(cat "$OUT")"
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=skipped F_IN_DIFF= O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$STEP" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -186,7 +249,7 @@ if ! grep -q 'decide "format (diff-scoped)"' "$MUT" && [ "$(wc -l < "$MUT")" -lt
 else
   no "D0 the mutation did NOT apply — every case below is vacuous"
 fi
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=failure F_IN_DIFF="$F" O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$MUT" >"$OUT" 2>&1 && rc=0 || rc=$?
@@ -198,7 +261,7 @@ fi
 MUT2="$TMP/mutant2.sh"
 sed 's/^\( *\)if \[ -n "\${F_IN_DIFF:-}" \]; then/\1if false; then/' "$STEP" > "$MUT2"
 if grep -q 'if false; then' "$MUT2"; then ok "D2 the name-carrying mutation APPLIED"; else no "D2 mutation did not apply"; fi
-env -i PATH="$PATH" HOME="$HOME" \
+env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success \
   R_FORMAT=failure F_IN_DIFF="$F" O_COMPILE=true O_TEST=true \
   bash --noprofile --norc "$MUT2" >"$OUT" 2>&1 && rc=0 || rc=$?

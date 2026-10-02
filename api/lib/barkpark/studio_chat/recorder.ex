@@ -23,21 +23,19 @@ defmodule Barkpark.StudioChat.Recorder do
   require Logger
 
   alias Barkpark.Content.Broadcast
+  alias Barkpark.Plugins.Enablement
   alias Barkpark.{CycleFleet, StudioChat}
   alias Barkpark.StudioChat.Runtime
   alias Barkpark.StudioChat.Runtime.Event
   alias Barkpark.StudioChat.{RuntimeAdmission, RuntimeTelemetry, RuntimeUsage}
   alias Barkpark.StudioChat.StreamSegments
+  alias Barkpark.StudioChat.TaskLedgerScope
   alias Barkpark.StudioChat.TaskTransition
 
   @registry Barkpark.StudioChat.RecorderRegistry
-  # The dataset the task ledger lives in — PINNED, mirroring the Tasks board
-  # LiveView's own `@dataset "production"`. The Recorder has no dataset of its
-  # own (a chat session is not scoped to one), and resolving it would cost a
-  # query on every turn spawn; the ledger's home is the board's, by definition.
-  @task_dataset "production"
   @supervisor Barkpark.StudioChat.RuntimeSupervisor
   @idle_after_ms 30 * 60 * 1000
+  @tasks_plugin "tasks"
 
   # ── the durable accumulator's per-turn byte cap (charter D169) ──────────────
   #
@@ -61,6 +59,13 @@ defmodule Barkpark.StudioChat.Recorder do
   # counts GRAPHEMES and is only a backstop.
   @default_max_runtime_text_bytes 1_048_576
   @runtime_text_truncation_marker "\n\n[… turn output truncated at the persist byte cap …]"
+
+  # The sibling cap for a TOOL RESULT's raw text: one `task_ready` dump was
+  # 112,838 characters, and every tool row would carry its result verbatim into
+  # jsonb without it. UNCHANGED by task-5a49dc55626ea80d — the chip envelope
+  # (`StudioChat.attach_tool_result/5`) exists precisely so replay parity does
+  # NOT require raising this number.
+  @result_text_cap 4_000
 
   # ── public API ─────────────────────────────────────────────────────────────
 
@@ -266,7 +271,18 @@ defmodule Barkpark.StudioChat.Recorder do
     # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
     # this surface's own workspace on the keyed one — so every document arrives
     # exactly once, WITH its payload, and no foreign tenant's body ever does.
-    Broadcast.subscribe_documents(@task_dataset, ledger_workspace_id())
+    #
+    # The dataset and workspace come from `TaskLedgerScope.resolve/1` — the ONE
+    # resolver `ChatLive`'s Doing strip subscribes through too, so the two chat
+    # surfaces cannot ride different ledger streams (task-ff3ed7ae0a242160).
+    #
+    # The workspace is this session's OWN (`opts[:workspace_id]`, the store row's
+    # `owner_workspace_id`), the one its agent's task token is minted into, so
+    # the Recorder rides the stream that agent writes on (task-180a07e9d178d6a8).
+    %{dataset: task_dataset, workspace_id: ledger_workspace_id} =
+      TaskLedgerScope.resolve(Map.get(opts, :workspace_id))
+
+    Broadcast.subscribe_documents(task_dataset, ledger_workspace_id)
 
     # A Task holder authorized this managed attempt but is not the Studio
     # process's principal. Never mint or forward Task hands for that process.
@@ -768,8 +784,12 @@ defmodule Barkpark.StudioChat.Recorder do
   # Attach it to the persisted tool row so replay shows the terminal's ⎿ line;
   # the frame also rebroadcasts so live tabs update their in-memory row.
   def handle_info({:claude_chat_event, %{"type" => "user"} = ev} = msg, state) do
-    for {tool_use_id, output, error?} <- user_tool_results(ev) do
-      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?)
+    for {tool_use_id, output, error?, full_output} <- user_tool_results(ev) do
+      # `output` is what the ROW stores (capped); `full_output` is what the LIVE
+      # tab saw. The store seam reduces the full text to the D64 chip envelope
+      # for an mcp-tagged row, so a result past the cap replays as a chip
+      # instead of a generic row (task-5a49dc55626ea80d).
+      StudioChat.attach_tool_result(state.session_id, tool_use_id, output, error?, full_output)
     end
 
     broadcast(state, msg)
@@ -1019,6 +1039,13 @@ defmodule Barkpark.StudioChat.Recorder do
   # no lifecycle_status — and emit a phantom "released" transition. Require a
   # `doc` map so the stripped twin falls through to the catch-all below and
   # only the payload-bearing frame is projected.
+  # PER-WORKSPACE ENABLEMENT (task-b428d724ad80434f). A workspace that switched
+  # Tasks off still WRITES task rows: enablement is the surfaced layer only, so
+  # the plugin's routes and write fences keep running and the claim broadcasts
+  # on this stream as usual. The transition is therefore dropped here, keyed by
+  # the session's own workspace through the same `Enablement` call
+  # `PaperMastersSeam` makes. Checked per projected transition, not cached at
+  # init, so a toggle takes effect on the next frame.
   def handle_info({:document_changed, %{type: "task", doc: doc} = msg}, state)
       when is_map(doc) do
     worker = Runtime.worker_id(state.provider, state.session_id)
@@ -1027,7 +1054,8 @@ defmodule Barkpark.StudioChat.Recorder do
       {:ok, transition, touched} ->
         state = %{state | touched_tasks: touched}
 
-        if MapSet.member?(state.seen_task_events, transition.key) do
+        if MapSet.member?(state.seen_task_events, transition.key) or
+             not tasks_enabled?(state.owner_workspace_id) do
           {:noreply, state}
         else
           broadcast(
@@ -1048,6 +1076,9 @@ defmodule Barkpark.StudioChat.Recorder do
   def handle_info({:document_changed, _msg}, state), do: {:noreply, state}
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  defp tasks_enabled?(workspace_id),
+    do: Enablement.enabled?(Enablement.effective(workspace_id), @tasks_plugin)
 
   # The compact wire summary the SSE `event: task` frame carries — the SAME
   # fields Studio renders, so `bp chat` prints the identical `label` string
@@ -2358,7 +2389,7 @@ defmodule Barkpark.StudioChat.Recorder do
     Application.get_env(:barkpark, :studio_chat_idle_reap_ms, @idle_after_ms)
   end
 
-  # {tool_use_id, output, is_error?} triples off a wire user-frame; [] for
+  # {tool_use_id, output, is_error?, full_output} quads off a wire user-frame; [] for
   # anything else (our own echoed sends through test fakes never match). Output
   # capped so a huge tool result can't bloat the jsonb row. `is_error` is the
   # ONLY wire fact that turns a settled row's gutter ✗, so an ERROR result with
@@ -2372,14 +2403,18 @@ defmodule Barkpark.StudioChat.Recorder do
       # `result_text/1` answers nil for a contentless block — normalize to ""
       # so an ERROR result with no text still reaches the persist seam (whose
       # guard is `is_binary(output)`) instead of raising a FunctionClauseError.
-      {b["tool_use_id"], result_text(b["content"]) || "", b["is_error"] == true}
+      full = result_text(b["content"]) || ""
+      {b["tool_use_id"], String.slice(full, 0, @result_text_cap), b["is_error"] == true, full}
     end)
-    |> Enum.reject(fn {_id, out, error?} -> out == "" and not error? end)
+    |> Enum.reject(fn {_id, out, error?, _full} -> out == "" and not error? end)
   end
 
   defp user_tool_results(_), do: []
 
-  defp result_text(content) when is_binary(content), do: String.slice(content, 0, 4_000)
+  # The FULL result text — the cap is applied by the caller, which keeps the
+  # uncapped copy to reduce into the D64 chip envelope (nothing uncapped is ever
+  # persisted; see `StudioChat.attach_tool_result/5`).
+  defp result_text(content) when is_binary(content), do: content
 
   defp result_text(content) when is_list(content) do
     content
@@ -2388,7 +2423,6 @@ defmodule Barkpark.StudioChat.Recorder do
       _ -> ""
     end)
     |> Enum.join("\n")
-    |> String.slice(0, 4_000)
   end
 
   defp result_text(_), do: nil
@@ -2437,17 +2471,5 @@ defmodule Barkpark.StudioChat.Recorder do
       _ ->
         nil
     end
-  end
-
-  # The workspace the ledger this Recorder projects lives in — the default
-  # workspace `bp`'s `/v1/tasks` writes resolve to (AssignDefaultScope), which
-  # is the scope Studio's own Doing strip uses (`hand_task_scope/0`).
-  defp ledger_workspace_id do
-    case Barkpark.Tenancy.get_default_workspace() do
-      %{id: id} when is_binary(id) -> id
-      _ -> nil
-    end
-  rescue
-    _ -> nil
   end
 end

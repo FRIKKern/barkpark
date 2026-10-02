@@ -51,6 +51,8 @@
 # Requires: curl, jq, a logged-in bp config (~/.config/barkpark/config.json
 # with cloud_url + cloud_token; `bp login` refreshes it).
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/lib/bp-curl.sh"   # 429 backoff, shared (task-ca8fffa7ca885413)
 
 CONFIG="${BP_CONFIG:-$HOME/.config/barkpark/config.json}"
 INSTANCE_URL="${BP_SMOKE_INSTANCE_URL:-https://guerrilla.barkpark.cloud}"
@@ -105,7 +107,7 @@ say ""
 # caller's oldest membership when no X-Barkpark-Team is sent), which hides the
 # instance from any member whose primary team is not the instance's team.
 say "-- fleet walk (cloud session, scope=all) --"
-fleet=$(curl -sf "${cloud_hdrs[@]}" "$CLOUD_URL/v1/barkparks?scope=all") ||
+fleet=$(bp_curl_body -s "${cloud_hdrs[@]}" "$CLOUD_URL/v1/barkparks?scope=all") ||
   die "cloud fleet list failed — is the cloud session stale? (bp login)"
 
 BP_ID=$(jq -r --arg url "$INSTANCE_URL" \
@@ -125,7 +127,7 @@ ok "fleet lists $INSTANCE_URL (id $BP_ID)"
 # ── 2. Mint through the exchange ──────────────────────────────────────────
 say ""
 say "-- mint: POST /v1/barkparks/:id/app-token (member-reachable proxy) --"
-mint_status=$(curl -s -o /tmp/mobile-smoke-mint.$$ -w '%{http_code}' \
+mint_status=$(bp_curl_code -s -o /tmp/mobile-smoke-mint.$$ \
   -X POST "${cloud_hdrs[@]}" \
   "$CLOUD_URL/v1/barkparks/$BP_ID/app-token")
 mint_body=$(cat /tmp/mobile-smoke-mint.$$ && rm -f /tmp/mobile-smoke-mint.$$)
@@ -187,7 +189,7 @@ revoke_minted_token() {
   local status body
   say ""
   say "-- teardown: revoke the minted token (body {token}, never empty) --"
-  status=$(curl -s -o /tmp/mobile-smoke-revoke.$$ -w '%{http_code}' \
+  status=$(bp_curl_code -s -o /tmp/mobile-smoke-revoke.$$ \
     -X DELETE "${cloud_hdrs[@]}" -H "Content-Type: application/json" \
     -d "$(jq -n --arg t "$TOKEN" '{token: $t}')" \
     "$CLOUD_URL/v1/barkparks/$BP_ID/app-token")
@@ -200,7 +202,7 @@ revoke_minted_token() {
     # its WHERE clause). Probed on /v1/tasks/prime, which is token-GATED — not
     # /v1/capabilities, which answers 200 anonymously and would pass vacuously.
     local recheck
-    recheck=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
+    recheck=$(bp_curl_code -s -o /dev/null "${auth[@]}" \
       "$INSTANCE_URL/v1/tasks/prime?view=brief")
     case "$recheck" in
       401 | 403)
@@ -230,8 +232,8 @@ say "-- journey as the ${mode} token --"
 # in the output instead of leaving it implied, and the leg is labeled for what it
 # actually proves. The credential assertion is the anonymous-401 + authed-200
 # pair on /v1/tasks/prime below.
-cap_anon=$(curl -s -o /dev/null -w '%{http_code}' "$INSTANCE_URL/v1/capabilities")
-cap_status=$(curl -s -o /tmp/mobile-smoke-cap.$$ -w '%{http_code}' "${auth[@]}" \
+cap_anon=$(bp_curl_code -s -o /dev/null "$INSTANCE_URL/v1/capabilities")
+cap_status=$(bp_curl_code -s -o /tmp/mobile-smoke-cap.$$ "${auth[@]}" \
   "$INSTANCE_URL/v1/capabilities")
 cap_body=$(cat /tmp/mobile-smoke-cap.$$ && rm -f /tmp/mobile-smoke-cap.$$)
 if [ "$cap_status" = "200" ] &&
@@ -252,7 +254,7 @@ fi
 # /v1/capabilities. As the member-shaped minted token this MUST bounce:
 # the admin floor holding is the assertion (in fallback mode the configured
 # token may be admin, so a 200 is accepted there and labeled as such).
-structure_status=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
+structure_status=$(bp_curl_code -s -o /dev/null "${auth[@]}" \
   "$INSTANCE_URL/v1/structure/$DATASET")
 case "$structure_status" in
   401 | 403)
@@ -277,7 +279,7 @@ esac
 # token clears it. Without the control, an authed 200 alone cannot tell "the
 # token works" apart from "the route is public" — exactly the hole the old
 # capabilities leg had. Deliberately unauthenticated: no "${auth[@]}" here.
-prime_anon=$(curl -s -o /dev/null -w '%{http_code}' \
+prime_anon=$(bp_curl_code -s -o /dev/null \
   "$INSTANCE_URL/v1/tasks/prime?view=brief")
 floor="unproven"
 case "$prime_anon" in
@@ -295,7 +297,7 @@ esac
 # tasks prime (brief view) — the mobile Tasks tab's first paint, AS the token:
 # the authed half of the pair above. The label only claims a credential proof
 # when the control probe actually established the floor.
-prime_status=$(curl -s -o /dev/null -w '%{http_code}' "${auth[@]}" \
+prime_status=$(bp_curl_code -s -o /dev/null "${auth[@]}" \
   "$INSTANCE_URL/v1/tasks/prime?view=brief")
 if [ "$prime_status" = "200" ]; then
   if [ "$floor" = "proven" ]; then
@@ -310,7 +312,7 @@ else
 fi
 
 # tasks events feed.
-if curl -sf "${auth[@]}" "$INSTANCE_URL/v1/tasks/events?since=0" | jq -e 'has("events")' >/dev/null; then
+if bp_curl_body -s "${auth[@]}" "$INSTANCE_URL/v1/tasks/events?since=0" | jq -e 'has("events")' >/dev/null; then
   ok "GET /v1/tasks/events?since=0 -> events feed"
 else
   bad "GET /v1/tasks/events?since=0"
@@ -327,7 +329,7 @@ fi
 
 # one paper read — the Papers tab floor (limit=1: one full document, not the
 # whole multi-MB corpus).
-papers=$(curl -sf "${auth[@]}" "$INSTANCE_URL/v1/data/query/$DATASET/paper?limit=1" || true)
+papers=$(bp_curl_body -s "${auth[@]}" "$INSTANCE_URL/v1/data/query/$DATASET/paper?limit=1" || true)
 paper_id=$(jq -r '.result.documents[0]._id // empty' <<<"$papers" 2>/dev/null || true)
 if [ -n "$paper_id" ]; then
   ok "GET /v1/data/query/$DATASET/paper?limit=1 -> paper '$paper_id' readable"
@@ -339,7 +341,7 @@ fi
 say ""
 say "-- chat floor as the ${mode} token --"
 
-sessions=$(curl -s -o /tmp/mobile-smoke-chat.$$ -w '%{http_code}' "${auth[@]}" \
+sessions=$(bp_curl_code -s -o /tmp/mobile-smoke-chat.$$ "${auth[@]}" \
   "$INSTANCE_URL/v1/chat/sessions")
 chat_body=$(cat /tmp/mobile-smoke-chat.$$ && rm -f /tmp/mobile-smoke-chat.$$)
 if [ "$sessions" = "200" ]; then
@@ -355,7 +357,7 @@ ghost="00000000-0000-4000-8000-000000000000"
 probe_chat_leg() {
   local name="$1" method="$2" path="$3" body="$4"
   local status
-  status=$(curl -s -o /dev/null -w '%{http_code}' -X "$method" "${auth[@]}" \
+  status=$(bp_curl_code -s -o /dev/null -X "$method" "${auth[@]}" \
     -H "Content-Type: application/json" ${body:+-d "$body"} \
     "$INSTANCE_URL$path")
   if [ "$status" = "404" ]; then

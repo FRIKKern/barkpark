@@ -257,6 +257,14 @@ selftest() {
   local pass=0 fail=0
   ok()  { pass=$((pass + 1)); echo "ok   - $*"; }
   bad() { fail=$((fail + 1)); echo "FAIL - $*"; }
+  # A HERE-STRING, NEVER `printf "$out" | grep -q`.  Under this script's
+  # `set -o pipefail` a matching `grep -q` exits on the FIRST hit, the printf
+  # takes SIGPIPE, and pipefail promotes 141 over the match — so every TRUE
+  # assertion below would read as FAIL once a scan's output outgrows the pipe
+  # buffer (~512 B on darwin, 64 KB on the Linux runners), which is exactly
+  # what happens as the fixture tree or the citation list grows.  A here-string
+  # has no producer process to kill.  Regex semantics are unchanged.
+  out_has() { grep -q "$1" <<<"$out"; }
 
   local d
   d="$(mktemp -d "${TMPDIR:-/tmp}/scruborder-st.XXXXXX")"
@@ -352,45 +360,45 @@ EX
   out="$(run_scan "$d/good" 2>&1)"; rc=$?
   if [ $rc -eq 0 ]; then ok "correct order is GREEN (single-line pipe, proven binding, nested spelling)"
   else bad "correct order should be green, got exit $rc"; echo "$out" | sed 's/^/       /'; fi
-  if printf '%s' "$out" | grep -q "expressions seen: 3"; then ok "positive control counted all 3 correct sites"
+  if out_has "expressions seen: 3"; then ok "positive control counted all 3 correct sites"
   else bad "positive control did not count 3 sites"; printf '%s\n' "$out" | sed 's/^/       /'; fi
   # NOT a whole-output grep: the header line prints the excluded basename, so
   # `grep failure_copy.ex` over $out matches on a CORRECT run. Assert on a
   # CITATION (`failure_copy.ex:<line>`) instead — and prove the assertion can
   # fail by re-running with the exclusion pointed elsewhere, which must red.
-  if printf '%s' "$out" | grep -q "failure_copy\.ex:[0-9]"; then bad "failure_copy.ex was NOT excluded"
+  if out_has "failure_copy\.ex:[0-9]"; then bad "failure_copy.ex was NOT excluded"
   else ok "failure_copy.ex is excluded (its leaky humanize order does not red)"; fi
   out="$(EXCLUDE_BASENAME=__none__ run_scan "$d/good" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "failure_copy\.ex:2"; then
+  if [ $rc -eq 1 ] && out_has "failure_copy\.ex:2"; then
     ok "the exclusion is LOAD-BEARING: with it pointed elsewhere the same tree reds at failure_copy.ex:2"
   else bad "non-vacuity: dropping the exclusion should red failure_copy.ex:2, got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/rev" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "rev.ex:2" && printf '%s' "$out" | grep -q "(a)"; then
+  if [ $rc -eq 1 ] && out_has "rev.ex:2" && out_has "(a)"; then
     ok "reversed order is RED and names rev.ex:2 with clause (a)"
   else bad "reversed order should red at rev.ex:2 (a), got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/multi" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "multi.ex:3" && printf '%s' "$out" | grep -q "(a)"; then
+  if [ $rc -eq 1 ] && out_has "multi.ex:3" && out_has "(a)"; then
     ok "MULTI-LINE reversed pipe is RED and names multi.ex:3"
   else bad "multi-line reversed pipe should red at multi.ex:3, got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/bare" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "(b)" && printf '%s' "$out" | grep -q "whatever"; then
+  if [ $rc -eq 1 ] && out_has "(b)" && out_has "whatever"; then
     ok "bare scrub on an unknown binding is RED and names the argument"
   else bad "bare scrub on unknown binding should red (b), got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/field" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "(b)"; then ok "bare scrub on a field access is RED"
+  if [ $rc -eq 1 ] && out_has "(b)"; then ok "bare scrub on a field access is RED"
   else bad "bare scrub on a field access should red (b), got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/scope" 2>&1)"; rc=$?
-  if [ $rc -eq 1 ] && printf '%s' "$out" | grep -q "(b)"; then
+  if [ $rc -eq 1 ] && out_has "(b)"; then
     ok "a strip_ansi binding in a DIFFERENT function does not vouch (the lookback stops at the def head)"
   else bad "cross-function binding must not vouch, got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 
   out="$(run_scan "$d/empty" 2>&1)"; rc=$?
-  if [ $rc -eq 2 ] && printf '%s' "$out" | grep -q "REFUSED"; then
+  if [ $rc -eq 2 ] && out_has "REFUSED"; then
     ok "an EMPTY scan refuses (exit 2) instead of reporting a green zero"
   else bad "empty scan should refuse with exit 2, got exit $rc"; printf '%s\n' "$out" | sed 's/^/       /'; fi
 

@@ -188,8 +188,42 @@ build_bound() {
 # Sets: ON_SHA (a commit origin/main HAS), OFF_SHA (a REAL commit origin/main
 # never saw -- committed on main and then reset away, so the object survives
 # unreachable), BLOB_SHA (a blob, which owes existence and NOT ancestry).
+#
+# THE SHAS ARE PINNED, AND PINNED TO A SHAPE THE CLAUSE WILL READ. The census's
+# `cited_shas` drops any <40-char hex token that is not BOTH digits and letters
+# (so a year, a count or the word `decade` is never filed as a commit). A commit
+# sha depends on its timestamp, so with the wall clock ~1 run in 110 minted an
+# ALL-DIGIT 10-char OFF_SHA ((10/16)^10 = 0.91%), the clause correctly declined
+# to read it as a sha, and three clause-8 checks went red with no code change
+# (task-e6b78869b43d3e2b; reproduced at GIT_COMMITTER_DATE=@1700000042 +0000,
+# OFF_SHA 0817621757). So the dates are fixed -- the same bytes every run -- and
+# if a future git (another hash, another object format) lands a pinned sha on a
+# digit-only or letter-only shape, the date is re-rolled deterministically
+# rather than left to fail one run in a hundred.
+reason_repo_sha_readable() {
+  [[ $1 =~ [0-9] && $1 =~ [a-f] ]]
+}
+
 build_reason_repo() {
+  local dir=$1 epoch=1700000000 tries=0
+  while :; do
+    rm -rf -- "$dir"
+    build_reason_repo_at "$dir" "$epoch"
+    if reason_repo_sha_readable "$ON_SHA" && reason_repo_sha_readable "$OFF_SHA"; then
+      return 0
+    fi
+    tries=$((tries + 1))
+    if [ "$tries" -ge 64 ]; then
+      echo "SELFTEST FIXTURE: 64 pinned dates never produced a digit+letter ON/OFF sha" >&2
+      exit 2
+    fi
+    epoch=$((epoch + 1))
+  done
+}
+
+build_reason_repo_at() {
   local dir=$1
+  local -x GIT_AUTHOR_DATE="@$2 +0000" GIT_COMMITTER_DATE="@$2 +0000"
   mkdir -p "$dir"
   git init -q "$dir" >/dev/null 2>&1
   git -C "$dir" symbolic-ref HEAD refs/heads/main
@@ -308,6 +342,24 @@ build_blind_drafts() {
   d0+="$(row drafts.foreign 'null' open open 'another epic entirely. REOPEN: lima')"
   drafts_page "$dir" 0 200 "$(drafts_envelope 4 0 4 drafts "$d0")"
   drafts_page "$dir" 1 200 "$(drafts_envelope 0 4 4 drafts '')"
+}
+
+# THE DRAFTS LENS, CARRYING A LAPSED CLAIM. The clause-7 delta is not "how many
+# rows does the drafts lens add" but "does the published read MISS a lapse, or
+# does the drafts read INVENT one" -- and those two answers differ ONLY by what
+# the draft's published twin says. So the lapsed draft's id is a PARAMETER:
+#   drafts.kid-b        -> twin is `done`   = PHANTOM, a MANUFACTURED lapse
+#   drafts.pds-hidden-x -> no twin at all   = a real UNDERCOUNT of the published read
+# One builder, two fixtures, opposite verdicts: an arm that printed "+1 missed"
+# for both would pass the first assertion and fail the second.
+build_lapsed_drafts() {
+  local dir=$1 lapsed=$2
+  local d0 claim
+  claim='{"worker":null,"previous_worker":"epic-builder-wave-43","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z","now":{"text":"drafts-side now-line"}}'
+  d0="$(claim_row "$lapsed" '"kid-a"' open open 'a lapsed draft row. REOPEN: mike' "$claim"),"
+  d0+="$(row drafts.kid-a "\"$ROOT_SLUG\"" open open 'edit shadow of a LIVE row, NOT lapsed. REOPEN: kilo')"
+  drafts_page "$dir" 0 200 "$(drafts_envelope 2 0 4 drafts "$d0")"
+  drafts_page "$dir" 1 200 "$(drafts_envelope 0 2 4 drafts '')"
 }
 
 # THE HOSTILE WORKING DIRECTORY. `plant_stray <path> <module>` writes a stray
@@ -1217,7 +1269,7 @@ expect_status_matching "a duplicate reason on a TERMINAL row still reds (1-3 sta
 echo
 
 # =============================================================================
-# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (PDS-D372/D373).
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (PDS-D372/PDS-D373).
 #
 # Every fixture in this section EXITS 0 against the census as it stood on
 # origin/main before the clause existed — verified by running each one against
@@ -1631,19 +1683,28 @@ expect_output_contains "shape C reads 0 on a healthy board" \
 expect_output_contains "the arm prints the LENS it read, derived from the response" \
   "lens        /v1/data/query perspective:published" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
-# THE CAVEAT IS AMENDED, NOT RETIRED (wave 47). It still says the two lenses
-# disagree BY CONSTRUCTION -- that part was never in doubt -- but the DIRECTION
-# it implied was wrong, and the amendment carries the measurement that settles
-# it: shape A 24 -> 27, the +3 being edit shadows of `done` rows. Both halves are
-# pinned, so retiring either one reds.
+# THE CAVEAT IS AMENDED, NOT RETIRED (wave 47; re-amended r20). It still says the
+# two lenses disagree BY CONSTRUCTION -- that part was never in doubt -- and it
+# still carries the DIRECTION, which is the half that was wrong. What it no
+# longer carries is a QUOTED NUMBER: wave 47 pinned the literal `shape A 24 ->
+# 27` into the render, and by 2026-09-16 the live board read A 1 -> 11. A
+# by-hand figure in a render rots exactly like one in a comment, so the number
+# is now re-derived every run in the attributed block below and only the
+# DIRECTION is prose. Both surviving halves are pinned, so retiring either reds.
 expect_output_contains "the caveat still says the lenses DISAGREE by construction" \
   "the two lenses DISAGREE by construction" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
-expect_output_contains "and it now carries the MEASURED direction, not an implication" \
+expect_output_contains "and it still carries the MEASURED direction, not an implication" \
+  "MANUFACTURES lapses rather than revealing hidden ones" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_lacks "but it no longer PINS a number that rots (2026-08-04's 24 -> 27 is dead)" \
   "shape A 24 -> 27" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
-expect_output_contains "and refuses to quote B/C as verified (0 on both lenses)" \
-  "UNDISCRIMINATED" \
+# WITH NO DRAFTS LENS AT ALL, the delta is UNMEASURED and must say so. A run
+# that printed `+0` here would be reporting a permission it never had as
+# agreement between the lenses.
+expect_output_contains "an UNREAD drafts lens makes the delta UNMEASURED, never 0" \
+  "drafts lens UNREAD, so the per-shape delta is UNMEASURED, not 0" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "the lens is machine-readable in --json" '"lens_perspective": "published"' \
   run --page-limit 4 --fixture-dir "$HEALTHY" --json
@@ -1655,10 +1716,72 @@ page "$NOPERSP" 0 200 '{"result":{"count":4,"offset":0,"limit":4,"documents":['"
 expect_output_contains "a source that names no perspective is <unset>, not assumed" \
   "perspective:<unset>+published" \
   run --page-limit 4 --fixture-dir "$NOPERSP"
+
+# -----------------------------------------------------------------------------
+# CLAUSE 7's CAVEAT, MEASURED AND ATTRIBUTED (r20, PDS-D685).
+#
+# The caveat used to say "a published-only read undercounts drafts BY
+# CONSTRUCTION" and stop. True, and inert: no number, so a 3-row blind spot and
+# a 300-row one read identically. The measurement exists now -- and it points
+# the OTHER WAY, which is why a bare "+N" is the wrong report. `+N` reads as
+# "the published read MISSED N"; on this board every specimen measured is an
+# unpublished EDIT SHADOW of a row the published lens already holds, so the
+# drafts read MANUFACTURES lapses rather than revealing them.
+#
+# ONE FIXTURE BUILDER, TWO IDS, OPPOSITE VERDICTS -- that is the mutation:
+#   drafts.kid-b        (twin `done`)  -> 0 undercount, 1 manufactured
+#   drafts.pds-hidden-x (no twin)      -> 1 undercount, 0 manufactured
+# An arm that reported "+1" for both, or classified by count alone, passes the
+# first pair of assertions and fails the second. The THIRD fixture is the quiet
+# control: a drafts lens with rows but NO lapsed row must claim neither.
+# -----------------------------------------------------------------------------
+DELTAMANU="$TMP/lapse-delta-manufactured"
+build_healthy "$DELTAMANU"
+build_lapsed_drafts "$DELTAMANU" drafts.kid-b
+expect_output_contains "the delta is split into UNDERCOUNT and MANUFACTURED, never one +N" \
+  "A  +1 = 0 UNDERCOUNT (never published) + 1 MANUFACTURED (edit shadows)" \
+  run --page-limit 4 --fixture-dir "$DELTAMANU"
+expect_output_contains "and every delta row is NAMED with the class that placed it" \
+  "drafts.kid-b   (phantom)" \
+  run --page-limit 4 --fixture-dir "$DELTAMANU"
+expect_output_contains "a phantom-only delta REFUSES the undercount reading out loud" \
+  "the published read does NOT undercount shape A; the drafts" \
+  run --page-limit 4 --fixture-dir "$DELTAMANU"
+expect_output_contains "the attribution is a machine path too, not just prose" \
+  "\"never_published\"" \
+  run --page-limit 4 --fixture-dir "$DELTAMANU" --json
+# THE MUTATION. Same builder, same claim, same lapse -- only the published twin
+# is gone. The verdict must INVERT.
+DELTAUNDER="$TMP/lapse-delta-undercount"
+build_healthy "$DELTAUNDER"
+build_lapsed_drafts "$DELTAUNDER" drafts.pds-hidden-x
+expect_output_contains "a never-published lapsed draft IS an undercount, and inverts the split" \
+  "A  +1 = 1 UNDERCOUNT (never published) + 0 MANUFACTURED (edit shadows)" \
+  run --page-limit 4 --fixture-dir "$DELTAUNDER"
+expect_output_contains "and the undercount is stated with the row that causes it" \
+  "the published read UNDERCOUNTS shape A by 1: drafts.pds-hidden-x" \
+  run --page-limit 4 --fixture-dir "$DELTAUNDER"
+expect_output_lacks "the manufactured verdict does NOT fire on a real undercount" \
+  "does NOT undercount shape A" \
+  run --page-limit 4 --fixture-dir "$DELTAUNDER"
+# THE QUIET CONTROL. A drafts lens that is READ and carries rows, but no lapsed
+# one: a 0 on BOTH lenses is UNDISCRIMINATED and must say so -- neither read
+# found a specimen, so "the lenses agree" is not something this run measured.
+DELTAQUIET="$TMP/lapse-delta-quiet"
+build_healthy "$DELTAQUIET"
+build_blind_drafts "$DELTAQUIET"
+expect_status "a drafts lens with no lapsed row is silent, not red" 0 \
+  run --page-limit 4 --fixture-dir "$DELTAQUIET" --assert-round-done
+expect_output_contains "and a both-lens 0 is named UNDISCRIMINATED, not printed as agreement" \
+  "A  0 on BOTH lenses -- UNDISCRIMINATED, the delta proves nothing either way" \
+  run --page-limit 4 --fixture-dir "$DELTAQUIET"
+expect_output_lacks "the quiet control claims no undercount" \
+  "UNDERCOUNTS shape" \
+  run --page-limit 4 --fixture-dir "$DELTAQUIET"
 echo
 
 # =============================================================================
-# CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
+# CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/PDS-D365). 4(a) unanchored is
 # structurally unreachable by any round that discovers work: a row is BORN bare,
 # so a round that files one row can never certify. The anchor says WHICH ROUND
 # the clause is asking about — and the danger it introduces is the opposite one,
@@ -2467,7 +2590,7 @@ every pre-existing fixture here, and the reason none of them changed. --no-ancho
 opts back into the UNANCHORED clause, which defers nothing and so cannot seal a
 round, and a declared Paper the source cannot serve still fails closed.
 
-CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/D373), and it is
+CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/PDS-D373), and it is
 CLOSED-ONLY and CASE-EXACT. It reds on a live+closed row on `open` and on
 `blocked`, naming the row; it stays SILENT on a terminal+closed row (the correct
 shape of a finished row), on a LIVE park carrying a structured reopen_trigger

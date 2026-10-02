@@ -158,15 +158,47 @@ const stripComments = (src) =>
 
 const EXIT2 = /process\.exit\(2\)|process\.exitCode\s*=\s*2/;
 
-function fenceEmitters() {
-  const out = [];
-  for (const dir of FENCE_GLOBS) {
+// SCANNED, then FILTERED — the two numbers are kept apart on purpose. An arm
+// that reports "0 emitters" because its directory rule matched no files is
+// indistinguishable, in a green run, from one that really found no exit-2 path;
+// so `scanned` is returned alongside and asserted non-zero per arm below.
+function fenceScan() {
+  const scanned = [];
+  const emitters = [];
+  for (const { dir, match } of FENCE_GLOBS) {
     for (const f of fs.readdirSync(path.join(ROOT, dir)).sort()) {
-      if (!f.endsWith(".mjs")) continue;
+      if (!match.test(f)) continue;
       const rel = `${dir}/${f}`;
       if (fs.statSync(path.join(ROOT, rel)).isDirectory()) continue;
-      if (EXIT2.test(stripComments(read(rel)))) out.push(rel);
+      scanned.push({ dir, rel });
+      if (EXIT2.test(stripComments(read(rel)))) emitters.push(rel);
     }
+  }
+  return { scanned, emitters };
+}
+
+function fenceEmitters() {
+  return fenceScan().emitters;
+}
+
+// ── THE LINES A FILE CAN PUBLISH, READ OUT OF ITS OWN BYTES ──────────────────
+//
+// Not a manifest sample, not a paraphrase: every `!!…` run in the file's CODE
+// (comments stripped), with the interpolations this tree actually uses resolved
+// from the same source. `REFUSAL_NAME` is read from the file's own declaration,
+// so a rename moves the derived line with it and cannot silently un-cover the
+// emitter.
+function publishableRefusalLines(rel) {
+  const src = stripComments(read(rel));
+  const decl = /const REFUSAL_NAME = "([^"]+)"/.exec(src);
+  const resolve = (t) =>
+    t
+      .replace(/\$\{REFUSAL_NAME\}/g, decl ? decl[1] : "INSTRUMENT NAME")
+      .replace(/\$\{instrument\}/g, "INSTRUMENT NAME")
+      .replace(/\$\{[^}]*\}/g, "X");
+  const out = [];
+  for (const m of src.matchAll(/!![^"'`\n]*/g)) {
+    out.push(resolve(m[0]).replace(/\\n[\s\S]*$/, "").replace(/\s+$/, ""));
   }
   return out;
 }
@@ -230,10 +262,120 @@ test("cch-w63-bl (DERIVED): each conforming emitter still carries its literal pr
   }
 });
 
+// ═══════════════════════════════════════════════════════════════════════════
+// (4) THE POSITIVE CONTROL — DERIVED BOTH WAYS
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// The orphan test above reds when an emitter is not NAMED. This one reds when a
+// named emitter is not READ: for every exit-2 file the scan finds that is not
+// excluded, at least one `!!` line the file's own code can publish must come
+// back from captureRefusal(). It needs no manifest entry to work, so it also
+// covers a file whose entry someone deletes AND re-adds to EXCLUDED by mistake
+// — and it reds on the mutation "delete the `!!` from an emitter's refuse
+// helper", which the manifest-only form survives.
+test("cch-w63-bl (DERIVED): every non-excluded exit-2 emitter publishes a line THIS capture reads", () => {
+  const excluded = new Set(EXCLUDED.map((e) => e.file));
+  const subjects = fenceEmitters().filter((f) => !excluded.has(f));
+  assert.ok(subjects.length >= 13,
+    `the subject set collapsed to ${subjects.length}; this control would be vacuous`);
+  const blind = [];
+  for (const rel of subjects) {
+    const lines = publishableRefusalLines(rel);
+    const hit = lines.find((l) => isRefusalLine(l));
+    if (!hit) blind.push(`${rel}\n      candidates its code carries: ` +
+      (lines.length ? lines.slice(0, 6).map((l) => JSON.stringify(l)).join("\n        ") : "(none)"));
+  }
+  assert.deepEqual(blind, [],
+    "an exit-2 emitter whose own refusal line scripts/console-refusal-capture.mjs CANNOT read.\n" +
+    "Either the emitter stopped speaking the shape, or the capture was narrowed:\n  " + blind.join("\n  "));
+});
+
+test("cch-w63-bl (DERIVED): each fence arm actually reached files", () => {
+  const { scanned } = fenceScan();
+  for (const { dir } of FENCE_GLOBS) {
+    const n = scanned.filter((s) => s.dir === dir).length;
+    assert.ok(n > 0,
+      `fence arm ${dir} matched 0 files — a directory rule that reaches nothing reports ` +
+      `"no emitters here" forever, whatever the tree grows.`);
+  }
+});
+
 test("cch-w63-bl: every exclusion carries a written reason", () => {
   assert.ok(EXCLUDED.length > 0);
   for (const e of EXCLUDED) {
     assert.ok(fs.existsSync(path.join(ROOT, e.file)), `excluded file is gone: ${e.file}`);
     assert.ok(e.why && e.why.length > 80, `${e.file} is excluded with no real reason`);
   }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════
+// (5) THE EXCLUSION'S PRECONDITION, DERIVED — NOT THE PROSE, THE REACHABILITY
+// ═══════════════════════════════════════════════════════════════════════════
+//
+// Every EXCLUDED entry rests on ONE load-bearing claim: no gate step runs this
+// file, so nothing ever captures its stderr and normalising it would be a shape
+// with no reader. Until now that claim lived only in the `why` string, which
+// means `EXCLUDED` was a one-line escape hatch: drop a REAL gate instrument in
+// there with 80 characters of plausible prose and both DERIVED arms above go
+// quiet about it forever. That is the failure direction this file keeps being
+// filed against, so the claim is now DERIVED on every run.
+//
+// A mention is not an invocation. Four of the nine excluded files are named in
+// console-harness.yml and cloud.yml — all of them inside `#` comment lines that
+// explain why nothing runs them. Full-line comments are dropped before the scan
+// for exactly that reason (measured: keeping them makes 4 of 9 look reachable).
+const WORKFLOW_DIR = ".github/workflows";
+
+/** Non-comment lines of every workflow, as one blob per file. */
+function workflowCommandLines() {
+  const out = [];
+  for (const f of fs.readdirSync(path.join(ROOT, WORKFLOW_DIR)).sort()) {
+    if (!/\.ya?ml$/.test(f)) continue;
+    const src = fs.readFileSync(path.join(ROOT, WORKFLOW_DIR, f), "utf8");
+    for (const line of src.split("\n")) {
+      if (/^\s*#/.test(line)) continue;   // a comment ABOUT a file is not a call TO it
+      out.push({ file: `${WORKFLOW_DIR}/${f}`, line });
+    }
+  }
+  return out;
+}
+
+const COMMAND_LINES = workflowCommandLines();
+
+/** The workflow lines that INVOKE `node <rel>` in command position, if any. */
+function workflowInvocationsOf(rel) {
+  const esc = rel.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`(^|[\\s;&|(\`"'])node\\s+(?:--[^\\s]+\\s+)*${esc}(\\s|$|["'\`;&|)])`);
+  return COMMAND_LINES.filter((c) => re.test(c.line));
+}
+
+test("cch-w63-bl (DERIVED): the workflow-invocation reader can SEE a call — positive control", () => {
+  // Without this arm, a reader that answers "unreachable" for every path would
+  // pass every exclusion vacuously: a green with no subject. breakpoint-sweep
+  // is a real `run:` step of console-harness.yml's console-unit job.
+  assert.ok(COMMAND_LINES.length > 500,
+    `only ${COMMAND_LINES.length} non-comment workflow lines — the workflow scan collapsed`);
+  const control = "cloud/priv/static/__preview__/breakpoint-sweep.mjs";
+  const hits = workflowInvocationsOf(control);
+  assert.ok(hits.length > 0,
+    `the reader cannot see the known invocation of ${control}; every exclusion below would pass vacuously`);
+
+  // And it must be able to say NO — a file nobody runs, and a mere MENTION.
+  assert.deepEqual(workflowInvocationsOf("cloud/priv/static/__preview__/no-such-file-anywhere.mjs"), []);
+  const mentionOnly = COMMAND_LINES.filter((c) => /__terminal_verb_dump\.mjs/.test(c.line));
+  assert.deepEqual(mentionOnly, [],
+    "a dump file is named only inside comment lines; if it shows up here the comment strip broke");
+});
+
+test("cch-w63-bl (DERIVED): no EXCLUDED file is invoked by a workflow run: line", () => {
+  assert.ok(EXCLUDED.length >= 9, `EXCLUDED collapsed to ${EXCLUDED.length} entries`);
+  const reachable = [];
+  for (const e of EXCLUDED) {
+    const hits = workflowInvocationsOf(e.file);
+    if (hits.length) reachable.push(`${e.file}\n      invoked at: ${hits.map((h) => `${h.file}: ${h.line.trim()}`).join("\n                  ")}`);
+  }
+  assert.deepEqual(reachable, [],
+    "an EXCLUDED file that a workflow DOES run. Its exclusion rests on 'no gate step reaches it',\n" +
+    "and that claim is now false — so the capture is blind to a refusal a job really publishes.\n" +
+    "Normalise it or make it CONFORMING; do not leave it excluded:\n  " + reachable.join("\n  "));
 });

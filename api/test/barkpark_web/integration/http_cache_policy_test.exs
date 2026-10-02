@@ -449,6 +449,8 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
                "got #{inspect(header_values(headers, "cache-control"))}"
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "ChatController.fleet_events/2 (herd SSE) pins cache-control: no-cache", %{port: port} do
       raw = "sse-fleet-" <> Integer.to_string(System.unique_integer([:positive]))
 
@@ -472,6 +474,8 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
                "got #{inspect(header_values(headers, "cache-control"))}"
     end
 
+    # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+    @tag :requires_plugins
     test "ChatController.events/2 (per-session SSE) pins cache-control: no-cache", %{port: port} do
       raw = "sse-session-" <> Integer.to_string(System.unique_integer([:positive]))
 

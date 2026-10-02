@@ -910,6 +910,15 @@
       --bp-evidence-band-max: 1360px;
       --bp-evidence-fill: 0.74;
     }
+    <%!-- A surface NESTED in the article (Edit's canvas paint holes wrap each
+          read-only block's reader HTML in its own `.bp-paper-surface`) would
+          re-declare the shared default band (1040px) and paint breakout blocks
+          narrower than View. Carry the article's stage into it. --%>
+    .bp-paper-shell.bp-paper-article .bp-paper-surface {
+      --bp-evidence-band: 1180px;
+      --bp-evidence-band-max: 1360px;
+      --bp-evidence-fill: 0.74;
+    }
     /* WIDE PAPERS (`style: "article-wide"` → bulldocs_live.ex stamps
        `.bp-paper-shell--wide`). A scorecard, matrix or dashboard paper improves
        with width the way a table does, so the shell opens to the evidence
@@ -1681,8 +1690,24 @@
       font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px;
       font-weight: 600; letter-spacing: 0.02em;
       padding: 8px 13px; border-radius: 999px; cursor: pointer;
-      color: #2f6b4e; background: rgba(255,255,255,0.86);
-      border: 1px solid rgba(20,40,30,0.16);
+      /* THEME-DERIVED chrome, not a light literal. The pills float over the
+         article ground, so they must follow it — exactly like the other
+         floating chrome in this sheet (`.bp-paper-actions` stands on
+         `var(--paper-bg)`, the lightbox on `Canvas`/`CanvasText`). These used
+         to be `#2f6b4e` ink on `rgba(255,255,255,0.86)`: a white pill left
+         stranded on the dark article, and the Mode pill that ADVERTISES dark
+         mode was the worst offender. Reading the tokens covers every palette
+         at once — the base skin and all five `data-bp-theme` skins, the
+         `@media (prefers-color-scheme: dark)` no-JS path, the stamped
+         `html[data-theme]` path and the `@media print` re-stamp — because all
+         of them re-skin `--paper-*` on `body:has(.bp-paper-article)`, which
+         these pills inherit from. The `var(…, hex)` fallbacks are the sheet's
+         documented convention and keep the old light values as the floor.
+         `body.bp-tui` below stays LITERAL on purpose: the terminal view is a
+         fixed-dark ground that does not follow the paper theme. */
+      color: var(--paper-accent, #2f6b4e);
+      background: color-mix(in srgb, var(--paper-bg, #ffffff) 86%, transparent);
+      border: 1px solid var(--paper-rule, rgba(20,40,30,0.16));
       box-shadow: 0 2px 10px rgba(20,40,30,0.14); backdrop-filter: blur(6px);
       transition: background 0.15s, color 0.15s, transform 0.08s;
     }
@@ -1698,8 +1723,8 @@
        (always terminal-dark); the email-mode rule above already hides it
        there, and print + the no-article guard below cover the rest. */
     body.bp-tui .bp-mode-toggle { display: none; }
-    .bp-view-toggle:focus-visible { outline: 2px solid #2f7d5b; outline-offset: 2px; }
-    .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: #2f7d5b; }
+    .bp-view-toggle:focus-visible { outline: 2px solid var(--paper-accent, #2f7d5b); outline-offset: 2px; }
+    .bp-view-toggle .bp-vt-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--paper-accent, #2f7d5b); }
     /* hide the toggle when there is no article paper on the page */
     body:not(:has(.bp-paper-article)) .bp-view-controls { display: none; }
 
@@ -1711,7 +1736,7 @@
     body.bp-tui .bp-view-toggle .bp-vt-dot { background: #5fcf9c; box-shadow: 0 0 6px #5fcf9c; }
 
     /* toggle look in Email mode — the pill sits below the inbox ground */
-    body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px #2f7d5b; }
+    body.bp-email .bp-view-toggle--email .bp-vt-dot { box-shadow: 0 0 6px var(--paper-accent, #2f7d5b); }
 
     /* Comparison evidence stacks before the reading column gets cramped. */
     @media (max-width: 900px) {
@@ -2442,6 +2467,127 @@
       // Reader and TUI occupy the identical measure). Keep in lockstep.
       var TUI_COLS = 80;
 
+      // ── TUI image map ─────────────────────────────────────────────────────
+      // bpRenderTUI's OPTIONAL 5th argument is a {src: base64} object. Every
+      // bound is RE-ENFORCED in Go by internal/wasmimages (same-origin, MIME
+      // sniff, per-entry bytes, pixels, total memory, entry count) and a
+      // refused entry simply resolves to nil, keeping the honest labeled box —
+      // so nothing here is a trust boundary. These page-side limits exist only
+      // so the toggle never spends bandwidth or wall-clock on bytes the wasm
+      // would refuse anyway. Each is AT OR UNDER its Go counterpart:
+      //   IMG_MAX_ENTRIES     64      <= wasmimages.MaxEntries     (256)
+      //   IMG_MAX_ENTRY_BYTES 4 MiB   == wasmimages.MaxEntryBytes  (4 << 20)
+      //   IMG_MAX_TOTAL_BYTES 24 MiB  == wasmimages.MaxTotalBytes  (24 << 20)
+      var IMG_MAX_ENTRIES = 64;
+      var IMG_MAX_ENTRY_BYTES = 4 * 1024 * 1024;
+      var IMG_MAX_TOTAL_BYTES = 24 * 1024 * 1024;
+      // Concurrency + two clocks: one per request, one for the whole pre-fetch.
+      // Whichever fires first, renderTUI proceeds with the entries it has, so a
+      // slow or hanging image costs a picture and never the toggle.
+      var IMG_CONCURRENCY = 6;
+      var IMG_FETCH_TIMEOUT_MS = 4000;
+      var IMG_TOTAL_BUDGET_MS = 6000;
+
+      // Collect the image-block srcs worth pre-fetching, in document order.
+      // Mirrors the Go renderer's notion of an image: an explicit
+      // `type:"image"` block, or a typeless `{src,alt}` media element (the
+      // coerceMediaImages seam in internal/pdrender/composeblocks.go). Typed
+      // non-image carriers of `src` — asciicast, video — are NOT collected:
+      // their renderers never consult the ImageResolver.
+      //
+      // SAME-ORIGIN filter, matching wasmimages.sameOrigin: keep only a rooted
+      // path. An absolute URL ("https://…"), a protocol-relative "//host/x",
+      // a "data:" URI and a backslash-bearing path are all skipped here and
+      // would be rejected there too.
+      function collectImageSrcs(blocks) {
+        var out = [], seen = {};
+        function sameOrigin(src) {
+          return src.charAt(0) === "/" && src.slice(0, 2) !== "//" &&
+            src.indexOf("\\") < 0 && src.indexOf("\u0000") < 0;
+        }
+        function visit(node) {
+          if (!node || typeof node !== "object") return;
+          if (Array.isArray(node)) {
+            for (var i = 0; i < node.length; i++) visit(node[i]);
+            return;
+          }
+          var type = node.type;
+          var imageish = type === "image" ||
+            ((type === undefined || type === null || type === "") &&
+              typeof node.src === "string");
+          if (imageish && typeof node.src === "string") {
+            // The resolver keys on the TRIMMED src string, so key identically.
+            var key = node.src.trim();
+            if (key && sameOrigin(key) && !Object.prototype.hasOwnProperty.call(seen, key)) {
+              seen[key] = true;
+              if (out.length < IMG_MAX_ENTRIES) out.push(key);
+            }
+          }
+          for (var k in node) {
+            if (Object.prototype.hasOwnProperty.call(node, k)) visit(node[k]);
+          }
+        }
+        visit(blocks);
+        return out;
+      }
+
+      // btoa() over a Uint8Array, chunked so a multi-megabyte image does not
+      // blow the argument limit of String.fromCharCode.apply. Standard base64
+      // WITH padding — Go decodes with base64.StdEncoding.
+      function bytesToBase64(bytes) {
+        var chunk = 0x8000, parts = [];
+        for (var i = 0; i < bytes.length; i += chunk) {
+          parts.push(String.fromCharCode.apply(null, bytes.subarray(i, i + chunk)));
+        }
+        return btoa(parts.join(""));
+      }
+
+      // Build the {src: base64} map. Failures — non-2xx, network error, abort,
+      // an over-budget body — are simply OMITTED: the wasm keeps the box for
+      // any src it cannot resolve, which is the honest outcome.
+      async function buildImageMap(blocks) {
+        var map = {}, srcs = collectImageSrcs(blocks);
+        if (!srcs.length) return map;
+        var next = 0, total = 0, expired = false;
+        async function worker() {
+          while (!expired) {
+            var i = next++;
+            if (i >= srcs.length) return;
+            var src = srcs[i];
+            if (total >= IMG_MAX_TOTAL_BYTES) return;
+            try {
+              var ctl = typeof AbortController !== "undefined" ? new AbortController() : null;
+              var timer = ctl ? setTimeout(function () { ctl.abort(); }, IMG_FETCH_TIMEOUT_MS) : null;
+              var r;
+              try {
+                r = await fetch(src, ctl ? { signal: ctl.signal } : undefined);
+              } finally {
+                if (timer) clearTimeout(timer);
+              }
+              if (!r || !r.ok) continue;
+              var buf = await r.arrayBuffer();
+              // No await between this budget test and the commit below, so the
+              // running total can never be overspent by a racing worker.
+              if (!buf.byteLength || buf.byteLength > IMG_MAX_ENTRY_BYTES) continue;
+              if (total + buf.byteLength > IMG_MAX_TOTAL_BYTES) continue;
+              total += buf.byteLength;
+              map[src] = bytesToBase64(new Uint8Array(buf));
+            } catch (e) {
+              // omitted on purpose — see above
+            }
+          }
+        }
+        var pool = [];
+        for (var w = 0; w < IMG_CONCURRENCY && w < srcs.length; w++) pool.push(worker());
+        await Promise.race([
+          Promise.all(pool),
+          new Promise(function (res) {
+            setTimeout(function () { expired = true; res(); }, IMG_TOTAL_BUDGET_MS);
+          })
+        ]);
+        return map;
+      }
+
       async function renderTUI() {
         if (!out) return;
         var slug = currentSlug();
@@ -2455,7 +2601,11 @@
           await ensureWasm();
           var blocks = await blocksP;
           if (!blocks) throw new Error("could not load this paper's blocks");
-          var html = window.bpRenderTUI(JSON.stringify(blocks), TUI_COLS, "dark");
+          // arg 3 is the light/dark MODE; arg 4 is the theme IDENTITY, which
+          // the reader does not select — "" makes the Go side fall back to
+          // pdrender.DefaultTheme (evergreen). arg 5 is the image map.
+          var images = await buildImageMap(blocks);
+          var html = window.bpRenderTUI(JSON.stringify(blocks), TUI_COLS, "dark", "", images);
           out.innerHTML = html;
         } catch (e) {
           out.innerHTML = '<pre class="bp-tui-pre">TUI render failed: ' +
@@ -2611,6 +2761,10 @@
         <head> and NOT blocking (Golden Rule #4) — the engine itself
         (mermaid.min.js) still loads `defer` above. --%>
   <script src="/assets/bp-paper-mermaid.js"></script>
+  <%!-- Code tokens on the reader, from THE tokenizer the canvas uses (paper-editor/src/code-highlight.js,
+        built to this asset): the server emits `<pre data-lang>`; this pass paints hljs-* spans inside it
+        (Barkdown plan #27). Deferred: it reads the DOM once and watches LiveView patches. --%>
+  <script src="/assets/bp-paper-code.js" defer></script>
   <%!-- EDIT-ON-THE-LINK assets are loaded by the boot script below after it can
         inspect the LiveView's static HTML. Root-layout assigns do not include
         the socket's `can_edit?`, so gating tags on that assign omitted every
@@ -2644,20 +2798,101 @@
         // enters the DOM. Guarded for asciinema-player.min.js (deferred) not
         // being ready yet: we retry on window load.
         runAsciicast() {
+          // ── the honest fallback (jf-backlog-asciicast-empty-box) ──────────
+          // asciinema-player 3.x exposes no `error` event, so its own DOM IS
+          // the error channel: on a recording it cannot fetch it paints
+          // `div.ap-overlay-error`, a bordered box whose entire content is a
+          // 💥 glyph — the empty box the komposisjon law forbids. These
+          // constants and renderCastFallback() are the TWIN of client.ts's
+          // ASCIICAST_* / renderCastFallback. They are NOT kept in step by
+          // this comment: reader_asciicast_fallback_parity_test.exs READS
+          // every literal below out of js/packages/react/src/client.ts and
+          // asserts this file carries it, so a change on EITHER side reds.
+          let ERROR_SELECTOR = ".ap-overlay-error";
+          let READY_SELECTOR = ".ap-terminal, .ap-overlay-start";
+          let PROBE_STEP_MS = 25;
+          let PROBE_TIMEOUT_MS = 4000;
+          let FALLBACK_MESSAGE = "Opptaket kunne ikke lastes.";
+          let FALLBACK_LINK = "Åpne opptaket direkte";
+          let FALLBACK_STYLE = "padding:1rem;font-size:0.9em;line-height:1.5";
+
+          // `href` for the raw recording, or null when `data-cast-src` is not a
+          // fetchable web URL. Same allow-list as client.ts's castHref: http(s)
+          // or a same-origin path; protocol-relative and every other scheme
+          // (`javascript:`, `data:`) refused, so a hostile src degrades to
+          // message-only rather than becoming a clickable payload.
+          let castHref = (src) => {
+            let trimmed = src.replace(/^[\x00-\x20]+/, "");
+            if (/^https?:\/\//i.test(trimmed)) return trimmed;
+            if (trimmed.charAt(0) === "/" && !/^\/[/\\]/.test(trimmed)) return trimmed;
+            return null;
+          };
+
+          // Replace a faulted player with prose + a raw link. The CAPTION
+          // survives by construction: Figures.asciicast_html puts
+          // <figcaption> NEXT TO the mount point inside the <figure>, so
+          // emptying the mount div cannot reach it.
+          let renderCastFallback = (el, src) => {
+            let doc = el.ownerDocument;
+            el.textContent = "";
+            let box = doc.createElement("div");
+            box.className = "bp-asciicast__fallback";
+            box.setAttribute("style", FALLBACK_STYLE);
+            box.textContent = FALLBACK_MESSAGE;
+            let href = castHref(src);
+            if (href !== null) {
+              let link = doc.createElement("a");
+              link.className = "bp-asciicast__fallback-link";
+              link.setAttribute("href", href);
+              link.textContent = FALLBACK_LINK;
+              box.appendChild(doc.createElement("br"));
+              box.appendChild(link);
+            }
+            el.appendChild(box);
+            // A second stamp beside `data-asciicast-done`: the mount stays
+            // skipped by the idempotency guard, and a screenshot test can
+            // select the faulted casts without parsing our copy.
+            el.dataset.asciicastFailed = "true";
+          };
+
+          // Swap ONLY on asciinema's own error overlay — never on a timeout. A
+          // player showing neither marker inside the ceiling is left alone:
+          // replacing a slow-but-working player with a "could not be loaded"
+          // card would be its own lie.
+          let probeCast = (el, src) => {
+            let deadline = Date.now() + PROBE_TIMEOUT_MS;
+            let step = () => {
+              if (el.querySelector(ERROR_SELECTOR)) return renderCastFallback(el, src);
+              if (el.querySelector(READY_SELECTOR)) return;
+              if (Date.now() >= deadline) return;
+              window.setTimeout(step, PROBE_STEP_MS);
+            };
+            step();
+          };
+
           let mountPlayer = (el) => {
             let src = el.dataset.castSrc;
             if (!src) return;
+            // Stamped BEFORE the outcome is known: the guard is about
+            // re-entrancy (a stream delta re-running the hook mid-probe), not
+            // about success.
+            el.dataset.asciicastDone = "true";
             // `data-cast-poster` is the block's optional resting frame (an npt
             // timestamp, or "end"), emitted by Figures.asciicast_html only when
             // set — unset falls back to npt:0:1. Twin of client.ts's
             // hydrateAsciicast; keep the two in step.
-            window.AsciinemaPlayer.create(src, el, {
-              fit: "width",
-              poster: el.dataset.castPoster || "npt:0:1",
-              idleTimeLimit: 2,
-              theme: "asciinema"
-            });
-            el.dataset.asciicastDone = "true";
+            try {
+              window.AsciinemaPlayer.create(src, el, {
+                fit: "width",
+                poster: el.dataset.castPoster || "npt:0:1",
+                idleTimeLimit: 2,
+                theme: "asciinema"
+              });
+            } catch (_e) {
+              // A create() that threw never painted anything — straight to the card.
+              return renderCastFallback(el, src);
+            }
+            probeCast(el, src);
           };
           let nodes = Array.from(
             this.el.querySelectorAll('div.bp-asciicast:not([data-asciicast-done="true"])')
@@ -2898,6 +3133,7 @@
           "/assets/bp-paper-editor.bundle.js",
           "/assets/bp-asset-browser.js",
           "/assets/bp-media-picker.js",
+          "/assets/bp-search-intel.js",
           "/assets/bp-reference-picker.js",
           "/assets/bp-rich-text-editor.js",
           "/assets/bp-paper-editor-hooks.js"

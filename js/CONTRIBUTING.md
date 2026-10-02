@@ -53,4 +53,4 @@ Architecture Decision Records live in `docs/adr/` (backend ADRs: `api/docs/adr/`
 
 ## No `node:` imports
 
-`@barkpark/core` and `@barkpark/nextjs` edge subpaths (`client`, `server`, `webhook`, `draft-mode`) must NOT import from `node:*` built-ins. Checked (currently advisory, not blocking) by `scripts/check-no-node-imports.sh` in CI on every PR — see `docs/decisions/deferred.md` for the pending ADR-002 resolution.
+`@barkpark/core`'s source and EVERY `@barkpark/nextjs` subpath source dir must NOT import from `node:*` built-ins. The corpus is not restated here: this line named four subpaths while the scan already read five and the build shipped eight, and a list in prose cannot notice the entry it is missing. `scripts/check-no-node-imports.sh` derives it from `packages/nextjs/src/*/`; that script is the corpus. Checked (currently advisory, not blocking) by `scripts/check-no-node-imports.sh` in CI on every PR — see `docs/decisions/deferred.md` for the pending ADR-002 resolution.

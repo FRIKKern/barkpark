@@ -20,12 +20,12 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
   # per-type invariant (so a degraded default surfaces as a failure) lives in
   # `addable_block_valid?/1` below — module attributes cannot hold closures.
   @addable_block_types ~w(
-    paragraph heading list callout code blockquote divider section steps tabs
+    paragraph heading list callout code blockquote divider section expandable steps tabs
     eyebrow byline ingress pullquote
-    action card table terminal stage diagram figure equation route toc criteria-progress gauge-list
+    action card table terminal stage note diagram figure equation route toc criteria-progress gauge-list bar-chart
     diff filetree footnote code-tabs api-endpoint form questionnaire
     field-string field-slug field-text field-boolean field-select field-datetime field-color field-number
-    field-image field-reference video
+    field-image field-reference paper-links video
     columns composite arrayOf codelist localizedText
   )
 
@@ -162,7 +162,28 @@ defmodule BarkparkWeb.Studio.PaperEditor.AddBlockTest do
        when is_map(v),
        do: true
 
+  defp addable_block_valid?(%{"type" => "paper-links", "refs" => []}), do: true
+
+  defp addable_block_valid?(%{
+         "type" => "expandable",
+         "summary" => "New details",
+         "open" => false,
+         "children" => [%{"id" => id, "type" => "paragraph"}]
+       }),
+       do: is_binary(id)
+
+  defp addable_block_valid?(%{
+         "type" => "bar-chart",
+         "values" => true,
+         "bars" => [
+           %{"label" => "Sample A", "value" => 10},
+           %{"label" => "Sample B", "value" => 5}
+         ]
+       }),
+       do: true
+
   defp addable_block_valid?(%{"type" => "stage", "title" => "New stage"}), do: true
+  defp addable_block_valid?(%{"type" => "note", "label" => "note", "text" => ""}), do: true
   defp addable_block_valid?(_), do: false
 
   for type <- @addable_block_types do

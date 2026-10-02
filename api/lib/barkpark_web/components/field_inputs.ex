@@ -53,6 +53,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   attr :field, :map, required: true
   attr :editor_form, :map, required: true
@@ -83,9 +84,35 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # Selects WITH a matching stored value are unchanged (that option is selected;
   # no placeholder). Required detection is rule-based (`validation.required`),
   # never name-based — cf. `Content.Forms` status handling (forms.ex).
+  # Types whose own clause below already copes with a structured (map/list)
+  # stored value: reference/image read ids and JSON, array/object render
+  # read-only JSON, richText renders block content read-only.
+  @structured_value_types ~w(richText reference image array object)
+
+  # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
+  # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
+  # a select — crashed the whole document route (`Phoenix.HTML.Safe not
+  # implemented for Map`, or `lists in Phoenix.HTML …`; stranger walk,
+  # 2026-09-30, a post created through the API with a Sanity slug). Render it
+  # read-only with NO form input: the Classic save then never posts the field,
+  # so the stored value survives byte-identical instead of being replaced by a
+  # string. Declared before every scalar clause so none of them sees a map.
+  def input(%{field: %{"type" => t, "name" => name}, editor_form: %{} = form} = assigns)
+      when t not in @structured_value_types and is_map_key(form, name) and
+             (is_map(:erlang.map_get(name, form)) or is_list(:erlang.map_get(name, form))) do
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-structured-value>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+    </div>
+    """
+  end
+
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     options = Barkpark.Content.SelectOptions.normalize(opts)
     has_selection = val in Enum.map(options, & &1.value)
     required = get_in(f, ["validation", "required"]) == true
@@ -176,21 +203,28 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # A plain richText whose stored value is NOT a string — Portable Text blocks,
+  # the shape `bp seed` writes for richText and the JS SDK/Sanity path uses.
+  # The Classic editor below is an HTML-string contenteditable; handed a list it
+  # crashed the whole document route with `ArgumentError … lists in
+  # Phoenix.HTML and templates may only contain integers …` (stranger walk,
+  # 2026-09-30: `bp make schema widget` → `bp schema apply` → `bp seed widget`
+  # → open it in Studio = 500). Show it read-only like the array/object clause
+  # and emit NO form input, so a Classic save preserves the stored blocks
+  # byte-identically instead of replacing them with an HTML string.
   def input(%{field: %{"type" => "richText", "name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
-    assigns = assign(assigns, n: name, v: val)
+    case Map.get(assigns.editor_form, name, "") do
+      val when is_binary(val) or is_nil(val) ->
+        rich_text_editor(assign(assigns, n: name, v: val))
 
-    ~H"""
-    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
-      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
-    </div>
-    """
+      blocks ->
+        rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
+    end
   end
 
   def input(%{field: %{"type" => t, "name" => name} = f} = assigns)
       when t == "text" do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     rows = Map.get(f, "rows") || 3
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
@@ -200,7 +234,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def input(%{field: %{"type" => "boolean", "name" => name}} = assigns) do
-    checked = Map.get(assigns.editor_form, name, "") == "true"
+    # A stored JSON `true` (what the API, SDK and `bp seed` write) is checked
+    # too — reading only the string "true" rendered it UNCHECKED, so the
+    # hidden "false" posted and an edit of ANY other field flipped it to false.
+    checked = Map.get(assigns.editor_form, name, "") in [true, "true"]
     assigns = assign(assigns, n: name, c: checked)
 
     ~H"""
@@ -271,13 +308,13 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def input(
         %{field: %{"type" => "reference", "name" => name, "refType" => "mediaAsset"}} = assigns
       ) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = reference_id(Map.get(assigns.editor_form, name, ""))
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
     <div id={"bp-mp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
         value-mode="reference"
         dataset={@dataset}
@@ -303,13 +340,13 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # the picker searches across the set (`types=`) and shows the type on every
   # hit and on the selected pill. A single `refType` renders byte-identically.
   def input(%{field: %{"type" => "reference", "name" => name} = f} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = reference_id(Map.get(assigns.editor_form, name, ""))
     assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
 
     ~H"""
     <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-reference-picker
+      <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
         ref-type={@ref_type}
         dataset={@dataset}
@@ -341,7 +378,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-media-picker
+      <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
@@ -362,14 +399,14 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # exactly like a typed value. The input itself stays the standard text
   # input (hand-editing always wins).
   def input(%{field: %{"type" => "slug", "name" => name} = f} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     source = slug_source_of(f)
     assigns = assign(assigns, n: name, v: val, source: source)
 
     ~H"""
     <div style="display:flex;gap:6px;align-items:center;">
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="text" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="500" style="flex:1;min-width:0;" />
-      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={"Generate from #{@source}"}>Generate</button>
+      <button type="button" class="btn btn-sm" phx-click="slug-generate" phx-value-field={@n} data-slug-source={@source} title={gettext("Generate from %{source}", source: @source)}><%= gettext("Generate") %></button>
     </div>
     """
   end
@@ -420,7 +457,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def input(%{field: %{"name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
 
     # A field DECLARED "number" always gets the numeric treatment — the
     # name heuristic below only exists for ONIX's string-typed numerics
@@ -460,6 +497,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # read-only display. nil / "" → an em-dash placeholder; values that
   # cannot JSON-encode (shouldn't happen for jsonb-sourced content)
   # fall back to `inspect/1` rather than crash the editor pane.
+  # A JSON number or boolean stored in a field whose Classic control is a text
+  # input / select (a string field holding `true`, a select whose options are
+  # numbers). HEEx renders `value={true}` as a BARE attribute, which a browser
+  # posts as "" — an edit of another field erased the value — and a select
+  # compares option strings to the raw number and selected nothing. Render the
+  # text the input holds; `Forms` keeps the stored type when it comes back
+  # unedited.
+  defp scalar_text(v) when is_number(v) or is_boolean(v), do: to_string(v)
+  defp scalar_text(v), do: v
+
   defp readonly_json(nil), do: "—"
   defp readonly_json(""), do: "—"
 
@@ -499,6 +546,24 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def slug_source_of(_), do: "title"
 
+  defp rich_text_editor(assigns) do
+    ~H"""
+    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+      <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
+    </div>
+    """
+  end
+
+  defp rich_text_readonly(assigns) do
+    ~H"""
+    <div data-readonly-field={@n}>
+      <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged</span>
+    </div>
+    """
+  end
+
   @doc "The slug source for the schema field named `name` (default `\"title\"`)."
   @spec slug_source(map() | nil, String.t()) :: String.t()
   def slug_source(%{fields: fields}, name) when is_list(fields) do
@@ -508,6 +573,27 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def slug_source(_, _), do: "title"
+
+  @doc """
+  The document id a stored reference VALUE points at, as the string every
+  picker's `value` attribute and hidden input carry.
+
+  Studio persists a reference as the bare id string, but the API accepts — and
+  `?expand` resolves — the Sanity-style object too (`{"_ref": id, "_type":
+  "reference"}`, api-v1.md), so documents written through the JS SDK or
+  `bp --set 'author:={"_ref":…}'` carry it. Rendered raw, that map crashed the
+  whole editor with `Phoenix.HTML.Safe not implemented for Map` (a 500 on the
+  document route; stranger walk 2026-09-30). The id it names is shown instead,
+  and a Classic save keeps the stored object (an edit replaces its `_ref`) —
+  `Forms` preserve guard.
+
+  `nil` and anything with no readable id render as `""` (an empty picker).
+  """
+  @spec reference_id(term()) :: String.t()
+  def reference_id(value) when is_binary(value), do: value
+  def reference_id(%{"_ref" => ref}) when is_binary(ref), do: ref
+  def reference_id(%{_ref: ref}) when is_binary(ref), do: ref
+  def reference_id(_), do: ""
 
   @doc """
   Every target type a reference field may point at, in declaration order and

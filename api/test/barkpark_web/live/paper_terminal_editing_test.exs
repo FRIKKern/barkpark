@@ -28,7 +28,16 @@ defmodule BarkparkWeb.PaperTerminalEditingTest do
       )
 
     token = "terminal-writer-#{System.unique_integer([:positive])}"
-    {:ok, _} = Auth.create_token(token, "Terminal editing", @dataset, ["read", "write"])
+
+    {:ok, _} =
+      Auth.create_token(
+        token,
+        "Terminal editing",
+        @dataset,
+        ["read", "write"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
     %{conn: Plug.Test.init_test_session(conn, %{"api_token" => token})}
   end
 

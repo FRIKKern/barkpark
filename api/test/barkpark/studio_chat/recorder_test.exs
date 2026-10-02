@@ -9,6 +9,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.{AgentStateSweeper, Recorder, Session}
   alias Barkpark.StudioChat.Runtime.Event
@@ -46,8 +49,12 @@ defmodule Barkpark.StudioChat.RecorderTest do
     Application.put_env(:barkpark, :public_demo_studio, false)
 
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
+      # Guarded: with studio_chat off there is no RuntimeSupervisor, and a raise
+      # here would skip the env restores below (public_demo_studio leak).
+      if(Process.whereis(Barkpark.StudioChat.RuntimeSupervisor),
+        do: DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
+        else: []
+      )
       |> Enum.each(fn
         {_, pid, _, _} when is_pid(pid) ->
           DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
@@ -89,7 +96,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
   test "a bp_sandbox frame persists the binding and is SWALLOWED (charter D137)",
        %{sid: sid, recorder: recorder} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Recorder.topic(sid))
-    before = length(StudioChat.list_messages(sid))
+    before = length(StudioChat.list_messages(sid, :global))
 
     frame(
       recorder,
@@ -100,7 +107,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
     # persisted onto the Session row — the durable binding the next turn resumes
     assert StudioChat.get_session(sid).cloud_sandbox_id == "sbx-x"
     # SWALLOWED: no chat_messages row appended (the customer stream stays clean)
-    assert length(StudioChat.list_messages(sid)) == before
+    assert length(StudioChat.list_messages(sid, :global)) == before
     # SWALLOWED: never broadcast on the session topic
     refute_receive {:claude_chat_event, %{"type" => "bp_sandbox"}}, 200
 
@@ -161,7 +168,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
        }}
     )
 
-    rows = StudioChat.list_messages(sid)
+    rows = StudioChat.list_messages(sid, :global)
     assert Enum.any?(rows, &(&1.role == "assistant" and &1.source_markdown == "the answer"))
 
     tool = Enum.find(rows, &(&1.role == "tool"))
@@ -204,7 +211,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
     )
 
     assert StudioChat.get_session(sid).pending_approvals == 1
-    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "approval"))
+    row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "approval"))
     assert row.metadata["approval_status"] == "pending"
     assert row.metadata["request_id"] == "req-1"
   end
@@ -223,7 +230,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
        }}
     )
 
-    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "q-1"))
+    row =
+      StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.metadata["request_id"] == "q-1"))
+
     assert row.role == "question"
     assert row.metadata["approval_status"] == "pending"
     # a question STILL raises the one "needs you" counter (widened role set)
@@ -244,7 +253,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
        }}
     )
 
-    row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "p-1"))
+    row =
+      StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.metadata["request_id"] == "p-1"))
+
     assert row.role == "plan"
     assert StudioChat.get_session(sid).pending_approvals == 1
   end
@@ -327,7 +338,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "tool"))
+      row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "tool"))
       assert row.metadata["tool_use_id"] == "toolu_abc"
       refute row.metadata["output"]
 
@@ -348,7 +359,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "tool"))
+      row = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "tool"))
       assert row.metadata["output"] == "a.txt\nb.txt"
     end
 
@@ -367,7 +378,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       )
 
       assert Process.alive?(recorder)
-      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "tool")) == []
+      assert StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "tool")) == []
     end
   end
 
@@ -396,7 +407,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
     end
 
     defp settle_row(sid, id) do
-      StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["tool_use_id"] == id))
+      StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.metadata["tool_use_id"] == id))
     end
 
     test "a tool row is UNSETTLED until its turn's result frame lands",
@@ -655,7 +666,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
 
       # the main card is untouched…
       [todo] = Enum.filter(rows, &(&1.role == "todo"))
@@ -688,7 +699,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
         ])
       )
 
-      todos = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      todos = StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "todo"))
       assert length(todos) == 1
 
       [row] = todos
@@ -710,7 +721,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
       frame(recorder, todo_frame("toolu_b", [%{"content" => "step", "status" => "completed"}]))
 
-      rows = StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "todo"))
+      rows = StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "todo"))
       assert length(rows) == 2
     end
 
@@ -734,7 +745,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
       assert Enum.any?(rows, &(&1.role == "tool"))
       assert Enum.filter(rows, &(&1.role == "todo")) == []
     end
@@ -788,7 +799,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
 
       spawn_row = Enum.find(rows, &(&1.metadata["tool_use_id"] == "toolu_spawn"))
       refute spawn_row.metadata["parent_tool_use_id"]
@@ -814,7 +825,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "top level"))
+      row =
+        StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.source_markdown == "top level"))
+
       refute row.metadata["parent_tool_use_id"]
     end
   end
@@ -847,7 +860,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
 
       text = Enum.find(rows, &(&1.role == "assistant" and &1.source_markdown == "the answer"))
       assert text.metadata["frame_uuid"] == "frame-abc-123"
@@ -869,7 +882,10 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "child thinking"))
+      row =
+        StudioChat.list_messages(sid, :global)
+        |> Enum.find(&(&1.source_markdown == "child thinking"))
+
       assert row.metadata["frame_uuid"] == "frame-child-1"
       assert row.metadata["parent_tool_use_id"] == "toolu_spawn"
     end
@@ -885,7 +901,10 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "no uuid here"))
+      row =
+        StudioChat.list_messages(sid, :global)
+        |> Enum.find(&(&1.source_markdown == "no uuid here"))
+
       refute Map.has_key?(row.metadata, "frame_uuid")
     end
 
@@ -901,7 +920,9 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.source_markdown == "blank uuid"))
+      row =
+        StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.source_markdown == "blank uuid"))
+
       refute Map.has_key?(row.metadata, "frame_uuid")
     end
   end
@@ -926,7 +947,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, thinking_tokens(120))
       frame(recorder, assistant_text("the answer"))
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
       think = Enum.find(rows, &(&1.role == "thinking"))
       answer = Enum.find(rows, &(&1.role == "assistant"))
 
@@ -945,14 +966,14 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, thinking_tokens(70))
       frame(recorder, assistant_text("done"))
 
-      think = StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "thinking"))
+      think = StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "thinking"))
       # max(50,90,70) = 90 — a naive sum would be 210
       assert think.metadata["tokens"] == 90
     end
 
     test "no thinking frames ⇒ no thinking row", %{sid: sid, recorder: recorder} do
       frame(recorder, assistant_text("straight to prose"))
-      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "thinking")) == []
+      assert StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "thinking")) == []
     end
 
     test "each bout flushes its own row across a multi-turn session",
@@ -966,7 +987,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, assistant_text("second"))
 
       counts =
-        StudioChat.list_messages(sid)
+        StudioChat.list_messages(sid, :global)
         |> Enum.filter(&(&1.role == "thinking"))
         |> Enum.map(& &1.metadata["tokens"])
 
@@ -980,7 +1001,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       frame(recorder, {:claude_chat_event, %{"type" => "system", "subtype" => "init"}})
       frame(recorder, assistant_text("fresh turn, no prior thought"))
 
-      assert StudioChat.list_messages(sid) |> Enum.filter(&(&1.role == "thinking")) == []
+      assert StudioChat.list_messages(sid, :global) |> Enum.filter(&(&1.role == "thinking")) == []
     end
 
     test "a thinking_tokens frame rebroadcasts to subscribers", %{sid: sid, recorder: recorder} do
@@ -1193,7 +1214,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     defp spawn_row(sid, tool_use_id),
       do:
-        StudioChat.list_messages(sid)
+        StudioChat.list_messages(sid, :global)
         |> Enum.find(&(&1.metadata["tool_use_id"] == tool_use_id))
 
     test "task_started stamps task_id + running onto the spawn row, preserving its input",
@@ -1821,7 +1842,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
 
     assert Process.alive?(recorder)
 
-    assert StudioChat.list_messages(sid)
+    assert StudioChat.list_messages(sid, :global)
            |> Enum.any?(&(&1.source_markdown == "landed after tab close"))
   end
 
@@ -1852,7 +1873,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
          }}
       )
 
-      rows = StudioChat.list_messages(sid)
+      rows = StudioChat.list_messages(sid, :global)
 
       mcp_row = Enum.find(rows, &(&1.metadata["tool_use_id"] == "tu-mcp-1"))
       assert mcp_row.role == "tool"
@@ -1901,7 +1922,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       refute_receive {:claude_chat_permission, _}, 100
       refute_receive {:chat_activity, _, %{state: :needs_you}}, 100
       assert StudioChat.get_session(sid).pending_approvals == 0
-      assert StudioChat.list_messages(sid) == []
+      assert StudioChat.list_messages(sid, :global) == []
     end
 
     test "a MUTATING loopback ask still persists the pending card and flips needs-you",
@@ -1926,7 +1947,10 @@ defmodule Barkpark.StudioChat.RecorderTest do
       assert_receive {:chat_activity, _, %{state: :needs_you}}
       assert StudioChat.get_session(sid).pending_approvals == 1
 
-      row = StudioChat.list_messages(sid) |> Enum.find(&(&1.metadata["request_id"] == "mcp-w1"))
+      row =
+        StudioChat.list_messages(sid, :global)
+        |> Enum.find(&(&1.metadata["request_id"] == "mcp-w1"))
+
       assert row.role == "approval"
       assert row.metadata["approval_status"] == "pending"
     end
@@ -2362,6 +2386,14 @@ defmodule Barkpark.StudioChat.RecorderTest do
       id = Ecto.UUID.generate()
       {:ok, _} = StudioChat.create_session(%{id: id, mode: "plan"}, {:workspace, ws})
 
+      # A tenant-owned session may not run on the instance host
+      # (task-6ca882967fd95dda) — the tenant's turn rides the cloud profile.
+      Application.put_env(
+        :barkpark,
+        :claude_chat,
+        Keyword.put(Application.get_env(:barkpark, :claude_chat), :execution_profile, :cloud)
+      )
+
       {:ok, recorder} =
         Recorder.ensure(%{session_id: id, mode: "plan", resume: false, workspace_id: ws})
 
@@ -2784,7 +2816,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       do: {:studio_chat_runtime_event, %Event{kind: kind, provider: "codex", session_id: sid}}
 
     defp persisted_assistant(sid),
-      do: StudioChat.list_messages(sid) |> Enum.find(&(&1.role == "assistant"))
+      do: StudioChat.list_messages(sid, :global) |> Enum.find(&(&1.role == "assistant"))
 
     test "turn_completed persists TRUNCATED-with-marker, never beyond the cap (:1126 site)",
          %{sid: sid, recorder: recorder} do
@@ -2963,7 +2995,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
       sid: sid,
       recorder: recorder
     } do
-      before = length(StudioChat.list_messages(sid))
+      before = length(StudioChat.list_messages(sid, :global))
       worker = Barkpark.StudioChat.Runtime.worker_id("claude", sid)
 
       frame(
@@ -2977,7 +3009,7 @@ defmodule Barkpark.StudioChat.RecorderTest do
         )
       )
 
-      assert length(StudioChat.list_messages(sid)) == before
+      assert length(StudioChat.list_messages(sid, :global)) == before
     end
   end
 end

@@ -433,8 +433,20 @@ own sources**, because no single one knows the whole surface:
 | A | manifest rows | `docs/cli/fixtures/full-manifest.json` | the server-declared noun/verb tree (`doc`, `task`, `workspace`, …). Drop it and manifest-driven commands go falsely RED |
 | B | `completionNouns` | `internal/cli/builtins.go` | the built-in top-level nouns. B knows `cloud` is a noun — and nothing more |
 | C | `parseHzArgs` allowlists | `internal/cli/*.go` | a leaf's declared value/bool flags |
-| D | router switch tables | `internal/cli/*.go` (`case "x":` + `if verb == "x"`) | the DEPTH. **Not optional**: `bp cloud barkpark ls` cannot be RED from A+B+C, because B has `cloud` and nothing left can adjudicate the token after it |
+| D | router dispatch | `internal/cli/*.go` (`case "x":`, `if verb == "x"`, and verb TABLES like `siteVerbMatrix`) | the DEPTH. **Not optional**: `bp cloud barkpark ls` cannot be RED from A+B+C, because B has `cloud` and nothing left can adjudicate the token after it |
 | E | `"--flag"` literals | `internal/cli/*.go`, file-scoped | hand-rolled parsers that declare no allowlist. Without E, `bp login --device` and every `bp vercel quick-setup` flag is UNPROVEN |
+
+**D reads dispatch by SHAPE, not by spelling.** A `switch`/`case "x":` and a
+lookup table are two spellings of one fact, and a reader keyed to either one
+goes blind the moment the other is used: #18555 replaced `runCloudSite()`'s verb
+switch with `siteVerbMatrix` and every correct `bp cloud site …` line in
+`templates/` went UNRESOLVED on docs nobody had touched. D therefore reads the
+TABLE — its `Verb:`, `Aliases:`, `Scope:` and handler columns — and reaches it
+the way the binary does, by following the call that hands a user-typed token
+into it. A function that merely RENDERS a table (`bp sites matrix`) donates no
+verbs to anything. The selftest holds both arms: dropping a row, dropping an
+alias, or widening a `…Only` scope each changes a verdict, and a token the table
+never declares still REDs.
 
 **Laws.** A token that resolves in NO source is UNRESOLVED and the gate FAILS —
 it never skips what it cannot adjudicate. A source that cannot be LOADED fails
@@ -519,3 +531,51 @@ three disciplines, not by claiming to be right:
 
 Mechanical recall beats inflated recall: a `false` that is actually `confirmed`
 on re-check costs more than a missed prose nuance.
+
+## doc-drift-check — the drift an ORDINARY change causes
+
+`scripts/doc-drift-check.sh` is the PR-time half of doc truth. The gates above
+ask structural questions about the doc spine; this one asks the three questions
+a code change actually rots, and it asks them **diff-scoped**, the same shape as
+`scripts/format-diff-scope.sh`: a finding is your red only when your own diff
+touches the doc that carries it (or touches a file an example declares as a
+dependency). Inherited drift is printed and stays neutral.
+
+| Check | Reds on | Deliberately silent about |
+|---|---|---|
+| links + routes | a relative target that resolves nowhere | `http(s)`, absolute, anchor-only and templated targets; a bare extensionless route that a `.md`, a directory or an `index.md` serves |
+| exposed placeholders | `FIXME` / `TBD` / `TODO:` / `<PLACEHOLDER>` / `REPLACE_ME` standing as prose | the same words inside a fenced block or an inline code span — that is a quotation, not an assertion |
+| allowlisted examples | a fenced block marked `<!-- doc-exec: allowlisted -->` exiting non-zero | every unmarked fence, which is never run and never judged |
+
+Cold-tier docs, `_attic/`, any `fixtures/` tree and `tooling/grip/ledger/` are
+out of the corpus: retired, frozen or deliberately-broken text is not drift.
+
+An executable example is opt-in, and it runs with a fresh `mktemp -d` as cwd, so
+a side-effectful one damages nothing but its own sandbox. `$DOC_DRIFT_REPO`
+points back at the repo root. This block is one, and it is the gate's own
+non-vacuity proof — it plants a broken link and demands the extractor SEE it:
+
+<!-- doc-exec: allowlisted deps=scripts/doc-drift-extract.py,scripts/doc-drift-check.sh -->
+```bash
+printf '%s\n' '# t' 'A [dead link](nope.md) in prose.' '`[quoted](nope.md)` is not.' > t.md
+out=$(python3 "$DOC_DRIFT_REPO/scripts/doc-drift-extract.py" t.md)
+echo "$out" | grep -qx 'link	2	nope.md'   # prose link is SEEN
+test "$(echo "$out" | wc -l)" -eq 1         # code-span link is NOT
+```
+
+Run it: `bash scripts/doc-drift-check.sh` (scoped to `origin/main...HEAD`), and
+`bash scripts/doc-drift-check.test.sh` for the twelve regression arms — six
+fixture classes, two scope arms, and a vacuity control that proves an empty
+corpus REFUSES rather than passing clean.
+
+### When your PR touches a doc — three rules
+
+The three contributor rules — a new durable fact goes into its CANONICAL OWNER,
+an INDEPENDENT READER reviews the doc change, and RE-RUN the supported startup
+paths a doc names — plus the coverage table saying what is mechanised and what
+is review-only, are CANONICAL in
+[`docs/ops/merge-gates.md`](../../docs/ops/merge-gates.md) §"When your PR
+touches a doc — three contributor rules". They are not restated here: that page
+is the `canonical-for: merge-gates` owner, and one topic gets one answer. This
+file stays the MECHANISM: what the extractor sees, what the corpus excludes, and
+how the twelve regression arms prove it.

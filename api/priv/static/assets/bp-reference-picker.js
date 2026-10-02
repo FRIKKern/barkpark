@@ -35,6 +35,7 @@ class BpReferencePicker extends HTMLElement {
     super();
     this._value = "";
     this._refType = "";
+    this._refTypes = [];
     this._dataset = "production";
     this._loading = false;
     this._debounceMs = 350;
@@ -56,6 +57,13 @@ class BpReferencePicker extends HTMLElement {
   connectedCallback() {
     if (this._mounted) return;
     this._mounted = true;
+    // Gyldendal parity E7: workspace-locale strings stamped by the server as
+    // `data-strings` (JSON); each key falls back to the English literal.
+    try {
+      this._strings = this.dataset.strings ? JSON.parse(this.dataset.strings) : {};
+    } catch (_e) {
+      this._strings = {};
+    }
     this._value = this.getAttribute("value") || "";
     this._refType = this.getAttribute("ref-type") || "";
     this._refTypes = this._refType
@@ -67,9 +75,18 @@ class BpReferencePicker extends HTMLElement {
     // Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2). "" on
     // the flat surface keeps every fetch byte-identical.
     this._scopePrefix = this.getAttribute("scope-prefix") || "";
-    this._searchIntel.clientId = BpSearchIntel.clientId("documents", this._dataset);
+    // bp-search-intel.js is a sibling script; a surface that loads the picker
+    // without it still gets a working picker, only without search telemetry.
+    this._searchIntel.clientId = typeof BpSearchIntel === "undefined"
+      ? null
+      : BpSearchIntel.clientId("documents", this._dataset);
     this._render();
     if (this._value) this._loadSelectedTitle();
+  }
+
+  _t(key, fallback) {
+    const strings = this._strings || {};
+    return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
   disconnectedCallback() {
@@ -117,14 +134,14 @@ class BpReferencePicker extends HTMLElement {
     const change = document.createElement("button");
     change.type = "button";
     change.className = "btn btn-sm";
-    change.textContent = "Change";
+    change.textContent = this._t("change", "Change");
     change.addEventListener("click", () => this._switchToSearch());
     actions.appendChild(change);
 
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "btn btn-destructive btn-sm";
-    remove.textContent = "Remove";
+    remove.textContent = this._t("remove", "Remove");
     remove.addEventListener("click", () => this._clear());
     actions.appendChild(remove);
 
@@ -141,7 +158,7 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = `Search ${this._refTypes.length ? this._refTypes.join(", ") : "documents"}…`;
+    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
@@ -201,6 +218,7 @@ class BpReferencePicker extends HTMLElement {
 
   _searchHeaders(opts) {
     opts = opts || {};
+    if (typeof BpSearchIntel === "undefined") return { Accept: "application/json" };
     return BpSearchIntel.searchHeaders(this._searchIntel, {
       source: "studio-picker",
       record: opts.record
@@ -208,10 +226,12 @@ class BpReferencePicker extends HTMLElement {
   }
 
   _captureSearchEventId(body) {
+    if (typeof BpSearchIntel === "undefined") return;
     BpSearchIntel.captureEventId(this._searchIntel, body);
   }
 
   _recordSearchInteraction(objectId, position) {
+    if (typeof BpSearchIntel === "undefined") return;
     BpSearchIntel.trackInteraction(
       "documents",
       this._dataset,
@@ -414,7 +434,7 @@ class BpReferencePicker extends HTMLElement {
     if (!matches.length) {
       const empty = document.createElement("div");
       empty.className = "bp-ref-dropdown-empty";
-      empty.textContent = "No matches";
+      empty.textContent = this._t("no_matches", "No matches");
       this._dropdown.appendChild(empty);
       this._dropdown.hidden = false;
       if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
@@ -438,7 +458,7 @@ class BpReferencePicker extends HTMLElement {
         // Sanity-style draft indicator on unpublished candidates.
         const badge = document.createElement("span");
         badge.className = "bp-ref-suggest-meta";
-        badge.textContent = "draft";
+        badge.textContent = this._t("draft", "draft");
         btn.appendChild(badge);
       }
       btn.addEventListener("mousedown", (e) => {
@@ -505,11 +525,12 @@ class BpReferencePicker extends HTMLElement {
       const body = await res.json();
       const docs = body.documents || [];
       // Prefix-agnostic: the stored value is canonical, the matching row
-      // may be its drafts.* counterpart (or vice versa).
+      // may be its drafts.* counterpart (or vice versa). No match keeps the
+      // id: a dangling reference must never borrow another document's title.
       const canon = (v) =>
         v && v.startsWith("drafts.") ? v.slice("drafts.".length) : v || "";
       const match =
-        docs.find((d) => canon(d._id || d.id) === canon(id)) || docs[0] || null;
+        docs.find((d) => canon(d._id || d.id) === canon(id)) || null;
       const title = match && (match.title || match._id || match.id);
       if (title && this._value) {
         this._selectedTitle = title;
@@ -538,6 +559,12 @@ class BpReferencePicker extends HTMLElement {
   set value(v) {
     if (v === this._value) return;
     this._value = v || "";
+    // Before connectedCallback the element has no config (ref-type, dataset,
+    // strings) to render with. Keep the value; connectedCallback renders it.
+    if (!this._mounted) {
+      this.setAttribute("value", this._value);
+      return;
+    }
     this._render();
     if (this._value) this._loadSelectedTitle();
   }

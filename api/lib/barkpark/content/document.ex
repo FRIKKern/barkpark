@@ -55,6 +55,20 @@ defmodule Barkpark.Content.Document do
     # there. Read enforcement lives in `Barkpark.Content.Scope.scope_to_owner/2`.
     field :owner_id, :binary_id
 
+    # SCOPE-RESOLUTION PROVENANCE (task-b389fe352e013dce). Which arm of
+    # `Content.WriteScope.resolve_write_scope_with_source/1` produced the
+    # `workspace_id` on this row — "explicit" | "inferred" | "instance_wide" |
+    # "default_fallback" | "inherited". Stamped on every write by
+    # `WriteScope.put_scope_attrs/2`, from SERVER-resolved opts; it is in that
+    # module's `@client_scope_keys` drop list, so a caller can never assert its
+    # own provenance.
+    #
+    # It describes the workspace_id BESIDE it, not the row's birth: both are
+    # re-stamped by the same write, so the pair is always coherent. NULL means
+    # the row predates migration 20260923120000 and is permanently UNMEASURED —
+    # never fold those rows into either side of a count.
+    field :scope_source, :string
+
     field :search_vector, :any, virtual: true
 
     # Carries a task doc's hydrated `task_edges` rows (resolved PK→doc_id) so
@@ -88,6 +102,13 @@ defmodule Barkpark.Content.Document do
 
   def statuses, do: @statuses
 
+  # The closed vocabulary for `scope_source`. Exposed as a function because the
+  # provenance test and any future counting query need the SAME list — a
+  # duplicated literal would drift the moment a sixth arm is added.
+  @scope_sources ~w(explicit inferred instance_wide default_fallback inherited)
+
+  def scope_sources, do: @scope_sources
+
   def changeset(document, attrs) do
     document
     |> cast(attrs, [
@@ -101,7 +122,8 @@ defmodule Barkpark.Content.Document do
       :workspace_id,
       :project_id,
       :dataset_id,
-      :owner_id
+      :owner_id,
+      :scope_source
     ])
     |> validate_required([:doc_id, :type])
     # varchar(255) COLUMNS NEED A CHANGESET LENGTH GATE, OR POSTGRES ANSWERS 500.
@@ -128,6 +150,12 @@ defmodule Barkpark.Content.Document do
     |> validate_length(:dataset, max: 255)
     |> validate_length(:title, max: 255)
     |> validate_inclusion(:status, @statuses)
+    # `scope_source` is a CLOSED vocabulary (task-b389fe352e013dce). The write
+    # path only ever produces these five literals, and the column exists to be
+    # GROUPed BY — a sixth value arriving from anywhere would silently split a
+    # bucket. nil is allowed (and is what every pre-migration row carries);
+    # validate_inclusion only runs on a present change.
+    |> validate_inclusion(:scope_source, @scope_sources)
     # W2 uniqueness flip: the row's identity leaf is now (doc_id, type,
     # dataset_id). The `dataset` STRING constraint is dropped at the DB level
     # (see migration 20260527134000); naming the flipped index here keeps the
@@ -136,11 +164,26 @@ defmodule Barkpark.Content.Document do
       name: :documents_doc_id_type_dataset_id_index
     )
     # FK-abort containment (Felix W17). `workspace_id`, `project_id`, and
-    # `dataset_id` are real Postgres foreign keys —
-    # `references(:workspaces/:projects/:datasets, on_delete: :nilify_all)` from
-    # migrations 20260527110100_add_tenancy_columns and
-    # 20260527131000_add_dataset_id_columns, with Ecto-default constraint names
-    # `documents_<col>_fkey`. `owner_id` is NOT this class — it is a plain
+    # `dataset_id` are real Postgres foreign keys to
+    # `:workspaces` / `:projects` / `:datasets`, with Ecto-default constraint
+    # names `documents_<col>_fkey`. The COLUMNS arrived in migrations
+    # 20260527110100_add_tenancy_columns and 20260527131000_add_dataset_id_columns;
+    # their CURRENT delete action was set later, by
+    # 20260527160000_cascade_content_on_scope_delete, to `on_delete: :delete_all`
+    # (SQL `ON DELETE CASCADE`) — and nothing after it re-flips these twelve
+    # content-table scope FKs, so CASCADE is what ships.
+    #
+    # WHAT THAT MEANS FOR A READER: deleting a workspace / project / dataset
+    # DELETES this row. It does not survive with a NULLed scope column, so a
+    # scope delete can never manufacture a `documents` row carrying
+    # `workspace_id IS NULL` beside a non-NULL `project_id` — the writer cannot
+    # produce that pair either (`Content.WriteScope.resolve_write_scope/1`;
+    # task-3e3367eba8695cec). The sibling content tables (revisions,
+    # media_files, schema_definitions) were flipped by the same migration; see
+    # `Content.Revisions`' retention note for the same fact stated from the
+    # history side.
+    #
+    # `owner_id` is NOT this class — it is a plain
     # `:binary_id` column with no `references()` (migration
     # 20260629150300_add_owner_id_to_documents) — so it earns no constraint.
     #

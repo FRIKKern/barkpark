@@ -6,6 +6,7 @@ import (
 	"strconv"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/taskboard"
 )
 
 // transport.go — the client's single IO seam. Every /v1/chat call the TUI makes
@@ -85,14 +86,22 @@ type Transport interface {
 	// onFrame(event, data). Replayed persisted rows arrive as event "message"
 	// (carrying an id: line the shared parser uses for Last-Event-ID resume);
 	// live frames as "chat"/"permission"/"exit". Blocks until ctx is cancelled
-	// or the stream fails.
-	Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte)) error
+	// or the stream fails. onReconnect (nil-safe) fires on every reconnect
+	// attempt after a drop — the signal the shell re-reads its context band on,
+	// because a reconnect is exactly when the connection may have changed.
+	Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte), onReconnect func()) error
 	// FleetEvents opens the ONE herd fleet stream (GET /v1/chat/events, herd
 	// charter D45h/D54h): snapshot-then-live four-state frames for the whole
 	// in-scope fleet. It is a thin wrap over apiclient.FleetEvents — the SAME
 	// scanListenFrames parser as Events, no fork — and blocks until ctx is
 	// cancelled or the transport's own reconnect/backoff gives up terminally.
 	FleetEvents(ctx context.Context, lastEventID string, onFrame func(event string, data []byte)) error
+	// JoinTasks reads the task rows the agent↔task join resolves against
+	// (task wsc-bl-agent-task-join). It rides taskboard.FetchSnapshot — the SAME
+	// two calls `bp tasks` makes, with the SAME decode — so the terminal has one
+	// task-wire projection, not a second one grown inside chat. Called at most
+	// once per process, lazily, when the agent-detail level first opens.
+	JoinTasks() ([]taskboard.Task, error)
 }
 
 // clientTransport implements Transport over the shared internal/apiclient chat
@@ -216,7 +225,7 @@ func (t *clientTransport) AnswerQuestion(id, requestID string, answers map[strin
 	return t.c.AnswerChatQuestion(id, requestID, answers)
 }
 
-func (t *clientTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte)) error {
+func (t *clientTransport) Events(ctx context.Context, id string, lastSeq int, onFrame func(event string, data []byte), onReconnect func()) error {
 	// Resume is by turn boundary (charter D5): seed Last-Event-ID from the max
 	// persisted seq the caller already holds. apiclient.ChatEvents advances the
 	// cursor on each id:<seq> replay row and reconnects on a drop / transient 5xx
@@ -228,7 +237,7 @@ func (t *clientTransport) Events(ctx context.Context, id string, lastSeq int, on
 	return t.c.ChatEvents(ctx, id, last, func(event, data string) error {
 		onFrame(event, []byte(data))
 		return nil
-	}, nil)
+	}, onReconnect)
 }
 
 func (t *clientTransport) FleetEvents(ctx context.Context, lastEventID string, onFrame func(event string, data []byte)) error {
@@ -278,4 +287,15 @@ func stringField(fields map[string]any, key string) (*string, bool) {
 		return nil, false
 	}
 	return &s, true
+}
+
+// JoinTasks fetches the join's candidate rows through the shared taskboard
+// snapshot decoder. Errors pass through untouched: the shell degrades them to
+// "no task line" rather than painting client chrome into an agent's detail.
+func (t clientTransport) JoinTasks() ([]taskboard.Task, error) {
+	snap, err := taskboard.FetchSnapshot(t.c)
+	if err != nil {
+		return nil, err
+	}
+	return snap.Tasks, nil
 }

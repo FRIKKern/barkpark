@@ -221,8 +221,12 @@ defmodule Barkpark.Tenancy.Members do
           |> Membership.changeset(%{role: role}, valid_role_names(workspace_id))
           |> Repo.update()
           |> case do
-            {:ok, updated} -> {:ok, decorate_one(updated)}
-            {:error, changeset} -> {:error, changeset}
+            {:ok, updated} ->
+              announce_seats_changed(updated.workspace_id)
+              {:ok, decorate_one(updated)}
+
+            {:error, changeset} ->
+              {:error, changeset}
           end
         end
     end
@@ -400,10 +404,38 @@ defmodule Barkpark.Tenancy.Members do
 
   defp delete_membership(%Membership{} = membership) do
     case Repo.delete(membership) do
-      {:ok, deleted} -> {:ok, decorate_one(deleted)}
-      {:error, _changeset} -> {:error, :delete_failed}
+      {:ok, deleted} ->
+        announce_seats_changed(deleted.workspace_id)
+        {:ok, decorate_one(deleted)}
+
+      {:error, _changeset} ->
+        {:error, :delete_failed}
     end
   end
+
+  @doc """
+  Tell every open LiveView mounted in `workspace_id` that its seat roster
+  changed (r4a realtime authz sweep). A seat is checked when a socket mounts;
+  without this a member removed or demoted kept an open Studio tab reading the
+  workspace until the browser reconnected. `BarkparkWeb.LiveScope` subscribes
+  and re-runs its read admission on this message. Call it AFTER the change is
+  committed, so the re-check sees the new roster.
+  """
+  @spec announce_seats_changed(binary() | nil) :: :ok
+  def announce_seats_changed(workspace_id) when is_binary(workspace_id) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      seats_topic(workspace_id),
+      {:workspace_seats_changed, workspace_id}
+    )
+  end
+
+  def announce_seats_changed(_workspace_id), do: :ok
+
+  @doc "The PubSub topic `announce_seats_changed/1` publishes on."
+  @spec seats_topic(binary()) :: String.t()
+  def seats_topic(workspace_id) when is_binary(workspace_id),
+    do: "workspace_seats:" <> workspace_id
 
   # A demotion is only dangerous when it takes the LAST owner off the owner
   # role. Re-setting an owner to `owner` is a no-op and must not be refused.

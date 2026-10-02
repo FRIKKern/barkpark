@@ -1,0 +1,44 @@
+{
+  "_doc": "The four self-enqueue chains reachable from a LiveViewTest trigger in the studio tree, each labelled with its HOP COUNT: the number of zero-delay self-messages the LiveView sends ITSELF between the handle_event the test triggers and the handle_info that writes to the store. Hop count is what decides how many barriers a test needs: `Phoenix.LiveViewTest.render/1` is ONE `GenServer.call(pid, {:phoenix, :ping})` (deps/phoenix_live_view/lib/phoenix_live_view/channel.ex, `def ping/1`), which orders only against messages ALREADY in the mailbox when it arrives. A 1-hop chain's send fires INSIDE the GenServer.call the trigger is already blocking on, so it is in the mailbox before the next ping and ONE barrier drains it deterministically. A chain of 2+ hops enqueues its next hop while the LiveView handles the previous one, AFTER the ping has been answered, so one barrier is not a drain and only a settle loop (ping until message_queue_len is 0, twice) is sound.",
+  "chains": {
+    "CH-PAPEROP": {
+      "hops": 1,
+      "trigger_events": ["inner-change", "inner-flush", "inner-array-op"],
+      "enqueue_sites": [
+        "api/lib/barkpark_web/live/studio/paper_field_block.ex:350  send(self(), {:paper_op, Map.put(op, \"if_rev\", if_rev), request_id})",
+        "api/lib/barkpark_web/live/studio/paper_field_block.ex:352  send(self(), {:paper_op, Map.put(op, \"if_rev\", if_rev)})"
+      ],
+      "terminus": "api/lib/barkpark_web/live/studio/studio_live.ex:328/342 handle_info({:paper_op, ...}) -> Lifecycle.paper_op/2 -> Shared.paper_op/2 (store write). The handler issues no further self-enqueue."
+    },
+    "CH-AUTOSAVE": {
+      "hops": 1,
+      "trigger_events": ["select-media", "clear-image", "upload-image", "select-ref", "clear-ref"],
+      "enqueue_sites": [
+        "api/lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:42  send(self(), {:autosave_form, form})",
+        "api/lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:49  send(self(), {:autosave_form, form})",
+        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:59  send(self(), {:autosave_form, form})",
+        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:66  send(self(), {:autosave_form, form})",
+        "api/lib/barkpark_web/live/studio/studio_live/handlers/media.ex:93  send(self(), {:autosave_form, form})"
+      ],
+      "terminus": "api/lib/barkpark_web/live/studio/studio_live.ex:321 handle_info({:autosave_form, form}) -> Lifecycle.autosave_form/2 -> Shared.do_autosave/2 (store write). No further self-enqueue."
+    },
+    "CH-CHAT": {
+      "hops": 1,
+      "trigger_events": ["send (chat form phx-submit)"],
+      "enqueue_sites": [
+        "api/lib/barkpark_web/live/studio/chat_live.ex:554  send(self(), {:dispatch_send, text, queued?})"
+      ],
+      "terminus": "api/lib/barkpark_web/live/studio/chat_live.ex:1287 handle_info({:dispatch_send, text, queued?}) -> ensure_session + wire write + persist. No further self-enqueue."
+    },
+    "CH-TREE": {
+      "hops": 3,
+      "trigger_events": ["tree_node_select"],
+      "enqueue_sites": [
+        "HOP 1  api/lib/barkpark_web/components/fields/tree_codelist_field.ex:179  maybe_notify_select/2 -> send(self(), {:tree_codelist_change, ...})",
+        "HOP 2  api/lib/barkpark_web/live/studio/studio_live/handlers/lifecycle.ex:316  tree_codelist_change/2 -> send_update(PaperFieldBlock, tree_value: code), which is Phoenix.LiveView.Channel.send_update/3 -> send(pid, {:phoenix, :send_update, {ref, assigns}}) with pid == self()",
+        "HOP 3  api/lib/barkpark_web/live/studio/paper_field_block.ex:350/352  update(%{tree_value: code}) (paper_field_block.ex:119) -> persist/4 -> send(self(), {:paper_op, ...})"
+      ],
+      "terminus": "api/lib/barkpark_web/live/studio/studio_live.ex:328/342 handle_info({:paper_op, ...}) (store write) — four generations after the trigger."
+    }
+  }
+}

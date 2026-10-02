@@ -30,11 +30,15 @@ defmodule Barkpark.StructureTasksDeskTest do
     |> Repo.insert!()
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "tasks plugin is registered on the plugin highway" do
     assert {:ok, %{module: Barkpark.Plugins.Tasks}} =
              Barkpark.Plugins.Registry.lookup("tasks")
   end
 
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "desk shows a Tasks document list when the task schema exists" do
     dataset = "structure_tasks_desk"
     insert_task_schema!(dataset)

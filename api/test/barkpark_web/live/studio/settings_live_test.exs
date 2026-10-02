@@ -29,9 +29,21 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
     ensure_default_scope!()
 
     {:ok, _} =
-      Auth.create_token(@admin_token, "test admin", "production", ["read", "write", "admin"])
+      Auth.create_token(
+        @admin_token,
+        "test admin",
+        "production",
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
 
-    {:ok, _} = Auth.create_token(@junior_token, "test junior", "production", ["read"])
+    {:ok, _} =
+      Auth.create_token(
+        @junior_token,
+        "test junior",
+        "production",
+        ["read"]
+      )
 
     {:ok, conn: conn}
   end
@@ -115,6 +127,213 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert body =~ ~s(class="form-switch")
       assert body =~ ~s(class="form-switch-track")
       assert body =~ ~s(class="form-switch-state")
+    end
+  end
+
+  # ── Where a font-family rule for THIS page can be authored ─────────────────
+  #
+  # studio-r21g: the refute pair above reads `element("div.settings-live") |>
+  # render()` — the LiveView's OWN bytes. A `.settings-live { font-family:
+  # ui-sans-serif }` rule added to the Studio stylesheet is the same disease and
+  # was invisible to it (measured: the mutation left this file 51 tests,
+  # 0 failures). The fix is not a second literal — it is to read every source
+  # that can style this page, DERIVED from how the page is assembled:
+  #
+  #   router.ex   plug(:put_root_layout, html: {BarkparkWeb.Layouts, :root})
+  #               live_session …, layout: {BarkparkWeb.Layouts, :studio}
+  #   ⇒ the browser applies, in order:
+  #     (a) every inline `<style>` block in root.html.heex and studio.html.heex
+  #     (b) every `<link rel="stylesheet" href="/assets/…">` those templates
+  #         pull, resolved under priv/static  (bp-paper-editor-shell.css,
+  #         bp-media-picker.css today — read from the href, never a fixed list)
+  #     (c) CSS a template embeds through a helper call: root.html.heex's
+  #         `paper_stylesheet()` → Layouts.paper_stylesheet/0 →
+  #         PortableDoc.Render.Stylesheet.css/0 (the paper-surface sheet)
+  #     (d) the LiveView's own markup — inline `style=` attributes
+  #         (settings_live.ex, the page root — grep: `class="settings-live" style=` —
+  #         `<div class="settings-live" style="… font-family: var(--font);">`)
+  #
+  # `font_sources/0` walks (a)–(c) off disk; `body` above is (d). Both arms are
+  # asserted below.
+  #
+  # NON-VACUITY: root.html.heex declares NO `.settings-live` font rule today, so
+  # the "every declaration is a token" loop has an empty subject on a clean tree
+  # — a green with no subject. That is exactly what the CONTROL test guards: it
+  # feeds the offending rule through the SAME extraction and reds if the layout
+  # arm ever stops being read.
+  describe "the page's font is a theme token wherever the rule is authored (studio-r21g)" do
+    @layout_dir Path.expand("../../../../lib/barkpark_web/layouts", __DIR__)
+    @static_dir Path.expand("../../../../priv/static", __DIR__)
+    # The two templates the router names for a Studio LiveView route.
+    @page_layouts ["root.html.heex", "studio.html.heex"]
+    @page_root_class "settings-live"
+
+    setup %{conn: conn} do
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @settings_path)
+      {:ok, body: view |> element("div.#{@page_root_class}") |> render()}
+    end
+
+    test "the router still assembles this page from exactly the layouts we read" do
+      router = File.read!(Path.expand("../../../../lib/barkpark_web/router.ex", __DIR__))
+      # If either name changes, @page_layouts is stale and font_sources/0 is
+      # reading a template the page no longer uses.
+      assert router =~ "{BarkparkWeb.Layouts, :root}"
+      assert router =~ "{BarkparkWeb.Layouts, :studio}"
+    end
+
+    test "the font check's input is the whole stylesheet set, not one element's render" do
+      sources = font_sources()
+
+      # Non-empty, and every source carries bytes (an empty read is not evidence).
+      assert sources != []
+
+      for {label, css} <- sources do
+        assert byte_size(css) > 0, "source #{label} read as empty"
+      end
+
+      labels = Enum.map(sources, &elem(&1, 0))
+
+      assert Enum.any?(labels, &String.starts_with?(&1, "root.html.heex")),
+             "the Studio stylesheet (root.html.heex) is not among the sources: #{inspect(labels)}"
+
+      assert Enum.any?(labels, &String.starts_with?(&1, "/assets/")),
+             "no linked stylesheet is among the sources: #{inspect(labels)}"
+
+      # The layout arm really is bytes the LiveView render does NOT contain —
+      # so this set is strictly wider than the element-scoped extraction.
+      assert Enum.any?(sources, fn {_, css} -> css =~ "body { font-family: var(--font)" end),
+             "the layout's own `body { font-family: var(--font) }` rule was not read"
+    end
+
+    test "every font-family rule targeting the Settings page root resolves to a token" do
+      offenders =
+        for {label, css} <- font_sources(),
+            {selector, value} <- font_family_declarations(css, "." <> @page_root_class),
+            not token_font?(value),
+            do: "#{label}: #{selector} { font-family: #{value} }"
+
+      assert offenders == [],
+             """
+             A `.#{@page_root_class}` rule hardcodes a font stack instead of the
+             theme token. The Settings page must inherit `var(--font)`:
+             #{Enum.join(offenders, "\n")}
+             """
+    end
+
+    test "every Studio page-root font rule in the layout resolves to a token" do
+      # Generalised from `.settings-live` to the shape: any selector naming a
+      # Studio LiveView page root (a `*-live` class). A predicate, not a list —
+      # a new Studio page is covered the day it is written.
+      root_heex = File.read!(Path.join(@layout_dir, "root.html.heex"))
+
+      offenders =
+        for {selector, value} <- font_family_declarations(root_heex, ~r/\.[a-z0-9-]+-live\b/),
+            not token_font?(value),
+            do: "root.html.heex: #{selector} { font-family: #{value} }"
+
+      assert offenders == [], Enum.join(offenders, "\n")
+    end
+
+    test "the LiveView's own markup declares no native font stack", %{body: body} do
+      refute body =~ "ui-sans-serif"
+      refute body =~ "ui-monospace"
+    end
+
+    test "CONTROL: the same extraction catches the offending rule authored in the layout" do
+      sources = font_sources()
+
+      {label, css} =
+        Enum.find(sources, fn {l, _} -> String.starts_with?(l, "root.html.heex <style>") end) ||
+          flunk("""
+          The layout arm is missing from font_sources/0. Every Studio style rule
+          lives in root.html.heex's inline <style>; without it this check reads
+          only the places a hardcoded font would NOT be written.
+          """)
+
+      fixture = css <> "\n.#{@page_root_class} { font-family: ui-sans-serif; }\n"
+
+      caught =
+        for {selector, value} <- font_family_declarations(fixture, "." <> @page_root_class),
+            not token_font?(value),
+            do: {selector, value}
+
+      assert caught != [],
+             "#{label}: a `.#{@page_root_class} { font-family: ui-sans-serif }` rule was NOT caught"
+    end
+
+    # ── extraction ────────────────────────────────────────────────────────────
+
+    # [{label, css}] for every stylesheet the Settings page pulls, read off disk.
+    defp font_sources do
+      Enum.flat_map(@page_layouts, fn name ->
+        html = File.read!(Path.join(@layout_dir, name))
+
+        inline =
+          html
+          |> style_blocks()
+          |> Enum.with_index(1)
+          |> Enum.map(fn {css, i} -> {"#{name} <style> ##{i}", css} end)
+
+        linked =
+          for href <- linked_stylesheets(html),
+              path = Path.join(@static_dir, String.trim_leading(href, "/")),
+              File.exists?(path),
+              do: {href, File.read!(path)}
+
+        helper =
+          if html =~ "paper_stylesheet()" do
+            [{"Render.Stylesheet.css/0", Barkpark.PortableDoc.Render.Stylesheet.css()}]
+          else
+            []
+          end
+
+        inline ++ linked ++ helper
+      end)
+    end
+
+    defp style_blocks(html) do
+      ~r/<style[^>]*>(.*?)<\/style>/s
+      |> Regex.scan(html)
+      |> Enum.map(fn [_, css] -> css end)
+      |> Enum.reject(&(String.trim(&1) == ""))
+    end
+
+    defp linked_stylesheets(html) do
+      ~r/<link[^>]*rel="stylesheet"[^>]*href="([^"]+)"/
+      |> Regex.scan(html)
+      |> Enum.map(fn [_, href] -> href end)
+    end
+
+    # Every `font-family:` declaration in `css` whose selector matches `match`
+    # (a substring or a Regex). A rule body carries no braces, so this also
+    # reaches rules nested inside @media/@supports.
+    defp font_family_declarations(css, match) do
+      # Strip CSS comments first: a commented-out rule is not a declaration,
+      # and a comment sitting above a rule would otherwise be read as part of
+      # its selector.
+      ~r/([^{}]+)\{([^{}]*)\}/s
+      |> Regex.scan(String.replace(css, ~r|/\*.*?\*/|s, ""))
+      |> Enum.flat_map(fn [_, selector, decls] ->
+        selector = String.trim(selector)
+
+        if selector_matches?(selector, match) do
+          ~r/font-family\s*:\s*([^;}]+)/
+          |> Regex.scan(decls)
+          |> Enum.map(fn [_, value] -> {selector, String.trim(value)} end)
+        else
+          []
+        end
+      end)
+    end
+
+    defp selector_matches?(selector, %Regex{} = re), do: Regex.match?(re, selector)
+    defp selector_matches?(selector, str) when is_binary(str), do: String.contains?(selector, str)
+
+    # The theme token (or an explicit inherit) — anything else is a hardcoded stack.
+    defp token_font?(value) do
+      value = String.trim(value)
+      value == "inherit" or Regex.match?(~r/^var\(--[a-z0-9-]*font[a-z0-9-]*\b/, value)
     end
   end
 
@@ -219,6 +438,45 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert audited?("revealme", "reveal")
     end
 
+    # The REST twin sits behind RequirePlatformOperator; with the operator
+    # allowlist ARMED and this admin not on it, the Studio reveal refuses too
+    # (task-a1c518158045be04).
+    test "an armed operator allowlist refuses the reveal to a non-operator admin", %{view: view} do
+      Settings.put("operatoronly", %{"api_key" => "operatorsecretvalue"})
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [Ecto.UUID.generate()])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatoronly"})
+
+      refute html =~ "operatorsecretvalue"
+      assert html =~ "requires the platform operator"
+      refute audited?("operatoronly", "reveal")
+    end
+
+    test "with the allowlist armed, the named operator still reveals", %{view: view} do
+      Settings.put("operatorok", %{"api_key" => "operatorvisiblevalue"})
+      {:ok, %{id: admin_id}} = Barkpark.Auth.verify_token(@admin_token)
+      previous = Application.get_env(:barkpark, :operator_token_ids)
+      Application.put_env(:barkpark, :operator_token_ids, [admin_id])
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :operator_token_ids, previous),
+          else: Application.delete_env(:barkpark, :operator_token_ids)
+      end)
+
+      html = render_click(view, "reveal", %{"plugin_name" => "operatorok"})
+
+      assert html =~ "operatorvisiblevalue"
+      assert audited?("operatorok", "reveal")
+    end
+
     test "delete removes row + writes delete audit", %{view: view} do
       Settings.put("zapme", %{"k" => "v"})
 
@@ -268,6 +526,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, conn: conn}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "loading bokbasen renders 5 typed inputs (no raw textarea)", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -286,6 +546,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute html =~ ~s(id="settings_json")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "submitting the typed form persists via Settings.put", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -313,6 +575,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
               }} = Settings.reveal("bokbasen")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "loading bokbasen masks secrets but shows URL + role plain", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -336,6 +600,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ ~s(value="publisher")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "rejects submit with missing required fields", %{conn: conn} do
       {:ok, view, _html} = live(conn, @settings_path)
 
@@ -358,6 +624,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert {:error, :not_found} = Settings.get("bokbasen")
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "save with untouched masked secrets preserves the stored credentials", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -391,6 +659,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert stored["client_role"] == "distributor"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "save with a newly typed secret persists the new value", %{conn: conn} do
       Settings.put("bokbasen", %{
         "api_base" => "https://api.bokbasen.io",
@@ -431,6 +701,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view: view, html: html}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "lists installed plugins, each row carrying a default badge when no override exists",
          %{html: html} do
       assert html =~ ">Plugins<"
@@ -450,6 +722,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ "…Rest"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "toggling a plugin persists into settings[\"plugins\"] and preserves the theme key",
          %{view: view} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -471,6 +745,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert fresh.settings["theme"] == "evergreen"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "a workspace override wins over the declaration default and drops the badge",
          %{conn: conn} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -495,6 +771,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
              )
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "placement change persists to settings[\"plugins\"] and re-resolves via Enablement",
          %{view: view} do
       ws = Barkpark.Tenancy.get_default_workspace()
@@ -575,6 +853,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert html =~ ws_a.name
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "a scope switch FROM Settings lands on the NEW scope's Settings, and writes land there — not the old (D16)",
          %{conn: conn, ws_a: ws_a, proj_a: proj_a, ws_b: ws_b, proj_b: proj_b} do
       {:ok, view, _html} = live(conn, settings_url(ws_a, proj_a))
@@ -671,6 +951,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, conn: conn}
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "an enabled plugin whose owned types are UNREGISTERED shows the 'no content types' truth",
          %{conn: conn} do
       # Remove EVERY globally-registered bulldocs schema for this test's scope,
@@ -697,6 +979,8 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute hint =~ "types registered, no documents yet"
     end
 
+    # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
+    @tag :requires_plugins
     test "an enabled plugin whose owned types are REGISTERED but document-less shows the softer truth",
          %{conn: conn} do
       # Ambient test DB: `paper` is registered globally with NO documents (empty
@@ -776,7 +1060,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # the coarse mount gate. The per-write re-gate is the ONLY thing that
       # separates them at the target workspace.
       {:ok, admin_tok} =
-        Auth.create_token("ep-admin-raw", "ep admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          "ep-admin-raw",
+          "ep admin",
+          "production",
+          ["read", "write", "admin"]
+        )
 
       {:ok, outsider_tok} =
         Auth.create_token(
@@ -852,14 +1141,17 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       assert Barkpark.Tenancy.workspace_theme(ws_after) == "evergreen"
       assert Map.has_key?(Barkpark.Tenancy.workspace_plugin_settings(ws_after), "onixedit")
 
-      # The toggle is a server-derived flip: a second click round-trips back to
-      # self-hosted, never trusting a client-supplied value.
+      # The toggle is a server-derived flip, never trusting a client-supplied
+      # value. The flip BACK to self-hosted would run this tenant workspace's
+      # chat on the instance host, which only the instance owner's Default
+      # workspace may (task-6ca882967fd95dda): refused, named, nothing written.
       {:ok, view2, _html} = live(conn, ep_settings_url(ws, proj))
-      render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      html2 = render_click(view2, "toggle_execution_profile", %{"ws" => ws.id})
+      assert html2 =~ "reserved for the instance owner"
 
       assert Barkpark.Tenancy.workspace_chat_settings(Barkpark.Tenancy.get_workspace_by_id(ws.id))[
                "execution_profile"
-             ] == "self_hosted"
+             ] == "cloud"
     end
 
     test "a garbage persisted profile never propagates — a flip yields a known-good value", %{
@@ -909,7 +1201,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
   describe "per-write workspace_admin? re-gate — theme/plugin writes (W34, D268)" do
     setup %{conn: conn} do
       {:ok, admin_tok} =
-        Auth.create_token("w34-admin-raw", "w34 admin", "production", ["read", "write", "admin"])
+        Auth.create_token(
+          "w34-admin-raw",
+          "w34 admin",
+          "production",
+          ["read", "write", "admin"]
+        )
 
       {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "w34-ws", name: "W34 Belt WS"})
       {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "W34P"})
@@ -1020,7 +1317,12 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # role-only W26 mount gate — but WITHOUT the flat global "admin"
       # permission, so it holds no installation-level authority.
       {:ok, b_admin_tok} =
-        Auth.create_token("w35-b-admin-raw", "w35 b-only admin", "production", ["read", "write"])
+        Auth.create_token(
+          "w35-b-admin-raw",
+          "w35 b-only admin",
+          "production",
+          ["read", "write"]
+        )
 
       {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35-wb", name: "W35 Cred WS B"})
       {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35PB"})
@@ -1198,10 +1500,15 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # membership role (clears the `:scoped_admin` mount gate) with NO global
       # "admin" permission, hence no installation-level authority.
       {:ok, b_admin_tok} =
-        Auth.create_token("w35l-b-admin-raw", "w35 load b-only admin", "production", [
-          "read",
-          "write"
-        ])
+        Auth.create_token(
+          "w35l-b-admin-raw",
+          "w35 load b-only admin",
+          "production",
+          [
+            "read",
+            "write"
+          ]
+        )
 
       {:ok, ws_b} = Barkpark.Tenancy.create_workspace(%{slug: "w35l-wb", name: "W35L Cred WS B"})
       {:ok, proj_b} = Barkpark.Tenancy.create_project_with_dataset(ws_b, %{name: "W35LPB"})

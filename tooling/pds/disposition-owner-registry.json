@@ -1,0 +1,203 @@
+{
+  "_doc": "THE registry of legal disposition_owner values for PDS ledger rows. A non-empty disposition_owner is NOT evidence of ownership: before this file the field had no schema, no validator and no writer anywhere in api/lib or internal/, so a census could only assert 'non-empty and slug-shaped' and green on sixteen strings nobody had defined. This file defines them, and tooling/grip/ledger/disposition_owner_registry.py REFUSES anything not listed.",
+  "authority": "tooling/grip/ledger/disposition_owner_registry.py is the only reader; adding a roles[] entry is pds-owner-onboarding-owner's call.",
+  "derived_from_the_ledger": {
+    "at": "2026-09-11",
+    "command": "python3 tooling/grip/ledger/disposition_owner_registry.py --derive",
+    "rows_walked": 8710,
+    "pages": 18,
+    "terminator": "hasMore=false",
+    "distinct_owners_board_wide": 22,
+    "open_rows_with_no_owner": 283,
+    "note": "The slug list below is DERIVED FROM THIS WALK, not quoted from the task row that asked for it. The task recorded 16 slugs on 2026-07-30 and 22 on 2026-07-31; today's walk finds 22 distinct owners board-wide and 16 live on rows whose disposition is open. An enumeration is a snapshot: re-run --derive before trusting these counts, and use --check for the verdict."
+  },
+  "shape": "^[a-z0-9]+(-[a-z0-9]+)*$",
+  "expiring_owner_ruling": {
+    "id": "wave-N",
+    "pattern": "^wave-[0-9]+$",
+    "ruling": "REFUSED AS AN OWNER.",
+    "why": "The two honest options were auto-reassign-on-close and refuse-outright. Auto-reassign needs a writer, and disposition_owner has no code writer repo-wide \u2014 there is nothing to hang the reassignment on, so 'auto-reassign' would have been a documented intention, not an enforced rule. Refusal is enforceable by the same predicate that enforces the registry, and it fails LOUDLY at assignment time instead of silently at wave close.",
+    "enforced_by": "is_expiring_owner() in tooling/grip/ledger/disposition_owner_registry.py. It is checked BEFORE registry membership, so a wave-N slug is refused even if someone adds it to roles[] \u2014 and lint_registry() reds on a registry that lists one.",
+    "live_violations_at_derivation": 8
+  },
+  "roles": [
+    {
+      "slug": "pds-harness-maintainer",
+      "class": "durable-role",
+      "definition": "Owns the PDS shell/exs harnesses under scripts/pds-* and their door-census dispositions.",
+      "resolution": "Route to whoever is running the current PDS wave's harness slice; the work is a scripts/pds-* edit plus a door-census row.",
+      "live_open": 18,
+      "live_all": 35
+    },
+    {
+      "slug": "lead-pds",
+      "class": "durable-role",
+      "definition": "The lead of the PDS epic for the wave that is currently open.",
+      "resolution": "Resolve to the named lead of the open PDS wave at the time the row is read; if no PDS wave is open the row is unassigned work and waits for the next wave.",
+      "live_open": 5,
+      "live_all": 34
+    },
+    {
+      "slug": "pds-charter-steward",
+      "class": "durable-role",
+      "definition": "Owns .claude/workflows/bp-pds-charter.md \u2014 rulings, D-numbers, and charter currency.",
+      "resolution": "Only a charter ruling discharges it; a worker proposes the ruling in a PR body and the epic lead applies it to the charter.",
+      "live_open": 4,
+      "live_all": 24
+    },
+    {
+      "slug": "pds-export-path-owner",
+      "class": "durable-role",
+      "definition": "Owns the ONIX/Bokbasen export path and the cost/peak measurements taken against it.",
+      "resolution": "Route to the export lane; the work lands under api/lib/barkpark/plugins/onix* and scripts/pds-export-*.",
+      "live_open": 5,
+      "live_all": 10
+    },
+    {
+      "slug": "pds-schema-owner",
+      "class": "durable-role",
+      "definition": "Owns the task/document schema fields the PDS ledger reads and writes.",
+      "resolution": "Route to the api/ lane; any change is a schema v2 field change plus a migration.",
+      "live_open": 2,
+      "live_all": 7
+    },
+    {
+      "slug": "pds-import-path-owner",
+      "class": "durable-role",
+      "definition": "Owns the ONIX/document import path.",
+      "resolution": "Route to the import lane; the work lands under api/lib/barkpark/plugins and its ingest tests.",
+      "live_open": 0,
+      "live_all": 6
+    },
+    {
+      "slug": "pds-repo-hygiene-owner",
+      "class": "durable-role",
+      "definition": "Owns repo-level hygiene: stray files, gitignore, doc tiers, budget overflow.",
+      "resolution": "Route to any lane; the work is repo-wide and needs no epic context.",
+      "live_open": 2,
+      "live_all": 5
+    },
+    {
+      "slug": "pds-cli-scope-maintainer",
+      "class": "durable-role",
+      "definition": "Owns what the bp CLI/TUI surface is allowed to do inside PDS scope.",
+      "resolution": "Route to the cli lane; the work lands under internal/cli/.",
+      "live_open": 3,
+      "live_all": 4
+    },
+    {
+      "slug": "pds-pull-path-owner",
+      "class": "durable-role",
+      "definition": "Owns the deploy pull path and scripts/pds-pull-proof.sh.",
+      "resolution": "Route to the deploy lane; the work lands under deploy/ and scripts/pds-pull-*.",
+      "live_open": 3,
+      "live_all": 4
+    },
+    {
+      "slug": "pds-owner-onboarding-owner",
+      "class": "durable-role",
+      "definition": "Owns this registry: admitting a new role slug, retiring one, and ruling on a refused owner.",
+      "resolution": "The only role that may add a `roles[]` entry here; a PR touching roles[] names this owner in its body.",
+      "live_open": 1,
+      "live_all": 4
+    },
+    {
+      "slug": "bp-task-ledger-maintainer",
+      "class": "durable-role",
+      "definition": "Owns the bp task ledger itself \u2014 row shape, claim/close mechanics, census walks.",
+      "resolution": "Route to the api/ or cli lane depending on whether the fix is server-side or in bp.",
+      "live_open": 1,
+      "live_all": 4
+    },
+    {
+      "slug": "pds-scratch-target-maintainer",
+      "class": "durable-role",
+      "definition": "Owns scripts/pds-scratch-target.sh and the scratch-target cost ledger.",
+      "resolution": "Route to the deploy lane; the work lands in that script and its _test.sh.",
+      "live_open": 1,
+      "live_all": 4
+    },
+    {
+      "slug": "pds-deploy-path-owner",
+      "class": "durable-role",
+      "definition": "Owns the prod deploy path: deploy/, the post-merge hook, instance-deploy.sh.",
+      "resolution": "Route to the deploy lane; any prod-touching half stays a REQUEST until an operator runs it.",
+      "live_open": 0,
+      "live_all": 2
+    },
+    {
+      "slug": "pds-api-honesty-owner",
+      "class": "durable-role",
+      "definition": "Owns the api/ half of the epic's honesty class: a check that greens on a name instead of a fact.",
+      "resolution": "Route to the api/ lane; the work is an ExUnit test that reds before the fix.",
+      "live_open": 0,
+      "live_all": 1
+    },
+    {
+      "slug": "pds-papers-sweep-owner",
+      "class": "durable-role",
+      "definition": "Owns the PDS Papers/Bulldocs sweep and the pre-gate papers predicate.",
+      "resolution": "Route to the papers lane; the work lands in scripts/pds-pre-gate-papers-*.",
+      "live_open": 1,
+      "live_all": 1
+    }
+  ],
+  "refused": [
+    {
+      "slug": "truth-grip-epic lead (wave-10 steward)",
+      "class": "malformed-shape",
+      "reason": "Carries spaces and parentheses; breaks the ratified lowercase-kebab shape on 26 rows. A prose phrase is not an addressable owner.",
+      "remedy": "Re-adjudicate each row to a pds-* durable role above; there is no legal substitute, because the phrase names a DIFFERENT epic's lead.",
+      "live_open": 10,
+      "live_all": 26
+    },
+    {
+      "slug": "lead-truthgrip",
+      "class": "foreign-vocabulary",
+      "reason": "Well-shaped, but it is the lead of the TRUTH-GRIP epic, not of PDS. 22 of its 23 occurrences were minted by one shard (pds-w25 `bare`) whose sibling shard in the same wave used the pds-* vocabulary instead. These rows point at an entity that does not own them.",
+      "remedy": "Re-adjudicate to a pds-* durable role, or file the row under the truth-grip epic. Not admissible as a PDS owner.",
+      "live_open": 14,
+      "live_all": 24
+    },
+    {
+      "slug": "wave-24",
+      "class": "expiring-owner",
+      "reason": "wave-N is an EXPIRING owner: it self-clears when the wave closes and the row silently degrades to unowned. See the expiring_owner_ruling below.",
+      "remedy": "Reassign to a durable role before the wave closes.",
+      "live_open": 0,
+      "live_all": 7
+    },
+    {
+      "slug": "wave-25",
+      "class": "expiring-owner",
+      "reason": "Same as wave-24; wave 25 is closed, so this row is already de facto unowned.",
+      "remedy": "Reassign to a durable role.",
+      "live_open": 0,
+      "live_all": 1
+    },
+    {
+      "slug": "pds-w25-round-terminal",
+      "class": "task-id-as-owner",
+      "reason": "Resolves to an existing type:task row (verified 2026-09-11 by `bp task get`). A task is work, not a role: it cannot answer for a queue and it terminates.",
+      "remedy": "Reassign to the durable role that owns that task's domain.",
+      "live_open": 1,
+      "live_all": 1
+    },
+    {
+      "slug": "pds-w25-round-parked",
+      "class": "task-id-as-owner",
+      "reason": "Resolves to an existing type:task row (verified 2026-09-11).",
+      "remedy": "Reassign to the durable role that owns that task's domain.",
+      "live_open": 1,
+      "live_all": 1
+    },
+    {
+      "slug": "pds-barkpark-stop-4000-fallback",
+      "class": "self-owner",
+      "reason": "The row names ITSELF as its owner (verified 2026-09-11: the slug resolves to a task row, and that row is the one carrying it). Self-ownership is the defect this epic opened with; it survives among the terminal rows.",
+      "remedy": "Reassign to pds-cli-scope-maintainer or pds-deploy-path-owner.",
+      "live_open": 0,
+      "live_all": 1
+    }
+  ]
+}

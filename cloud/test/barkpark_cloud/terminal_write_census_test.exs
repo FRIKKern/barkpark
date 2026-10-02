@@ -62,6 +62,20 @@ defmodule BarkparkCloud.TerminalWriteCensus.EpochThiefRelay do
     {:ok, 200, %{"slug" => slug, "build_id" => build_id, "log_state" => "never_recorded"}}
   end
 
+  # The recorder BYTES read (`dr-bl-recorder-http-read-path` c1). Same honest
+  # stub as `build_record/3` above: this census never reads a build log.
+  @impl true
+  def build_log_bytes(_bp, slug, build_id) do
+    {:ok, 200,
+     %{
+       "slug" => slug,
+       "build_id" => build_id,
+       "log_state" => "never_recorded",
+       "log_scrub" => nil,
+       "tail" => nil
+     }}
+  end
+
   @impl true
   def start_deploy(_bp, _payload) do
     state = state()
@@ -140,8 +154,10 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
   landed. That is the SAFE direction through the same worker — `{:ok, :live}` is
   a value `start_and_report/2` already accepts (its `outcome in [:live, :failed,
   :deferred]` arm), where `{:error, _}` was the arm that logged "could not start
-  the driver" and made Oban retry a build that had already gone live. Arms A, C
-  and D are untouched: their returns are what they were.
+  the driver" and made Oban retry a build that had already gone live. ARM D's
+  lost-CAS deferral answers `{:ok, :deferred_unrecorded}` (was `{:ok, :deferred}`,
+  which claimed a counted row that does not exist) — also an `{:ok, _}` shape the
+  worker accepts. Arms A and C are untouched: their returns are what they were.
 
     * ARM A — `fail/2` loses its fenced CAS: the row is not `failed`,
       `failure_reason` is nil, AND no failure alert fires either, because
@@ -496,7 +512,32 @@ defmodule BarkparkCloud.TerminalWriteCensusTest do
 
     EpochThiefRelay.program(start: busy_409(), steal: :start, steal_from: d.id)
 
-    log = capture_log(fn -> assert {:ok, :deferred} = Deploy.run(d.id) end)
+    ref = make_ref()
+    me = self()
+    handler = "arm-d-deferral-unrecorded-#{inspect(ref)}"
+
+    BarkparkCloud.TelemetryTap.attach(
+      handler,
+      [:barkpark_cloud, :sites, :deploy, :deferral_unrecorded],
+      fn _event, measurements, metadata, _ -> send(me, {ref, measurements, metadata}) end,
+      nil
+    )
+
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
+
+    # THE OUTCOME NO LONGER CLAIMS A COUNTED DEFERRAL
+    # (ccpca-bl-deploy-defer-cas-loss-counting): `{:ok, :deferred}` said "a
+    # deferred row exists" while none did.
+    log = capture_log(fn -> assert {:ok, :deferred_unrecorded} = Deploy.run(d.id) end)
+
+    # …and the un-counted deferral is COUNTABLE: the telemetry event carries the
+    # depth/bound/cause the row never got.
+    assert_received {^ref, %{count: 1}, meta}
+    assert meta.deployment_id == d.id
+    assert meta.site_id == site.id
+    assert meta.deferral_depth == 1
+    assert is_integer(meta.deferral_bound)
+    assert is_binary(meta.deferral_cause)
 
     # The PROMISE held (the rebuild really is queued)…
     assert [_job] =

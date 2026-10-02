@@ -133,6 +133,54 @@ defmodule BarkparkWeb.Studio.EditorWarningsAndSlugSourceTest do
       assert stored(scope).content["slug"] == expected
       refute expected == Barkpark.Tenancy.slugify("Forfatter")
     end
+
+    # Stranger walk (2026-09-30): "Blåbær & Søt! Æøå" generated `bl-b-r-s-t` —
+    # every non-ASCII letter became a hyphen. A Norwegian name must TRANSLITERATE.
+    test "Generate transliterates accented and ligature letters instead of dropping them", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      doc: doc,
+      scope: scope
+    } do
+      {:ok, _} =
+        Content.upsert_document(
+          "author",
+          %{
+            "doc_id" => "drafts.author-1",
+            "title" => "Forfatter",
+            "status" => "draft",
+            "content" => %{"name" => "Kjære Åse Øvrebø", "slug" => ""}
+          },
+          @dataset,
+          Keyword.put(scope, :source, :api)
+        )
+
+      {view, _html} = open!(conn, ws, proj, doc)
+
+      view
+      |> element(~s(button[phx-click="slug-generate"][phx-value-field="slug"]))
+      |> render_click()
+
+      assert stored(scope).content["slug"] == "kjaere-ase-ovrebo",
+             "æ/å/ø must fold to ae/a/o, not collapse to hyphens (was kj-re-se-vreb)"
+    end
+  end
+
+  describe "document_slug/1" do
+    alias BarkparkWeb.Studio.StudioLive.Handlers.Fields
+
+    test "folds accents, spells out ligatures, and leaves plain ASCII exactly as Tenancy.slugify did" do
+      assert Fields.document_slug("Blåbær & Søt! Æøå") == "blabaer-sot-aeoa"
+
+      assert Fields.document_slug("Crème Brûlée für Łódź — Straße") ==
+               "creme-brulee-fur-lodz-strasse"
+
+      for plain <- ["Lars Mytting", "Hello, World 2026", "--Edge--"] do
+        assert Fields.document_slug(plain) == Barkpark.Tenancy.slugify(plain),
+               "ASCII input must slug byte-identically to before: #{plain}"
+      end
+    end
   end
 
   describe "warning-level validation" do

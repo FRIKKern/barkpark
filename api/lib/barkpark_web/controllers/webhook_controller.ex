@@ -22,13 +22,21 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  # task-c8214d77e91e73d5: a webhook created with no secret used to be stored
+  # secretless and deliver UNSIGNED, and nothing in the 201 said so. Every
+  # @barkpark/nextjs createWebhookHandler refuses an unsigned delivery, and there
+  # was no secret the caller could configure to match. Now a missing/blank
+  # secret is GENERATED here and returned ONCE as `secret` (rotate's contract).
+  # A caller-supplied secret is stored as given and never echoed back.
   def create(conn, %{"dataset" => dataset} = params) do
-    attrs = Map.put(params, "dataset", dataset)
+    {attrs, generated} = ensure_secret(Map.put(params, "dataset", dataset))
 
-    case Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
-      {:ok, wh} ->
-        conn |> put_status(201) |> json(%{webhook: render_webhook(wh)})
-
+    with :ok <- refuse_audit_subscription(params),
+         {:ok, wh} <- Webhooks.create_webhook(attrs, ScopeHelpers.scope_opts(conn)) do
+      body = %{webhook: render_webhook(wh)}
+      body = if generated, do: Map.put(body, :secret, generated), else: body
+      conn |> put_status(201) |> json(body)
+    else
       {:error, changeset} ->
         validation_failed(conn, changeset)
     end
@@ -37,6 +45,7 @@ defmodule BarkparkWeb.WebhookController do
   def update(conn, %{"id" => id} = params) do
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
+         :ok <- refuse_audit_subscription(params),
          {:ok, updated} <- Webhooks.update_webhook(wh, params) do
       json(conn, %{webhook: render_webhook(updated)})
     else
@@ -46,6 +55,16 @@ defmodule BarkparkWeb.WebhookController do
     end
   end
 
+  # ANCHORED DELETE/REVOKE ROW — EDITING THIS BODY REDS A GATE IN scripts/.
+  # This action is a NARROW row in @exclusion_anchors
+  # (scripts/pds-elixir-receipt-census.exs). Any edit inside these clauses, a
+  # `mix format` reflow included, moves its def fingerprint and fails
+  # EXCLUSION-ANCHORS-FRESH. Re-derive IN THE SAME COMMIT, READING the three
+  # values out of the STDOUT of
+  #   elixir scripts/pds-elixir-receipt-census.exs --exclusion-keys
+  # and never typing them from a log. Editing that register is a DECLARED
+  # allowed cross-fence edit for the lane that moved it — the ruling, its
+  # limits and the steps: docs/ops/exclusion-anchor-rederive.md
   def delete(conn, %{"id" => id}) do
     with :ok <- validate_uuid(id),
          {:ok, wh} <- Webhooks.get_webhook(id, ScopeHelpers.scope_opts(conn)),
@@ -216,11 +235,19 @@ defmodule BarkparkWeb.WebhookController do
   # global sequential integers, so without the workspace clause a wsB admin
   # could point a wsB webhook at their own URL and replay wsA's event ids into
   # it (cross-tenant document-snapshot exfiltration).
+  # A NULL-project webhook is workspace-wide (see `Webhooks.scope/2`), so it may
+  # replay any event of its own workspace.
+  # task-ae096a1b6ef7f5a6: listener presence is per-machine heartbeat truth and
+  # never fans out to a webhook (PDF-D18). Automatic dispatch, the SSE live leg
+  # and the SSE replay leg all drop `type == "listener"`; the replay door must
+  # agree, or an admin can hand-deliver what no automatic path would send.
+  defp event_in_scope?(%MutationEvent{type: "listener"}, _wh), do: false
+
   defp event_in_scope?(ev, wh) do
     ev.dataset == wh.dataset and
       (is_nil(ev.workspace_id) or
          (ev.workspace_id == wh.workspace_id and
-            (is_nil(ev.project_id) or ev.project_id == wh.project_id)))
+            (is_nil(ev.project_id) or is_nil(wh.project_id) or ev.project_id == wh.project_id)))
   end
 
   # Load a webhook by id, enforcing BOTH the tenant scope (workspace/project via
@@ -258,6 +285,15 @@ defmodule BarkparkWeb.WebhookController do
   # default) instead of raising FunctionClauseError -> 500 (history_controller
   # .ex:132 same idiom).
   defp parse_limit(_), do: nil
+
+  defp ensure_secret(attrs) do
+    if Dispatcher.blank_secret?(Map.get(attrs, "secret")) do
+      secret = generate_secret()
+      {Map.put(attrs, "secret", secret), secret}
+    else
+      {attrs, nil}
+    end
+  end
 
   defp generate_secret do
     "whsec_" <> Base.url_encode64(:crypto.strong_rand_bytes(24), padding: false)
@@ -304,13 +340,55 @@ defmodule BarkparkWeb.WebhookController do
     |> json(%{error: Map.delete(env, :status)})
   end
 
+  # AUDIT SUBSCRIPTIONS ARE NOT A TENANT FEATURE (r2c webhook audit, finding 1).
+  # `Webhook.changeset/2` casts `audit_categories`, `audit_actions` and
+  # `organization_id` for the SERVER-SIDE audit bridge (era-w7), and
+  # `Webhooks.audit_webhooks_for/3` selects on them ORG-wide — a nil
+  # `organization_id` matches EVERY org. This route is gated per WORKSPACE
+  # (a workspace-bound admin token passes it), so letting the body set those
+  # keys let one workspace's admin subscribe to another organisation's audit
+  # stream (auth, token, membership, secret events with full metadata), or to
+  # every organisation's. The HTTP surface therefore REFUSES them, loudly, with
+  # a 422 naming the keys — never a silent drop, so a caller can tell. An empty
+  # list / nil (a client echoing the rendered object back) is not a request for
+  # a subscription and passes.
+  @audit_subscription_keys ~w(audit_categories audit_actions organization_id)
+
+  defp refuse_audit_subscription(params) do
+    case Enum.filter(@audit_subscription_keys, &audit_value_present?(Map.get(params, &1))) do
+      [] ->
+        :ok
+
+      keys ->
+        changeset =
+          Enum.reduce(keys, Ecto.Changeset.change(%Barkpark.Webhooks.Webhook{}), fn key, cs ->
+            Ecto.Changeset.add_error(
+              cs,
+              String.to_existing_atom(key),
+              "audit subscriptions are not available on this route"
+            )
+          end)
+
+        {:error, changeset}
+    end
+  end
+
+  defp audit_value_present?(nil), do: false
+  defp audit_value_present?([]), do: false
+  defp audit_value_present?(""), do: false
+  defp audit_value_present?(_), do: true
+
   defp validation_failed(conn, changeset) do
     base = Errors.to_envelope({:error, :malformed}, conn)
 
     err =
       base
       |> Map.put(:code, "validation_failed")
-      |> Map.put(:message, "document failed validation")
+      # A webhook definition, not a document; and the caller's JSON parsed fine,
+      # so the inherited `malformed` hint about Content-Type is noise here
+      # (task-7f0e58f885c3e363).
+      |> Map.put(:message, "webhook failed validation")
+      |> Map.put(:hint, "Fix the listed webhook fields, then resend the definition.")
       |> Map.put(:details, format_errors(changeset))
       |> Map.delete(:status)
 
@@ -333,12 +411,29 @@ defmodule BarkparkWeb.WebhookController do
       events: wh.events,
       types: wh.types,
       active: wh.active,
+      # task-c8214d77e91e73d5: whether deliveries carry x-barkpark-signature. A
+      # webhook created before secrets were generated on create can still be
+      # secretless; it keeps delivering unsigned (never silently rotated — that
+      # would break a receiver that expects unsigned), and this flag is how a
+      # reader finds it. `bp webhook rotate` gives it a secret.
+      signed: not Dispatcher.blank_secret?(wh.secret),
       # Auto-disable substrate for the console panel: the consecutive terminal
       # give-up count, and when/why the endpoint was auto-disabled (nil until it
       # crosses the threshold). The panel renders these + calls the re-enable path.
       consecutive_failures: wh.consecutive_failures,
       auto_disabled_at: wh.auto_disabled_at,
       disable_reason: wh.disable_reason,
+      # The AUTOMATIC exit, made visible. Without these two an operator reading
+      # a disabled endpoint sees a dead stop and clicks re-enable — taking by
+      # hand the action the system was already scheduled to take, and blind to
+      # whether that was 60s away or had walked out to the 1h cap. Both are pure
+      # functions of columns already on the row. Named to match
+      # `Barkpark.Audit.Export.sink_health/1` so the two latch surfaces read alike;
+      # `next_probe_at` carries the webhook latch's own verb (a half-open PROBE,
+      # not a queued retry). Both nil for an endpoint a PERSON disabled — only the
+      # automatic latch has an automatic exit.
+      next_probe_at: Webhooks.next_probe_at(wh),
+      dark_for_seconds: Webhooks.dark_for_seconds(wh),
       created_at: wh.inserted_at,
       updated_at: wh.updated_at
     }

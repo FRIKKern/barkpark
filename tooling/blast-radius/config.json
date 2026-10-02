@@ -39,7 +39,8 @@
         "id": "http-api-v1",
         "globs": [
           "api/lib/barkpark_web/router.ex",
-          "api/lib/barkpark_web/controllers/**/*.ex"
+          "api/lib/barkpark_web/controllers/**/*.ex",
+          "api/lib/barkpark/plugins/*/web/**/*_controller.ex"
         ],
         "consumers": [
           { "label": "go:internal/apiclient — HTTP client against /v1", "files": ["internal/apiclient/client.go", "internal/apiclient/schema.go"], "anchor": "/v1|http|path" },

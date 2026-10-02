@@ -19,6 +19,7 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -26,7 +27,7 @@ import (
 )
 
 // ---------------------------------------------------------------------------
-// THE LB-FAMILY POST-READ OBSERVERS (PDS-D398/D399)
+// THE LB-FAMILY POST-READ OBSERVERS (PDS-D398/PDS-D399)
 //
 // One observer per obligation, all handed to hzResObserved / hzResObservedResponse
 // (hetzner_respost_mutation.go). Two rules hold across every one of them:
@@ -286,9 +287,9 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 //	  so a CORRECT create fires a guaranteed false advisory. MEASURED against a
 //	  production-shaped response: enrolling it emitted `divergence: datacenter
 //	  — you asked for nbg1-dc3, the server reports nbg1` at exit 0 on a create
-//	  that did exactly what was asked. (The SDK's Datacenter field is also
-//	  deprecated past its removal date, so there is nothing to compare against
-//	  that will survive.) Pinned by TestHetznerCreateAdvisoryExclusions.
+//	  that did exactly what was asked. (hcloud-go v2.49 removed the SDK's
+//	  Datacenter field outright; --datacenter is now sent as its location via
+//	  hzPrimaryIPLocation.) Pinned by TestHetznerCreateAdvisoryExclusions.
 //	placement-group --type — hetzner_lb_cmd.go rejects everything but "spread"
 //	  CLIENT-SIDE before the request leaves, so the only reachable comparison is
 //	  spread-vs-spread: the pair is degenerate, and an advisory that can never
@@ -304,6 +305,21 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 //	  so `--type 1` would advise `you asked for 1, the server reports lb11` on a
 //	  correct create.
 //
+// hzResSetIfNamed enrols a receipt key ONLY when the observed value is
+// non-empty. It exists because hcloud-go's schema types make blank observations
+// a CLASS, not an accident: schema.PrimaryIP.Location, schema.LoadBalancer.
+// Location, schema.LoadBalancer.LoadBalancerType and schema.FloatingIP.
+// HomeLocation are all VALUE types, so the converter always returns a non-nil
+// pointer — with an EMPTY Name when the response omitted the object. A `!= nil`
+// guard therefore passes and the receipt prints `  location: ` with nothing
+// behind it, which tells an operator the field was observed and is blank rather
+// than that it was never sent.
+func hzResSetIfNamed(extra map[string]any, key, value string) {
+	if value != "" {
+		extra[key] = value
+	}
+}
+
 // hzObserveLBCreated reads a create receipt off the create RESPONSE object,
 // which for a create IS server truth (the addresses and the settled algorithm
 // are things nobody typed). It takes the asked values as constructor arguments
@@ -321,12 +337,17 @@ func hzObserveLBCreated(askedType, askedLocation, askedAlgorithm string) hzResOb
 		typeName, locName := "", ""
 		if lb.LoadBalancerType != nil {
 			typeName = lb.LoadBalancerType.Name
-			extra["load_balancer_type"] = typeName
 		}
+		// NOT `!= nil`: schema.LoadBalancer.LoadBalancerType and .Location are
+		// VALUE types, so the converter hands back a non-nil pointer with an
+		// EMPTY Name whenever the create response omits the object. Enrolling
+		// the key on the pointer printed `  load_balancer_type: ` with nothing
+		// behind it — a key with no value is not an honest empty state.
+		hzResSetIfNamed(extra, "load_balancer_type", typeName)
 		if lb.Location != nil {
 			locName = lb.Location.Name
-			extra["location"] = locName
 		}
+		hzResSetIfNamed(extra, "location", locName)
 		if lb.Algorithm.Type != "" {
 			extra["algorithm"] = string(lb.Algorithm.Type)
 		}
@@ -343,15 +364,17 @@ func hzObserveLBCreated(askedType, askedLocation, askedAlgorithm string) hzResOb
 // one the API reports back, not the one the flag carried.
 func hzObserveFloatingIPCreated(askedType, askedHomeLocation string) hzResObserveFn[hcloud.FloatingIP] {
 	return func(fip *hcloud.FloatingIP) hzResObservation {
-		extra := map[string]any{"type": string(fip.Type)}
+		extra := map[string]any{}
+		hzResSetIfNamed(extra, "type", string(fip.Type))
 		if fip.IP != nil {
 			extra["ip"] = fip.IP.String()
 		}
 		homeLoc := ""
 		if fip.HomeLocation != nil {
 			homeLoc = fip.HomeLocation.Name
-			extra["home_location"] = homeLoc
 		}
+		// schema.FloatingIP.HomeLocation is a VALUE type — see hzResSetIfNamed.
+		hzResSetIfNamed(extra, "home_location", homeLoc)
 		return hzResAgreesWith(extra, hzResDivergence(
 			hzResAsked{"type", askedType, string(fip.Type)},
 			hzResAsked{"home_location", askedHomeLocation, homeLoc},
@@ -382,20 +405,41 @@ func hzObserveFloatingIPUnassigned(fip *hcloud.FloatingIP) hzResObservation {
 	return hzResAgrees(map[string]any{"assigned": false})
 }
 
+// hzDatacenterSuffix matches the "-dc<N>" tail of a Hetzner datacenter name
+// (nbg1-dc3 → nbg1).
+var hzDatacenterSuffix = regexp.MustCompile(`-dc[0-9]+$`)
+
+// hzPrimaryIPLocation resolves the create location. The Hetzner API removed
+// `datacenter` from primary-ip create on 2026-07-01 (hcloud-go v2.49 dropped
+// PrimaryIPCreateOpts.Datacenter), so --datacenter stays as a compatibility
+// alias and is sent as its location: a datacenter name is its location plus
+// a "-dc<N>" suffix.
+func hzPrimaryIPLocation(datacenter, location string) string {
+	if location != "" {
+		return location
+	}
+	return hzDatacenterSuffix.ReplaceAllString(datacenter, "")
+}
+
 // hzObservePrimaryIPCreated enrols --type and --location. --datacenter is NOT
 // enrolled: see the exclusion list above — pip.Location.Name answers a
 // datacenter token with its LOCATION, so the pair is not token-identical.
 func hzObservePrimaryIPCreated(askedType, askedLocation string) hzResObserveFn[hcloud.PrimaryIP] {
 	return func(pip *hcloud.PrimaryIP) hzResObservation {
-		extra := map[string]any{"type": string(pip.Type)}
+		extra := map[string]any{}
+		hzResSetIfNamed(extra, "type", string(pip.Type))
 		if pip.IP != nil {
 			extra["ip"] = pip.IP.String()
 		}
 		locName := ""
 		if pip.Location != nil {
 			locName = pip.Location.Name
-			extra["location"] = locName
 		}
+		// THE MEASURED SPECIMEN (PDS-D432): schema.PrimaryIP.Location is a
+		// VALUE type, so a create response that omits the top-level `location`
+		// still yields a non-nil *Location with an empty Name, and the receipt
+		// printed `  location: ` at exit 0.
+		hzResSetIfNamed(extra, "location", locName)
 		return hzResAgreesWith(extra, hzResDivergence(
 			hzResAsked{"type", askedType, string(pip.Type)},
 			hzResAsked{"location", askedLocation, locName},
@@ -430,17 +474,17 @@ func hzObservePrimaryIPUnassigned(pip *hcloud.PrimaryIP) hzResObservation {
 // hzObservePlacementGroupCreated prints the type the API assigned, not the one
 // the flag defaulted to.
 func hzObservePlacementGroupCreated(pg *hcloud.PlacementGroup) hzResObservation {
-	return hzResAgrees(map[string]any{
-		"type":    string(pg.Type),
-		"servers": len(pg.Servers),
-	})
+	extra := map[string]any{"servers": len(pg.Servers)}
+	hzResSetIfNamed(extra, "type", string(pg.Type))
+	return hzResAgrees(extra)
 }
 
 // hzObserveCertificateUploaded reads the fingerprint and the validity window off
 // the response — facts about the PEM that was uploaded, none of which the
 // operator could have typed.
 func hzObserveCertificateUploaded(cert *hcloud.Certificate) hzResObservation {
-	extra := map[string]any{"type": string(cert.Type)}
+	extra := map[string]any{}
+	hzResSetIfNamed(extra, "type", string(cert.Type))
 	if cert.Fingerprint != "" {
 		extra["fingerprint"] = cert.Fingerprint
 	}
@@ -469,11 +513,11 @@ func hzObserveCertificateManaged(cert *hcloud.Certificate) hzResObservation {
 		issuance = string(cert.Status.Issuance)
 	}
 	extra := map[string]any{
-		"type":     string(cert.Type),
 		"issuance": issuance,
 		hzKeyConfirmation: "declared — managed issuance is asynchronous, so this is the state the create " +
 			"response reported, not a confirmed certificate (poll `bp cloud hetzner certificate get`)",
 	}
+	hzResSetIfNamed(extra, "type", string(cert.Type))
 	if len(cert.DomainNames) > 0 {
 		extra["domain_names"] = cert.DomainNames
 	}
@@ -1544,7 +1588,7 @@ func runHetznerPrimaryIPList(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 	if len(pips) == 0 {
-		out.outf("no primary ips in this project — create one with 'bp cloud hetzner primary-ip create --type ipv4 --datacenter <dc> --name <n>'")
+		out.outf("no primary ips in this project — create one with 'bp cloud hetzner primary-ip create --type ipv4 --location <loc> --name <n>'")
 		return exitOK
 	}
 	rows := make([][]string, 0, len(pips))
@@ -1590,7 +1634,7 @@ func runHetznerPrimaryIPGet(out *writer, g globals, args []string) int {
 }
 
 func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
-	const usage = "bp cloud hetzner primary-ip create --type ipv4|ipv6 (--datacenter <dc> | --location <loc>) [--name <n>] [--label k=v]…"
+	const usage = "bp cloud hetzner primary-ip create --type ipv4|ipv6 (--location <loc> | --datacenter <dc>, deprecated: sent as its location) [--name <n>] [--label k=v]…"
 	a, err := parseHzArgs(args, []string{"type", "datacenter", "location", "name", "label"}, nil, usage)
 	if err != nil {
 		return useError(out, "usage", err.Error(), exitUsage)
@@ -1619,8 +1663,7 @@ func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
 		Type:         ipType,
 		Name:         a.val("name"),
 		AssigneeType: "server",
-		Datacenter:   a.val("datacenter"),
-		Location:     a.val("location"),
+		Location:     hzPrimaryIPLocation(a.val("datacenter"), a.val("location")),
 		Labels:       labels,
 	}
 	result, _, err := hc.PrimaryIP.Create(ctx, opts)
@@ -2240,7 +2283,7 @@ func printHetznerPrimaryIPHelp(out *writer) {
 USAGE
   bp cloud hetzner primary-ip list
   bp cloud hetzner primary-ip get <id|name|ip>
-  bp cloud hetzner primary-ip create --type ipv4|ipv6 (--datacenter <dc> | --location <loc>)
+  bp cloud hetzner primary-ip create --type ipv4|ipv6 (--location <loc> | --datacenter <dc>)
                                      [--name <n>] [--label k=v]…
   bp cloud hetzner primary-ip delete <id|name|ip> [--yes]
   bp cloud hetzner primary-ip assign <id|name|ip> --server <s>
@@ -2248,7 +2291,9 @@ USAGE
 
 NOTES
   <id|name|ip>  primary IPs also resolve by their literal address
-  assign        the target server must be powered off and in the IP's location
+  --datacenter  deprecated: the API no longer takes a datacenter, so nbg1-dc3
+                is sent as its location nbg1 — prefer --location
+  assign       the target server must be powered off and in the IP's location
   unassign      detaches the IP but keeps it reserved (billed while unattached)
 
 EXAMPLE

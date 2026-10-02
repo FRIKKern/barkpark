@@ -13,6 +13,7 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.TwoFactorRateLimiter
+  alias BarkparkCloud.RateLimitWindow
   alias BarkparkCloud.Web.Router
 
   @opts Router.init([])
@@ -201,6 +202,10 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
     end
 
     test "more than 5 attempts/min → 429 rate_limited" do
+      # The limiter window is the CALENDAR minute, so the whole loop must land
+      # inside ONE of them — see BarkparkCloud.RateLimitWindow.
+      RateLimitWindow.align!()
+
       {user, _team} = user_with_team()
       {_codes, _secret, _t} = enable_two_factor(user)
 
@@ -270,6 +275,22 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == false
     end
 
+    # task-e4cdc0f2e7766e1a: enroll nulls two_factor_confirmed_at, so an enroll
+    # over an ENABLED factor used to switch 2FA off with no audit row and no
+    # security event. It is refused; turning 2FA off stays DELETE's (recorded) job.
+    test "enroll while 2FA is ENABLED → 409 already_enabled, and 2FA stays on" do
+      {user, _team} = user_with_team()
+      {_codes, _secret, token} = enable_two_factor(user)
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+
+      conn = call(:post, "/v1/account/two-factor/enroll", %{}, token)
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "already_enabled"
+
+      assert Accounts.two_factor_enabled?(Accounts.get_user(user.id))
+      assert json_body(call(:get, "/v1/me", nil, token))["user"]["two_factor_enabled"] == true
+    end
+
     test "confirm with a wrong code → 422 invalid_otp" do
       {user, _team} = user_with_team()
       token = login_token(user)
@@ -284,6 +305,10 @@ defmodule BarkparkCloud.Web.RouterTwoFactorTest do
       assert call(:post, "/v1/account/two-factor/enroll", %{}).status == 401
       assert call(:get, "/v1/account/two-factor", nil).status == 401
       assert call(:delete, "/v1/account/two-factor", nil).status == 401
+      # The two routes that RETURN secret material (recovery codes). Pinned so a
+      # router refactor that drops Auth.require_user from either reds here.
+      assert call(:post, "/v1/account/two-factor/confirm", %{code: "000000"}).status == 401
+      assert call(:post, "/v1/account/two-factor/recovery-codes", %{}).status == 401
     end
 
     test "regenerate recovery codes invalidates the old set" do

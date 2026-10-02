@@ -1,8 +1,11 @@
 #!/bin/bash
-# Pre-commit hook: two local checks.
+# Pre-commit hook: three local checks.
 #
 #   1. BLOCKING — fail fast on unformatted Elixir code.
-#   2. ADVISORY — remind you to regenerate docs/openapi.json when you stage a
+#   2. BLOCKING — refuse a staged api/test file that adds an unreachable
+#      `assert pattern = expr, "message"` (task-eb42388a71b8d277). Same script,
+#      same baseline, same RED line as the required Elixir gate's ratchet step.
+#   3. ADVISORY — remind you to regenerate docs/openapi.json when you stage a
 #      file the OpenAPI generator reads (task-openapi-drift-chronic). Never
 #      exits non-zero; its own comment block below says why.
 #
@@ -15,9 +18,14 @@
 # Install: `make hooks` (sets core.hooksPath to .githooks).
 # Bypass:  `git commit --no-verify` (use sparingly; CI will still gate).
 #
-# Scope: the format check reads only staged *.ex / *.exs files. If none, that
-# half is a no-op and adds zero latency to non-Elixir commits. Both checks are
-# pure `git diff --cached` + `mix format`; neither compiles or touches a DB.
+# Scope: the format check reads only staged *.ex / *.exs files; the ratchet
+# reads only the staged ones under api/test/. With no staged Elixir file the
+# hook exits before either runs, so a .md / .go commit pays neither. All
+# checks are `git diff --cached` + `mix format` + an AST parse of the named
+# files; none compiles or touches a DB. Both blocking checks run even when the
+# first fails, so one commit attempt shows every refusal.
+#
+# Harness: scripts/pre-commit-hook.test.sh (drives this hook in a temp repo).
 
 set -e
 
@@ -75,33 +83,58 @@ if [ -z "$STAGED" ]; then
   exit 0
 fi
 
+rc=0
+
+# ── 1. mix format --check-formatted (BLOCKING) ─────────────────────────────
 # All Elixir code lives under api/. The .formatter.exs and mix.exs both
 # resolve from that directory.
 if [ ! -f api/mix.exs ]; then
   echo "[pre-commit] api/mix.exs not found — skipping format check." >&2
-  exit 0
+else
+  # Strip the api/ prefix so paths are relative to the mix project root.
+  RELATIVE=$(echo "$STAGED" | sed -n 's|^api/||p')
+
+  # Staged Elixir files outside api/ are nothing the formatter owns.
+  if [ -n "$RELATIVE" ]; then
+    # `mix format --check-formatted <files>` exits non-zero with a list of
+    # offenders. Run from api/ so .formatter.exs (import_deps, subdirectories)
+    # resolves correctly.
+    echo "[pre-commit] mix format --check-formatted on $(echo "$RELATIVE" | wc -l | tr -d ' ') file(s)..."
+    if ! (cd api && echo "$RELATIVE" | xargs mix format --check-formatted); then
+      echo ""
+      echo "[pre-commit] FAIL — unformatted Elixir files staged."
+      echo "  Fix:    cd api && mix format"
+      echo "  Bypass: git commit --no-verify  (CI will still block the PR)"
+      rc=1
+    fi
+  fi
 fi
 
-# Strip the api/ prefix so paths are relative to the mix project root.
-RELATIVE=$(echo "$STAGED" | sed -n 's|^api/||p')
+# ── 2. unreachable-assert-message ratchet (BLOCKING) ───────────────────────
+# PR #19477 committed one `assert {:ok, x} = f(), "msg"` site; this hook
+# passed it (format was fine), and the required Elixir gate reddened a CI
+# round-trip later on a defect the script names in one local line. Scoped to
+# staged api/test files via --files: the whole-corpus scan is CI's job.
+STAGED_TESTS=()
+while IFS= read -r f; do
+  case "$f" in
+    api/test/*.ex | api/test/*.exs) STAGED_TESTS+=("$f") ;;
+  esac
+done <<EOF
+$STAGED
+EOF
 
-if [ -z "$RELATIVE" ]; then
-  # Staged Elixir files exist but none under api/ — nothing the formatter
-  # owns. Bail gracefully.
-  exit 0
+if [ "${#STAGED_TESTS[@]}" -gt 0 ]; then
+  echo "[pre-commit] unreachable-assert-message ratchet on ${#STAGED_TESTS[@]} staged api/test file(s)..."
+  uamc_rc=0
+  bash scripts/unreachable-assert-message-check.sh --files "${STAGED_TESTS[@]}" || uamc_rc=$?
+  if [ "$uamc_rc" != 0 ]; then
+    echo ""
+    echo "[pre-commit] FAIL — scripts/unreachable-assert-message-check.sh exit $uamc_rc (1 = RED above, 3 = REFUSED)."
+    echo "  Re-run: bash scripts/unreachable-assert-message-check.sh --files ${STAGED_TESTS[*]}"
+    echo "  Bypass: git commit --no-verify  (the required Elixir gate will still red the PR)"
+    rc=1
+  fi
 fi
 
-# `mix format --check-formatted <files>` exits non-zero with a list of
-# offenders. Run from api/ so .formatter.exs (import_deps, subdirectories)
-# resolves correctly.
-echo "[pre-commit] mix format --check-formatted on $(echo "$RELATIVE" | wc -l | tr -d ' ') file(s)..."
-cd api
-if ! echo "$RELATIVE" | xargs mix format --check-formatted; then
-  echo ""
-  echo "[pre-commit] FAIL — unformatted Elixir files staged."
-  echo "  Fix:    cd api && mix format"
-  echo "  Bypass: git commit --no-verify  (CI will still block the PR)"
-  exit 1
-fi
-
-exit 0
+exit "$rc"

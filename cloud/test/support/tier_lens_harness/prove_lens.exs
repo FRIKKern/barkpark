@@ -31,6 +31,10 @@
 # the entire cloud suite down with it. `elixirc_paths(:test)` compiling only
 # `.ex` is a fact about COMPILATION and says nothing about test DISCOVERY;
 # they are separate mechanisms and only one of them cares about the extension.
+# That rule is now MECHANICAL, not advisory: cloud/test/barkpark_cloud/
+# support_halt_guard_test.exs derives every file under cloud/test/support/
+# containing `System.halt` and reds if any of them matches the discovery glob.
+# It runs inside `mix test`, i.e. under the REQUIRED `Cloud gate`.
 # `mix format` reaches these files too — it globs `.exs` under test/.
 
 root = System.argv() |> Enum.at(0)

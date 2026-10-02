@@ -298,27 +298,9 @@ defmodule Barkpark.Plugins.Media.Assets do
       @asset_type,
       attrs,
       file.dataset,
-      [source: :worker] ++ file_scope_opts(file)
+      [source: :worker] ++ MediaFile.scope_opts(file)
     )
   end
-
-  # Derive the {workspace_id, project_id} write scope from the blob the asset
-  # doc belongs to. The %MediaFile{} carries the scope resolved at upload
-  # (put_scope_attrs on the blob), so stamping the companion asset DOCUMENT
-  # from it keeps the two in the same tenant — closing the gap where the doc
-  # landed NULL-workspace while the blob was scoped (barkpark-x56q). Only
-  # non-nil scope keys are emitted, so a pre-tenancy blob (nil workspace_id)
-  # writes nothing and Content.put_scope_attrs falls back to its Default-scope
-  # behaviour — never-worse for legacy uploads.
-  @spec file_scope_opts(%MediaFile{}) :: keyword()
-  def file_scope_opts(%MediaFile{workspace_id: ws_id, project_id: project_id}) do
-    []
-    |> maybe_put_scope(:workspace_id, ws_id)
-    |> maybe_put_scope(:project_id, project_id)
-  end
-
-  defp maybe_put_scope(opts, _key, nil), do: opts
-  defp maybe_put_scope(opts, key, value), do: Keyword.put(opts, key, value)
 
   defp asset_kind(nil), do: "other"
 

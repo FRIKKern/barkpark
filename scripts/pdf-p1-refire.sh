@@ -147,6 +147,8 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
 # set -m FIRST (PDF-D28): job control gives any backgrounded helper its OWN
 # process group — the skeleton is transcribed from the donor proofs verbatim.
 set -m
@@ -216,37 +218,37 @@ rung_seal() { # n summary — FAIL if any efail fired (NO exit — money before
 ADMIN_TOKEN=""; CLOUD_TOKEN=""
 
 cp_get() { # path -> body (cloud bearer)
-  curl -sS --max-time 25 -H "Authorization: Bearer $CLOUD_TOKEN" "$CP_BASE$1"
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $CLOUD_TOKEN" "$CP_BASE$1"
 }
 
 cp_get_code() { # path outfile -> http code (cloud bearer)
-  curl -sS --max-time 25 -o "$2" -w '%{http_code}' \
+  bp_curl_code -sS --max-time 25 -o "$2" \
     -H "Authorization: Bearer $CLOUD_TOKEN" "$CP_BASE$1" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 cp_post_code() { # path json-body outfile -> http code (cloud bearer)
-  curl -sS --max-time 30 -o "$3" -w '%{http_code}' -X POST "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$3" -X POST "$CP_BASE$1" \
     -H "Authorization: Bearer $CLOUD_TOKEN" -H 'Content-Type: application/json' \
     -d "$2" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 cp_delete_code() { # path outfile -> http code (cloud bearer)
-  curl -sS --max-time 30 -o "$2" -w '%{http_code}' -X DELETE "$CP_BASE$1" \
+  bp_curl_code -sS --max-time 30 -o "$2" -X DELETE "$CP_BASE$1" \
     -H "Authorization: Bearer $CLOUD_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 main_delete_code() { # path outfile -> http code (guerrilla admin bearer)
-  curl -sS --max-time 25 -o "$2" -w '%{http_code}' -X DELETE "$MAIN_BASE$1" \
+  bp_curl_code -sS --max-time 25 -o "$2" -X DELETE "$MAIN_BASE$1" \
     -H "Authorization: Bearer $ADMIN_TOKEN" 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 anon_post_code() { # url -> http code, anonymous POST {} (probe: writes nothing)
-  curl -sS --max-time 25 -o /dev/null -w '%{http_code}' -X POST "$1" \
+  bp_curl_code -sS --max-time 25 -o /dev/null -X POST "$1" \
     -H 'Content-Type: application/json' -d '{}' 2>/dev/null | tr -dc '0-9' | tail -c 3
 }
 
 curl_roster() { # the guerrilla main's roster (admin bearer)
-  curl -sS --max-time 25 -H "Authorization: Bearer $ADMIN_TOKEN" \
+  bp_curl_body -sS --max-time 25 -H "Authorization: Bearer $ADMIN_TOKEN" \
     "$MAIN_BASE/v1/fleet/roster?dataset=$DATASET"
 }
 
@@ -715,7 +717,7 @@ fi
 # 0f. the guerrilla roster answers the documents envelope (the census leg 3
 # surface + the token-revoke host).
 ROSTER_TMP="$WORKDIR/roster-r0.json"
-PRECODE="$(curl -sS -o "$ROSTER_TMP" -w '%{http_code}' --max-time 25 \
+PRECODE="$(bp_curl_code -sS -o "$ROSTER_TMP" --max-time 25 \
   -H "Authorization: Bearer $ADMIN_TOKEN" "$MAIN_BASE/v1/fleet/roster?dataset=$DATASET" 2>/dev/null | tr -dc '0-9' | tail -c 3 || true)"
 ENVELOPE_OK="$(python3 -c '
 import json, sys

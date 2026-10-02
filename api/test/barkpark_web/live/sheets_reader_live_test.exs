@@ -494,10 +494,19 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert view |> element(~s(td[data-ref="A1"])) |> render() =~ ~s(data-v="3")
   end
 
-  test "the reader renders a checkbox glyph but a forged cell-toggle never mutates it",
+  # ORACLE CONTRACT (pds-w44): the oracle here is the STORED cell value read
+  # back through `Session.peek/3`, NOT `Session.whereis(...) == nil`. The old
+  # whereis oracle only ever said "no session was started" — true in a fixture
+  # that starts none, and vacuous the instant one exists, which is the NORMAL
+  # case (any collaborator with the sheet open in Studio). So this test
+  # deliberately PRE-STARTS a live session before forging the toggle: the
+  # assertion can no longer pass by absence, only by the write actually having
+  # been refused.
+  test "the reader renders a checkbox glyph but a forged cell-toggle never mutates the stored cell",
        %{conn: conn} do
-    create_draft!("rdr-cb", one_tab(%{"A1" => %{"v" => true, "fmt" => "checkbox"}}))
+    doc = create_draft!("rdr-cb", one_tab(%{"A1" => %{"v" => true, "fmt" => "checkbox"}}))
     publish!("rdr-cb")
+    ws = doc.workspace_id
 
     {:ok, view, html} = live(conn, "/sheets/rdr-cb")
 
@@ -508,11 +517,34 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     assert html =~ ~s(aria-checked="true")
     refute html =~ ~s(phx-click="cell-toggle")
 
+    # PRE-START the session the forged toggle would ride, holding A1 as the
+    # draft stored it. The B1 op is only there to force the session up.
+    {:ok, %{applied: 1, errors: []}} =
+      Session.apply_ops(
+        "rdr-cb",
+        @dataset,
+        [%{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "held"}],
+        nil,
+        ws
+      )
+
+    assert Session.whereis("rdr-cb", @dataset, ws) != nil
+
     target = with_target(view, "#sheet-reader-rdr-cb")
     render_hook(target, "cell-toggle", %{"ref" => "A1"})
 
-    # send_ops drops the forged toggle: no session starts, the value holds.
-    assert Session.whereis("rdr-cb", @dataset) == nil
+    # THE ORACLE: `Ops.send_ops/2`'s `write_capable: false` head dropped the
+    # forged toggle, so the LIVE session's A1 still holds the true it loaded.
+    # Remove that head and the toggle commits FALSE onto this very session,
+    # turning the peeked cell into %{"fmt" => "checkbox", "v" => false}.
+    assert {:ok, content} = Session.peek("rdr-cb", @dataset, ws)
+    cells = content |> Map.fetch!("tabs") |> Enum.at(0) |> Map.fetch!("cells")
+
+    assert Map.fetch!(cells, "A1") == %{"v" => true, "fmt" => "checkbox"}
+    # Control: the session really is the one we pre-started and it really does
+    # accept writes — so an unchanged A1 is refusal, not a dead session.
+    assert cells |> Map.fetch!("B1") |> Map.fetch!("v") == "held"
+
     assert render(view) =~ "☑"
   end
 

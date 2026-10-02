@@ -5,6 +5,27 @@ defmodule BarkparkCloud.Registry.Site do
   runs on) and through it to a `Team`.
 
   The `(team_id, slug)` pair is unique — a Team names each of its sites once.
+
+  ## `team_id` is CREATE-TIME-ONLY (task-69d84bc7f15c88d6)
+
+  `Registry.create_site/2` copies `team_id` from the box at insert and nothing
+  ever re-stamps it. That is safe TODAY only because nothing moves a box between
+  teams: the one writer of `barkparks.team_id` is `Registry.insert_barkpark/2`
+  (on a fresh `%Barkpark{}`), and no route, worker or mix task updates it. An
+  out-of-band move (hand SQL) WOULD leave every site on the old team, and every
+  reader below would follow the stale column. `Registry.site_team_drift/1` is the
+  census that names such a site; it reads zero on a correct fleet. A future
+  box-move verb MUST re-stamp `sites.team_id` in the same transaction.
+
+  Readers that key team scope on `sites.team_id` (not `barkpark.team_id`):
+  `Registry.list_sites_for_team/1` (and through it `Notifications.team_site_ids/1`,
+  the digest), `Registry.get_team_site/2` (every slug/id-addressed site route),
+  `Notifications.site_owning_team_ids/0` (digest audience), `DeployLedger`'s
+  tenant-narrowed fold (`where s.team_id in ^team_ids`), the team deploy-ledger
+  census route (its scope hops through `sites.team_id`), `add_site_domain/2`'s
+  `hostname_claimed?/2` team scope, and the per-site side effects the router keys
+  on `site.team_id` (SSE `push_event/2`, audit rows, the GitHub installation
+  token lookup, `Registry.resolve_cloudflare_credential/1`).
   `domains` is an array because one site can answer on the apex, www, and any
   number of custom hostnames; the array carries a GIN index so the on-demand
   TLS `/v1/tls/ask` gate can answer "is this domain registered?" in O(1).
@@ -105,6 +126,26 @@ defmodule BarkparkCloud.Registry.Site do
   #                        this column exists to retire.
   @binding_verdicts ~w(bound unverified not_applicable never_checked)
 
+  # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): the site's
+  # standing DEMAND CLASS — is a publish on this site demand we exist to serve,
+  # or churn we produce ourselves?
+  #
+  #   * "customer" — a real tenant. Its publishes are the load the fleet is FOR.
+  #   * "platform" — a demo, fixture, capstone or internal site. Its publishes
+  #     are self-inflicted: the five site-autodeploy-* webhooks all carry
+  #     types={paper} on ONE shared `production` dataset, so ONE paper publish
+  #     mints five site rebuilds, always.
+  #
+  # NULL is a THIRD state and is a synonym for neither: it means nobody has
+  # classified this site. Reading NULL as "customer" would silently count demo
+  # churn as demand — the exact confusion this column exists to end — so the
+  # deployment-side stamp writes "unclassified" rather than guessing.
+  #
+  # There is deliberately NO default and no list of known demo slugs anywhere in
+  # the code: a class derived from a hard-coded list is a constant wearing a
+  # column's clothes — no fixture can flip it and no regression can red it.
+  @demand_classes ~w(customer platform)
+
   # owner/repo — the only shape GitHub uses for repos, e.g. "FRIKKern/barkpark".
   # Two segments separated by one slash; each segment is letters/digits/_/-/.
   @github_repo_format ~r/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/
@@ -184,12 +225,26 @@ defmodule BarkparkCloud.Registry.Site do
     # byte-identical to today.
     field :prebuilt_enabled, :boolean, default: false
 
+    # task-71082f5541c13b53 (N-08): whether this site's form endpoint is on. The
+    # endpoint itself is a `form_endpoint` document on the box
+    # (`BarkparkCloud.Sites.Forms`); this bit only decides whether the next
+    # deploy hands the build `BARKPARK_FORMS_URL`, the template's opt-in.
+    # Written ONLY through `forms_changeset/2`, after the box accepted the write.
+    field :forms_enabled, :boolean, default: false
+
     # ssw8-persist-binding-verdict (charter D73): what the control plane OBSERVED
     # when it read this site's binding at create, and when. Written by
     # `POST /v1/sites` from `verify_content_binding/2`; `never_checked` until
     # something actually looks.
     field :content_binding_verdict, :string, default: "never_checked"
     field :content_binding_checked_at, :utc_datetime_usec
+
+    # dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): "customer" |
+    # "platform" | NULL (nobody has classified it). Written through
+    # `Registry.classify_site_demand/2`; READ at deployment-create time and
+    # STAMPED onto the deployment row, so a later reclassification never
+    # rewrites what past load was.
+    field :demand_class, :string
 
     # site-spawner W6 (charter D51): CLOUDFLARE-IN-FRONT edge binding. The user's
     # OWN domain (blog.example.com), bound to THIS deployed site through the user's
@@ -268,6 +323,10 @@ defmodule BarkparkCloud.Registry.Site do
   def serving_modes, do: @serving_modes
   def tls_modes, do: @tls_modes
   def binding_verdicts, do: @binding_verdicts
+
+  @doc "The valid site demand classes (charter D206): customer | platform."
+  @spec demand_classes() :: [String.t()]
+  def demand_classes, do: @demand_classes
   def domain_format, do: @domain_format
 
   @doc """
@@ -499,6 +558,34 @@ defmodule BarkparkCloud.Registry.Site do
     |> cast(attrs, [:theme, :doc_type, :prebuilt_enabled])
     |> validate_theme()
     |> validate_length(:doc_type, min: 1, max: 100)
+  end
+
+  @doc """
+  task-71082f5541c13b53 (N-08): the NARROW changeset for the forms bit. Its own
+  changeset, not `settings_changeset/2`: the bit must only move after the box
+  accepted the matching `form_endpoint` write, so no PATCH can flip it alone.
+  """
+  def forms_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:forms_enabled])
+    |> validate_required([:forms_enabled])
+  end
+
+  @doc """
+  dr-w13-bl-demand-needs-a-label-before-a-cut (charter D206): the NARROW
+  changeset that classifies a site's demand.
+
+  Deliberately not part of `changeset/2`: classifying a site is an operator act
+  about what the site IS FOR, not a settings edit, and routing it through the
+  wide create/update changeset would let a classification ride along with — or
+  be silently clobbered by — an unrelated write. `nil` is castable on purpose:
+  UNCLASSIFYING a site must be possible, or the column could only ever be wrong
+  in one direction.
+  """
+  def demand_class_changeset(site, attrs) do
+    site
+    |> cast(attrs, [:demand_class])
+    |> validate_inclusion(:demand_class, @demand_classes)
   end
 
   @doc """

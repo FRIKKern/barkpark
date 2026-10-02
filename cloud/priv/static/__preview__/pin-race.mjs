@@ -392,6 +392,12 @@ async function main() {
     out.browser = version.Browser;
     out.node = process.version;
     process.stdout.write(">> " + version.Browser + " · node " + process.version + "\n\n");
+    // THE SCOPE OF THIS RUN, PRINTED WITH ITS RESULT (D906). Everything below
+    // is measured in ONE engine. D168 asserted a cross-browser property off a
+    // green like this one and stood for four waves until a hand-driven Firefox
+    // refuted it (D904). browser-axis-census.mjs derives the engine from this
+    // file's own discovery candidates and reds if this line disagrees with them.
+    process.stdout.write(">> browser axis  Blink — 1 of 3 engine families (Blink · Gecko · WebKit). A green here is NOT a cross-browser green.\n");
     cdp = await Cdp.connect(version.webSocketDebuggerUrl);
 
     // ONE browser, ONE default context → ONE localStorage per origin, which is

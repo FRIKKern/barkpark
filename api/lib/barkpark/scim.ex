@@ -260,7 +260,12 @@ defmodule Barkpark.Scim do
           from(t in base, where: t.workspace_id in ^ws_ids or is_nil(t.workspace_id))
       end
 
-    {n, _} = Repo.update_all(query, set: [revoked_at: now])
+    {n, revoked} = Repo.update_all(select(query, [t], t), set: [revoked_at: now])
+
+    # The bulk update skips `Auth.revoke_token/1`, so send its socket teardown
+    # here: an open search socket holding one of these tokens must close now,
+    # not at its next frame (r4a realtime authz sweep).
+    Enum.each(revoked, &Barkpark.Auth.broadcast_socket_teardown/1)
 
     if n > 0 do
       Audit.emit(%{
@@ -281,7 +286,7 @@ defmodule Barkpark.Scim do
   @spec get_org_user(Organization.t(), binary()) :: User.t() | nil
   def get_org_user(%Organization{} = org, user_id) when is_binary(user_id) do
     # #672 class: `user_id` binds to `:binary_id` columns (Membership.principal_id,
-    # User.id). A non-UUID path param would raise Ecto.CastError → 500; guard the
+    # User.id). A non-UUID path param would raise Ecto.Query.CastError → 400; guard the
     # cast so a malformed id folds into the existing not_found (`nil`) branch → 404.
     case Repo.uuid_or_nil(user_id) do
       nil -> nil
@@ -359,7 +364,7 @@ defmodule Barkpark.Scim do
         random = Base.encode16(:crypto.strong_rand_bytes(32))
 
         case Accounts.register_user(%{email: email, password: random}) do
-          {:ok, user} -> {:ok, Repo.update!(User.confirm_changeset(user))}
+          {:ok, user} -> {:ok, Accounts.confirm_provisioned_user(user)}
           err -> err
         end
     end
@@ -440,7 +445,7 @@ defmodule Barkpark.Scim do
   @spec get_org_group(Organization.t(), binary()) :: Group.t() | nil
   def get_org_group(%Organization{id: oid}, id) when is_binary(id) do
     # #672 class: `id` binds to Group's `:binary_id` PK. A non-UUID path param
-    # would raise Ecto.CastError → 500; guard the cast so a malformed id folds
+    # would raise Ecto.Query.CastError → 400; guard the cast so a malformed id folds
     # into the existing `nil` branch → SCIM 404.
     case Repo.uuid_or_nil(id) do
       nil -> nil

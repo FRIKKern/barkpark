@@ -172,6 +172,27 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   @spec enqueue(binary(), pos_integer()) :: {:ok, Oban.Job.t()} | {:error, term()}
   def enqueue(site_id, schedule_in)
       when is_binary(site_id) and is_integer(schedule_in) and schedule_in > 0 do
+    # THE ENQUEUE SEAM (dr-bl-deferral-requeue-failure-untested), mirroring
+    # `Sites.Deploy`'s `:site_deploy_starter` / `:site_deploy_requeue` exactly.
+    # Under `Oban testing: :manual` an insert ALWAYS succeeds, so BOTH re-queue
+    # failure arms — `Deploy.defer/3`'s (which reaches Oban through this
+    # function) and `defer_behind_running_build/2`'s below — were unreachable in
+    # a test. Those two arms are the ones that decide whether a lost publish is
+    # counted; a branch that cannot be made to fire proves nothing by being read.
+    #
+    # INERT IN PRODUCTION, structurally rather than by convention: the override
+    # lives in the CALLING PROCESS's dictionary, which starts empty on every
+    # process the BEAM spawns. No non-test module writes this key (`git grep
+    # auto_deploy_enqueue -- cloud/lib` is this line alone), so the default arm
+    # is the only one production can take. Process-locality is also what keeps
+    # `async: true` honest: one test's stub can never be seen by another's.
+    case Process.get(:auto_deploy_enqueue) do
+      fun when is_function(fun, 2) -> fun.(site_id, schedule_in)
+      _ -> insert_debounced(site_id, schedule_in)
+    end
+  end
+
+  defp insert_debounced(site_id, schedule_in) do
     %{site_id: site_id}
     |> new(schedule_in: schedule_in, unique: @unique)
     |> Oban.insert()
@@ -336,6 +357,16 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
       # onto it. Re-driving is right either way — a still-`queued` row reads the
       # NEW content when it starts, and an already-building one answers
       # `:not_queued`, which defers below instead of dropping the publish.
+      # task-786051334bc47508: a `--prebuilt` mint sits `queued` for up to an
+      # hour WAITING FOR ITS UPLOAD. Driving it here started a build with no
+      # bytes: the row died `failed`, and the client's upload then 409'd
+      # `deployment_not_queued` — the build was lost and the site showed a false
+      # failure. The reaper and resume_orphaned already skip such a row; so does
+      # this path now. Defer behind it like any other in-flight build.
+      {:duplicate,
+       %Deployment{status: "queued", source: "prebuilt", artifact_sha256: nil} = deployment} ->
+        defer_behind_running_build(site, deployment)
+
       {:duplicate, %Deployment{status: "queued"} = deployment} ->
         start_and_report(site, deployment)
 
@@ -375,7 +406,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
       # row with the box's own reason — returning an Oban error would retry a
       # build that just failed for a reason a retry cannot change — but the value
       # travels so the job record says which it was.
-      {:ok, outcome} when outcome in [:live, :failed, :deferred] ->
+      {:ok, outcome} when outcome in [:live, :failed, :deferred, :deferred_unrecorded] ->
         {:ok, outcome}
 
       # The row is already claimed — the site is mid-build. THIS is the publish
@@ -445,13 +476,30 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   # HOW MANY PUBLISHES THIS BUILD IS ANSWERING FOR — the count of attempts that
   # minted no row of their own, hung on the in-flight row they coalesced onto.
   #
-  # WHY IT MATTERS EVEN THOUGH IT IS QUIET TODAY, measured from Oban rather than
-  # guessed: in the twelve hours 2026-08-06 08:00-20:00Z there were 2,256
-  # `AutoDeployWorker` jobs against 1,052 deployment rows — 1,204 ATTEMPTS THAT
-  # MINTED NO ROW against 277 counted deferrals (4.35:1). Since 22:00Z the same
-  # ratio is 0.086:1 and zero per minute. That is DORMANT, not fixed: the gap is
-  # a function of publish load against build duration, so it returns precisely
-  # when the number is worth having.
+  # WHY IT READS NEAR-ZERO, AND WHY THAT IS THE CORRECT ANSWER
+  # (dr-w19-bl-coalesced-counter-reads-a-confident-zero). This counter and a
+  # MINTED ROW are the two EXCLUSIVE branches of one decision in `drive/2`: a
+  # second publish either finds the site's previous row still ACTIVE — the
+  # `(site_id, environment)` index refuses the INSERT, no row exists to count,
+  # so the attempt is counted HERE — or finds it SETTLED, in which case the
+  # INSERT succeeds and a real row carries the attempt instead. `deferred` is
+  # TERMINAL, so on a busy box each round settles its own row before the next
+  # attempt runs and only the MINT branch is reachable: the 1,371 deferral rows
+  # of 2026-08-07 are 1,371 proofs that the mint branch was taken, NOT 1,371
+  # uncounted coalesces. The coalesce branch's window is the span a row spends
+  # active — minutes on a healthy build, one HTTP round trip on a busy box
+  # (claim → `building` → 409 → `deferred`) — against a 60s debounce.
+  #
+  # THE PRIOR SIZING HERE IS WITHDRAWN. This comment used to carry "1,204
+  # attempts that minted no row … 4.35:1", derived by subtracting deployment
+  # rows from `AutoDeployWorker` Oban jobs. The two populations are not nested
+  # (rows also arrive from non-AutoDeployWorker triggers), so post-migration the
+  # subtraction goes NEGATIVE — 651 jobs against 658 rows, i.e. -7 — and
+  # `oban_jobs` prunes at 7 days. It sized nothing then and cannot be used now.
+  #
+  # ALIVE, NOT DORMANT-BY-ASSUMPTION: `auto_deploy_worker_test.exs`'s "THE ZERO
+  # IS THE REGIME, NOT A DEAD COUNTER" reads 3 in flight and 0 behind a busy box
+  # through this same column — a dead counter reads 0 in both.
   #
   # "Attempts that minted no row", never "uncounted deferrals": the
   # `{:duplicate, %{status: "queued"}}` re-drive arm above has the same shape and

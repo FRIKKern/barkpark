@@ -80,6 +80,21 @@ defmodule BarkparkCloud.Notifications.Transactional do
   end
 
   @doc """
+  Build the notice sent to the FORMER address after an email change. Names the
+  new address so the rightful owner can tell whether the change was theirs.
+  """
+  @spec email_changed_notice_email(String.t(), String.t()) :: Swoosh.Email.t()
+  def email_changed_notice_email(to, new_email) when is_binary(to) and is_binary(new_email) do
+    base_email(to, "Your Barkpark Cloud email was changed", """
+    The email address on your Barkpark Cloud account was changed from this
+    address to #{new_email}. Every other signed-in session was signed out.
+
+    If you made this change, there is nothing to do. If you didn't, your account
+    may be in someone else's hands — contact Barkpark support from this address.
+    """)
+  end
+
+  @doc """
   cch-w30-bl — build the PAT expiry warning, addressed to the token's OWNER.
 
   IT IS TRANSACTIONAL, NOT AN ALERT, and that is a routing decision rather than
@@ -195,6 +210,10 @@ defmodule BarkparkCloud.Notifications.Transactional do
   @spec deliver_email_change_code(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def deliver_email_change_code(to, code),
     do: email_change_code_email(to, code) |> Mailer.deliver()
+
+  @spec deliver_email_changed_notice(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
+  def deliver_email_changed_notice(to, new_email),
+    do: email_changed_notice_email(to, new_email) |> Mailer.deliver()
 
   @spec deliver_token_expiring(String.t(), String.t(), DateTime.t()) ::
           {:ok, term()} | {:error, term()}

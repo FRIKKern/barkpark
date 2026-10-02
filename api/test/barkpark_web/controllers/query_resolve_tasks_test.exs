@@ -49,25 +49,34 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     %{conn: put_req_header(conn, "authorization", "Bearer barkpark-dev-token"), scope: scope}
   end
 
+  # PUBLISHED, because `?resolve=tasks` now resolves in the caller's own
+  # perspective (task-b10e10b944f6f55b) and every request in this file asks for
+  # the default `published` one — exactly like the DOCUMENTS in the same
+  # response. A draft-only fixture would resolve to an empty snapshot and the
+  # seam's contract would go untested.
   defp mk_task!(title, lifecycle, label, scope) do
     doc_id = "rs-#{System.unique_integer([:positive])}"
+    Barkpark.LabelFixtures.register_tags!(@dataset)
 
-    {:ok, doc} =
+    {:ok, _draft} =
       Content.create_document(
         "task",
         %{
           "doc_id" => doc_id,
           "title" => title,
-          "content" => %{
-            "kind" => "task",
-            "lifecycle_status" => lifecycle,
-            "labels" => [label]
-          }
+          "content" =>
+            Barkpark.LabelFixtures.with_labels(%{
+              "kind" => "task",
+              "brief" => Barkpark.TaskBriefFixtures.brief(),
+              "lifecycle_status" => lifecycle,
+              "labels" => [label]
+            })
         },
         @dataset,
         scope
       )
 
+    {:ok, doc} = Content.publish_document(doc_id, "task", @dataset, scope)
     doc
   end
 
@@ -78,6 +87,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     slug
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "index: ?resolve=tasks turns a query block into a snapshot block", %{
     conn: conn,
     scope: scope
@@ -131,6 +142,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     refute Map.has_key?(block, "snapshot")
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "show: single-doc route resolves; pinned snapshots pass through", %{
     conn: conn,
     scope: scope
@@ -160,6 +173,8 @@ defmodule BarkparkWeb.QueryResolveTasksTest do
     assert kept["snapshot"] == pinned
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "fail-closed: a foreign workspace's tasks never resolve into the rows", %{
     conn: conn,
     scope: scope

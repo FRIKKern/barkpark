@@ -66,6 +66,9 @@ defmodule Barkpark.Quiz.BridgeSandboxCascadeTest do
   """
   use ExUnit.Case, async: false
 
+  # Plugins-off: the quiz plugin starts Barkpark.Quiz.RoomRegistry and the room supervisors
+  @moduletag :requires_plugins
+
   import ExUnit.CaptureLog
 
   alias Barkpark.{Content, Quiz}

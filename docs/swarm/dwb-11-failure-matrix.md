@@ -15,8 +15,10 @@ control-plane restart. Money column noted where it differs.
 ## 2. Launch (POST /v1/launch | /v1/go-live)
 
 - Double-click, same name, paid team w/ quota headroom: PROVEN —
-  `barkparks_team_slug_unique_idx` is the launch idempotency key → second submit 422, one row,
-  one job (`router_test.exs "dwb-11: rapid double-submit of the SAME launch creates ONE box"`).
+  go_live reconciles an equivalent in-flight launch → second submit 409 `already_provisioning`
+  + the first row's id, one row, one job (`router_test.exs "dwb-11: rapid double-submit of the
+  SAME launch creates ONE box"`; racing pair + trial path in `router_launch_flow_test.exs`).
+  `barkparks_team_slug_unique_idx` stays the backstop the racing loser collides on.
   Different-name double-launch is two INTENTS (quota-gated), not a duplicate — by design.
 - Clean-URL race (two teams, same clean slug): PROVEN — `barkparks_url_unique_idx` decides;
   loser falls back to suffixed FQDN (`register_managed_barkpark`, registry tests).

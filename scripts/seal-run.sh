@@ -102,6 +102,18 @@
 #   bash scripts/seal-run.sh --repo <full-history worktree at origin/main>
 #   bash scripts/seal-run.sh --repo . --epic deploy-reliability-epic -- --ladder-only
 #
+# A MACHINE TAKES ONE READING THROUGH THIS SCRIPT, and that is the point of
+# .github/workflows/seal-reading.yml (dr-w28-bl-seal-run-is-available-but-not-
+# enforced): on every push to main and daily, over a `fetch-depth: 0` checkout
+# detached at origin/main, it runs the command above and publishes the token with
+# `head=` and `b-unavailable=` beside it. The job is ADVISORY — a measurement, not
+# a merge gate — and it reads `--ladder-only`, because a full verdict needs the
+# ledger and a `--successor` claim, and manufacturing a successor to force a
+# verdict is what charter D83 forbids. What that job reds on is a REFUSAL from
+# this script or an infra fault: facts about the checkout, never about the epic.
+# Nothing stops a hand-typed `node <predicate>` call; what the job removes is the
+# excuse that no machine-taken reading exists to stand beside one.
+#
 # Mutation proofs: bash scripts/seal-run.test.sh
 
 set -uo pipefail

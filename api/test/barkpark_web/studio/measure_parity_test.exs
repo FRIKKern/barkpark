@@ -919,6 +919,58 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
              """
     end
 
+    test "the reader's TOP-LEVEL rule PADS with the gutter token, not a literal" do
+      # The mirror, on the READER sheet, of the Studio-side consumption pin
+      # ("the reader's padding CONSUMES the same token the floor does", which
+      # reads root.html.heex). Every other reader pin above is derived from
+      # `--paper-gutter` DECLARATIONS (the ladder) or from the @media bodies, so
+      # the top-level rule can go on declaring the token while its padding
+      # restates `56px 40px 96px` — the ORIGINAL desync shape — and the whole
+      # file stays green. This is the one that looks at what actually renders.
+      padding = reader_shell_padding!()
+
+      assert padding =~ ~r/var\(\s*--paper-gutter\s*\)/,
+             """
+             The reader shell `#{@reader_shell_selector}` in bulldocs.html.heex
+             pads `padding: #{padding}` — a gutter LITERAL, not the token.
+
+             `--paper-gutter` can stay declared and the ladder pins above still
+             agree, so the value is back to living in two places and the two
+             shells drift the moment either sheet is edited. Pad with
+             `var(--paper-gutter)`.
+             """
+    end
+
+    defp reader_shell_padding! do
+      src = File.read!(@bulldocs)
+
+      block =
+        case Enum.filter(
+               top_level_blocks(src, @reader_shell_selector),
+               &(&1 =~ ~r/--paper-gutter\s*:/)
+             ) do
+          [one] ->
+            one
+
+          other ->
+            flunk(
+              "expected exactly ONE top-level `#{@reader_shell_selector}` rule in " <>
+                "bulldocs.html.heex declaring `--paper-gutter`, found #{length(other)}"
+            )
+        end
+
+      case Regex.run(~r/(?<![-\w])padding\s*:\s*([^;}]+)/, block) do
+        [_, value] ->
+          String.trim(value)
+
+        nil ->
+          flunk(
+            "the top-level `#{@reader_shell_selector}` rule in bulldocs.html.heex " <>
+              "declares no `padding` at all — the reader column has no gutter"
+          )
+      end
+    end
+
     test "no reader breakpoint pads the shell with a gutter LITERAL" do
       # THE ACTUAL BUG, as a permanent tripwire. `padding-inline: 20px` sat in a
       # LATER `@media (max-width: 720px)` block than the ladder, so it won on

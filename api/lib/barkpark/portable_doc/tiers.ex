@@ -115,6 +115,9 @@ defmodule Barkpark.PortableDoc.Tiers do
   # the block is the read-time VISUAL, its answerability rides the message envelope.
   @widget [
     "paper-links",
+    # `master-ref` → :widget: a linked master instance (task-59f078a2fd248698),
+    # one display unit resolved at read time, the same family as `embed`.
+    "master-ref",
     # scaffy:classify-block-type route MARK:tier-route--widget
     # `route` → :widget: one purposeful visualization over literal data (an
     # encoded polyline), the same family as chart/heatmap/gauge-list.

@@ -729,6 +729,14 @@ const PIN = [
   { key: "MAP|ERRORS.not_live", verdict: "CONSULTED", copy: "The instance isn't live yet — wait for provisioning to finish." },
   { key: "MAP|ERRORS.no_admin_token", verdict: "CONSULTED", copy: "No stored credentials for this instance — it may need a re-..." },
   { key: "MAP|ERRORS.instance_unreachable", verdict: "CONSULTED", copy: "Couldn't reach the instance — try again in a moment." },
+  // task-71082f5541c13b53 (N-08): every /v1/sites/:id/forms route's 409 (router.ex forms_refusal/2).
+  { key: "MAP|ERRORS.forms_unsupported", verdict: "CONSULTED", copy: "This instance doesn't have the forms plugin turned on, so it can't tak..." },
+  // task-8b4a4776ba35a9cd: the 409 on POST /v1/billing/checkout for a team that already pays.
+  { key: "MAP|ERRORS.already_subscribed", verdict: "CONSULTED", copy: "Your team already has a paid plan. Change or cancel it from Manage bil..." },
+  // task-e4cdc0f2e7766e1a: the 409 on POST /v1/account/two-factor/enroll while 2FA is ON.
+  { key: "MAP|ERRORS.already_enabled", verdict: "CONSULTED", copy: "Two-factor is already on. Turn it off first if you want to set it up a..." },
+  // r4a: the 422 on POST /v1/fleet/supports when the host is another team's box.
+  { key: "MAP|ERRORS.host_taken", verdict: "CONSULTED", copy: "That host is already registered to another team. Use the address of a ..." },
   { key: "MAP|ERRORS.instance_not_armed", verdict: "CONSULTED", copy: "This instance hasn't armed one-click apply, so resuming aut..." },
   { key: "MAP|ERRORS.network_error", verdict: "CONSULTED", copy: "Network error — is the control plane running?" },
   { key: "MAP|ERRORS.limit_reached", verdict: "CONSULTED", copy: "You're at your plan's instance limit." },
@@ -750,6 +758,41 @@ const PIN = [
   { key: "MAP|ERRORS.repo_not_in_installation", verdict: "CONSULTED", copy: "GitHub's app can no longer see that repository — grant it a..." },
   { key: "MAP|ERRORS.github_error", verdict: "CONSULTED", copy: "GitHub did not respond as expected — the problem is on GitH..." },
   { key: "MAP|ERRORS.invalid_name", verdict: "CONSULTED", copy: "That repository name isn't allowed — use only letters, numb..." },
+  // cch-w73-bl — THE THREE SITES THE GITHUB INSTALL RETURN LEG BROUGHT.
+  //
+  // installation_not_found is CONSULTED, and the emitter is named: the POST
+  // /v1/github/installations handler validates the id through the client seam
+  // and answers 422 {"error":"installation_not_found"} when the App can no
+  // longer see it (cloud/lib/barkpark_cloud/web/router.ex — re-derive with
+  // `grep -n installation_not_found cloud/lib/barkpark_cloud/web/router.ex`).
+  // Before this wave the slug had NO reader, because the route had no caller at
+  // all; the leg made it human-reachable and the sentence was paid in the same
+  // diff that deleted its wire-vs-reader census row.
+  { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
+  { key: "MAP|ERRORS.install_state_invalid", verdict: "CONSULTED", copy: "That GitHub install link was started by another account or..." },
+  // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
+  // a refusal CAUSE: the first is the console's own success line for a 201 it
+  // verified (installation.connected === true and nothing less), the second is
+  // its honest-absence TITLE, under which friendly() then renders the server's
+  // own cause when there is one. The console invents these, so the census's
+  // question — "can the server produce this?" — is answered "it does not have
+  // to": they state what the CONSOLE knows, which is exactly the claim the leg
+  // exists to keep narrow.
+  { key: "FN|githubInstallOutcome|c12d75b8", verdict: "AUTHORED", copy: "Barkpark recorded the app install" },
+  { key: "FN|githubInstallOutcome|12f8d6af", verdict: "AUTHORED", copy: "Couldn't confirm the GitHub install" },
+  // cch-w73-bl (census pass) — THE FENCE'S OWN SENTENCE, split across the four
+  // string literals that build it. AUTHORED, and this is the one place in the
+  // leg where that verdict is the POINT rather than a concession: the console
+  // is NOT reading a server cause here, it is refusing to produce one. It knows
+  // from /v1/me that this principal is not a team admin, so it never POSTs and
+  // never collects the 403 whose generic copy would have been rendered under
+  // "Couldn't confirm the GitHub install" — a sentence about the INSTALL for a
+  // refusal about the READER. The server emitter exists (require_team_admin's
+  // 403 forbidden); it is simply never reached, which is the whole fence.
+  { key: "FN|githubInstallRefusalToast|0a1d9085", verdict: "AUTHORED", copy: "Only a team admin can connect GitHub" },
+  { key: "FN|githubInstallRefusalToast|3940bbc9", verdict: "AUTHORED", copy: "The app may now be installed on your GitHub account, but re..." },
+  { key: "FN|githubInstallRefusalToast|6ffd53cb", verdict: "AUTHORED", copy: "for this team is an admin-only action. Ask a team admin to ..." },
+  { key: "FN|githubInstallRefusalToast|5d33800f", verdict: "AUTHORED", copy: "Settings \\u2192 Providers and connect GitHub." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.admin", verdict: "CONSULTED", copy: "You need the admin role on this team — an admin on this tea..." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.owner", verdict: "CONSULTED", copy: "You need the owner role on this team — only the team owner ..." },
   { key: "MAP|FORBIDDEN_ROLE_COPY.platform_operator", verdict: "CONSULTED", copy: "That's limited to platform operators — no team role grants it." },
@@ -758,6 +801,12 @@ const PIN = [
   { key: "MAP|FORBIDDEN_REASON_COPY.cannot_grant_higher_role", verdict: "CONSULTED", copy: "You can't grant a role above your own — that has to come fr..." },
   { key: "FN|forbiddenEvidenceCopy|3fb8e7ae", verdict: "UNREVIEWED", copy: "You need the \"" },
   { key: "FN|forbiddenEvidenceCopy|36412f8e", verdict: "UNREVIEWED", copy: "\" permission on this team — an admin on this team can grant..." },
+  // cch-w48-bl — THE scope:"token" ARM. CONSULTED, and the server emitter is
+  // named: Auth.require_ability/2 sends {error:"forbidden", required:<ability>,
+  // scope:"token"} and it is the ONLY producer of that scope in cloud/lib. The
+  // sentence is reached ONLY on that scope, so it cannot fire on a team refusal.
+  { key: "FN|forbiddenEvidenceCopy|8e4a70b3", verdict: "CONSULTED", copy: "That access token doesn\\'t carry the \"" },
+  { key: "FN|forbiddenEvidenceCopy|89a37a83", verdict: "CONSULTED", copy: "\" ability. No team role grants it — a token\\'s abilities ar..." },
   { key: "FN|friendly|bee54c9c", verdict: "UNREVIEWED", copy: "Something went wrong." },
   { key: "FN|fleetLoadErrorHtml|47aa7e66", verdict: "UNREVIEWED", copy: "<div class=\"empty-state\"><h2>Couldn\\'t load this instance</h2>" },
   { key: "ARG|fleetLoadErrorHtml|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },
@@ -821,6 +870,7 @@ const PIN = [
   { key: "FN|loadOverview|d1b27ebe", verdict: "UNREVIEWED", copy: "You don't have access to this fleet." },
   { key: "FN|loadOverview|6ad5126d", verdict: "UNREVIEWED", copy: "Your fleet couldn't be loaded, and the answer didn't say why." },
   { key: "ARG|dismissRunway|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|ackRunwayStep|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|runDecommission|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|retryInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|removeInstance|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
@@ -898,6 +948,13 @@ const PIN = [
   { key: "FN|operatorReadFault|a5b0ceb4", verdict: "UNREVIEWED", copy: "The request never reached the control plane, so there is no..." },
   { key: "ARG|operatorConfirmBrake|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|operatorConfirmBrake|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  // gr-backlog-operator-digest-send — the send-now button's failure leg, the
+  // brake's twin two rows up and DELEGATED for the identical reason: the
+  // sentence a human reads comes from operatorReadFault(r) / friendly(r.data),
+  // i.e. the SERVER's own refusal, and "Please try again." is only the fallback
+  // when the response carried no cause at all. Nothing here authors a cause.
+  { key: "ARG|operatorConfirmDigestSend|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "ARG|operatorConfirmDigestSend|ctl.fail|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|loadInstanceSites|00ee8a15", verdict: "UNREVIEWED", copy: "You don't have access to the sites on this instance." },
   { key: "FN|loadInstanceSites|1cf6149e", verdict: "UNREVIEWED", copy: "We couldn't read this instance's sites — try again in a mom..." },
   { key: "FN|siteCreateFailureCopy|3b49b7b9", verdict: "UNREVIEWED", copy: "It can read:" },
@@ -936,6 +993,23 @@ const PIN = [
   { key: "FN|sitePreviewsSectionHtml|0518bdaf", verdict: "UNREVIEWED", copy: "Turn them on with <span class=\\\"mono\\\">bp cloud site settin..." },
   { key: "FN|sitePreviewsSectionHtml|e7ec0c7a", verdict: "UNREVIEWED", copy: "<div class=\"empty-state\"><h2>No branch previews are being s..." },
   { key: "FN|sitePreviewsSectionHtml|527cc320", verdict: "UNREVIEWED", copy: "<p>This lists the previews the instance is serving right no..." },
+  // task-71082f5541c13b53 (N-08): the form inbox. The two headings are painted
+  // only over a server answer (forms_unsupported, or a failed read whose own
+  // cause readFailureCopy relays); every fallback is reached only after that
+  // relay found no cause of its own. The four markup rows carry no cause at all.
+  { key: "FN|siteFormsSectionHtml|0b0c6880", verdict: "CONSULTED", copy: "<div class=\"empty-state\"><h2>Forms aren\\'t available on this instance<..." },
+  { key: "FN|siteFormsSectionHtml|b6d85ce4", verdict: "CONSULTED", copy: "<div class=\"empty-state\"><h2>Couldn\\'t load the form inbox</h2><p>" },
+  { key: "FN|siteFormsSectionHtml|cc70a458", verdict: "CONSULTED", copy: "You don't have access to this site's form inbox." },
+  { key: "FN|siteFormsSectionHtml|37b57d85", verdict: "CONSULTED", copy: "The form inbox couldn't be loaded, and the answer didn't say why." },
+  { key: "FN|siteFormsSectionHtml|bbbba99a", verdict: "UNREVIEWED", copy: "<button class=\"seg-btn\" type=\"button\" data-forms-filter=\"" },
+  { key: "FN|siteFormsSectionHtml|a90bab43", verdict: "UNREVIEWED", copy: "<button class=\"btn btn-ghost btn-sm\" type=\"button\" data-forms-export=\"" },
+  { key: "FN|siteFormsSectionHtml|c043c1cf", verdict: "UNREVIEWED", copy: "<button class=\"btn btn-ghost btn-sm\" type=\"button\" data-forms-export=\"" },
+  { key: "FN|siteFormsSectionHtml|4b660db6", verdict: "UNREVIEWED", copy: "<p class=\"deploys-note\">Showing the 200 most recent submissions.</p>" },
+  { key: "FN|wireSiteForms|757e4c9f", verdict: "CONSULTED", copy: "You don't have permission to change this site's forms." },
+  { key: "FN|wireSiteForms|7d1c83f1", verdict: "CONSULTED", copy: "The change didn't go through, and the answer didn't say why." },
+  { key: "FN|wireSiteForms|ace3602b", verdict: "CONSULTED", copy: "You don't have permission to change this site's submissions." },
+  { key: "FN|wireSiteForms|530c7822", verdict: "CONSULTED", copy: "You don't have permission to export this site's submissions." },
+  { key: "FN|wireSiteForms|2602b482", verdict: "CONSULTED", copy: "The export didn't go through, and the answer didn't say why." },
   { key: "FN|sitePreviewsSectionHtml|821a1ecc", verdict: "UNREVIEWED", copy: "or was torn down when the branch was deleted, is not listed..." },
   { key: "FN|sitePreviewsSectionHtml|107dba76", verdict: "UNREVIEWED", copy: "what has been pushed.</p></div>" },
   { key: "ARG|siteDetailHtml|faultCopy|43d5ca9a", verdict: "DELEGATED", copy: "the read failed without saying why." },
@@ -999,7 +1073,27 @@ const PIN = [
   { key: "ARG|openSiteGithub|friendly|f69d8f71", verdict: "DELEGATED", copy: "Couldn't load your repositories." },
   { key: "ARG|submitSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|disconnectSiteGithub|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
-  { key: "ARG|resumeStudioLogin|friendly|ca861173", verdict: "DELEGATED", copy: "Try again from the instance page." },
+  // ── studioSigninOutcome — the "Log in with Barkpark Cloud" refusal sheet.
+  // Every sentence here is backed by an emitter in the studio-signin route
+  // (`post "/v1/auth/studio-signin"`, cloud/lib/barkpark_cloud/web/router.ex):
+  // `not_found` (the deliberate non-oracle: no such host AND not your team),
+  // `no_admin_token`, `suspended`, `not_live`, `instance_unreachable`, plus the
+  // 401 from Auth.require_user. The two 404 slugs are why the branch reads the
+  // SLUG and not the status — see studioSigninOutcome's own note. It replaces
+  // ARG|resumeStudioLogin|friendly|ca861173, whose call site is gone.
+  { key: "FN|studioSigninOutcome|1addabec", verdict: "AUTHORED", copy: "Instance not linked" },
+  { key: "FN|studioSigninOutcome|3de1ca26", verdict: "AUTHORED", copy: "isn't managed by this account." },
+  { key: "FN|studioSigninOutcome|ea757cd2", verdict: "AUTHORED", copy: "Can't open Studio yet" },
+  { key: "ARG|studioSigninOutcome|friendly|7c6265e0", verdict: "DELEGATED", copy: "No stored credentials for this instance." },
+  { key: "FN|studioSigninOutcome|348f9c97", verdict: "AUTHORED", copy: "Studio access to" },
+  { key: "FN|studioSigninOutcome|a86e71d3", verdict: "AUTHORED", copy: "is closed until the suspension is cleared." },
+  { key: "FN|studioSigninOutcome|966a3d35", verdict: "AUTHORED", copy: "Instance isn't live yet" },
+  { key: "FN|studioSigninOutcome|310ef575", verdict: "AUTHORED", copy: "has finished provisioning." },
+  { key: "ARG|studioSigninOutcome|friendly|6f310ee9", verdict: "DELEGATED", copy: "Try again once" },
+  { key: "FN|studioSigninOutcome|aad0405d", verdict: "AUTHORED", copy: "Couldn't reach the instance" },
+  { key: "ARG|studioSigninOutcome|friendly|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
+  { key: "FN|studioSigninOutcome|f61ae203", verdict: "AUTHORED", copy: "Couldn't open Studio" },
+  { key: "ARG|studioSigninOutcome|faultCopy|5f827a70", verdict: "DELEGATED", copy: "Try again from" },
   { key: "ARG|submitLaunchFlow|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderLaunchPlan|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "ARG|renderBilling|faultCopy|a8e3bd83", verdict: "DELEGATED", copy: "Check your connection and retry." },
@@ -1063,6 +1157,17 @@ const PIN = [
   { key: "ARG|inviteFailureCopy|faultCopy|a448c5d3", verdict: "DELEGATED", copy: "Check the address and try again." },
   { key: "FN|roleChangeFailureCopy|3871abbb", verdict: "UNREVIEWED", copy: "You're the last owner — promote another member to owner first." },
   { key: "ARG|roleChangeFailureCopy|friendly|37eaf9f4", verdict: "DELEGATED", copy: "That role change didn't go through — please try again." },
+  { key: "FN|accountEraseFailureCopy|294d3435", verdict: "CONSULTED", copy: "That password didn't match. If you sign in with GitHub or Go..." },
+  { key: "FN|accountEraseFailureCopy|bd9e0fef", verdict: "CONSULTED", copy: "set one first — account deletion needs it." },
+  { key: "FN|accountEraseFailureCopy|30bf11ab", verdict: "CONSULTED", copy: "You're the only owner of" },
+  { key: "FN|accountEraseFailureCopy|5b2c6096", verdict: "AUTHORED", copy: "a team that still exists" },
+  { key: "FN|accountEraseFailureCopy|2ca7f6fc", verdict: "CONSULTED", copy: ". Promote another owner, or delete the team first." },
+  { key: "ARG|accountEraseFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
+  { key: "FN|teamEraseFailureCopy|55d60362", verdict: "CONSULTED", copy: "This team still owns" },
+  { key: "FN|teamEraseFailureCopy|b467498e", verdict: "CONSULTED", copy: ". Decommission them first — deleting the team now would lea..." },
+  { key: "FN|teamEraseFailureCopy|3920aff9", verdict: "CONSULTED", copy: "Only an owner can delete a team." },
+  { key: "FN|teamEraseFailureCopy|eac7fb8b", verdict: "CONSULTED", copy: "That team is no longer there." },
+  { key: "ARG|teamEraseFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
   { key: "FN|removeMemberFailureCopy|cdc21050", verdict: "UNREVIEWED", copy: "You're the last owner — promote another member to owner bef..." },
   { key: "FN|removeMemberFailureCopy|c860f807", verdict: "UNREVIEWED", copy: "That member is no longer on the team." },
   { key: "ARG|removeMemberFailureCopy|friendly|83a6fd7b", verdict: "DELEGATED", copy: "Please try again." },
@@ -1071,6 +1176,50 @@ const PIN = [
   { key: "FN|offloadFileErrorCopy|009882c1", verdict: "UNREVIEWED", copy: "Couldn't reach the Barkpark — it may be offline, or its add..." },
   { key: "FN|offloadFileErrorCopy|f712989d", verdict: "UNREVIEWED", copy: "The app token was rejected — reload and try again." },
   { key: "ARG|offloadFileErrorCopy|friendly|3fddca35", verdict: "DELEGATED", copy: "Couldn't file the order — please try again." },
+
+  // cch-w47-rv-bl — SIX SITES THAT ARRIVED WITHOUT ONE SENTENCE BEING WRITTEN.
+  // archivesPanelHtml gained ONE call to `forbiddenEvidenceCopy` (the refuse arm's
+  // server-owned role line). That call is what QUALIFIES a function here, so the
+  // whole of archivesPanelHtml's string population entered the census in the same
+  // commit — six literals that were already shipping, unchanged, byte for byte.
+  // The sentence the change actually adds is NOT among them: it is read out of
+  // FORBIDDEN_ROLE_COPY through the fence and is already pinned as a MAP key.
+  // Read each of the six: none is a refusal CAUSE. They are the panel's own
+  // explanatory prose and its empty state — what an archive IS, where archives
+  // come from, and the `bp cloud instance archive <name>` chip. They are console
+  // AUTHORED in the literal sense (no server emits them) and the census's own
+  // question — "can the server produce this cause?" — does not apply to any of
+  // them, because none of them claims a cause. Pinned so the key set is exact;
+  // a copy edit to any of the six reds this gate again, which is correct.
+  { key: "FN|archivesPanelHtml|4497a103", verdict: "AUTHORED", copy: "An archive is a portable bundle of a whole deployment" },
+  { key: "FN|archivesPanelHtml|742ff044", verdict: "AUTHORED", copy: "DNS record and registry row as one unit — that you can resu..." },
+  { key: "FN|archivesPanelHtml|c2e4f6de", verdict: "AUTHORED", copy: "Wire object storage for this deployment and they show up here." },
+  { key: "FN|archivesPanelHtml|9d773160", verdict: "AUTHORED", copy: "No archives yet. Archive an instance with" },
+  { key: "FN|archivesPanelHtml|2a86a13b", verdict: "AUTHORED", copy: "bp cloud instance archive <name>" },
+  { key: "FN|archivesPanelHtml|7c79cc42", verdict: "AUTHORED", copy: "to keep a portable, cross-provider bundle you can resurrect..." },
+  // console-w28 — providerIdentityModel BECAME a refusal renderer, and the two
+  // sentences below are NOT new copy: they shipped in cch-w13 and are unchanged
+  // byte for byte. What changed is that the function now branches on a typed
+  // server error (`typeof payload.error === "string"`, so a 502
+  // credential_unreadable keeps its own sentence instead of being rounded off to
+  // the absent arm), which trips the census's `/\.error\s*===/` predicate and
+  // brings the whole function into scope for the first time. That is the census
+  // working, not drifting: the function reads a server cause now, so its copy is
+  // exactly what this pin is for.
+  //
+  // BOTH ARE CONSULTED, not AUTHORED. Each is reached only AFTER the server's own
+  // payload has been read and found wanting, and each names the specific thing
+  // that was missing rather than inventing a cause:
+  //   · the first fires when the payload carries no `identity` KEY at all —
+  //     `provider_identity/2` always emits the key (identity_absent/2 fills it
+  //     with value:nil + a reason), so its absence means a control plane older
+  //     than D899, which is what the sentence says.
+  //   · the second fires when the key IS there with a null value but the server
+  //     sent no `reason` — every committed identity_absent/2 call site passes
+  //     one, so this is the honest fallback for a reason-less payload rather
+  //     than a blank that would look known.
+  { key: "FN|providerIdentityModel|46965ca1", verdict: "CONSULTED", copy: "This control plane doesn't report which account a connectio..." },
+  { key: "FN|providerIdentityModel|4c83c181", verdict: "CONSULTED", copy: "This connection doesn't say which account it points at." },
 ];
 
 // ═══════════════════════════════════════════════════════════════════════════

@@ -58,8 +58,12 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   windowed `done_today` a single event cannot re-derive.
 
   A per-socket **seen-set** of `{doc_id, updated_at}` drops the mount-snapshot
-  echo and exact-repeat events. Non-`task` events and anything else are ignored
-  by a catch-all `handle_info` clause — a stray message never crashes the socket.
+  echo and exact-repeat events. It is a BOUNDED FIFO (`@seen_cap` newest keys):
+  the topic it is fed from is dataset-global, so an unbounded set grew one tuple
+  per task write ANYWHERE in the dataset for the life of the socket, and the
+  `:refresh` reconcile never pruned it. Non-`task` events and anything else are
+  ignored by a catch-all `handle_info` clause — a stray message never crashes
+  the socket.
 
   ## Drag restage (charter §criterion, wave 3)
 
@@ -189,6 +193,21 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # the windowed done_today) — so seconds, not milliseconds, is right.
   @refresh_ms 15_000
 
+  # A CEILING on the per-socket echo set. The set's only job is to drop the
+  # mount-snapshot echo and an exact repeat of an event this socket just
+  # applied, so it needs memory of the RECENT past only — yet it was an
+  # unbounded `MapSet` fed by the DATASET-GLOBAL topic `documents:#{@dataset}`,
+  # so every task write anywhere in the dataset added a permanent
+  # `{doc_id, updated_at}` tuple for the life of the socket. `:refresh`
+  # rebuilds board/readable?/last_change/peek and walks straight past it, so
+  # the 15s reconcile was not a pruning point. A board tab left open under
+  # campaign write load therefore grew per-socket heap no GC can reclaim.
+  # Bounded FIFO: the newest @seen_cap keys are remembered, older ones evicted.
+  # Persisted so the protective test can read the real ceiling out of the
+  # compiled module instead of restating the number and drifting from it.
+  Module.register_attribute(__MODULE__, :seen_cap, persist: true)
+  @seen_cap 256
+
   @dataset "production"
 
   @facet_keys [:goal, :priority, :label, :worker]
@@ -237,7 +256,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
      |> assign(:readable?, readable?)
      |> assign(:last_change, nil)
      |> assign(:notice, nil)
-     |> assign(:seen, MapSet.new())
+     |> assign(:seen, seen_new())
      |> assign(:group_by, :none)
      |> assign(:filters, empty_filters())
      |> assign_view()}
@@ -283,7 +302,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       when is_map(doc) do
     key = {doc.doc_id, doc.updated_at}
 
-    if MapSet.member?(socket.assigns.seen, key) do
+    if seen_member?(socket.assigns.seen, key) do
       {:noreply, socket}
     else
       board = socket.assigns.board
@@ -295,7 +314,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
        socket
        |> assign(:board, board)
        |> assign(:last_change, change)
-       |> update(:seen, &MapSet.put(&1, key))
+       |> update(:seen, &seen_put(&1, key))
        |> refresh_peek()
        |> assign_view()}
     end
@@ -323,6 +342,40 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # A non-task document event, or any other stray message — ignore it. NEVER
   # crash the socket over an event we don't render.
   def handle_info(_other, socket), do: {:noreply, socket}
+
+  # ── bounded echo set ───────────────────────────────────────────────────────
+  #
+  # `MapSet` alone answers membership but cannot say which key is OLDEST, so a
+  # cap needs insertion order alongside it: an Erlang `:queue` (O(1) amortised
+  # at both ends) carries the FIFO, the `MapSet` carries the O(1) lookup, and
+  # `size` is tracked rather than recomputed. Exactly one key enters per
+  # accepted event, so at most one eviction is ever owed per put.
+
+  defp seen_new, do: %{set: MapSet.new(), order: :queue.new(), size: 0}
+
+  defp seen_member?(%{set: set}, key), do: MapSet.member?(set, key)
+
+  # Re-putting a key already held is a no-op: it must NOT re-enqueue, or the
+  # queue would outgrow the set and the eviction arm would delete a key that is
+  # still current.
+  defp seen_put(%{set: set, order: order, size: size} = seen, key) do
+    if MapSet.member?(set, key) do
+      seen
+    else
+      seen_evict(%{
+        set: MapSet.put(set, key),
+        order: :queue.in(key, order),
+        size: size + 1
+      })
+    end
+  end
+
+  defp seen_evict(%{size: size} = seen) when size <= @seen_cap, do: seen
+
+  defp seen_evict(%{set: set, order: order, size: size}) do
+    {{:value, oldest}, order} = :queue.out(order)
+    %{set: MapSet.delete(set, oldest), order: order, size: size - 1}
+  end
 
   # ── wave 3: drag restage (charter D4/D11/D12) ──────────────────────────────
   #
@@ -357,7 +410,16 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         worker: worker,
         epoch: epoch,
         caller_token_id: caller_token_id(socket),
-        scope: [workspace_id: ws_id]
+        # `dataset:` is the claim door's disambiguator
+        # (bp-task-verbs-500-on-cross-dataset-duplicate-slugs), and the board is
+        # the caller best placed to supply it: it renders ONE dataset and knows
+        # which. `{:claim}` is the only restage arm that re-resolves by doc_id —
+        # `{:close, _}` and `{:release}` carry `ctx.task_id`, the uuid this
+        # handler already resolved — so without this key a drag on a
+        # cross-dataset twin reached `Tasks.claim_by_id/3` with nothing to break
+        # the tie and the LiveView died on the refusal instead of writing the
+        # card the user was actually looking at.
+        scope: [workspace_id: ws_id, dataset: @dataset]
       })
     else
       # No resolvable write workspace, an unknown column, a row that vanished, or
@@ -655,9 +717,29 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     end
   end
 
+  # ── THE THIRD FORK (bp-task-verbs-500-on-cross-dataset-duplicate-slugs) ────
+  # `documents` is unique on `(doc_id, type, dataset_id)`, not `(doc_id, type)`
+  # (migration 20260527134000), so one task doc_id can hold a row in two
+  # datasets — eleven such pairs live on guerrilla today. This reader filtered
+  # on doc_id + type + workspace and nothing else, so for those rows `Repo.one/1`
+  # matched TWO and raised `Ecto.MultipleResultsError`: not a refusal, a
+  # LiveView crash on the drag that touched them, with the board reconnecting to
+  # a stale card.
+  #
+  # The `d.dataset == ^@dataset` filter is not new policy — it is the filter
+  # this file's OWN sibling reader already carries (`fetch_peek_doc/1`, same
+  # exact/`drafts.` dance, twenty lines further down), and it is what the board
+  # already means everywhere else: the board subscribes to
+  # `documents:#{@dataset}`, snapshots `Board.snapshot(dataset: @dataset)` and
+  # gates fields on `@dataset`. A row in another dataset was never a card on
+  # this board, so it must not be a candidate for this board's write. With it,
+  # the twin resolves to the ONE row the board is showing, and a genuinely
+  # foreign id falls through to the same `:error` a missing id always did.
   defp fetch_task_exact(doc_id, ws_id) do
     query =
-      from(d in Document, where: d.doc_id == ^doc_id and d.type == "task")
+      from(d in Document,
+        where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset
+      )
       |> Scope.scope_to_workspace(ws_id, nil)
 
     case Repo.one(query) do
@@ -1810,6 +1892,33 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
         flex: 1 1 auto; min-width: 0;
         font-weight: 500; font-size: 13px; line-height: 1.4; color: var(--text);
       }
+      /* PDS-D749 — the DRAFT marker. `drafts.<id>` is the only signal a row is
+         not published, and `Content.published_id/1` strips it off the card's
+         doc_id before anything paints; `Board`'s card carries the boolean
+         forward (see its DRAFT LABEL CONTRACT) and this is where it lands.
+         Amber like `blocked`: not an error, but "this is not the real row yet". */
+      .bp-draft {
+        flex: 0 0 auto; align-self: flex-start;
+        font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+        line-height: 1.6; text-transform: uppercase;
+        color: var(--warn); border: 1px solid var(--warn);
+        border-radius: 3px; padding: 0 4px; opacity: 0.85;
+      }
+      .bp-phone-title .bp-draft { vertical-align: middle; margin-right: 6px; }
+      /* task-9d0c7adbbe1a5af1 c2 — the UNPUBLISHED-PAIR marker. The card's
+         logical id collapsed from 2+ rows and NONE is published, so the row
+         shown was picked between two unpublished twins by
+         `TwinCollapse.canonical/1`'s tie-break, not because it is the row of
+         record. Same chip shape as DRAFT, danger-coloured: this one wants
+         an operator to reconcile the pair. */
+      .bp-twin-pair {
+        flex: 0 0 auto; align-self: flex-start;
+        font-size: 9px; font-weight: 700; letter-spacing: 0.09em;
+        line-height: 1.6; text-transform: uppercase;
+        color: var(--danger); border: 1px solid var(--danger);
+        border-radius: 3px; padding: 0 4px; opacity: 0.85;
+      }
+      .bp-phone-title .bp-twin-pair { vertical-align: middle; margin-right: 6px; }
       /* Freshness stamp — every card dates itself (relative, tabular) so
          relevance is readable at a glance without opening anything. */
       .bp-age {
@@ -2760,6 +2869,22 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
               <%= glyph_text(card) %>
             </span>
             <span class="bp-title" data-role="card-title"><%= card.title %></span>
+            <span
+              :if={card[:draft]}
+              class="bp-draft"
+              data-role="draft"
+              title="Unpublished draft row — its stored id still carries the drafts. prefix"
+            >
+              DRAFT
+            </span>
+            <span
+              :if={card[:twin_unpublished_pair]}
+              class="bp-twin-pair"
+              data-role="twin-unpublished-pair"
+              title="Twinned pair with NO published side — this id has 2+ unpublished rows; the one shown was picked by tie-break"
+            >
+              UNPUBLISHED PAIR
+            </span>
             <span :if={card.updated_at} class="bp-age" data-role="age">
               <%= age_label(card.updated_at) %>
             </span>
@@ -3267,7 +3392,25 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
           </button>
         </header>
 
-        <h3 class="bp-phone-title" data-role="card-title"><%= card.title %></h3>
+        <h3 class="bp-phone-title" data-role="card-title">
+          <span
+            :if={card[:draft]}
+            class="bp-draft"
+            data-role="draft"
+            title="Unpublished draft row — its stored id still carries the drafts. prefix"
+          >
+            DRAFT
+          </span>
+          <span
+            :if={card[:twin_unpublished_pair]}
+            class="bp-twin-pair"
+            data-role="twin-unpublished-pair"
+            title="Twinned pair with NO published side — this id has 2+ unpublished rows; the one shown was picked by tie-break"
+          >
+            UNPUBLISHED PAIR
+          </span>
+          <%= card.title %>
+        </h3>
 
         <p :if={card[:description_excerpt]} class="bp-phone-desc" data-role="card-desc">
           <%= card.description_excerpt %>

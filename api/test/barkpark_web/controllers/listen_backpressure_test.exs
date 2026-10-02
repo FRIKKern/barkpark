@@ -17,8 +17,53 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   """
   use ExUnit.Case, async: false
 
+  # WHY THESE ASSERTIONS CARRY AN EXPLICIT 2_000 ms BUDGET.
+  #
+  # Three `assert_receive`s in this file are STARTUP-GATED: each waits on a
+  # process spawned inside the same test, so the spawn, the controller's
+  # `Phoenix.PubSub.subscribe/2`, the event forwarder's boot and the first
+  # `chunk/2` all have to be scheduled before the message can land. ExUnit's
+  # implicit 100 ms default was the only thing between that and a red under
+  # fleet load, and it MEASURED as one: 1 of 12 sequential runs reddened
+  # (task-c24236119b999b62).
+  #
+  # A TIMING BUDGET CANNOT MASK A DROPPED EVENT, because a dropped event never
+  # arrives at any budget. That is not theory — it was proven on THIS file
+  # during PR #15696: the fix's own `forward_event?(_msg, :shared_only) -> false`
+  # arm dropped the fixture's seeded events, and the failure read "the process
+  # mailbox is EMPTY" after the FULL wait rather than a late arrival. The
+  # mailbox would have been just as empty at 2_000 ms. Widening buys tolerance
+  # for scheduler jitter and buys NOTHING for a real drop — exactly the
+  # property a timing budget should have.
+  #
+  # WHICH THREE, and why not the rest. The set was measured, not guessed: with
+  # the implicit default forced to 1 ms, 15 of 20 runs reddened, and only at
+  # the three sites budgeted below. Every other `assert_receive` here fires
+  # AFTER the listener is hot, on a message already queued by the work the
+  # test just did, and passed every amplified run — so none is widened. This
+  # is a timing budget only: no assertion is weakened, no message pattern is
+  # broadened, no production code is touched.
+
+  # The spin helpers at the bottom of this file wait on the same wall-clock
+  # budget for the same reason.
+  @spin_budget_ms 2_000
+
   alias Barkpark.Content.CallerContext
   alias BarkparkWeb.ListenController
+
+  # A dataset NO other code writes to (task-5b5c0360d848c3e8). The listener
+  # subscribes to `documents:<dataset>`, and a shared-layer write elsewhere in
+  # the suite broadcasts there too. If a burst of 21 or more foreign events lands
+  # between the forwarder's subscribe and the listener's first loop step, the
+  # listener sheds before the test's own signal. The forwarder then exits on
+  # `:stop` before `Process.monitor/1` runs, so its DOWN reads `:noproc`
+  # instead of `:normal`. That is the main-run red of 2026-09-29.
+  #
+  # A probe (25 shared-layer broadcasts on `documents:production` fired from
+  # the adapter's `send_chunked`) reproduced it every run on "production", and
+  # passed every run on an isolated dataset. What this file tests is the shed
+  # and its cleanup, so each test owns its topic and asserts nothing weaker.
+  defp isolated_dataset, do: "listen-backpressure-#{System.unique_integer([:positive])}"
 
   defmodule BlockingChunkAdapter do
     def send_chunked(state, _status, _headers), do: {:ok, "", state}
@@ -82,6 +127,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   end
 
   test "a blocked chunk sink keeps its mailbox bounded and terminates after overload" do
+    ds = isolated_dataset()
     previous = Application.get_env(:barkpark, ListenController)
 
     Application.put_env(:barkpark, ListenController,
@@ -103,21 +149,27 @@ defmodule BarkparkWeb.ListenBackpressureTest do
 
     {pid, monitor} =
       spawn_monitor(fn ->
-        ListenController.listen(conn, %{"dataset" => "production"})
+        ListenController.listen(conn, %{"dataset" => ds})
         send(test, :listener_returned)
       end)
 
-    assert_receive {:chunk, :welcome, ^pid}
+    # Startup-gated (see the budget note at the top of this module): an
+    # explicit 2_000 ms, not the implicit 100 ms. A timing budget cannot mask
+    # a dropped event — a dropped event never arrives at any budget.
+    assert_receive {:chunk, :welcome, ^pid}, 2_000
     forwarder = only_forwarder_link(pid)
     forwarder_monitor = Process.monitor(forwarder)
 
     send(pid, {:document_changed, event(0, %{"body" => "trigger"})})
-    assert_receive {:chunk, :blocked, ^pid}
+    # Startup-gated (see the budget note at the top of this module): an
+    # explicit 2_000 ms, not the implicit 100 ms. A timing budget cannot mask
+    # a dropped event — a dropped event never arrives at any budget.
+    assert_receive {:chunk, :blocked, ^pid}, 2_000
 
     for id <- 1..1_000 do
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
-        "documents:production",
+        "documents:#{ds}",
         {:document_changed, event(id, %{"body" => "queued #{id}"})}
       )
     end
@@ -137,6 +189,7 @@ defmodule BarkparkWeb.ListenBackpressureTest do
   end
 
   test "an overload signal at the low-queue race boundary terminates and cleans up" do
+    ds = isolated_dataset()
     previous = Application.get_env(:barkpark, ListenController)
 
     Application.put_env(:barkpark, ListenController,
@@ -155,9 +208,12 @@ defmodule BarkparkWeb.ListenBackpressureTest do
       |> Map.put(:adapter, {BlockingChunkAdapter, %{test: self()}})
 
     {pid, monitor} =
-      spawn_monitor(fn -> ListenController.listen(conn, %{"dataset" => "production"}) end)
+      spawn_monitor(fn -> ListenController.listen(conn, %{"dataset" => ds}) end)
 
-    assert_receive {:chunk, :welcome, ^pid}
+    # Startup-gated (see the budget note at the top of this module): an
+    # explicit 2_000 ms, not the implicit 100 ms. A timing budget cannot mask
+    # a dropped event — a dropped event never arrives at any budget.
+    assert_receive {:chunk, :welcome, ^pid}, 2_000
     forwarder = only_forwarder_link(pid)
     forwarder_monitor = Process.monitor(forwarder)
 
@@ -191,38 +247,57 @@ defmodule BarkparkWeb.ListenBackpressureTest do
     assert String.ends_with?(frame, "\n\n")
   end
 
-  defp await_bounded_overload(pid, limit, attempts \\ 10_000)
+  # A DEADLINE, NOT AN ATTEMPT COUNT. `attempts \\ 10_000` was the wrong unit:
+  # 10_000 `:erlang.yield()`s is however long the scheduler feels like taking,
+  # so the same loop is generous on an idle box and a flake on a loaded one.
+  # The safety argument is the one stated at the top of this module — a timing
+  # budget cannot mask a dropped event, because a dropped event never arrives
+  # at any budget. These flunk on exactly the SAME condition as before; they
+  # simply wait a stated wall-clock span instead of an unstated scheduling one.
+  # The deadline is checked AFTER the success clause, so a condition that is
+  # already satisfied can never be flunked by an expired budget.
+  defp deadline_from_now, do: System.monotonic_time(:millisecond) + @spin_budget_ms
 
-  defp await_bounded_overload(_pid, _limit, 0),
-    do: flunk("event forwarder never filled the bounded listener window")
+  defp expired?(deadline), do: System.monotonic_time(:millisecond) >= deadline
 
-  defp await_bounded_overload(pid, limit, attempts) do
+  defp await_bounded_overload(pid, limit),
+    do: await_bounded_overload(pid, limit, deadline_from_now())
+
+  defp await_bounded_overload(pid, limit, deadline) do
     case Process.info(pid, :message_queue_len) do
       {:message_queue_len, n} when n > limit ->
         n
 
       {:message_queue_len, _n} ->
+        if expired?(deadline) do
+          flunk(
+            "event forwarder never filled the bounded listener window " <>
+              "within #{@spin_budget_ms}ms"
+          )
+        end
+
         :erlang.yield()
-        await_bounded_overload(pid, limit, attempts - 1)
+        await_bounded_overload(pid, limit, deadline)
 
       nil ->
         flunk("listener terminated before the blocked chunk was released")
     end
   end
 
-  defp await_empty_mailbox(pid, attempts \\ 10_000)
+  defp await_empty_mailbox(pid), do: await_empty_mailbox(pid, deadline_from_now())
 
-  defp await_empty_mailbox(_pid, 0),
-    do: flunk("event forwarder mailbox did not drain")
-
-  defp await_empty_mailbox(pid, attempts) do
+  defp await_empty_mailbox(pid, deadline) do
     case Process.info(pid, :message_queue_len) do
       {:message_queue_len, 0} ->
         :ok
 
       {:message_queue_len, _n} ->
+        if expired?(deadline) do
+          flunk("event forwarder mailbox did not drain within #{@spin_budget_ms}ms")
+        end
+
         :erlang.yield()
-        await_empty_mailbox(pid, attempts - 1)
+        await_empty_mailbox(pid, deadline)
 
       nil ->
         flunk("event forwarder terminated before the stable queue observation")

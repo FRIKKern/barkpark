@@ -71,7 +71,14 @@
 #
 # WHAT IS TRUE ABOUT THIS COLUMN TODAY, STATED EXACTLY:
 #   * the INSTRUMENT exists — `--measure <basename>` meters a door and prints a
-#     pasteable row, so a price can descend from a meter this file drove;
+#     pasteable row, so a price can descend from a meter this file drove, and
+#     `--measure --all` re-drives the whole column at ONE load stamp by reading
+#     back the `arm=` token each row records (PDS-D656 makes that the only way
+#     the rows can ever be comparable to each other). `--all` is FAIL-CLOSED and
+#     is EXPECTED TO RED until the column is re-taken: a row predating the token
+#     is refused BY NAME at rc=5 rather than measured with a guessed arm, which
+#     makes the remaining work a printed list instead of a comment. `--measure`
+#     gates nothing, so that red costs no PR anything;
 #   * the AXIS exists — a FOREIGN row is a legal, checked shape;
 #   * and NO FOREIGN PRICE HAS BEEN TAKEN. Every figure below is a loaded
 #     10-core Apple-Silicon mac, labelled LOCAL. Not "not yet": REFUSED, for a
@@ -219,6 +226,7 @@
 #   pds-door-census.sh --list-refs     # every classified test-side reference
 #   pds-door-census.sh --measure <basename> [arg...]   # meter a door, print a row
 #   pds-door-census.sh --measure <basename> --via '<cmd>'  # meter an arbitrary arm
+#   pds-door-census.sh --measure --all # re-take the whole price column, one stamp
 #   pds-door-census.sh --help
 
 set -euo pipefail
@@ -250,6 +258,40 @@ NOT-YET-BUILT
 CONTENT-RED
 RED-BY-DESIGN-REPORTER
 HUMAN-GATE'
+
+# PRICE MEANS PRICED-BUT-UNGATED. IT DOES NOT MEAN "TOO EXPENSIVE TO GATE", AND
+# THE DIFFERENCE IS NOT PEDANTRY (wave 50, the pds-w49 ruling taken)
+# ----------------------------------------------------------------------------
+# Read as "not through BECAUSE OF ITS PRICE", the label is FALSE on most of the
+# rows that wear it, and the falsehood is measured, not argued: of the SIX
+# PRICE-classed rows on this base, FIVE are under 5 s of CPU by their own
+# committed figures (pds-pre-gate-papers-check.sh 0.06 s,
+# pds-scratch-target_test.sh 0.54 s, pds-blind-spot-check.sh 0.67 s,
+# pds-read-preflight-audit.sh 1.53 s, pds-read-preflight-audit_test.sh 4.46 s)
+# and exactly ONE is a tiering case at all (pds-ledger-census_test.sh,
+# 22.73-26.27 s). A class whose
+# name asserts a disqualifying cost, carried by a 0.06 s instrument, is the
+# reassuring word this epic exists to remove.
+#
+# SO THE CLASS IS DEFINED HERE, IN WRITING, BY WHAT IT ACTUALLY PARTITIONS:
+#
+#   PRICE = the instrument HAS A MEASURED PRICE and NOTHING REQUIRED RUNS IT.
+#
+# The price is the FACT the row carries; the ungatedness is the REASON it is not
+# THROUGH. Whether the figure is large is a separate question the row's own
+# evidence must answer in words — and where it is small, the row says so
+# ("N s keeps no door shut") rather than letting the label imply the opposite.
+# THE ONLY THING BETWEEN A CHEAP PRICE ROW AND THROUGH IS AN ExUnit RIDER under
+# api/test that execs it, plus leg B in .github/workflows/elixir.yml; that is a
+# door-opening change, not a re-labelling, and it is named in each such row.
+#
+# WHY THE ALTERNATIVE WAS REFUSED. The obvious move — invent a seventh class for
+# "cheap but ungated" — was not taken: PDS-D637's vocabulary is five plus
+# HUMAN-GATE and is asserted as such by a required gate
+# (api/test/barkpark/pds_door_census_test.exs, "the class vocabulary is D637's
+# five plus HUMAN-GATE"), and a vocabulary that grows whenever a label reads
+# oddly is how a partition stops partitioning. The definition moved; the
+# vocabulary did not.
 
 # The bands a row can land in WITHOUT a ledger row — derived from the tree by the
 # cond in run_census. Declared here beside the ledger vocabulary because the two
@@ -286,14 +328,19 @@ ERROR'
 # `class_known` refuses it by an explicit arm, so a retired class can never be
 # smuggled back in as a live one.
 #
-# PRICE IS THE PRICED-BUT-UNGATED HOLDING PEN, AND THAT IS THE MECHANISM BEHIND
-# THE ONLY TWO ROTTEN FIGURES IN THE WHOLE COLUMN (wave 49). Sort the six
-# committed price literals — n=6, the FOUR rows of PDS_DOOR_PRICES plus the TWO
-# PRICE-classed dispositions here — by WHICH LEDGER HOLDS THEM and the
-# separation is 6/6 perfect. Every PDS_DOOR_PRICES row is THROUGH a required
-# gate ("THROUGH a required gate : 4 of 20" in the COUNTS block), and all four
-# reproduce at a matched load stamp. Both PRICE-classed dispositions are through
-# NO door — nothing required runs them — and BOTH were wrong by 1.5x and 17x.
+# PRICE IS THE PRICED-BUT-UNGATED HOLDING PEN (defined above PDS_DOOR_CLASSES),
+# AND THAT IS THE MECHANISM BEHIND THE ONLY TWO ROTTEN FIGURES THIS COLUMN HAS
+# EVER CARRIED (wave 49). Sort the committed price literals by WHICH LEDGER
+# HOLDS THEM and the separation is perfect. RE-DERIVED BY RUN ON THIS BASE, not
+# re-quoted: wave 49 wrote `n=6, the FOUR rows of PDS_DOOR_PRICES plus the TWO
+# PRICE-classed dispositions`, and BOTH halves of that enumeration are now
+# STALE — this base carries EIGHT price rows and SIX PRICE-classed dispositions,
+# n=14. THE PREDICATE DID NOT MOVE, WHICH IS WHY IT IS WRITTEN AS ONE: every
+# PDS_DOOR_PRICES row is THROUGH a required gate (the COUNTS block prints
+# "THROUGH a required gate : 8 of 43" and the price ledger holds exactly those
+# eight basenames), and not one PRICE-classed disposition is through any door.
+# 14/14, on the same rule that read 6/6. Both of the rotten figures were
+# PRICE-classed — wrong by 1.5x and 17x.
 # A THROUGH price is re-derived by reality on every merge: the gate executes the
 # instrument, so the number is continuously contradictable. A PRICE-classed
 # price is a figure for a workload nothing ever runs, so no gate can disagree
@@ -317,17 +364,18 @@ ERROR'
 # to add a figure that is, on a shared host, not a property of the door at all
 # (a fixed workload swung 5.8x at constant load). The refuse is the ruling; the
 # rider is not touched.
-PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token: the ledger side is a PAGED live read (`bp doc query task --fields lifecycle_status --limit/--offset`, scripts/pds-charter-ledger-sweep.sh:208-209) whose every page is echo-asserted, plus a per-slug second read (`bp task get`, :257) that is fail-closed in BOTH directions, and the run refuses exit 2 UNCHECKED with bp absent at :134-135 — so no required gate can run it. THE CLASS MOVED BECAUSE THE CONTENT-RED WAS PAID, NEVER BECAUSE THE LABEL WAS CONVENIENT. The 47 unresolved-claim arrivals this row used to cite are adjudicated one entry each in scripts/pds-charter-ledger-adjudication.md (the wave-49 block: 21 terminal, 15 non-disposition, 6 non-task, 4 historical, 1 non-terminal), and by run 2026-09-10 from a clean git archive root `--check` is rc=0 "OK: every one of the 223 candidate claims is adjudicated and resolved against the live ledger" (tally AGREES 83, NOT-A-DISPOSITION-ASSERTION 90, NOT-A-TASK 33, DISAGREES 17; arrivals 0, misclassified 0, stale 0), against rc=1 with 47 arrivals at the same tree before the block. NOT BOUGHT BY WIDENING AN ALLOWLIST — PROVEN BY MUTATION: append one synthetic same-line claim to a COPY of the charter and the same run is rc=1, "unresolved-claim arrivals : 1", naming charter:15222. The 17 DISAGREES are FINDINGS for the lead and are deliberately NOT adjudicated away; two of them (charter:14484, :15219) had an AGREES-producing class available and did not take it. AND THE OLD EVIDENCE WAS STALE IN ITS MECHANISM TOO: the row it paid, pds-w43-bl-charter-ledger-sweep-content-red, cites `--selftest` rc=1, but the selftest was decoupled from the corpus into a DELTA assertion and is rc=0 (3 of 3) from a clean archive root — the CONTENT-RED only ever lived on `--check`. Not blocked on price, and the price column is NOT the reason this row exists: a CPU meter is structurally blind to most of this door. Re-derived from THIS run and read from source, never re-quoted: 9 ledger pages means 8 x 0.4 s at :225 and 24 uncached second reads means 24 x 0.3 s at :274, a hardcoded time.sleep floor of 10.4 s that user+sys cannot see at all, on top of 33 network round trips.
+PDS_DOOR_DISPOSITIONS='pds-task-anchor-report.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE ledger walk (`bp task ls --parent <id> --all -o json`, scripts/pds-task-anchor-report.sh, the ledger walk in the live arm) — the same class as pds-draft-only-task-census.sh and pds-control-char-census.sh. With no server the walk fails or returns ZERO rows and the run exits 2 CANNOT READ, printing no table at all; that refusal is the design, because a failed walk answering "0 stale anchors" is the exact fraud this instrument exists to refuse, and it is asserted in BOTH directions (transport failure AND an empty docs array). It NEVER WRITES, and that is the point of the tool rather than a side note: an anchor that moved may mean the code moved or may mean the finding is gone, so a silent rewrite would erase the distinction (charter D613 rule 5). The engine opens every source file read-only, selftest arm (h) greps the engine for a write mode and arm (i) greps the live path for bp write verbs, and arm (d) shasums the whole fixture tree before and after a full red run and reds if one byte moved. Its OFFLINE arm IS through the door and green: by run 2026-09-16 at d288448d9, `--selftest` rc=0, `SELFTEST PASS: 10 arms, 0 failed.`, no ledger and no network. NOT VACUOUS — the arms are paired RED/QUIET by construction over the SAME fixture file: arm (a) cites solo.ex:1, a line the `@build_slot_capacity` symbol has MOVED away from, and must read STALE naming the row; arm (b) cites solo.ex:40, the line it is ON, and must stay GOOD. That pairing was EARNED, not asserted: the first fixture made solo.ex four lines long, so a +/-5 window covered the whole file and arm (a) passed GOOD — the selftest reddened on its own vacuity before the fixture was lengthened. Nothing required runs it and the ONLY thing between it and THROUGH is an ExUnit rider, but the arm a gate would run is the offline one, so ENVIRONMENT is the honest class for the live half and the row says so rather than letting the label imply the whole tool is unrunnable.
+pds-charter-ledger-sweep.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token: the ledger side is a PAGED live read (`bp doc query task --fields lifecycle_status --limit/--offset`, scripts/pds-charter-ledger-sweep.sh:208-209) whose every page is echo-asserted, plus a per-slug second read (`bp task get`, :257) that is fail-closed in BOTH directions, and the run refuses exit 2 UNCHECKED with bp absent at :134-135 — so no required gate can run it. THE CLASS MOVED BECAUSE THE CONTENT-RED WAS PAID, NEVER BECAUSE THE LABEL WAS CONVENIENT. The 47 unresolved-claim arrivals this row used to cite are adjudicated one entry each in docs/ledgers/pds-charter-ledger-adjudication.md (the wave-49 block: 21 terminal, 15 non-disposition, 6 non-task, 4 historical, 1 non-terminal), and by run 2026-09-10 from a clean git archive root `--check` is rc=0 "OK: every one of the 223 candidate claims is adjudicated and resolved against the live ledger" (tally AGREES 83, NOT-A-DISPOSITION-ASSERTION 90, NOT-A-TASK 33, DISAGREES 17; arrivals 0, misclassified 0, stale 0), against rc=1 with 47 arrivals at the same tree before the block. NOT BOUGHT BY WIDENING AN ALLOWLIST — PROVEN BY MUTATION: append one synthetic same-line claim to a COPY of the charter and the same run is rc=1, "unresolved-claim arrivals : 1", naming charter:15222. The 17 DISAGREES are FINDINGS for the lead and are deliberately NOT adjudicated away; two of them (charter:14484, :15219) had an AGREES-producing class available and did not take it. AND THE OLD EVIDENCE WAS STALE IN ITS MECHANISM TOO: the row it paid, pds-w43-bl-charter-ledger-sweep-content-red, cites `--selftest` rc=1, but the selftest was decoupled from the corpus into a DELTA assertion and is rc=0 (3 of 3) from a clean archive root — the CONTENT-RED only ever lived on `--check`. Not blocked on price, and the price column is NOT the reason this row exists: a CPU meter is structurally blind to most of this door. Re-derived from THIS run and read from source, never re-quoted: 9 ledger pages means 8 x 0.4 s at :225 and 24 uncached second reads means 24 x 0.3 s at :274, a hardcoded time.sleep floor of 10.4 s that user+sys cannot see at all, on top of 33 network round trips.
 pds-record-parity.sh	RED-BY-DESIGN-REPORTER	by run 2026-08-03: `--selftest` rc=3 "unknown argument" — the flag does not exist; its only non-vacuous axis resolves task ids against the LIVE ledger and is red by design. A reporter must never carry a required check name.
 pds-window-sentinel.sh	NOT-YET-BUILT	source declares THREE verbs — `sample`, `watch`, `preflight` — cited as the WHOLE USAGE run (scripts/pds-window-sentinel.sh:63-65), and `sample` is the DEFAULT (`main()` opens `local cmd="${1:-sample}"`), so the omitted verb was also the most-used path. THE REASON WAS REFUTED AND REPLACED, NOT THE VERDICT: this row previously read "only `watch` and `preflight`" off a citation of :48-49 — a window one line too narrow, which excluded the very line that refutes it. That defect never reddened anything, because the lines it named were in range, non-blank, and said exactly what the claim said; tooling/doc-truth now detects the class (an exhaustive claim over a clipped run) and pins it as lineref-sweep selftest arms (e)/(f). NOT-YET-BUILT is RE-DERIVED on its own second clause and UPHELD: the file names no selftest anywhere (zero matches for selftest and for --check), and its documented exit contract (0 GO / 1 STAND-DOWN / 2 probe-failed) grades the HOST it samples, not the instrument — exit 2 means measured nothing, never the tool is broken. A host-facing exit contract is not a pass/fail selftest, so there is still nothing here a required gate could run.
-pds-ledger-census_test.sh	PRICE	CPU=22.96+3.31=26.27s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=7.30 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 26.27s at load1=7.30, 22.73s at load1=9.20, 22.80s at load1=7.32, all cpus=10. The OBSERVED BAND is 22.73-26.27 s CPU across load1 7.30-9.20, a 15.6% spread, and the row deliberately quotes the HIGH end of its own band, because the one direction a price column must not err is making an expensive thing look gate-able. It replaces 33.44+6.89=40.33s at load1=24.26, hand-typed through /usr/bin/time -p on 2026-08-03 and 1.53-1.77x this band. That figure was never re-derived by anything: no required gate runs this instrument, so nothing could contradict it. QUOTED AGAINST ITS OWN STAMP ONLY (PDS-D656) — this band is NOT poolable with the pds-scratch-target_test.sh band below, which was taken at systematically different loads, and it is NOT a quiet-host figure: the host carried 23 users at load averages 5,21 4,00 3,99 when the trials began. NOT VACUOUS: `--measure` discards subject output, so the full arm set was shown by a SEPARATE un-metered run — rc=0, `SELFTEST PASS: 173 checks.`; this harness prints NO failure(s) line on the green path at all (its counter prints only on the red path at :1400-1401), so 173 checks is the arm evidence in its place. Still the SECOND tiering case at ~23-26 s CPU on a 2-4 vCPU runner, which is why the class does not move.
-pds-scratch-target_test.sh	PRICE	CPU=0.24+0.30=0.54s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=9.56 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 0.54s at load1=9.56, 0.51s at load1=7.32, 0.54s at load1=6.76, all cpus=10; observed band 0.51-0.54 s CPU across load1 6.76-9.56, a 5.9% spread, high end quoted. It replaces 4.83+4.08=8.91s at load1=79.23, hand-typed 2026-08-03 and 16.5-17.5x this band — and the USER leg alone read 4.83 s stamped against 0.23-0.24 s measured, ~20x, which contention cannot manufacture: user CPU is work. NOT VACUOUS: a separate un-metered run exits 0 and prints `---- 0 failure(s)` then `SCRATCH TEST PASSED`, with 32 PASS / 0 FAIL arms and zero skips. THE STATED REASON MOVED WITH THE FIGURE, because a repaired number under an unrepaired justification still asserts what no measurement produced: the reason this row used to carry — that hermeticity on a runner WITHOUT local Postgres is unproven here — is REFUTED BY RUN. The harness names no Postgres binary anywhere in its source (zero matches for psql, pg_ctl, initdb or postgres; it drives two fake roots and a stub barkpark it writes itself) and it exits 0 with the same 32 PASS / 0 FAIL under PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no Postgres reachable. WHAT SURVIVES IS THE CLASS, NOT ITS OLD REASON, and the class is now itself in doubt: 0.54 s is not a price that keeps any door shut, so this row is PRICE today only because nothing required runs it. The class move is NOT taken here — price_rows is exactly 2 against a required `assert length(price_rows) >= 2` (api/test/barkpark/pds_door_census_test.exs:344), so re-classing reds a required gate and must land WITH its rider in one commit. Filed as pds-w49-scratch-target-class-vs-its-own-price.
-pds-live-hetzner-placement-group.sh	ENVIRONMENT	by run 2026-08-03: `--selftest` rc=3 "REFUSE — needs one WORKING credential"; needs HCLOUD_TOKEN or HCLOUD_CONFIG (scripts/pds-live-hetzner-placement-group.sh:17-21).
+pds-ledger-census_test.sh	PRICE	CPU=22.96+3.31=26.27s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=7.30 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 26.27s at load1=7.30, 22.73s at load1=9.20, 22.80s at load1=7.32, all cpus=10. The OBSERVED BAND is 22.73-26.27 s CPU across load1 7.30-9.20, a 15.6% spread, and the row deliberately quotes the HIGH end of its own band, because the one direction a price column must not err is making an expensive thing look gate-able. It replaces 33.44+6.89=40.33s at load1=24.26, hand-typed through /usr/bin/time -p on 2026-08-03 and 1.53-1.77x this band. That figure was never re-derived by anything: no required gate runs this instrument, so nothing could contradict it. QUOTED AGAINST ITS OWN STAMP ONLY (PDS-D656) — this band is NOT poolable with the pds-scratch-target_test.sh band below, which was taken at systematically different loads, and it is NOT a quiet-host figure: the host carried 23 users at load averages 5,21 4,00 3,99 when the trials began. NOT VACUOUS: `--measure` discards subject output, so the full arm set was shown by a SEPARATE un-metered run — rc=0, `SELFTEST PASS: 173 checks.`; this harness prints NO failure(s) line on the green path at all (its counter prints only on the red path at :1400-1401), so 173 checks is the arm evidence in its place. Still the SECOND tiering case at ~23-26 s CPU on a 2-4 vCPU runner, which is why the class does not move. RE-PRICED UP AGAIN, 2026-09-17, PDS-D752 (pds-w44-bl-ledger-census-door-repriced): CPU=46.88+16.74=63.62s / 48.21+16.86=65.07s / 49.44+17.50=66.94s LOADED, and 51.21+17.41=68.62s HERMETIC (env -i, empty HOME, PATH=/usr/bin:/bin, rc=0 — hermeticity STILL HOLDS). meter=/usr/bin/time -l around `bash -c` cpus=10, rc=0 on all four. LOAD-STAMPED AND NOT A QUIET-HOST FIGURE: load1 ran 31.45->60.67, 49.77->81.14, 81.14->65.09, 65.09->78.19 on 10 cores during a six-lane ~30-worker campaign, so this band is a CEILING AT THAT LOAD, not a property of the instrument. PDS-D648 already ruled the quiet-host precondition unsatisfiable during a wave (the wave IS the load); 'quiet' here would mean load1 < cpus sustained across the whole ~90 s run, out of band. THE COUNT IS THE FINDING, NOT THE CPU: `SELFTEST PASS: 288 checks.` printed IDENTICALLY in all four runs including the hermetic one, at load1 31.45, 49.77, 81.14 and 65.09 — the count is LOAD-INDEPENDENT while the CPU moved 63.62->68.62s across the same trials, which is the control proving the meter varied with something and the count did not. So 288 is a STALENESS verdict on every prior figure, not an artefact: 107 (PDS-D637), 144 (PDS-D647), 173 (this row, 2026-08-05) and now 288 — 2.7x since D637 priced it VIABLE. No required gate runs this instrument, so nothing can contradict any number written here; this price column is UNANCHORED BY CONSTRUCTION and will rot again. DISPOSITION STANDS AT PRICE, now as the CONSERVATIVE reading: every independent re-take has moved the price UP, never down (26.27s at load1~7 -> 42.6-45.0s -> 63.62-68.62s), across three meters, three months and three authors. Even the LOWEST figure ever taken for this door is the second-most-expensive tiering case on this board, and no pds door has ever been measured on ubuntu-latest, where 2-4 vCPU makes it materially worse. NO GATE LEGS ARE LANDED AND NONE ARE PROPOSED: an api/test/** rider and an ELIXIR_TEST_ONLY_PATHS entry must land TOGETHER or not at all (leg A without leg B is the one class no gate can see -- see the `leg B without leg A` evidence string below), and under PRICE the correct number of legs is zero. INDEPENDENTLY RE-DERIVED 2026-09-17 BY A SECOND WORKER, SECOND TAKE (r21 dw31), same meter CLASS and a different hand: /usr/bin/time -l around `bash -c bash scripts/pds-ledger-census_test.sh` from a fresh origin/main worktree, cpus=10, rc=0 on all four runs. CPU=47.24+16.07=63.31s at load1 44.70 rising to 58.47; 46.35+16.11=62.46s at load1 58.47 to 53.05; 46.36+16.75=63.11s at load1 53.05 to 51.13; and HERMETIC 45.42+15.83=61.25s under env -i with HOME unset to a nonexistent path and PATH=/usr/bin:/bin, at load1 51.13 to 40.97 — observed band 61.25-63.31 s CPU, a 3.4 percent spread, and HERMETICITY STILL HOLDS at rc=0. THE COUNT IS `SELFTEST PASS: 288 checks.` IN ALL FOUR RUNS INCLUDING THE HERMETIC ONE — a SECOND independent confirmation of 288, taken at loads that do not overlap the first take run for run, which settles 288 against 107, 144 and 173 by two authors rather than one. AND ONE SENTENCE ABOVE IS NOW OVER-STATED, CORRECTED HERE RATHER THAN LEFT STANDING: the claim that every independent re-take has moved the price UP AND NEVER DOWN was true of the three takes it was written over, and this fourth take FALSIFIES it. 61.25-63.31 s sits entirely BELOW the 63.62-68.62 s band above, and it cannot be waved away as a quieter host, because the load ranges overlap (load1 40.97-58.47 here against 31.45-81.14 there). THE HONEST FORM OF THE ARGUMENT IS THE LEVEL, NOT THE DIRECTION, and the disposition does not depend on the direction at all: the four independent takes are 26.27 s at load1 about 7 (2026-08-05), 42.6-45.0 s (PDS-D647), 63.62-68.62 s (PDS-D752) and 61.25-63.31 s (this one), every one of them at or above the 20-23 s that PDS-D637 priced VIABLE and the three most recent at 1.9x to 3.4x it. PRICE STANDS ON THE LEVEL. STILL NOT A QUIET-HOST FIGURE AND NOT OFFERED AS ONE: load1 ran 40.97-58.47 on 10 cores across all four trials during a six-lane campaign, so this band is a CEILING AT THAT LOAD in exactly the sense the band above is, and PDS-D648 rules the quiet precondition unsatisfiable during a wave. FINALLY, AS AN EXPLICITLY NON-QUOTABLE NOTE AND DELIBERATELY LAST IN THIS CELL, because nothing after it may carry an equals sign: elapsed clock ran 85.58 / 86.87 / 90.47 / 93.12 seconds across the same four trials. That is NOT the price and must never be read as one -- PDS-D648 rules the unit of this column is CPU, user plus sys, because a fixed workload swung 5.8x at constant load. It is recorded only because the gap between it and the CPU figure is pure contention on a host running a six-lane campaign, which is the evidence that the CPU band above is a ceiling at that load rather than a property of the door, and a deleted measurement is a fact destroyed. The load-stamped ceiling reading survives here in full; the shape assertion on the required Elixir gate bans quoting wall AS the price, not recording that it was observed.
+pds-scratch-target_test.sh	PRICE	CPU=0.24+0.30=0.54s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=9.56 2026-08-05 (no arguments, rc=0) — RE-TAKEN BY `--measure`, never by hand: 3 trials gave 0.54s at load1=9.56, 0.51s at load1=7.32, 0.54s at load1=6.76, all cpus=10; observed band 0.51-0.54 s CPU across load1 6.76-9.56, a 5.9% spread, high end quoted. It replaces 4.83+4.08=8.91s at load1=79.23, hand-typed 2026-08-03 and 16.5-17.5x this band — and the USER leg alone read 4.83 s stamped against 0.23-0.24 s measured, ~20x, which contention cannot manufacture: user CPU is work. NOT VACUOUS: a separate un-metered run exits 0 and prints `---- 0 failure(s)` then `SCRATCH TEST PASSED`, with 32 PASS / 0 FAIL arms and zero skips. THE STATED REASON MOVED WITH THE FIGURE, because a repaired number under an unrepaired justification still asserts what no measurement produced: the reason this row used to carry — that hermeticity on a runner WITHOUT local Postgres is unproven here — is REFUTED BY RUN. The harness names no Postgres binary anywhere in its source (zero matches for psql, pg_ctl, initdb or postgres; it drives two fake roots and a stub barkpark it writes itself) and it exits 0 with the same 32 PASS / 0 FAIL under PATH=/usr/bin:/bin:/usr/sbin:/sbin, with no Postgres reachable. WHAT SURVIVES IS THE CLASS, AND WAVE 50 SETTLED WHY RATHER THAN LEAVING IT IN DOUBT: 0.54 s is not a price that keeps any door shut, and PRICE is now DEFINED above PDS_DOOR_CLASSES as priced-but-ungated — the price is the fact the row carries, the ungatedness is the reason it is not THROUGH — so the label asserts exactly what is true of this instrument and nothing more. THE ROW NO LONGER CLAIMS THE MOVE IS BLOCKED BY THE RIDER, BECAUSE THAT PREMISE WAS FALSE AND IS RETRACTED HERE: it said price_rows was exactly 2 against `assert length(price_rows) >= 2` at pds_door_census_test.exs:344, and by run on this base there are SIX PRICE rows and the assertion sits at :388, so re-classing was never what reddened a required gate. WHAT ACTUALLY STANDS BETWEEN THIS HARNESS AND THROUGH IS A DOOR, NOT A LABEL: leg A needs an ExUnit case under api/test that binds and execs it, and leg B needs that suite dispatched by .github/workflows/elixir.yml for a PR touching this path. The second half is outside the fence of the change that took this ruling, so THROUGH was not claimed on half a door. Same shape as pds-blind-spot-check.sh and pds-pre-gate-papers-check.sh above, whose rows say the same thing in the same words.
+pds-live-hetzner-placement-group.sh	RETIRED-ENVIRONMENT	SUPERSEDED BY A COMPUTED THROUGH, in the same commit that made it one: api/test/barkpark/pds_hetzner_offline_door_test.exs binds ../../../scripts/pds-live-hetzner-placement-group.sh to @runner_rel and System.cmds it with --selftest-offline (leg A, classified LEGA-BOUND-EXEC by --list-refs), and scripts/elixir-path-escape-check.sh now declares that path so elixir.yml dispatches the suite on a PR touching it (leg B, --match test answers true). THE RETIRED ROW WAS EVIDENCE ABOUT THE WRONG ARM, and that is why it is retired rather than merely outgrown: it disposed the whole instrument ENVIRONMENT citing `--selftest` rc=3 REFUSE - needs one WORKING credential, which is a true fact about the CREDENTIALED arm. The script header at :13 declares --selftest-offline the CREDENTIAL-FREE arm; this is the CI-able gate, and by run 2026-09-11 on this tree --selftest-offline is rc=0 while --selftest is rc=3. An instrument whose gate-able arm needs no credential was never environment-refused; it was unread. The credentialed arms (--selftest, --harvest-only, --run) remain credential-bound and are NOT what the door runs.
 pds-draft-twin-sweep.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE raw ledger walk (scripts/pds-draft-twin-sweep.sh:123, `bp doc ls task --perspective raw --all`) and, in write mode, for `bp doc discard-draft` (:329); the raw walk is an offset walk over a LIVE collection that refuses with pagination_shifted under load, so no required gate can run it. Its `--selftest` is hermetic (synthetic fixture, no network, no credential) and green, but nothing required runs it — the same holding-pen shape as pds-scratch-target_test.sh; a rider would move the class, not this row.
 pds-draft-only-task-census.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE raw ledger walk (scripts/pds-draft-only-task-census.sh:101, `bp doc ls task --perspective raw --all`) — the same walk and the same class as its sibling pds-draft-twin-sweep.sh. With no server the walk file comes back EMPTY and the run exits 1 CANNOT READ, printing no table and no SUMMARY, so its census arm cannot be measured on a credential-free box at all; the refusal is the design (a failed walk answering "0 draft-only rows" is the exact fraud this instrument exists to refuse). It NEVER writes: read verbs only, and the selftest greps the census path for write verbs and reds if one appears. Its OFFLINE arm IS through the door and green — by run 2026-09-04 at 8c0723b7f: `--selftest` rc=0, 26 of 26 synthetic arms, no ledger and no network.
 pds-stranded-draft-cause.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for TWO reads — the ONE raw ledger walk it shares with scripts/pds-draft-only-task-census.sh (`bp doc ls task --perspective raw --all`, pull_raw) and the tag registry (`bp doc ls tag --all`, pull_tags). SAME WALK, SAME CLASS as that sibling and as pds-draft-twin-sweep.sh: the walk is an offset walk over a LIVE collection that refuses `pagination_shifted` under campaign traffic, so no required gate can run its live arm — MEASURED, not assumed: 5 consecutive census walks were refused before the 6th completed (2026-09-05, 8771 docs, 207 published tags). With no server BOTH reads come back empty and the run exits 1 CANNOT READ with no counts and no SUMMARY, and that refusal is the design — an empty registry would otherwise score EVERY tag UNREGISTERED and hand a lead a table confirming the filing row of this very instrument by construction, so the empty-registry case is its own separate refusal (`ZERO published tag docs`). It NEVER writes: read verbs only, and the selftest greps the live path for write verbs — including `doc create`, because the repair this instrument recommends IS a tag creation — and reds if one appears. Its OFFLINE arm IS through the door and green: by run 2026-09-05, `--selftest` rc=0, 32 of 32 synthetic arms, no ledger and no network, every gate shown REFUSING and PASSING. The load-bearing pair is gate ORDER: one fixture row carries a 19-char rationale AND an unregistered tag and must read SPINE, its twin carries the SAME tag with a clean spine and must read UNKNOWN-TAG, so neither arm can pass on a classifier that ignores the wall order.
-pds-live-bp-write-receipt.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token; refuses exit 3 otherwise (scripts/pds-live-bp-write-receipt.sh:219).
-pds-ledger-census.sh	ENVIRONMENT	needs live ledger credentials (BARKPARK_SERVER, scripts/pds-ledger-census.sh:1325) and python3 (exit 3 at :348-350).
+pds-live-bp-write-receipt.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token; refuses exit 3 otherwise (scripts/pds-live-bp-write-receipt.sh:191).
+pds-ledger-census.sh	ENVIRONMENT	needs live ledger credentials (BARKPARK_SERVER, scripts/pds-ledger-census.sh:935) and python3 (exit 3 at :694-697, the guard; `exec python3 -I -` at :707). ANCHORS RE-DERIVED 2026-09-17 (PDS-D752): this row carried :1325 and :348-350, and BOTH were stale — :1325 is `by_id[doc_id] = doc` and :348-350 is a comment about the draft perspective. The exit code 3 was right and its address was wrong, which is the one shape a reader cannot catch: the number they check resolves to prose, so the claim reads UNVERIFIABLE rather than FALSE. Proven in BOTH polarities by run, not by reading: with python3 on PATH `--help` exits 0; with a PATH holding bash/sed/grep/cat/dirname/pwd/env/printf and NO python3 it exits 3 printing "pds-ledger-census: python3 is required (stdlib only, no new deps)" — a control that pins the PATH strip as honest, which is exactly the confound PDS-D647 caught in the struck wave-43 receipt.
 pds-pull-proof.sh	ENVIRONMENT	needs a pinned BARKPARK_HOME scratch target plus an admin-token curl against a live server (scripts/pds-pull-proof.sh:113,227).
 pds-secret-scan.sh	ENVIRONMENT	needs psql on PATH and DB-sourced ammo (scripts/pds-secret-scan.sh:136,191).
 pds-scratch-target.sh	ENVIRONMENT	needs a scratch Postgres root and free port (BARKPARK_HOME / BARKPARK_PG_PORT, scripts/pds-scratch-target.sh:22-25).
@@ -337,11 +385,29 @@ pds-climb-preflight.sh	ENVIRONMENT	needs `gh` workflow state and an ssh key for 
 pds-export-peak-measure.sh	ENVIRONMENT	samples a live host over ssh (scripts/pds-export-peak-measure.sh:242).
 pds-blind-spot-check.sh	PRICE	CPU=0.22+0.44=0.67s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=12.08 2026-09-02 (--selftest, rc=0; 3 trials gave 0.67/0.59/0.58s CPU, observed band 0.58-0.67 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Its ungated arm is the plain census at CPU=0.40+0.26=0.65s at the same load1=12.08 (3 trials 0.65/0.66/0.65s, a 1.5 percent spread). RE-TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.67 s keeps no door shut. Same shape as pds-scratch-target_test.sh above, whose row already reads "PRICE today only because nothing required runs it" — this instrument is cheap, hermetic (it reads the tree and writes only a mktemp -d it removes; it issues no network call and reads no credential) and green, and the ONLY thing between it and THROUGH is an ExUnit rider under api/test, which is outside the fence of the PR that added it. Filed as the follow-up named in that PR body. NOT VACUOUS: a separate un-metered run exits 0 and prints `SELFTEST: 10 PASS / 0 FAIL of 10 arms`, and the green descends from arms that can fail — arm 4 deletes the sentence from a compliant fixture and demands rc=1, arm 8 is a mutation this check FAILED on its first run (a source COMMENT naming the constant satisfied the emission scan, so deleting every emitter call from the real pds-pull-proof.sh left the tree GREEN) and now reds.
 pds-blind-spot.sh	NOT-YET-BUILT	IT IS NOT A PROGRAM, and the denominator glob cannot tell: `scripts/pds-*.{sh,exs}` keys on the NAME, and this file is a SOURCED CONSTANT — three SYMBOLS, cited by name and not by line so the citation cannot rot on an insertion: `PDS_BLIND_SPOT`, `PDS_BLIND_SPOT_PLACEMENT` and `pds_blind_spot_note()` in scripts/pds-blind-spot.sh, which five instruments read with `.`. It sets no shell options, reads nothing, writes nothing, and executed directly it prints its two constants and exits 0 WHATEVER the tree looks like — so there is no verdict here for a required gate to run, which is the NOT-YET-BUILT clause as pds-window-sentinel.sh states it above. AND IT IS NOT UNCHECKED, which is the part a bare class would hide: its correctness is asserted by scripts/pds-blind-spot-check.sh, which sources it and whose 10 arms red on a one-byte drift of the constant (arm 6, `a one-byte DRIFTED copy of the sentence REDS`, rc=1 by run 2026-09-02). NO PRICE ROW: pricing a file that is never invoked as a program would be a figure for a workload nothing runs, which is precisely the rot the PRICE pen above documents.
-pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (scripts/pds-idle-sampler.sh:7,182).
+pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, once a second, TWO quantities per tick. CITED BY CONTENT ANCHOR, NEVER BY LINE (PDS-D758): `scripts/pds-idle-sampler.sh`@`ssh_available() {` is the preflight whose refusal IS the ENVIRONMENT class here (no key, no host, no run), and `scripts/pds-idle-sampler.sh`@`start_sampler() {` plus `scripts/pds-idle-sampler.sh`@`start_memavail_sampler() {` are the two remote loops themselves — deliberately two ssh loops and not two columns in one log, per PDS-D220b. Each anchor resolves UNIQUELY on origin/main by grep -cF = 1, beside a negative control (`no_such_fn() {`) that reads 0, so an empty read is proven to be an absence rather than a broken grep. THE OLD CITATION WAS :7,182 AND BOTH HALVES WERE NON-COMPLIANT, not only the half that moved. :182 was moved by the DETACHED LAUNCH recipe #18908 inserted into the header (origin/main 0e1e4eca5964f3a26673dc47f26223c3c38b1eed) and now lands inside that recipe; :7 never moved at all, and is still wrong, because it is a COMMENT and PDS-D758(iii) rules a comment out as an anchor whether or not it has rotted — a home rots on one event, a comment or a call site rots on every refactor passing through it. THE PROSE WAS WRONG TOO AND THE NUMBER CHECK WOULD NEVER HAVE CAUGHT IT: this row read "twice a minute", while both loops sleep 1 s between ticks — TWICE is two QUANTITIES per tick (BEAM RSS, and /proc/meminfo MemAvailable), not two ticks per minute, which is what the source header states as "twice a quantity, once a second". NOTHING GATES EITHER FORM, and the row says so rather than letting an anchor imply a check: scripts/new-lineref-check.sh is DIFF-scoped, so it reported 0 novel for the stale :182 (that line was not added by the PR that broke it), and scripts/pds-charter-anchors-check.sh resolves the joint form in the CHARTER only — its CHARTER variable defaults to .claude/workflows/bp-pds-charter.md and it reads exactly one file. So this anchor is honest and unwatched; its guarantee is that it survives an insert above it, not that a gate will shout when it dies.
 pds-pre-gate-papers-check.sh	PRICE	CPU=0.03+0.04=0.06s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=4.11 2026-09-05 (--selftest, rc=0; 3 trials gave 0.06/0.05/0.06s CPU, observed band 0.05-0.06 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.06 s keeps no door shut. Same shape as pds-blind-spot-check.sh above — the `--selftest` arm is offline and hermetic (it builds its fixtures in a mktemp -d it removes, calls no bp, no mix and no network, and reads no credential), and the ONLY thing between it and THROUGH is an ExUnit rider under api/test that would have to exec it. The OTHER arm, `--live`, is genuinely ENVIRONMENT-bound (it needs a BARKPARK_SERVER-resolvable bp AND a compiled api/ tree to shell the predicate, scripts/pds-pre-gate-papers-check.sh:41-42) — but the arm a gate would run is the offline one, so ENVIRONMENT would be a FALSE disposition for this door and PRICE is the honest one. NOT VACUOUS: a separate un-metered run exits 0 and prints `selftest failures: 0` over 7 arms, and the green descends from arms that can fail — case 2 plants a refused-and-UNREGISTERED id and demands rc=1 naming that id, so a comparison gutted by a copy-paste reds instead of passing empty.
 pds-pre-gate-papers-predicate.exs	ENVIRONMENT	needs a COMPILED api/ tree and the server modules inside it — this is `mix run --no-start` fodder, not a standalone program. Proven by run 2026-09-05: `elixir scripts/pds-pre-gate-papers-predicate.exs /dev/null /dev/null` is rc=1 with `** (UndefinedFunctionError) function Jason.decode!/1 is undefined (module Jason is not available)` raised at scripts/pds-pre-gate-papers-predicate.exs:62, before a single one of its three server calls is reached — Barkpark.PortableDoc.Projection.read_blocks/1 (:107) and Barkpark.Content.Papers.BlockOps.normalize_render_shapes/1 plus validate_render_shapes/1 (:104,:110-111) are the publish gate OWN code and exist only inside the compiled application. The source states the dependency itself at :39-41 (`MIX_ENV=test mix run --no-start ../scripts/pds-pre-gate-papers-predicate.exs`). NOT NOT-YET-BUILT: this is a finished program with a real verdict, but it takes two positional file paths and declares no --selftest and no --check — its only argument arm is the rc=2 usage refusal at :56 — so there is nothing a required gate could run here WITHOUT standing up the api/ build it needs. Its offline comparison logic is exercised through its caller, scripts/pds-pre-gate-papers-check.sh --selftest.
+pds-read-preflight-audit_test.sh	PRICE	CPU=3.27+4.14=7.41s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=24.54 2026-09-11 (no arguments, rc=0; 3 trials gave 7.41/6.86/6.93s CPU at load1 24.54-25.60, observed band 6.86-7.41 s, an 8.0% spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). THE FIGURE MOVED AND ARM 5 IS NOT PROVABLY WHY: the superseded 4.30-4.46 s band was taken at load1 6.16-6.67 and this one at load1 24.54-25.60, a roughly four-fold busier host, so the new arm and contention are CONFOUNDED here and this row refuses to attribute the delta to either. The two bands are quoted against their own stamps only (PDS-D656) and are NOT poolable. RE-TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE: 7.41 s keeps no door shut. THIS IS THE SEVENTH DERIVED HARNESS (the *_test.sh rule), landed by #17651 with no ledger row, which is what reddened main at 56c290852 — this census read UNDISPOSED 3 of 42 and api/test/barkpark/pds_door_census_test.exs refuted `harnesses : 6`; both are paid in the same PR as this row, and the count there now reads 7 ON PURPOSE. It is wired into .github/workflows/shell-harnesses.yml (pds-harnesses job) by that PR, which is NOT a required context (.github/required-checks.json names four), so it is not THROUGH; the rider that would move it is an ExUnit exec under api/test, the pds_window_sentinel_test.exs:20 shape. NOT VACUOUS: a separate un-metered run exits 0 and prints `=== 11 passed, 0 failed ===` over 5 arms, each a PAIR of a mutation that must be caught beside a control that must not be (arm 1 plants an undispositioned writer and demands the census ratchet red; arm 3 hands pds-crown-stamp.sh a NON-WRITING principal and demands the refusal; arm 5 hands it a stub bp that ACKS a met-to-met stamp and DROPS the evidence, and demands the read-back go red beside an honest stub that must stay green), so the green descends from arms that can fail — and arm 5 is shown by MUTATION rather than asserted: restore origin/main scripts/pds-crown-stamp.sh and the harness reds 10 passed, 1 failed, because the dropping stub prints CONFIRMED: criterion 0 reads met at exit 0. Hermetic by construction: the crown-stamp arms drive a STUB bp inside a mktemp tree it removes, and no server is contacted (its own header: NOTHING HERE TOUCHES A SERVER).
+pds-read-preflight-audit.sh	PRICE	CPU=0.68+0.86=1.53s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.69 2026-09-11 (no arguments = the `census` verb, rc=0; 3 trials gave 1.53/1.45/1.31s CPU at load1 6.69-7.20, observed band 1.31-1.53 s, HIGH END QUOTED). RE-TAKEN BY `--measure`, never hand-typed (PDS-D656). TWO VERBS, ONE PRICED: the default `census` verb (scripts/pds-read-preflight-audit.sh:160, cmd_census) reads the scripts/ tree for bp write verbs at COMMAND POSITION and demands a disposition for each — it issues no network call and reads no credential, proven by a run under `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin` that exits 0 with `candidates: 17   undispositioned: 0`. The `prove` verb (scripts/pds-read-preflight-audit.sh:211, cmd_prove) curls a LIVE server with NO token for the anonymous-read control pair and is ENVIRONMENT-shaped; it is deliberately NOT priced here, because a network round-trip is elapsed waiting, not CPU work, and a figure for it would be the exact costume this column refuses. PRICE for the holding-pen reason: 1.53 s keeps no door shut and nothing required runs it. Its can-fail arms are proven by its harness pds-read-preflight-audit_test.sh above, whose arm 1 plants an undispositioned writer and demands rc=1 beside a control that must stay green. Landed by #17651 with no ledger row; this row is the main-red repair.
+pds-live-hetzner-placement-group_test.sh	PRICE	CPU=0.45+0.29=0.74s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=4.63 2026-09-11 (no arguments, rc=0; 3 trials gave 0.71/0.74/0.72s CPU at load1 4.63-5.94, observed band 0.71-0.74 s, a 4.2% spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). RE-TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE: 0.74 s keeps no door shut. THIS IS THE EIGHTH DERIVED HARNESS (the *_test.sh rule), landed by #17687 at 9db224f2c with no ledger row, which is what reddened main at 10:23Z — this census read UNDISPOSED 1 of 44 and api/test/barkpark/pds_door_census_test.exs refuted `harnesses : 7`; both are paid in the same PR as this row, and the count there now reads 8 ON PURPOSE. It is wired into .github/workflows/shell-harnesses.yml (pds-hetzner-offline job) by that PR, which is NOT a required context (.github/required-checks.json names four), so it is not THROUGH; the rider that would move it is an ExUnit exec under api/test, the pds_window_sentinel_test.exs:20 shape. NOT VACUOUS: a separate un-metered run under `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin` exits 0 and prints `PASS (8 arms: 4 diagnostic, 3 artifact-dir, 1 positive control)`; arms 1-4 are RED against the pre-#17687 script by construction (pass the old script as $1) and arm 8 is the positive control a refuse-everything runner fails, so the green descends from arms that can fail. Hermetic by construction: every arm drives the `--selftest-probe` entry point against a stub bp this file writes into a mktemp tree — no credential, no network, not one live write, per its own header.
+pds-control-char-census.sh	ENVIRONMENT	needs a bp-resolvable Barkpark server+token for its ONE raw ledger walk (scripts/pds-control-char-census.sh:241, `bp doc ls task --perspective drafts --all -o json`; 87,858,221 bytes and 9,079 rows on 2026-09-11) — the same walk and the same class as pds-draft-only-task-census.sh above: an offset walk over a LIVE collection that refuses pagination_shifted under campaign traffic, so no required gate can run its live arm. It NEVER writes: read verbs only, and its `--selftest` READONLY arm greps this file for write verbs and reds if one appears, beside an RO-CTRL arm that proves the grep can see the read verb it must find. Its OFFLINE arm is hermetic and green: `--selftest` rc=0 over 7 arms (CONTROL, PLANTED, DECODED, JQ, JQ-CTRL, READONLY, RO-CTRL) under `env -i PATH=/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin` with no server and no credential, sub-second by `--measure` on 2026-09-11. The load-bearing pair is PLANTED beside CONTROL: a clean corpus must read 0/0 on both axes and a planted raw 0x01 byte must be seen on axis A, so a detector that always says CLEAN fails PLANTED and one that always fires fails CONTROL. Landed by #17682 with no ledger row; this row is the main-red repair.
+pds-export-drift-watch.sh	PRICE	CPU=0.10+0.16=0.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.08 2026-09-11 (--selftest, rc=0; 3 trials gave 0.24/0.25/0.26s CPU at load1=6.08, observed band 0.24-0.26 s, an 8.3% spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.26 s keeps no door shut. The `--selftest` arm is offline and hermetic — it writes a stub `gh` and a stub `ssh` into a mktemp -d it removes, resolves BOTH probes through PATH, contacts no server, reads no credential and touches no BEAM — so the arm a gate would run is the offline one and the ONLY thing between it and THROUGH is an ExUnit rider under api/test that execs it, the pds_window_sentinel_test.exs:20 shape. Same shape as pds-pre-gate-papers-check.sh and pds-blind-spot-check.sh above. THE LIVE ARMS (`sample`, `watch`) ARE GENUINELY ENVIRONMENT-BOUND (they need `gh` authenticated against FRIKKern/barkpark and ssh to guerrilla, scripts/pds-export-drift-watch.sh:150-171), but ENVIRONMENT would be a FALSE disposition for this door because it is not the arm a gate would run — PRICE is the honest one, exactly the split the pds-pre-gate-papers-check.sh row already draws between its offline and `--live` arms. NOT VACUOUS, AND PROVEN BY THREE MUTATIONS, not by the green: a separate un-metered run exits 0 and prints `=== 17 passed, 0 failed ===` over 12 arms, each a mutation that must be caught beside a control that must not be. (A) collapse the blind-probe verdict to CLEAN and the run reds 15/2, naming `a blind draw printed CLEAN — the gate fails OPEN`; (B) drop the sample floor of the cost model and it reds 15/2 on `a sub-floor model printed a percentage anyway`; (C) count an all-blind session as clean and it reds 15/2 on the denominator arm. Restored, 17/0 in all three cases. IT NEVER WRITES ANYTHING, anywhere: every remote command is a read (`git -C /opt/barkpark rev-parse HEAD`), and arm 12 greps the own non-comment lines for a write verb aimed at the frozen harness — with the needle ASSEMBLED AT RUNTIME so the guard cannot match its own source line, which is how it read FAIL on its first run.
 rerun-adjudicate.mjs	RED-BY-DESIGN-REPORTER	ITS EXIT CODE IS DECLARED NOT TO BE A VERDICT, IN ITS OWN SOURCE. tooling/pds/rerun-adjudicate.mjs:16-21 reads: EXIT CODES ARE FOR THE SHELL, NEVER FOR A VERDICT -- 0 the run COMPLETED, it does NOT mean the reasons are true, read the line. A required gate consumes exactly one thing, an exit code, and this file refuses to make its exit code mean what a gate would read it as. Run-derived 2026-09-03 at ec8b97a09: `node tooling/pds/rerun-adjudicate.mjs` rc=0, printing `status COMPLETE`, `172 live adjudicated row(s)` and a five-row rerun variance census -- all of it over the DEFAULT corpus, which is the PINNED SNAPSHOT tooling/pds/fixtures/live-corpus-2026-07-31.json (read_at 2026-07-31, declared at :30). So the green is hermetic and reproducible and says nothing whatever about the board today; the one mode that would (--fetch, :12) reads the LIVE ledger and needs a credential. NOT NOT-YET-BUILT: it is built, it runs, and it prints a full verdict. What it does not have is an exit code a gate may read.
-rerun-adjudicate.test.mjs	CONTENT-RED	by run 2026-09-03 at ec8b97a09: `node tooling/pds/rerun-adjudicate.test.mjs` rc=1, `pds/rerun-adjudicate: 117 checks, 7 failed`, naming arms 5.3, 5.4, 6.7, 6.8, 8.8, 8.9 and 9.2 -- a pds/grip polarity drift in which an absence claim comes back REFUSED where the arm expects RE-DERIVED. THE TREE ALREADY KNEW AND SAID SO IN WRITING: .github/workflows/research-coverage-suite.yml:37-42 excludes this file from the tooling node --test job (DELIBERATELY EXCLUDED -- it fails on a pds/grip polarity drift that needs evidence-weighed triage under a hard fence forbidding any tooling/grip edit) and names the follow-up wbt-pds-grip-polarity-drift-2026-08-31; the failure notice at :243 repeats it. IT IS RED, NOT UNRUN, AND THAT DISTINCTION DECIDES THE REMEDY: wiring a red harness into a blocking gate reds main on the first merge for a defect no PR introduced. It flips to THROUGH when the drift is adjudicated and an ExUnit rider executes it, and not before.'
+pds-personal-local-smoke_test.sh	PRICE	CPU=0.04+0.10=0.14s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=29.46 arm=none key=437ebe41cb78 2026-09-13 (no arguments = the `--dry-run` arm, rc=0; 3 trials gave 0.14/0.13/0.12s CPU at load1=29.46, observed band 0.12-0.14 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.14 s keeps no door shut. THIS IS THE TENTH DERIVED HARNESS (the *_test.sh rule), landed by the pds-bl-personal-local-doc-staleness slice, and it arrives WITH its row rather than reddening main first. IT WAS CUT AS THE NINTH AND REBASED INTO THE TENTH: #18094 landed scripts/pds-threshold-move-guard_test.sh as the ninth at a959fe3a8 first, so this branch re-derived the count from a fresh `bash scripts/pds-door-census.sh` (which prints `harnesses : 10`) rather than from its own stale diff, and it ADDS its row beside the two rows that PR landed rather than replacing them — the two mains reddened by #17651 and #17687 are why this paragraph exists. It is wired into .github/workflows/shell-harnesses.yml (pds-harnesses job), which is NOT a required context (.github/required-checks.json names four), so it is not THROUGH; the rider that would move it is an ExUnit exec under api/test, the pds_window_sentinel_test.exs:20 shape. TWO ARMS, ONE PRICED AND ONLY ONE WIRED. The default `--dry-run` arm is the doc-drift ratchet: it resolves eleven LITERAL anchors in docs/setup/personal-local.md and prints each beside its line number, reading ONE file — no mix, no Postgres, no BEAM, no network, no credential — which is why it is the arm CI runs. The `--boot` arm actually walks the guide (mix deps.get, `bin/barkpark up`, `bin/barkpark token`, a raw-blob PUT, `bin/barkpark stop`) and is genuinely ENVIRONMENT-bound — it needs a Postgres toolchain and takes minutes — but ENVIRONMENT would be a FALSE disposition for this door because it is not the arm a gate would run; PRICE is the honest one, exactly the split the pds-pre-gate-papers-check.sh and pds-export-drift-watch.sh rows already draw. NOT VACUOUS, AND PROVEN BY THREE MUTATIONS rather than by the green: a separate un-metered run exits 0 and prints `=== 15 passed, 0 failed ===`; (A) delete the `CC=/usr/bin/clang bin/barkpark up` line from the one-command block of the doc and the same run is rc=1, `14 passed, 1 failed`, naming the missing literal; (B) reword the never-pipe-up-into-tail trap and it reds the same way; (C) rename the `barkpark stop` row of the command table and `--boot` exits 1 printing `the plan did not resolve — REFUSING to boot`, having started nothing. Restored, rc=0 in all three cases. AND ITS OWN TALLY CANNOT GO VACUOUS: the first cut piped the anchor loop into `while`, which on bash 3.2 runs in a SUBSHELL and discarded every counter — it printed `0 passed, 0 failed` over a MISSING anchor at rc=0. The loop now redirects from a file and the foot refuses an empty tally by name. The `--boot` arm was run once locally on 2026-09-13 at 12415bf92: `30 passed, 0 failed`, on free ports 46484/25528 with both released after `bin/barkpark stop`.
+rerun-adjudicate.test.mjs	CONTENT-RED	by run 2026-09-03 at ec8b97a09: `node tooling/pds/rerun-adjudicate.test.mjs` rc=1, `pds/rerun-adjudicate: 117 checks, 7 failed`, naming arms 5.3, 5.4, 6.7, 6.8, 8.8, 8.9 and 9.2 -- a pds/grip polarity drift in which an absence claim comes back REFUSED where the arm expects RE-DERIVED. THE TREE ALREADY KNEW AND SAID SO IN WRITING: .github/workflows/research-coverage-suite.yml:37-42 excludes this file from the tooling node --test job (DELIBERATELY EXCLUDED -- it fails on a pds/grip polarity drift that needs evidence-weighed triage under a hard fence forbidding any tooling/grip edit) and names the follow-up wbt-pds-grip-polarity-drift-2026-08-31; the failure notice at :243 repeats it. IT IS RED, NOT UNRUN, AND THAT DISTINCTION DECIDES THE REMEDY: wiring a red harness into a blocking gate reds main on the first merge for a defect no PR introduced. It flips to THROUGH when the drift is adjudicated and an ExUnit rider executes it, and not before.
+pds-threshold-move-guard.sh	PRICE	CPU=0.81+0.74=1.55s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=48.71 arm=opaque 2026-09-13 (via: PR_BODY="" bash scripts/pds-threshold-move-guard.sh --base HEAD --head HEAD, rc=0) -- TAKEN BY `--measure --via`, never hand-typed (PDS-D656): 3 trials gave 1.50/1.54/1.55s CPU at load1 48.25-48.71, observed band 1.50-1.55 s, a 3.3% spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able. THE ARM IS THE SWEEP, NOT `--list`: `--list` prints the roster and exits, metering at 0.00-0.01s CPU, and a headline figure for the one arm that reads nothing would understate the door 150x. The metered arm walks all 18 watched paths at two revisions, which is what any gate would run. WHY IT IS NOT THROUGH: nothing executes it. It needs no credential, no network and no server -- its price is not the obstacle -- and it would ride a door the day an ExUnit case under api/test binds it to an attribute and System.cmds it, or the day a workflow step calls it with PR_BODY. Wiring venue is .github/workflows, owned by the gates lane; the slice that built this file (pds-bl-w49-budget-literal-moved-by-its-own-pr) built the PREDICATE and says so rather than wiring a check it does not own. Its harness IS wired, into the pds-harnesses job of shell-harnesses.yml, which is not a required context: the arms RUN, they do not BLOCK.
+pds-threshold-move-guard_test.sh	PRICE	CPU=4.53+5.65=10.18s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=57.42 arm=none key=06b024fbb9c7 2026-09-13 (no arguments, rc=0) -- RE-TAKEN BY `--measure`, never hand-typed (PDS-D656): 3 trials gave 9.84/10.18/9.60s CPU at load1 55.90-58.10, observed band 9.60-10.18 s, a 6.0% spread, HIGH END QUOTED per the rule of this column. THE HOST WAS NOT QUIET -- load1 ran 55.9-58.1 on 10 cpus across all three trials, so this band is a LOADED-HOST band and is NOT poolable with the pds-live-hetzner-placement-group_test.sh band above, which was taken at load1 4.63-5.94. NOT VACUOUS: the same binary run un-metered prints 15 ok lines and `pds-threshold-move-guard_test: PASS`, including the two arms the task exists for -- a silent cap move REFUSED at exit 1 and THE SAME HEAD TREE passing at exit 0 once the PR body states both values with a reason -- plus the real-history replay of c3b0421cb (PR #9601) itself. The cost is mostly git: 12 commits in a throwaway repo plus two revisions of 18 watched paths per arm. WHY IT IS NOT THROUGH: it is wired into the pds-harnesses job of .github/workflows/shell-harnesses.yml, which is not a required context, so the arms RUN and do not BLOCK; no ExUnit case under api/test executes it, which is the only thing between this row and THROUGH.
+pds-artifact-retention.sh	PRICE	CPU=0.01+0.03=0.05s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=28.02 arm=none key=427fb9b623ef 2026-09-16 (no arguments = the DRY RUN, rc=0; 3 trials gave 0.05/0.04/0.04s CPU at load1 27.86-28.02, observed band 0.04-0.05 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.05 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PRICED ARM REMOVES NOTHING, and that is the arm a gate would run: with no flag it walks $PDS_ARTIFACT_ROOT (default /tmp), prints `0 kept · 0 removable (0 MB) · 0 refused` and `Nothing was removed. Re-run: pds-artifact-retention.sh --apply`; only `--apply` unlinks, so the dry run reads the tree and writes nothing. NOT VACUOUS: its can-fail arms live in the derived harness pds-artifact-retention.test.sh below, hermetic by construction (every arm builds its own mktemp -d root and plants its own parked full-export store, reaching no network and reading no credential) and green at `35 pass(es), 0 failure(s)`. Landed by #18544 with no ledger row; this row is the main-red repair.
+pds-artifact-retention.test.sh	PRICE	CPU=1.16+1.94=3.09s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=24.49 arm=none key=1f73c6852c47 2026-09-16 (no arguments, rc=0; 3 trials gave 2.94/2.94/3.09s CPU at load1 24.49-27.86, observed band 2.94-3.09 s, a 5.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 3.09 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THIS IS A DERIVED HARNESS (the *_test.sh rule), landed by #18544 at 983d3d0ac with no ledger row, which is half of what reddened main. NOT VACUOUS: `--measure` discards subject output, so the arm evidence comes from a SEPARATE un-metered run — rc=0, `35 pass(es), 0 failure(s)`. Hermetic per its own header: nothing here touches a real /tmp path, no export is fired, no network is reached, no credential is read.
+pds-charter-anchors-check.sh	PRICE	CPU=0.08+0.06=0.14s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=49e35c300aab 2026-09-16 (no arguments = the default charter .claude/workflows/bp-pds-charter.md, rc=0; 3 trials gave 0.14/0.12/0.13s CPU at load1=23.01, observed band 0.12-0.14 s, HIGH END QUOTED). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.14 s keeps no door shut. Nothing REQUIRED runs it, and REQUIRED is now the whole of the claim: .github/workflows/shell-harnesses.yml DOES run this file (the `pds-charter-anchors ...` steps, dispatched by the pre-existing `scripts/pds-*.sh` path entry that workflow already carried), and that workflow carries NONE of the four required contexts on main -- riding a workflow is not riding a required name, and that distinction is the one this whole column turns on. It has no ExUnit rider under api/test, and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PREVIOUS WORDING HERE DENIED THAT ANY WORKFLOW FILE NAMED IT, and that denial was FALSE from 7cb2c6894 (PR #18769) onward with nothing anywhere reddening -- which is why the denial is no longer WRITTEN at all: workflow_claim_errors DERIVES it against $SCAN_ROOT/.github/workflows on every run, so restoring the old sentence to this row REDS the census by name. IT READS ONE FILE AND WRITES NONE: the charter path is argv[1] with the repo default at scripts/pds-charter-anchors-check.sh:42, and the run prints `RESULT: PASS — every charter content anchor resolves uniquely.` NOT VACUOUS, and the green descends from arms that can fail: the derived harness below pairs each RED arm (one mutation, must red) with a QUIET arm (must stay green) and carries a REVERT arm that reproduces the pre-fix charter text verbatim, so the check is proven to catch the exact regression it was written for. Landed by #18539 at e01c3c22e with no ledger row; this row is the main-red repair.
+pds-charter-anchors-check_test.sh	PRICE	CPU=0.32+0.48=0.81s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.01 arm=none key=efb09f1436d5 2026-09-16 (no arguments, rc=0; 3 trials gave 0.81/0.77/0.77s CPU at load1=23.01, observed band 0.77-0.81 s, a 5.2 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.81 s keeps no door shut. Nothing REQUIRED runs it, and REQUIRED is now the whole of the claim: .github/workflows/shell-harnesses.yml DOES run this file (the `pds-charter-anchors ...` steps, dispatched by the pre-existing `scripts/pds-*.sh` path entry that workflow already carried), and that workflow carries NONE of the four required contexts on main -- riding a workflow is not riding a required name, and that distinction is the one this whole column turns on. It has no ExUnit rider under api/test, and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. THE PREVIOUS WORDING HERE DENIED THAT ANY WORKFLOW FILE NAMED IT, and that denial was FALSE from 7cb2c6894 (PR #18769) onward with nothing anywhere reddening -- which is why the denial is no longer WRITTEN at all: workflow_claim_errors DERIVES it against $SCAN_ROOT/.github/workflows on every run, so restoring the old sentence to this row REDS the census by name. DERIVED HARNESS (the *_test.sh rule), landed by #18539 with no ledger row. NOT VACUOUS: a SEPARATE un-metered run exits 0 and prints `14 passed, 0 failed` then `RESULT: PASS`, over arms that are paired RED/QUIET by construction.
+pds-citation-precedes-merge.sh	PRICE	CPU=0.13+0.16=0.29s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=21.89 arm=none key=0f6661a42e91 2026-09-16 (no arguments = HEAD against origin/main, rc=0; 3 trials gave 0.28/0.28/0.29s CPU at load1=21.89, observed band 0.28-0.29 s, a 3.6 percent spread, HIGH END QUOTED). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 0.29 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. ITS ORACLE IS A GIT REF, NOT A CREDENTIAL, which is why this is PRICE and not ENVIRONMENT: it resolves the charter AT THE BASE REF (`BASE="origin/main"`, scripts/pds-citation-precedes-merge.sh:120) through git grep and cat-file, contacts no server and reads no token. A checkout with no origin/main does not lie about it — the harness pins that arm as `charter absent on base -> UNCHECKED`. Landed by #18542 at fa307f490 with no ledger row; this row is the main-red repair.
+pds-citation-precedes-merge_test.sh	PRICE	CPU=1.33+2.04=3.37s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=21.89 arm=none key=7178470fb6f2 2026-09-16 (no arguments, rc=0; 3 trials gave 3.37/3.31/3.30s CPU at load1 20.05-21.89, observed band 3.30-3.37 s, a 2.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) — this host carried load1 20.05-28.02 across the six takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE, and the row says so rather than letting the label imply the opposite: 3.37 s keeps no door shut. Nothing required runs it — it appears in no .github/workflows file and has no ExUnit rider under api/test — and the ONLY thing between it and THROUGH is such a rider, the pds_window_sentinel_test.exs:20 shape. DERIVED HARNESS (the *_test.sh rule), landed by #18542 with no ledger row. NOT VACUOUS: a SEPARATE un-metered run exits 0 and prints `SELFTEST PASS — 10/10`, the last arm being `charter absent on base -> UNCHECKED`. Hermetic per its own header: every case builds a THROWAWAY GIT REPO with its own fixture charter, so the real charter is never read and the verdict cannot move when an unrelated PR lands.
+pds-roster-callee-churn.exs	PRICE	CPU=7.16+1.89=9.05s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.81 arm=none key=9c86920c7d60 2026-09-16 (no arguments, rc=0; 3 trials gave 7.97/8.43/9.05s CPU at load1 5.61-5.83, observed band 7.97-9.05 s, a 13.6 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, AND THE ROW SAYS SO RATHER THAN LETTING THE LABEL IMPLY THE OTHER ONE: 9 s keeps no door shut, and nothing runs this instrument — no rider binds it and no workflow names it. IT IS A ONE-SHOT PRICING HARNESS, NOT A RATCHET, AND THAT IS WHY IT IS NOT WIRED: it answers ONE settled question — what a callee-inclusive roster fingerprint would have cost over the 95 api/lib commits that settled def_fp — and the answer is committed in scripts/pds-elixir-receipt-census.exs ROSTER-VERDICT-FRESH block and in its printed sentence. Re-running it on a PR would re-derive a constant. NOT VACUOUS, AND ITS GREEN DESCENDS FROM AN ARM THAT CAN FAIL: it carries its own CONTROL and halts 1 unless the def granularity re-derives the price PDS-D558 settled (2 fires over the window, one of them fbc6b80a1, one of them unrelated). BOTH REFUSALS ARE PROVEN BY RUN, NOT ASSERTED: `--count 999999` exits 2 with `the window is 1798 commits, not 999999`, and `--tip fbc6b80a1~1 --count 95` — the same window slid back so the repair leaves it — prints `CONTROL ... NOT REPRODUCED` and exits 1. Unmodified, exit 0 and `CONTROL ... REPRODUCED`. A first draft of this row claimed `--count 94` refuses; it does NOT (94 is a real window and the control still reproduces over it), and the claim was withdrawn by run rather than left standing. IT NEEDS THE REPOSITORY GIT HISTORY, not merely a checkout: it reads 95 commits of api/lib through rev-list, ls-tree and cat-file, so from a `git archive` root it cannot run at all — a second reason the wiring question is not live.
+pds-citation-expand.sh	PRICE	CPU=7.57+1.89=9.46s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=90.19 arm=--check key=95a792d9f2ed 2026-09-18 (--check = the gated arm, rc=0; 3 trials gave 9.46/9.26/9.22s CPU at load1 76.99-90.19, observed band 9.22-9.46 s, a 2.6 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY --measure, never hand-typed, and quoted against its own stamp only (PDS-D656) -- this host carried load1 69.61-90.19 across every take in this PR, a heavily loaded machine, and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE: 9.46 s keeps no door shut, and nearly all of it is git grep over the whole tree, which is what the arm is FOR. WHAT IT IS: the counter and guard for slash-compressed PDS-D citations. --count prints every denominator side by side (lines, matches, and the citation total both of those hide), --expand restores the prefix on each segment idempotently, --check is the guard, --selftest is 16 arms. ONLY --expand WRITES: the gated --check arm runs git grep, writes nothing, reaches no network and reads no credential. Nothing REQUIRED runs it. It now APPEARS in .github/workflows/shell-harnesses.yml -- its derived harness scripts/pds-citation-expand.test.sh runs both the 16-arm --selftest and the live --check on the pds-harnesses leg -- and that workflow carries none of the four required names (.github/required-checks.json: Elixir gate, PR references an active task, Cloud gate, Console gate), so appearing in a workflow is NOT being through the door. It still has no ExUnit rider under api/test, and such a rider, the pds_window_sentinel_test.exs:20 shape, remains the ONLY thing between it and THROUGH. NOT VACUOUS, and the greens are shown by MUTATION rather than asserted: narrowing the segment class reds ARM 4b, making the counter report matches as citations reds ARM 5c, dropping the captured-data skip reds ARM 7b, and over-broadening that skip reds ARM 7c. The arms are PAIRED by construction -- ARM 3 and ARM 3b are positive controls that must stay QUIET, so ARM 2b cannot pass by matching nothing, and ARM 7c must RED on an authored path so ARM 7b cannot be a blanket skip. Hermetic: every fixture is built from parts inside a mktemp git repo it removes, so this file carries no compressed literal of its own and needs no exception for its own test data. ITS DERIVED HARNESS HAS NOW LANDED (task-b92409dc562dc20c): scripts/pds-citation-expand.test.sh is a DERIVED HARNESS by the *_test.sh / *.test.sh rule, it moved the census harness count 13 -> 14 exactly as this row predicted it would, and it carries a PRICE row of its own below. --selftest is no longer run BY HAND: the pds-harnesses leg runs it on every PR that touches either file.
+pds-citation-expand.test.sh	PRICE	CPU=20.59+6.67=27.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=43.51 arm=none key=a14defa41bbd 2026-09-18 (no arguments = the only arm, rc=0; 3 trials gave 25.90/27.26/26.66s CPU at load1 42.55-47.20, observed band 25.90-27.26 s, a 5.3 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY --measure, never hand-typed, and quoted against its own stamp only (PDS-D656) -- this host carried load1 42.55-47.20 across the three takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE: 27.26 s keeps no door shut, and nearly all of it is the subject --check and --count arms, which are git grep over the whole tree, the work the guard exists to do. THIS IS THE FOURTEENTH DERIVED HARNESS (the *_test.sh / *.test.sh rule). IT ARRIVES WITH ITS ROW rather than reddening main first, like the tenth and unlike the seventh, eighth, eleventh, twelfth and thirteenth: the census on this tree prints `harnesses : 14` and names this file, while api/test/barkpark/pds_door_census_test.exs:323 pins 13, so THAT PIN MUST MOVE TO 14 IN THE SAME LANDING. It is a literal, not a derived figure -- read, not assumed -- and api/test is the API lane fence, which this lane does not reach, so the bump is filed as a row of its own and reported as a dependency rather than edited from here. Stated plainly because a reader who finds `harnesses : 13` refuted has a right to know it was foreseen rather than missed. IT IS WIRED, AND WIRED IS NOT GATED: the pds-harnesses leg of .github/workflows/shell-harnesses.yml runs it (the arm lives in .github/shell-harness-legs.json; both this file and the subject are named in the twin paths lists and in the changes roster, so an edit to either dispatches the leg that runs it), and that workflow is NOT a required context, so this is RUN, not BLOCK. The rider that would move it to THROUGH is an ExUnit exec under api/test, the pds_window_sentinel_test.exs:20 shape. NOT VACUOUS: a separate un-metered run exits 0 and prints `pds-citation-expand.test: 4 passed, 0 failed`, and three of the four arms can fail independently of the subject own --selftest -- arm 2 is the LIVE guard over the real PDS fence and reds the day a compressed PDS-D citation re-enters scripts/pds-*, deploy/, tooling/pds/ or the charter, which no fixture can simulate; arm 3 demands rc=2 from a POSIX-mode run, so an interpreter guard that silently exits 0 having compared nothing is caught; arm 4 demands --count answer over the whole tree, so the denominator this lane reports stays derivable. Arm 3 is the one that cannot pass by accident: an expected rc of 2 is refuted by BOTH a green and a different red.
+pds-secret-scan_test.sh	PRICE	CPU=0.47+0.79=1.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=44.35 arm=none key=b0610db5a5cb 2026-09-21 (no arguments = the only arm, rc=0; 3 trials gave 1.23/1.24/1.26s CPU at load1 43.69-44.35, observed band 1.23-1.26 s, a 2.4 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY --measure, never hand-typed, and quoted against its own stamp only (PDS-D656) -- this host carried load1 43.69-44.35 across the three takes and no figure here is comparable to a quiet-host or a CI stamp. THE CLASS IS PRICE FOR THE HOLDING-PEN REASON, NOT THE DISQUALIFYING ONE: 1.26 s keeps no door shut. THIS IS THE FIFTEENTH DERIVED HARNESS (the *_test.sh rule), landed by #19577 at 342c912a7 with NEITHER of the two halves the contract demands -- no ledger row here and no pin bump in api/test/barkpark/pds_door_census_test.exs -- which is what reddened main: this census read UNDISPOSED 1 of 59 and the pin there refuted harnesses : 14. Both halves are paid in the same PR as this row, and the pin now reads 15 ON PURPOSE. Like the seventh, eighth, eleventh, twelfth and thirteenth, and unlike the tenth and fourteenth, it reddened main FIRST rather than arriving with its row: #19577 touched no api/** so the diff-scoped Elixir gate never ran the pin test on its own PR, and the red surfaced only on main and on every later PR that did dispatch the Elixir matrix. THE FIGURE IS MEASURED AFTER #19626 (43493f66b), NOT ON THE BRANCH BASE, AND THAT IS NOT A DETAIL: that PR added arms F-I, the bundle member loop, taking this harness from five arms to nine and from 18 checks to 38 in the same window this row was being written. A price taken before the rebase would have priced a harness main no longer carries, which is the exact rot the key= token exists to catch one edit later. Re-derived on the rebased tree, never adjusted from the earlier number. IT IS WIRED, AND WIRED IS NOT GATED: the pds-harnesses leg of .github/workflows/shell-harnesses.yml runs it (the arm lives in .github/shell-harness-legs.json), and that workflow is NOT a required context (.github/required-checks.json names four), so this is RUN, not BLOCK. The rider that would move it to THROUGH is an ExUnit exec under api/test, the pds_window_sentinel_test.exs:20 shape. NOT VACUOUS, AND SHOWN BY MUTATION RATHER THAN BY THE GREEN: a separate un-metered run exits 0 and prints pds-secret-scan count identity: 38 checks, 0 failed. Arm D CUTS the count-identity block out of a scratch copy between its own MUT-ANCHOR and MUT-END markers and then DEMANDS arm B go green, printing CLEAN over 1 of 3 -- the defect reproduced -- while arms A and C stay unchanged; arm H does the same cut for the bundle half and demands arm F is unaffected by it. A guard whose removal changes nothing was never the guard, and these two arms are what make the other seven mean something. Hermetic by construction: psql is a shell stub placed first on PATH, so no database, no network and no credential are reachable from any arm. ONE STALE LABEL IS RECORDED HERE RATHER THAN GLOSSED, AND IT IS NOT THIS ROW TO FIX: the leg name in .github/shell-harness-legs.json still reads pds-secret-scan count identity (5 arms, psql stubbed) after #19626 took the file to nine arms. That string is cosmetic, gates nothing, and sits outside the fence of the row that pays for the census.'
 
 # ---------------------------------------------------------------------------
 # THE PRICE LEDGER — measured prices for rows that ARE through the door.
@@ -355,6 +421,37 @@ rerun-adjudicate.test.mjs	CONTENT-RED	by run 2026-09-03 at ec8b97a09: `node tool
 # is the fraud this column exists to remove. The load1 stamp is REQUIRED
 # (PDS-D656): CPU is not load-independent, so a figure with no load beside it is
 # a number nobody can re-take.
+#
+# THE CPU= FIELD IS THE GATED ARM. ALWAYS. (wave 50, the PDS-D673 ruling taken)
+# ----------------------------------------------------------------------------
+# THE RULE, stated here because it was NOWHERE in this file and the column was
+# therefore not comparable to itself: the figure in the `CPU=` field is the arm a
+# REQUIRED GATE ACTUALLY RUNS, and every other figure about the same instrument
+# is TRAILING PROSE in the same cell, never the headline. For a harness the gated
+# arm is the bare run (`arm=none`); for an instrument a rider drives through a
+# verb it is that verb.
+#
+# WHY IT IS A RULE AND NOT A HABIT. This census's own row headlined `--check` —
+# the arm NO gate runs — while naming its gated `--selftest` arm in the same
+# cell as prose, and every other row headlined its gated arm. The gap between
+# the two figures was 20.75x when the row was filed. A reader comparing two rows
+# of this column was therefore comparing a CPU second the repo pays on every PR
+# against a CPU second nobody pays at all, with nothing in the file to say which
+# was which. The headline is moved below; the `--check` figure survives as prose
+# rather than being deleted, because a deleted measurement is a fact destroyed.
+#
+# AND IT IS RECORDED IN THE ROW, not inferred by a reader. Every row `--measure`
+# emits carries `arm=<argv>` — `arm=none` for a bare harness run, `arm=--selftest`
+# for a gated verb, `arm=opaque` when the arm was a `--via` shell string this file
+# will not claim it can reconstruct. That token is what lets a future reader tell
+# a gated-arm price from a whole-harness price WITHOUT opening the instrument,
+# and it is what `--measure --all` reads back to re-drive the column. A row with
+# no `arm=` predates the token; `--all` REFUSES it by name rather than guessing.
+#
+# A ROW MAY ALSO CARRY `key=<12 hex>` — the elided-ledger-block content key (see
+# price_key). If it does, `price_stale_error` recomputes it every run and REDS
+# when the instrument changed underneath its own price. The key is OPT-IN by
+# RE-TAKE, never by typing: only `--measure` emits one.
 #
 # A PRICE HAS EXACTLY ONE LEGAL ENDING: DELETE THE ROW. The disposition ledger's
 # retire shape does NOT exist here and must never be imported, because the two
@@ -375,14 +472,15 @@ rerun-adjudicate.test.mjs	CONTENT-RED	by run 2026-09-03 at ec8b97a09: `node tool
 # any other instrument is a price nobody pays and nothing reads —
 # `orphaned_price_error` below is what makes that say so instead of passing in
 # total silence.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.49+0.77=1.26s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=6.48 2026-08-05 (--check, rc=0; 3 trials gave 1.26/1.31/1.27s). Its gated arm is --selftest at CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s — a 5.7% spread at one stamp, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once. RE-TAKEN ON THE BUILDER HOST 2026-09-03 (wave 49, the widened denominator), BY --measure, NEVER PASTED, AND ADDED BESIDE THE STAMP ABOVE RATHER THAN OVER IT: --check CPU=3.25+10.01=13.25s at load1=69.60, 3.25+9.75=13.00s at load1=65.29, 3.27+10.14=13.41s at load1=83.63 (band 13.00-13.41 s, a 3.1 percent spread, cpus=10); --selftest CPU=2.03+6.26=8.29s at load1=66.84, 2.11+6.70=8.81s at load1=75.97, 1.96+5.91=7.87s at load1=75.62 (band 7.87-8.81 s, an 11.9 percent spread, cpus=10). THE INSTRUMENT DID CHANGE UNDERNEATH THE ROW AGAIN and that is why it was re-taken: --selftest went 45 arms to 49 and --check went from a population of 25 to 34 as the denominator reached tooling/pds. THE TWO STAMPS ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): 1.26s at load1=6.48 against 13.25s at load1=69.60 is a TENFOLD gap on a host carrying ten times the load, and no part of it is attributable to the four new arms. A ratio taken across those stamps would measure this machine, not this change. The transferable facts here are the arm count, the population and the WITHIN-STAMP spreads; the quotable figure for a CI runner is still the load1=5-7 band above, which this run does not refute and cannot confirm.
-pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (--selftest, 15/15 arms)
-pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (76 checks, 0 failures)
-pds-pull-proof_test.sh	CPU=0.32+0.28=0.59s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=3.17 2026-09-06 (no arguments, rc=0; 3 trials gave 0.56/0.59/0.57s CPU at one stamp, observed band 0.56-0.59 s, a 5.4 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS THROUGH AND THE PRICE IS WHY THAT IS HONEST: 0.59 s keeps no door shut, and the instrument is hermetic — it builds tar fixtures in a mktemp -d it removes, sources scripts/pds-pull-proof.sh through the PDS_PROOF_LIB=1 library mode that script itself documents (it loads every rung and runs none), issues no network call, opens no ssh, reads no credential and touches no scratch target. THE SUBJECT STAYS ENVIRONMENT-DISPOSED: this harness prices the offline predicate full_meta_ok and its reader manifest_field, never the --all climb, which still needs a live server and a pinned BARKPARK_HOME, and the disposition row for pds-pull-proof.sh is unchanged. NOT VACUOUS: --measure discards subject output, so the arm evidence comes from a SEPARATE un-metered run — rc=0, 23 `ok` lines and `pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)`. The green descends from arms that can FAIL, shown by mutation rather than asserted: reverting full_meta_ok to the origin/main predicate reds 16 arms, collapsing the manifest_field exit code back to a constant 0 reds 5 (including the legacy-accept arm, which is what proves the tightening did not simply refuse everything), deleting file(1) from the refusal message reds 2, and forcing that identification empty reds 2 — an arm that could only ever pass is what this column exists to refuse.
-pds-window-sentinel_test.sh	CPU=0.016+0.023=0.039s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=8.51 2026-08-22 (no arguments, rc=0; 3 trials gave 0.039/0.031/0.031s CPU, observed band 0.031-0.039 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Quoted against its own stamp only (PDS-D656) and NOT poolable with the two bands above, which were taken at different loads. NOT VACUOUS: a separate un-metered run exits 0 and prints `pds-window-sentinel_test: PASS` over 8 arms, and the harness was run against the PRE-CHANGE sentinel where 3 of those 8 arms RED — so the green descends from arms that can fail. It is hermetic by construction: the probe is stubbed, no ssh is issued, no credential is read, and nothing about any live host is measured.
-pds-published-artifact-door.sh	CPU=1.527+0.697=2.224s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.16 2026-08-22 (origin/main, rc=1 REFUSE; 3 trials gave 2.224/2.193/2.206s CPU, observed band 2.193-2.224 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Quoted against its own stamp only (PDS-D656). NOT VACUOUS: the gated arm is the SELFTEST below, not this live run -- main is RED today and correctly so, so gating on the live run would red every PR for a defect none of them introduced. This figure is the cost of the rider second arm, which asserts the door still NAMES the two react subpaths it was built to refuse and FLUNKS with a re-derivation instruction if it ever goes green.
-pds-published-artifact-door_test.sh	CPU=3.557+1.956=5.513s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.16 2026-08-22 (no arguments, rc=0; 3 trials gave 5.513/5.483/5.553s CPU, observed band 5.483-5.553 s, a 1.3 percent spread, high end quoted). Hermetic by construction: it builds a synthetic git fixture in a temp dir, issues no network call, reads no credential, and does not depend on the state of this repo history. NOT VACUOUS: 17 arms, every escape hatch carrying a MUTATION twin that removes the hatch and demands the same tree refuse, plus a PAIRED PROBE whose two packages differ only in the version literal -- a hatch that skips everything is indistinguishable from one that works unless you show the thing it was hiding.
-pds-elixir-receipt-census.exs	CPU=39.16+3.14=42.30s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.50-7.61 2026-08-05 — the FOUR GATED ARMS SUMMED, each metered separately by `--measure`: plain rc=0 at 11.76+0.93=12.69s (load1=5.66), the one-token tl/1 mutant rc=1 at 12.71+0.85=13.56s (load1=5.50), the D448 population-baseline mutant rc=1 at 11.76+0.93=12.69s (load1=7.61), the unknown-flag refusal rc=2 at 2.93+0.43=3.36s (load1=5.71). THE ROW SAID THREE FOR TWO WAVES WHILE THE RIDER RAN FOUR: api/test/barkpark/pds_elixir_census_test.exs carries arms at :135 :145 :187 :210, and the baseline-mutant arm (PDS-D678, wave 47) was never priced. IT WAS RE-METERED, NOT RE-WORDED — a prose-only repair here is INVISIBLE to every gate in this repo (proven by mutation: editing THREE to SEVENTEEN leaves --check rc=0 ERRORS 0 and the rider 9 tests / 0 failures), which is why the count and the figure moved together. THE UNIT IS DECIDED IN WRITING (PDS-D633/D692): this is an OS meter around a SHELL that runs the four census invocations DIRECTLY, never a meter around the ExUnit rider. Measured, not assumed — `--measure ... --via "mix test test/barkpark/pds_elixir_census_test.exs"` reports 0.90+1.26=2.16s for the same four arms, 19.6x under this leaf sum, because a meter wrapped around a BEAM that fans out to child BEAMs is blind to the fan-out in exactly the direction a price column must not err: it makes an expensive thing look gate-able. The four stamps span 5.50-7.61 and the figure is quotable against that band only, NOT against a quiet or a busier host (PDS-D656). Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.'
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=4.84+7.50=12.34s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=62.77 arm=--selftest key=3c5e931ce447 2026-09-21 (--selftest, rc=0; 3 trials gave 12.34/12.21/12.31s CPU at load1 62.77-66.30, observed band 12.21-12.34 s, a 1.1 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). RE-TAKEN BECAUSE THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, WHICH IS THE ONLY REASON THIS COLUMN EVER RE-TAKES ONE, AND THE KEY SAID SO BEFORE THE ROW WAS TOUCHED: leg B was split into its whole-set and LITERAL halves (leg_b_literal, plus three arms: LEG B LITERAL / LEG B DERIVED / LEG B LITERAL REFUSES), --selftest went 74 arms to 77, and the key moved 0ae13750c8e3 -> 3c5e931ce447. THIS IS A RE-MEASUREMENT, NEVER AN EDITED NUMBER: every figure here came back from `--measure pds-door-census.sh --selftest` on this tree, and nothing about the previous stamp was changed to make it fit. THE SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.81+5.78=8.59s at load1=76.94, 3 trials 8.59/8.04/7.30s at load1 74.91-77.90, a 17.7 percent spread, key=0ae13750c8e3, 2026-09-18. THE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 62.77-66.30 against load1 74.91-77.90 is a quieter host, and the three new arms and the contention are CONFOUNDED here — this row attributes the 3.75 s to neither. The transferable facts are the arm count, the key, and the WITHIN-STAMP spread, which tightened from 17.7 percent to 1.1 percent at the lower load. TAKEN TWICE IN THIS PR, AND BOTH REASONS WERE THE SAME MECHANISM: PRICE-STALE fired when a slash-compressed charter citation in the prose of THIS FILE was expanded (key d44af97a4f79 -> 56296e9376c9), and fired AGAIN when that one expansion had to be REVERTED (key 56296e9376c9 -> 0ae13750c8e3) because api/test/barkpark/pds_door_census_test.exs:446 asserts the literal string METER BLIND SPOT (PDS-D633/D646) against this instrument printed output -- a compressed citation that is not prose at all but part of a pinned contract another lane owns. THE KEY WAS RIGHT BOTH TIMES: it elides the ledger literals precisely so a ledger paste cannot move it, so each firing was the program moving, and the honest discharge is a re-take rather than an argument that a comment-only edit must be harmless. THE INTERMEDIATE STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.87+5.15=8.02s at load1=72.70, 3 trials 7.84/8.02/7.70s at load1 69.61-72.70, key=56296e9376c9, 2026-09-18. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=3.09+5.87=8.96s at load1=61.55 over 74 arms, 3 trials 8.96/8.70/8.48s at load1 56.73-67.75, key=d44af97a4f79, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 56.73-67.75 against load1 69.61-72.70 is a busier host, so the edit and the contention are CONFOUNDED here and this row attributes the 0.94 s to neither. RE-TAKEN BECAUSE THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, WHICH IS THE ONLY REASON THIS COLUMN EVER RE-TAKES ONE: the PRICE-UNGRADED ruling landed with seven arms (67 -> 74), and the PRICE-STALE key moved f50c75efbf51 -> d44af97a4f79 in the same edit — and it moved BEFORE the row was pasted, which is how this row learned it needed re-taking at all. THE IMMEDIATELY SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN: CPU=2.50+4.39=6.89s at load1=47.82 over 67 arms, 3 trials 6.89/6.67/6.53s at load1 47.82-57.30, key=f50c75efbf51, 2026-09-17. THOSE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 47.82-57.30 against load1 56.73-67.75 is a host carrying meaningfully more load, so the seven new arms and the contention are CONFOUNDED here and this row attributes the 2.07 s to neither. AND THE STAMP BEFORE THAT ONE IS KEPT TOO, because a deleted measurement is a fact destroyed: workflow_claim_errors landed with five arms (62 -> 67), and the PRICE-STALE key moved fb27908d5edc -> f50c75efbf51 in that edit. The key ELIDES both ledger literals, so it did not move because a row was pasted -- it moved because the program did, which is exactly the signal it exists to give. THE SUPERSEDED STAMP IS KEPT, NOT OVERWRITTEN, because a deleted measurement is a fact destroyed: CPU=2.07+4.72=6.79s at load1=35.89 over 62 arms, 3 trials 6.79/6.54/6.33s at load1 29.91-35.89, key=fb27908d5edc, 2026-09-11. THE TWO ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): load1 29.91-35.89 against load1 47.82-57.30 is a host carrying roughly half again the load, so the five new arms and the contention are CONFOUNDED here and this row attributes the 0.10 s to neither. The transferable facts are the arm count, the key, and the WITHIN-STAMP spread. THE HEADLINE MOVED TO THE GATED ARM IN WAVE 50, AND THAT IS NOW THE RULE OF THIS COLUMN, STATED ABOVE: the CPU= field is the arm a required gate actually runs, and every other figure about the same instrument is trailing prose in this same cell. Until this change this row headlined --check — the one arm NO gate runs — while naming its gated arm as prose, and every other row in this ledger headlined its gated arm; the column was therefore not comparable to itself, which is the defect pds-w46-bl-census-own-price-measures-the-wrong-arm was filed on. THE --check FIGURE IS NOT DELETED, because a deleted measurement is a fact destroyed: taken in the SAME session as the headline above, --check is CPU=4.08+10.11=14.20s at load1=26.99, 4.02+9.88=13.91s at load1=26.15, 4.09+9.92=14.01s at load1=24.67 (band 13.91-14.20 s, a 2.1 percent spread, cpus=10), i.e. the ungated arm costs 2.0-2.2x the gated one in one session. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. That ratio is the whole reason the headline had to move: it is the difference between a figure the repo pays on every PR and a figure nobody pays at all. The earlier pair is kept too and is NOT poolable with either (PDS-D656): --check CPU=0.49+0.77=1.26s at load1=6.48 (3 trials 1.26/1.31/1.27s) and --selftest CPU=0.58+1.01=1.59s at load1=5.19 (3 trials 1.59/1.53/1.62s, a 5.7 percent spread at one stamp), both 2026-08-05. THE ROW NOW CARRIES arm= AND key=: the key is the elided-ledger-block content key (price_key), recomputed by every --check inside the THROUGH branch, so this row REDS as PRICE-STALE the moment the census changes underneath it without being re-measured — and it survives its own paste, which is the self-pricing fixpoint the key was built for. RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT AGAIN: wave 48 took --selftest from 33 arms to 43 (the host axis in the grammar, the depth guard, the witness, the two LC_ALL pins, portability, writes-nothing), and a price whose instrument changed underneath it is the exact rot this row exists to prevent. AND THE METER ITSELF CHANGED — this is the first row in the column taken BY `--measure`, not by a hand-typed /usr/bin/time recipe, so it is quoted against the wave 47 figure only as a like-for-like re-take at a comparable stamp: 1.07s at load1=5.54 then, 1.59s at load1=5.19 now, i.e. the ten new arms cost ~+49% of the gated arm. The earlier 3.32s/0.16s at load1=41.63 is NOT comparable and is quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once. RE-TAKEN ON THE BUILDER HOST 2026-09-03 (wave 49, the widened denominator), BY --measure, NEVER PASTED, AND ADDED BESIDE THE STAMP ABOVE RATHER THAN OVER IT: --check CPU=3.25+10.01=13.25s at load1=69.60, 3.25+9.75=13.00s at load1=65.29, 3.27+10.14=13.41s at load1=83.63 (band 13.00-13.41 s, a 3.1 percent spread, cpus=10); --selftest CPU=2.03+6.26=8.29s at load1=66.84, 2.11+6.70=8.81s at load1=75.97, 1.96+5.91=7.87s at load1=75.62 (band 7.87-8.81 s, an 11.9 percent spread, cpus=10). THE INSTRUMENT DID CHANGE UNDERNEATH THE ROW AGAIN and that is why it was re-taken: --selftest went 45 arms to 49 and --check went from a population of 25 to 34 as the denominator reached tooling/pds. THE TWO STAMPS ARE NOT A DELTA AND MUST NOT BE READ AS ONE (PDS-D656): 1.26s at load1=6.48 against 13.25s at load1=69.60 is a TENFOLD gap on a host carrying ten times the load, and no part of it is attributable to the four new arms. A ratio taken across those stamps would measure this machine, not this change. The transferable facts here are the arm count, the population and the WITHIN-STAMP spreads; the quotable figure for a CI runner is still the load1=5-7 band above, which this run does not refute and cannot confirm. RE-TAKEN AGAIN 2026-09-11 (the wave-46 whitespace repair), BY `--measure`, NEVER PASTED, AND ADDED BESIDE THE TWO STAMPS ABOVE RATHER THAN OVER THEM: --selftest CPU=1.06+2.05=3.12s at load1=19.50, 1.05+2.01=3.06s at load1=19.50, 1.02+1.90=2.92s at load1=18.50 (band 2.92-3.12 s, a 6.8 percent spread, cpus=10; HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). THE INSTRUMENT CHANGED UNDERNEATH THE ROW AGAIN, AND THAT IS THE WHOLE REASON FOR THE RE-TAKE: --selftest went 49 arms to 50 when retired_evidence_errors learned that whitespace-only evidence IS empty evidence, and a price whose instrument changed underneath it is the exact rot this row exists to prevent. THIS STAMP IS NOT A DELTA AGAINST EITHER STAMP ABOVE AND MUST NOT BE READ AS ONE (PDS-D656): load1=18.50-19.50 sits between the load1=5-7 band and the load1=65-84 band, so the only facts transferable across the three are the arm count, the population and the within-stamp spreads.
+pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 ungraded-until=2026-12-31 2026-08-03 (--selftest, 15/15 arms)
+pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 ungraded-until=2026-12-31 2026-08-03 (76 checks, 0 failures)
+pds-pull-proof_test.sh	CPU=0.32+0.28=0.59s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=3.17 ungraded-until=2026-12-31 2026-09-06 (no arguments, rc=0; 3 trials gave 0.56/0.59/0.57s CPU at one stamp, observed band 0.56-0.59 s, a 5.4 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656). THE CLASS IS THROUGH AND THE PRICE IS WHY THAT IS HONEST: 0.59 s keeps no door shut, and the instrument is hermetic — it builds tar fixtures in a mktemp -d it removes, sources scripts/pds-pull-proof.sh through the PDS_PROOF_LIB=1 library mode that script itself documents (it loads every rung and runs none), issues no network call, opens no ssh, reads no credential and touches no scratch target. THE SUBJECT STAYS ENVIRONMENT-DISPOSED: this harness prices the offline predicate full_meta_ok and its reader manifest_field, never the --all climb, which still needs a live server and a pinned BARKPARK_HOME, and the disposition row for pds-pull-proof.sh is unchanged. NOT VACUOUS: --measure discards subject output, so the arm evidence comes from a SEPARATE un-metered run — rc=0, 23 `ok` lines and `pds-pull-proof_test: PASS (23 arms: 13 refuse, 2 accept, 5 manifest_field, 2 identification, 1 discrimination)`. The green descends from arms that can FAIL, shown by mutation rather than asserted: reverting full_meta_ok to the origin/main predicate reds 16 arms, collapsing the manifest_field exit code back to a constant 0 reds 5 (including the legacy-accept arm, which is what proves the tightening did not simply refuse everything), deleting file(1) from the refusal message reds 2, and forcing that identification empty reds 2 — an arm that could only ever pass is what this column exists to refuse.
+pds-window-sentinel_test.sh	CPU=0.03+0.06=0.09s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=21.46 arm=none key=26abf56c5be2 2026-09-25 (no arguments, rc=0; RE-TAKEN BY --measure on 2026-09-25 because task-ef46f3da4aec1918 changed one comment path in the harness (scripts/ -> docs/ledgers/ for the w10 crown transcript), which moved key= from 7b92668f14d5; the prior 2026-09-11 stamp was CPU=0.03+0.06=0.09s at load1=24.95, 3 trials 0.09/0.08/0.09s). RE-TAKEN BY --measure IN WAVE 50 FOR THE arm= AND key= TOKENS, not because the figure was doubted: arm=none records that the gated arm here IS the bare harness run, and key= is what lets this row red as PRICE-STALE if the harness changes underneath it. IT IS ALSO THE SECOND KEYED ROW ON PURPOSE — with two keyed rows a SINGLE --check run can show a stale price redding and a fresh one passing at the same time, which a one-keyed-row column cannot do. THE PREVIOUS STAMP IS KEPT AND IS NOT A DELTA AGAINST THIS ONE (PDS-D656): CPU=0.016+0.023=0.039s at load1=8.51 2026-08-22 (3 trials 0.039/0.031/0.031s, high end quoted). load1 more than doubled between the two stamps, so the only fact transferable across them is that this harness costs under a tenth of a CPU second either way. Quoted against its own stamp only (PDS-D656) and NOT poolable with the two bands above, which were taken at different loads. NOT VACUOUS: a separate un-metered run exits 0 and prints `pds-window-sentinel_test: PASS` over 8 arms, and the harness was run against the PRE-CHANGE sentinel where 3 of those 8 arms RED — so the green descends from arms that can fail. It is hermetic by construction: the probe is stubbed, no ssh is issued, no credential is read, and nothing about any live host is measured.
+pds-published-artifact-door.sh	CPU=1.527+0.697=2.224s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.16 ungraded-until=2026-12-31 2026-08-22 (origin/main, rc=1 REFUSE; 3 trials gave 2.224/2.193/2.206s CPU, observed band 2.193-2.224 s, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). Quoted against its own stamp only (PDS-D656). NOT VACUOUS: the gated arm is the SELFTEST below, not this live run -- main is RED today and correctly so, so gating on the live run would red every PR for a defect none of them introduced. This figure is the cost of the rider second arm, which asserts the door still NAMES the two react subpaths it was built to refuse and FLUNKS with a re-derivation instruction if it ever goes green.
+pds-published-artifact-door_test.sh	CPU=3.557+1.956=5.513s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.16 ungraded-until=2026-12-31 2026-08-22 (no arguments, rc=0; 3 trials gave 5.513/5.483/5.553s CPU, observed band 5.483-5.553 s, a 1.3 percent spread, high end quoted). Hermetic by construction: it builds a synthetic git fixture in a temp dir, issues no network call, reads no credential, and does not depend on the state of this repo history. NOT VACUOUS: 17 arms, every escape hatch carrying a MUTATION twin that removes the hatch and demands the same tree refuse, plus a PAIRED PROBE whose two packages differ only in the version literal -- a hatch that skips everything is indistinguishable from one that works unless you show the thing it was hiding.
+pds-elixir-receipt-census.exs	CPU=39.16+3.14=42.30s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=5.50-7.61 ungraded-until=2026-12-31 2026-08-05 — the FOUR GATED ARMS SUMMED, each metered separately by `--measure`: plain rc=0 at 11.76+0.93=12.69s (load1=5.66), the one-token tl/1 mutant rc=1 at 12.71+0.85=13.56s (load1=5.50), the D448 population-baseline mutant rc=1 at 11.76+0.93=12.69s (load1=7.61), the unknown-flag refusal rc=2 at 2.93+0.43=3.36s (load1=5.71). THE ROW SAID THREE FOR TWO WAVES WHILE THE RIDER RAN FOUR: api/test/barkpark/pds_elixir_census_test.exs carries arms at :135 :145 :187 :210, and the baseline-mutant arm (PDS-D678, wave 47) was never priced. IT WAS RE-METERED, NOT RE-WORDED — a prose-only repair here is INVISIBLE to every gate in this repo (proven by mutation: editing THREE to SEVENTEEN leaves --check rc=0 ERRORS 0 and the rider 9 tests / 0 failures), which is why the count and the figure moved together. THE UNIT IS DECIDED IN WRITING (PDS-D633/PDS-D692): this is an OS meter around a SHELL that runs the four census invocations DIRECTLY, never a meter around the ExUnit rider. Measured, not assumed — `--measure ... --via "mix test test/barkpark/pds_elixir_census_test.exs"` reports 0.90+1.26=2.16s for the same four arms, 19.6x under this leaf sum, because a meter wrapped around a BEAM that fans out to child BEAMs is blind to the fan-out in exactly the direction a price column must not err: it makes an expensive thing look gate-able. The four stamps span 5.50-7.61 and the figure is quotable against that band only, NOT against a quiet or a busier host (PDS-D656). Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.
+pds-live-hetzner-placement-group.sh	CPU=1.46+1.27=2.73s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=10 load1=23.56 ungraded-until=2026-12-31 2026-09-11 (--selftest-offline, rc=0; 3 trials gave 2.48/2.43/2.73s CPU at load1 22.55-23.56, observed band 2.43-2.73 s, a 12.3 percent spread, HIGH END QUOTED per the rule of this column that a price must never err toward making an expensive thing look gate-able). TAKEN BY `--measure`, never hand-typed, and quoted against its own stamp only (PDS-D656) - which here is not a formality but the whole point: this BYTE-IDENTICAL arm has been reported at 3.79 / 2.98 / 2.15 / 1.91 / 1.31 / 1.23 s across five earlier waves, a 3.1x span for a program nobody edited, so every one of those figures is a stamp and not one of them is a baseline. The 2.98 s figure carried on the stranded rescue branch is therefore NOT usable and was not pasted forward. THE ARM PRICED IS THE GATED ONE: --selftest-offline, the credential-free arm the new rider execs, not --selftest (rc=3 with no credential) and not --run. THE DOOR IS HERMETIC BY CONSTRUCTION: it re-execs itself with every HCLOUD_*/HETZNER_* variable stripped and prints the count it is left with, drives a stub bp via PDS_LIVE_BP against a loopback python3 stub server, reaches no real API, and leaves git status --porcelain EMPTY. NOT VACUOUS: --measure discards subject output, so the arm evidence comes from a SEPARATE un-metered run - rc=0, `hetzner/hcloud variables in this process environment: 0`, four MUTATION blocks each demanding a refusal, and a deposit block pairing three refusals (not-404, not-json, no-error-code) with a healthy positive control that must still be ACCEPTED, so a guard that refuses everything reds too. PROVEN ABLE TO RED: disarming the deposit status guard at :500 (the "$st" != "404" test forced false) takes the arm to rc=1 with `not-404: refused, but not for the stated reason` and reds the rider. LOCAL, and deliberately so: no pds door has ever been metered on a GitHub runner, so this door supplies its own FOREIGN figure on its first CI run and none is projected here.'
 
 # ---------------------------------------------------------------------------
 # roots
@@ -895,6 +993,36 @@ EOF
   esac
 }
 
+# LEG B HAS TWO HALVES SINCE THE DERIVED-FAMILY RULING, AND THIS CLASS READS THE
+# NARROW ONE. `--match test` answers what the DISPATCHER runs: the declared
+# lists PLUS every member of a family a declared program enumerates by glob
+# (today `scripts/pds-*.{sh,exs}`, `tooling/pds/*.mjs`). That is the right
+# answer for "is this path gated?" and the WRONG answer for "is this
+# declaration dead?" — a family member nobody executes is the derivation
+# working as designed, not a name somebody typed and forgot. Reading the whole
+# set here reclassified 43 ledger-disposed instruments as DEAD-DECLARATION in
+# one commit, and every one of their dispositions then read as ORPHANED: the
+# census met a shape it did not model, which is an ERROR by its own rule, and
+# the fix is the shape, never the count.
+leg_b_literal() {
+  local path="$1" out rc
+  # NO PIPE — same SIGPIPE-under-pipefail reason as leg_b above.
+  out="$(bash "$ESCAPE_CHECK" --match test --literal 2>&1 <<EOF
+$path
+EOF
+  )"
+  rc=$?
+  if [ "$rc" -ne 0 ]; then
+    printf 'ERROR'
+    return 0
+  fi
+  case "$out" in
+    true) printf 'true' ;;
+    false) printf 'false' ;;
+    *) printf 'ERROR' ;;
+  esac
+}
+
 # ---------------------------------------------------------------------------
 # ledger lookup
 # ---------------------------------------------------------------------------
@@ -1101,6 +1229,307 @@ price_shape_error() {
 }
 
 # ---------------------------------------------------------------------------
+# THE CONTENT KEY, AND WHAT MEASUREMENT DECIDED IT KEYS ON (wave 50, PDS-D664)
+# ---------------------------------------------------------------------------
+# THE QUESTION THIS ANSWERS was filed as a choice between two keys: hash the
+# instrument's CONTENT, or key on WHETHER ANYTHING RE-TAKES THE ROW. It is not a
+# matter of taste and it was not settled by one. RE-DERIVED BY RUN on this base
+# (de88e01e9), never re-quoted from the filing:
+#
+#   * the price literals committed in this file are FOURTEEN, not six — EIGHT
+#     rows of PDS_DOOR_PRICES and SIX PRICE-classed dispositions
+#     (pds-ledger-census_test.sh, pds-scratch-target_test.sh,
+#     pds-blind-spot-check.sh, pds-pre-gate-papers-check.sh,
+#     pds-read-preflight-audit.sh, pds-read-preflight-audit_test.sh). The
+#     filing's `n=6` was a wave-49 snapshot and is STALE; the ENUMERATION moved
+#     and the PREDICATE did not, which is why the rule below is written as a
+#     predicate;
+#   * the SEPARATION the filing claimed at 6/6 still holds at 14/14 on the
+#     predicate that matters: every PDS_DOOR_PRICES row is THROUGH a required
+#     gate (this run prints `THROUGH a required gate : 8 of 43` and the price
+#     ledger holds exactly those 8 basenames), and not one PRICE-classed
+#     disposition is through any door;
+#   * and the mechanism is unchanged: a THROUGH price is re-derived by reality
+#     on every merge, so it is continuously contradictable; a PRICE-classed
+#     price is a figure for a workload nothing runs, so nothing can disagree
+#     with it.
+#
+# SO THE KEY IS CONTENT, AND ITS SCOPE IS THE THING THE SEPARATION DECIDED.
+# A content hash over a PRICE-classed row would have CERTIFIED THE WORST FIGURE
+# IN THE LEDGER FRESH IN PERPETUITY — pds-scratch-target_test.sh last changed a
+# WEEK BEFORE its 8.91 s stamp and was 16.5x wrong, and its bytes never moved,
+# so every content predicate ever written would have called that row fresh.
+# `price_stale_error` is therefore read at exactly ONE site — inside the THROUGH
+# branch, beside `price_shape_error` — so it can only ever red a row that
+# something re-takes. Content-freshness is ORTHOGONAL to price truth, and this
+# is where the two are kept apart instead of being conflated by a predicate that
+# grades all fourteen the same.
+#
+# THE FALSIFICATION IS OWED, NOT RUN, AND IS NAMED SO IT CANNOT BE LOST: price a
+# SEVENTH instrument THROUGH a door and watch whether it rots. It could not be
+# run here — leg B is evaluated against `.github/workflows/elixir.yml`'s declared
+# path set, and putting a new instrument through a door requires editing that
+# file, which is outside this change's fence.
+#
+# THE ELIDED-LEDGER-BLOCK KEY, AND THE FIXPOINT IT SOLVES
+# ------------------------------------------------------
+# This census PRICES ITSELF. A naive whole-file sha over pds-door-census.sh can
+# never be fresh: pasting the measured row INTO PDS_DOOR_PRICES changes the very
+# bytes the key is taken over, so the key computed after the paste never equals
+# the key computed before it. The key therefore ELIDES both ledger literals —
+# every line from `PDS_DOOR_DISPOSITIONS='` or `PDS_DOOR_PRICES='` through the
+# line that closes the quote — and hashes what is left. Editing a price literal
+# leaves the key UNCHANGED; editing anything else about the instrument moves it.
+# Both directions are `--selftest` arms, and the naive whole-file sha is taken
+# beside it in the same arm as the CONTROL that shows the elision is doing work.
+#
+# RESIDUAL HOLE, STATED RATHER THAN IMPLIED GONE: the elision terminates on the
+# first line whose LAST character is a single quote. A ledger evidence cell that
+# happened to end in one would end the elision early, which makes the key MORE
+# sensitive (a price edit below that point would move it), never less — it can
+# manufacture a false PRICE-STALE, never conceal a real one. The selftest arm
+# that proves a price edit leaves the key unchanged is what would catch it.
+# WHAT IT COSTS, MEASURED, NOT ASSERTED (wave 50). The key is computed ONLY for
+# rows that carry one — two on this base — and never in a loop over the 43-file
+# population. THREE FORKS PER KEYED ROW, SIX IN TOTAL, FIXED. Measured by
+# mutation at one stamp: `--measure pds-door-census.sh --check` with both keys
+# present gave 13.31 / 12.78 / 12.98 s CPU (band 12.78-13.31, cpus=10, load1
+# ~26-30); with the two ` key=<hex>` tokens STRIPPED — the only difference — the
+# same command gave 13.01 / 13.33 s (band 13.01-13.33). THE TWO BANDS OVERLAP,
+# so the honest statement is not a percentage but this: the key's cost is BELOW
+# THIS INSTRUMENT'S OWN RUN-TO-RUN NOISE at this stamp, i.e. well under the 3%
+# ceiling the row asked for, and a figure quoted to two decimals here would be
+# quoting the host. Nothing about that claim scales with the population; adding
+# a keyed row adds three forks.
+price_key() {
+  # $1 = path to the instrument. Prints a 12-hex key, or nothing at rc=1.
+  # THREE FORKS, FIXED, PER KEYED ROW — one awk, one sha, one `command -v`
+  # probe; never a per-file loop over the population.
+  local body sum
+  [ -f "$1" ] || return 1
+  body="$(LC_ALL=C awk '
+    /^PDS_DOOR_(DISPOSITIONS|PRICES)=/ { skip = 1 }
+    skip { if ($0 ~ /'"'"'$/) { skip = 0 }; next }
+    { print }
+  ' "$1")" || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    sum="$(printf '%s\n' "$body" | LC_ALL=C shasum -a 256)" || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sum="$(printf '%s\n' "$body" | LC_ALL=C sha256sum)" || return 1
+  else
+    return 1
+  fi
+  sum="${sum%% *}"
+  case "$sum" in
+    [0-9a-f][0-9a-f]*) ;;
+    *) return 1 ;;
+  esac
+  printf '%s' "${sum:0:12}"
+}
+
+# THE NAIVE KEY, kept ONLY as the control the selftest compares against. It is
+# never read by `--check`: it exists so the arm that proves the elision works can
+# show the thing the elision removes, rather than asserting it.
+price_key_naive() {
+  local sum
+  [ -f "$1" ] || return 1
+  if command -v shasum >/dev/null 2>&1; then
+    sum="$(LC_ALL=C shasum -a 256 <"$1")" || return 1
+  elif command -v sha256sum >/dev/null 2>&1; then
+    sum="$(LC_ALL=C sha256sum <"$1")" || return 1
+  else
+    return 1
+  fi
+  sum="${sum%% *}"
+  printf '%s' "${sum:0:12}"
+}
+
+# ---------------------------------------------------------------------------
+# READING A ROW'S TOKENS — BY POSITION, NEVER BY SEARCHING THE CELL
+# ---------------------------------------------------------------------------
+# THIS IS A REPAIR AND THE SAME DEFECT BIT TWICE, which is why it is one pair of
+# functions instead of two `case` blocks. A price cell is a TOKEN PREFIX
+# (`CPU=… LOCAL meter=… cpus=N load1=N arm=<argv> [key=<hex>]`) followed by
+# FREE PROSE, and every shipped row's prose talks ABOUT its own tokens. Searching
+# the cell found the LAST match, i.e. a fragment of a SENTENCE:
+#   * `${price##* key=}` read `key=:` and `key=` out of two rows' prose and
+#     reported PRICE-STALE KEY MALFORMED on a tree where both keys were correct;
+#   * `${price##* arm=}` read the empty string out of `THE ROW NOW CARRIES arm=
+#     AND key=` and made `--measure --all` drive the census with NO ARGUMENTS
+#     while its row said `arm=--selftest` — the meter measuring the wrong arm,
+#     inside the change whose whole subject is measuring the wrong arm.
+# Both readers below walk FORWARD from `load1=`, which `run_measure` always
+# emits, and REFUSE (rc=1) the moment a field is not where the emitter puts it.
+# Prose may now say `arm=` and `key=` as often as it likes.
+price_arm_token() {
+  # $1 = price text. Prints the arm token, or rc=1 if the row has none.
+  local rest="$1"
+  case "$rest" in
+    *' load1='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#* load1=}"
+  rest="${rest#* }"
+  case "$rest" in
+    'arm='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#arm=}"
+  printf '%s' "${rest%% *}"
+}
+
+price_key_token() {
+  # $1 = price text. Prints the key token, or rc=1 if the row carries none.
+  local rest="$1"
+  case "$rest" in
+    *' load1='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#* load1=}"
+  rest="${rest#* }"
+  case "$rest" in
+    'arm='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#* }"
+  case "$rest" in
+    'key='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#key=}"
+  printf '%s' "${rest%% *}"
+}
+
+# ---------------------------------------------------------------------------
+# PRICE-STALE — read at ONE site, inside the THROUGH branch (see above)
+# ---------------------------------------------------------------------------
+# A price row MAY carry `key=<12 hex>`, in the position `run_measure` emits it:
+# the field immediately after `arm=<argv>`. If it does, the instrument's elided key
+# must still equal it; if the instrument changed underneath the row, the row is
+# PRICE-STALE and the run reds.
+#
+# THE RULING ON AN UNKEYED ROW (this slice; it replaces the sentence "A row with
+# NO `key=` is not graded", which was the hole). AN UNKEYED PRICE ROW IS AN
+# ERROR. Grading unkeyed rows would still mean inventing a key for a figure
+# nobody re-took — so the fix is NOT to invent one, it is to REFUSE the row: a
+# THROUGH price that carries neither `key=` nor an explicit dated grandfather is
+# PRICE-UNGRADED and the run reds, naming it. The old sentence made silence the
+# default for every row that had not been re-taken, and silence over a
+# population is indistinguishable from a clean verdict: on this ledger the
+# freshness arm graded TWO rows of NINE while its `ERRORS : 0` read as a
+# statement about all nine.
+#
+# THE GRANDFATHER IS PER-ROW, DATED, AND OPT-IN, NEVER A LIST IN THIS FILE. A
+# row may stand down the grading by carrying `ungraded-until=<YYYY-MM-DD>` in
+# the SAME position `arm=` occupies — the field immediately after `load1=<n>`.
+# Until that date the row is accepted and named as grandfathered; ON OR AFTER
+# it, the row reds as PRICE-UNGRADED GRANDFATHER EXPIRED and the only exit is a
+# `--measure` re-take. It is a token on the ROW and not an enumeration in the
+# code ON PURPOSE: a skip LIST goes quiet the moment a row is added that nobody
+# thought to list, and going quiet over a growing population is the exact defect
+# this ruling closes. A NEW price row pasted with neither token reds on its
+# first `--check`, which is what makes this a predicate and not a snapshot.
+#
+# THE GRANDFATHER DEADLINE FOR THE ROWS THIS SLICE FOUND IS 2026-12-31. The
+# seven rows unkeyed when the ruling landed carry `ungraded-until=2026-12-31`
+# and NOT a key, because a key can only be produced by `--measure` on a QUIET
+# host out of band and these prices are load-stamped: manufacturing seven keys
+# during a wave would trade a silent ledger for a dishonest one. On 2027-01-01
+# every one of them reds until it has been re-taken.
+#
+# A ROW THAT DOES NOT PARSE IS NOT JUDGED HERE. If the cell carries no `load1=`
+# field at all, the price GRAMMAR arm already reds it; this predicate returns
+# quiet so one defect produces one error.
+#
+# SEPARATED AXIS, exactly as PDS-D667 rules for the shape check: this APPENDS to
+# error_lines and increments errors, and NEVER assigns class. A stale price is a
+# fact about the LEDGER; THROUGH is a fact about the WIRING.
+price_ungraded_token() {
+  # $1 = price text. Prints the grandfather deadline, or rc=1 if the row carries
+  # none. READ BY POSITION for the same reason price_key_token is (see there):
+  # prose in a shipped cell talks about its own tokens, so a search-the-cell
+  # reader finds a fragment of a SENTENCE. The token sits where `arm=` sits —
+  # the field immediately after `load1=<n>`.
+  local rest="$1"
+  case "$rest" in
+    *' load1='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#* load1=}"
+  rest="${rest#* }"
+  case "$rest" in
+    'ungraded-until='*) ;;
+    *) return 1 ;;
+  esac
+  rest="${rest#ungraded-until=}"
+  printf '%s' "${rest%% *}"
+}
+
+# PRICE-UNGRADED — the arm that refuses to be silent over a row it cannot grade.
+# Read at the SAME one site as price_stale_error, inside the THROUGH branch, and
+# on the SAME separated axis (PDS-D667): it appends to error_lines and never
+# assigns class.
+price_ungraded_error() {
+  # $1 = basename, $2 = price text.
+  local deadline today
+  # A cell with no load1= does not parse as a price at all; the grammar arm owns
+  # it. One defect, one error.
+  case "$2" in
+    *' load1='*) ;;
+    *) return 0 ;;
+  esac
+  # Graded rows are price_stale_error's business, including a malformed key:
+  # that path already reds loudly and must not red twice.
+  price_key_token "$2" >/dev/null 2>&1 && return 0
+  if deadline="$(price_ungraded_token "$2")"; then
+    case "$deadline" in
+      [0-9][0-9][0-9][0-9]-[0-1][0-9]-[0-3][0-9]) ;;
+      *)
+        printf '  %s: PRICE-UNGRADED DEADLINE MALFORMED — the row stands down freshness grading with ungraded-until=%s, which is not YYYY-MM-DD. A deadline nobody can compare is a deadline that never arrives. Write a real date or re-take the row with --measure.' "$1" "$deadline"
+        return 0
+        ;;
+    esac
+    today="$(date +%Y-%m-%d)"
+    # ISO-8601 dates sort lexically, so a string compare IS a date compare.
+    if [ "$today" \> "$deadline" ] || [ "$today" = "$deadline" ]; then
+      printf '  %s: PRICE-UNGRADED GRANDFATHER EXPIRED — the row stood down freshness grading until %s and today is %s. Its instrument can have changed underneath it for the whole of that window and nothing here would have said so. Re-take it on a QUIET host (`--measure %s <its gated arm>`) and paste the keyed row; the deadline has no second extension that is not a deliberate edit to this ledger.' "$1" "$deadline" "$today" "$1"
+    fi
+    return 0
+  fi
+  printf '  %s: PRICE-UNGRADED — the row carries neither key=<12 hex> (the token --measure emits after arm=) nor ungraded-until=<YYYY-MM-DD>, so the freshness arm cannot grade it and would otherwise pass over it in silence. An ungraded row makes ERRORS 0 a statement about a SMALLER population than the one reported. Re-take it with `--measure %s <its gated arm>`, or stand it down explicitly with a dated ungraded-until= in the field after load1=.' "$1" "$1"
+}
+
+price_stale_error() {
+  # $1 = basename, $2 = price text, $3 = path to the instrument.
+  #
+  # THE KEY IS READ BY POSITION, NOT BY SEARCHING FOR `key=`, AND THAT IS A
+  # REPAIR, NOT A STYLE: the first version took `${2##* key=}` and found the LAST
+  # `key=` in the cell — which, the moment a row explained its own key in
+  # trailing prose, was a fragment of that SENTENCE. Two real rows went
+  # PRICE-STALE KEY MALFORMED with `key=:` and `key=` on a tree where both keys
+  # were correct. The token is emitted in a fixed position by `run_measure` —
+  # immediately after `arm=<argv>` — so it is read there: the field after the arm
+  # token, or nothing. Prose may now say `key=` as often as it likes.
+  local want have
+  want="$(price_key_token "$2")" || return 0
+  case "$want" in
+    [0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f][0-9a-f]) ;;
+    *)
+      printf '  %s: PRICE-STALE KEY MALFORMED — the row carries key=%s, which is not twelve lowercase hex. A key nobody can recompute is a freshness claim nobody can contradict. Re-take the row with --measure.' "$1" "$want"
+      return 0
+      ;;
+  esac
+  have="$(price_key "$3")" || {
+    printf '  %s: PRICE-STALE UNCHECKABLE — the row carries key=%s but this run could not compute a content key for %s (no shasum and no sha256sum, or the file is unreadable). FAIL-CLOSED: an unverifiable freshness claim is refused, never assumed true.' "$1" "$want" "$3"
+    return 0
+  }
+  if [ "$have" != "$want" ]; then
+    printf '  %s: PRICE-STALE — the row claims key=%s and the instrument now keys %s, so the instrument changed underneath its own price. The key ELIDES both ledger literals, so this did NOT move because a price was pasted: something else about %s changed. Re-take it (`--measure %s <its gated arm>`) and paste the new row; a price whose instrument moved is a figure for a workload that no longer exists.' \
+      "$1" "$want" "$have" "$3" "$1"
+  fi
+}
+
+# ---------------------------------------------------------------------------
 # DUPLICATE KEYS — the first row silently wins
 # ---------------------------------------------------------------------------
 # ledger_field and live_ledger_field both exit on their FIRST match, so a second
@@ -1130,14 +1559,97 @@ EOF
 # are held to — retirement as designed is an unconditional exemption, and an
 # exemption with no evidence attached is a row that says only "not this any
 # more", which is the vacuous green under a different name.
+# WHITESPACE IS EMPTY. The shipped test was `$3 == ""`, so a RETIRED- row whose
+# evidence was a single space — or any run of blanks — bought the exemption for
+# free while LOOKING like it had paid (wave 46 review finding). The field is
+# TRIMMED BEFORE IT IS TESTED: two portable sub() calls, one anchored at each
+# end, never a gsub alternation (gsub would also delete interior blanks, which
+# is not what "empty" means and would make a one-word-per-line evidence read as
+# a different string than the one the ledger carries).
 retired_evidence_errors() {
   # $1 = disposition ledger text. Prints zero or more error lines.
   awk -F'\t' '
-    $2 ~ /^RETIRED-/ && $3 == "" {
+    $2 ~ /^RETIRED-/ {
+      ev = $3
+      sub(/^[[:space:]]+/, "", ev)
+      sub(/[[:space:]]+$/, "", ev)
+      if (ev != "") next
       printf "  %s: RETIRED row with EMPTY evidence. Retiring a disposition means REPLACING its evidence with what superseded it, not deleting it — a retired row is exempt from the orphan check, and an exemption nobody justified is the vacuous green under another name.\n", $1
     }
   ' <<EOF
 $1
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# THE WIRED-CLAIM PREDICATE — the one sentence this ledger kept writing by hand
+# ---------------------------------------------------------------------------
+# Six disposition rows carry the clause below, and on 2026-09-16 exactly TWO of
+# them were FALSE: merge 7cb2c6894 (PR #18769) wired pds-charter-anchors-check.sh
+# and pds-charter-anchors-check_test.sh into .github/workflows/shell-harnesses.yml,
+# and the rows went on saying they appeared in no workflow file. The sentence was
+# stale within hours of the merge that falsified it, and nothing anywhere reddened.
+#
+# That is this file's OWN thesis turned against it. The header above says the
+# reason this census exists is that gate-coverage prose is "hand-copied,
+# re-hand-copied, and stale by the time the next wave read it" — and then the
+# disposition column restated, by hand, a claim about which scripts CI runs. A
+# hand-maintained list of what is wired is an ENUMERATION: a snapshot of one
+# morning, silently wrong on any later one. The fix is not to correct the
+# snapshot; it is to stop keeping one. This function makes the clause a
+# PREDICATE the run re-derives from `.github/workflows` every time.
+#
+# SCOPE, STATED SO IT IS NOT OVER-READ. The clause has two conjuncts — "appears
+# in no .github/workflows file" AND "has no ExUnit rider under api/test". Only
+# the first is derived here. The second already is: leg A computes it, and a row
+# whose door opened moves band and reds through the orphan check. This adds the
+# half that had no deriver at all.
+#
+# A COMMENT MENTION COUNTS, ON PURPOSE. The clause says "appears in", not "is
+# executed by", so a basename named only in a workflow COMMENT falsifies it and
+# this check says so. The conservative direction is the safe one: the error names
+# the file, and a reader who disagrees rewrites the row's prose rather than
+# silently keeping a sentence that is not true as written.
+#
+# FAIL-CLOSED, like every other verdict in this file: a root with no
+# .github/workflows directory cannot answer the question, so a row carrying the
+# clause there is UNCHECKED and reds. An unverifiable claim about gate coverage
+# is exactly the prose this census replaced.
+PDS_DOOR_WORKFLOW_CLAIM='appears in no .github/workflows file'
+
+workflow_claim_errors() {
+  # $1 = disposition ledger text, $2 = the root to resolve .github/workflows
+  # under. Prints zero or more error lines.
+  local root="$2" wfdir cands b pat hits
+  wfdir="$root/.github/workflows"
+
+  # Candidates first, into a variable — never a here-doc nested inside the
+  # `$( … )` of another here-doc. RETIRED- rows are invisible to the live path
+  # everywhere else in this file and are invisible here too.
+  cands="$(awk -F'\t' -v c="$PDS_DOOR_WORKFLOW_CLAIM" '
+    $2 ~ /^RETIRED-/ { next }
+    index($3, c) { print $1 }
+  ' <<EOF
+$1
+EOF
+)"
+
+  while IFS= read -r b; do
+    [ -n "$b" ] || continue
+    if [ ! -d "$wfdir" ]; then
+      printf '  %s: WIRED-CLAIM UNCHECKED — the row asserts it "%s", and %s does not exist, so nothing here can confirm or refute it. Fail-closed: an unverifiable claim about gate coverage is the prose this census replaced.\n' \
+        "$b" "$PDS_DOOR_WORKFLOW_CLAIM" "$wfdir"
+      continue
+    fi
+    # The basename is matched as a WHOLE token: `pds-x.sh` must not be reported
+    # for a hit on `pds-x.sh.bak`. Only `.` is regex-special in a basename.
+    pat="$(printf '%s' "$b" | sed 's/[.]/\\./g')(\$|[^A-Za-z0-9._-])"
+    hits="$(grep -rlE -e "$pat" "$wfdir" 2>/dev/null | LC_ALL=C sort | while IFS= read -r f; do printf '%s ' "${f##*/}"; done)"
+    [ -n "$hits" ] || continue
+    printf '  %s: STALE WIRED-CLAIM — the row says it "%s", and it DOES appear in: %s. Rewrite the row to say what is true now (being in a workflow is not the same as being under a REQUIRED context — .github/workflows/shell-harnesses.yml carries none of main'"'"'s four required names), or delete the clause. This is DERIVED every run, so it cannot go stale the way the sentence did.\n' \
+      "$b" "$PDS_DOOR_WORKFLOW_CLAIM" "${hits% }"
+  done <<EOF
+$cands
 EOF
 }
 
@@ -1208,7 +1720,7 @@ run_census() {
   echo
 
   # ---- the table -----------------------------------------------------------
-  local b bpath kinds legA legB class evidence price row computed shape_err orphan_err
+  local b bpath kinds legA legB class evidence price row computed shape_err stale_err ungraded_err orphan_err
   local orphan_price_err
   local through=0 undisposed=0 errors=0 inbeam=0 dead=0 libmod=0 error_rows=0
   local through_names="" undisposed_names="" error_lines="" class_tally=""
@@ -1225,6 +1737,13 @@ run_census() {
     legA='no'
     case "$kinds" in *LEGA-BOUND-EXEC*) legA='yes' ;; esac
     legB="$(leg_b "$bpath")"
+    # Only asked when the whole set already said yes — the narrow half can never
+    # be true where the whole set is false, and this keeps one bash per row
+    # rather than two for the rows that answer `false` outright.
+    legBlit='false'
+    if [ "$legB" = 'true' ]; then
+      legBlit="$(leg_b_literal "$bpath")"
+    fi
 
     class=''
     evidence=''
@@ -1270,6 +1789,24 @@ run_census() {
 $shape_err"
           errors=$((errors + 1))
         fi
+        # PRICE-STALE, AT THE SAME ONE SITE AND ON THE SAME SEPARATED AXIS. It
+        # is inside the THROUGH branch ON PURPOSE (see price_stale_error): the
+        # predicate can only ever grade a row that something re-takes.
+        stale_err="$(price_stale_error "$b" "$price" "$SCAN_ROOT/$bpath")"
+        if [ -n "$stale_err" ]; then
+          error_lines="$error_lines
+$stale_err"
+          errors=$((errors + 1))
+        fi
+        # AND THE ROW THE FRESHNESS ARM CANNOT GRADE REDS RATHER THAN PASSING
+        # THROUGH IT IN SILENCE — same one site, same separated axis. See the
+        # ruling above price_stale_error.
+        ungraded_err="$(price_ungraded_error "$b" "$price")"
+        if [ -n "$ungraded_err" ]; then
+          error_lines="$error_lines
+$ungraded_err"
+          errors=$((errors + 1))
+        fi
         evidence="$price"
       fi
     elif has_line "$kinds" 'IN-BEAM-REQUIRE'; then
@@ -1278,9 +1815,15 @@ $shape_err"
       # price and never claims THROUGH-with-a-price.
       class='IN-BEAM-REQUIRED'
       evidence='Code.require_file — runs inside the ExUnit BEAM, so D633 forbids an OS-meter price for it. Gated, unpriceable, its own row.'
-    elif [ "$legA" = 'no' ] && [ "$legB" = 'true' ]; then
+    elif [ "$legA" = 'no' ] && [ "$legBlit" = 'ERROR' ]; then
+      # UNCLASSIFIABLE, NOT "probably family-declared". The narrow half refused
+      # or answered something that is neither true nor false, so no verdict
+      # about this row descends from a complete read.
+      class='ERROR'
+      evidence='the path set says this path is gated, but `--match test --literal` neither answered true nor false, so the census cannot tell a typed declaration from a derived family member. Fix the ratchet invocation; never let the narrow half fail open.'
+    elif [ "$legA" = 'no' ] && [ "$legBlit" = 'true' ]; then
       class='DEAD-DECLARATION'
-      evidence='declared in ELIXIR_TEST_ONLY_PATHS but executed by no ExUnit case — leg B without leg A. This is the one class no existing gate can see.'
+      evidence='declared in ELIXIR_TEST_ONLY_PATHS by NAME but executed by no ExUnit case — leg B (literal half) without leg A. This is the one class no existing gate can see. A member of a DERIVED family never lands here: nobody typed it, so there is no snapshot to rot.'
     elif is_library_module "$bpath"; then
       # DERIVED, NOT DECLARED — and ordered AFTER every gated band, so a library
       # that ever does become gated classifies THROUGH and never hides here.
@@ -1427,6 +1970,19 @@ $re"
     errors=$((errors + 1))
   done <<EOF
 $(retired_evidence_errors "$PDS_DOOR_DISPOSITIONS")
+EOF
+
+  # ---- the wired-claim predicate (see workflow_claim_errors) --------------
+  # Derived every run against $SCAN_ROOT/.github/workflows, never restated. The
+  # sentence this replaces was false for hours and nothing reddened.
+  local wce
+  while IFS= read -r wce; do
+    [ -n "$wce" ] || continue
+    error_lines="$error_lines
+$wce"
+    errors=$((errors + 1))
+  done <<EOF
+$(workflow_claim_errors "$PDS_DOOR_DISPOSITIONS" "$SCAN_ROOT")
 EOF
 
   # ---- the partition, computed BEFORE the block prints ---------------------
@@ -1718,6 +2274,7 @@ run_measure() {
   # invocation of the instrument (an ExUnit rider, say).
   local base="$1" cmd='' note='' path='' interp='' raw='' sums='' user='' sys='' total=''
   local cpus='' load1='' host='' rcfile='' subject_rc='' stamp='' arg=''
+  local arm='' key=''
   shift
 
   # THE DEPTH GUARD, FIRST — before the witness, before any work. PDS-D669.
@@ -1741,6 +2298,11 @@ run_measure() {
     }
     cmd="$*"
     note="via: $cmd"
+    # A --via command is a SHELL STRING, not an argv, so it is not re-drivable
+    # from a single ledger token. It is recorded OPAQUE rather than transcribed:
+    # `--measure --all` refuses to re-drive it and says so, which is the honest
+    # ending for an arm this file cannot reconstruct.
+    arm='opaque'
   else
     path="$SCRIPT_DIR/$base"
     if [ ! -f "$path" ]; then
@@ -1755,6 +2317,27 @@ run_measure() {
     for arg in "$@"; do cmd="$cmd $(printf '%q' "$arg")"; done
     note="$*"
     [ -n "$note" ] || note='no arguments'
+    # THE ARM TOKEN — the half of the row that makes a gated-arm price
+    # distinguishable from a whole-harness price WITHOUT reading the instrument
+    # (the wave-46 ruling above PDS_DOOR_PRICES). It is an argv, comma-joined,
+    # never prose: `arm=none` is the bare harness run, `arm=--selftest` is a
+    # gated verb, `arm=--check,--quiet` is a two-argument arm, and `arm=opaque`
+    # means this file will not claim it can re-drive it. An argument carrying a
+    # comma or whitespace cannot round-trip through one token, so it is recorded
+    # OPAQUE rather than silently mangled.
+    arm='none'
+    for arg in "$@"; do
+      case "$arg" in
+        *,* | *' '* | *'	'*)
+          arm='opaque'
+          break
+          ;;
+      esac
+      if [ "$arm" = 'none' ]; then arm="$arg"; else arm="$arm,$arg"; fi
+    done
+    # THE CONTENT KEY, taken BEFORE the subject runs and over the tree the price
+    # is FOR — never for a --via arm, whose subject this file cannot name.
+    key="$(price_key "$path" || true)"
   fi
 
   cpus="$(measure_cpus)" || {
@@ -1802,8 +2385,10 @@ run_measure() {
   sys="${sys%% *}"
 
   # ONE PASTEABLE ROW ON STDOUT. Nothing else, nowhere else.
-  printf '%s\tCPU=%s+%s=%ss %s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=%s load1=%s %s (%s, rc=%s)' \
-    "$base" "$user" "$sys" "$total" "$host" "$cpus" "$load1" "$stamp" "$note" "$subject_rc"
+  printf '%s\tCPU=%s+%s=%ss %s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=%s load1=%s arm=%s' \
+    "$base" "$user" "$sys" "$total" "$host" "$cpus" "$load1" "$arm"
+  [ -z "$key" ] || printf ' key=%s' "$key"
+  printf ' %s (%s, rc=%s)' "$stamp" "$note" "$subject_rc"
   if [ "$host" = 'FOREIGN' ]; then
     printf ' runner=%s run=%s sha=%s' \
       "${RUNNER_OS:-unknown}" "${GITHUB_RUN_ID:-unknown}" "${GITHUB_SHA:-unknown}"
@@ -1818,6 +2403,101 @@ run_measure() {
   pds_blind_spot_note \
     "bash times builtin around LC_ALL=$PDS_DOOR_MEASURE_METER_LC bash -c — an OS meter around a SHELL, outside every BEAM (PDS-D633 placement (a))" \
     "$base" >&2
+  return 0
+}
+
+# ---------------------------------------------------------------------------
+# --measure --all — the whole price column, re-taken at ONE load stamp
+# ---------------------------------------------------------------------------
+# WHY IT EXISTS. PDS-D656 rules that a price is quotable only against its own
+# load stamp, and the column's rows were taken on eight different days at load1
+# 3.17 through 69.60. Re-taking them one at a time can never produce a column
+# whose rows are comparable to EACH OTHER; one command that drives every arm
+# back-to-back can. That is the whole of it: `--all` buys COMPARABILITY, not
+# convenience.
+#
+# IT IS NEVER GATED, AND THAT IS THE SAME MECHANISM, NOT A NEW PROMISE
+# (PDS-D669). It runs through `run_measure`, so the DEPTH guard and the WITNESS
+# both apply unchanged — and the depth guard is checked HERE TOO, once, before
+# any work, so a nested `--all` refuses with ONE message instead of N. D669's own
+# arithmetic is why this must never be wired to a gate: 165.78 s wall / 65.92 s
+# CPU as one command, of which ~70% of the CPU is a SINGLE arm
+# (`pds-ledger-census_test.sh`), i.e. 19x the census's own `--check`. A
+# `--selftest` arm proves the refusal fires rather than trusting this paragraph.
+#
+# IT DRIVES THE ARM THE ROW RECORDS, never an arm it guesses. Every row emitted
+# by `--measure` carries `arm=<argv>`; `--all` reads that token back and re-drives
+# exactly it. THREE ENDINGS, and only one of them is silent:
+#   * `arm=` present and re-drivable  -> the row is re-measured and printed;
+#   * `arm=opaque`                    -> SKIPPED, named, with the reason — a
+#     `--via` command is a shell string this file will not reconstruct;
+#   * NO `arm=` token at all          -> REFUSED, named, and the command exits 5.
+# The refusal is the FAIL-CLOSED ending this file uses everywhere else: a row
+# whose arm nobody recorded cannot be re-taken by a machine, and pretending
+# otherwise is how a column starts re-measuring the wrong thing. It is also a
+# RATCHET rather than a wall — a row gains its `arm=` the moment it is re-taken
+# by `--measure`, so the refusal shrinks as the column is re-metered, and it can
+# never shrink by someone typing a token a meter did not produce.
+run_measure_all() {
+  local row b price arm rest measured=0 skipped=0 refused=0
+  local -a argv
+
+  if [ -n "${PDS_DOOR_MEASURE_DEPTH:-}" ]; then
+    printf '%s: REFUSE — PDS_DOOR_MEASURE_DEPTH=%s is already set, so this --measure --all is running INSIDE a metered subtree. A meter inside a meter prices the meter (PDS-D669: --measure is first-class and is NEVER gated). Nothing measured, nothing printed.\n' \
+      "$SELF" "$PDS_DOOR_MEASURE_DEPTH" >&2
+    return 4
+  fi
+
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    b="${row%%	*}"
+    price="${row#*	}"
+    [ -n "$b" ] || continue
+
+    if ! arm="$(price_arm_token "$price")" || [ -z "$arm" ]; then
+      printf '%s: --all REFUSES %s — its row records no arm=<argv> token where --measure emits one (the field after load1=<n>), so no machine can know which arm the figure was taken over. Re-take it once by hand (`--measure %s <its arm>`) and paste the row; every row --measure emits carries the token.\n' \
+        "$SELF" "$b" "$b" >&2
+      refused=$((refused + 1))
+      continue
+    fi
+
+    if [ "$arm" = 'opaque' ]; then
+      printf '%s: --all SKIPS %s — arm=opaque. Its arm is a --via shell string (or an argument carrying a comma or a blank), which does not round-trip through one ledger token. Re-take it by hand.\n' \
+        "$SELF" "$b" >&2
+      skipped=$((skipped + 1))
+      continue
+    fi
+
+    argv=()
+    if [ "$arm" != 'none' ]; then
+      rest="$arm"
+      while [ -n "$rest" ]; do
+        case "$rest" in
+          *,*)
+            argv+=("${rest%%,*}")
+            rest="${rest#*,}"
+            ;;
+          *)
+            argv+=("$rest")
+            rest=''
+            ;;
+        esac
+      done
+    fi
+
+    if [ "${#argv[@]}" -eq 0 ]; then
+      run_measure "$b" || return $?
+    else
+      run_measure "$b" "${argv[@]}" || return $?
+    fi
+    measured=$((measured + 1))
+  done <<EOF
+$PDS_DOOR_PRICES
+EOF
+
+  printf '%s: --all measured %d row(s), skipped %d (arm=opaque), refused %d (no arm= token).\n' \
+    "$SELF" "$measured" "$skipped" "$refused" >&2
+  [ "$refused" -eq 0 ] || return 5
   return 0
 }
 
@@ -2153,6 +2833,16 @@ EOF
   mkdir -p "$croot/scripts" "$croot/api/test/barkpark"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-through.sh"
   printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-shut.sh"
+  # A .github/workflows tree for the WIRED-CLAIM predicate. fx-wired.yml NAMES
+  # pds-fx-shut.sh (so a row claiming no workflow names it must red); fx-bak.yml
+  # names only `pds-fx-through.sh.bak`, a DIFFERENT file whose name merely
+  # CONTAINS the through-instrument's — the token boundary the predicate holds,
+  # and the reason the control arm below is not vacuous.
+  mkdir -p "$croot/.github/workflows"
+  printf 'jobs:\n  fx:\n    steps:\n      - run: bash scripts/pds-fx-shut.sh\n' \
+    >"$croot/.github/workflows/fx-wired.yml"
+  printf 'jobs:\n  fx:\n    steps:\n      - run: bash scripts/pds-fx-through.sh.bak\n' \
+    >"$croot/.github/workflows/fx-bak.yml"
   cat >"$croot/api/test/barkpark/census_door_test.exs" <<'EOF'
 defmodule CensusDoorTest do
   use ExUnit.Case, async: false
@@ -2177,13 +2867,31 @@ EOF
     # `$( … )` ends the substitution early, which is a parse error, not a wrong
     # answer — but it is a parse error that only fires at RUN time.
     if CENSUS_OUT="$(
-      leg_b() { case "$1" in (*/pds-fx-through.sh) printf 'true' ;; (*) printf 'false' ;; esac; }
+      leg_b() { case "$1" in ($CENSUS_STUB_LEGB) printf 'true' ;; (*) printf 'false' ;; esac; }
+      # `ERROR` as the stub value is the third answer the real function can
+      # give (a non-zero ratchet, or output that is neither true nor false) and
+      # it is NOT expressible as a path pattern, so it gets its own arm here.
+      leg_b_literal() {
+        if [ "$CENSUS_STUB_LEGB_LIT" = 'ERROR' ]; then printf 'ERROR'; return 0; fi
+        case "$1" in ($CENSUS_STUB_LEGB_LIT) printf 'true' ;; (*) printf 'false' ;; esac
+      }
       run_census 2>&1
     )"; then CENSUS_RC=0; else CENSUS_RC=$?; fi
     SCAN_ROOT="$saved_scan"
     PDS_DOOR_DISPOSITIONS="$saved_d"
     PDS_DOOR_PRICES="$saved_p"
+    # RESET, ALWAYS. An arm that widens a stub must not widen every arm after
+    # it: a stub that leaks forward is a fixture nobody declared, and the arm it
+    # silently changes is the one that stops measuring anything.
+    CENSUS_STUB_LEGB='*/pds-fx-through.sh'
+    CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
   }
+
+  # THE TWO HALVES OF LEG B, STUBBED SEPARATELY. The default keeps both in
+  # lockstep, which is what every arm written before the derived-family ruling
+  # assumes; the family arms below are the only ones that pull them apart.
+  CENSUS_STUB_LEGB='*/pds-fx-through.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
 
   census_arm() {
     # $1 = label, $2 = expected rc, $3.. = substrings the output MUST contain
@@ -2206,7 +2914,7 @@ EOF
 
   local d_ok p_ok
   d_ok="$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: needs a credential it will never have.')"
-  p_ok="$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture)')"
+  p_ok="$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 ungraded-until=2099-01-01 2026-08-04 (fixture)')"
 
   # CONTROL — the harness itself can be green, so a red arm below means the
   # defect, not the harness.
@@ -2236,6 +2944,109 @@ EOF
   census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\t' "$d_ok")" "$p_ok"
   census_arm "A RETIRED ROW WITH EMPTY EVIDENCE REDS" 1 \
     'RETIRED row with EMPTY evidence'
+
+  # ...AND WHITESPACE IS EMPTY. This is the arm the `$3 == ""` shape passed: a
+  # single space is not the empty string, so the row bought its orphan-check
+  # exemption for free with rc=0 and ERRORS 0 and nothing printed. Revert the
+  # two sub() calls in retired_evidence_errors and THIS arm reds (rc=0, the
+  # substring absent) while the arm above stays green.
+  census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\t ' "$d_ok")" "$p_ok"
+  census_arm "A RETIRED ROW WHOSE EVIDENCE IS WHITESPACE-ONLY REDS TOO" 1 \
+    'RETIRED row with EMPTY evidence'
+
+  # ---- LEG B HAS TWO HALVES: DERIVED-FAMILY MEMBER vs TYPED DECLARATION ----
+  # THE ARM THE 43-ERROR INCIDENT IS FILED ON, AND IT IS A PAIR. When the
+  # dispatcher path set learned to derive `scripts/pds-*.{sh,exs}` from the glob
+  # the consuming program runs, `--match test` began answering `true` for every
+  # member of the family. leg_b reads that whole-set answer, and DEAD-DECLARATION
+  # used to key on it directly — so 43 instruments carrying live ledger rows were
+  # reclassified as DEAD-DECLARATION in one commit, and every one of their
+  # dispositions then read as ORPHANED. The class means "somebody TYPED this path
+  # into a list and nothing executes it"; a family member nobody typed is the
+  # derivation working, not a snapshot rotting.
+  #
+  # FIRST THE MUTANT, so the control below cannot be read as vacuous: the literal
+  # half says the name WAS typed, and with leg A absent that is a dead
+  # declaration — which orphans the live ENVIRONMENT row the ledger carries.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-*.sh'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B LITERAL: a TYPED declaration with no ExUnit executor is DEAD-DECLARATION and orphans its row" 1 \
+    'DEAD-DECLARATION' 'pds-fx-shut.sh' 'ORPHANED DISPOSITION'
+
+  # THE CONTROL, AND THE ONE LINE THAT DIFFERS IS THE LITERAL HALF. Same tree,
+  # same ledgers, same whole-set answer: gated, so a change to it runs the Elixir
+  # job. Nobody typed it, so it is NOT a dead declaration and its ENVIRONMENT row
+  # is read exactly as before. Revert the DEAD-DECLARATION arm to key on $legB
+  # and this arm reds with the incident's own signature.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='*/pds-fx-through.sh'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B DERIVED: a FAMILY member with no ExUnit executor keeps its ledger class, not DEAD-DECLARATION" 0 \
+    'pds-fx-shut.sh' 'ENVIRONMENT' 'DEAD-DECLARATION        : 0 of'
+
+  # AND THE NARROW HALF CANNOT FAIL OPEN. `--match test --literal` answering
+  # neither true nor false leaves the census unable to tell a typed name from a
+  # derived one, which is unclassifiable — an ERROR, never a quiet ledger read.
+  CENSUS_STUB_LEGB='*/pds-fx-*.sh'
+  CENSUS_STUB_LEGB_LIT='ERROR'
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEG B LITERAL REFUSES: an unanswerable narrow half is an ERROR row, never a silent pass" 1 \
+    'pds-fx-shut.sh' 'never let the narrow half fail open'
+
+  # ---- THE WIRED-CLAIM PREDICATE (the sentence that was false for hours) ---
+  # ARM. A live row asserting the clause for an instrument fx-wired.yml NAMES.
+  # This is the exact shape pds-charter-anchors-check.sh carried on origin/main
+  # from 7cb2c6894 onward, and nothing in the repo reddened on it. Delete the
+  # workflow_claim_errors block from run_census and THIS arm goes green.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: nothing required runs it - it appears in no .github/workflows file and has no ExUnit rider.')" "$p_ok"
+  census_arm "WIRED-CLAIM FIRES: a row claiming no workflow names it, for a script a workflow DOES name, REDS" 1 \
+    'STALE WIRED-CLAIM' 'fx-wired.yml' 'pds-fx-shut.sh'
+
+  # CONTROL, AND IT IS NOT VACUOUS IN TWO DIRECTIONS AT ONCE. The clause is
+  # carried by a row for pds-fx-through.sh, which NO workflow names -- and
+  # fx-bak.yml names `pds-fx-through.sh.bak`, whose name CONTAINS it. A plain
+  # substring grep reds here; the whole-token pattern must stay quiet. So this
+  # arm proves the predicate discriminates rather than just firing.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: a credential it will never have.\npds-fx-through.sh\tRETIRED-PRICE\tsuperseded: it appears in no .github/workflows file, and the .bak beside it is a different file.')" "$p_ok"
+  census_arm "WIRED-CLAIM CONTROL: the clause on a genuinely-unwired name stays QUIET (and .bak is not a match)" 0 \
+    'ERRORS                  : 0'
+
+  # RETIRED ROWS ARE INVISIBLE HERE TOO, like everywhere else in this file --
+  # the control above already carries the clause on a RETIRED- row, so the live
+  # arm and the retired arm are the same run read twice. This one is the LIVE
+  # counterpart of that same row, and it REDS: same text, same basename, the
+  # only difference is the class prefix.
+  census_run "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: it appears in no .github/workflows file\npds-fx-through.sh\tPRICE\tCPU=0.01+0.01=0.02s LOCAL meter=x load1=1.00 ungraded-until=2099-01-01 2026-08-04 (fixture)')" "$p_ok"
+  census_arm "WIRED-CLAIM ON A LIVE ROW REDS WHERE THE RETIRED ONE DID NOT" 1 \
+    'STALE WIRED-CLAIM' 'pds-fx-shut.sh'
+
+  # FAIL-CLOSED. A root with no .github/workflows cannot answer the question, so
+  # the clause there is UNCHECKED, not "probably still true". Called directly:
+  # census_run is pinned to $croot, which now HAS the directory.
+  local wc_closed
+  wc_closed="$(workflow_claim_errors "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: it appears in no .github/workflows file')" "$tmp/no-such-root")"
+  case "$wc_closed" in
+    *'WIRED-CLAIM UNCHECKED'*)
+      echo "  PASS  WIRED-CLAIM FAIL-CLOSED: no .github/workflows dir is UNCHECKED, never a silent pass"
+      pass=$((pass + 1)) ;;
+    *)
+      echo "  FAIL  WIRED-CLAIM FAIL-CLOSED: expected UNCHECKED, got [$wc_closed]"
+      fail=$((fail + 1)) ;;
+  esac
+
+  # ...AND ITS OWN CONTROL: a row with NO clause over that same missing root is
+  # silent. Without this, the arm above would also pass if the function shouted
+  # at every row it was handed.
+  local wc_quiet
+  wc_quiet="$(workflow_claim_errors "$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: needs a credential it will never have.')" "$tmp/no-such-root")"
+  if [ -z "$wc_quiet" ]; then
+    echo "  PASS  WIRED-CLAIM FAIL-CLOSED CONTROL: a row NOT carrying the clause is silent on the same missing root"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  WIRED-CLAIM FAIL-CLOSED CONTROL: expected silence, got [$wc_quiet]"
+    fail=$((fail + 1))
+  fi
 
   # TWO LIVE ROWS FOR ONE BASENAME — the first silently wins.
   census_run "$(printf 'pds-fx-shut.sh\tNOT-YET-BUILT\tfixture: the contradictory row above the true one.\n%s' "$d_ok")" "$p_ok"
@@ -2374,20 +3185,20 @@ RETIRED-ENVIRONMENT"
   # direction), a FOREIGN price passes, and a price wearing NEITHER token REDS.
   # Widening the glob without this last arm converts a pin into a hole: the
   # mutation that proves the pin (relabel one price) would then pass silently.
-  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=2099-01-01 2026-08-04 (fixture)')"
   census_arm "HOST AXIS: a LOCAL price PASSES" 0 \
     'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
 
-  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s FOREIGN meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s FOREIGN meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=2099-01-01 2026-08-04 (fixture)')"
   census_arm "HOST AXIS: a FOREIGN price PASSES" 0 \
     'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
 
-  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-08-04 (fixture)')"
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=2099-01-01 2026-08-04 (fixture)')"
   census_arm "HOST AXIS: a price wearing NEITHER LOCAL NOR FOREIGN REDS, and is NAMED" 1 \
     'LOCAL or FOREIGN, one of the two, never neither' 'pds-fx-through.sh' \
     'THROUGH a required gate : 1 of 2'
 
-  # ---- THE METER (wave 48, PDS-D663/D669/D691) ----------------------------
+  # ---- THE METER (wave 48, PDS-D663/PDS-D669/PDS-D691) ----------------------------
   # THE ARMS BELOW STAGE BOTH DEPTH STATES DELIBERATELY, and that is why three
   # of them carry `PDS_DOOR_MEASURE_DEPTH=`. `--selftest` is itself a PRICED
   # gated arm, so `--measure pds-door-census.sh --selftest` must be able to run
@@ -2640,6 +3451,252 @@ EOF
     fail=$((fail + 1))
   fi
 
+  # ---- THE CONTENT KEY AND PRICE-STALE (wave 50, PDS-D664) ----------------
+  # THE KEY'S TWO DIRECTIONS, EACH AGAINST THE NAIVE WHOLE-FILE SHA AS ITS OWN
+  # CONTROL. A one-direction key arm proves nothing: a key that never moves and a
+  # key that always moves both pass half of this, so both halves run here and the
+  # naive sha is computed beside each one to SHOW the thing the elision removes.
+  local kcopy k_base k_price k_other n_base n_price n_other
+  kcopy="$tmp/key-subject.sh"
+  cp "$self_path" "$kcopy"
+  k_base="$(price_key "$kcopy")"
+  n_base="$(price_key_naive "$kcopy")"
+
+  # DIRECTION 1 — EDIT A PRICE LITERAL. The elided key must NOT move; the naive
+  # whole-file sha MUST. This is the self-pricing fixpoint: pasting this
+  # census's own measured row into its own ledger is exactly this edit.
+  LC_ALL=C awk '
+    /^PDS_DOOR_PRICES=/ { sub(/CPU=/, "CPU=9"); print; next }
+    { print }
+  ' "$kcopy" >"$kcopy.p"
+  mv "$kcopy.p" "$kcopy"
+  k_price="$(price_key "$kcopy")"
+  n_price="$(price_key_naive "$kcopy")"
+  if [ "$k_price" = "$k_base" ] && [ "$n_price" != "$n_base" ]; then
+    echo "  PASS  THE KEY ELIDES THE LEDGER: a price-literal edit leaves key=$k_base UNCHANGED while the naive whole-file sha moves $n_base -> $n_price"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the elided key moved on a price-literal edit ($k_base -> $k_price), or the naive control did not move ($n_base -> $n_price). Without both legs this arm proves nothing: the census PRICES ITSELF, so a key that moves when its own row is pasted can never be fresh."
+    fail=$((fail + 1))
+  fi
+
+  # DIRECTION 2 — EDIT SOMETHING THAT IS NOT A PRICE. The key MUST move, or the
+  # elision has eaten the instrument instead of its ledger and PRICE-STALE can
+  # never fire at all.
+  cp "$self_path" "$kcopy"
+  printf '\n# selftest: a non-price edit\n' >>"$kcopy"
+  k_other="$(price_key "$kcopy")"
+  n_other="$(price_key_naive "$kcopy")"
+  if [ "$k_other" != "$k_base" ] && [ "$n_other" != "$n_base" ]; then
+    echo "  PASS  THE KEY STILL SEES THE INSTRUMENT: a non-price edit moves it $k_base -> $k_other (naive control also moves, $n_base -> $n_other)"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  a non-price edit left the elided key at $k_other (base $k_base). An elision that swallows the whole file is a key that can never red."
+    fail=$((fail + 1))
+  fi
+
+  # PRICE-STALE, BOTH DIRECTIONS ON THE SAME FIXTURE — a FRESH key passes and a
+  # STALE one reds, and the two arms differ in ONE FIELD so the red descends from
+  # the key and not from the row around it.
+  local fx_key
+  fx_key="$(price_key "$croot/scripts/pds-fx-through.sh")"
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=%s 2026-09-11 (fixture)' "$fx_key")"
+  census_arm "PRICE-STALE: a FRESH key PASSES (key=$fx_key)" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=deadbeefcafe 2026-09-11 (fixture)')"
+  census_arm "PRICE-STALE: a STALE key REDS and NAMES both keys" 1 \
+    'PRICE-STALE' 'key=deadbeefcafe' "$fx_key" 'ERRORS                  : 1' \
+    'THROUGH a required gate : 1 of 2'
+
+  # THE KEY IS READ BY POSITION, AND THIS ARM IS THE ONE THAT CAUGHT IT. The
+  # first implementation searched the cell for the LAST `key=`, and the moment a
+  # real row explained its own key in trailing prose the predicate read a
+  # fragment of that SENTENCE instead: two correct rows reported
+  # `PRICE-STALE KEY MALFORMED` with `key=:` and `key=` on a clean tree. The
+  # fixture below carries a CORRECT key in the emitted position AND the word
+  # `key=` twice more in its prose, exactly as the shipped rows do.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=%s 2026-09-11 (fixture). This row explains its own key= in prose, and mentions key=deadbeefcafe as the thing a stale one would look like.' "$fx_key")"
+  census_arm "PRICE-STALE: PROSE MENTIONING key= DOES NOT BECOME THE KEY" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  # AND A MALFORMED KEY IS REFUSED RATHER THAN IGNORED. `key=` is opt-in, so the
+  # cheapest way to defeat the predicate is to write a key no recomputation can
+  # match a shape to; this arm is what makes that loud instead of silent.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=fresh-honest 2026-09-11 (fixture)')"
+  census_arm "PRICE-STALE: a MALFORMED key REDS rather than being skipped" 1 \
+    'PRICE-STALE KEY MALFORMED' 'ERRORS                  : 1'
+
+  # ---- PRICE-UNGRADED (this slice) ---------------------------------------
+  # THE DEFECT THESE ARMS EXIST FOR WAS SILENCE, NOT A WRONG ANSWER. Before the
+  # ruling above, a THROUGH row with no `key=` was passed over without a word:
+  # on the live ledger the freshness arm graded TWO rows of NINE and printed
+  # `ERRORS : 0`, which every reader took as a verdict on all nine. So the arm
+  # that matters most here is the FIRST one — a row nobody keyed must RED.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 2026-09-17 (fixture: neither token)')"
+  census_arm "PRICE-UNGRADED: a row with NEITHER key= NOR ungraded-until= REDS rather than being skipped" 1 \
+    'PRICE-UNGRADED' 'pds-fx-through.sh' 'ERRORS                  : 1' \
+    'THROUGH a required gate : 1 of 2'
+
+  # THE QUIET CONTROL, ONE FIELD AWAY. Same row, plus the dated stand-down: it
+  # passes. Without this arm the one above would be satisfied by a predicate
+  # that reds on everything.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=2099-01-01 2026-09-17 (fixture)')"
+  census_arm "PRICE-UNGRADED CONTROL: a DATED stand-down passes, and it is the only difference" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  # AND THE STAND-DOWN IS A DEADLINE, NOT AN AMNESTY. A grandfather whose date
+  # has passed reds on its own, with no edit to this file — which is what stops
+  # `ungraded-until=` from becoming the new silence.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=2000-01-01 2026-09-17 (fixture)')"
+  census_arm "PRICE-UNGRADED: an EXPIRED grandfather REDS with no code edit" 1 \
+    'PRICE-UNGRADED GRANDFATHER EXPIRED' 'until 2000-01-01' 'ERRORS                  : 1' \
+    'THROUGH a required gate : 1 of 2'
+
+  # A DEADLINE NOBODY CAN COMPARE IS REFUSED, exactly as a malformed key is —
+  # the cheapest way to defeat a dated predicate is to write a date that never
+  # arrives.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 ungraded-until=someday 2026-09-17 (fixture)')"
+  census_arm "PRICE-UNGRADED: a MALFORMED deadline REDS rather than standing the row down" 1 \
+    'PRICE-UNGRADED DEADLINE MALFORMED' 'ERRORS                  : 1'
+
+  # POSITIONAL, FOR THE SAME REASON THE KEY IS (see price_key_token): a keyed
+  # row whose PROSE says `ungraded-until=` must not be stood down by its own
+  # sentence, and must not be double-reported either.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=%s 2026-09-17 (fixture). This row explains that it does NOT carry ungraded-until=2000-01-01, which a search-the-cell reader would have read as an expired grandfather.' "$fx_key")"
+  census_arm "PRICE-UNGRADED: PROSE MENTIONING ungraded-until= DOES NOT STAND THE ROW DOWN" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  # A MALFORMED KEY IS STILL ONE ERROR, NOT TWO. price_ungraded_error returns
+  # quiet whenever a key token is present at all, so the two predicates never
+  # both report the same row.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=bash-times-builtin-around-LC_ALL=C-bash-c cpus=2 load1=1.00 arm=none key=fresh-honest 2026-09-17 (fixture)')"
+  census_arm "PRICE-UNGRADED: a MALFORMED key reports ONCE, not once per predicate" 1 \
+    'PRICE-STALE KEY MALFORMED' 'ERRORS                  : 1'
+
+  # AND A CELL THAT DOES NOT PARSE AS A PRICE IS THE GRAMMAR ARM'S ROW, NOT
+  # THIS ONE — one defect, one error. Without this the no-load1 arm above would
+  # have started reporting two.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c 2026-09-17 (fixture: no load stamp)')"
+  census_arm "PRICE-UNGRADED: a cell with NO load1= is the GRAMMAR arm's row, and reports ONCE" 1 \
+    'must carry its own load1=<n> stamp' 'ERRORS                  : 1'
+
+  # THE SEPARATED AXIS HOLDS FOR THIS CHECK TOO (PDS-D667): a stale price reds
+  # the run and leaves the door counted as the door it is. The `THROUGH a
+  # required gate : 1 of 2` substring in the stale arm above is that assertion —
+  # the naive implementation of the shape check set class='ERROR' here and
+  # silently dropped a door out of the headline while reporting a ledger typo.
+
+  # THE TOKEN READERS ARE POSITIONAL, AND THIS ARM IS WHY THEY HAD TO BE. The
+  # same defect landed twice from the same cause: the cell is tokens THEN prose,
+  # and every shipped row's prose talks about its own tokens. A search-the-cell
+  # reader found the LAST match, i.e. a fragment of a sentence — it read `key=:`
+  # out of prose and reported PRICE-STALE KEY MALFORMED on correct rows, and it
+  # read the EMPTY STRING out of `THE ROW NOW CARRIES arm= AND key=` and made
+  # `--measure --all` drive the census with NO arguments while its own row said
+  # `arm=--selftest`: the meter measuring the wrong arm, inside the change whose
+  # subject is measuring the wrong arm. The fixture below is that exact shape.
+  local tok_row tok_arm tok_key
+  tok_row='CPU=1.00+2.00=3.00s LOCAL meter=m cpus=2 load1=1.00 arm=--selftest key=abcdef012345 2026-09-11 (--selftest, rc=0). This row explains its own arm= and key= in prose, and mentions arm=--check and key=deadbeefcafe as the things a wrong reader would grab.'
+  tok_arm="$(price_arm_token "$tok_row" || printf 'RC1')"
+  tok_key="$(price_key_token "$tok_row" || printf 'RC1')"
+  if [ "$tok_arm" = '--selftest' ] && [ "$tok_key" = 'abcdef012345' ]; then
+    echo "  PASS  THE TOKEN READERS ARE POSITIONAL: prose naming arm=--check and key=deadbeefcafe does not displace arm=$tok_arm key=$tok_key"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  a token reader took its answer from the prose: arm=[$tok_arm] key=[$tok_key] (wanted --selftest / abcdef012345)"
+    fail=$((fail + 1))
+  fi
+
+  # AND A ROW WITH NO TOKENS AT ALL REFUSES rather than returning something. An
+  # unkeyed row must not be graded and an armless row must not be driven; both
+  # endings depend on rc=1 here, not on an empty string that could be mistaken
+  # for a legal token.
+  tok_row='CPU=1.00+2.00=3.00s LOCAL meter=m cpus=2 load1=1.00 2026-08-05 (fixture, rc=0)'
+  tok_arm="$(price_arm_token "$tok_row" || printf 'RC1')"
+  tok_key="$(price_key_token "$tok_row" || printf 'RC1')"
+  if [ "$tok_arm" = 'RC1' ] && [ "$tok_key" = 'RC1' ]; then
+    echo "  PASS  THE TOKEN READERS REFUSE a row that predates the tokens, rather than inventing one"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  a pre-token row yielded arm=[$tok_arm] key=[$tok_key] instead of refusing twice"
+    fail=$((fail + 1))
+  fi
+
+  # ---- --measure --all (wave 50, PDS-D669) --------------------------------
+  # THE ROW CARRIES ITS ARM AND ITS KEY. Without `arm=` no machine can re-drive
+  # the column, and a reader cannot tell a gated-arm price from a whole-harness
+  # price without opening the instrument — the wave-46 ruling.
+  local arm_out
+  set +e
+  arm_out="$(PDS_DOOR_MEASURE_DEPTH= bash "$self_path" --measure pds-window-sentinel_test.sh 2>/dev/null)"
+  set -e
+  case "$arm_out" in
+    *' arm=none key='*)
+      echo "  PASS  --measure RECORDS WHICH ARM IT DROVE and keys the row: $arm_out"
+      pass=$((pass + 1))
+      ;;
+    *)
+      echo "  FAIL  the emitted row carries no arm=/key= pair, so the column cannot be re-driven or graded: $arm_out"
+      fail=$((fail + 1))
+      ;;
+  esac
+
+  set +e
+  arm_out="$(PDS_DOOR_MEASURE_DEPTH= bash "$self_path" --measure pds-window-sentinel_test.sh --via true 2>/dev/null)"
+  set -e
+  case "$arm_out" in
+    *' arm=opaque '*)
+      echo "  PASS  A --via ARM IS RECORDED OPAQUE, never transcribed into a token that would not re-drive"
+      pass=$((pass + 1))
+      ;;
+    *)
+      echo "  FAIL  a --via arm did not record arm=opaque: $arm_out"
+      fail=$((fail + 1))
+      ;;
+  esac
+
+  # --measure --all IS NEVER GATED EITHER, and by the SAME mechanism rather than
+  # a second promise: the depth guard fires before any row is driven.
+  set +e
+  arm_out="$(PDS_DOOR_MEASURE_DEPTH=1 bash "$self_path" --measure --all 2>&1)"
+  measure_rc=$?
+  set -e
+  case "$arm_out" in
+    *'PDS_DOOR_MEASURE_DEPTH=1 is already set'*) sum_ok=yes ;;
+    *) sum_ok=no ;;
+  esac
+  if [ "$measure_rc" = '4' ] && [ "$sum_ok" = 'yes' ]; then
+    echo "  PASS  THE DEPTH GUARD FIRES FOR --all TOO: refused rc=4 before a single row was driven"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  --measure --all under PDS_DOOR_MEASURE_DEPTH=1 exited $measure_rc (wanted 4): $arm_out"
+    fail=$((fail + 1))
+  fi
+
+  # AND --all IS FAIL-CLOSED ON A ROW WHOSE ARM NOBODY RECORDED. The arm below
+  # does NOT drive the real column (that costs ~66 s of CPU); it points --all at
+  # a one-row fixture ledger so the refusal path is exercised for free.
+  set +e
+  arm_out="$(
+    PDS_DOOR_MEASURE_DEPTH=''
+    PDS_DOOR_PRICES="$(printf 'pds-fx-armless.sh\tCPU=0.01+0.01=0.02s LOCAL meter=m load1=1.00 2026-09-11 (fixture)')"
+    run_measure_all 2>&1
+  )"
+  measure_rc=$?
+  set -e
+  case "$arm_out" in
+    *'--all REFUSES pds-fx-armless.sh'*) sum_ok=yes ;;
+    *) sum_ok=no ;;
+  esac
+  if [ "$measure_rc" = '5' ] && [ "$sum_ok" = 'yes' ]; then
+    echo "  PASS  --all IS FAIL-CLOSED: a row with no arm= token is REFUSED by name at rc=5, never measured with a guessed arm"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  --measure --all on an armless row exited $measure_rc (wanted 5): $arm_out"
+    fail=$((fail + 1))
+  fi
+
   echo
   printf '%s\n' "$BLIND_SPOT"
   echo
@@ -2678,11 +3735,20 @@ case "$mode" in
   --measure)
     shift
     if [ $# -lt 1 ]; then
-      echo "$SELF: --measure needs the basename of the instrument the row is for" >&2
-      echo "usage: $0 --measure <basename> [arg...] | --measure <basename> --via '<command>'" >&2
+      echo "$SELF: --measure needs the basename of the instrument the row is for, or --all" >&2
+      echo "usage: $0 --measure <basename> [arg...] | --measure <basename> --via '<command>' | --measure --all" >&2
       exit 2
     fi
-    run_measure "$@"
+    if [ "$1" = '--all' ]; then
+      shift
+      if [ $# -ne 0 ]; then
+        echo "$SELF: --measure --all takes no further arguments; it drives the arm each price row records. Got: $*" >&2
+        exit 2
+      fi
+      run_measure_all
+    else
+      run_measure "$@"
+    fi
     ;;
   --help | -h)
     sed -n '3,60p' "${BASH_SOURCE[0]}"

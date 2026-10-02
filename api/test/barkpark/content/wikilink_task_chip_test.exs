@@ -65,7 +65,11 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
 
   defp task!(id, title, content_extra \\ %{}) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(content_extra)
 
@@ -79,6 +83,8 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
     doc
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a task-titled target resolves to the full chip hit" do
     task!("t-chip", "Fix the resolver", %{
       "lifecycle_status" => "in_progress",
@@ -114,6 +120,8 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
     assert %{id: "p-shared", kind: "paper"} = Content.resolve_wikilink("Shared Title", @dataset)
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "criteria are garbage-tolerant: non-boolean / missing met count as unmet" do
     # NEITHER a non-map entry NOR a non-boolean `met` can be persisted through
     # the write doors any more — `Validation.criteria_violation/1` refuses both
@@ -142,6 +150,8 @@ defmodule Barkpark.Content.WikilinkTaskChipTest do
              Content.resolve_wikilink("Garbage Criteria", @dataset)
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "criteria-absent resolves criteria: nil (renderers omit the segment)" do
     task!("t-bare", "Bare Task")
 

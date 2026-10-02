@@ -11,11 +11,23 @@ Content-backed paragraphs retain their inline representation. Clearing primary
 content also clears a stale string fallback so erased prose cannot reappear.
 Unchanged inline source fields are retained exactly; unrelated block metadata
 and IDs remain outside the emitted field patch.
+The projection reads every inline spelling the reader paints — `strike`/`s`
+wrappers, a text leaf's flat `marks` array, a legacy `text` key — and compares
+links on `href` alone, so an untouched sibling in an edited run is never
+re-serialized.
+
+A paragraph may carry `align: "center" | "right"`; left is the absence of the
+key, never stored. The canvas maps it to Tiptap's `textAlign` and back: setting
+an alignment patches `align`, returning to left patches `align: null` (the
+shallow merge drops the key). The reader renders it as an inline `text-align`
+on every surface, and BPML spells it as `<p align="center">`.
 
 `bpParagraphSource` is editor-only history state, never rendered into HTML or
 imported from pasted HTML. Native splits may retain the text carrier while the
 canvas assigns the new block its own identity. This introduces no document
-migration, new dependency, nested-list support or hard-break support.
+migration or new dependency. Inline breaks serialize as LF text; DOM normalization
+and Undo retain original carriers. `src/canvas/__inline_breaks.test.mjs` covers
+paragraphs, headings and list bodies in canvas and per-block editors.
 
 Tests: `src/__paragraph_carriers.test.mjs` and
 `src/canvas/__paragraph_carriers.test.mjs` under `api/assets/paper-editor`, run

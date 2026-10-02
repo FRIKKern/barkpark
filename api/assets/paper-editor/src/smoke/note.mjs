@@ -14,7 +14,7 @@
 // Pure Node — no editor mounted. run-convert.js references the note TYPE only (a string
 // "note"), never the NodeView, so this imports it headless.
 import assert from "node:assert/strict";
-import { check, assertFolds } from "./harness.mjs";
+import { check, assertFolds, applyOps } from "./harness.mjs";
 import {
   runToTiptap,
   runToOps,
@@ -78,10 +78,12 @@ check("note runToTiptap: lead is PRESENT-ONLY (a lead-less note gains no lead at
   assert.ok(node.attrs.lead == null, "no lead attr on a lead-less note (round-trips ABSENT)");
 });
 
-check("note byte-align: the FLAT form and its MATERIALIZED slots twin project to the SAME node", () => {
+check("note byte-align: flat and materialized display the same strings while retaining their carriers", () => {
   const flat = runToTiptap([NOTE()]).content[0];
   const mat = runToTiptap([MAT_NOTE()]).content[0];
-  assert.deepEqual(mat, flat, "both encodings of the same note project byte-identical (the byte-align claim)");
+  delete flat.attrs.bpBlock;
+  delete mat.attrs.bpBlock;
+  assert.deepEqual(mat, flat, "visible projections agree; carrier identity is not flattened");
 });
 
 // ── ZERO-OPS (anti-vacuous: the projected doc carries a real note body) ────────
@@ -96,9 +98,7 @@ check("note runToOps: an untouched top-level note round-trips with ZERO ops (+ r
 check("note docToBlocks: a note round-trips blocks→node→docToBlocks BYTE-EQUAL (flat wire form)", () => {
   assert.deepEqual(docToBlocks(runToTiptap([NOTE()])), [NOTE()], "the note round-trips byte-identical");
   assert.deepEqual(docToBlocks(runToTiptap([BARE_NOTE()])), [BARE_NOTE()], "a lead-less note round-trips ABSENT lead");
-  // The materialized twin round-trips to the FLAT wire form (note persists flat; slots
-  // are the additive server-side encoding). Its three strings are preserved.
-  assert.deepEqual(docToBlocks(runToTiptap([MAT_NOTE()])), [NOTE()], "the slots twin projects to the flat wire form");
+  assert.deepEqual(docToBlocks(runToTiptap([MAT_NOTE()])), [MAT_NOTE()], "materialized shape survives reconstruction");
 });
 
 // ── NON-VACUOUS MUTATION (each edit → EXACTLY ONE patch; the fold moves ONLY it) ─
@@ -185,4 +185,162 @@ check("note reconcileServerEcho: an EDITED note does NOT own-echo (external path
   liveDoc.content[0].attrs = { ...liveDoc.content[0].attrs, label: "changed" };
   const { ownEcho } = reconcileServerEcho(server, liveDoc.content);
   assert.equal(ownEcho, false, "a label-edited note falls through to the external path");
+});
+
+// Carrier persistence: compare the COMPLETE folded tree, not only visible strings.
+const richPara = (text) => ({
+  id: "paragraph-id", type: "paragraph", custom: { keep: [null, 7] },
+  content: [{ type: "link", href: "/kept", custom: "wrapper",
+    children: [{ type: "code", value: text, custom: { leaf: true } }] }],
+});
+const carriedNote = () => ({ ...MAT_NOTE(), custom: { root: [1, null] },
+  slots: { label: [richPara("alive")], lead: [richPara("Kept")],
+    body: [richPara("the body")], unknown: [{ keep: true }] } });
+const editNote = (doc, field, value) => {
+  if (field === "body") doc.content[0].content = value ? [{ type: "text", text: value }] : [];
+  else doc.content[0].attrs[field] = value || null;
+};
+function assertNoteEdit(before, field, value, expected) {
+  const snapshot = structuredClone(before);
+  const doc = runToTiptap([before]);
+  assert.equal(doc.content[0].type, "note", "accepted carrier has actual controls");
+  editNote(doc, field, value);
+  const ops = runToOps([before], doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].op, "patch-block");
+  const folded = applyOps([before], ops);
+  assert.deepEqual(folded, [expected], "complete persisted tree");
+  assert.deepEqual(before, snapshot, "projection/diff did not mutate original");
+  const reloaded = runToTiptap(folded);
+  const node = reloaded.content[0];
+  assert.equal(field === "body" ? (node.content || []).map(n => n.text).join("") : node.attrs[field] || "", value);
+  assert.deepEqual(runToOps(folded, reloaded), [], "reload emits no normalization");
+  assert.deepEqual(docToBlocks(reloaded), folded, "reconstruction keeps full carrier");
+  assert.equal(reconcileServerEcho(folded, doc.content).ownEcho, true);
+}
+
+for (const field of ["label", "lead", "body"]) {
+  const flat = field === "body" ? "text" : field;
+  for (const shadow of [undefined, null, "", 7, "divergent", field === "label" ? "alive" : field === "lead" ? "Kept" : "the body"]) {
+    for (const value of ["Meaningful edit", ""]) {
+      check(`note materialized ${field}: full tree with shadow ${String(shadow)} → ${JSON.stringify(value)}`, () => {
+        const before = carriedNote();
+        if (shadow !== undefined) before[flat] = shadow;
+        const expected = structuredClone(before);
+        expected.slots[field][0].content[0].children[0].value = value;
+        if (shadow === (field === "label" ? "alive" : field === "lead" ? "Kept" : "the body")) expected[flat] = value;
+        assertNoteEdit(before, field, value, expected);
+      });
+    }
+  }
+}
+
+for (const carrier of [{}, { label: null, lead: null, text: null }, { label: "", lead: "", text: "" },
+  { label: 7, lead: 8, text: 9 }, { slots: null }, { slots: {} },
+  { slots: { lead: [] } }]) {
+  check(`note no-op and single-field edit preserve missing/null/empty/integer ${JSON.stringify(carrier)}`, () => {
+    const before = { id: "shape", type: "note", custom: { keep: true }, ...carrier };
+    const doc = runToTiptap([before]);
+    assert.deepEqual(runToOps([before], doc), []);
+    assert.deepEqual(docToBlocks(doc), [before]);
+    assertNoteEdit(before, "label", "Edited", { ...before, label: "Edited" });
+  });
+}
+
+for (const primary of [{}, { text: null }, { text: "" }, { slots: { body: [richPara("")] }, text: "dormant" }]) {
+  check(`note direct content fallback edits and clears without changing primary ${JSON.stringify(primary)}`, () => {
+    const before = { id: "content", type: "note", ...primary, content: richPara("Visible fallback").content, extra: true };
+    assert.equal(runToTiptap([before]).content[0].content[0].text, "Visible fallback");
+    for (const value of ["New content", ""]) {
+      const expected = structuredClone(before);
+      expected.content[0].children[0].value = value;
+      assertNoteEdit(before, "body", value, expected);
+    }
+  });
+}
+
+check("note nested materialized edit uses the same carrier patch", () => {
+  const before = [{ id: "section", type: "section", blocks: [carriedNote()] }];
+  const doc = runToTiptap(before);
+  doc.content[0].content[0].attrs.label = "Nested edit";
+  const expected = structuredClone(before);
+  expected[0].blocks[0].slots.label[0].content[0].children[0].value = "Nested edit";
+  assert.deepEqual(applyOps(before, runToOps(before, doc)), expected);
+});
+
+for (const shape of [
+  { slots: { body: [{ type: "paragraph", content: [{ type: "text", value: "one" }, { type: "text", value: "two" }] }] } },
+  { slots: { label: [{ type: "paragraph", content: [{ type: "image", src: "kept" }] }] } },
+  { slots: { body: [richPara("first"), richPara("second")] } },
+  { text: "Primary", content: [{ type: "text", value: "Dormant fallback" }] },
+  { content: "opaque scalar" },
+]) {
+  check(`note unsupported carrier is read-only and lossless ${JSON.stringify(shape)}`, () => {
+    const before = { ...NOTE(), ...shape, extra: { untouched: true } };
+    const doc = runToTiptap([before]);
+    assert.equal(doc.content[0].type, "bpOpaque", "no editable control may save flattened or stale data");
+    assert.deepEqual(doc.content[0].attrs.bpBlock, before);
+    assert.notEqual(doc.content[0].attrs.bpBlock, before);
+    assert.deepEqual(runToOps([before], doc), []);
+    assert.deepEqual(docToBlocks(doc), [before]);
+  });
+}
+
+for (const content of [undefined, null, [], "", [""], [{ type: "text", value: null, keep: 9 }]]) {
+  check(`note empty terminal keeps paragraph/leaf keys when first authored ${JSON.stringify(content)}`, () => {
+    const before = carriedNote();
+    const paragraph = { id: "empty", type: "paragraph", extra: { keep: true } };
+    if (content !== undefined) paragraph.content = content;
+    before.slots.body = [paragraph];
+    const doc = runToTiptap([before]);
+    if (typeof content === "string" || (Array.isArray(content) && typeof content[0] === "string")) {
+      assert.equal(doc.content[0].type, "bpOpaque", "raw strings are not server-admitted terminals");
+      assert.deepEqual(runToOps([before], doc), []);
+      assert.deepEqual(docToBlocks(doc), [before]);
+      return;
+    }
+    assert.equal(doc.content[0].type, "note");
+    assert.deepEqual(runToOps([before], doc), []);
+    assert.deepEqual(docToBlocks(doc), [before]);
+    const expected = structuredClone(before);
+    expected.slots.body[0].content = content == null || (Array.isArray(content) && !content.length)
+      ? [{ type: "text", value: "First body" }]
+      : [{ ...content[0], value: "First body" }];
+    assertNoteEdit(before, "body", "First body", expected);
+  });
+}
+
+check("note multiple changed fields share a full slots map without losing siblings", () => {
+  const before = carriedNote();
+  const doc = runToTiptap([before]);
+  editNote(doc, "label", "Changed label");
+  editNote(doc, "lead", "");
+  editNote(doc, "body", "Changed body");
+  const expected = structuredClone(before);
+  expected.slots.label[0].content[0].children[0].value = "Changed label";
+  expected.slots.lead[0].content[0].children[0].value = "";
+  expected.slots.body[0].content[0].children[0].value = "Changed body";
+  const ops = runToOps([before], doc);
+  assert.equal(ops.length, 1);
+  assert.deepEqual(Object.keys(ops[0].patch), ["slots"]);
+  assert.deepEqual(applyOps([before], ops), [expected]);
+});
+
+check("note structural section reconstruction retains original note carrier", () => {
+  const before = [{ id: "parent", type: "section", blocks: [carriedNote()] }];
+  const doc = runToTiptap(before);
+  doc.content[0].content.push({ type: "paragraph", attrs: { bpId: null, bpType: "paragraph" }, content: [{ type: "text", text: "New child" }] });
+  const folded = applyOps(before, runToOps(before, doc));
+  assert.equal(folded[0].blocks.length, 2);
+  assert.deepEqual(folded[0].blocks[0], before[0].blocks[0]);
+});
+
+check("note empty content fallback can be authored, cleared and reauthored without creating a competing primary", () => {
+  let before = { id: "empty-content", type: "note", text: "", content: [{ type: "text", value: "", meta: true }] };
+  for (const value of ["First content", "", "Retyped content"]) {
+    const expected = structuredClone(before);
+    expected.content[0].value = value;
+    assertNoteEdit(before, "body", value, expected);
+    before = expected;
+  }
 });

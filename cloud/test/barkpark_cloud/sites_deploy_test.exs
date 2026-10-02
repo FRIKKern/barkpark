@@ -136,6 +136,14 @@ defmodule BarkparkCloud.SitesDeployTest do
     settled
   end
 
+  # A SUCCEEDED build. Since task-1621e517bca0d51a only a live (or still-active)
+  # row owns its inputs as a no-op; a failed one is rebuilt. A pin that means
+  # "the same inputs are a no-op" must settle to live, not failed.
+  defp settle_live(%Deployment{} = d) do
+    {:ok, settled} = Registry.transition_deployment(d, %{status: "live"})
+    settled
+  end
+
   # The debounced rebuild a deferral promises — a REAL Oban row, not a log line.
   defp pending_auto_deploy_jobs(site_id) do
     Repo.all(
@@ -165,6 +173,59 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert {:duplicate, existing} = Deploy.enqueue(site, bp)
       assert existing.id == d.id
       assert length(Registry.list_deployments(site, 10)) == 1
+    end
+
+    # task-1621e517bca0d51a: the `(site_id, build_id)` index covers every
+    # status, so a failed build used to own its inputs forever. An unforced
+    # deploy answered 200 with the OLD failed row and built nothing.
+    test "an unforced enqueue whose inputs match only a FAILED row builds again" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      settle(d1)
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp)
+      refute d2.id == d1.id
+      refute d2.build_id == d1.build_id
+      assert d2.status == "queued"
+      assert length(Registry.list_deployments(site, 10)) == 2
+    end
+
+    test "a CANCELLED row does not own its inputs either" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      {:ok, _} = Registry.transition_deployment(d1, %{status: "cancelled"})
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp)
+      refute d2.id == d1.id
+    end
+
+    test "a LIVE row is still the no-op" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp)
+      settle_live(d1)
+
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp)
+      assert dup.id == d1.id
+    end
+
+    test "the hourly template sweep waits a day before retrying a failed template build" do
+      {bp, site} = setup_site()
+      {:ok, d1} = Deploy.enqueue(site, bp, false, "template-auto")
+      settle(d1)
+
+      # Inside the cooldown: the quiet duplicate, not an hourly retry loop.
+      assert {:duplicate, dup} = Deploy.enqueue(site, bp, false, "template-auto")
+      assert dup.id == d1.id
+
+      # A day later the roll gets a fresh build.
+      Repo.update_all(
+        from(d in Deployment, where: d.id == ^d1.id),
+        set: [inserted_at: DateTime.add(DateTime.utc_now(), -25 * 3600, :second)]
+      )
+
+      assert {:ok, %Deployment{} = d2} = Deploy.enqueue(site, bp, false, "template-auto")
+      refute d2.id == d1.id
+      assert d2.trigger == "template-auto"
     end
 
     test "a different dataset binding is a different build" do
@@ -368,7 +429,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       # passes on the defective code for a reason that has nothing to do with the
       # revision: it measures the one-active-build guard, not the projection.
       # With d1 settled, only a repeat `build_id` can produce `:duplicate`.
-      settle(d1)
+      settle_live(d1)
 
       # 50 slots of `task` churn later, the bound type's only published event has
       # been truncated off the end of the window. Nothing this site publishes
@@ -447,7 +508,7 @@ defmodule BarkparkCloud.SitesDeployTest do
       # Settle it: an in-flight d1 makes `:duplicate` the answer to EVERY second
       # enqueue (see the eviction pin above), which would make this test green
       # over a projection that had moved.
-      settle(d1)
+      settle_live(d1)
 
       # The SAME published content, on a dataset that has since churned: a draft
       # of the bound type was saved, an unrelated `task` was closed, the totals
@@ -1217,7 +1278,19 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       # ACTUAL: the difference of the two rows' `inserted_at` — the SAME column
       # and the same arithmetic the 2,262-deferral hand measurement used.
-      assert second_row.deferral_actual_gap_s == 61
+      #
+      # DERIVED, NEVER A LITERAL. A literal 61 here asserts that ZERO wall-clock
+      # time passed between the backdate and the second enqueue, which is false
+      # the moment the suite crosses a second boundary in between — under CI
+      # load it reds with `left: 62, right: 61` on PRs that touch nothing near
+      # this file (run 34555593107, 2026-09-11). The expected value is read off
+      # the two rows' OWN stamps, so the assertion measures what the column
+      # recorded against what the rows say, and the floor below is what proves
+      # the 61s backdate actually took.
+      assert second_row.deferral_actual_gap_s ==
+               DateTime.diff(second_row.inserted_at, backdated)
+
+      assert second_row.deferral_actual_gap_s >= 61
 
       # SCHEDULED: the window the ladder asked for when round 1 re-queued. Read
       # off `deferral_backoff_seconds/1` and never a literal, so an operator who
@@ -1362,6 +1435,71 @@ defmodule BarkparkCloud.SitesDeployTest do
     # literal: a capacity chain gets 12 and a busy/stuck chain gets 6, so a
     # sentence that hardcoded either would misstate the other cause's whole
     # budget to the operator reading it.
+    # dr-w4-bl-deferral-raw-column-ambiguous — THE SPOOF, DRIVEN END TO END.
+    #
+    # Both runs below go through the REAL `start_on_box` → `box_refusal/3` →
+    # `defer/4` path. The only difference between the two 409 bodies is the
+    # presence of the `code` key: the codeless one's `message` is
+    # `"box_at_capacity — " <> <the verbatim capacity prose>`, so
+    # `refusal_detail/1` renders it to THE SAME BYTES the coded one renders to,
+    # and the test asserts that byte-identity rather than assuming it.
+    #
+    # Before the column, both rows classified BOX_AT_CAPACITY_DEFERRED and took
+    # the capacity leash of 12 — a forged cause with no code involved anywhere.
+    test "a CODELESS 409 forging the capacity bytes is deferred as BUSY, not as capacity" do
+      {bp, site} = setup_site()
+
+      # The verbatim body, READ from the fixture the api-side conformance test
+      # pins — never retyped here (#16598).
+      forged_message = "box_at_capacity — " <> BoxCapacityRefusalFixture.message()
+
+      # NO `code` KEY. This is the whole specimen.
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => %{"message" => forged_message}}})
+
+      {:ok, spoof} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(spoof.id)
+      spoof_row = Repo.get(Deployment, spoof.id)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "box_at_capacity",
+               "message" => BoxCapacityRefusalFixture.message()
+             }
+           }}
+      )
+
+      {:ok, coded} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(coded.id)
+      coded_row = Repo.get(Deployment, coded.id)
+
+      # THE PRECONDITION: the box's half of the two reasons is byte-identical.
+      # (`defer/3` appends its own `" — deferred: refusal N of B …"` clause,
+      # which is DOWNSTREAM of the classification and therefore differs — that
+      # divergence is the finding, not a flaw in the comparison.)
+      box_words = fn reason -> reason |> String.split(" — deferred: ") |> hd() end
+      assert box_words.(spoof_row.failure_reason) === box_words.(coded_row.failure_reason)
+
+      # THE COLUMN IS WHERE THEY DIFFER, and it was written at refusal time.
+      assert spoof_row.box_refusal_code == DeployLedger.no_box_code()
+      assert coded_row.box_refusal_code == "box_at_capacity"
+
+      # THE CRITERION, on the persisted rows.
+      refute DeployLedger.classify(spoof_row) == "BOX_AT_CAPACITY_DEFERRED"
+      assert DeployLedger.classify(spoof_row) == "BOX_BUSY_DEFERRED"
+      assert DeployLedger.classify(coded_row) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and the producer's OWN stamped cause agrees with the ledger, because it
+      # is computed through the same column-first reader. A forged capacity
+      # refusal takes the BUSY leash of 6, not the capacity leash of 12.
+      assert spoof_row.deferral_cause == "BOX_BUSY_DEFERRED"
+      assert spoof_row.deferral_bound == 6
+      assert coded_row.deferral_cause == "BOX_AT_CAPACITY_DEFERRED"
+      assert coded_row.deferral_bound == 12
+    end
+
     test "the rendered bound is the CAUSE's own bound — 12 for capacity, 6 for a busy box" do
       {bp, site} = setup_site()
 
@@ -1492,6 +1630,9 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "a PREBUILT deploy is never deferred — it fails honestly, since the rebuild path would refuse it" do
       {bp, site} = setup_site()
       {:ok, d} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      # Its bytes have ARRIVED — Deploy.run/1 refuses a prebuilt row still
+      # awaiting its upload (task-786051334bc47508), which is not this case.
+      d = d |> Ecto.Changeset.change(artifact_sha256: String.duplicate("a", 64)) |> Repo.update!()
 
       FakeBoxRelay.program(
         start:
@@ -1507,6 +1648,12 @@ defmodule BarkparkCloud.SitesDeployTest do
       # name the human action instead.
       assert row.failure_reason =~ "re-run the upload"
       assert pending_auto_deploy_jobs(site.id) == []
+
+      # The REAL row the driver wrote is named the lost publish it is
+      # (dr-w9-followup-prebuilt-terminal-409-also-lost) — not the transient
+      # BOX_BUSY_409, and not an abandonment (whose alert copy promises a rebuild).
+      assert DeployLedger.classify(row) == "PREBUILT_REFUSED_409"
+      refute BarkparkCloud.Notifications.AbandonmentPolicy.abandonment?(row)
     end
 
     test "a NON-409 refusal is still terminal — the deferral is scoped to the box's one transient no" do
@@ -2070,16 +2217,22 @@ defmodule BarkparkCloud.SitesDeployTest do
       ref = make_ref()
       test = self()
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         "grace-#{inspect(ref)}",
         [:barkpark_cloud, :sites, :deploy, :grace],
         fn event, measurements, metadata, _ ->
-          send(test, {:grace_telemetry, event, measurements, metadata})
+          # OURS ONLY. Other async modules run Deploy.run/1 through refusals
+          # too (sites_deploy_refusal_class_test, …), and the handler runs in
+          # whichever process emits; `assert_received` takes the FIRST match, so
+          # a peer's poll_refusal could stand in for this test's.
+          if self() == test or test in List.wrap(Process.get(:"$callers")) do
+            send(test, {:grace_telemetry, event, measurements, metadata})
+          end
         end,
         nil
       )
 
-      on_exit(fn -> :telemetry.detach("grace-#{inspect(ref)}") end)
+      on_exit(fn -> BarkparkCloud.TelemetryTap.detach("grace-#{inspect(ref)}") end)
       :ok
     end
 

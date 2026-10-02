@@ -99,6 +99,9 @@ api/.claude/
 # Site-deploy run-state (DeployRunner's per-run manifests/status/log + transient
 # 0600 build-env files, under the repo root so init/1 re-attaches across a restart)
 .bp-site-deploy-runs/
+# Self-update run records (SelfUpdate.Runner manifest/log/terminal — under the
+# repo root so a status read after the restart the run itself causes finds them)
+.bp-self-update-runs/
 
 # doc-truth generated artifacts (byproducts of the standing --code / --emit-refs runs)
 tooling/doc-truth/citation-truth-report.json
@@ -108,6 +111,14 @@ tooling/doc-truth/doc-refs.json
 # toolchains). Built at dev (`make dev`), at deploy (scripts/deploy-rebuild.sh),
 # and in CI (.github/workflows/pdrender-wasm.yml). The bp-wasm-exec.js loader IS
 # committed (host-stable text) and stays tracked.
+#
+# BOTH siblings are build outputs and BOTH are ignored. `make wasm` emits the
+# identity blob as well as the gzip one so that Plug.Static (gzip: true) can
+# answer /assets/bp-pdrender.wasm for an `Accept-Encoding: identity` client
+# instead of 404ing a url it advertises (het-bl-wasm-identity-404). The identity
+# file is the LARGER of the two (~11 MB vs ~3 MB) — committing it is exactly the
+# non-reproducible-artifact churn this block exists to prevent.
+api/priv/static/assets/bp-pdrender.wasm
 api/priv/static/assets/bp-pdrender.wasm.gz
 
 # Claude Code harness RUNTIME state — machine-local, never cloned. These lived
@@ -130,3 +141,4 @@ api/priv/static/assets/bp-pdrender.wasm.gz
 # lineref-sweep --selftest writes a throwaway probe at the repo root and removes
 # it in a finally block; this covers a run killed between the write and the cleanup.
 __lineref_selftest_probe_*.ex
+.pr-comment.md

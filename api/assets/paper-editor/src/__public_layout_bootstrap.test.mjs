@@ -16,6 +16,7 @@ const editorScripts = [
   "/assets/bp-paper-editor.bundle.js",
   "/assets/bp-asset-browser.js",
   "/assets/bp-media-picker.js",
+  "/assets/bp-search-intel.js",
   "/assets/bp-reference-picker.js",
   "/assets/bp-rich-text-editor.js",
   "/assets/bp-paper-editor-hooks.js",

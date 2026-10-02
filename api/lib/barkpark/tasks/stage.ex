@@ -208,6 +208,100 @@ defmodule Barkpark.Tasks.Stage do
   shared family `reopen_trigger` already does. D336(a) ruled this once for
   `reopen_trigger` and pinned it with the SHAREDTRIG fixture; a distinctness
   check here would repeat that mistake under a new field name.
+
+  ## Two durable slots, because a verdict and an instruction have opposite lifetimes
+
+  (task-bd7476eecdede252.) Every durable key above belongs to ONE
+  adjudication: a TERM, its WHY, its WHEN-RECONSIDERED, its falsifier. All
+  four are *dated measurements* — a later, better measurement SHOULD replace
+  them, and `:supersede` is the door that lets it.
+
+  A row also carries a second, different kind of durable writing: an
+  **OPERATING INSTRUCTION** — standing guidance addressed to whoever touches
+  the row next ("INDEX CONVENTION … READ BEFORE STAMPING"; "do not execute
+  this row as written"). That is not a version of the verdict. It is not
+  dated, nothing supersedes it by being newer, and a later verdict must never
+  displace it.
+
+  Before this hunk both kinds shared `content.disposition_reason`, so a lane
+  ruling on a row whose reason slot held guidance had exactly two moves:
+  DESTROY THE GUIDANCE (`--supersede`) or RECORD NOTHING. MEASURED: of 22
+  rulings written across the 2026-09-07 ledger campaign, TEN were safe only
+  because the slot happened to be blank, and on
+  `tgw11-bl-root-criteria-stamp-needs-close-window` — carrying a 1,960-byte
+  pinned INDEX CONVENTION note — the verdict was never written at all,
+  because there was nowhere to put it.
+
+  A DELIMITER CONVENTION INSIDE ONE FIELD DOES NOT FIX THIS and is explicitly
+  refused: it is the same collision with a convention painted on top, it still
+  makes `--supersede` destroy guidance, and it still gives two lifetimes one
+  slot. The separation is STRUCTURAL:
+
+    * `content.disposition_reason` — the durable VERDICT. Unchanged, including
+      its supersede guard.
+    * `content.operating_instruction` — the durable INSTRUCTION, its OWN
+      addressable key, with its OWN supersede guard
+      (`{:error, {:instruction_would_supersede, existing}}`, opt-in via
+      `:supersede_instruction`).
+
+  THE TWO GUARDS ARE INDEPENDENT BY CONSTRUCTION, which is the whole property.
+  `:supersede` is read ONLY by `check_note_supersession/3` and
+  `:supersede_instruction` ONLY by `check_instruction_supersession/3`; a stage
+  that omits `:instruction` never reaches `@operating_instruction_key` (the
+  `apply_adjudication_key(content, _key, nil)` clause returns the content
+  untouched) and a stage that omits `:note` never reaches
+  `@durable_reason_key`. So a verdict written WITH `--supersede` onto a row
+  holding an instruction leaves that instruction BYTE-IDENTICAL, and an
+  instruction written with `--supersede-instruction` onto a row holding a
+  verdict leaves that verdict byte-identical. Both arms are asserted in
+  `test/barkpark/tasks/stage_operating_instruction_test.exs`.
+
+  ### Legacy values are not reclassified, and nothing guesses
+
+  Rows already carry `content.disposition_reason` holding BOTH kinds of
+  writing mixed together — this is a live ledger, and the 2026-09-07 campaign
+  alone wrote 22 of them, one of which (`cch-w63-bl-a-task-carries-its-pr-in-
+  a-structured-field`) holds a superseded note quoted verbatim inside its
+  replacement. THERE IS NO MIGRATION and there will not be one. An existing
+  `disposition_reason` stays exactly where it is, byte-identical, still the
+  verdict slot, still under the same guard it had yesterday;
+  `content.operating_instruction` is simply ABSENT on every legacy row, and an
+  absent instruction slot is what makes the FIRST `--instruction` on a legacy
+  row unguarded — there is nothing there to displace.
+
+  No heuristic reads a legacy string and decides which kind it is, because no
+  heuristic can: "do not execute this row as written" and "this row's premise
+  aged" are the same data type and only the author knows which they meant. The
+  cost is stated rather than papered over — guidance sitting TODAY in a legacy
+  `disposition_reason` is still guarded by the note guard only, and moving it
+  into the new slot is a deliberate authored act (`--instruction` with the
+  text, then the verdict), never something this code does behind the author's
+  back.
+
+  ### Independent corroboration is NOT solved here, and that is a ruling
+
+  The other way this field loses information is CORROBORATION: when a second
+  lane's verdict AGREES with an existing one, replacing it merges two
+  independent passes into one opinion and destroys the fact that two readers
+  reached the same answer independently. `task-bb4eded7e1cc8dac` is the
+  measured specimen — `lead-triage-c2` and `lead-ledger-c2` reached the same
+  conclusion separately, and the second was deliberately NOT written precisely
+  to avoid that destruction.
+
+  THIS CHANGE DOES NOT PRESERVE SEPARATE AUTHORED VERDICT RECORDS, and
+  declines to on purpose. The split here is by LIFETIME (dated measurement vs.
+  standing guidance), which is a fixed two-way TYPE distinction; corroboration
+  needs an APPEND-ONLY, AUTHOR-KEYED LIST — an unbounded `[{who, when, text}]`
+  with its own read surface, its own bound, and its own answer for every
+  existing census that reads `disposition_reason` as a string. Bolting on a
+  second verdict SCALAR would buy exactly one corroborating reader and collide
+  again on the third, which is the enumeration-instead-of-a-rule mistake one
+  field over. So for corroboration the honest moves remain the ones the
+  campaign used: record nothing, or supersede while quoting the displaced text
+  verbatim inside the replacement — and the `note_would_supersede` refusal,
+  which quotes the existing text IN FULL, is what lets the second reader see
+  the first instead of clobbering it blind. The separate-record mechanism is a
+  different row.
   """
 
   import Barkpark.Tasks.Internal,
@@ -253,6 +347,121 @@ defmodule Barkpark.Tasks.Stage do
   # OPTIONAL, because a reason is allowed to say it cannot be checked.
   @disposition_rerun_key "disposition_rerun"
 
+  # ── THE SECOND DURABLE SLOT: STANDING GUIDANCE (task-bd7476eecdede252) ────
+  #
+  # NOT a fifth member of the adjudication — a SEPARATE KIND of durable
+  # writing, with the opposite lifetime. A verdict is a dated measurement a
+  # later measurement should replace; an operating instruction is standing
+  # guidance nothing newer supersedes. They shared `disposition_reason`, so a
+  # lane ruling on a row holding guidance could only DESTROY IT or SAY
+  # NOTHING. Its own key, its own supersede guard, its own opt-in flag — so
+  # `--supersede` on a note can never reach it.
+  @operating_instruction_key "operating_instruction"
+
+  # ── THE FIFTH DURABLE KEY: WHO OWNS THE ADJUDICATION ──────────────────────
+  # (api half of pds-bl-disposition-owner-role-registry)
+  #
+  # `content.disposition_owner` has ridden PDS ledger rows since the epic
+  # began and had, before this hunk, NO schema declaration, NO validator and
+  # NO code writer anywhere in `api/lib` or `internal/` — so a census could
+  # only ever assert "non-empty and slug-shaped" and green on sixteen strings
+  # nobody had defined. PR #17836 defines them:
+  # `tooling/pds/disposition-owner-registry.json` is THE registry of legal
+  # owners, derived from an 8,710-row ledger walk, and it RULES the `wave-N`
+  # shape refused outright — an expiring owner self-clears when the wave
+  # closes, and with no writer repo-wide there is nothing to hang an
+  # auto-reassignment on, so the honest option is to fail LOUDLY at assignment
+  # time instead of silently at wave close.
+  #
+  # THE ROLE LIST IS NOT RETYPED HERE. It is read from that JSON at COMPILE
+  # time through `@external_resource` — the same loader
+  # `Content.Papers.PreGateRegister` uses for its sibling register under
+  # `tooling/pds/`, and for the same release-shaped reason: the release the
+  # server runs is built from `api/` and ships no `tooling/` directory, so a
+  # RUNTIME read would ALWAYS miss in a release while passing every
+  # `mix test`. A hand-copied Elixir list is the exact defect this row exists
+  # to remove; `@external_resource` also recompiles this module when the
+  # registry changes, which is the cadence a registry changes at (a PR).
+  #
+  # IT FAILS CLOSED, NOT OPEN — the one place this loader deliberately differs
+  # from its sibling. `PreGateRegister` compiles to an empty register and
+  # disables a cosmetic badge; an absent OWNER registry must never mean "every
+  # owner is legal". Absent → `@durable_owner_roles` is `[]` → every
+  # `disposition_owner` WRITE is refused, and the refusal names the missing
+  # path. Until #17836 merges, that is the state on `main`.
+  @disposition_owner_key "disposition_owner"
+
+  @owner_registry_path Path.expand(
+                         "../../../../tooling/pds/disposition-owner-registry.json",
+                         __DIR__
+                       )
+  @external_resource @owner_registry_path
+
+  @owner_registry (if File.exists?(@owner_registry_path) do
+                     Jason.decode!(File.read!(@owner_registry_path))
+                   else
+                     # `IO.puts(:stderr, …)`, NOT `IO.warn`, and the difference
+                     # is load-bearing: `mix compile --warnings-as-errors` is a
+                     # merge gate, so an `IO.warn` here would turn "the registry
+                     # has not merged yet" into a BUILD failure — which reads as
+                     # a broken tree, not as a closed door. The door closes at
+                     # RUNTIME (the role set is empty, every owner write is
+                     # refused, and the 422 names this path); the build stays
+                     # green and says why on stderr.
+                     IO.puts(
+                       :stderr,
+                       "disposition-owner registry absent at #{@owner_registry_path} — " <>
+                         "FAILING CLOSED: every disposition_owner write is refused until " <>
+                         "tooling/pds/disposition-owner-registry.json (PR #17836) is present"
+                     )
+
+                     %{}
+                   end)
+
+  # Only `durable-role` entries are legal owners. The registry's `refused[]`
+  # list is carried too, but ONLY to make a refusal teach — membership is
+  # decided by `roles[]`, never by absence from `refused[]`.
+  @durable_owner_roles @owner_registry
+                       |> Map.get("roles", [])
+                       |> Enum.filter(&(Map.get(&1, "class") == "durable-role"))
+                       |> Enum.map(&Map.get(&1, "slug"))
+                       |> Enum.reject(&is_nil/1)
+                       |> Enum.sort()
+
+  # Held as a set as well as a list. The membership test reads the SET on
+  # purpose: in a fail-closed build the list is `[]`, and `owner in []` is a
+  # literal-false the compiler reports as a typing violation — which would turn
+  # an absent registry into a BUILD failure under `--warnings-as-errors`
+  # instead of the loud runtime refusal it is supposed to be.
+  @durable_owner_role_set MapSet.new(@durable_owner_roles)
+
+  @refused_owners @owner_registry
+                  |> Map.get("refused", [])
+                  |> Enum.reject(&is_nil(Map.get(&1, "slug")))
+                  |> Map.new(
+                    &{Map.get(&1, "slug"),
+                     %{
+                       class: Map.get(&1, "class"),
+                       reason: Map.get(&1, "reason"),
+                       remedy: Map.get(&1, "remedy")
+                     }}
+                  )
+
+  # The expiring-owner pattern is the REGISTRY's, not a retyped one; the
+  # fallback only ever applies in the fail-closed (registry absent) build,
+  # where every owner is refused anyway. Kept as a STRING and compiled per
+  # call on purpose: a compiled `Regex` cannot be escaped into a module
+  # attribute on every Elixir this repo builds under.
+  @expiring_owner_pattern get_in(@owner_registry, ["expiring_owner_ruling", "pattern"]) ||
+                            "^wave-[0-9]+$"
+
+  # A ledger task id written into the owner slot. `pds-w25-round-terminal` and
+  # `pds-w25-round-parked` are the measured specimens — those are caught by the
+  # membership arm (they are slug-shaped and simply not roles), so this arm
+  # carries the one shape a membership check cannot TEACH about: the canonical
+  # `task-<hex>` doc id.
+  @task_id_owner_pattern ~r/^task-[0-9a-f]{8,}$/
+
   # What a refused rerun is told to write instead. Each of these reports the
   # PROBE's own failure as a non-zero exit, which is the whole property the
   # screen exists to preserve.
@@ -277,7 +486,32 @@ defmodule Barkpark.Tasks.Stage do
        "so the inner probe's failure is swallowed"},
     {:filesystem_predicate, ~r/(?:^|[|;&]\s*)(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)*(?:test|\[)\s/,
      "a `test` / `[` predicate asserts about the local CHECKOUT — per-machine state that " <>
-       "says nothing about origin/main"}
+       "says nothing about origin/main"},
+    # PDS-D750. LAST of the regex arms, so a command an earlier arm already
+    # refuses keeps its code. `git grep` matches a SUBSTRING, so a
+    # definition-shaped pattern ending in an identifier character is a PREFIX
+    # match and survives a suffix rename: measured, `git grep -n 'defp
+    # apply_engagement'` exits 0 against a ref where the function is
+    # `apply_engagement_RENAMED`, printing the renamed line as its hit.
+    #
+    # NARROW ON PURPOSE (440 of 470 corpus git-grep reruns end in a bare
+    # identifier; 8 are definition-shaped). The pattern must be QUOTED, OPEN
+    # with a definition keyword + an identifier, and END in [A-Za-z0-9_] that is
+    # not the `b` of `\b`. A reference (`ROSTER_PAGE_LIMIT`, a quoted charter
+    # sentence) is not refused. The keyword set is the reader seam's
+    # (scripts/pds-rerun-symbol-coverage.py DEF_KEYWORD), so the writer refuses
+    # exactly what the census names. Pattern slot: the first token after
+    # `git grep` that is not an option; `-m/-A/-B/-C/-f/--max-count` consume
+    # their argument, `--` ends the options (what follows is a path).
+    # Mirrored by tooling/pds/spellings.mjs PREFIX-MATCH-PROBE.
+    {:prefix_match_probe,
+     ~r/(?<![\w.-])git\s+grep(?:\s+(?:-[mABCf]|--max-count)\s+\S+|\s+-(?!-(?:\s|$))\S*)*\s+(?:'\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^']*[A-Za-z0-9_])?(?<!\\b)'|"\s*(?:defp?|defmodule|defmacrop?|defstruct|func|function|class|type|struct|interface|const|let|var|fn|pub\s+fn)\s+[A-Za-z_](?:[^"]*[A-Za-z0-9_])?(?<!\\b)")/,
+     "a definition-shaped `git grep` pattern that ends in an identifier character is a " <>
+       "PREFIX match — `git grep` matches a substring, so `'defp apply_engagement'` still " <>
+       "hits after a suffix rename to `defp apply_engagement_RENAMED(` and prints the " <>
+       "renamed line as its evidence. Terminate the pattern: the language's delimiter " <>
+       "(`'defp apply_engagement('`), `$`, or `\\b`. A deliberate FAMILY probe " <>
+       "(`'defp handle_'`) takes one character: `'defp handle_[a-z]'`"}
   ]
 
   # Why the assignment prefix is stepped over (pds-w28-bl-two-rerun-screens-drift):
@@ -342,6 +576,80 @@ defmodule Barkpark.Tasks.Stage do
   def disposition_rerun_key, do: @disposition_rerun_key
 
   @doc """
+  The content key a durable OPERATING INSTRUCTION is written to
+  (task-bd7476eecdede252) — standing guidance for whoever touches this row
+  next. Structurally separate from `durable_reason_key/0`: replacing a verdict
+  cannot touch an instruction and replacing an instruction cannot touch a
+  verdict, because each has its own key AND its own supersede guard.
+  """
+  @spec operating_instruction_key() :: String.t()
+  def operating_instruction_key, do: @operating_instruction_key
+
+  @doc """
+  The content key the ADJUDICATION OWNER is written to — who is accountable
+  for the verdict on this row (api half of
+  pds-bl-disposition-owner-role-registry).
+  """
+  @spec disposition_owner_key() :: String.t()
+  def disposition_owner_key, do: @disposition_owner_key
+
+  @doc """
+  Every legal `disposition_owner`, read from
+  `tooling/pds/disposition-owner-registry.json` at compile time — the
+  `durable-role` entries of `roles[]`, sorted. `[]` means the registry was
+  absent when this module compiled, and the door then refuses EVERY owner
+  write (fail closed).
+  """
+  @spec durable_owner_roles() :: [String.t()]
+  def durable_owner_roles, do: @durable_owner_roles
+
+  @doc "Absolute path of the owner registry this module compiled against."
+  @spec owner_registry_path() :: String.t()
+  def owner_registry_path, do: @owner_registry_path
+
+  @doc "True when the owner registry was present at compile time."
+  @spec owner_registry_loaded?() :: boolean()
+  def owner_registry_loaded?, do: @durable_owner_roles != []
+
+  @doc "The registry's own `wave-N` pattern, as the string it is stored as."
+  @spec expiring_owner_pattern() :: String.t()
+  def expiring_owner_pattern, do: @expiring_owner_pattern
+
+  @doc """
+  The registry's `refused[]` entry for a slug, or `nil`. Carried ONLY so a
+  refusal can quote the registry's own reason — membership is decided by
+  `roles[]`, never by absence from this map.
+  """
+  @spec refused_owner_entry(term()) :: map() | nil
+  def refused_owner_entry(slug) when is_binary(slug), do: Map.get(@refused_owners, slug)
+  def refused_owner_entry(_), do: nil
+
+  @doc """
+  THE OWNER SCREEN AS A PURE FUNCTION — `nil` when the value is a legal
+  owner, otherwise the refusal code.
+
+  ORDER IS PART OF THE ANSWER, and it is the REGISTRY's order:
+  `is_expiring_owner()` is checked BEFORE membership there, so a `wave-N` slug
+  is refused even if someone adds it to `roles[]`. This mirrors that.
+
+    * `:expiring_owner`   — matches the registry's `wave-N` pattern
+    * `:task_id_shape`    — a ledger task id in the owner slot
+    * `:not_a_string`     — anything that is not a binary
+    * `:unregistered`     — well-shaped, not a `durable-role` of the registry
+  """
+  @spec owner_refusal_code(term()) :: atom() | nil
+  def owner_refusal_code(owner) when is_binary(owner) do
+    cond do
+      Regex.match?(Regex.compile!(@expiring_owner_pattern), owner) -> :expiring_owner
+      Regex.match?(@task_id_owner_pattern, owner) -> :task_id_shape
+      MapSet.member?(@durable_owner_role_set, owner) -> nil
+      true -> :unregistered
+    end
+  end
+
+  def owner_refusal_code(_owner), do: :not_a_string
+
+  @doc """
   The rerun shapes a refusal names as the legal substitute — each reports the
   probe's OWN failure as a non-zero exit.
   """
@@ -359,7 +667,8 @@ defmodule Barkpark.Tasks.Stage do
   @doc """
   THE WRITE SEAM'S SCREEN, AS A PURE FUNCTION — `nil` when the rerun is legal,
   otherwise the refusal code (`:repo_redirect`, `:merge_base_ancestor`,
-  `:command_substitution`, `:filesystem_predicate`, `:pipe_masked`).
+  `:command_substitution`, `:filesystem_predicate`, `:prefix_match_probe`,
+  `:pipe_masked`).
 
   Made public for ONE reason: `tooling/pds/spellings.mjs` is a SECOND screen for
   the same law, and until this row nothing re-derived that the two agreed — they
@@ -457,6 +766,33 @@ defmodule Barkpark.Tasks.Stage do
       checkable. What is refused is a rerun that CANNOT FAIL — see
       `forbidden_rerun_shapes/0` — with `{:error, {:unfalsifiable_rerun, code,
       value}}` and NOTHING written.
+    * `:clear_rerun` — `true` REMOVES `content.#{@disposition_rerun_key}`: after
+      the stage the key is ABSENT, not `nil`. The only door that can subtract
+      this field — `:rerun ""` is blank-is-absent (a no-op) and the raw
+      `/v1/data/mutate` seam refuses the key by name — and the precondition for
+      PDS-D750's REMOVE arm, where a reason that is a pure ruling is made honest
+      by taking the probe away rather than by inventing one. Passing it together
+      with `:rerun` is `{:error, :contradictory_rerun}` and writes NOTHING.
+    * `:keep_rerun` — `true` states that the rerun ALREADY on the row still
+      binds the reason being written. Writes nothing itself; it is the
+      deliberate-keep door past `{:error, {:rerun_would_orphan, existing}}`, and
+      the kept/shared shape it opts into is the honest majority case
+      (PDS-D391b(b), PDS-D336(a)).
+    * `:instruction` (alias `:operating_instruction`) — a durable OPERATING
+      INSTRUCTION: standing guidance for whoever touches this row next
+      (task-bd7476eecdede252). Written to `content.#{@operating_instruction_key}`
+      in the SAME CAS update as everything else. Optional, blank-is-absent, and
+      a stage that says nothing about it leaves it exactly as it was. It is NOT
+      a verdict and shares nothing with `:note`: `:supersede` cannot displace
+      it and `:supersede_instruction` cannot displace a `:note`.
+    * `:supersede_instruction` — `true` to allow an `:instruction` to displace
+      a DIFFERENT non-blank instruction already on the row. Default `false`,
+      which refuses that write with
+      `{:error, {:instruction_would_supersede, existing}}` and writes NOTHING.
+      Deliberately a SECOND flag rather than a reuse of `:supersede`: one flag
+      for both slots would mean a caller replacing a verdict on purpose is
+      silently also licensed to destroy standing guidance, which is the exact
+      collision this key exists to remove.
     * `:caller_token_id` — audit stamp for the mutation_event.
 
   Returns `{:ok, doc}`, or:
@@ -473,10 +809,22 @@ defmodule Barkpark.Tasks.Stage do
       reopen condition, on the stage or on the row. NOTHING is written.
     * `{:error, {:unfalsifiable_rerun, code, value}}` — a rerun that cannot
       fail. NOTHING is written.
+    * `{:error, {:instruction_would_supersede, existing}}` — the `:instruction`
+      would have replaced a DIFFERENT non-blank operating instruction already
+      on the row and `:supersede_instruction` was not passed. `existing` is
+      that instruction IN FULL. NOTHING is written.
     * `{:error, {:note_would_supersede, existing}}` — the `:note` would have
       replaced a DIFFERENT non-blank reason already on the row and `:supersede`
       was not passed. `existing` is that reason IN FULL, so the refusal can
       show the caller what it just saved. NOTHING is written.
+    * `{:error, {:rerun_would_orphan, existing}}` — the `:note` would have
+      DISPLACED a different non-blank reason on a row carrying a non-blank
+      `content.#{@disposition_rerun_key}`, and the call said nothing about that
+      probe. `existing` is the rerun IN FULL. `:supersede` alone NEVER satisfies
+      this door — the ways through are `:rerun` (re-bind), `:clear_rerun`
+      (remove) or `:keep_rerun` (it still binds). NOTHING is written.
+    * `{:error, :contradictory_rerun}` — `:rerun` and `:clear_rerun` in one
+      call. NOTHING is written.
     * `{:error, :stale_claim}` — CAS lost (rare under the advisory lock).
   """
   @spec stage(binary(), String.t(), keyword()) ::
@@ -489,14 +837,24 @@ defmodule Barkpark.Tasks.Stage do
              | {:invalid_disposition, term()}
              | {:missing_reopen_trigger, String.t()}
              | {:unfalsifiable_rerun, atom(), term()}
-             | {:note_would_supersede, String.t()}}
+             | {:instruction_would_supersede, String.t()}
+             | {:note_would_supersede, String.t()}
+             | {:rerun_would_orphan, String.t()}
+             | :contradictory_rerun}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
     note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
     reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
     rerun = normalize_note(Keyword.get(opts, :rerun) || Keyword.get(opts, :disposition_rerun))
+
+    instruction =
+      normalize_note(Keyword.get(opts, :instruction) || Keyword.get(opts, :operating_instruction))
+
     supersede = Keyword.get(opts, :supersede) == true
+    supersede_instruction = Keyword.get(opts, :supersede_instruction) == true
+    clear_rerun = Keyword.get(opts, :clear_rerun) == true
+    keep_rerun = Keyword.get(opts, :keep_rerun) == true
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -520,12 +878,19 @@ defmodule Barkpark.Tasks.Stage do
                  {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
                  :ok <- check_reopen_trigger(doc, disposition, reopen_trigger),
                  :ok <- check_rerun(rerun),
-                 :ok <- check_note_supersession(doc, note, supersede) do
+                 :ok <- check_rerun_conflict(rerun, clear_rerun),
+                 :ok <- check_note_supersession(doc, note, supersede),
+                 :ok <-
+                   check_instruction_supersession(doc, instruction, supersede_instruction),
+                 :ok <-
+                   check_rerun_orphan(doc, note, rerun, clear_rerun, keep_rerun) do
               adj = %{
                 note: note,
                 disposition: disposition,
                 reopen_trigger: reopen_trigger,
-                rerun: rerun
+                rerun: rerun,
+                clear_rerun: clear_rerun,
+                instruction: instruction
               }
 
               do_stage(doc, from, to, object, holder, adj, caller_token_id)
@@ -688,6 +1053,118 @@ defmodule Barkpark.Tasks.Stage do
     end
   end
 
+  # THE SECOND DISPLACEMENT DOOR (task-bd7476eecdede252).
+  #
+  # Identical in SHAPE to `check_note_supersession/3` and deliberately NOT
+  # sharing its flag. The two fields hold different KINDS of writing with
+  # opposite lifetimes, so one override for both would mean a caller saying "I
+  # read this verdict and I am replacing it" is also, silently, saying "and I
+  # am destroying whatever standing instruction this row carries" — which is
+  # precisely the collision the separate key removes. Two slots with one key to
+  # both locks is one slot wearing a costume.
+  #
+  # Same three non-refusals, for the same reason (none of them destroys text):
+  # an absent/blank instruction, an absent/blank existing instruction, and a
+  # re-write with the SAME normalized text. Runs under the advisory lock and
+  # BEFORE the CAS, so a refusal leaves the row byte-identical. The refusal
+  # carries the existing instruction IN FULL — a bare "no" would send the
+  # caller straight back with the override without reading the guidance they
+  # were about to erase.
+  defp check_instruction_supersession(_doc, nil, _supersede), do: :ok
+  defp check_instruction_supersession(_doc, _instruction, true), do: :ok
+
+  defp check_instruction_supersession(%Document{content: content}, instruction, _supersede) do
+    existing =
+      content
+      |> content_map()
+      |> Map.get(@operating_instruction_key)
+      |> normalize_note()
+
+    cond do
+      is_nil(existing) -> :ok
+      String.trim(existing) == String.trim(instruction) -> :ok
+      true -> {:error, {:instruction_would_supersede, existing}}
+    end
+  end
+
+  # A CALL CANNOT SAY BOTH THINGS ABOUT ONE FIELD.
+  #
+  # `:rerun` re-binds the probe, `:clear_rerun` removes it; a call carrying both
+  # has stated two incompatible intentions about a single key and the writer
+  # must not pick one on the caller's behalf. Refused BEFORE anything is
+  # written, like every other check in the `with`, so the retry is the whole
+  # remedy.
+  defp check_rerun_conflict(rerun, true) when is_binary(rerun),
+    do: {:error, :contradictory_rerun}
+
+  defp check_rerun_conflict(_rerun, _clear), do: :ok
+
+  # THE BINDING DOOR (task-5509618e1868d9f2 / task-fcc590f205433209, PDS-D750).
+  #
+  # `content.#{@disposition_rerun_key}` is not free-standing: it is the command
+  # that could prove THIS ROW'S REASON wrong. Replace the reason and say nothing
+  # about the probe and the row keeps a GREEN, RECENT, SYMBOL-SPECIFIC check
+  # attached to a claim it no longer makes — which is strictly worse than
+  # carrying no rerun at all, because an absent rerun is an honest "this reason
+  # refuses to be checked" while an orphaned one passes about something nobody
+  # asserted. The parent filing measured 136 such rows on the ledger, 125 of
+  # them minted by exactly this call shape.
+  #
+  # NEVER `:supersede`. That flag is the caller saying they read the REASON they
+  # are replacing; it is not them saying they read the probe. The codebase's own
+  # words at `check_instruction_supersession/3`: "Two slots with one key to both
+  # locks is one slot wearing a costume." The doors that leave the row honest
+  # are the ones that SAY something about the rerun itself:
+  #
+  #   * `:rerun`      — re-bind the probe to the reason being written
+  #   * `:clear_rerun`— remove it, because the new reason is a pure ruling
+  #   * `:keep_rerun` — state that the EXISTING probe still binds the new
+  #     reason. The shared/kept shape is honest (PDS-D391b(b), PDS-D336(a)) and
+  #     is the majority case; without this door the only way to record a kept
+  #     probe would be to re-send it verbatim through `:rerun`, i.e. to make the
+  #     honest shape the awkward one.
+  #
+  # ORDER MATTERS: this runs AFTER `check_note_supersession/3`, so an unflagged
+  # displacement is still `{:note_would_supersede, _}` (one refusal per call,
+  # and the note is the thing the caller must read first). This door is reached
+  # only once the caller has already said, with `:supersede`, that replacing the
+  # reason is deliberate.
+  #
+  # SIX QUIET SHAPES, none of which can orphan anything:
+  #
+  #   * no `:note` (blank included — `normalize_note/1` collapsed it): nothing
+  #     is displaced;
+  #   * the row's existing reason is blank/absent: nothing is displaced;
+  #   * the new note is the SAME normalized text: a re-stage is not a
+  #     replacement;
+  #   * the row carries no rerun, or a blank one: nothing to orphan;
+  #   * `:rerun` / `:clear_rerun` / `:keep_rerun` on the same call;
+  #   * NO distinctness check, ever — a SHARED rerun across distinct rows still
+  #     writes (PDS-D391b(b) / PDS-D336(a); the parent filing measured that a
+  #     distinctness refusal would have refused 191 correct writes).
+  #
+  # Runs under the advisory lock and BEFORE the CAS, so a refusal leaves the row
+  # byte-identical on BOTH keys. The refusal carries the rerun IN FULL: a
+  # truncated command cannot be judged, and judging whether it still binds is
+  # the entire decision being asked for.
+  defp check_rerun_orphan(_doc, nil, _rerun, _clear, _keep), do: :ok
+  defp check_rerun_orphan(_doc, _note, rerun, _clear, _keep) when is_binary(rerun), do: :ok
+  defp check_rerun_orphan(_doc, _note, _rerun, true, _keep), do: :ok
+  defp check_rerun_orphan(_doc, _note, _rerun, _clear, true), do: :ok
+
+  defp check_rerun_orphan(%Document{content: content}, note, _rerun, _clear, _keep) do
+    map = content_map(content)
+    existing_reason = map |> Map.get(@durable_reason_key) |> normalize_note()
+    existing_rerun = map |> Map.get(@disposition_rerun_key) |> normalize_note()
+
+    cond do
+      is_nil(existing_rerun) -> :ok
+      is_nil(existing_reason) -> :ok
+      String.trim(existing_reason) == String.trim(note) -> :ok
+      true -> {:error, {:rerun_would_orphan, existing_rerun}}
+    end
+  end
+
   defp check_rerun(nil), do: :ok
 
   defp check_rerun(rerun) when is_binary(rerun) do
@@ -754,6 +1231,15 @@ defmodule Barkpark.Tasks.Stage do
         _ -> Map.get(content || %{}, @durable_reason_key)
       end
 
+    # The same receipt for the OTHER slot, read from the OTHER key. Keeping
+    # them separate here is not symmetry for its own sake: reusing one variable
+    # would make a note-only stage echo an instruction it never touched.
+    superseded_instruction =
+      case adj.instruction do
+        nil -> nil
+        _ -> Map.get(content || %{}, @operating_instruction_key)
+      end
+
     # The adjudication triple lands in this ONE map, which this ONE CAS update
     # persists — there is no window in which a row is parked without its
     # trigger, because there is no second write.
@@ -763,7 +1249,8 @@ defmodule Barkpark.Tasks.Stage do
       |> apply_durable_reason(adj.note)
       |> apply_adjudication_key(@disposition_key, adj.disposition)
       |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
-      |> apply_adjudication_key(@disposition_rerun_key, adj.rerun)
+      |> apply_rerun(adj.rerun, adj.clear_rerun)
+      |> apply_adjudication_key(@operating_instruction_key, adj.instruction)
 
     # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
     case fenced_content_write(doc, observed_rev, new_content, new_rev) do
@@ -775,7 +1262,15 @@ defmodule Barkpark.Tasks.Stage do
             observed_rev,
             "api",
             Map.merge(
-              staged_payload(from, to, engagement, holder, adj, superseded_note),
+              staged_payload(
+                from,
+                to,
+                engagement,
+                holder,
+                adj,
+                superseded_note,
+                superseded_instruction
+              ),
               caller_stamp(caller_token_id)
             )
           )
@@ -827,7 +1322,7 @@ defmodule Barkpark.Tasks.Stage do
   # re-leases exactly as it did before.
   #
   # The returned `nil` is not "the lease is gone" — it is "this stage wrote no
-  # lease". `staged_payload/6` echoes what this stage WROTE, and an
+  # lease". `staged_payload/7` echoes what this stage WROTE, and an
   # adjudication writes nothing to `content.engagement`, so the event payload
   # for a same-state stage is byte-identical to what it was before this fix.
   defp apply_engagement(content, from, to, _object, _holder, _ts_iso) when from == to do
@@ -849,6 +1344,30 @@ defmodule Barkpark.Tasks.Stage do
   # adjudication.
   defp apply_adjudication_key(content, _key, nil), do: content
   defp apply_adjudication_key(content, key, value), do: Map.put(content, key, value)
+
+  # THE ONE PLACE A RERUN CAN LEAVE THE ROW (task-fcc590f205433209).
+  #
+  # `apply_adjudication_key/3`'s "absent means leave it alone" rule is right for
+  # every adjudication key — a stage that says nothing about the probe must not
+  # erase it — but it made REMOVAL unreachable at every door: `:rerun ""` is
+  # collapsed to `nil` by `normalize_note/1` (blank counts as absent, so it is a
+  # no-op, not a clear), and the raw `/v1/data/mutate` seam refuses
+  # `#{@disposition_rerun_key}` by name. Measured on guerrilla 2026-09-17
+  # against task-a5b928e4d5dfba60: both doors, both no path.
+  #
+  # So `:clear_rerun` is the subtraction verb, and it is a `Map.delete/2`, not a
+  # write of `nil`: after it the KEY IS ABSENT, which is the same shape a row
+  # that never carried a rerun has. A rerun written as `nil` would read back as
+  # present-and-null to every consumer that tests for the key, and PDS-D750's
+  # REMOVE arm needs absence.
+  #
+  # A call carrying BOTH `:rerun` and `:clear_rerun` never reaches here — it is
+  # refused up front by `check_rerun_conflict/2` — so the clause order below is
+  # a statement of intent, not a tiebreak.
+  defp apply_rerun(content, nil, true), do: Map.delete(content, @disposition_rerun_key)
+
+  defp apply_rerun(content, rerun, _clear),
+    do: apply_adjudication_key(content, @disposition_rerun_key, rerun)
 
   # When the written lease dies, as an ISO-8601 instant. Derived from the same
   # `ts` the sweeper compares against, so this is a statement about the actual
@@ -881,10 +1400,11 @@ defmodule Barkpark.Tasks.Stage do
   # The adjudication triple is echoed the same way the note is — the VALUE plus
   # the KEY it landed on — so a consumer of the event can tell an adjudication
   # that was written from one that was merely passed.
-  defp staged_payload(from, to, engagement, holder, adj, superseded_note) do
+  defp staged_payload(from, to, engagement, holder, adj, superseded_note, superseded_instruction) do
     %{
       "staged" => %{
         "superseded_note" => superseded_note,
+        "superseded_instruction" => superseded_instruction,
         "from" => from,
         "to" => to,
         "object" => engagement && Map.get(engagement, "object"),
@@ -897,6 +1417,12 @@ defmodule Barkpark.Tasks.Stage do
         "reopen_trigger_key" => adj.reopen_trigger && @reopen_trigger_key,
         "disposition_rerun" => adj.rerun,
         "disposition_rerun_key" => adj.rerun && @disposition_rerun_key,
+        # Additive (charter D8): a SUBTRACTION is invisible in a payload that
+        # only ever echoes what was written, so the clear says its own name.
+        # `false` on every other stage, exactly as it reads today.
+        "disposition_rerun_cleared" => Map.get(adj, :clear_rerun) == true,
+        "operating_instruction" => adj.instruction,
+        "operating_instruction_key" => adj.instruction && @operating_instruction_key,
         "lapses_at" => engagement && Map.get(engagement, "lapses_at")
       }
     }

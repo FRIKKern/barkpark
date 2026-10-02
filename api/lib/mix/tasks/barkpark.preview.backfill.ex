@@ -85,7 +85,24 @@ defmodule Mix.Tasks.Barkpark.Preview.Backfill do
 
   @impl Mix.Task
   def run(args) do
-    Mix.Task.run("app.start")
+    # NOT `app.start` (task-12b07c13e3cc08b6, following #18596). `app.start`
+    # boots the FULL tree with whatever runtime env the shell carries: on
+    # guerrilla, 2026-09-02, `PHX_SERVER` was set and a one-shot's endpoint
+    # tried to bind the LIVE slot's port ("port 4001 already in use"),
+    # killing the run before the sweep started; the same boot put up a
+    # second Oban draining the live queues and the onixedit codelist
+    # seeders (`ERROR 57014 query_canceled`).
+    #
+    # MEASURED, not assumed (the edges precedent: dropping SchemaBootstrap
+    # took the projected edge count from 962 to ZERO while still exiting 0).
+    # The narrowed tree is correct for THIS task because the sweep is `Repo.all` + `Barkpark.Preview.project/3` (pure) + a
+    # scoped media resolver whose urls are RELATIVE (`Renditions.url/2`) + a
+    # direct `Repo.update` that deliberately bypasses the Content writer — so it
+    # reads no endpoint ETS table and inserts no Oban job.
+    # The dev-corpus dry run reports the identical tally under both boots —
+    # see the PR body.
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     {opts, _argv, invalid} = OptionParser.parse(args, strict: @switches)
 

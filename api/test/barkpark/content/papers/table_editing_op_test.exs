@@ -1,5 +1,5 @@
 defmodule Barkpark.Content.Papers.TableEditingOpTest do
-  use Barkpark.DataCase, async: false
+  use Barkpark.DataCase, async: true
 
   import Ecto.Query
 

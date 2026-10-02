@@ -569,11 +569,18 @@ JSON
   # (DISCARD), differs-pair (LIST) and met-differs-pair (LIST). The
   # diagnostic must count all three while the verdict column DISCARDs one: a
   # diagnostic that agreed with the verdict would be measuring nothing new.
-  if printf "%s" "$diag" | grep -q "content-poorer drafts on sealed twins = 3"; then
-    ok "counts 3 content-poorer sealed twins while only 1 is DISCARD"
-  else bad "diagnostic" "expected 3, got: $diag"; fi
-  if printf '%s' "$diag" | grep -q 'NEVER gated'; then ok "labelled as never gated"
-  else bad "diagnostic-label" "the diagnostic must say out loud that it gates nothing: $diag"; fi
+  # `case`, never `printf | grep -q` — the same rule this file already states at
+  # expect_reason() above: grep -q exits on its first match, printf takes
+  # SIGPIPE, and under `set -o pipefail` the pipeline reports 141, so the arm
+  # would fail at random once the diagnostic line grows.
+  case "$diag" in
+    *"content-poorer drafts on sealed twins = 3"*) ok "counts 3 content-poorer sealed twins while only 1 is DISCARD" ;;
+    *) bad "diagnostic" "expected 3, got: $diag" ;;
+  esac
+  case "$diag" in
+    *"NEVER gated"*) ok "labelled as never gated" ;;
+    *) bad "diagnostic-label" "the diagnostic must say out loud that it gates nothing: $diag" ;;
+  esac
 
   printf 'THE WRITE LOOP CLOSES STDIN\n'
   # A stub bp that does what the real one does: refuse a piped stdin it does
@@ -589,7 +596,12 @@ STUB
   chmod +x "$tmp/stub-bp"
   local wl
   wl="$(printf 'id-a\nid-b\nid-c\n' | { BP="$tmp/stub-bp"; while IFS= read -r id; do discard_one "$id"; done; } 2>&1)"
-  if [ "$(printf '%s\n' "$wl" | grep -c '^discarded ')" = "3" ] && ! printf '%s' "$wl" | grep -q FAILED; then
+  # The FAILED test is a `case`, not a pipe into `grep -q`: $wl is the whole
+  # write-loop transcript and grows with the id list. (`grep -c` above reads to
+  # EOF, so it is not the early-exit shape and stays a pipe.)
+  local wl_failed=0
+  case "$wl" in *FAILED*) wl_failed=1 ;; esac
+  if [ "$(printf '%s\n' "$wl" | grep -c '^discarded ')" = "3" ] && [ "$wl_failed" -eq 0 ]; then
     ok "three discards from inside a piped while-read all land (stdin closed per write)"
   else bad "write-loop-stdin" "expected 3 discarded / 0 FAILED, got: $wl"; fi
   case "$wl" in *"::"*) bad "write-loop-reason" "a reason was printed on a green run: $wl" ;; *) ok "no FAILED reason on a green run" ;; esac

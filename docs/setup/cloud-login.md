@@ -24,20 +24,18 @@ TTY; `bp` prints a box:
   Waiting for you to approve in the browser…
 ```
 
-`bp` opens `https://barkpark.cloud/activate`. Approve there — riding your
-existing barkpark.cloud session, or logging in if you aren't yet. **Two-factor
+`bp` opens `https://barkpark.cloud/activate`; approve there in your
+barkpark.cloud session (logging in first if needed). **Two-factor
 is handled by the web login**, so the CLI never sees your password or 2FA code.
 The approve page shows the requesting machine (host, IP, user-agent) with
 **Approve** / **Deny** buttons — it never auto-approves.
 
-Once you approve, the poll returns and stores the token. You're signed in — and
-`bp` keeps going.
+Once you approve, the poll stores the token and `bp` keeps going.
 
 ## After sign-in: auto-register
 
-Signing in isn't the finish line. `bp` resolves your fleet and lands you in a
-working barkpark — for `bp login` and the wizard's **Barkpark Cloud** target
-alike.
+`bp` then resolves your fleet and lands you in a working barkpark — for
+`bp login` and the wizard alike.
 
 - **One barkpark** (usual case) — `bp` fetches its admin credentials and
   connects automatically:
@@ -98,8 +96,8 @@ only; the envelope is byte-identical to before.
 
 ## Email + password fallback (CI, headless)
 
-The device flow needs a browser and a TTY. On a headless box or in CI, pass
-credentials and `bp` uses the password path verbatim — no box or polling:
+On a headless box or in CI, pass credentials for the password path — no box,
+no polling:
 
 ```bash
 bp login --email you@example.com          # prompts for the password
@@ -119,6 +117,8 @@ untouched. `--device` forces it. `--url <base>` overrides the control-plane URL
   start. **Deny** cancels a request immediately.
 - **Approval needs your browser session** — preserving the 2FA gate; the CLI can
   never approve itself, and no token ever rides in the URL.
+- **`bp login --team <id|slug>`** binds the login: only a member of that team
+  may approve (an outsider is refused `team_mismatch`); the session lands there.
 
 ## Troubleshooting
 

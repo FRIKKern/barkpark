@@ -19,7 +19,7 @@
       "cell": "eight-minute-erasure__light__1280",
       "file": "eight-minute-erasure__light__1280.jpeg",
       "scale": 2,
-      "bytes": 2281220,
+      "bytes": 2351170,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -73,11 +73,11 @@
           "skippedEmpty": 0
         },
         {
-          "kind": "container",
+          "kind": "heading",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -86,19 +86,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 67.9,
-      "captionWidth": 453.5,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 519.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 380.1,
-          "right": 899.9,
-          "inkWidth": 519.8,
+          "left": 374,
+          "right": 906,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -166,16 +166,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 623,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 328.5,
-          "right": 951.5,
-          "inkWidth": 623,
+          "left": 317.8,
+          "right": 962.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -214,12 +214,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 3,
           "emptyTracks": 0,
           "probe": null
@@ -228,19 +228,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 44,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 37,
+          "2": 7
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 826.4,
-            "width": 580,
+            "y": 823.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -249,8 +249,8 @@
           },
           {
             "px": 2,
-            "y": 1631.4,
-            "width": 580,
+            "y": 1638.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -259,8 +259,8 @@
           },
           {
             "px": 2,
-            "y": 2455.1,
-            "width": 580,
+            "y": 2459.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -269,8 +269,8 @@
           },
           {
             "px": 2,
-            "y": 4214.3,
-            "width": 580,
+            "y": 4247.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -279,8 +279,8 @@
           },
           {
             "px": 2,
-            "y": 5631.4,
-            "width": 580,
+            "y": 5674.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -289,8 +289,18 @@
           },
           {
             "px": 2,
-            "y": 7174.2,
-            "width": 580,
+            "y": 7231.5,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8143.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -299,13 +309,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "eight-minute-erasure__light__1920",
       "file": "eight-minute-erasure__light__1920.jpeg",
       "scale": 2,
-      "bytes": 2469232,
+      "bytes": 2545733,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -359,11 +369,11 @@
           "skippedEmpty": 0
         },
         {
-          "kind": "container",
+          "kind": "heading",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -372,19 +382,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 67.9,
-      "captionWidth": 453.5,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 519.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 700.1,
-          "right": 1219.9,
-          "inkWidth": 519.8,
+          "left": 694,
+          "right": 1226,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -452,16 +462,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 623,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 648.5,
-          "right": 1271.5,
-          "inkWidth": 623,
+          "left": 637.8,
+          "right": 1282.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -514,19 +524,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 44,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 37,
+          "2": 7
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 826.4,
-            "width": 580,
+            "y": 823.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -535,8 +545,8 @@
           },
           {
             "px": 2,
-            "y": 1631.4,
-            "width": 580,
+            "y": 1638.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -545,8 +555,8 @@
           },
           {
             "px": 2,
-            "y": 2455.1,
-            "width": 580,
+            "y": 2459.6,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -555,8 +565,8 @@
           },
           {
             "px": 2,
-            "y": 4190.3,
-            "width": 580,
+            "y": 4223.6,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -565,8 +575,8 @@
           },
           {
             "px": 2,
-            "y": 5607.4,
-            "width": 580,
+            "y": 5650.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -575,8 +585,18 @@
           },
           {
             "px": 2,
-            "y": 7150.2,
-            "width": 580,
+            "y": 7207.5,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8119.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -585,13 +605,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "eight-minute-erasure__dark__1280",
       "file": "eight-minute-erasure__dark__1280.jpeg",
       "scale": 2,
-      "bytes": 2294502,
+      "bytes": 2354705,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -645,11 +665,11 @@
           "skippedEmpty": 0
         },
         {
-          "kind": "container",
+          "kind": "heading",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -658,19 +678,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 67.9,
-      "captionWidth": 453.5,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1180,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 519.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 380.1,
-          "right": 899.9,
-          "inkWidth": 519.8,
+          "left": 374,
+          "right": 906,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -738,16 +758,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 623,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 328.5,
-          "right": 951.5,
-          "inkWidth": 623,
+          "left": 317.8,
+          "right": 962.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -786,12 +806,12 @@
         "fontWeight": "400"
       },
       "statTracks": [
-        8
+        7
       ],
       "statTracksNote": null,
       "statRemainder": [
         {
-          "tracks": 8,
+          "tracks": 7,
           "cells": 3,
           "emptyTracks": 0,
           "probe": null
@@ -800,19 +820,19 @@
       "docOverflow": 0,
       "clientWidth": 1280,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 44,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 37,
+          "2": 7
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 826.4,
-            "width": 580,
+            "y": 823.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -821,8 +841,8 @@
           },
           {
             "px": 2,
-            "y": 1631.4,
-            "width": 580,
+            "y": 1638.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -831,8 +851,8 @@
           },
           {
             "px": 2,
-            "y": 2455.1,
-            "width": 580,
+            "y": 2459.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -841,8 +861,8 @@
           },
           {
             "px": 2,
-            "y": 4214.3,
-            "width": 580,
+            "y": 4247.6,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -851,8 +871,8 @@
           },
           {
             "px": 2,
-            "y": 5631.4,
-            "width": 580,
+            "y": 5674.7,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -861,8 +881,18 @@
           },
           {
             "px": 2,
-            "y": 7174.2,
-            "width": 580,
+            "y": 7231.5,
+            "width": 1180,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8143.1,
+            "width": 1180,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -871,13 +901,13 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     },
     {
       "cell": "eight-minute-erasure__dark__1920",
       "file": "eight-minute-erasure__dark__1920.jpeg",
       "scale": 2,
-      "bytes": 2483580,
+      "bytes": 2550563,
       "wrapper": true,
       "classes": "bp-paper-shell bp-paper-surface bp-paper-article",
       "paragraphs": 21,
@@ -931,11 +961,11 @@
           "skippedEmpty": 0
         },
         {
-          "kind": "container",
+          "kind": "heading",
           "head": "VII · Declaration of peace — to Sigurd Hegge",
-          "gap": 16,
-          "rule": 1,
-          "ruleGap": 0,
+          "gap": 92,
+          "rule": 2,
+          "ruleGap": 16,
           "skippedEmpty": 0
         }
       ],
@@ -944,19 +974,19 @@
       "columnWidth": 660,
       "columnContentWidth": 580,
       "maxWidth": "660px",
-      "proseCpl": 71.9,
+      "proseCpl": 71.1,
       "proseCplSamples": 19,
-      "captionCpl": 67.9,
-      "captionWidth": 453.5,
+      "captionCpl": 59,
+      "captionWidth": 400,
       "evidenceBand": 1360,
       "bandRows": [
         {
           "kind": "bp-table",
-          "width": 519.8,
+          "width": 532,
           "offCentre": 0,
-          "left": 700.1,
-          "right": 1219.9,
-          "inkWidth": 519.8,
+          "left": 694,
+          "right": 1226,
+          "inkWidth": 530,
           "inkOffCentre": 0
         },
         {
@@ -1024,16 +1054,16 @@
         },
         {
           "kind": "bp-table",
-          "width": 623,
+          "width": 644.5,
           "offCentre": 0,
-          "left": 648.5,
-          "right": 1271.5,
-          "inkWidth": 623,
+          "left": 637.8,
+          "right": 1282.2,
+          "inkWidth": 642.5,
           "inkOffCentre": 0
         }
       ],
       "ingressPresent": true,
-      "ingressRatio": 0.783,
+      "ingressRatio": 0.785,
       "ingressNote": null,
       "toneSamples": {
         ".bp-callout--info": {
@@ -1086,19 +1116,19 @@
       "docOverflow": 0,
       "clientWidth": 1920,
       "rules": {
-        "total": 37,
-        "heavy": 6,
-        "structuralHeavy": 6,
+        "total": 44,
+        "heavy": 7,
+        "structuralHeavy": 7,
         "strayHeavy": 0,
         "byWeight": {
-          "1": 31,
-          "2": 6
+          "1": 37,
+          "2": 7
         },
         "heavyRules": [
           {
             "px": 2,
-            "y": 826.4,
-            "width": 580,
+            "y": 823.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1107,8 +1137,8 @@
           },
           {
             "px": 2,
-            "y": 1631.4,
-            "width": 580,
+            "y": 1638.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1117,8 +1147,8 @@
           },
           {
             "px": 2,
-            "y": 2455.1,
-            "width": 580,
+            "y": 2459.6,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1127,8 +1157,8 @@
           },
           {
             "px": 2,
-            "y": 4190.3,
-            "width": 580,
+            "y": 4223.6,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1137,8 +1167,8 @@
           },
           {
             "px": 2,
-            "y": 5607.4,
-            "width": 580,
+            "y": 5650.7,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1147,8 +1177,18 @@
           },
           {
             "px": 2,
-            "y": 7150.2,
-            "width": 580,
+            "y": 7207.5,
+            "width": 1360,
+            "parts": 1,
+            "structural": true,
+            "owners": [
+              "h2"
+            ]
+          },
+          {
+            "px": 2,
+            "y": 8119.1,
+            "width": 1360,
             "parts": 1,
             "structural": true,
             "owners": [
@@ -1157,7 +1197,7 @@
           }
         ]
       },
-      "blockedRequests": 3
+      "blockedRequests": 1
     }
   ]
 }

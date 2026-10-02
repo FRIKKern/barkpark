@@ -120,6 +120,8 @@ defmodule BarkparkWeb.Studio.EditorEmptyStateTypeEnumerationTest do
   end
 
   describe "arm 2 — the plugin register_schemas walk" do
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "is non-zero on its own, and carries task + listener" do
       arm2 = arm2_plugin_declared_types()
 
@@ -131,6 +133,8 @@ defmodule BarkparkWeb.Studio.EditorEmptyStateTypeEnumerationTest do
       assert "listener" in arm2, "same plugin, same walk"
     end
 
+    # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+    @tag :requires_plugins
     test "FLOOR membership comes from arm 2, not from arm 1" do
       arm2 = arm2_plugin_declared_types()
 

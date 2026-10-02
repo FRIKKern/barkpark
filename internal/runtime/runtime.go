@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/FRIKKern/barkpark/internal/caddyfile"
+	"github.com/FRIKKern/barkpark/internal/tokensource"
 )
 
 // DefaultInterval is the claim-poll cadence when Executor.Interval is zero.
@@ -74,6 +75,13 @@ type Executor struct {
 	FS            FS
 	Ports         PortAllocator
 
+	// TokenSource, when set, owns the control-plane bearer: its transport sets
+	// Authorization on every request and, on a 401, re-reads --token-file and
+	// replays once if the token changed (provisioning supersede-mints
+	// agent.token on claim / stale-reclaim). It supersedes AgentToken. See
+	// internal/tokensource.
+	TokenSource *tokensource.Source
+
 	// RetainImages bounds how many container generations — and therefore how
 	// many loaded Docker images — this box keeps PER SITE after a PROVEN
 	// cutover. Zero (unset) takes DefaultRetainImages; RetainImagesUnlimited
@@ -85,6 +93,11 @@ type Executor struct {
 	// BuildKit cache is swept down to after a proven cutover (e.g. "5GB").
 	// Zero (unset) takes DefaultBuildCacheKeep; "off" disables that arm.
 	BuildCacheKeep string
+
+	// Timeouts bounds each docker/caddy subprocess with its own per-operation
+	// budget. A zero field takes its Default… constant (see optimeout.go), so
+	// the zero value is the production configuration.
+	Timeouts OpTimeouts
 
 	// Logger is called for non-fatal warnings the executor wants visible
 	// without failing the deploy — e.g. a best-effort drain that didn't
@@ -277,6 +290,16 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 		return false, fmt.Errorf("claim: %w", err)
 	}
 	if !claimed {
+		// Idle cycle. Nothing to deploy, so this is where the box re-derives
+		// the TLS mode of the sites it is ALREADY serving from the control
+		// plane's current serving_mode — the flip-on-a-live-site half of the
+		// CP→box TLS channel that the claim inline can never reach, because a
+		// claim only ever speaks about the one site being deployed. See
+		// tls_reconcile.go for the invariant and its bound. A reconcile
+		// failure is logged, not returned: it must never stall claiming.
+		if _, err := e.reconcileTLSModes(ctx, state); err != nil {
+			e.logf("tls reconcile: %v", err)
+		}
 		return false, nil
 	}
 
@@ -309,7 +332,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.writeCaddyfile(updated); err != nil {
 		// The green container is up but unreachable (no Caddyfile entry). Tear
 		// it down so a flapping Caddy doesn't leak 512m orphans across reboots.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -322,7 +345,7 @@ func (e *Executor) RunOnce(ctx context.Context, state State) (bool, error) {
 	if err := e.reloadCaddy(ctx); err != nil {
 		// Same as above — the new container is pinned to a loopback port that
 		// Caddy never picked up. Reap it before failing the transition.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", containerName(slug, d.ID))
 		_ = e.transition(ctx, d.ID, map[string]any{
 			"worker_id":      e.WorkerID,
 			"observed_epoch": d.Epoch,
@@ -487,7 +510,7 @@ func (e *Executor) executeDeploy(
 	// a command the shell expands. A prior `sh -c "docker load -i %q"` was a real
 	// RCE — Go's %q does NOT neutralize `$(...)`/backticks inside a shell.
 	imageTar := fmt.Sprintf("%s/%s.tar", strings.TrimRight(e.CacheDir, "/"), d.ImageTag)
-	if err := e.runner().Run(ctx, devNull{},
+	if err := e.runOp(ctx, OpDockerLoad, e.Timeouts.dockerLoad(), devNull{},
 		"docker", "load", "-i", imageTar); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker load %s: %w", imageTar, err)
 	}
@@ -544,7 +567,7 @@ func (e *Executor) executeDeploy(
 	// deployment 2f92055a left site-jarl-website-2f92055a in Created, and the
 	// retry's `docker run` failed with "name already in use", exit 125).
 	// Best-effort removal; an absent name just errors quietly.
-	_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
+	_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", container)
 
 	args := []string{
 		"run", "-d",
@@ -561,14 +584,14 @@ func (e *Executor) executeDeploy(
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, containerInnerPort),
 		d.ImageTag,
 	)
-	if err := e.runner().Run(ctx, devNull{}, "docker", args...); err != nil {
+	if err := e.runOp(ctx, OpDockerRun, e.Timeouts.dockerRun(), devNull{}, "docker", args...); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker run: %w", err)
 	}
 
 	// 5. Health-check the container until /` answers (any non-5xx).
 	if err := e.healthCheck(ctx, port); err != nil {
 		// Tear down the failed container before bailing.
-		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", container)
+		_ = e.runOp(ctx, OpDockerRemove, e.Timeouts.dockerRemove(), devNull{}, "docker", "rm", "-f", container)
 		return "", "", nil, 0, 0, fmt.Errorf("health-check: %w", err)
 	}
 
@@ -715,7 +738,7 @@ func (e *Executor) writeCaddyfile(sites []caddyfile.Site) error {
 }
 
 func (e *Executor) reloadCaddy(ctx context.Context) error {
-	return e.runner().Run(ctx, devNull{}, "caddy", "reload", "--config", e.CaddyfilePath)
+	return e.runOp(ctx, OpCaddyReload, e.Timeouts.caddyReload(), devNull{}, "caddy", "reload", "--config", e.CaddyfilePath)
 }
 
 func (e *Executor) drainContainer(ctx context.Context, name string, port int) error {
@@ -724,7 +747,7 @@ func (e *Executor) drainContainer(ctx context.Context, name string, port int) er
 	// visible via Logger instead of leaving the old container running with
 	// zero trace.
 	var buf bytes.Buffer
-	err := e.runner().Run(ctx, &buf, "sh", "-c",
+	err := e.runOp(ctx, OpDrain, e.Timeouts.drain(), &buf, "sh", "-c",
 		fmt.Sprintf("docker ps -q --filter publish=%d | xargs -r docker stop -t 5", port))
 	if err != nil {
 		e.logf("drain %s (port %d) failed: %v; output: %s", name, port, err, strings.TrimSpace(buf.String()))
@@ -777,10 +800,14 @@ func (e *Executor) Run(ctx context.Context, buildState func(context.Context) (St
 // hung control-plane connection can't freeze the claim/transition loop with
 // no crash and no log — http.DefaultClient has Timeout 0 (no deadline).
 func (e *Executor) http() *http.Client {
-	if e.HTTPClient != nil {
-		return e.HTTPClient
+	c := e.HTTPClient
+	if c == nil {
+		c = &http.Client{Timeout: 30 * time.Second}
 	}
-	return &http.Client{Timeout: 30 * time.Second}
+	if e.TokenSource != nil {
+		return e.TokenSource.Client(c)
+	}
+	return c
 }
 
 func (e *Executor) runner() CommandRunner {
@@ -819,8 +846,12 @@ func (e *Executor) healthTimeout() time.Duration {
 }
 
 func (e *Executor) attachAuth(req *http.Request) {
-	if e.AgentToken != "" {
-		req.Header.Set("Authorization", "Bearer "+e.AgentToken)
+	tok := e.AgentToken
+	if e.TokenSource != nil {
+		tok = e.TokenSource.Token()
+	}
+	if tok != "" {
+		req.Header.Set("Authorization", "Bearer "+tok)
 	}
 }
 

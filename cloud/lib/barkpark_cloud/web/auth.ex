@@ -322,10 +322,61 @@ defmodule BarkparkCloud.Web.Auth do
     configured = worker_token()
 
     with token when is_binary(token) <- bearer_token(conn),
-         true <- is_binary(configured) and configured != "" do
-      Plug.Crypto.secure_compare(token, configured)
+         true <- is_binary(configured) and configured != "",
+         true <- Plug.Crypto.secure_compare(token, configured) do
+      worker_source_allowed?(conn)
     else
       _ -> false
+    end
+  end
+
+  # dr-w24-bl-internal-write-route-is-publicly-reachable: the worker token is a
+  # single-secret perimeter on a publicly reachable /v1/internal/* surface. An
+  # OPTIONAL second factor: when `:worker_allowed_ips` (WORKER_ALLOWED_IPS,
+  # comma-separated) names addresses, a correct token from any OTHER source is
+  # not the worker. Unset or empty keeps today's behaviour. `conn.remote_ip` is
+  # the client address the router's `trust_forwarded_ip` plug resolved (only a
+  # trusted front may move it), so a caller cannot forge its way in by header.
+  # An entry that does not parse as an IP matches nothing, so a list whose
+  # entries ALL fail to parse admits nobody (fails closed, never silently open).
+  defp worker_source_allowed?(conn) do
+    case worker_allowed_ips() do
+      :unset ->
+        true
+
+      allowed ->
+        ok? = Enum.any?(allowed, &(&1 == conn.remote_ip))
+
+        unless ok? do
+          Logger.warning(
+            "worker token presented from a source outside WORKER_ALLOWED_IPS: " <>
+              to_string(:inet.ntoa(conn.remote_ip))
+          )
+        end
+
+        ok?
+    end
+  end
+
+  @doc false
+  @spec worker_allowed_ips() :: :unset | [:inet.ip_address()]
+  def worker_allowed_ips do
+    raw =
+      :barkpark_cloud
+      |> Application.get_env(:worker_allowed_ips, [])
+      |> List.wrap()
+      |> Enum.map(&(&1 |> to_string() |> String.trim()))
+      |> Enum.reject(&(&1 == ""))
+
+    if raw == [] do
+      :unset
+    else
+      Enum.flat_map(raw, fn entry ->
+        case :inet.parse_address(String.to_charlist(entry)) do
+          {:ok, ip} -> [ip]
+          _ -> []
+        end
+      end)
     end
   end
 
@@ -401,7 +452,12 @@ defmodule BarkparkCloud.Web.Auth do
     * 403 when authenticated but NOT on the allowlist — and, because the
       allowlist resolves config emails against REGISTERED users and reads `[]`
       when unset, an unconfigured platform 403s every user rather than opening
-      the operator surface by omission.
+      the operator surface by omission. Those two 403s are DIFFERENT FACTS and
+      say so: the unconfigured one carries an additive `allowlist:
+      "unconfigured"` evidence key, the not-on-a-populated-list one does not, so
+      a census reader can tell a misconfiguration from a determination
+      (`dr-bl-w8-census-403-cannot-say-the-list-is-empty`). The `forbidden` slug,
+      `required` and `scope` are identical on both arms.
 
   Distinct from `require_worker/2` (the faceless off-box provisioner secret
   behind `/v1/internal/*` + `/v1/admin/*`): this gates the human operator's
@@ -424,10 +480,30 @@ defmodule BarkparkCloud.Web.Auth do
   def require_platform_operator(conn, opts) do
     conn = if conn.assigns[:current_user], do: conn, else: require_user(conn, opts)
 
-    cond do
-      conn.halted -> conn
-      conn.assigns.current_user.email in Notifications.platform_admin_emails() -> conn
-      true -> forbidden(conn, required: "platform_operator", scope: "platform")
+    if conn.halted do
+      conn
+    else
+      # THE TWO REFUSALS ARE DIFFERENT FACTS (dr-bl-w8-census-403-cannot-say-the-
+      # list-is-empty). A single fallback arm served BOTH "the allowlist has
+      # population zero, so nobody on earth could look" and "the allowlist is
+      # populated and you are not on it", emitting byte-identical bodies — so the
+      # 403 read as an ACCUSATION when the truth was an operator MISCONFIGURATION.
+      # The unconfigured arm now carries an ADDITIVE `allowlist: "unconfigured"`
+      # key; the `forbidden` slug, `required` and `scope` are untouched on both
+      # arms, so every client that reads only `error` is unaffected.
+      case Notifications.platform_admin_emails() do
+        [] ->
+          forbidden(conn,
+            required: "platform_operator",
+            scope: "platform",
+            allowlist: "unconfigured"
+          )
+
+        operators ->
+          if conn.assigns.current_user.email in operators,
+            do: conn,
+            else: forbidden(conn, required: "platform_operator", scope: "platform")
+      end
     end
   end
 

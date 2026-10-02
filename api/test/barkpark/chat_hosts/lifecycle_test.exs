@@ -1,6 +1,9 @@
 defmodule Barkpark.ChatHosts.LifecycleTest do
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   alias Barkpark.ChatHosts
   alias Barkpark.ChatHosts.{ExecutionLease, RegisteredHost}
   alias Barkpark.StudioChat.Session

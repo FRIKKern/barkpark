@@ -71,10 +71,78 @@ function sh(cmd) {
 
 // ── 1. THE FENCE ─────────────────────────────────────────────────────────────
 {
-  const gripDiff = sh("git diff --stat origin/main -- tooling/grip/").stdout.trim();
-  eq("1.1 zero bytes changed under tooling/grip/", gripDiff, "");
-  const scriptsDiff = sh("git diff --stat origin/main -- scripts/").stdout.trim();
-  eq("1.2 scripts/pds-ledger-census.sh untouched by this slice", scriptsDiff, "");
+  // 1.1 WAS REMOVED BY DECISION (2026-09-24, task-b71f7affdc15671b). It asserted
+  // that `git diff --stat origin/main -- tooling/grip/` was empty — PDS-D386's
+  // "PDS MUST NOT modify tooling/grip/**", written into the slice that first
+  // adopted grip read-only (#8516).
+  //
+  // THE DECISION: D386 outlives its epic as CHARTER LAW, not as a CI predicate.
+  // It binds PDS builders, and a diff cannot say who wrote it. This file runs on
+  // every PR that touches tooling/grip/** — the workflow watches grip on purpose,
+  // so a grip change CAN red this gate — which made 1.1 a PDS authorship rule
+  // enforced on every other lane's grip PR, and a red for the diff itself rather
+  // than for any drift. MEASURED 2026-09-24: every PR run of this job that
+  // failed between 2026-09-19 and 2026-09-22 — twelve — failed on 1.1 ALONE.
+  // Eleven (eight branches) were markdown notes under tooling/grip/ledger/, a
+  // directory nothing under tooling/pds reads. The twelfth was a Dependabot
+  // workflow bump that touched no grip byte at all: the diff runs against a
+  // freshly fetched origin/main, so a grip note a sibling merged after the PR's
+  // merge ref was built showed up as 51 deletions. On push-to-main origin/main
+  // IS HEAD, so there 1.1 passed having measured nothing.
+  //
+  // WHO IT BINDS: a PDS slice still may not edit tooling/grip/** — grip-side
+  // faults go to grip as rows (D386 stands). That is enforced where authorship
+  // is visible: the PDS lane fence and PR review. Other lanes' grip edits answer
+  // to grip's charter and grip's own suite, not to this file.
+  //
+  // WHAT NOW CATCHES WHAT 1.1 STOOD IN FOR — grip changing under PDS:
+  //   - an export PDS imports is renamed or removed: this file's static imports
+  //     fail to link, node exits 1 before any check runs, and the workflow's rc
+  //     and "no summary line" clauses red. Mutation: rename grip's deriveLevel.
+  //   - grip's screen starts admitting what it refused: sections 8 and 10 red by
+  //     name. Mutation: skip the per-segment allowlist refusal in screenCommand,
+  //     and 8.8, 8.9, 8.10, 10.2 and 10.5 fail.
+  //   - grip's behaviour in general: grip's own node --test suite in
+  //     .github/workflows/grip-suite.yml (push-to-main only today); the same
+  //     screen mutation fails 82 of its 880 tests.
+  // 1.2 — THE PATH IS THE FILE THE LABEL NAMES, AND THAT WAS A RULING, NOT A
+  // REFLEX. Until 2026-09-20 the path here was `scripts/`, the whole directory,
+  // while the label said `scripts/pds-ledger-census.sh`. So the check measured
+  // "did this branch touch ANY of the ~70 scripts/ files" and reported the
+  // answer as "pds-ledger-census.sh was touched", sending every reader to a
+  // file the branch had not opened. MEASURED at 863714ac8: appending one
+  // comment line to scripts/pds-secret-scan.sh — a file neither this suite nor
+  // that label names — printed
+  //   FAIL 1.2 scripts/pds-ledger-census.sh untouched by this slice —
+  //        expected "", got "scripts/pds-secret-scan.sh | 1 +\n 1 file changed…"
+  // The control file's own name in the failure text IS the proof the predicate
+  // was directory-wide.
+  //
+  // Three exits were open and the other two were refused for cause:
+  //   NOT "delete both fence checks". Deletion is the one repair that cannot
+  //   fail for the right reason afterwards — it leaves no check any mutation
+  //   can red, which is precisely the green-with-no-subject this file's header
+  //   calls its central obligation to refuse. The guard's SCOPE was wrong; its
+  //   existence was not the defect.
+  //   NOT "keep scripts/ and make the label honest". That ratifies a standing
+  //   suite forbidding a whole directory to every later PR forever, and the
+  //   pds lane's own charter fence is `scripts/pds-*` — i.e. the directory this
+  //   would forbid is the directory that lane is chartered to edit. A fence
+  //   that reds correctly-scoped work trains readers to ignore it.
+  // What is left is a check whose label and predicate name the same one file,
+  // which still reds when that file moves and no longer reds when a neighbour
+  // does.
+  //
+  // 1.2a IS THE ANTI-VACUITY HALF AND MUST NOT BE DROPPED. A one-file path is
+  // an enumeration, and an enumeration goes stale silently: rename or delete
+  // scripts/pds-ledger-census.sh on main and `git diff -- <that path>` is
+  // empty forever, so 1.2 would pass by measuring nothing. 1.2a asserts the
+  // fenced path still exists, so a rename reds the fence instead of voiding it.
+  const CENSUS = "scripts/pds-ledger-census.sh";
+  ok(`1.2a the fenced path ${CENSUS} still exists (a one-file fence over a renamed file measures nothing)`,
+    sh(`git ls-files --error-unmatch -- ${CENSUS}`).exit === 0);
+  const scriptsDiff = sh(`git diff --stat origin/main -- ${CENSUS}`).stdout.trim();
+  eq(`1.2 ${CENSUS} untouched by this slice`, scriptsDiff, "");
 
   // No module under tooling/pds may reach for grip's command-line entry point:
   // consuming its rc would be this epic's own violation one level up.
@@ -109,7 +177,7 @@ function sh(cmd) {
     new Set(coarse.map((f) => f.subject)).size === 1);
 }
 
-// ── 3. THE FOUR FORBIDDEN SPELLINGS ──────────────────────────────────────────
+// ── 3. THE FIVE FORBIDDEN SPELLINGS ──────────────────────────────────────────
 {
   const cases = [
     ["GIT-DASH-C", "git -C /tmp show origin/main:README.md"],
@@ -118,13 +186,14 @@ function sh(cmd) {
     ["TEST-F", "test -f tooling/pds/adjudicate.mjs"],
     ["COMMAND-SUBSTITUTION", "git rev-list --count origin/main..$(git rev-parse HEAD) | grep -x 0"],
     ["MERGE-BASE-IS-ANCESTOR", "git merge-base --is-ancestor abc123 origin/main"],
+    ["PREFIX-MATCH-PROBE", "git grep -n 'defp apply_engagement' origin/main -- api/lib/barkpark/tasks/stage.ex"],
   ];
   for (const [name, cmd] of cases) {
     const r = forbiddenSpelling(cmd);
     ok(`3.1 ${name} refused: ${cmd}`, r?.name === name, JSON.stringify(r));
     ok(`3.2 ${name} names a legal substitute`, /git (cat-file|grep|rev-list)/.test(r?.message ?? ""), r?.message);
   }
-  eq("3.3 four named rules and no more", FORBIDDEN_NAMES.length, 4);
+  eq("3.3 five named rules and no more", FORBIDDEN_NAMES.length, 5);
 
   // NEVER CRY WOLF. Each legal substitute must pass this layer untouched, or
   // the screen would push honest authors straight back into prose.
@@ -271,13 +340,25 @@ function sh(cmd) {
 // ── 5. ABSENCE CLAIMS ARE FIRST-CLASS, AND THE PREDICATES ARE POLARISED ──────
 {
   // The absence recipe's command legitimately exits 1 BECAUSE the claim holds.
-  const abs = sh("git grep -c completeness origin/main -- internal/cli/export_cmd.go");
+  //
+  // READ FROM THE RECIPE, NEVER RETYPED. Until 2026-09-12 this line carried its
+  // own hand-copied spelling of the command, and that is exactly how the drift
+  // this section exists to catch stayed invisible: the recipe's command moved
+  // out from under the screen (#13481 refused a sub-verb's own `-c`, #17224 then
+  // refused the ungraded count) while 5.1 went on probing a string nothing
+  // adjudicated. A probe that does not read the artefact cannot witness it.
+  const ABSENCE_ID = "pds-bl-export-close-delimited-silent-truncation";
+  const absenceRecipe = recipes.find((r) => r.doc_id === ABSENCE_ID);
+  ok("5.0 the absence recipe is the one this section probes", Boolean(absenceRecipe), ABSENCE_ID);
+  const abs = sh(absenceRecipe.command);
   eq("5.1 the absence rerun exits 1 (a genuine no-match)", abs.exit, 1);
+  ok("5.1b and its command carries no ungraded counting stage — the screen would refuse it",
+    countingSpelling(absenceRecipe.command) === null, String(countingSpelling(absenceRecipe.command)));
   const exists = sh("git cat-file -t origin/main:internal/cli/export_cmd.go");
   eq("5.2 while the file it reads is present", exists.exit, 0);
 
   const report = adjudicateCorpus(rows, recipes, RUN);
-  const absRow = report.rows.find((r) => r.doc_id === "pds-bl-export-close-delimited-silent-truncation");
+  const absRow = report.rows.find((r) => r.doc_id === ABSENCE_ID);
   eq("5.3 a nonzero-exit absence is RE-DERIVED, not REFUTED", absRow.verdict, PDS_VERDICT.RE_DERIVED);
   eq("5.4 via grip's admitsAbsenceClaim, not `verdict == ADMITTED`", absRow.reason, "ABSENCE-ADMITTED");
 

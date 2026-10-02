@@ -46,6 +46,50 @@
 # THE CORPUS FLOOR (MIN_WEB_FILES, cgsi-s4): a gate that scans nothing PASSES,
 # so this one refuses to — see the floor's own failure text below.
 #
+# ── THE UNCOVERED AXIS: raw Tailwind palette utilities ──────────────────────
+# This gate covers ONE axis — inline #hex and hsl()/hsla() literals — and its
+# PASS line says so verbatim. It does NOT cover raw Tailwind palette classes
+# (`text-zinc-400`, `bg-slate-800`, `focus:ring-violet-500`). Those are
+# hardcoded colors too: they resolve to a fixed palette value and so opt their
+# element out of the emitted theme tokens — web/app/globals.css carries SIX
+# theme identities x light/dark, and a raw palette class follows none of them.
+#
+# The old PASS line read "no inline color literals", which reads as "no
+# hardcoded colors". That is how the palette-class axis stayed invisible under
+# a green gate. The axis naming above is the fix; widening the scanner is a
+# separate, larger change (and would need MIN_WEB_FILES and --selftest arms of
+# its own for the new axis — see scripts/templates-literal-check.sh, which
+# already implements exactly that rule for templates/).
+#
+# DECISION on the remaining raw palette classes in web/app + web/components
+# (task-7a7b6b9c91402621, recorded 2026-09-15 — ACCEPT, do not migrate now):
+#   Census AT THIS COMMIT (i.e. after the two fixes named below), counting
+#   OCCURRENCES — not lines — over .tsx/.ts/.css:
+#     web/components  24 files   421 palette-utility occurrences
+#     web/app         31 files   135 palette-utility occurrences
+#   Of those, the subset templates-literal-check.sh actually bans — a
+#   LIGHT-applying `text-<palette>-300/400` (bare or under a non-`dark:`
+#   variant) and a raw palette ring under a focus variant — is:
+#     web/components  38 light-failing text-300/400  +  3 focus rings
+#     web/app         11 light-failing text-300/400  +  0 focus rings
+#   i.e. porting that rule to web/ would red on 52 sites across 55 files.
+#   ACCEPTED, NOT MIGRATED, for a stated reason: that is a visual change to
+#   ~52 call sites with no token mapping decided (`text-zinc-500` has no
+#   1:1 role token, and `dark:`-only palette classes are legitimately allowed
+#   by the templates rule), so it is a sweep with its own review, not a rider
+#   on a gate-honesty commit. What is NOT accepted is the silence: the count
+#   above and the PASS-line naming make the backlog legible, which is the half
+#   that let this survive. Follow-up is the templates-rule port, scoped as its
+#   own row; this header is the record until it lands.
+#   The two adoption-lag sites this row FOUND are fixed in this commit:
+#   web/components/detail-chrome.tsx (the close/dismiss control's className) and
+#   web/components/meta-card.tsx (the <dt> label className) now use
+#   `text-muted-text`, making both files line-for-line identical with their
+#   templates/search-starter counterparts again (`diff` prints nothing).
+#   NOT NORMALISED, deliberately: the web-vs-templates raw counts are not
+#   comparable (different tree sizes). The evidence for the drift is the two
+#   line-for-line-identical files, not a ratio.
+#
 # Usage: scripts/web-literal-check.sh              (check; CI + merge gate)
 #        scripts/web-literal-check.sh --selftest   (prove the gate can FAIL)
 set -euo pipefail
@@ -204,9 +248,24 @@ TSX
     grep -q 'file floor' <<<"$out" \
         || fail "the zero-file RED did not name the corpus floor." "$out"
 
+    # 11) THE PASS LINE MUST NAME ITS AXIS. A gate whose green overstates what it
+    #     measured is how the raw-palette-class axis stayed unwatched under 55
+    #     green runs. This asserts the naming on the REAL passing output (case 2's
+    #     clean fixture), so deleting or re-generalising the banner REDs here.
+    #     Deliberately NOT asserted as "the output must not contain the phrase
+    #     'no hardcoded colors'": a negative grep over text that quotes its own
+    #     forbidden phrase matches its own subject. Assert what must be PRESENT.
+    pass_out="$(WEB_LIT_SELFTEST="$tmp/clean.tsx" bash "$0" 2>&1)" \
+        || fail "the clean fixture did not PASS (case 11 setup)."
+    grep -q 'AXIS COVERED: inline #hex and hsl()/hsla() literals' <<<"$pass_out" \
+        || fail "the PASS line does not NAME the axis it covered (it can be read as 'no hardcoded colors')." "$pass_out"
+    grep -q 'AXIS NOT COVERED: raw Tailwind palette utilities' <<<"$pass_out" \
+        || fail "the PASS output does not name the UNCOVERED palette-class axis." "$pass_out"
+
     echo "web-literal-check --selftest: PASS — gate REDs on a planted literal (naming file:line), on"
     echo "  both lit-allow spoofs, on an hsl() outside the GENERATED block and on a zero-file corpus;"
-    echo "  passes clean token usage, commented hexes, .css url()/comments and genuine lit-allow waivers."
+    echo "  passes clean token usage, commented hexes, .css url()/comments and genuine lit-allow waivers;"
+    echo "  and its PASS line NAMES the axis it covered (hex/hsl) and the one it does not (palette classes)."
     exit 0
 fi
 
@@ -388,8 +447,20 @@ if not SELFTEST and scanned < MIN_WEB_FILES:
     sys.exit(1)
 
 if not failures:
+    # THE PASS LINE NAMES ITS AXIS. It used to read "no inline color literals",
+    # which is heard as "no hardcoded colors" — a broader claim than this gate
+    # makes or can make. Raw Tailwind palette utilities are hardcoded colors on a
+    # SEPARATE, ungated axis in web/ (see the UNCOVERED AXIS note in the header),
+    # and a PASS that overstates itself is exactly what keeps an unwatched axis
+    # unwatched. The --selftest asserts this naming, so it cannot silently revert.
     print(f"web-literal-check: PASS — {scanned} web file(s) scanned, "
-          f"no inline color literals.")
+          f"no inline #hex or hsl()/hsla() color literals.")
+    print("  AXIS COVERED: inline #hex and hsl()/hsla() literals in web/app + "
+          "web/components (.tsx/.ts/.css).")
+    print("  AXIS NOT COVERED: raw Tailwind palette utilities "
+          "(text-zinc-400, bg-slate-800, focus:ring-violet-500 …) —")
+    print("  hardcoded colors this gate does not see. This PASS certifies that "
+          "one axis and no other.")
     sys.exit(0)
 
 print("web-literal-check: FAILED — inline color literal(s) in web/.\n")

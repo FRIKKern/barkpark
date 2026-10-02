@@ -90,6 +90,32 @@ const byline: Render = (b, ctx, key) => {
   )
 }
 
+// The reader-synthesised pre-gate badge (#17199). Elixir's
+// `Content.Papers.PreGateRegister.annotate/3` mints it into the block stream of a
+// grandfathered Paper — never authored, never stored — so it arrives here like any
+// other block and must not unknown-box. The web mark is a quiet caps-mono line
+// under the byline rule; the native equivalent is the same eyebrow measure in the
+// muted colour, switching to this file's existing warning hue (via calloutTone,
+// so the badge introduces no new colour) on the ONE warning tone the register
+// mints (`blank_header_cell`). Any other tone is neutral — the same two-value
+// whitelist compose.ex applies, so a stray value can never pick a colour.
+// `title` is a hover explanation the web has and a phone does not, so it is
+// deliberately not rendered here.
+const preGateBadge: Render = (b, ctx, key) => (
+  <Text
+    key={key}
+    style={{
+      ...scale.xs,
+      letterSpacing: 1.2,
+      textTransform: 'uppercase',
+      color: str(b.tone) === 'warning' ? calloutTone(ctx.theme, 'warning') : ctx.theme.textMuted,
+      marginBottom: 10,
+    }}
+  >
+    {str(b.label)}
+  </Text>
+)
+
 /* ── the two serif outliers, made register-aware (D50) ─────────────────────────
  * The paperIngress and paperPullquote tokens carry `fontFamily: 'serif'` ON THE
  * TOKEN. Reaching for either unconditionally painted a serif lede and a serif
@@ -129,8 +155,17 @@ const pullquote: Render = (b, ctx, key) => (
   </Text>
 )
 
+// An ordered list's first number: the block's integer `start`, else 1. A JSON
+// number only — a string "5" is not a start (compose.ex list_start/1, pdrender
+// listStart, @barkpark/react listStart).
+export function listStart(b: Record<string, unknown>): number {
+  const start = b.start
+  return typeof start === 'number' && Number.isInteger(start) ? start : 1
+}
+
 const list: Render = (b, ctx, key) => {
   const ordered = b.ordered === true
+  const start = listStart(b)
   const items = asList(b.items)
   return (
     <View key={key} style={{ marginVertical: 6, gap: 4 }}>
@@ -159,7 +194,7 @@ const list: Render = (b, ctx, key) => {
         )
         return (
           <View key={i} style={{ flexDirection: 'row', paddingLeft: 8 }}>
-            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${i + 1}.` : '•'}</Text>
+            <Text style={[bodyText(ctx), { width: 24 }]}>{ordered ? `${start + i}.` : '•'}</Text>
             {children.length === 0 ? (
               body
             ) : (
@@ -293,6 +328,7 @@ export const coreProseRenderers: Record<string, Render> = {
   paragraph,
   eyebrow,
   byline,
+  'pre-gate-badge': preGateBadge,
   ingress,
   pullquote,
   list,

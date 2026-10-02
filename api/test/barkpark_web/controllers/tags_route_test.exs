@@ -36,9 +36,14 @@ defmodule BarkparkWeb.TagsRouteTest do
   @token "tags-route-token"
 
   setup do
-    Barkpark.Auth.create_token(@token, "dev", @dataset, ["read", "write", "admin"])
-
     {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    # MINT AFTER THE SEAT IS TAKEN, AND NAME IT (task-e0e6454b8b2045ae).
+    # `Auth.create_token/5` no longer resolves `nil -> the Default workspace`,
+    # so a 4-arity mint is now WORKSPACE-LESS and the scoped mount below
+    # answers 403 `not_a_member`. The workspace this suite means is the one
+    # `ensure_default_scope!/0` just seated, so it is passed explicitly.
+    Barkpark.Auth.create_token(@token, "dev", @dataset, ["read", "write", "admin"], ws.id)
 
     # Browse census: "alpha" on 2 papers + 1 task (total 3), "beta" on 1 paper
     # (total 1), plus an off-default "post" carrier of alpha that must NOT

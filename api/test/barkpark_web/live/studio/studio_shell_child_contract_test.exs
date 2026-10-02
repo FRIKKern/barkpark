@@ -83,6 +83,28 @@ defmodule BarkparkWeb.Studio.StudioShellChildContractTest do
     end
   end
 
+  # The scroller only owns what it CONTAINS. `.form-switch`'s real checkbox is
+  # `position: absolute` (visually replaced by the track); with no positioned
+  # ancestor its containing block is the initial one, so every switch below
+  # the fold sat OUTSIDE `.studio-page-scroll` and stretched the document
+  # itself (Workspace Settings: 2103px tall in a 900px viewport). Focusing such
+  # a switch — Tab, or a screen reader — scrolled <html> by 1203px and carried
+  # the whole clipped shell off-screen: a blank page, the switch never shown.
+  describe "an absolutely-positioned control stays inside its scroller" do
+    test "`.form-switch` is the containing block of its hidden checkbox" do
+      css = File.read!(@root_layout)
+
+      [input_rule] = Regex.run(~r/\.form-switch input\[type="checkbox"\]\s*\{[^}]*\}/, css)
+      assert input_rule =~ "position: absolute", "premise moved: #{input_rule}"
+
+      [switch_rule] = Regex.run(~r/\.form-switch\s*\{[^}]*\}/, css)
+
+      assert switch_rule =~ ~r/position:\s*relative/,
+             "`.form-switch` must be `position: relative` so its absolutely-positioned " <>
+               "checkbox lays out inside the page scroller, not on <html>: #{switch_rule}"
+    end
+  end
+
   describe "every Studio LiveView root honours the shell contract" do
     test "census is derived from source and is not empty" do
       names = census() |> Enum.map(&Path.basename/1)

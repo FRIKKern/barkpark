@@ -296,6 +296,19 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:instance_global, @operator_guard, "Deletes from the global tier. RULING row 4."},
 
     # ── /v1/admin — operator primitives ──
+    {:get, "/v1/admin/write-admission"} =>
+      {:instance_global, @operator_guard,
+       "Operator: write-admission instance view. RULING row 1."},
+    {:post, "/v1/admin/write-admission/recover"} =>
+      {:instance_global, @operator_guard,
+       "Operator: explicit recovery of the write-admission coordinator. RULING row 1."},
+    {:post, "/v1/admin/write-admission/hold"} =>
+      {:instance_global, @operator_guard,
+       "Operator: begins the managed write-admission hold (Barkdown C083). RULING row 1."},
+    {:get, "/v1/admin/write-admission/hold/:capability"} =>
+      {:instance_global, @operator_guard, "Operator: managed hold status. RULING row 1."},
+    {:delete, "/v1/admin/write-admission/hold/:capability"} =>
+      {:instance_global, @operator_guard, "Operator: aborts the managed hold. RULING row 1."},
     {:post, "/v1/admin/self-update"} =>
       {:instance_global, @operator_guard,
        "Operator: applies a release to the whole instance. RULING row 1."},
@@ -357,6 +370,11 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     {:delete, "/v1/shares"} =>
       {:tenant_bound, "workspace_admin?(conn",
        "delete/2, same resolve-then-workspace_admin?/2 shape as create/2."},
+    {:post, "/v1/shares/media"} =>
+      {:tenant_bound, "workspace_admin?(conn",
+       "publish_media/2 (task-cbb112a9b4c600cc), the SAME resolve-then-workspace_admin?/2 " <>
+         "shape as create/2 — the affordance that adds the :media surface must not be a " <>
+         "softer door onto the registry its sibling guards."},
     {:get, "/v1/shares/tokens"} =>
       {:tenant_bound, "workspace_admin?(conn",
        "list_tokens/2 filters the row set through workspace_admin?/2 per row."},
@@ -400,6 +418,14 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "TenancyAuth.workspace_admin?",
        "WorkspaceController.delete/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
          "against the RESOLVED target before the cascade teardown."},
+    {:post, "/api/workspaces/:workspace_slug/archive"} =>
+      {:tenant_bound, "TenancyAuth.workspace_admin?",
+       "WorkspaceController.archive/2 resolves the slug THEN Tenancy.Auth.workspace_admin?/2 " <>
+         "against the RESOLVED target (authorize_workspace_admin/2) before archived_at is set."},
+    {:post, "/api/workspaces/:workspace_slug/restore"} =>
+      {:tenant_bound, "TenancyAuth.workspace_admin?",
+       "WorkspaceController.restore/2 — the same authorize_workspace_admin/2 bind as archive/2, " <>
+         "before archived_at is cleared."},
     {:post, "/api/playground"} =>
       {:instance_global, @operator_guard,
        "Provisioning primitive: mints a NEW workspace + owner + quota. RULING row 6."},

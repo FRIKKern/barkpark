@@ -1131,6 +1131,120 @@ fi
 rm -f "$FX_CHAIN/api/test/barkpark/chain_ok_test.exs"
 echo
 
+# ── case 3k: SHAPE 8 — an ATTRIBUTE-INDIRECTED literal is seen ──────────────
+# `@mirrors ["nowhere/attr.json"]` + `Path.join(@repo_root, m)`. Every door
+# before this one needs the literal AT the call site, so one binding of
+# indirection took the read out of the census entirely: MEASURED on 974d3d2cb,
+# the attribute form resolved 66 reads and printed OK at rc=0 while the SAME
+# read written inline resolved 67 and redded — a false OK inside the REQUIRED
+# Elixir gate (task-5a00c588a808f523 / task-c605ea24bbe5066c).
+#
+# FOUR ARMS, because this door's whole risk is the opposite of blindness:
+#   (a) the join form reds and is TAGGED (the positive control — a non-zero
+#       test-rootattr count, so the door cannot go vacuous);
+#   (b) the `"../…" <> var` expand form reds the same way;
+#   (c) the door is LOAD-BEARING — disarm the pre-scan's `I` stream and the
+#       same read greens;
+#   (d) the ARMING is load-bearing too: the same attribute literals with NO
+#       indirect join site in the file must NOT red. A door that reported
+#       every attribute literal in every file would be a false-RED machine in
+#       a required gate, which costs more than the blindness it removes.
+echo "case 3k: SHAPE 8 — an attribute-indirected literal is seen, tagged test-rootattr"
+FX_ATTR="$TMPROOT/attr"
+make_fixture "$FX_ATTR"
+mkdir -p "$FX_ATTR/nowhere"
+: >"$FX_ATTR/nowhere/attr.json"
+cat >"$FX_ATTR/api/test/barkpark/attr_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors [
+    "nowhere/attr.json"
+  ]
+  def read_all, do: Enum.map(@mirrors, fn m -> File.read!(Path.join(@repo_root, m)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an attribute-indirected uncovered read"
+else
+  no "PASSED with an attribute-indirected uncovered read — shape 8 is blind: $out"
+fi
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "names the path the attribute held"
+else
+  no "did not name the attribute-held path: $out"
+fi
+if has "$out" "read from: api/test/barkpark/attr_test.exs"; then
+  ok "attributes the indirected read to its file"
+else
+  no "did not attribute the indirected read: $out"
+fi
+# THE POSITIVE CONTROL: the tag must actually carry a count. `test-rootattr: 0`
+# next to a red would mean some OTHER door caught this and shape 8 measured
+# nothing — the vacuous pass this case exists to refuse.
+if has "$out" "idiom test-rootattr: [1-9]"; then
+  ok "test-rootattr resolved a non-zero count — the door itself saw the read"
+else
+  no "test-rootattr is zero (or missing) while the read redded — shape 8 proved nothing: $out"
+fi
+# ARM (b): the `Path.expand("../…" <> var, __DIR__)` form of the same fault.
+FX_ATTRC="$TMPROOT/attrconcat"
+make_fixture "$FX_ATTRC"
+mkdir -p "$FX_ATTRC/nowhere"
+: >"$FX_ATTRC/nowhere/attr.json"
+cat >"$FX_ATTRC/api/test/barkpark/attrconcat_test.exs" <<'EX'
+  @mirrors ["nowhere/attr.json"]
+  def read_all, do: Enum.map(@mirrors, fn rel -> File.read!(Path.expand("../../../" <> rel, __DIR__)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRC" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ] && has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "the \"../..\" <> var expand form reds on the same read"
+else
+  no "the concatenated-prefix expand form did not red (rc=$rc): $out"
+fi
+# ARM (c): LOAD-BEARING. Disarm the pre-scan's `I` stream — the rows still get
+# collected, but under a tag nothing drains — and the same read must green.
+MUT_ATTR="$TMPROOT/mutant-no-indirect.sh"
+python3 - "$SCRIPT" "$MUT_ATTR" <<'PY'
+import sys
+src, dst = sys.argv[1], sys.argv[2]
+lines = open(src).read().splitlines(keepends=True)
+target = None
+for i, line in enumerate(lines):
+    if "awk -v t=I " in line:
+        target = i
+        break
+assert target is not None, "the shape-8 `I` pre-scan stream was not found — mutation would prove nothing"
+lines[target] = lines[target].replace("awk -v t=I ", "awk -v t=Z ")
+open(dst, "w").writelines(lines)
+PY
+if ! cmp -s "$MUT_ATTR" "$SCRIPT"; then
+  ok "the indirect-join mutation applied (the I stream really changed)"
+else
+  no "the indirect-join mutation did NOT apply — this case would prove nothing"
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTR" bash "$MUT_ATTR" 2>&1)" && rc=0 || rc=$?
+if has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  no "the indirected read was still reported with the I stream disarmed — case 3k proves nothing: $out"
+else
+  ok "without the I stream the read goes dark again — shape 8's door is load-bearing"
+fi
+# ARM (d): the ARMING is load-bearing. Same attribute, NO indirect join site.
+FX_ATTRQ="$TMPROOT/attrquiet"
+make_fixture "$FX_ATTRQ"
+mkdir -p "$FX_ATTRQ/nowhere"
+: >"$FX_ATTRQ/nowhere/attr.json"
+cat >"$FX_ATTRQ/api/test/barkpark/attrquiet_test.exs" <<'EX'
+  @repo_root Path.expand("../../..", __DIR__)
+  @mirrors ["nowhere/attr.json"]
+  def names, do: @mirrors
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_ATTRQ" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ] && ! has "$out" "UNCOVERED repo-root read: nowhere/attr.json"; then
+  ok "an attribute with NO indirect join site stays quiet — no false red"
+else
+  no "shape 8 redded on an attribute nothing joins (rc=$rc) — a false red in a required gate: $out"
+fi
+echo
+
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
 # Same mutation, but inside a real git repo where the offending fixture is
 # present on disk and NOT tracked. A `git ls-files` enumeration reports clean
@@ -1289,8 +1403,18 @@ check_match "design/status-manifest.json" compile true
 check_match ".github/workflows/elixir.yml" compile true
 check_match "scripts/elixir-path-escape-check.sh" compile true
 check_match "docs/ops/merge-gates.md" compile false
-check_match "docs/ops/merge-gates.md" test false
-check_match "README.md" test false
+# BOTH FLIPPED TO true 2026-09-13 (task-4c9c1682f5ba5c7a), and the flip is the
+# fact, not a fixture repair: merge-gates.md and README.md are now DECLARED in
+# ELIXIR_TEST_ONLY_PATHS because they carry byte caps in
+# scripts/check-doc-budgets.sh, and api/test/barkpark/doc_budget_cap_test.exs
+# enforces those caps from the required `Elixir gate`. A capped doc that does not
+# dispatch the test job would skip the only gate that can refuse it.
+check_match "docs/ops/merge-gates.md" test true
+check_match "README.md" test true
+# The DOC negative specimen the two above used to be. SETUP.md carries no cap, so
+# it stays out — which is what proves the doc entries are EXACT FILES and not a
+# `docs/**` tree that would dispatch the whole suite on every documentation PR.
+check_match "docs/setup/SETUP.md" test false
 check_match "web/src/app/page.tsx" test false
 check_match "internal/taskboard/components.go" test true
 check_match "internal/taskboard/components.go" compile false
@@ -1353,6 +1477,76 @@ $seam_roots
 EOF
   fi
 fi
+# ── the scaffy-duels METER entries (2026-09-11, pds-w49-meter-ci-decision) ─
+# METER.md §6 decided that `tooling/scaffy-duels/meter.py` is to be WIRED, and
+# named the only blocking route: these declarations plus
+# api/test/barkpark/pds_meter_rider_test.exs, riding the required `Elixir gate`.
+# A workflow-level `on: paths:` filter is refused as the venue (S4: such a
+# workflow can never be required), so if these arms stop passing the instrument
+# is back to where wave 48 found it — correct, fast, and run by nothing.
+#
+# DERIVED FROM THE RIDER, NOT PINNED HERE. Every `"../../../tooling/…"` literal
+# in the rider is a read `--list-escapes` resolves and `--check` demands be
+# dispatched; this loop asserts the OTHER half — that the dispatcher answers
+# true for each. Add a read to the rider without declaring it and case 3 reds;
+# declare it and this loop starts covering it, with no edit here. Deriving ZERO
+# literals is itself a failure, or the loop passes vacuously the day the grep
+# stops matching.
+rider="$REAL_ROOT/api/test/barkpark/pds_meter_rider_test.exs"
+if [ ! -f "$rider" ]; then
+  no "api/test/barkpark/pds_meter_rider_test.exs is missing — meter.py is wired to nothing again"
+else
+  # `|| true` covers ONLY the grep, for the reason the seam-scan block above
+  # records at length: under `set -euo pipefail` a non-matching grep in a
+  # command substitution kills the harness mid-case with no tally.
+  meter_lits="$(grep -Eoh '"\.\./\.\./\.\./tooling/scaffy-duels/[^"]*"' "$rider" || true)"
+  meter_lits="$(sed -e 's/^"\.\.\/\.\.\/\.\.\///' -e 's/"$//' <<<"$meter_lits" | LC_ALL=C sort -u)"
+  # EXISTENCE-FILTERED, MIRRORING THE CENSUS. `list_escapes` discards a literal
+  # that resolves to nothing on disk, so a path-shaped string in the rider's
+  # moduledoc is not a read and must not be required to dispatch. MEASURED: an
+  # `…`-elided path inside a prose heading reded this loop for a reason foreign
+  # to what it measures, while `--check` correctly ignored it. Filtering here
+  # keeps the two halves asking the same question.
+  meter_real=""
+  while IFS= read -r meter_path; do
+    [ -n "$meter_path" ] || continue
+    [ -e "$REAL_ROOT/$meter_path" ] || continue
+    meter_real="$meter_real$meter_path
+"
+  done <<EOF
+$meter_lits
+EOF
+  meter_lits="$meter_real"
+  if [ -z "$meter_lits" ]; then
+    no "derived ZERO tooling/scaffy-duels reads from the rider — the arms below would pass vacuously"
+  else
+    ok "derived meter reads from the rider: $(tr '\n' ' ' <<<"$meter_lits")"
+    while IFS= read -r meter_path; do
+      [ -n "$meter_path" ] || continue
+      check_match "$meter_path" test true
+    done <<EOF
+$meter_lits
+EOF
+  fi
+fi
+# The corpus is declared as a TREE on purpose: the change that rotted METER.md
+# was an ADDED envelope, and an added file has no name this list could have
+# carried in advance. The literal below is deliberately a filename that does
+# not exist.
+check_match "tooling/scaffy-duels/results/a-duel-not-yet-run--A--1.agent.json" test true
+# TEST-only, never compile: nothing in api/ links against the instrument.
+check_match "tooling/scaffy-duels/meter.py" compile false
+check_match "tooling/scaffy-duels/results/a-duel-not-yet-run--A--1.agent.json" compile false
+# FOUR DECLARATIONS, not `tooling/**` and not `tooling/scaffy-duels/**`. The
+# neighbours below are in the same directory and must stay OUT — a PR touching
+# only them has no business paying for the full Elixir suite.
+check_match "tooling/scaffy-duels/README.md" test false
+check_match "tooling/scaffy-duels/run-cell.sh" test false
+check_match "tooling/scaffy-duels/matrix.json" test false
+check_match "tooling/grip/ledger/some-note.md" test false
+# exact-file entries must not match by prefix (the sibling arms above)
+check_match "tooling/scaffy-duels/meter.py.bak" test false
+check_match "tooling/scaffy-duels/METER.md.orig" test false
 # Every compile path is also a test path. The invariant belongs to the SETS,
 # not to any `needs` edge between the jobs: compile ⊆ test must hold however
 # the graph is wired. elixir.yml's dispatcher asserts it at runtime and hard-
@@ -1367,6 +1561,241 @@ while IFS= read -r g; do
 done <<EOF
 $("$SCRIPT" --print-set compile)
 EOF
+echo
+
+# ── case 6b: a glob-consumed family is dispatched WHOLE ────────────────────
+# task-ac7392fa242a09ef. The sets used to name nine `scripts/pds-*` files one
+# at a time while scripts/pds-door-census.sh — the program
+# api/test/barkpark/pds_door_census_test.exs shells — enumerates
+# `scripts/pds-*.sh` / `scripts/pds-*.exs` / `tooling/pds/*.mjs` from the tree.
+# deploy #19577 added the tenth file, the dispatcher answered `test=false`,
+# mix-test SKIPPED and the required `Elixir gate` reported SUCCESS over zero
+# tests (run 35532446963) while that same test reddened main's push arm.
+#
+# EVERY ARM HERE PROBES A PATH THAT IS NOT ON DISK. Asking about a file the
+# tree already holds is the assertion a nine-file hand list passes, which is
+# how the hole survived: the dispatcher answers about a RULE, not about a
+# directory listing, and only an absent member can tell the two apart.
+#
+# DERIVED, never typed: the families come back out of `--print-families`, so
+# retiring a program retires its arms and no arm can certify a family nobody
+# enumerates. Deriving ZERO is itself a failure — the loop would otherwise
+# pass vacuously the day the extractor goes blind.
+echo "case 6b: glob-consumed families are dispatched whole"
+fams="$("$SCRIPT" --print-families 2>/dev/null || true)"
+if [ -z "$fams" ]; then
+  no "derived ZERO glob-consumed families — the derivation went blind and every arm below would pass vacuously"
+else
+  nfam=0
+  while IFS= read -r row; do
+    [ -n "$row" ] || continue
+    prog="${row%%	*}"
+    fam="${row#*	}"
+    nfam=$((nfam + 1))
+    probe="$(sed -e 's,\*\*,zz-harness-absent-member,g' -e 's,\*,zz-harness-absent-member,g' <<<"$fam")"
+    if [ -e "$REAL_ROOT/$probe" ]; then
+      no "$fam: the probe member $probe EXISTS on disk — this arm would prove nothing"
+    elif [ "$(m "$probe" test)" = true ]; then
+      ok "$fam (enumerated by $prog): an absent member $probe -> test true"
+    else
+      no "$fam (enumerated by $prog): an absent member $probe -> test FALSE — the family is only partially declared"
+    fi
+  done <<EOF
+$fams
+EOF
+  ok "derived $nfam family row(s) from the programs themselves"
+fi
+# THE INCIDENT'S OWN PATHS, named because a class that cannot reproduce its
+# founding case is a class nobody checked. Both are real scripts/pds-* names;
+# the first landed in #19577 and matched NOTHING on 97271476d.
+check_match "scripts/pds-secret-scan_test.sh" test true
+check_match "scripts/pds-zz-new.sh" test true
+check_match "scripts/pds-zz-new.exs" test true
+check_match "tooling/pds/zz-new.mjs" test true
+# …and the family is a FAMILY, not a licence for the tree it lives in. A
+# scripts/ path no api test consumes must still skip the suite, or the fix has
+# bought coverage by dispatching everything, which is the over-inclusion the
+# templates/** and tooling/** notes in the ratchet refuse.
+check_match "scripts/deploy-rebuild.sh" test false
+check_match "scripts/which-gates.sh" test false
+check_match "tooling/scaffy-duels/zz-unrelated.txt" test false
+# The `*` is single-segment: it must not eat a `/`.
+check_match "scripts/pds-nested/inner.sh" test false
+echo
+
+# ── case 6c: the derivation cannot silently go empty ───────────────────────
+# Two different failures, deliberately given two different answers, because
+# conflating them is what a first cut of this got wrong:
+#
+# (a) PROGRAMS READ, ZERO FAMILIES — the extractor rotted. Nothing survives
+#     this: every mode exits 2 before it can answer. Mutated by blinding the
+#     enumeration-verb regex, the one line between the credited families and
+#     the unfiltered form that swallowed `scripts/**` out of the ratchet's own
+#     prose.
+# (b) THE PRODUCTION SHAPE. elixir.yml runs the PINNED script out of
+#     `$RUNNER_TEMP/elixir-dispatcher-pinroot` — a directory holding exactly one
+#     file — with its CWD on the head checkout. The families must still derive
+#     there, or the fix is inert in the only place it ships. Asserted with the
+#     absent member, not an on-disk one.
+# (c) NO PROGRAM TO READ AT ALL — a fixture tree. `--check` REFUSES (it only
+#     ever runs against the real checkout, from elixir.yml's unfiltered
+#     path-escape job), while `--match` says so on stderr and contributes no
+#     derived half. Forcing `true` here instead would make every dispatcher
+#     fixture below answer `test=true` for a docs-only diff, i.e. certify the
+#     shim can never skip — a green bought by measuring nothing.
+echo "case 6c: a blind derivation refuses rather than answering quietly"
+BLINDDIR="$TMPROOT/blind"
+mkdir -p "$BLINDDIR"
+sed -e "s|^ELIXIR_FAMILY_ENUM_VERBS=.*|ELIXIR_FAMILY_ENUM_VERBS='zzzz-no-such-verb-zzzz'|" \
+  "$SCRIPT" >"$BLINDDIR/blinded.sh"
+if ! grep -q "zzzz-no-such-verb-zzzz" "$BLINDDIR/blinded.sh"; then
+  no "could not blind ELIXIR_FAMILY_ENUM_VERBS — the mutation did not apply and (a) would be vacuous"
+else
+  out="$(ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$BLINDDIR/blinded.sh" --match test <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+  if [ "${rc:-0}" = 2 ]; then
+    ok "(a) a blinded extractor exits 2 rather than answering"
+  else
+    no "(a) a blinded extractor exited ${rc:-0} and answered '$out'"
+  fi
+  if has "$out" "ZERO path families derived"; then
+    ok "(a) names the blindness"
+  else
+    no "(a) did not name the blindness: $out"
+  fi
+fi
+# (b) the pin root, built exactly as elixir.yml builds it, run from the real
+#     checkout — the shipped invocation.
+PINROOT="$TMPROOT/pinroot"
+rm -rf "$PINROOT"
+mkdir -p "$PINROOT/scripts"
+cp "$SCRIPT" "$PINROOT/scripts/elixir-path-escape-check.sh"
+out="$(cd "$REAL_ROOT" && bash "$PINROOT/scripts/elixir-path-escape-check.sh" --match test <<<'scripts/pds-zz-new.sh' 2>&1)" && rc=0 || rc=$?
+if [ "$out" = true ]; then
+  ok "(b) the PINNED script, run from the checkout, still dispatches an absent family member"
+else
+  no "(b) the pinned script answered '$out' (rc=${rc:-0}) — the fix is inert in the shipped invocation"
+fi
+# (c) a tree with no declared program in it.
+NOPROG="$TMPROOT/noprog"
+rm -rf "$NOPROG"
+mkdir -p "$NOPROG/scripts"
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" --match test <<<'docs/setup/SETUP.md' 2>&1)" && rc=0 || rc=$?
+if has "$out" "NO declared program found under"; then
+  ok "(c) --match names a family root it cannot derive from"
+else
+  no "(c) degraded without naming the reason: $out"
+fi
+out="$(ELIXIR_FAMILY_ROOT="$NOPROG" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "${rc:-0}" != 0 ]; then
+  ok "(c) --check refuses a family root it can derive nothing from (exit ${rc:-0})"
+else
+  no "(c) --check PASSED against a tree it could derive nothing from — vacuous"
+fi
+echo
+
+# ── case 6e: the FAMILY arm's verdict is the PROCESS exit ─────────────────
+# task-92a213f01ca30817. Every family case above asks `--match` / `--print-*`
+# a question and reads the ANSWER; none runs `--check` far enough to reach the
+# family arm's `exit 1`, so flipping it to `exit 0` kept this harness green
+# while the REQUIRED Elixir gate would certify a family dispatched in part.
+# Same idiom as PR #13405 / #20180: RE-EXEC THE WHOLE PROGRAM and assert the
+# PROCESS exit. The plant is the ratchet's own recorded mutation (see THE
+# FAMILY ARM in the script): a copy of "$SCRIPT" whose set_globs no longer
+# appends the derived half. It must exit 1 naming the family and must NOT red
+# on the census arm first (or the exit would be the wrong arm's); the pristine
+# script under the same env must exit 0. The copy is made FROM "$SCRIPT", so a
+# disarmed family exit in the file under test is inherited by the plant.
+echo "case 6e: the family arm's verdict is the process exit (whole program)"
+FAMX="$TMPROOT/famexit"
+mkdir -p "$FAMX"
+sed -e 's/^        derived_family_globs$/        :/' "$SCRIPT" >"$FAMX/no-derived-half.sh"
+if cmp -s "$SCRIPT" "$FAMX/no-derived-half.sh"; then
+  no "(6e) the plant did not apply — set_globs carries no derived_family_globs line to drop, so the arm would be vacuous"
+else
+  out="$(ELIXIR_PATH_ESCAPE_ROOT="$REAL_ROOT" ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$FAMX/no-derived-half.sh" 2>&1)" && rc=0 || rc=$?
+  if [ "${rc:-0}" = 1 ] && has "$out" "UNDECLARED glob-consumed family" && ! has "$out" "UNCOVERED repo-root read"; then
+    ok "(6e) planted: the derived half dropped -> --check exits 1 from the FAMILY arm, naming the family"
+  else
+    no "(6e) planted: --check exited ${rc:-0}; family named: $(has "$out" "UNDECLARED glob-consumed family" && echo yes || echo no); census arm red first: $(has "$out" "UNCOVERED repo-root read" && echo yes || echo no)"
+  fi
+fi
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$REAL_ROOT" ELIXIR_FAMILY_ROOT="$REAL_ROOT" bash "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "${rc:-0}" = 0 ]; then
+  ok "(6e) removed: the pristine script under the same env exits 0"
+else
+  no "(6e) removed: the pristine script under the same env exited ${rc:-0} — the planted red above is not the plant's alone: $(grep -m3 '::error::' <<<"$out" | tr '\n' ' ')"
+fi
+echo
+
+# ── case 6d: the two halves of the test set answer different questions ─────
+# WHY THIS EXISTS, AND IT IS AN INCIDENT AND NOT A STYLE. When case 6b's
+# derivation landed, `--match test` began answering `true` for every member of
+# `scripts/pds-*.{sh,exs}` and `tooling/pds/*.mjs`. scripts/pds-door-census.sh
+# reads that answer as its leg B and its DEAD-DECLARATION class means "somebody
+# TYPED this path into a list and no ExUnit case executes it" — so 43
+# ledger-disposed instruments were reclassified DEAD-DECLARATION in one commit
+# and every one of their dispositions then read as ORPHANED, five arms of
+# api/test/barkpark/pds_door_census_test.exs red. The set did not become wrong;
+# it started answering a QUESTION its consumer was not asking. `--literal` is
+# the narrow half, and these arms are what keeps the two from re-merging.
+echo "case 6d: --literal is the typed half, the bare form is the dispatched whole"
+ml() { "$SCRIPT" --match "$2" --literal <<<"$1"; }
+check_literal() {
+  # $1 path, $2 want-whole, $3 want-literal
+  local gw gl
+  gw="$(m "$1" test)"
+  gl="$(ml "$1" test)"
+  if [ "$gw" = "$2" ] && [ "$gl" = "$3" ]; then
+    ok "'$1' -> whole=$2 literal=$3"
+  else
+    no "'$1' -> whole=$gw literal=$gl, wanted whole=$2 literal=$3"
+  fi
+}
+# A FAMILY MEMBER NOBODY TYPED: gated, and NOT a typed declaration. This is the
+# row the census must not call DEAD-DECLARATION. It is an ABSENT path on
+# purpose — asking about a file the tree already holds is the assertion a hand
+# list passes too.
+check_literal "scripts/pds-zz-new.sh" true false
+check_literal "tooling/pds/zz-new.mjs" true false
+# A TYPED ENTRY: identical under both halves, which is what makes the arm above
+# a discriminator rather than a blanket `literal=false`.
+check_literal "api/lib/barkpark.ex" true true
+# A PATH IN NEITHER HALF stays false under both — the narrow half is a subset,
+# never an independent set that could answer true where the whole set says no.
+check_literal "scripts/deploy-rebuild.sh" false false
+# THE FLAG IS NOT A NO-OP, ASSERTED AS A SET DIFFERENCE AND NOT AS ONE PATH:
+# --print-set test --literal must be a STRICT subset of --print-set test, and
+# the difference must be exactly what --print-families derived. A --literal that
+# silently kept the derived half would pass every check_literal above only if
+# every probe were typed; this arm reds even then.
+# FILES, NOT PROCESS SUBSTITUTION: bash 3.2 — what macOS ships and therefore
+# what the local gate runs — segfaults on `<(...)` inside a command
+# substitution, and that is a RUN-time crash, not a parse error.
+"$SCRIPT" --print-set test | LC_ALL=C sort -u >"$TMPROOT/set-whole.txt"
+"$SCRIPT" --print-set test --literal | LC_ALL=C sort -u >"$TMPROOT/set-literal.txt"
+"$SCRIPT" --print-families | cut -f2 | LC_ALL=C sort -u >"$TMPROOT/set-families.txt"
+fam_set="$(cat "$TMPROOT/set-families.txt")"
+only_lit="$(comm -23 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+diff_set="$(comm -13 "$TMPROOT/set-literal.txt" "$TMPROOT/set-whole.txt")"
+if [ -n "$only_lit" ]; then
+  no "--literal returned globs the whole set does not contain: $only_lit"
+elif [ -z "$diff_set" ]; then
+  no "--literal and the bare form returned the SAME set — the flag is a no-op and the census's leg B halves are still one thing"
+elif [ "$diff_set" = "$fam_set" ]; then
+  ok "whole - literal == the derived families exactly ($(printf '%s\n' "$fam_set" | wc -l | tr -d ' ') glob(s))"
+else
+  no "whole - literal is not the derived family set. difference: $(printf '%s' "$diff_set" | tr '\n' ' ') / families: $(printf '%s' "$fam_set" | tr '\n' ' ')"
+fi
+# AND AN UNKNOWN FLAG IN THAT SLOT REFUSES. It printed its complaint to stderr
+# and then answered `false` with rc=0 the first time this was written: the
+# refusal lived in a command substitution, i.e. a subshell, whose exit status
+# the caller discarded. A refusal that still answers is worse than none.
+out="$("$SCRIPT" --match test --bogus <<<'api/lib/barkpark.ex' 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "an unknown flag after --match SET exits $rc"
+else
+  no "an unknown flag after --match SET answered '$out' with rc=0"
+fi
 echo
 
 # ── case 7: a bad set name is an error, not a silent false ──────────────────
@@ -1542,6 +1971,28 @@ emit("escape_if", str(esc.get("if", "")))
 emit("escape_needs", ",".join(esc.get("needs", [])))
 for n in ("mix-test", "mix-prod-compile", "validation-perf"):
     emit(f"if::{n}", str(jobs.get(n, {}).get("if", "")))
+# ── the Test PARTITIONS (task-8345bf4c2ca2b989) ──────────────────────────
+# The matrix list and TEST_PARTITIONS are two spellings of one number, and the
+# gate's fold trusts the number. They must agree, and the list must be 1..N.
+mt = jobs.get("mix-test", {})
+parts = ((mt.get("strategy") or {}).get("matrix") or {}).get("partition")
+total = str((mt.get("env") or {}).get("TEST_PARTITIONS", ""))
+emit("test_partitions_agree",
+     isinstance(parts, list) and total.isdigit() and int(total) >= 1
+     and parts == list(range(1, int(total) + 1)))
+# A matrix job's outputs are last-writer-wins, so the refusal channel may not
+# ride one ALONE: the job output stays (and stays bound as V_TEST, the shape
+# gate-refusal-vocabulary-check requires), and the per-cell records the gate
+# downloads and folds worst-first on top of it are the authority.
+emit("mix_test_outputs", ",".join(sorted((mt.get("outputs") or {}).keys())))
+gsteps = agg.get("steps", []) or []
+emit("gate_run_steps", sum(1 for st in gsteps if "run" in st))
+emit("cells_downloaded", any("download-artifact" in str(st.get("uses", ""))
+                             and "mix-test-cell-p" in str((st.get("with") or {}).get("pattern", ""))
+                             for st in gsteps))
+dec = next((st for st in gsteps if "run" in st), {})
+emit("v_test_bound_in_env", "V_TEST" in (dec.get("env") or {}))
+emit("cells_env", str((dec.get("env") or {}).get("MIX_TEST_CELLS", "")))
 out.close()
 PY
   python3 "$EMIT" "$WF" "$FACTS"
@@ -1602,6 +2053,17 @@ PY
   assert_fact escape_if ""
   assert_fact escape_needs ""
   assert_fact "if::mix-test" "needs.changes.outputs.test == 'true'"
+  # The Test partitions fold fail-closed (task-8345bf4c2ca2b989): the list and
+  # the number agree, the (last-writer-wins) job output is kept but is not the
+  # authority, the per-cell records are downloaded, and Decide stays the
+  # aggregator's ONE run step (every shape harness extracts it by that rule)
+  # and folds them itself.
+  assert_fact test_partitions_agree True
+  assert_fact mix_test_outputs "verdict"
+  assert_fact gate_run_steps 1
+  assert_fact cells_downloaded True
+  assert_fact v_test_bound_in_env True
+  assert_fact cells_env '${{ runner.temp }}/mix-test-cells'
   assert_fact "if::mix-prod-compile" "needs.changes.outputs.compile == 'true'"
   assert_fact "if::validation-perf" "needs.changes.outputs.compile == 'true'"
   # …and every decide() call's THIRD positional (the gate) matches what the
@@ -1792,11 +2254,27 @@ PY
 # a pass that proves nothing, which is the exact defect class this epic exists
 # to remove. Follow-up assertions read the file.
 GATE_OUT="$TMPROOT/gate.out"
+# cells <dir> <partition>:<of>:<verdict>... — the per-partition records the
+# mix-test matrix uploads and elixir-gate downloads (task-8345bf4c2ca2b989).
+cells() {
+  local dir="$1" spec p o v
+  shift
+  mkdir -p "$dir"
+  for spec in "$@"; do
+    IFS=: read -r p o v <<<"$spec"
+    mkdir -p "$dir/mix-test-cell-p$p-$RANDOM"
+    printf 'partition=%s\nof=%s\nverdict=%s\n' "$p" "$o" "$v" >"$(ls -d "$dir"/mix-test-cell-p"$p"-* | tail -1)/cell.txt"
+  done
+}
+CELLS_OK="$TMPROOT/cells-ok"
+cells "$CELLS_OK" "1:2:MEASURED-CLEAN" "2:2:"
 gate() {
   local label="$1" want="$2"
   shift 2
   local rc
-  env -i PATH="$PATH" HOME="$HOME" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  # MIX_TEST_CELLS defaults to a complete clean set; a case that passes its
+  # own MIX_TEST_CELLS overrides it (env's later assignment wins).
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
   else
@@ -1858,6 +2336,46 @@ gate_names() {
 gate "full run, all green" 0 \
   R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
   O_COMPILE=true O_TEST=true
+
+# (a2) THE PARTITIONS (task-8345bf4c2ca2b989). A matrix whose cells all
+#      SUCCEEDED can still be half a suite: a partition dropped from the matrix
+#      is simply absent. So a missing record is red and names mix-test, and
+#      a refusal in a LATER cell survives the fold instead of being overwritten
+#      the way a last-writer-wins job output would overwrite it.
+CELLS_MISSING="$TMPROOT/cells-missing"
+cells "$CELLS_MISSING" "1:2:MEASURED-CLEAN"
+gate "a Test partition never reported (matrix [1] of 2)" 1 \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_MISSING"
+gate_says "partition 2 of 2 reported 0 times" "…and says which partition is missing"
+gate_names "mix-test (partitions incomplete)" "validation-perf"
+CELLS_NONE="$TMPROOT/cells-none"
+mkdir -p "$CELLS_NONE"
+# A refusal is red on its OWN annotation ("an instrument REFUSED TO MEASURE"),
+# not the allow-set one `gate` looks for, so these two arms read it directly.
+gate_refused() {
+  local label="$1" rc
+  shift
+  env -i PATH="$PATH" HOME="$HOME" MIX_TEST_CELLS="$CELLS_OK" "$@" bash --noprofile --norc "$AGG" >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
+  if [ "$rc" -eq 1 ]; then ok "$label -> exit 1"; else no "$label -> exit $rc, wanted 1"; fi
+  if grep -qF -- "::error title=Elixir gate RED — an instrument REFUSED TO MEASURE" "$GATE_OUT" \
+     || grep -qF -- "::error title=Elixir gate RED — a refusal reached the aggregate" "$GATE_OUT"; then
+    ok "  …and reached its own REFUSED verdict line"
+  else
+    no "  …but printed NO refusal verdict line — the step body crashed rather than decided"
+    sed 's/^/        /' "$GATE_OUT" >&2
+  fi
+}
+gate_refused "no Test partition uploaded a record" \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_NONE"
+gate_says "no partition uploaded a record" "…and says no record arrived"
+CELLS_REFUSED="$TMPROOT/cells-refused"
+cells "$CELLS_REFUSED" "1:2:MEASURED-CLEAN" "2:2:REFUSED"
+gate_refused "a later Test partition REFUSED" \
+  R_CHANGES=success R_TEST=success R_PROD=success R_PERF=success R_ESCAPE=success R_FORMAT=success \
+  O_COMPILE=true O_TEST=true MIX_TEST_CELLS="$CELLS_REFUSED"
+gate_says "REFUSED mix-test" "…and the refusal from partition 2 survives the fold"
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, expensive jobs legitimately skipped" 0 \
@@ -1947,15 +2465,42 @@ echo
 # substituted from the environment so the body can run outside Actions.
 echo "case 10: the dispatcher fails rather than skips when it cannot tell"
 DISP="$TMPROOT/dispatch-step.sh"
-python3 - "$WF" "$DISP" <<'PY'
-import sys, yaml
+
+# THE MUTATION HOOK for every arm in this case. Point ELIXIR_DISPATCH_WF at another copy
+# of this workflow — `git show origin/main:.github/workflows/<f>.yml > /tmp/f` —
+# and the SAME fixtures below are driven through THAT file's dispatcher. It is
+# how the version-skew arm is quoted red on the pre-fix shape rather than
+# asserted about.
+DISP_WF="${ELIXIR_DISPATCH_WF:-$WF}"
+
+# The `${{ … }}` expressions are substituted from the environment so the body
+# can run outside Actions — and the substitution is CLOSED, not a best effort.
+# An expression this list does not know survives into the body verbatim, bash
+# dies on it with `bad substitution`, and the reader sees every arm below fail
+# with no clue that the EXTRACTION is what went stale.
+if python3 - "$DISP_WF" "$DISP" <<'PY'
+import sys, re, yaml
 wf = yaml.safe_load(open(sys.argv[1]))
 step = [s for s in wf["jobs"]["changes"]["steps"] if s.get("id") == "sets"][0]
 body = (step["run"]
         .replace("${{ github.event_name }}", "${T_EVENT}")
-        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}"))
+        .replace("${{ github.event.pull_request.base.sha }}", "${T_BASE}")
+        .replace("${{ github.event.pull_request.number }}", "${T_PRNUM}"))
+left = sorted(set(re.findall(r"\$\{\{.*?\}\}", body)))
+if left:
+    sys.stderr.write(
+        "EXTRACTION IS OUT OF DATE: the `sets` step uses Actions expressions this "
+        "harness does not substitute: %s. Add each to the replace() chain above "
+        "(and pass its value from dispatch()), or every arm below measures "
+        "nothing.\n" % ", ".join(left))
+    sys.exit(3)
 open(sys.argv[2], "w").write(body)
 PY
+then
+  ok "extracted the 'sets' step body with every Actions expression substituted"
+else
+  no "could not extract the 'sets' step body from $DISP_WF (see the line above) — every dispatcher arm below measures nothing"
+fi
 
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/api/lib" "$DR/docs" "$DR/internal/taskboard" "$DR/scripts"
@@ -1971,12 +2516,24 @@ git -C "$DR" add -A >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm base >/dev/null 2>&1
 BASE_SHA="$(git -C "$DR" rev-parse HEAD)"
 
+# THE STAND-IN FOR refs/pull/N/merge. The dispatcher pins the path-set script to
+# the ref the WORKFLOW FILE came from; inside this fixture that ref is a branch
+# of the fixture repo, reached with the remote `.`. Every arm below therefore
+# exercises the PINNED read — the shipped path — not the fallback. An arm that
+# wants the fallback sets PIN_REF to a ref that does not exist.
+git -C "$DR" branch pinned-merge "$BASE_SHA"
+mkdir -p "$TMPROOT/runner-temp"
+
 # dispatch <label> <expected-rc> <expected-compile> <expected-test> <event> <base>
 dispatch() {
   local label="$1" want="$2" wc="$3" wt="$4" ev="$5" bs="$6"
   local rc gotc gott
   : >"$TMPROOT/gh_output"
-  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" GITHUB_OUTPUT="$TMPROOT/gh_output" \
+  (cd "$DR" && env T_EVENT="$ev" T_BASE="$bs" T_PRNUM="${PIN_PRNUM:-0}" \
+    DISPATCH_PIN_REMOTE="${PIN_REMOTE:-.}" \
+    DISPATCH_PIN_REF="${PIN_REF:-refs/heads/pinned-merge}" \
+    RUNNER_TEMP="$TMPROOT/runner-temp" \
+    GITHUB_OUTPUT="$TMPROOT/gh_output" \
     bash --noprofile --norc "$DISP") >"$GATE_OUT" 2>&1 && rc=0 || rc=$?
   if [ "$rc" -eq "$want" ]; then
     ok "$label -> exit $rc"
@@ -2055,6 +2612,97 @@ git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
 git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
 dispatch "a rename INTO the declared set" 0 true true pull_request "$BASE_SHA"
 
+# ── (4) A NEWLINE INSIDE A PATH (cch-bl-nul-native-path-matcher) ────────────
+# `-z` closed quoting, but the old producer's `| tr '\0' '\n'` re-opened ONE
+# class: a path holding a literal NEWLINE was split into two pseudo-paths
+# before the anchored ERE saw it. The dispatcher now hands the NUL records
+# straight to `--match … --null`. MUTATION HOOK: ELIXIR_DISPATCH_WF=<a pre-fix copy
+# of the workflow> drives these same arms through the tr producer.
+#   (4a) THE FALSE SKIP. A glob anchored at BOTH ends — the derived family
+#        `docs/cards/*.md`, enumerated by scripts/check-doc-budgets.sh — and the
+#        path `docs/cards/a<LF>b.md`. Split, `docs/cards/a` and `b.md` each
+#        miss, so the tr producer answered compile=false test=false for a path
+#        IN the test set: the suite skipped under a green required context.
+#   (4b) a newline inside the DIRECTORY of an in-set path, `api/li<LF>b/x.ex`.
+#        The split fragment `api/li` still matches `^api(/|$)`, so this is
+#        green on BOTH producers — a `dir/**` glob cannot be skipped by a
+#        split, which is why (4a) needs a two-ended family to be red.
+#   (4c) the filing's own example, `api<LF>foo/lib/x.ex`. Its top directory is
+#        `api<LF>foo`, not `api`, so the true answer is false/false. The tr
+#        producer answered true/true (its `api` fragment matches
+#        `^api(/|$)`) — an over-run, not the skip the filing described.
+#        Asserted so a matcher that still splits records cannot pass.
+git -C "$DR" checkout -q -b nlfamily-base "$BASE_SHA"
+cp "$REAL_ROOT/scripts/check-doc-budgets.sh" "$DR/scripts/"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nlfamily-base >/dev/null 2>&1
+NL_BASE="$(git -C "$DR" rev-parse HEAD)"
+# THE PRECONDITION: the fixture must DERIVE the family, or (4a) is vacuous.
+nl_fam="$( (cd "$DR" && bash scripts/elixir-path-escape-check.sh --print-families) 2>&1 )" || true
+if grep -qF -- 'docs/cards/*.md' <<<"$nl_fam"; then
+  ok "(4) the fixture derives the two-ended family docs/cards/*.md"
+else
+  no "(4) the fixture does not derive docs/cards/*.md — (4a) cannot fail for the right reason. It printed: $nl_fam"
+fi
+git -C "$DR" checkout -q -b nlfamily "$NL_BASE"
+mkdir -p "$DR/docs/cards"
+printf 'x\n' >"$DR/docs/cards/a"$'\n'"b.md"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nlfamily >/dev/null 2>&1
+dispatch '(4a) a NEWLINE inside a two-ended family path (docs/cards/a<LF>b.md)' 0 false true pull_request "$NL_BASE"
+git -C "$DR" checkout -q -b nldir "$BASE_SHA"
+mkdir -p "$DR/api/li"$'\n'"b"
+printf 'x\n' >"$DR/api/li"$'\n'"b/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nldir >/dev/null 2>&1
+dispatch '(4b) a NEWLINE inside the directory of an in-set path (api/li<LF>b/x.ex)' 0 true true pull_request "$BASE_SHA"
+git -C "$DR" checkout -q -b nltop "$BASE_SHA"
+mkdir -p "$DR/api"$'\n'"foo/lib"
+printf 'x\n' >"$DR/api"$'\n'"foo/lib/x.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm nltop >/dev/null 2>&1
+dispatch '(4c) the filing example api<LF>foo/lib/x.ex is NOT under api/' 0 false false pull_request "$BASE_SHA"
+
+# ── THE WORKFLOW/SCRIPT VERSION SKEW (task-3a81e68f7027ca98) ───────────────
+# GitHub takes the WORKFLOW FILE for a pull_request run from the MERGE REF while
+# this job checks out the PR HEAD (D34), so main's invocation used to run against
+# the BRANCH's older script. Measured in cloud.yml's twin on PR #17575
+# (2026-09-11, job 103113143741): exit 2, `unknown path set`, a RED required gate
+# with no defect in the PR. The fixture head below carries a script that does NOT
+# know the `test` set; the pin points at a ref that does.
+git -C "$DR" checkout -q -b oldscript "$BASE_SHA"
+sed 's/^    compile | test) ;;$/    compile) ;;/' \
+  "$REAL_ROOT/scripts/elixir-path-escape-check.sh" >"$DR/scripts/elixir-path-escape-check.sh"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm oldscript >/dev/null 2>&1
+
+# THE PRECONDITION, asserted before the verdict — never inferred from it. A sed
+# that matched nothing leaves the CURRENT script on the head and the arm below
+# passes having measured no skew at all.
+skew_rc=0
+skew_out="$( (cd "$DR" && bash scripts/elixir-path-escape-check.sh --match test <<<"docs/x.md") 2>&1 )" || skew_rc=$?
+if [ "$skew_rc" -eq 2 ] && has "$skew_out" "unknown path set 'test'"; then
+  ok "the fixture head's script REFUSES --match test (exit 2) — the skew is real"
+else
+  no "the fixture head's script still answers --match test (rc=$skew_rc, '$skew_out') — the arm below cannot fail for the right reason"
+fi
+
+# scripts/elixir-path-escape-check.sh is in BOTH sets (measured: --match compile
+# and --match test both answer true for it), so the pinned answer is
+# compile=true test=true. The load-bearing half is the EXIT CODE: without the
+# pin this step dies on the `--match test` refusal under `set -euo pipefail`
+# and emits no verdict at all.
+dispatch "version skew: the head's script predates the test set name" 0 true true pull_request "$BASE_SHA"
+gate_says "path-set script: refs/heads/pinned-merge" "  …and says which ref it read the script from"
+
+# THE NEGATIVE CONTROL for the pin: an unreadable pin ref (a conflicted PR has no
+# merge ref) must NOT be silent. It warns by name and falls back to the head's own
+# copy — which here is the skewed one — so the step still dies rather than
+# emitting a verdict nothing measured.
+PIN_REF=refs/heads/no-such-merge-ref \
+  dispatch "version skew, pin UNREADABLE: warns by name, then refuses" 2 - - pull_request "$BASE_SHA"
+gate_says "could NOT read scripts/elixir-path-escape-check.sh out of" "  …names the pin read that failed"
+
 # THE FAILURE PATHS — the polarity that makes the shim safe.
 # An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
 # branch-sync PR nets to nothing and is perfectly legal, and the old ::error::
@@ -2083,6 +2731,243 @@ git -C "$DR" -c user.email=t@t -c user.name=t commit -qm orphan >/dev/null 2>&1
 dispatch "a base with no common ancestor" 1 - - pull_request "$BASE_SHA"
 gate_says "share NO common ancestor" "  …and names the condition, not a raw git fatal"
 gate_says "refusing a two-dot fallback" "  …and refuses the fallback that sweeps in the whole base"
+echo
+
+
+# ── case 11: a ZERO-CENSUS door must PROVE itself or the run refuses ─────────
+# The floor table cannot judge a zero population: `0 < 0` is false however
+# broken the door is, and twelve idioms sit at floor 0 AND population 0 on the
+# real tree. --check therefore proves each such door on a synthetic fixture
+# before it is allowed to succeed (ELIXIR_ESCAPE_IDIOM_FIXTURE).
+#
+# The proof runs on a SELF-SCAN, so these cases give it one: the script is
+# COPIED into a fixture tree's own scripts/ directory and run from there, which
+# makes that tree its checkout without ELIXIR_PATH_ESCAPE_ROOT. That is also
+# what lets the mutation arms below delete a door for real.
+echo "case 11: a zero-census idiom proves its detector on a synthetic case, or the run refuses"
+FX_PROVE="$TMPROOT/prove"
+make_fixture "$FX_PROVE"
+mkdir -p "$FX_PROVE/scripts"
+cp "$SCRIPT" "$FX_PROVE/scripts/elixir-path-escape-check.sh"
+
+out="$(bash "$FX_PROVE/scripts/elixir-path-escape-check.sh" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "case 11a: a self-scan of a clean fixture checkout is green"
+else
+  no "case 11a: the clean fixture self-scan redded — every arm below would prove nothing: $out"
+fi
+if has "$out" "detector PROVEN on a synthetic case"; then
+  ok "case 11a: the zero-census doors are PROVEN, not assumed"
+else
+  no "case 11a: no proof line — the zero-census arm never ran: $out"
+fi
+if has "$out" "idiom lib-rootattr: 0 live read(s), detector PROVEN"; then
+  ok "case 11a: lib-rootattr — the one idiom with no arm anywhere in this harness — is proven"
+else
+  no "case 11a: lib-rootattr is still unproven: $out"
+fi
+
+# --- 7b: a BLINDED door must be named, not counted -------------------------
+# The sigil door is the mutation subject: it is the one whose deletion leaves
+# every other tag intact, so a red here cannot be a collapse in disguise.
+MUT_PROVE="$FX_PROVE/scripts/elixir-path-escape-check.sh"
+cp "$SCRIPT" "$MUT_PROVE"
+perl -0pi -e "s/      case \"\\\$lit\" in\n        '~'\\*\\)/      case \"\\\$lit\" in\n        'ZZNEVERZZ'*)/" "$MUT_PROVE"
+if grep -q 'ZZNEVERZZ' "$MUT_PROVE"; then
+  ok "case 11b: the sigil-door mutation applied (the fixture really changed)"
+else
+  no "case 11b: the sigil-door mutation did NOT apply — this case would prove nothing"
+fi
+out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 11b: exit $rc (non-zero) with the sigil door blinded"
+else
+  no "case 11b: a blinded door still greened — the proof is inert: $out"
+fi
+if has "$out" "idiom 'test-sigildir' resolved 0 reads on this tree AND did not fire on its own synthetic fixture"; then
+  ok "case 11b: names the blind door and says its zero was never coverage"
+else
+  no "case 11b: did not name test-sigildir as BLIND: $out"
+fi
+if has "$out" "idiom test-rootpipe: 0 live read(s), detector PROVEN"; then
+  ok "case 11b: the OTHER zero-census doors still prove — the red is the sigil door, not a collapse"
+else
+  no "case 11b: every door went dark at once, so this red says nothing about the sigil door: $out"
+fi
+
+# --- 7c: a zero-census door with NO fixture must REFUSE --------------------
+# The predicate polices its own registry: adding a door and forgetting its
+# fixture cannot ship as silent coverage.
+cp "$SCRIPT" "$MUT_PROVE"
+perl -ni -e 'print unless m{^test-rootexec\tapi/test}' "$MUT_PROVE"
+if grep -qE '^test-rootexec\tapi/test' "$MUT_PROVE"; then
+  no "case 11c: the fixture-removal mutation did NOT apply — this case would prove nothing"
+else
+  ok "case 11c: the fixture row for test-rootexec is gone (the mutation applied)"
+fi
+out="$(bash "$MUT_PROVE" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 11c: exit $rc (non-zero) for a zero-census idiom with no fixture"
+else
+  no "case 11c: an unprovable door passed as coverage: $out"
+fi
+if has "$out" "idiom 'test-rootexec' resolved 0 reads and has NO entry in ELIXIR_ESCAPE_IDIOM_FIXTURE"; then
+  ok "case 11c: refuses by name rather than counting an unproven door"
+else
+  no "case 11c: no NO-FIXTURE refusal: $out"
+fi
+rm -rf "$FX_PROVE/scripts"
+echo
+
+# ── case 12: a read the scanner CANNOT resolve is said out loud ─────────────
+# task-c605ea24bbe5066c's original shape: `Path.expand("../../../" <> rel,
+# __DIR__)` where `rel` is not bound to anything the doors can reach. The
+# census cannot see it, and before this arm the output was identical to a tree
+# with no such read: silence, then OK.
+echo "case 12: an unresolvable path expression is REPORTED, and refuses when nothing binds it"
+FX_UNSEEN="$TMPROOT/unseen"
+make_fixture "$FX_UNSEEN"
+cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
+  def r, do: File.read!(Path.expand("../../../" <> mirror_rel(), __DIR__))
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "case 12a: exit $rc (non-zero) on a read the scanner cannot resolve"
+else
+  no "case 12a: an unresolvable read passed as OK — the original defect: $out"
+fi
+if has "$out" "CANNOT SEE this read: api/test/barkpark/unseen_test.exs"; then
+  ok "case 12a: names the file, the line and the operand it cannot resolve"
+else
+  no "case 12a: no CANNOT SEE line — the arm is silent on its own subject: $out"
+fi
+
+# --- 8b: the SAME expression, bound to a literal list, must NOT refuse -----
+# The FALSE-RED control. The shape-8 door resolves this one, so a red here
+# would be the gate refusing code it can in fact see — case 3j's lesson.
+cat >"$FX_UNSEEN/api/test/barkpark/unseen_test.exs" <<'EX'
+  @mirrors ["design/tokens.json"]
+  def r, do: Enum.map(@mirrors, fn mirror_rel -> File.read!(Path.expand("../../../" <> mirror_rel, __DIR__)) end)
+EX
+out="$(ELIXIR_PATH_ESCAPE_ROOT="$FX_UNSEEN" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "case 12b: the same expression bound to a literal list is green"
+else
+  no "case 12b: a read the doors DO resolve was refused — a false red: $out"
+fi
+if has "$out" "cannot see directly: api/test/barkpark/unseen_test.exs"; then
+  ok "case 12b: still REPORTED as unresolvable-at-the-read-site, not silently counted"
+else
+  no "case 12b: green and silent — the honesty half is missing: $out"
+fi
+rm -f "$FX_UNSEEN/api/test/barkpark/unseen_test.exs"
+echo
+
+# ── case NUL: `--match … --null` reads one path per NUL record ─────────────
+# (cch-bl-nul-native-path-matcher) The dispatchers now feed `git diff -z`
+# output straight in. A path holding a NEWLINE must reach the anchored ERE as
+# ONE record, in both directions; newline-mode stdin must keep working for
+# every other caller (scripts/which-gates.sh).
+echo "case NUL: --match test --null reads NUL-terminated records"
+NUL_IN="$TMPROOT/nul-match.in"
+printf '%s\0%s\0' docs/x.md "docs/cards/a"$'\n'"b.md" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: docs/cards/a<LF>b.md (family docs/cards/*.md) is IN the set -> true"
+else
+  no "--null: docs/cards/a<LF>b.md (family docs/cards/*.md) answered '$nul_out', wanted true"
+fi
+printf '%s\0' docs/x.md "api"$'\n'"foo/lib/x.ex" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "--null: api<LF>foo/lib/x.ex (the filing's example) is ONE record, not in the set -> false"
+else
+  no "--null: api<LF>foo/lib/x.ex (the filing's example) answered '$nul_out', wanted false — the matcher still splits records"
+fi
+printf '%s\0%s' docs/x.md "docs/cards/a"$'\n'"b.md" >"$NUL_IN"
+nul_out="$(bash "$SCRIPT" --match test --null <"$NUL_IN" 2>&1)" || true
+if [ "$nul_out" = true ]; then
+  ok "--null: an unterminated LAST record is still read"
+else
+  no "--null: an unterminated last record was dropped ('$nul_out')"
+fi
+nul_out="$(printf '%s\n%s\n' docs/x.md "docs/cards/a"$'\n'"b.md" | bash "$SCRIPT" --match test 2>&1)" || true
+if [ "$nul_out" = false ]; then
+  ok "control: the same bytes read as LINES answer false — the SPLIT: both halves miss a two-ended glob, which is the false skip --null closes"
+else
+  no "control: newline mode answered '$nul_out', wanted false"
+fi
+nul_rc=0
+nul_out="$(bash "$SCRIPT" --match test --nul </dev/null 2>&1)" || nul_rc=$?
+if [ "$nul_rc" -eq 2 ]; then
+  ok "--nul (a typo) is REFUSED with exit 2, never read as newline mode"
+else
+  no "--nul exited $nul_rc ('$nul_out'), wanted 2"
+fi
+echo
+
+# ── case ERE: the fork-free glob_to_ere emits the sed spelling's ERE ────────
+# task-94379622c9572d2c. glob_to_ere used to be three `printf | sed` forms;
+# it is now done in bash so `--match` stops paying two forks per glob. The
+# ERE is what elixir.yml dispatches on, so the two spellings must agree BYTE
+# FOR BYTE. The reference below is the sed spelling verbatim; the candidate
+# is extracted from the live script, so an edit to either side is measured.
+echo "case ERE: fork-free glob_to_ere == the sed spelling, byte for byte"
+ere_ref() {
+  local g="$1" body
+  case "$g" in
+    */'**')
+      body="${g%/**}"
+      printf '^%s(/|$)' "$(printf '%s' "$body" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ;;
+    *'*'*)
+      printf '^%s$' "$(printf '%s' "$g" |
+        sed -e 's/[][\\.^$+?(){}|]/\\&/g' \
+            -e 's/\*\*/@@ELIXIRDSTAR@@/g' \
+            -e 's,\*,[^/]*,g' \
+            -e 's,@@ELIXIRDSTAR@@,.*,g')"
+      ;;
+    *)
+      printf '^%s$' "$(printf '%s' "$g" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ;;
+  esac
+}
+ere_src="$(awk '/^ere_escape_var\(\) \{/{on=1} on{print} on && /^glob_to_ere\(\) \{/{last=1} last && /^\}/{exit}' "$SCRIPT")"
+if ! printf '%s\n' "$ere_src" | grep -q '^glob_to_ere() {'; then
+  no "could not extract ere_escape_var..glob_to_ere from $SCRIPT — the case would measure nothing"
+else
+  eval "$ere_src"
+  ere_globs="$(
+    {
+      bash "$SCRIPT" --print-set test
+      bash "$SCRIPT" --print-set test --literal
+      bash "$SCRIPT" --print-set compile
+      printf '%s\n' 'a/b' 'a/**' 'a/*.ex' 'a/**/*.ex' '**' '*' 'a**b' 'a/*/b/**' \
+        'x.y+z?(a){b}|c^d$e[f]g\h' 'weird\*star/**' 'dir with space/**' 'a/b-*.{sh,exs}'
+    } | LC_ALL=C sort -u
+  )"
+  ere_n=0
+  ere_bad=""
+  while IFS= read -r g; do
+    [ -n "$g" ] || continue
+    ere_n=$((ere_n + 1))
+    [ "$(ere_ref "$g")" = "$(glob_to_ere "$g")" ] || ere_bad="$ere_bad $g"
+  done <<EOF
+$ere_globs
+EOF
+  if [ -z "$ere_bad" ] && [ "$ere_n" -ge 100 ]; then
+    ok "all $ere_n globs (the real compile/test sets + 12 edge cases) emit the identical ERE"
+  else
+    no "$ere_n globs compared; differing:$ere_bad"
+  fi
+  # CAN IT RED: a candidate that forgets to escape `.` must be caught.
+  eval "$(printf '%s\n' "$ere_src" | sed "s/'\\.' | //")"
+  if [ "$(ere_ref 'a/b.ex')" != "$(glob_to_ere 'a/b.ex')" ]; then
+    ok "control: a candidate that does not escape '.' DIFFERS — the comparison can red"
+  else
+    no "control: the mutated candidate still matched; the comparison is vacuous"
+  fi
+fi
 echo
 
 echo "----"

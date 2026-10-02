@@ -22,6 +22,7 @@
 // (`div[data-bp-opaque]`) so it never contends with another node's parse rule.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { readerPaintClass } from "./embed-node.js";
 
 export const BP_OPAQUE_NODE_NAME = "bpOpaque";
 
@@ -91,9 +92,10 @@ export const Opaque = Node.create({
   // A read-only chip node-view (NO edit surface). The whole block rides on bpBlock;
   // PM never reads/writes inside this view.
   addNodeView() {
-    return ({ node }) => {
+    return ({ node, editor }) => {
       const block = (node.attrs && node.attrs.bpBlock) || {};
       const bpType = (node.attrs && node.attrs.bpType) || block.type || "block";
+      if (bpType === "note") return readonlyNoteView(node, editor);
 
       const dom = document.createElement("div");
       dom.className = "bp-canvas-readonly bp-canvas-opaque";
@@ -112,6 +114,7 @@ export const Opaque = Node.create({
           if (updated.type.name !== BP_OPAQUE_NODE_NAME) return false;
           const b = (updated.attrs && updated.attrs.bpBlock) || {};
           const t = (updated.attrs && updated.attrs.bpType) || b.type || "block";
+          if (t === "note") return false;
           chip.textContent = opaqueChipLabel(t);
           return true;
         },
@@ -125,4 +128,71 @@ export const Opaque = Node.create({
 // A calm read-only label for a carried block (e.g. "section", "composite", "codelist").
 function opaqueChipLabel(bpType) {
   return bpType ? `↪ ${bpType}` : "↪ block";
+}
+
+// Unsafe note carriers stay opaque. Only the canonical server producer supplies
+// their display; the source-bound paint never enters ProseMirror or save history.
+function readonlyNoteView(initialNode, editor) {
+  let node = initialNode;
+  let destroyed = false;
+  const dom = document.createElement("div");
+  dom.setAttribute("data-bp-opaque", "");
+  dom.setAttribute("data-bp-type", "note");
+  dom.setAttribute("data-bp-fleet-id", node.attrs.bpId || "");
+  dom.setAttribute("contenteditable", "false");
+  dom.setAttribute("data-test-id", "paper-opaque-note");
+  const body = document.createElement("div");
+  body.className = readerPaintClass(editor);
+  body.setAttribute("data-bp-fleet-body", "");
+  dom.appendChild(body);
+
+  const fallback = message => {
+    dom.className = "bp-canvas-readonly bp-canvas-opaque";
+    const chip = document.createElement("span");
+    chip.className = "bp-canvas-readonly-chip";
+    chip.textContent = message;
+    body.replaceChildren(chip);
+  };
+  const onPaint = event => {
+    // Cancel the hook's generic raw injection even for stale/unbound replies.
+    event.preventDefault();
+    const { html, sourceBlock } = event.detail || {};
+    if (!sourceBlock || sourceBlock.id !== node.attrs.bpId ||
+        !node.type.create({ ...node.attrs, bpBlock: sourceBlock }).eq(node)) return;
+    if (typeof html !== "string" || html.trim() === "") {
+      fallback("Note preview unavailable (read-only).");
+      return;
+    }
+    // This HTML comes from bp:block-html, never from a source-block HTML field.
+    body.innerHTML = html;
+    dom.className = "bp-canvas-note-preview";
+  };
+  // A conflict can cache the latest paired paint before this node exists or
+  // accepts its source. Replay through the existing hook after PM installs it.
+  const signalReady = () => queueMicrotask(() => {
+    if (!destroyed && dom.isConnected) {
+      dom.dispatchEvent(new CustomEvent("bp-ready", { bubbles: true, composed: true }));
+    }
+  });
+  body.addEventListener("bp-fleet-paint", onPaint);
+  fallback("Loading note preview (read-only)…");
+  signalReady();
+  return {
+    dom,
+    update(updated) {
+      if (updated.type.name !== BP_OPAQUE_NODE_NAME || updated.attrs.bpType !== "note") return false;
+      const changed = !updated.eq(node);
+      if (changed) fallback("Loading note preview (read-only)…");
+      node = updated;
+      dom.setAttribute("data-bp-fleet-id", node.attrs.bpId || "");
+      if (changed) signalReady();
+      return true;
+    },
+    stopEvent: () => true,
+    ignoreMutation: () => true,
+    destroy() {
+      destroyed = true;
+      body.removeEventListener("bp-fleet-paint", onPaint);
+    },
+  };
 }

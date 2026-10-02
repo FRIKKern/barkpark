@@ -111,6 +111,24 @@ defmodule BarkparkWeb.Studio.StudioLiveDatasetLeafValidateTest do
       assert assigns.dataset == "production"
     end
 
+    test "the redirect SAYS it swapped the dataset — never a silent landing in production", %{
+      conn: conn
+    } do
+      # Stranger walk (2026-09-30): a typo'd dataset in the URL opened production
+      # with no word of it. The flash names both the leaf asked for and the one
+      # opened, and it rides the redirect.
+      {:ok, _view, html} =
+        conn
+        |> live(scoped("/d/secret-ds/studio"))
+        |> follow_redirect(conn)
+
+      assert html =~ "no dataset named “secret-ds”",
+             "the landing page must name the dataset that does not exist"
+
+      assert html =~ "Studio opened “production”",
+             "the landing page must name the dataset it opened instead"
+    end
+
     test "a dataset the project DOES own stays on that leaf and renders", %{conn: conn} do
       # "staging" is one of blog's datasets → no redirect, leaf is authoritative.
       {:ok, view, html} = live(conn, scoped("/d/staging/studio"))

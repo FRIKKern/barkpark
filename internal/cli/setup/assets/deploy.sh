@@ -19,6 +19,56 @@ bp_git() {
 }
 # bp_git END
 
+# install_caddy_pkg BEGIN
+# ONE Caddy installer, byte-identical in deploy.sh (and its go:embedded copy),
+# deploy/azure-base-install.sh, and — extracted from the embedded deploy.sh at
+# run time — internal/cli/setup/caddy.go. internal/cli/setup/caddy_test.go reds
+# if the copies drift (task-8fcdc94b07a9dc60).
+#
+# 1. The upstream apt repo FIRST, so a box keeps apt-managed Caddy updates.
+# 2. If that repo cannot be used, the SAME upstream package from the pinned
+#    GitHub release, verified against a pinned sha512 before it is installed.
+#    Measured 2026-10-01: cloudsmith signs caddy/stable's InRelease with subkey
+#    531A6B20FA058A70, expired 2024-03-30, so `apt-get update` exits 100
+#    (EXPKEYSIG; upstream caddyserver/caddy issue 8095). The repo's source list is
+#    then REMOVED, so it cannot fail every later `apt-get update` on the box.
+# BARKPARK_CADDY_SKIP_APT=1 skips step 1 (the harness uses it to keep step 2
+# tested after the upstream repo recovers). Bumping the fallback: version plus
+# both sha512 lines, from that release's caddy_<v>_checksums.txt.
+install_caddy_pkg() {
+  local v=2.11.4 arch sum deb
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq || true
+  apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg curl ca-certificates >/dev/null || return 1
+  if [ "${BARKPARK_CADDY_SKIP_APT:-0}" != 1 ]; then
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --batch --yes --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
+    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
+    if apt-get update -qq && apt-get install -y -qq caddy; then
+      echo ">> caddy: installed from the upstream apt repo"
+      return 0
+    fi
+    echo "!! caddy: the upstream apt repo is unusable; removing its source list and installing the pinned v$v release .deb" >&2
+    rm -f /etc/apt/sources.list.d/caddy-stable.list
+  fi
+  arch="$(dpkg --print-architecture)"
+  case "$arch" in
+    amd64) sum=1c6f5404f3622e46d401d81f4af59677d46b886229c6694d60fd936b87c72d3bb5d1fcf42b55c8d555769fa75acf434ab618fc7e0df2c79cf8512ee580d38d06 ;;
+    arm64) sum=c43c62b7b583b31c682b3c3e1a31cf03759fbab01dcb0fc7d7fc3a5ce1bef43403583e26133920634a730a9fe31dae1386af4d3f9f3fc19fcc2c29ebf19de235 ;;
+    *) echo "!! caddy: no pinned release checksum for architecture $arch" >&2; return 1 ;;
+  esac
+  deb="/tmp/caddy_${v}_linux_${arch}.deb"
+  curl -fsSL --retry 3 -o "$deb" "https://github.com/caddyserver/caddy/releases/download/v${v}/caddy_${v}_linux_${arch}.deb" || return 1
+  if ! echo "$sum  $deb" | sha512sum -c - >/dev/null; then
+    echo "!! caddy: sha512 mismatch for $deb — refusing to install it" >&2
+    rm -f "$deb"
+    return 1
+  fi
+  apt-get install -y -qq "$deb" || return 1
+  rm -f "$deb"
+  echo ">> caddy: installed v$v from the pinned, sha512-verified release .deb"
+}
+# install_caddy_pkg END
+
 # Barkpark — Server deployment
 #
 # Installs Erlang, Elixir (via ASDF), Go, and PostgreSQL directly on the server.
@@ -257,6 +307,22 @@ if [ -n "${BARKPARK_PLUGINS+x}" ]; then
   fi
 fi
 
+# Declare the shape (docs/contracts/product-era.md): a box this script installs
+# is Solo unless the caller says otherwise. A BARKPARK_SHAPE the caller set is
+# persisted; otherwise an existing line is left alone (the Cloud provisioner
+# writes `cloud` over it at go-live, and a re-run must not undo that), and a
+# missing line gets `solo`. status.json reports it (Barkpark.Shape).
+if [ -n "${BARKPARK_SHAPE:-}" ]; then
+  echo ">> Persisting BARKPARK_SHAPE=$BARKPARK_SHAPE into .env"
+  if grep -q "^BARKPARK_SHAPE=" "$APP_DIR/.env"; then
+    sed -i "s|^BARKPARK_SHAPE=.*|BARKPARK_SHAPE=$BARKPARK_SHAPE|" "$APP_DIR/.env"
+  else
+    echo "BARKPARK_SHAPE=$BARKPARK_SHAPE" >> "$APP_DIR/.env"
+  fi
+elif ! grep -q "^BARKPARK_SHAPE=" "$APP_DIR/.env"; then
+  echo "BARKPARK_SHAPE=solo" >> "$APP_DIR/.env"
+fi
+
 # Persist BARKPARK_CLOUD_URL the same way — set-ness only, ${VAR+x} not
 # ${VAR:-}. This is the control-plane ORIGIN constant (https://barkpark.cloud)
 # that arms the "Log in with Barkpark Cloud" button on /login; runtime.exs reads
@@ -277,10 +343,11 @@ fi
 
 set -a; source "$APP_DIR/.env"; set +a
 
-# Admin token: on the `clean` profile, mint one now so the seed installs it and
-# we can print the exact `bp` login command at the end. The `demo` profile
-# (default) seeds the shared dev token instead. Never overrides a caller-set one.
-SEED_PROFILE="${BARKPARK_SEED_PROFILE:-demo}"
+# Admin token: on the `clean` profile (the default), mint one now so the seed
+# installs it and we can print the exact `bp` login command at the end. The
+# `demo` profile, only when asked for by name, seeds the shared dev token
+# instead. Never overrides a caller-set one.
+SEED_PROFILE="${BARKPARK_SEED_PROFILE:-clean}"
 ADMIN_TOKEN=""
 if [ "$SEED_PROFILE" = "clean" ] && [ -z "${BARKPARK_SEED_ADMIN_TOKEN:-}" ]; then
   ADMIN_TOKEN="bp_admin_$(openssl rand 24 | base64 | tr '+/' '-_' | tr -d '=')"
@@ -343,12 +410,91 @@ ufw --force enable
 # It used to be taken and discarded: 30 failed probes fell through silently and
 # the "Barkpark is running!" banner printed unconditionally, exit 0. Never let
 # the banner outrun the probe again.
+# ---- 429 backoff, INLINED (task-4526610517915589) ---------------------------
+# WHY THE SHARED HELPER scripts/lib/bp-curl.sh IS NOT SOURCED HERE.
+# BOTH copies of this file — the repo-root deploy.sh and the byte-identical
+# go:embedded copy at internal/cli/setup/assets/deploy.sh that the `bp` binary
+# streams into `ssh <host> '<env> bash -s'` (internal/cli/setup/deploy.go, fed
+# from assets.DeployScript) — arrive on the REMOTE over STDIN. The root copy's
+# own documented usage is `ssh root@VPS 'bash -s' < deploy.sh` (line 10). So in
+# both cases $0 is `bash`, BASH_SOURCE names no file, and there is no sibling
+# path to lib/ to source from. The only bp-curl.sh that can exist on the box is
+# whichever one step 1's clone of $REPO happened to bring — a version neither
+# this script nor the binary shipping it ever chose — and a bare `.` on a
+# missing file under `set -euo pipefail` would abort a PROVISIONING run at step
+# 11, a far worse outcome than an unhandled 429 on a localhost boot probe. So
+# the bounded loop is inlined here instead, keeping bp_curl_body's two
+# load-bearing properties: the status is captured BEFORE any branch, and the
+# wait comes FROM THE RESPONSE rather than a hardcoded sleep.
+#
+# SUPERSEDES the guarded `. "$APP_DIR/scripts/lib/bp-curl.sh"` + no-backoff
+# `bp_curl_body() { curl -fsS "$@"; }` degrade shim that PR 17592
+# (task-90059c5c680f6665) put in the ROOT copy only. That arm is deliberately
+# NOT carried forward: its fallback silently ran the probe with NO backoff at
+# all, and it could only ever have reached the shared helper on a box whose
+# $REPO clone happened to carry it. The inline loop is unconditional and has
+# no external dependency, so the two copies can be byte-identical — which is
+# what `make cli-assets-check` and scripts/doctor.sh require. scripts/lib/bp-curl.sh
+# remains canonical for scripts that genuinely run FROM a checkout.
+HEALTH_429_ATTEMPTS="${HEALTH_429_ATTEMPTS:-4}"       # tries within ONE probe, first included
+HEALTH_429_MAX_WAIT_S="${HEALTH_429_MAX_WAIT_S:-5}"   # a longer ask is a quota, not a blip
+
+# bp_health_probe <url> — one health measurement, with 429 backed off INSIDE it
+# so backpressure is never counted as one of the $HEALTH_ATTEMPTS failed probes.
+# Exit semantics are `curl -fs`'s, so the caller below converts 1:1: 0 only on a
+# 2xx, 22 on any other status, curl's own rc on a transport failure, and nothing
+# on stdout. That -f semantics is the point of the probe — a booting or crashed
+# endpoint answering 500 is NOT read as healthy; the measurement is a good
+# answer, not merely an open socket.
+bp_health_probe() {
+  local url="$1" hdr attempt=1 code rc wait
+  hdr="$(mktemp "${TMPDIR:-/tmp}/bp-health.XXXXXX")" || return 1
+  while :; do
+    rc=0
+    # -w/-D, not -f: -f collapses every status into exit 22, which would make a
+    # 429 branch unreachable. Capture first, branch second.
+    code="$(curl -sS -D "$hdr" -w '%{http_code}' -o /dev/null "$url" 2>/dev/null)" || rc=$?
+    if [ "$rc" != 0 ]; then rm -f "$hdr"; return "$rc"; fi
+    case "$code" in
+      429) : ;;
+      2??) rm -f "$hdr"; return 0 ;;
+      *)   rm -f "$hdr"; return 22 ;;
+    esac
+    # Retry-After as the server sent it; absent or unparseable falls back to 1s.
+    # (Header only — this probe discards the body, so the envelope's nested
+    # error.details.retry_after that bp-curl.sh also reads is not available.)
+    wait="$(awk 'tolower($1)=="retry-after:"{x=$2;gsub(/\r/,"",x);v=x} END{if(v!="")print v}' "$hdr" 2>/dev/null)"
+    case "$wait" in ''|*[!0-9]*) wait=1 ;; esac
+    if [ "$wait" -gt "$HEALTH_429_MAX_WAIT_S" ]; then
+      echo "   rate limited (429): the server asked for ${wait}s, longer than this probe will ever wait (${HEALTH_429_MAX_WAIT_S}s) — reported unslept" >&2
+      rm -f "$hdr"; return 22
+    fi
+    if [ "$attempt" -ge "$HEALTH_429_ATTEMPTS" ]; then
+      echo "   rate limited (429): the ${HEALTH_429_ATTEMPTS}-attempt cap for one probe is spent" >&2
+      rm -f "$hdr"; return 22
+    fi
+    echo "   rate limited (429) — BACKPRESSURE, not a fault; waiting ${wait}s and retrying (attempt ${attempt} of ${HEALTH_429_ATTEMPTS})" >&2
+    sleep "$wait"
+    attempt=$((attempt + 1))
+  done
+}
+
 echo ">> Waiting for API on localhost:$APP_PORT..."
 HEALTHY=0
 for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
-  # -f so a non-2xx (a booting or crashed endpoint answering 500) is NOT read
-  # as healthy: the measurement is a good answer, not merely an open socket.
-  if curl -fs "http://localhost:$APP_PORT/api/schemas" > /dev/null 2>&1; then
+  # No 2>&1 here: the 429 backoff lines above are the only stderr this can
+  # produce, and swallowing them is how a rate limit became invisible.
+  #
+  # /status.json, NOT /api/schemas: the legacy route is mounted through
+  # BarkparkWeb.Plugs.LegacyDeprecation and carries a published
+  # `sunset: Wed, 31 Dec 2026 23:59:59 GMT`, and this loop gates on the STATUS
+  # CODE, so on removal day a healthy box would report "INSTALLED but NOT
+  # ANSWERING" at the end of every provisioning run. /status.json is
+  # `pipe_through(:api)` only, needs no token, and is strictly stronger:
+  # Status.health/0 runs a bare Repo.all/1, so a dead DB is a 500, not a 200.
+  # The repo-root deploy.sh and the VENDORED copy bp ships to every provisioned
+  # box are byte-identical, so this retarget (PR 17819) is live in both.
+  if bp_health_probe "http://localhost:$APP_PORT/status.json" > /dev/null; then
     echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
     HEALTHY=1
     break
@@ -367,15 +513,13 @@ if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; th
     echo ">> TLS: Caddy already installed — leaving its config untouched"
   else
     echo ">> TLS: installing Caddy for $DOMAIN..."
-    apt-get install -y -qq debian-keyring debian-archive-keyring apt-transport-https gnupg >/dev/null 2>&1
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-    curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' > /etc/apt/sources.list.d/caddy-stable.list
-    apt-get update -qq && apt-get install -y -qq caddy
+    install_caddy_pkg || { echo "!! TLS: Caddy install failed (apt repo AND pinned release); see above" >&2; exit 1; }
     cat > /etc/caddy/Caddyfile <<CADDYEOF
 $DOMAIN {
 	reverse_proxy localhost:$APP_PORT
-	handle_errors {
+	handle_errors 502 503 504 {
 		header Retry-After "15"
+		header Content-Type "text/html; charset=utf-8"
 		respond 503 {
 			body <<BARKPARK_MAINTENANCE
 <!doctype html>
@@ -411,7 +555,7 @@ fi
 echo "============================================"
 echo ""
 if [ "$HEALTHY" != "1" ]; then
-  echo "  The API never answered http://localhost:$APP_PORT/api/schemas —"
+  echo "  The API never answered http://localhost:$APP_PORT/status.json —"
   echo "  $HEALTH_ATTEMPTS probes over ~$((HEALTH_ATTEMPTS * HEALTH_INTERVAL))s, every one failed."
   echo "  Packages, database, secrets and the systemd unit ARE installed; the"
   echo "  URLs below are where Barkpark will answer once the service comes up."
@@ -419,7 +563,7 @@ if [ "$HEALTHY" != "1" ]; then
   echo "  Diagnose on this box:"
   echo "    journalctl -u barkpark -n 200 --no-pager"
   echo "    systemctl status barkpark"
-  echo "    curl -v http://localhost:$APP_PORT/api/schemas"
+  echo "    curl -v http://localhost:$APP_PORT/status.json"
   echo ""
   echo "  Port checked: $APP_PORT (from PORT= in $APP_DIR/.env)"
   echo ""

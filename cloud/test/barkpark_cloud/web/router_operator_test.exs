@@ -198,6 +198,55 @@ defmodule BarkparkCloud.Web.RouterOperatorTest do
     end
   end
 
+  # dr-bl-w8-census-403-cannot-say-the-list-is-empty — THE TWO 403s ARE
+  # DIFFERENT FACTS AND A CENSUS READER MUST BE ABLE TO SAY WHICH. Before this
+  # split, "no operators are configured anywhere" and "the list is populated and
+  # you are not on it" emitted BYTE-IDENTICAL bodies, so the refusal read as an
+  # accusation against the caller when the true state was an operator
+  # misconfiguration. Both bodies are asserted here SIDE BY SIDE, off the same
+  # user and the same route, so the only variable is the allowlist.
+  test "the unconfigured 403 names the empty allowlist; the populated-list 403 is unchanged" do
+    {user, _team} = user_with_team()
+    token = session_token(user)
+
+    # ARM A — allowlist has population ZERO (nobody on earth could look).
+    Application.put_env(:barkpark_cloud, :platform_admin_emails, [])
+    assert Notifications.platform_admin_emails() == []
+    unconfigured = call(:get, "/v1/operator/autoupdate", token)
+    assert unconfigured.status == 403
+    unconfigured_body = json_body(unconfigured)
+
+    # ARM B — allowlist is POPULATED (with someone else) and this caller is not
+    # on it. The control: a registered OTHER user, so the list truly resolves.
+    other = user_fixture()
+    Application.put_env(:barkpark_cloud, :platform_admin_emails, [other.email])
+    assert Notifications.platform_admin_emails() == [other.email]
+    not_listed = call(:get, "/v1/operator/autoupdate", token)
+    assert not_listed.status == 403
+    not_listed_body = json_body(not_listed)
+
+    # THE PROPERTY: the two refusals are DISTINGUISHABLE to a census reader.
+    refute unconfigured_body == not_listed_body
+
+    # The unconfigured arm names the empty allowlist, ADDITIVELY.
+    assert unconfigured_body == %{
+             "error" => "forbidden",
+             "required" => "platform_operator",
+             "scope" => "platform",
+             "allowlist" => "unconfigured"
+           }
+
+    # The populated-list arm's contract is untouched — same status, same key set.
+    assert not_listed_body == %{
+             "error" => "forbidden",
+             "required" => "platform_operator",
+             "scope" => "platform"
+           }
+
+    # Neither refusal moved the kill switch.
+    assert Registry.autoupdate_halted?() == false
+  end
+
   ## 2. autoupdate kill-switch read/toggle over the SESSION seam
 
   test "operator GET reflects state; halt/resume toggle it" do

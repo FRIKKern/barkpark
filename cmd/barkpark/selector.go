@@ -176,6 +176,8 @@ func (m *model) applyScope(ws, pr, dsName string) {
 	m.ds.Dataset = dsName
 
 	buildDesk(m.ds)
+	// Every cached page answered for the OLD dataset.
+	m.paperDocs.invalidate()
 	m.path = nil
 	m.selectedDoc = nil
 	m.editorSchema = nil

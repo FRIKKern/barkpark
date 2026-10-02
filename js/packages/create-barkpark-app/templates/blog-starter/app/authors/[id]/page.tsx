@@ -1,20 +1,21 @@
 import type { Metadata } from 'next'
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
-import { getDocById, getDocs } from '../../../lib/barkpark'
+import { POST_ORDER, getAllDocs, getDocById } from '../../../lib/barkpark'
+import { slugOf, type SlugValue } from '../../../lib/slug'
 
 interface Author {
   _id: string
   name: string
   bio?: string
-  slug?: { current: string }
+  slug?: SlugValue
   twitter?: string
 }
 
 interface Post {
   _id: string
   title: string
-  slug?: { current: string }
+  slug?: SlugValue
   excerpt?: string
   publishedAt?: string
   author?: { _ref: string }
@@ -45,7 +46,9 @@ export default async function AuthorPage({
   const author = await getDocById<Author>('author', id)
   if (!author) notFound()
 
-  const allPosts = await getDocs<Post>('post')
+  // Every post, not one page: getDocs reads the query route's default page
+  // (100 rows), so filtering it here dropped every match past the first 100.
+  const allPosts = await getAllDocs<Post>('post', POST_ORDER)
   const posts = allPosts.filter((p) => p.author?._ref === id)
 
   return (
@@ -67,7 +70,7 @@ export default async function AuthorPage({
         ) : (
           <ul className="space-y-3">
             {posts.map((post) => {
-              const slug = post.slug?.current ?? post._id
+              const slug = slugOf(post.slug) ?? post._id
               return (
                 <li key={post._id}>
                   <Link href={`/posts/${slug}`} className="underline">

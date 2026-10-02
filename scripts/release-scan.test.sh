@@ -552,6 +552,143 @@ assert_eq "H4 …with commits[] a FLAT array of objects (--slurpfile needs \$com
 assert_eq "H5 …and commits[] length matches commit_count (no silent truncation)" \
   "$COMMITS" "$(jq_of "$out_h" '.commits | length')"
 
+# ── J. the WALK, not the store flag: an off-HEAD graft is NOT truncation ─────
+# G above proves the guard still fires on a real `--depth 1` clone. THIS block
+# pins the other direction, the one the store-level flag got WRONG.
+#
+# `git rev-parse --is-shallow-repository` answers about the OBJECT STORE, which
+# is repository-wide. One off-HEAD `--depth` fetch sets it for a checkout whose
+# HEAD history reaches the root — measured on /Volumes/SATECHI/github/barkpark
+# (5132 commits from HEAD, one root, the sole .git/shallow graft not an ancestor
+# of HEAD), where release-scan FATALed at exit 3 on a history it was holding in
+# full and advertised `git fetch --unshallow`, a remedy describing nothing that
+# was wrong.
+#
+# THE FIXTURE BUILDS THAT SHAPE, it does not simulate it: a full clone, then a
+# real commit object written with `git commit-tree` and left UNREFERENCED, and
+# that sha alone in `.git/shallow`. J0 asserts the fixture is the shape it
+# claims (store-shallow TRUE, graft NOT an ancestor of HEAD, history still
+# reaching the root) before any behavioural J result is read — a fixture whose
+# graft accidentally landed on HEAD's history would make J1-J3 pass by testing
+# the G case again.
+#
+# J5 is the MUTATION: a copy of the script with the walk predicate swapped back
+# for the store-level flag must FATAL on this same fixture. Without it, J1-J3
+# would still pass against a release-scan.sh that never looked at a graft, which
+# is precisely the simplification this block exists to red.
+echo "── J. store-shallow but the graft is OFF HEAD: a complete walk, scanned ──"
+OFFHEAD="$TMP/offhead"
+git clone -q "$ORIGIN" "$OFFHEAD" >>"$GITLOG" 2>&1
+install_scan "$OFFHEAD"
+OFF_SHA="$(git -C "$OFFHEAD" commit-tree -m "off-head graft specimen" "$(git -C "$OFFHEAD" rev-parse 'HEAD^{tree}')" 2>>"$GITLOG")"
+printf '%s\n' "$OFF_SHA" > "$OFFHEAD/.git/shallow"
+
+j0_fails_before=$fails
+assert_eq "J0a the fixture's object store now reports SHALLOW" \
+  "true" "$(git -C "$OFFHEAD" rev-parse --is-shallow-repository 2>/dev/null)"
+assert_eq "J0b …the graft is a real object" \
+  "commit" "$(git -C "$OFFHEAD" cat-file -t "$OFF_SHA" 2>/dev/null)"
+assert_eq "J0c …and it is NOT an ancestor of HEAD (else this is just the G case)" \
+  "no" "$(git -C "$OFFHEAD" merge-base --is-ancestor "$OFF_SHA" HEAD >/dev/null 2>&1 && echo yes || echo no)"
+assert_eq "J0d …while HEAD's own history is still whole (3 commits, as seeded)" \
+  "3" "$(git -C "$OFFHEAD" rev-list --count HEAD 2>/dev/null)"
+if [ "$fails" -ne "$j0_fails_before" ]; then
+  echo "  !! J FIXTURE IS BROKEN — read every J1-J5 result below as 'fixture broken',"
+  echo "     not as a release-scan.sh defect. git construction log:"
+  sed 's/^/       /' "$GITLOG"
+fi
+
+out_j="$(GH_FIXTURE_DIR="$FE" bash "$OFFHEAD/scripts/release-scan.sh" origin/main 2>/dev/null)"; rc_j=$?
+assert_eq "J1 an off-HEAD graft does NOT truncate the walk: exit 0, not the FATAL 3" "0" "$rc_j"
+assert_eq "J2 …and the output does not stamp a complete read as shallow:true" \
+  "false" "$(jq_of "$out_j" '.shallow')"
+assert_eq "J3 …and the range it reports is the real one (2 commits since v0.1.0)" \
+  "2" "$(jq_of "$out_j" '.commit_count')"
+
+# J4-J6. FAIL CLOSED, driven through a `git` shim.
+#
+# WHY A SHIM AND NOT chmod 000 ON THE GRAFT LIST: measured here, git reads an
+# unreadable `.git/shallow` as ABSENT and answers `--is-shallow-repository`
+# FALSE, so the walk predicate returns "complete" and never reaches its
+# fail-closed arms — a chmod fixture passes at exit 0 while testing nothing.
+# The arms are reachable when the store flag says `true` and the graft list then
+# cannot be located or read (a permission or GC race between the two calls, or a
+# git that answers differently), so the fixture makes the flag say `true`
+# directly. Everything else passes through to the real git: the shim forges one
+# answer, not a repository.
+GITSHIM="$TMP/gitshim"
+mkdir -p "$GITSHIM"
+REAL_GIT="$(command -v git)"
+cat >"$GITSHIM/git" <<SHIM
+#!/usr/bin/env bash
+set -uo pipefail
+case "\$*" in
+  "rev-parse --is-shallow-repository")
+    if [ -n "\${FAKE_IS_SHALLOW:-}" ]; then printf '%s\n' "\$FAKE_IS_SHALLOW"; exit 0; fi ;;
+  "rev-parse --git-common-dir")
+    if [ -n "\${FAKE_NO_COMMON_DIR:-}" ]; then exit 0; fi ;;
+esac
+exec "$REAL_GIT" "\$@"
+SHIM
+chmod +x "$GITSHIM/git"
+
+# The deep clone from G is a full, un-grafted repo with NO .git/shallow: with
+# the flag forced true, the graft list is missing and nothing can be tested.
+j4_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j4.err" || j4_rc=$?
+assert_eq "J4a store-shallow with an unreadable/missing graft list FAILS CLOSED (exit 3)" "3" "$j4_rc"
+if grep -qF "fails CLOSED" <"$TMP/j4.err"; then
+  pass "J4b …and the refusal says it is failing closed, not that HEAD is grafted"
+else
+  fail "J4b the refusal does not name the fail-closed reason"; sed 's/^/    stderr: /' "$TMP/j4.err"
+fi
+
+j5_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=maybe GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j5.err" || j5_rc=$?
+assert_eq "J4c a non-true/false answer from git is not read as 'not shallow' (exit 3)" "3" "$j5_rc"
+
+j6_rc=0
+PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true FAKE_NO_COMMON_DIR=1 GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main >/dev/null 2>"$TMP/j6.err" || j6_rc=$?
+assert_eq "J4d a missing --git-common-dir cannot locate the graft list either (exit 3)" "3" "$j6_rc"
+
+# …and the documented escape still works on every fail-closed arm, because
+# release-scan's truncated commits[] is still draft material (that is why this
+# script has an override and pds-record-parity.sh does not).
+j7_rc=0
+out_j7="$(PATH="$GITSHIM:$PATH" FAKE_IS_SHALLOW=true RELEASE_SCAN_ALLOW_SHALLOW=1 GH_FIXTURE_DIR="$FE" \
+  bash "$DEEP/scripts/release-scan.sh" origin/main 2>/dev/null)" || j7_rc=$?
+assert_eq "J4e RELEASE_SCAN_ALLOW_SHALLOW=1 still downgrades a fail-closed verdict (exit 0)" "0" "$j7_rc"
+assert_eq "J4f …and that output declares shallow:true, never a silent green" \
+  "true" "$(jq_of "$out_j7" '.shallow')"
+
+# J5. MUTATION. Swap the walk predicate for the store-level flag — the exact
+# simplification a future reader might call a cleanup — and J1 must red.
+MUTANT="$TMP/mutant"
+git clone -q "$ORIGIN" "$MUTANT" >>"$GITLOG" 2>&1
+install_scan "$MUTANT"
+printf '%s\n' "$(git -C "$MUTANT" commit-tree -m "off-head graft specimen" "$(git -C "$MUTANT" rev-parse 'HEAD^{tree}')" 2>>"$GITLOG")" > "$MUTANT/.git/shallow"
+python3 - "$MUTANT/scripts/release-scan.sh" <<'MUTATE'
+import sys
+p = sys.argv[1]
+s = open(p).read()
+# The store-level predicate, as it stood before this fix: the walk is "complete"
+# iff the object store is not shallow. Nothing else about the mutant changes.
+s = s.replace('walk_truncation\nif [ "$WALK_STATE" != "complete" ]; then',
+              'WALK_STATE="$( [ "$(git rev-parse --is-shallow-repository 2>/dev/null)" = false ] '
+              '&& echo complete || echo truncated )"\nif [ "$WALK_STATE" != "complete" ]; then', 1)
+open(p, "w").write(s)
+MUTATE
+mut_rc=0
+GH_FIXTURE_DIR="$FE" bash "$MUTANT/scripts/release-scan.sh" origin/main >/dev/null 2>&1 || mut_rc=$?
+if [ "$mut_rc" = "3" ]; then
+  pass "J5 MUTATION: keying on the store flag alone FATALs this fixture (exit 3) — J1 is load-bearing"
+else
+  fail "J5 MUTATION did not red: the store-flag predicate exits $mut_rc on the off-HEAD fixture, so J1 proves nothing"
+fi
+
 # ── I. optional live re-record check (anti-rot for the recorded payloads) ────
 if [ "${RELEASE_SCAN_TEST_LIVE:-0}" = "1" ]; then
   echo "── I. live replay of the two pinned shas against the real GitHub API ──"

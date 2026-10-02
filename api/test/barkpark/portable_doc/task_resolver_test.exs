@@ -2,6 +2,7 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
   # Pure block-transform + field-mapper — no DB, async safe.
   use ExUnit.Case, async: true
 
+  alias Barkpark.Content.DraftId
   alias Barkpark.PortableDoc.TaskResolver
 
   # A stub fetcher: echoes deterministic rows so we test the TRAVERSAL, not a DB.
@@ -297,6 +298,93 @@ defmodule Barkpark.PortableDoc.TaskResolverTest do
       assert TaskResolver.apply_preview(block, %{"block_id" => "b1", "error" => true}) == block
       assert TaskResolver.apply_preview(block, nil) == block
       assert TaskResolver.apply_preview(block, %{}) == block
+    end
+  end
+
+  describe "row_from_task/1 — the drafts. discriminator (PDS-D749)" do
+    # Every id spelling worth asking about, INCLUDING the near-misses that must
+    # NOT read as drafts. The arm below is a PREDICATE over this table, not a
+    # pinned true/false pair: it asserts the row's marker agrees with
+    # `DraftId.draft?/1` — the ONE owner of the prefix rule — for each spelling.
+    # Teach DraftId a new spelling and this test follows it without an edit;
+    # let the projection drift from DraftId and it reds on the spelling that
+    # diverged, naming it.
+    @spellings [
+      "task-abc",
+      "drafts.task-abc",
+      "drafts.drafts.task-abc",
+      "draftstask-abc",
+      "draft.task-abc",
+      "drafts",
+      "drafts.",
+      "Drafts.task-abc",
+      "x.drafts.task-abc",
+      ""
+    ]
+
+    test "the row's draft marker agrees with DraftId.draft?/1 on every spelling" do
+      # Floor: the table must actually exercise BOTH verdicts, or a projection
+      # hardwired to one of them would pass vacuously.
+      assert Enum.any?(@spellings, &DraftId.draft?/1), "no draft spelling in the table"
+
+      assert Enum.any?(@spellings, &(not DraftId.draft?(&1))),
+             "no published spelling in the table"
+
+      for id <- @spellings do
+        row = TaskResolver.row_from_task(%{"title" => "t", "doc_id" => id})
+
+        expected = if DraftId.draft?(id), do: true, else: nil
+
+        assert Map.get(row, "draft") == expected,
+               "doc_id #{inspect(id)}: DraftId.draft? = #{DraftId.draft?(id)} " <>
+                 "but the row projected draft = #{inspect(Map.get(row, "draft"))}"
+      end
+    end
+
+    test "reads the atom-keyed render_doc shape too" do
+      # `TasksController.Params.render_doc/2` emits `doc_id:` as an ATOM key; a
+      # paper block resolved off that shape must still carry the marker.
+      assert TaskResolver.row_from_task(%{title: "t", doc_id: "drafts.task-abc"})["draft"] == true
+      refute Map.has_key?(TaskResolver.row_from_task(%{title: "t", doc_id: "task-abc"}), "draft")
+    end
+
+    test "a published row is BYTE-STABLE — the key set is exactly what it was" do
+      # The QUIET arm. Painters, the shared component-parity goldens and the JS
+      # twin emitter all key off this projection; the draft marker must be
+      # additive for a DRAFT row only. A published row's key set may not grow.
+      published =
+        TaskResolver.row_from_task(%{
+          "title" => "t",
+          "doc_id" => "task-abc",
+          "lifecycle_status" => "in_progress",
+          "priority" => 2,
+          "assignee" => "opus",
+          "labels" => ["wave:5"],
+          "criteria_progress" => %{"met" => 1, "total" => 3}
+        })
+
+      assert published |> Map.keys() |> Enum.sort() ==
+               ~w(criteria phase priority status title worker)
+
+      # Same doc, draft spelling: the ONLY difference is the added marker.
+      draft =
+        TaskResolver.row_from_task(%{
+          "title" => "t",
+          "doc_id" => "drafts.task-abc",
+          "lifecycle_status" => "in_progress",
+          "priority" => 2,
+          "assignee" => "opus",
+          "labels" => ["wave:5"],
+          "criteria_progress" => %{"met" => 1, "total" => 3}
+        })
+
+      assert Map.delete(draft, "draft") == published
+      assert draft["draft"] == true
+    end
+
+    test "a doc with no doc_id at all carries no marker (legacy callers)" do
+      refute Map.has_key?(TaskResolver.row_from_task(%{"title" => "t"}), "draft")
+      refute Map.has_key?(TaskResolver.row_from_task(%{"title" => "t", "doc_id" => nil}), "draft")
     end
   end
 

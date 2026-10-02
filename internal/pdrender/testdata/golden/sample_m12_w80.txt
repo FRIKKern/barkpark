@@ -15,6 +15,7 @@ ramp
 Eighth-block ladder (ascending)                                                 
 ▁▂▃▄▅▆▇█                                                                        
                                                                                 
+                                                                                
 1.24M                                                                           
 Tokens                                                                          
 ▁▁▃▂▆▇█                                                                         

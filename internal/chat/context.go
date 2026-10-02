@@ -7,7 +7,6 @@ import (
 	"os"
 	"os/exec"
 	"strings"
-	"sync"
 	"time"
 )
 
@@ -196,25 +195,19 @@ var localProbe = LocalProbe{Hostname: os.Hostname, RepoRoot: gitRepoRoot}
 // unknown is a thing the surface can say.
 const gitTimeout = 3 * time.Second
 
-var (
-	repoRootOnce sync.Once
-	repoRootVal  string
-	repoRootErr  error
-)
-
-// gitRepoRoot is the process-wide memoised repo-root probe. The working
-// directory does not move under a running `bp chat`, so the answer is resolved
-// once and shared — one exec per process, not one per model.
+// gitRepoRoot probes the working directory's repo root. It is NOT memoised:
+// the band re-reads its context after a stream reconnect and a session open
+// (model.go refreshContextCmd), and a memo would answer every re-read with the
+// launch-time root — the directory can stop being (or become) a work tree, or
+// vanish, under a long-running `bp chat`. The cost is one bounded exec per
+// resolution, and resolutions happen at launch, reconnect and session open,
+// never per frame.
 func gitRepoRoot() (string, error) {
-	repoRootOnce.Do(func() {
-		dir, err := os.Getwd()
-		if err != nil {
-			repoRootErr = err
-			return
-		}
-		repoRootVal, repoRootErr = probeGitRepoRootIn(dir)
-	})
-	return repoRootVal, repoRootErr
+	dir, err := os.Getwd()
+	if err != nil {
+		return "", err
+	}
+	return probeGitRepoRootIn(dir)
 }
 
 // probeGitRepoRootIn asks git for dir's work-tree root. It separates the two

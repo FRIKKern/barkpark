@@ -24,7 +24,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
   SCOPE NOTE (shared test database): every row is a pure function call on a
   literal term. Nothing touches `Repo`, so no other agent's rows can reach it.
   """
-  use ExUnit.Case, async: false
+  use ExUnit.Case, async: true
 
   import ExUnit.CaptureLog
 
@@ -53,6 +53,12 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
     [
       {"not_found", {:error, :not_found}, "not_found", 404, []},
       {"not_found/message", {:error, {:not_found, "secret not found"}}, "not_found", 404, []},
+      {"validation_failed/subject",
+       {:error, {:validation_failed, "query parameter order", %{"order" => ["bad"]}, "Fix it."}},
+       "validation_failed", 422, [:details]},
+      {"not_found/message+hint",
+       {:error, {:not_found, "schema not found", hint: "Check the schema name."}}, "not_found",
+       404, []},
       {"not_found/coded", {:error, {:not_found, "webhook_not_found", "no such webhook"}},
        "webhook_not_found", 404, []},
       {"unauthorized", {:error, :unauthorized}, "unauthorized", 401, []},
@@ -69,6 +75,13 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
+      # Reversible workspace archive (task-55474a106554e65a): 409 on both the
+      # read and the write refusal; the slug arm names WHICH workspace.
+      {"workspace_archived", {:error, :workspace_archived}, "workspace_archived", 409, []},
+      {"workspace_archived/slug", {:error, {:workspace_archived, "acme"}}, "workspace_archived",
+       409, [:details]},
+      {"default_workspace_not_archivable", {:error, :default_workspace_not_archivable},
+       "default_workspace_not_archivable", 409, []},
       # The unscoped-WRITE ruling (task-6fa023cdabdc5f6a): 422, well-formed but
       # unactionable as sent. The list arm carries the writable slugs.
       {"workspace_scope_required", {:error, :workspace_scope_required},
@@ -94,7 +107,6 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},
-      {"schema_unknown", {:error, :schema_unknown}, "schema_unknown", 404, []},
       {"rev_mismatch", {:error, :rev_mismatch}, "rev_mismatch", 409, []},
       {"rev_mismatch/expected-actual", {:error, {:rev_mismatch, %{expected: "a", actual: "b"}}},
        "precondition_failed", 412, [:details]},
@@ -114,6 +126,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"malformed_blocks",
        {:error, {:malformed_blocks, %{"blocks" => ["blocks[0] must be an object"]}}}, "malformed",
        400, [:details]},
+      # An object naming no known mutation verb (task-2f601b4f24e9af66): still
+      # `malformed` 400, now naming the received keys and the accepted verbs.
+      {"unknown_mutation_verb",
+       {:error, {:unknown_mutation_verb, ["frobnicate"], ["create", "patch"]}}, "malformed", 400,
+       [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",
@@ -146,6 +163,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # before resending). Pinned here so a later status edit to either transient
       # arm cannot move the other one silently.
       {"connection_unavailable", {:error, {:connection_unavailable, "tcp recv: closed"}},
+       "storage_unavailable", 503, [:reason]},
+      # Write admission (Barkdown C083): a dedicated instance holding writes for
+      # a library switch. Same public transient code and 503; `reason` carries
+      # the admission state so a client can tell a hold from a media fault.
+      {"write_admission_closed", {:error, {:write_admission, :admission_closed}},
        "storage_unavailable", 503, [:reason]},
       # The READ twin (task-5a7f007878b56e6a). Same public code, same 503, same
       # `reason` — a DIFFERENT hint, because the write arm above tells the

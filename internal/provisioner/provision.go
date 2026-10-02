@@ -500,6 +500,16 @@ func ProvisionWith(ctx context.Context, seams Seams, job JobSpec) (string, strin
 		token:        live.Secrets.AdminToken,
 		probeTimeout: verifyProbeTimeout,
 		totalBudget:  verifyTotalBudget,
+		// verify.siteplane (jpf-bl-siteplane-verify-probe): required iff the chain
+		// ATTEMPTED step 7c. nil (never attempted — an old control plane) skips the
+		// probe; a measured false FAILS the gate on the same teardown path as any
+		// other red probe. See verifySitePlane.
+		sitePlaneRequired: live.SitePlaneInstalled != nil,
+		sitePlaneComplete: live.SitePlaneInstalled,
+		// Why it failed, when it did: missing components + the installer's tail.
+		sitePlaneMissing:    live.SitePlaneMissing,
+		sitePlaneUnmeasured: live.SitePlaneUnmeasured,
+		sitePlaneLogTail:    live.SitePlaneLogTail,
 	}, report); verr != nil {
 		// Same teardown path as a content failure: nil teardown, no orphan bills.
 		if cerr := wp.CleanupHost(live.Server, spec); cerr != nil {
@@ -552,7 +562,22 @@ func (c managedBoxCaddy) Steps(name, zone string, appPort int) []cloud.CaddyStep
 		}
 	}
 	// Managed boxes are cloud-operated — new boxes ship with the self-update executor enabled.
-	return append(steps, setSelfUpdateApplyStep(attachEnvFile))
+	return append(steps, setSelfUpdateApplyStep(attachEnvFile), setShapeCloudStep(attachEnvFile))
+}
+
+// setShapeCloudStep declares the box's shape (docs/contracts/product-era.md):
+// a managed box is Cloud, reported in /status.json via Barkpark.Shape. It
+// REPLACES any BARKPARK_SHAPE line (deploy.sh writes `solo` when a line is
+// missing, and a warm-baked image may carry that) — grep -v then append, the
+// portable rewrite (no sed -i), so a re-run leaves exactly one cloud line.
+func setShapeCloudStep(envFile string) cloud.CaddyStep {
+	script := "{ grep -v '^BARKPARK_SHAPE=' " + envFile + " 2>/dev/null || true; printf 'BARKPARK_SHAPE=cloud\\n'; } > " +
+		envFile + ".bpshape && cat " + envFile + ".bpshape > " + envFile + " && rm -f " + envFile + ".bpshape"
+	return cloud.CaddyStep{
+		Title: "declare the shape (BARKPARK_SHAPE=cloud)",
+		Cmd:   script,
+		Argv:  []string{"bash", "-lc", script},
+	}
 }
 
 var _ cloud.CaddyStepper = managedBoxCaddy{}

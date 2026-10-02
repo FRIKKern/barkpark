@@ -15,6 +15,9 @@ defmodule BarkparkWeb.Studio.ChatKeyJumpPaletteTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the studio_chat capability (StudioChat.RuntimeSupervisor / SessionRegistry and the /studio/chat routes)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Auth
@@ -286,6 +289,15 @@ defmodule BarkparkWeb.Studio.ChatKeyJumpPaletteTest do
 
       # The asset is PREBUILT — committed, not produced by a build step.
       assert File.exists?("priv/static/assets/bp-chat-palette.js")
+
+      # THIS IS NOT THE ARM (task-481cb0ec3900a583, 2026-09-18). It asserts only
+      # that the harness FILE is present; it has never executed a line of it. The
+      # real arm now lives in CI: .github/workflows/studio-instrument-selftests.yml
+      # runs api/assets/chat-palette/__*.test.mjs and
+      # api/assets/chat-turn-clock/__*.test.mjs through
+      # scripts/node-test-floor.mjs --floor 2, and the workflow's paths: include
+      # api/priv/static/assets/bp-chat-palette.js, so a regression in the shipped
+      # artifact reds that job. Keep this line as the anti-DELETION pin only.
       assert File.exists?("assets/chat-palette/__palette.test.mjs")
     end
 

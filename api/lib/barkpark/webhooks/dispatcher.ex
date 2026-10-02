@@ -72,7 +72,11 @@ defmodule Barkpark.Webhooks.Dispatcher do
   # clamps a server-supplied `Retry-After` so a hostile/absurd value can't park
   # a delivery for hours; `@jitter_ceiling_ms` caps a jittered table delay so
   # jitter can widen a tier but never blow past a sane maximum.
-  @retry_after_max_ms 300_000
+  # STRICTLY below the stuck-delivery sweeper's threshold (300 s default,
+  # task-bcbef83443504e1c): a retry scheduled exactly at the threshold is itself
+  # old enough to be swept, and the sweep and the scheduled job then race for
+  # the same row. Pinned by stuck_delivery_attempt_resume_test.exs.
+  @retry_after_max_ms 240_000
   @jitter_ceiling_ms 60_000
 
   # Replay-defense window for `verify_signature/5`: an inbound signature whose
@@ -1045,11 +1049,13 @@ defmodule Barkpark.Webhooks.Dispatcher do
     Application.get_env(:barkpark, :webhook_retry_delays_ms, @default_retry_delays_ms)
   end
 
-  defp max_attempts do
+  @doc false
+  def max_attempts do
     Application.get_env(:barkpark, :webhook_max_attempts, @default_max_attempts)
   end
 
-  defp retry_after_max_ms do
+  @doc false
+  def retry_after_max_ms do
     Application.get_env(:barkpark, :webhook_retry_after_max_ms, @retry_after_max_ms)
   end
 

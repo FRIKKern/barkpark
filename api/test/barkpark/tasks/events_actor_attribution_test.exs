@@ -56,7 +56,6 @@ defmodule Barkpark.Tasks.EventsActorAttributionTest do
   @artifact "landed #17099 @ 63b89bef30 — the feed names its actor"
 
   setup do
-    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
     {:ok, _} = Auth.create_token(@token, "test-actor-attr", "test", ["read", "write", "admin"])
     {ws, project} = TenancyFixtures.ensure_default_scope!()
     scope = [workspace_id: ws.id, project_id: project.id]

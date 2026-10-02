@@ -256,17 +256,22 @@ jobs:
           #     core.quotepath=false — `api/lib/we"ird.ex` prints as
           #     `"api/lib/we\"ird.ex"`, the anchored ERE below misses it, and the
           #     ENTIRE suite is skipped under a green required context. `-z`
-          #     emits the raw bytes, which cannot be quoted; `tr` restores the
-          #     line format the matcher reads.
+          #     emits the raw bytes, which cannot be quoted, and the matcher
+          #     reads those NUL records itself (`--null`).
           #   * rename detection (default-on since git 2.9) prints only the
           #     DESTINATION, so `git mv api/lib/a.ex docs/a.ex` yields
           #     compile=false test=false while compiled code just left the tree.
           #     `--no-renames` prints both sides.
-          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
+          # NUL-separated, ON DISK, never re-lined: the old `tr` back to lines
+          # split a path holding a NEWLINE into two pseudo-paths before the
+          # matcher saw it (cch-bl-nul-native-path-matcher). A file, not a
+          # variable: command substitution drops NUL bytes.
+          changed_z="$(mktemp "${RUNNER_TEMP:-${TMPDIR:-/tmp}}/elixir-dispatcher-changed.XXXXXX")"
+          git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" >"$changed_z"
           echo "changed files:"
-          printf '%s\n' "$changed"
+          while IFS= read -r -d '' f; do printf '%s\n' "$f"; done <"$changed_z"
 
-          if [ -z "$changed" ]; then
+          if [ ! -s "$changed_z" ]; then
             # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
             # PR, nets to nothing against the base. The old polarity failed here
             # — a permanently red required context on a legal PR, with no
@@ -280,9 +285,60 @@ jobs:
             exit 0
           fi
 
+          # ── THE SCRIPT MUST MATCH THE WORKFLOW (task-3a81e68f7027ca98) ────
+          # GitHub takes the WORKFLOW FILE for a `pull_request` run from the
+          # MERGE REF; this job checks out the PR HEAD on purpose (D34, on the
+          # checkout above). Two different commits — so the invocation written
+          # HERE used to run against the BRANCH's copy of
+          # scripts/elixir-path-escape-check.sh, and any head branched before a
+          # change to that script's CLI surface answers `unknown path set …`,
+          # exits 2, and reds the required `Elixir gate` with no defect in the
+          # PR. Measured in cloud.yml's twin on PR #17575 (2026-09-11): same
+          # shape, same exit 2. A CLASS, so the sibling gets the same remedy
+          # rather than waiting for its own incident.
+          #
+          # THE SPLIT: the DIFF stays the head checkout's three-dot (D34
+          # intact); the SCRIPT comes from the commit this workflow file came
+          # from. A PIN ROOT, not a loose file — the script resolves its own
+          # root as `dirname($0)/..`.
+          #
+          # DISPATCH_PIN_REMOTE / DISPATCH_PIN_REF are the hooks
+          # scripts/elixir-path-escape-check.test.sh drives this block with
+          # against a fixture repo. Actions sets neither; the defaults are the
+          # real values, so the tested path IS the shipped path.
+          pin_remote="${DISPATCH_PIN_REMOTE:-origin}"
+          pin_ref="${DISPATCH_PIN_REF:-refs/pull/${{ github.event.pull_request.number }}/merge}"
+          pin_script="scripts/elixir-path-escape-check.sh"
+          pin_src="the PR HEAD checkout — NOT the commit this workflow file came from"
+          pinroot="${RUNNER_TEMP:-${TMPDIR:-/tmp}}/elixir-dispatcher-pinroot"
+          rm -rf "$pinroot"
+          mkdir -p "$pinroot/scripts"
+          pinned="$pinroot/scripts/elixir-path-escape-check.sh"
+
+          if git fetch --no-tags --quiet "$pin_remote" "+${pin_ref}:refs/dispatcher/elixir-pinned" 2>/dev/null \
+             && git show refs/dispatcher/elixir-pinned:scripts/elixir-path-escape-check.sh >"$pinned" 2>/dev/null \
+             && [ -s "$pinned" ]; then
+            pin_script="$pinned"
+            pin_src="${pin_ref} ($(git rev-parse refs/dispatcher/elixir-pinned))"
+          else
+            # NAMED, never silent — and NOT fatal. A merge ref is absent for a
+            # conflicted PR, and killing the dispatcher there would leave the
+            # suite with no answer at all, which is the failure this exists to
+            # end. The fallback is the head's own copy; the containment and
+            # interpretability checks below are unchanged.
+            echo "::warning::dispatcher: could NOT read scripts/elixir-path-escape-check.sh out of ${pin_ref} on remote '${pin_remote}' (an absent merge ref — a conflicted PR — is the usual cause). Falling back to the PR HEAD's own copy, which may predate this workflow's CLI surface. Degraded read, not a green."
+          fi
+          echo "path-set script: ${pin_src}"
+
           # The path sets are declared ONCE, in the ratchet that proves them.
-          compile="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match compile)"
-          test="$(printf '%s\n' "$changed" | bash scripts/elixir-path-escape-check.sh --match test)"
+          # A FILE REDIRECT, not a pipe (house D37): `--match` answers through
+          # `grep -Eq`, which exits the instant it matches, and a writer still
+          # holding bytes then takes SIGPIPE that `set -o pipefail` promotes
+          # over the match that DID occur. A copy of the script that predates
+          # `--null` REFUSES it (exit 2, `unknown flag`) — this step dies loud,
+          # the same as every other skew, never a silent false.
+          compile="$(bash "$pin_script" --match compile --null <"$changed_z")"
+          test="$(bash "$pin_script" --match test --null <"$changed_z")"
 
           # Containment invariant: compile ⊆ test, by construction of the two
           # path sets — every path that recompiles the app is also a path the
@@ -321,6 +377,10 @@ jobs:
     # it is needed (charter D26: scripts/pr-task-gate.test.sh was 30 green
     # fixtures executed by nothing). It costs a few seconds of bash.
     name: Elixir path-escape ratchet
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_ESCAPE.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -410,11 +470,11 @@ jobs:
       - name: Harness (the ratchet must be able to fail)
         # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
         if: steps.harness-scope.outputs.decision != 'skip'
-        run: bash scripts/elixir-path-escape-check.sh --selftest
+        run: bash scripts/run-instrument.sh elixir-path-escape-selftest -- bash scripts/elixir-path-escape-check.sh --selftest
 
       - name: Every repo-root read is dispatched on
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-path-escape-check.sh
+        run: bash scripts/run-instrument.sh elixir-path-escape -- bash scripts/elixir-path-escape-check.sh
 
       # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
       # Same wiring intent as security.yml's `Security gate shape ratchet`
@@ -460,11 +520,28 @@ jobs:
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The merge-authority claim guard must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/merge-authority-claim-check.test.sh
+        run: bash scripts/run-instrument.sh merge-authority-claim-harness -- bash scripts/merge-authority-claim-check.test.sh
 
       - name: No workflow or card claims merge authority the spec denies
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/merge-authority-claim-check.sh
+        run: bash scripts/run-instrument.sh merge-authority-claim -- bash scripts/merge-authority-claim-check.sh
+
+      # ── the static census of merge-blocking names (cchi-w57) ─────────────
+      # .github/required-checks.json is generated from names that RENDERED on
+      # sampled heads, so a job whose `if:` skipped it there is in no census.
+      # scripts/blocking-name-census.py reads the workflows instead: every job
+      # in a required aggregator's transitive `needs:` closure must be named in
+      # required ∪ exclusions, or this reds by name. Here, and as a STEP, for
+      # the reasons written above the skip-disclosure ratchet: this job is
+      # judged NEVER by `elixir-gate`, so the census reds a REQUIRED context,
+      # and a step adds no rendered name of its own.
+      - name: The blocking-name census must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census-selftest -- python3 scripts/blocking-name-census.py --selftest
+
+      - name: Every merge-blocking job name is in the spec
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh blocking-name-census -- python3 scripts/blocking-name-census.py
 
       # ── the unrecognised-top-level default (task-fb7857b984ff5ff8) ────────
       # Every path set in this tree fails OPEN. Re-derived live on origin/main
@@ -497,11 +574,11 @@ jobs:
       # classify it, never rendered at all.
       - name: Every changed top-level entry is one the repo knows
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toplevel-classifier-check.sh
+        run: bash scripts/run-instrument.sh toplevel-classifier -- bash scripts/toplevel-classifier-check.sh
 
       - name: The top-level classifier must be able to fail (27-case harness)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toplevel-classifier-check.sh --selftest
+        run: bash scripts/run-instrument.sh toplevel-classifier-selftest -- bash scripts/toplevel-classifier-check.sh --selftest
 
       # ── the vips hedge, now a tripwire instead of a 39-second bill ────────
       # mix-prod-compile below used to `apt-get install libvips-dev` purely as
@@ -516,7 +593,7 @@ jobs:
       # rendered check name, so required-checks-verify.sh's roster is unchanged.
       - name: The vips hedge tripwire must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/vips-hedge-tripwire.sh --selftest
+        run: bash scripts/run-instrument.sh vips-hedge-tripwire-selftest -- bash scripts/vips-hedge-tripwire.sh --selftest
 
       # NAME THIS STEP WITHOUT THE MODE TOKEN. A `name:` is not a comment, so
       # the tripwire's own step name counted as a live selection and reddened it
@@ -524,7 +601,34 @@ jobs:
       # correct behaviour and the reason the name reads around the token.
       - name: A platform-provided vips mode is never selected bare
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/vips-hedge-tripwire.sh
+        run: bash scripts/run-instrument.sh vips-hedge-tripwire -- bash scripts/vips-hedge-tripwire.sh
+
+      # ── the D41 @boundary marker registry, riding this job ───────────────
+      # VENUE IS THE POINT. The registry's natural home is doc-gates.yml, next
+      # to docs-anchors-check.sh §8 — and doc-gates publishes exactly ONE
+      # context, `Doc budgets + anchors`, which carries an S4 paths-filtered
+      # exclusion row in .github/required-checks.json and therefore stops no
+      # merge. A guard wired only there is mutation-proven and merge-toothless.
+      # This job is DELIBERATELY UNFILTERED (see its header) and feeds the
+      # REQUIRED `Elixir gate`, so a boundary comment whose enforcing test was
+      # renamed reds on the PR that renames it, on every PR, blockingly.
+      #
+      # A STEP of this job, not a job of its own — same two reasons as the vips
+      # hedge above: a new job reds the sibling harnesses via
+      # `blocking_not_in_needs`, and a step adds no rendered check name, so
+      # required-checks-verify.sh's roster is unchanged.
+      #
+      # Harness FIRST, subject second — the house selftest-first idiom. It takes
+      # ~2s over the whole tree.
+      - name: The @boundary marker registry must be able to fail
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh boundary-marker-selftest -- bash scripts/boundary-marker-check.sh --selftest
+
+      # STATIC PAIRING ONLY. A green here says every @boundary comment names a
+      # test that EXISTS — never that the test would fail if the boundary broke.
+      - name: Every @boundary comment names a test that still exists
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh boundary-marker -- bash scripts/boundary-marker-check.sh
 
       # ── the diff-scoped format verdict, end to end ───────────────────────
       # It rides HERE and not in the `format` job, deliberately: `format`
@@ -590,7 +694,7 @@ jobs:
       # name, so required-checks-verify.sh's roster is unchanged.
       - name: The PR test selector must fail safe (47-case harness)
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-impacted-tests.sh --selftest
+        run: bash scripts/run-instrument.sh elixir-impacted-tests-selftest -- bash scripts/elixir-impacted-tests.sh --selftest
 
       # The pinned half of the selector's ALWAYS set is the net under the tests
       # a compile closure structurally cannot reach — the plugin registry, the
@@ -599,7 +703,7 @@ jobs:
       # existence of every pin is asserted separately from the harness.
       - name: Every pinned ALWAYS test still exists
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/elixir-impacted-tests.sh --check-pins
+        run: bash scripts/run-instrument.sh elixir-impacted-tests-pins -- bash scripts/elixir-impacted-tests.sh --check-pins
 
       # The main-red attribution reporter (elixir-main-red-attribution.yml) runs
       # only when main is red, which is rare — so its own harness would go
@@ -613,11 +717,11 @@ jobs:
 
       - name: The pin-agreement gate must be able to fail
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toolchain-skew-check.sh --selftest
+        run: bash scripts/run-instrument.sh toolchain-skew-selftest -- bash scripts/toolchain-skew-check.sh --selftest
 
       - name: The production Elixir pin is covered by the jobs that test it
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
-        run: bash scripts/toolchain-skew-check.sh
+        run: bash scripts/run-instrument.sh toolchain-skew -- bash scripts/toolchain-skew-check.sh
 
       # ── the ACK_EX deriver (task-188100520e018ee4), riding this job ───────
       # A row added to `.github/required-checks.json`'s `.exclusions` that the
@@ -694,7 +798,327 @@ jobs:
       # `!= 'skip'`, never `== 'run'`: a missing or garbled output must RUN.
       - name: Every unrenderable .exclusions row is acknowledged in ACK_EX
         if: ${{ !cancelled() && steps.setup.outcome == 'success' && steps.ack-ex-scope.outputs.decision != 'skip' }}
-        run: bash scripts/required-checks-ack-derive.sh --selftest
+        run: bash scripts/run-instrument.sh required-checks-ack-derive-selftest -- bash scripts/required-checks-ack-derive.sh --selftest
+
+      # ── the selftest-wiring census, riding this job (task-47448b5c7eb29e54) ─
+      # VENUE, and the venue is the entire point of this step.
+      # scripts/selftest-wiring-census.sh already ran — as the job
+      # `selftest-wiring-census` in .github/workflows/shell-harnesses.yml, which
+      # carries a workflow-level `on: pull_request: paths:` filter and is
+      # therefore filed S4 PATHS-FILTERED in .github/required-checks.json. Its
+      # verdict could not stop a merge, and that is not a hypothetical:
+      # MEASURED on #17772 (run 34590077182, 2026-09-11) the census concluded
+      # FAILURE naming `ORPHAN scripts/sunset-route-consumers.test.sh`, the PR
+      # merged anyway as 8970ea272, and main then carried that red from ~15:2xZ
+      # to ~19:2xZ while the merge sweep HELD five PRs that inherited it
+      # (#17651 #17711 #17710 #17687 #17778) until #17830 (70d8d275a) wired the
+      # file. An advisory red cost four hours of a blocked queue because the one
+      # thing it could not do was refuse the head that created it.
+      #
+      # HERE, for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and the aggregator judges it
+      # with the gate value NEVER — so it runs on EVERY PR head, cannot be
+      # skipped into a green, and a red here reds `Elixir gate`, one of the four
+      # REQUIRED contexts. The venue rule in docs/ops/merge-gates.md
+      # ("Where a guard that must BLOCK lives"): the decision is a JOB-level
+      # shape, never a workflow-level `paths:` key — a job-level skip publishes
+      # a verdict, an absent workflow publishes nothing and reads `expected`
+      # forever.
+      #
+      # A STEP and not a job, for the two reasons written above the
+      # skip-disclosure ratchet: a new job here reds the sibling path-escape
+      # harnesses via `blocking_not_in_needs`, and a step adds no rendered check
+      # name — so the required set is NOT widened by one name and
+      # required-checks-verify.sh's roster is unchanged.
+      #
+      # shell-harnesses.yml's own tenant is deliberately LEFT IN PLACE: it is
+      # where the census's `--selftest` (the proof the census can fail) lives,
+      # and this step is the merge-authority half, not a replacement.
+      #
+      # UNFILTERED AND PRICED. No scope step, because the census is a whole-tree
+      # question — any new `scripts/*_test.sh` OR any workflow edit can change
+      # its answer, which is nearly every diff that could break it. Measured
+      # 2026-09-12 on this tree: `bash scripts/selftest-wiring-census.sh` is
+      # 6.6 s wall (92 run, 4 exempt, 0 orphaned over 96 self-tests) on a loaded
+      # laptop, against this job's 2m35s average — off the critical path.
+      # RE-PRICED 2026-09-23 (task-13bfa649df851d5f) after the corpus stopped
+      # being name-keyed: 12 s wall, over 278 self-tests rather than 96 — 230
+      # run, 4 exempt, 44 grandfathered backlog, 0 orphaned. Still off the
+      # critical path. The census's own `--selftest`, which is NOT here (it
+      # rides shell-harnesses.yml), went from ~35 s to ~2 min: it runs the whole
+      # census eight times, and four of those arms are new.
+      - name: Every self-test under scripts/ is executed by CI or declares an exemption
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh selftest-wiring-census -- bash scripts/selftest-wiring-census.sh
+
+      # ── cron scream coverage, riding this job (task-e6fe244ece2b5d27) ──────
+      # VENUE, for the same reason the census above it is here. The subject is
+      # a workflow that fails into a void, and every instrument that already
+      # watches one — cron-overdue-probe.yml, scheduled-arm-health.yml — is
+      # ITSELF schedule-armed and advisory. Putting this verdict in another
+      # cron would reproduce the disease: an advisory red on main's tip has no
+      # owner, which this repo measured at eleven hours across eight
+      # consecutive runs (main-red-owner.yml's own header) and at 5-of-5 on
+      # scheduled-arm-health.yml with nobody told.
+      #
+      # THIS JOB CAN REFUSE. `path-escape` carries no `if:`, no
+      # continue-on-error and no `needs`, and it is in `Elixir gate`'s needs
+      # list — so a red here reds one of the four REQUIRED contexts and the
+      # merge stops. That is the whole reason the step is here and not in a
+      # workflow of its own.
+      #
+      # A STEP, NOT A JOB, for the reasons written above the census: a new job
+      # here reds the sibling path-escape harnesses via `blocking_not_in_needs`
+      # and would add a rendered check name, widening the required set's
+      # roster. A step does neither.
+      #
+      # `--selftest` AND NOT A BARE RUN, for the ack-ex reason four steps up:
+      # the selftest performs the real-tree verdict FIRST (so this step is the
+      # verdict, not a proof-of-proof) and then runs ten mutation arms over a
+      # scratch copy of the real workflow tree — including both directions of
+      # the ratchet and a control proving the guard reds on the ABSENCE of a
+      # reader rather than on novelty. It is also what
+      # scripts/selftest-wiring-census.sh requires of any scripts/ file
+      # carrying an in-file `--selftest`: dispatched WITH the flag, or ORPHAN.
+      #
+      # PRICED: 1.4 s wall on a loaded laptop (10 arms, 31 cron'd workflows),
+      # against this job's 2m35s average. Off the critical path. It touches no
+      # network — it is a question about the tree, not about GitHub.
+      - name: Every cron'd workflow's red reaches a declared reader
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh cron-scream-coverage -- bash scripts/cron-scream-coverage.sh --selftest
+
+      # ── the two harnesses the census could not see, riding the same job ───
+      # task-13bfa649df851d5f. `scripts/pr-required.sh` is the instrument every
+      # lane in this campaign runs before merging anything — 766 lines, 33 arms,
+      # mirrored into .claude/skills/orchestrate-tasks/helpers/ with a
+      # `mirror in sync` arm that cmp's the two copies. `grep -rl pr-required
+      # .github/workflows/` returned NOTHING on origin/main c9c481959: its arms
+      # ran in no job, on no PR, ever. Same for
+      # scripts/stranded-worktree-report.sh (49 arms, merged 52a537957).
+      #
+      # They were invisible to the census next door because that census was
+      # NAME-KEYED — `*.test.sh` and three siblings — while these two carry
+      # their suite INSIDE a plainly-named tool behind `--selftest`. The census
+      # is content-keyed as of this commit, which is what makes THESE THREE
+      # STEPS the thing that clears its red rather than a number that hides it.
+      #
+      # HERE, and for the same reason the census step above is here: this job
+      # carries no `if:`, no continue-on-error and no `needs`, and elixir-gate
+      # judges it with the gate value NEVER — so a red is a red on `Elixir
+      # gate`, one of the four REQUIRED contexts, and it stops the merge. The
+      # obvious alternative — a tenant job in shell-harnesses.yml — is the trap:
+      # that workflow carries a workflow-level `on: pull_request: paths:` key,
+      # so on a PR that misses its paths the check is ABSENT, and absent is
+      # never-ran, not green (#17772: an advisory census red rode main for ~4
+      # hours and held five PRs).
+      #
+      # NO PATHS FILTER AND NO SCOPE STEP, which is also the answer to "which
+      # copy of pr-required.sh is covered". A paths list naming one mirror lets
+      # a change to the other ship unchecked; this job has no list, so BOTH
+      # copies are checked on every head. Both are run explicitly anyway, so the
+      # coverage is a fact about the step and not an inference about a filter.
+      #
+      # PRICED, measured on this tree with `time`: pr-required.sh --selftest is
+      # 2.3 s wall for 33/33 arms and stranded-worktree-report.sh --selftest is
+      # 1.0 s for 49, against this job's 2m35s average. Both are hermetic —
+      # fixture trees and a fake `gh` on PATH, no network, no token.
+      - name: pr-required.sh self-test (33 arms) — scripts/ copy
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh pr-required-selftest -- bash scripts/pr-required.sh --selftest
+
+      # The mirror, by its own path. Its `mirror in sync` arm cmp's the two
+      # copies, so running EITHER already reds on divergence — but a reader of
+      # this file should not have to derive that, and a future edit that drops
+      # the arm would silently un-cover this path.
+      - name: pr-required.sh self-test (33 arms) — .claude/skills mirror
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh pr-required-mirror-selftest -- bash .claude/skills/orchestrate-tasks/helpers/pr-required.sh --selftest
+
+      - name: stranded-worktree-report.sh self-test (49 arms)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh stranded-worktree-report-selftest -- bash scripts/stranded-worktree-report.sh --selftest
+
+      # ── the doc-budget HEADER-DISCOVERY arm, blockingly ──────────────────
+      #
+      # THE HOLE. `scripts/check-doc-budgets.sh` enforces byte budgets two ways.
+      # The 39-row CAPS heredoc got a blocking reader in #18216
+      # (api/test/barkpark/doc_budget_cap_test.exs, which this job's workflow
+      # already dispatches). Its sibling arm — HEADER DISCOVERY, which walks
+      # docs/**.md and enforces each file's own `budget: Ntok` header — got
+      # none, and the closed row's scope note said those docs stayed unread,
+      # which reads as a tolerable gap. MEASURED on origin/main f11ac14d1 by
+      # running the
+      # script: 109 docs are enforced ONLY by discovery, 38 of them are OVER
+      # their own declared header TODAY (green solely because a FREEZE row pins
+      # them at their measured size), and 0 of the 38 sat in any dispatched path
+      # set. The gap and the breach are different claims and only the second was
+      # ever true.
+      #
+      # WHY THIS JOB AND NOT `mix-test`. The CAPS route rides mix-test, which
+      # carries `if: needs.changes.outputs.test == 'true'` — it works only
+      # because every capped path is ALSO declared in the dispatcher's path
+      # sets, and a fourth test arm exists purely to keep that superset true.
+      # Header discovery has no path list to declare: its population is
+      # `docs/**.md` plus `scripts/*.md` plus five surface files, computed at
+      # run time and changing on any doc PR. Declaring all of docs/** would
+      # dispatch the whole Elixir suite on every documentation edit. So it rides
+      # `path-escape` instead, which carries NO `if:`, NO `needs`, and is in the
+      # aggregator's needs with the gate value NEVER — the one shape that
+      # publishes a verdict inside a REQUIRED context on EVERY pull request.
+      #
+      # A STEP, not a job: a step adds no rendered check name, so the required
+      # roster (`.github/required-checks.json`, four contexts) is unchanged and
+      # this needs no ruling from main.
+      #
+      # --discovery-only, NOT the whole script. The other arms (fixed-cap SIZE
+      # verdicts, the onramp span pin, the 7-card count, the two headroom
+      # floors) are live policy this task was not asked to re-scope, and root
+      # CLAUDE.md is at 203B of headroom against a 200B floor — turning that
+      # blocking in the same edit would be a fleet-wide merge change smuggled
+      # under a discovery fix. The advisory `Doc budgets + anchors` job still
+      # runs the whole script.
+      #
+      # HARNESS FIRST, subject second — the house idiom, and here it is what
+      # answers "does this green assert anything?". Arms (m0)-(m4) of the
+      # selftest run the NARROW mode specifically: a DARK discovery loop must
+      # exit 1 on the union floor rather than report zero violations, an
+      # over-header doc must red NAMING the doc and its header, the mode must
+      # still walk the CAPS table (its precedence source), it must NOT reach the
+      # card arm, the env-var spelling must be inert, and a freeze literal
+      # bumped past FREEZE_ROWS_CEILING must refuse. PRICED: the selftest is
+      # ~60s and the checked run ~2s on a loaded laptop, against this job's
+      # 2m35s average.
+      - name: The doc-budget discovery arm must be able to fail (30-arm harness)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh doc-budgets-selftest -- bash scripts/check-doc-budgets.sh --selftest
+
+      - name: Every header-discovered doc is within its own declared budget
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: bash scripts/run-instrument.sh doc-budgets-discovery -- bash scripts/check-doc-budgets.sh --discovery-only
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+
+      # ── the vendored-SDK freshness comparison, riding this job ────────────
+      # (task-632a54405ba79314)
+      #
+      # VENUE, and the venue is the entire point of these two steps.
+      # scripts/check-vendor-freshness.mjs already ran — as the job
+      # `vendor-sdk-freshness` in .github/workflows/search-template-gates.yml,
+      # whose pull_request arm ALREADY lists every pack input this gate reads
+      # (js/packages/{core,react}/src/**, package.json, tsup.config.ts,
+      # tsconfig.json). Coverage was never the defect and this is not a
+      # coverage fix. That workflow carries a workflow-level `paths:` filter
+      # and is therefore filed S4 PATHS-FILTERED in
+      # .github/required-checks.json, so its verdict could not stop a merge.
+      #
+      # MEASURED, not assumed. #18092 (merged d58a09857, 2026-09-13T15:58:50Z)
+      # changed js/packages/react/src/inline.tsx and added
+      # src/status-vocab.gen.ts. `Vendored SDK freshness` FIRED and went RED on
+      # that PR — twice, on heads f666cd258 (run 34755514346) and 2a298b785
+      # (run 34761228165), the latter printing the exact pair main still
+      # carried a day later: `source sha256:1e119abf0acb63ff… vs stamped
+      # sha256:0743095e65fa855d…`. The PR merged anyway. Main then failed this
+      # workflow on every push run from dc7d77f5d (2026-09-13T16:04:26Z)
+      # through c42fde07c (2026-09-14T14:25:56Z) — 24 `failure`, 6 `cancelled`,
+      # ZERO `success` — shipping the pre-#18092 renderer to every user who
+      # scaffolded from templates/*. Two compounding reasons, both structural:
+      # the context is advisory, AND on the FINAL head (efe999824, run
+      # 34764701777) the run was CANCELLED at 15:11:57 — so the rollup a
+      # merger reads showed `cancelled`, not `failure`. The push-arm run on the
+      # merge commit itself (34767194543) was cancelled too, by the
+      # main-collapse concurrency marker that workflow documents as its
+      # residual. Neither arm ever published a red ON the merged sha.
+      #
+      # THE PATHS-FILTERED LEAF CANNOT SIMPLY BE PROMOTED, and that door is
+      # closed for two independent reasons, both re-derived from the files:
+      # (1) a workflow-level `on: pull_request: paths:` filter emits NO check
+      # run on a non-matching PR, and a required context that never emits
+      # reports `expected` forever (D18) — the .exclusions reason text for
+      # `Vendored SDK freshness` says exactly this; and (2) that same reason
+      # text records a second constraint the row did not carry: the workflow's
+      # main-collapse concurrency marker is sound ONLY while no job name in it
+      # is a required context, and scripts/main-run-concurrency-check.sh
+      # re-derives that. Registering the leaf would void the marker as well as
+      # deadlock the branch. search-template-gates.yml's own header says the
+      # only promotable shape is an AGGREGATOR that always emits.
+      #
+      # HERE, for the reason every step above it is here: this job carries no
+      # `if:`, no continue-on-error and no `needs`, and the aggregator judges
+      # it with the gate value NEVER — so it runs on EVERY PR head, cannot be
+      # skipped into a green, and a red here reds `Elixir gate`, one of the
+      # four REQUIRED contexts. A STEP and not a job: a step publishes no
+      # check-run name, so the required set is NOT widened by one name,
+      # required-checks-verify.sh's roster is unchanged, and the sibling
+      # path-escape harnesses' `blocking_not_in_needs` derivation is untouched.
+      # search-template-gates.yml's own tenant is deliberately LEFT IN PLACE:
+      # it is where `--selftest` (the proof this gate can fail) lives, and
+      # these steps are the merge-authority half, not a replacement.
+      #
+      # WHAT THIS MAKES TRUE: a PR that changes a vendored package's pack
+      # inputs cannot merge without re-cutting in the SAME PR
+      # (`bash scripts/recut-vendor-tarballs.sh`, then commit the re-cut
+      # templates/*/vendor/*.tgz, both package-lock.json integrity pins and
+      # templates/VENDOR-STAMP.json). That is this repo's recurring
+      # "the PR that introduces a resource declares it" rule, sixth member.
+      #
+      # THE FENCE FOLLOWS THE RULE. search-template-gates.yml already records
+      # that the trigger and the remedy live in different trees — the gate
+      # fires on js/packages/**, the only remedy writes templates/**. Until
+      # now a lane fenced out of templates/** could merge past the red; now it
+      # cannot, so an SDK lane's fence MUST include templates/*/vendor/*.tgz,
+      # templates/*/package-lock.json and templates/VENDOR-STAMP.json.
+      #
+      # UNFILTERED, and not by omission. A diff-scoped predicate here would
+      # reproduce the defect it treats: the tarballs are a FROZEN artifact that
+      # rots against a source tree that keeps moving, so the run that proves
+      # they are still fresh is exactly the run on the commit that did not
+      # touch them — search-template-gates.yml makes the same argument for its
+      # path-unfiltered push arm. It is also a PREDICATE and not an
+      # enumeration: the package set, the pack-input set and the template set
+      # are all derived inside check-vendor-freshness.mjs, so adding a third
+      # vendored package needs no list edited here.
+      #
+      # PRICED. Zero npm dependencies — checkout, node and the system `tar`,
+      # nothing else — and measured 2026-09-14 on this tree at 0.28/0.39/0.45 s
+      # wall over three runs, against this job's 2m35s average. Off the
+      # critical path.
+      #
+      # node WITHOUT setup-node, like console-harness.yml's own `path-escape`
+      # job and eight other jobs in this tree: the runner image ships it, and
+      # a setup-node step would put a toolchain resolution on a required
+      # context to save nothing. The preflight below makes its absence a
+      # legible refusal rather than a bare `node: command not found`.
+      - name: node is present (the freshness gate is a node program)
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: |
+          set -uo pipefail
+          if ! command -v node >/dev/null 2>&1; then
+            echo "CANNOT READ: node is not on this runner. check-vendor-freshness.mjs is a node program, so no freshness reading was taken and none is being reported as fresh." >&2
+            echo "::error title=Vendored SDK freshness CANNOT READ::node missing on the runner image"
+            exit 1
+          fi
+          node --version
+
+      # Never piped. A gate piped through tail or grep -q reports the PIPE's
+      # exit code, and under pipefail a SIGPIPE turns a red into a 141 that
+      # reads as a flake.
+      - name: The vendored starter SDKs match js/packages source
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        run: node scripts/check-vendor-freshness.mjs
 
   format:
     # ADVISORY format signal — NOT a merge gate. This job pins THE FORMATTER
@@ -767,6 +1191,9 @@ jobs:
     outputs:
       unformatted_in_diff: ${{ steps.scope.outputs.unformatted_in_diff }}
       unformatted_total: ${{ steps.scope.outputs.unformatted_total }}
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_FORMAT.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     strategy:
       fail-fast: false
       matrix:
@@ -867,7 +1294,7 @@ jobs:
       # contract as the guard's --selftest above, and it needs no toolchain.
       - name: The diff scope must be able to refuse, to red, and to stay neutral
         working-directory: .
-        run: bash scripts/format-diff-scope.sh --selftest
+        run: bash scripts/run-instrument.sh format-diff-scope-selftest -- bash scripts/format-diff-scope.sh --selftest
 
       # CAPTURED, NOT DECIDED ON. This step is deliberately the last one in this
       # job that may not fail: `mix format --check-formatted` answers "is the
@@ -948,10 +1375,25 @@ jobs:
             fi
           fi
           echo "PR diff: $(wc -l < "$changed" | tr -d ' ') changed path(s) (empty = push, or no computable diff)"
-          bash scripts/format-diff-scope.sh \
+          bash scripts/run-instrument.sh format-diff-scope -- bash scripts/format-diff-scope.sh \
             --verdict-log "${tmp}/format-verdict.log" \
             --guard-rc "${GUARD_RC:-2}" \
             --changed "$changed"
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
 
   mix-test:
     name: Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})
@@ -962,6 +1404,13 @@ jobs:
     # sets, not one — charter D31. Declared in, and proven by,
     # scripts/elixir-path-escape-check.sh.
     if: needs.changes.outputs.test == 'true'
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last steps. Read by `elixir-gate` as V_TEST. This
+      # is a matrix, and matrix outputs are last-writer-wins, so it is NOT the
+      # authority: the per-cell records (`mix-test-cell-p<N>`) are, folded in
+      # `elixir-gate` worst-first together with this value.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     # BLOCKING since 2026-06-10: the remediation this job waited on is done —
     # suite de-flaked at the root (CompactorTest serialization, DateTime
@@ -993,6 +1442,12 @@ jobs:
       SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
+      # The Test step hands MIX_TEST_PARTITION to scripts/elixir-test-partition.sh
+      # to pick this cell's files, and config/test.exs suffixes the test database with it (barkpark_test1 .. barkpark_test3).
+      # Each cell has its own postgres service, so the suffix only has to be
+      # consistent within one cell, which it is: DB setup and Test share it.
+      MIX_TEST_PARTITION: ${{ matrix.partition }}
+      TEST_PARTITIONS: "3"
     strategy:
       fail-fast: false
       matrix:
@@ -1012,6 +1467,29 @@ jobs:
         # known residual in docs/ops/PROD_OPS.md.
         otp: ["27.0"]
         elixir: ["1.18.4"]
+        # THE TEST PARTITIONS (task-8345bf4c2ca2b989). The serial ExUnit time
+        # is the job's critical path: main run 36775391161 printed "Finished
+        # in 1200.8 seconds (313.5s async, 887.3s sync)". Sync modules run
+        # one at a time whatever max_cases says, so the only lever that
+        # scales is to split the FILES across runners. `mix test --partitions`
+        # does that deterministically, one cell per partition.
+        #
+        # THIS LIST AND `TEST_PARTITIONS` BELOW MUST AGREE. They are not derived
+        # from each other (a matrix cannot read `env`), so `elixir-gate` checks
+        # them. Every cell uploads a record naming its partition and the total
+        # it was told, and the gate refuses unless it holds EXACTLY the
+        # partitions 1..total. A cell dropped from this list is RED, never a
+        # silently smaller suite.
+        #
+        # THREE, not two (task-bc3ef53758b916a8). `--slowest` implies `--trace`,
+        # so every module runs serially and a cell's time is the sum of its
+        # files. Measured on 4 green main runs at two cells (36926715315,
+        # 36924113628, 36894114735, 36893500789): Test step p1 565-791 s,
+        # p2 573-791 s, and p1 carries ~40 s more one-time steps, so the two
+        # JOBS were balanced on average and the spread was runner noise.
+        # Rebalancing two cells bought nothing; a third cell cuts each one's
+        # share of the serial suite from 1/2 to 1/3.
+        partition: [1, 2, 3]
     defaults:
       run:
         working-directory: api
@@ -1023,8 +1501,18 @@ jobs:
         # "unknown", which fails BuildInfoTest ("version derives from git … v0.2.23
         # exists") and the git-tag-dependent SelfUpdate.CheckerTest suite. Only
         # this Test job asserts on the derived version, so only it needs the tags.
+        #
+        # `filter: blob:none` (task-d58797f4a9e0c1e2): every commit, tree and
+        # tag still arrives — `git describe`, `HEAD^1`, merge bases and
+        # `--name-only` diffs are unchanged by construction — but blob CONTENTS
+        # arrive only for the checked-out tree (and lazily, on demand, for the
+        # rare test that reads an old revision's file). origin carries ~4,300
+        # branch heads whose 8,000 commits are not on main; the full fetch of
+        # their blobs was most of this step's ~30 s in every cell. Same flag
+        # and reasoning as the `changes` dispatcher above.
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -1063,12 +1551,38 @@ jobs:
       # that always reports "clean" would satisfy a can-it-red test while
       # measuring nothing.
       - name: The unreachable-assert-message guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh --selftest
 
+      # The Test step picks each cell's files with scripts/elixir-test-partition.sh
+      # (task-bc3ef53758b916a8). A defect there is a silently SMALLER required
+      # suite, so its harness rides the job that depends on it — including its
+      # full-cover proof over the REAL tree and the checked-in weights.
+      - name: The test-file partitioner covers every file exactly once
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
+        working-directory: .
+        run: bash scripts/elixir-test-partition.test.sh
+
       - name: No NEW unreachable assert messages (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh
+
+      # The LOCAL half of the ratchet above: .githooks/pre-commit runs it with
+      # --files over staged api/test files (task-eb42388a71b8d277). This drives
+      # the hook through real `git commit` calls in a temp repo: a defective
+      # staged test is refused with the RED line, the fixed file commits, a
+      # .md/.go-only commit runs neither check. Needs only git + elixir + mix,
+      # all on PATH here, and no deps — so it rides BEFORE deps/compile too.
+      - name: The pre-commit hook refuses an unreachable assert message
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
+        working-directory: .
+        run: bash scripts/pre-commit-hook.test.sh
 
       # ── comment-status-literal ratchet, riding this job ──────────────────
       # A STEP, not a job, for exactly the reason the ratchet above records:
@@ -1100,10 +1614,14 @@ jobs:
       # scratch copy — without those, a scanner that always reports "clean"
       # would satisfy a can-it-red test while measuring nothing.
       - name: The comment-status-literal guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/comment-status-literal-check.sh --selftest
 
       - name: No NEW status literals in comments (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/comment-status-literal-check.sh
 
@@ -1126,12 +1644,16 @@ jobs:
       # without the second arm a scanner that reports "clean" unconditionally
       # would satisfy a can-it-red test while measuring nothing.
       - name: The client-ip resolver guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
-        run: bash scripts/client-ip-resolver-check.sh --selftest
+        run: bash scripts/run-instrument.sh client-ip-resolver-selftest -- bash scripts/client-ip-resolver-check.sh --selftest
 
       - name: No conn.remote_ip read outside the canonical resolver
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
-        run: bash scripts/client-ip-resolver-check.sh
+        run: bash scripts/run-instrument.sh client-ip-resolver -- bash scripts/client-ip-resolver-check.sh
 
       # ── test-env-leak ratchet, riding this job ───────────────────────────
       # STEPS, not a job — the same reasoning the two ratchets above record.
@@ -1168,25 +1690,159 @@ jobs:
       # but 25 assertion arms, because 12 splits into 12a/12b/12c and it is the
       # arms the harness tallies in its own "PASSED: n of n cases" line.
       - name: The test-env-leak guard must be able to fail
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/test-env-leak-gate.test.sh
 
       - name: No NEW unrestored global-state mutation in api/test (never-worse ratchet)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         working-directory: .
         run: bash scripts/test-env-leak-gate.sh
 
-      - name: Cache deps
+      # ── THE DEPENDENCY CACHES HERE, AND THE ONE THAT USED TO LIE ────────
+      #
+      # This was ONE `actions/cache@v4` over `api/deps` PLUS `api/_build`,
+      # under a `restore-keys:` PREFIX. That is the un-guarded twin of the prod
+      # dependency build cache in `mix-prod-compile` below, which was hardened
+      # under #15659, and it carried that cache's failure mode with nothing
+      # watching: on a `mix.lock` bump the exact key MISSES, the PREFIX HITS,
+      # and the job begins on an `api/_build/test` produced from a DIFFERENT
+      # lock — stale first-party `Elixir.Barkpark*.beam` left by an earlier
+      # run's `mix compile`, plus a dependency tree under no obligation to
+      # match the lock this run is about to test. Past Mistake #2
+      # (`Plug.Exception` undefined out of a partial deps tree) is the shape
+      # that produces, and it needed only a lock bump to arrive.
+      #
+      # It is now the prod site's contract exactly. Dependency SOURCES keep the
+      # prefix — a source tree holds no compiled anything and `mix deps.get`
+      # reconciles it against mix.lock itself. Compiled ARTIFACTS are restored
+      # only on an EXACT key, only for `_build/test/lib`, and are AUDITED by
+      # the same tripwire before this job is allowed to trust them.
+      #
+      # THE KEY STRING CHANGED, and that is load-bearing rather than cosmetic:
+      # `actions/cache` restores THE ARCHIVE THAT WAS SAVED, not the paths the
+      # restoring step declares. Left on the old `${{ runner.os }}-mix-…` key
+      # this narrowed step would still unpack yesterday's entry — which holds
+      # `api/_build` — and put back the very thing it removes.
+      #
+      # THE PRICE, SAID OUT LOUD: our own application no longer arrives
+      # pre-compiled, so `Compile` below builds `barkpark` from nothing every
+      # run. That is the same trade `mix-prod-compile` already took, and it is
+      # the only version of this cache that can be trusted on a near miss.
+      - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v4
         with:
-          path: |
-            api/deps
-            api/_build
-          key: ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          path: api/deps
+          key: ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-test-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      # NO `restore-keys:`, deliberately. A prefix match would hand this job
+      # dependency BEAM compiled from a DIFFERENT mix.lock; the completeness
+      # arm of the guard would still pass (every name is present) and
+      # `mix deps.compile` would trust the manifests. Exact key or nothing.
+      # `cache/restore` rather than `cache`, because `actions/cache`'s post-job
+      # auto-save would archive `_build/test/lib/barkpark` — OUR code, compiled
+      # by the steps below — and poison the next run's restore.
+      - name: Restore compiled dependency artifacts (test)
+        id: test_dep_build
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
         run: mix deps.get
+
+      # DISTRUST VACUOUS GREEN — 11 cases, ~0.2s, run BEFORE the verdict this
+      # job acts on. It plants an `Elixir.Barkpark.Stale.beam` inside an
+      # allowlisted dependency's ebin and requires a RED, deletes a dependency
+      # and requires a FALL BACK, and shrinks each input list to nothing and
+      # requires that neither shrink can produce a pass. A tripwire nobody has
+      # watched fail is not a tripwire.
+      - name: Prove the tripwire can fail (guard --selftest)
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" test-build-cache-guard-selftest -- bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        working-directory: .
+
+      # THE TRIPWIRE — the same script and the same three verdicts as the prod
+      # site below: 0 dep-only and complete, 3 unusable (rebuild from nothing),
+      # 1 CONTAMINATED (hard fail, naming what it found, never a silent
+      # clean-up). The script is env-agnostic: it judges a `<build>/lib`
+      # directory against two name lists, and `MIX_ENV=test mix deps` is what
+      # makes those lists the TEST set here. Both lists are re-derived every
+      # run and both carry a floor inside the guard, so a `mix deps` that
+      # errored into an empty pipe falls back instead of passing over nothing.
+      - name: Audit the restored dependency build tree
+        id: test_depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          # `|| true`: a `mix deps` that fails leaves the required list EMPTY,
+          # which the guard's floor turns into a fallback — never into a
+          # completeness check that passes over nothing.
+          (MIX_ENV=test mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   test deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          # `set +e` is load-bearing: GitHub runs `run:` blocks under `bash -e`,
+          # so without it the guard's non-zero verdicts (3 = fall back,
+          # 1 = contaminated) would kill the step before it can tell them
+          # apart, and BOTH would surface as the same opaque red.
+          set +e
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/test/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt"
+          verdict=$?
+          set -e
+          case "$verdict" in
+            0)
+              echo "mode=cached" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — taking the full 'rm -rf _build/test' + 'mix deps.compile --force' path (Past Mistake #2)."
+              rm -rf _build/test
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::test dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
+
+      - name: Compile deps (test)
+        # Two paths, one step, so before/after step timings stay comparable.
+        # `--force` is what the fallback runs, and the fallback is what the
+        # audit selects whenever the restored tree is anything less than
+        # complete.
+        run: |
+          if [ "${{ steps.test_depbuild_audit.outputs.mode }}" = "cached" ]; then
+            echo "Dependency build tree restored and audited dependency-only + complete."
+            mix deps.compile
+          else
+            echo "No usable dependency build cache — full forced rebuild."
+            mix deps.compile --force
+          fi
+
+      # SAVED HERE, BEFORE `Compile`, ON PURPOSE: this is the one moment in the
+      # job at which the tree provably holds dependency artifacts and nothing
+      # else. A post-job auto-save would archive `barkpark` alongside them; the
+      # tripwire would catch it on the next run, but catching it every run is
+      # not a design.
+      - name: Drop our own application's build dir before saving
+        if: steps.test_depbuild_audit.outputs.mode == 'rebuild'
+        # `mix deps.compile` creates the app's own (empty) build dir as a side
+        # effect. It is not a dependency, so it must not enter the cache.
+        run: rm -rf _build/test/lib/barkpark
+
+      - name: Save compiled dependency artifacts (test)
+        # One writer per cache key: partition 1 saves, the others only restore.
+        if: matrix.partition == 1 && steps.test_depbuild_audit.outputs.mode == 'rebuild'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       # Format check now lives in the dedicated `format` job above (Task
       # #29). It used to run here but was non-blocking because mix-test
@@ -1300,6 +1956,8 @@ jobs:
       # ALL is the safe answer, and reddening a required context because an
       # optimisation is unavailable would be the wrong trade.
       - name: Is the compile-closure instrument alive?
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
         id: xref-probe
         working-directory: .
         continue-on-error: true
@@ -1378,6 +2036,9 @@ jobs:
         # are today located only by log timestamps, with the owning test
         # inferred from adjacent lines. This names them.
         #
+        # THE CELL'S FILES ARE CHOSEN BY MEASURED WEIGHT, not by `--partitions`
+        # hash: scripts/elixir-test-partition.sh (task-bc3ef53758b916a8).
+        #
         # THE SELECTION IS READ FROM A FILE, and the ALL branch is the default
         # in three separate ways: a missing file, an empty file, and a file
         # holding the token `ALL` all run everything. `grep -qxF ALL <file>`
@@ -1386,22 +2047,42 @@ jobs:
         # and narrow on a verdict nobody produced.
         run: |
           sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
+          echo "partition ${MIX_TEST_PARTITION} of ${TEST_PARTITIONS}"
+          # THE CANDIDATES: every test file (the FULL suite) or the impacted
+          # selection. `find` mirrors mix's own discovery (test/**/*_test.exs,
+          # dot-paths excluded, as Path.wildcard does).
+          cands="$RUNNER_TEMP/elixir-test-candidates.txt"
           if [ ! -s "$sel" ] || grep -qxF 'ALL' "$sel"; then
             echo "running the FULL suite"
-            mix test --slowest 50
-            exit 0
+            find test -name '*_test.exs' -not -path '*/.*' >"$cands"
+          else
+            sed '/^$/d' "$sel" >"$cands"
+            if [ ! -s "$cands" ]; then
+              echo "::warning::the selection file held no usable paths — running the FULL suite."
+              find test -name '*_test.exs' -not -path '*/.*' >"$cands"
+            else
+              echo "the selection holds $(wc -l <"$cands" | tr -d ' ') test files"
+            fi
           fi
+          # THIS CELL'S SHARE, by measured weight (task-bc3ef53758b916a8). Every
+          # cell computes the same assignment from the same inputs; the script
+          # REFUSES (exit 2, red) unless its cells are disjoint and cover every
+          # candidate exactly once. It is not piped: its exit code is the step's.
+          mine="$RUNNER_TEMP/elixir-test-cell.txt"
+          bash ../scripts/elixir-test-partition.sh --cell "$MIX_TEST_PARTITION" "$TEST_PARTITIONS" <"$cands" >"$mine"
           files=()
           while IFS= read -r f; do
             [ -n "$f" ] || continue
             files+=("$f")
-          done <"$sel"
+          done <"$mine"
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::warning::the selection file held no usable paths — running the FULL suite."
-            mix test --slowest 50
+            # Only a narrowed selection can leave a cell empty (the full suite
+            # always fills every cell). A bare `mix test` here would run
+            # EVERYTHING, so an empty cell runs nothing and says so.
+            echo "this cell holds none of the $(wc -l <"$cands" | tr -d ' ') selected files — nothing to run here"
             exit 0
           fi
-          echo "running ${#files[@]} selected test files"
+          echo "running ${#files[@]} test files in this cell"
           mix test --slowest 50 "${files[@]}"
 
       # The selection is UPLOADED on every run, pass or fail. It is the only
@@ -1414,7 +2095,11 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: elixir-impacted-selection
+          # Partition 1 keeps the historical name, which elixir-main-red-attribution
+          # reads. The selection is computed identically in every cell. The other
+          # cells need their own names because upload-artifact v4 refuses a
+          # duplicate name inside one run.
+          name: elixir-impacted-selection${{ matrix.partition != 1 && format('-p{0}', matrix.partition) || '' }}
           path: elixir-impacted-selection.txt
           if-no-files-found: warn
           retention-days: 30
@@ -1438,7 +2123,8 @@ jobs:
         # but a broken compile does not cascade into a bogus "stale artifact"
         # red that says nothing true. The gate is unchanged in strength — only
         # its position moved. Do NOT move it back above `mix test`.
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: |
           mix barkpark.openapi
           cd ..
@@ -1487,7 +2173,8 @@ jobs:
         # (task-openapi-drift-chronic): runs AFTER `mix test`, on the same
         # build-succeeded-but-ignore-the-test-result condition, so a red suite
         # does not hide stale fixtures.
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: |
           mix barkpark.paper_components.gen_golden_parity
           cd ..
@@ -1533,8 +2220,49 @@ jobs:
         # never be able to suppress it. Unguarded, a one-byte docs/openapi.json
         # drift would skip the boot bar entirely — a fresh instance of the exact
         # failure mode that left this bar red on main for weeks (see above).
-        if: ${{ !cancelled() && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
+        # ONE-TIME: not a test shard. Partition 1 only.
+        if: ${{ !cancelled() && matrix.partition == 1 && steps.build.outcome == 'success' && steps.db.outcome == 'success' }}
         run: mix test --only boot_test test/barkpark/plugin_free_boot_test.exs
+
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      #
+      # THE JOB OUTPUT IS NOT ENOUGH ANY MORE (task-8345bf4c2ca2b989). This job
+      # is a matrix now, and a matrix job's `outputs:` hold whichever cell set
+      # them LAST, so a REFUSED in one partition could be overwritten by a
+      # later cell. The output is kept, published by partition 1 only because
+      # the channelled guards run there, and it stays bound in `elixir-gate`
+      # as V_TEST (gate-refusal-vocabulary-check requires that shape). But the
+      # AUTHORITY is the per-cell record below: every cell writes one, and
+      # `elixir-gate` folds them worst-first together with V_TEST, and refuses
+      # unless every partition reported.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always() && matrix.partition == 1
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+      - name: Record this partition for the gate
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: |
+          mkdir -p mix-test-cell
+          printf 'partition=%s\nof=%s\nverdict=%s\n' \
+            "${{ matrix.partition }}" "${TEST_PARTITIONS}" "${BP_STEP_VERDICT:-}" \
+            > mix-test-cell/cell.txt
+          cat mix-test-cell/cell.txt
+      - name: Upload this partition's record
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mix-test-cell-p${{ matrix.partition }}
+          path: mix-test-cell/cell.txt
 
   mix-prod-compile:
     # The merge gate. See docs/ops/merge-gates.md.
@@ -1555,6 +2283,10 @@ jobs:
     # belt-and-braces. It stays: the aggregator must not depend on the shape of
     # the `needs` graph to stay fail-closed.
     if: needs.changes.outputs.compile == 'true'
+    outputs:
+      # REFUSED when any instrument in this job exited 2 — see the refusal
+      # channel note on the last step. Read by `elixir-gate` as V_PROD.
+      verdict: ${{ steps.verdict.outputs.verdict }}
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -1638,7 +2370,7 @@ jobs:
       # proven only once at authoring time is not one either — so it is proven
       # on every run of the gate it protects.
       - name: Prove the tripwire can fail (guard --selftest)
-        run: bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        run: bash "$GITHUB_WORKSPACE/scripts/run-instrument.sh" prod-build-cache-guard-selftest -- bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
         working-directory: .
 
       # THE TRIPWIRE. Two arms, and the job is not allowed to proceed on a
@@ -1773,12 +2505,48 @@ jobs:
         env:
           MIX_ENV: prod
 
+      # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ──────────────
+      # `if: always()` and LAST, so it runs even when an instrument above it
+      # reddened the job — the refusal case is precisely the one whose verdict
+      # must survive. `BP_STEP_VERDICT` is what every scripts/run-instrument.sh
+      # call in this job combined worst-first through $GITHUB_ENV; a `||` chain
+      # over the individual step outputs would take the FIRST non-empty one and
+      # so drop a refusal that happened after a clean measurement.
+      # EMPTY is not MEASURED-CLEAN: it means the job never reached a
+      # channelled step, and `elixir-gate` reads it that way.
+      - name: Publish this job's refusal verdict
+        id: verdict
+        if: always()
+        working-directory: ${{ github.workspace }}
+        run: echo "verdict=${BP_STEP_VERDICT:-}" >> "$GITHUB_OUTPUT"
+
   validation-perf:
     # Phase 3 WI4 — cross-field validation perf gate. Independent of mix-test
     # (which is advisory) so a perf regression blocks merge even while the
     # test suite is being remediated, and a flaky test does not mask perf
-    # drift. Runs the synthetic 200-field / 100-rule bench, takes the median
-    # of 5 timed runs, fails the job if median > 100ms.
+    # drift. Runs the synthetic 200-field / 100-rule bench.
+    #
+    # ── THIS JOB REDS ON THE BENCH, AND ONLY ON THE BENCH ──────────────────
+    # Measured 2026-09-06 over 1,366 executed instances of this job
+    # (task-8adc3266e46e4ec4): it produced 7 reds in 4.6 days and NOT ONE was
+    # the bench. Six were `Compile --warnings-as-errors` on ordinary Elixir
+    # diffs — a verdict `mix-prod-compile` above already owns and reports
+    # under a name that says `compile` — and one was `Fetch deps` losing a
+    # hex.pm registry record. A required context that reds for a reason other
+    # than the one its name states is how a red gets MISREAD: #16340's
+    # registry blip was read as a load-sensitive bench and sent a whole lane
+    # hunting a perf problem that did not exist. So the compile step here
+    # DROPS `--warnings-as-errors` (see there) and `mix deps.get` is retried
+    # (see there).
+    #
+    # THE NAME BELOW IS STALE AND IS DELIBERATELY LEFT ALONE. The bench no
+    # longer takes a median of 5 and its alarm is no longer a fixed 100 ms
+    # (api/bench/validation_perf.exs). This string is a KEY: it is carried
+    # twice in .github/required-checks.json (run-shape and skipped-shape rows)
+    # and acknowledged twice in scripts/required-checks.test.sh, and branch
+    # protection plus every census in this repo key on the STRING. Renaming it
+    # is a registry change that belongs in its own PR with the census
+    # regenerated, not a rider on a bench change.
     name: Validation perf bench (median-of-5, alarm >100ms)
     needs: changes
     # Pure api/** compute (bench/validation_perf.exs against the rule
@@ -1810,25 +2578,166 @@ jobs:
           otp-version: ${{ matrix.otp }}
           elixir-version: ${{ matrix.elixir }}
 
-      - name: Cache deps
+      # SAME HAZARD, SAME CONTRACT AS `mix-test` ABOVE — and this job is the
+      # one where a near-miss restore is worst. It was `api/deps` PLUS
+      # `api/_build` under a `restore-keys:` PREFIX, so a `mix.lock` bump
+      # missed the exact key, hit the prefix, and benchmarked a rule evaluator
+      # compiled from a DIFFERENT lock — a first-party
+      # `Elixir.Barkpark*.beam` this run never produced, timed and published as
+      # this run's perf verdict. Nothing checked it, and unlike a compile error
+      # a stale bench does not announce itself: it just reports a number about
+      # code that is not on the branch.
+      #
+      # Sources keep the prefix; compiled artifacts move to an EXACT key over
+      # `_build/test/lib` behind the tripwire. The depbuild key is spelt
+      # identically to `mix-test`'s on purpose — both jobs run `MIX_ENV=test`,
+      # so where the matrices ever agree the two produce the same dependency
+      # tree from the same lock and may share it; where they differ (they do
+      # today: 1.18.4 vs 1.18.1) the Elixir field already separates them.
+      - name: Cache deps (dependency SOURCES)
         uses: actions/cache@v4
         with:
-          path: |
-            api/deps
-            api/_build
-          key: ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
+          path: api/deps
+          key: ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-perf-${{ matrix.otp }}-${{ matrix.elixir }}-
+            ${{ runner.os }}-mix-perf-deps-v2-${{ matrix.otp }}-${{ matrix.elixir }}-
+
+      # NO `restore-keys:`. See the twin step in `mix-test`: a prefix match
+      # would hand this job dependency BEAM from another lock and the
+      # completeness arm would still pass. `cache/restore`, not `cache`, so no
+      # post-job auto-save can archive `_build/test/lib/barkpark`.
+      - name: Restore compiled dependency artifacts (test)
+        id: perf_dep_build
+        uses: actions/cache/restore@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Fetch deps
-        run: mix deps.get
+        # RETRIED, because a hex.pm blip is not a merge decision. Measured
+        # 2026-09-06 (task-8adc3266e46e4ec4): run 34019004680 attempt 1 died
+        # here on `Failed to fetch record for fine from registry` and attempt 2
+        # — a plain re-run, no code change — was green, so PR #16340 was
+        # blocked on a REQUIRED context by a network flake. Same shape and same
+        # remedy as the libxml2-utils install in `mix-test` above: retry with
+        # backoff, then FAIL LOUDLY. Never `|| true` — a deps tree that is
+        # genuinely unfetchable must still red, or the bench below would run
+        # against nothing and the job would mean nothing.
+        #
+        # 3 attempts, sleeping 5s then 15s between them (~20s of added wall
+        # time in the worst case, against a job whose median is minutes).
+        # Backoff rather than a flat retry: a registry serving one bad record
+        # is usually mid-deploy, and the second gap is the one that matters.
+        run: |
+          set -u
+          fetched=0
+          delays="5 15"
+          attempt=0
+          for delay in $delays ""; do
+            attempt=$((attempt + 1))
+            if mix deps.get; then
+              fetched=1
+              echo "mix deps.get succeeded on attempt ${attempt}."
+              break
+            fi
+            if [ -n "$delay" ]; then
+              echo "mix deps.get attempt ${attempt}/3 failed (a hex.pm registry blip is the usual cause) — retrying in ${delay}s"
+              sleep "$delay"
+            fi
+          done
+          if [ "$fetched" != 1 ]; then
+            echo "::error::mix deps.get failed on all 3 attempts. This is NOT being tolerated: the bench below would then measure an untrusted dependency tree, so the job reds here instead."
+            exit 1
+          fi
+
+      # DISTRUST VACUOUS GREEN — the tripwire's own 11-case mutation harness
+      # runs before this job acts on its verdict. Called bare, not through
+      # scripts/run-instrument.sh: this job publishes no `outputs.verdict` for
+      # a channelled refusal to travel along, and `elixir-gate` reads only
+      # `needs.validation-perf.result` — which a non-zero exit already carries.
+      - name: Prove the tripwire can fail (guard --selftest)
+        run: bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" --selftest
+        working-directory: .
+
+      # THE TRIPWIRE. Three verdicts: 0 dep-only and complete, 3 unusable
+      # (rebuild from nothing), 1 CONTAMINATED — hard fail, naming what it
+      # found. Both input lists re-derived here every run, both floored inside
+      # the guard so an empty `mix deps` falls back rather than passing over
+      # nothing.
+      - name: Audit the restored dependency build tree
+        id: perf_depbuild_audit
+        run: |
+          set -uo pipefail
+          sed -n 's/^  "\([a-z0-9_][a-z0-9_]*\)".*/\1/p' mix.lock | sort -u > "$RUNNER_TEMP/dep-allowlist.txt"
+          (MIX_ENV=test mix deps 2>/dev/null || true) \
+            | sed -n 's/^\* \([a-z0-9_][a-z0-9_]*\) .*/\1/p' | sort -u > "$RUNNER_TEMP/dep-required.txt"
+          echo "mix.lock names: $(wc -l < "$RUNNER_TEMP/dep-allowlist.txt")   test deps: $(wc -l < "$RUNNER_TEMP/dep-required.txt")"
+          # `set +e`: GitHub runs `run:` under `bash -e`, and 1 and 3 are two
+          # different readings this step must tell apart.
+          set +e
+          bash "$GITHUB_WORKSPACE/scripts/prod-build-cache-guard.sh" \
+            _build/test/lib "$RUNNER_TEMP/dep-allowlist.txt" "$RUNNER_TEMP/dep-required.txt"
+          verdict=$?
+          set -e
+          case "$verdict" in
+            0)
+              echo "mode=cached" >> "$GITHUB_OUTPUT"
+              ;;
+            3)
+              echo "FALLBACK: no usable dependency build cache — taking the full 'rm -rf _build/test' + 'mix deps.compile --force' path (Past Mistake #2)."
+              rm -rf _build/test
+              echo "mode=rebuild" >> "$GITHUB_OUTPUT"
+              ;;
+            *)
+              echo "::error::test dependency build cache is CONTAMINATED (guard exit $verdict) — see the CONTAMINANT lines above"
+              exit 1
+              ;;
+          esac
+
+      - name: Compile deps (test)
+        run: |
+          if [ "${{ steps.perf_depbuild_audit.outputs.mode }}" = "cached" ]; then
+            echo "Dependency build tree restored and audited dependency-only + complete."
+            mix deps.compile
+          else
+            echo "No usable dependency build cache — full forced rebuild."
+            mix deps.compile --force
+          fi
+
+      - name: Drop our own application's build dir before saving
+        if: steps.perf_depbuild_audit.outputs.mode == 'rebuild'
+        run: rm -rf _build/test/lib/barkpark
+
+      - name: Save compiled dependency artifacts (test)
+        if: steps.perf_depbuild_audit.outputs.mode == 'rebuild'
+        uses: actions/cache/save@v4
+        with:
+          path: api/_build/test/lib
+          key: ${{ runner.os }}-mix-test-depbuild-v1-${{ matrix.otp }}-${{ matrix.elixir }}-${{ hashFiles('api/mix.lock') }}
 
       - name: Compile
-        run: mix compile --warnings-as-errors
+        # NO `--warnings-as-errors` HERE, ON PURPOSE. `mix-prod-compile` above
+        # is the job whose name says compile and whose green is the compile
+        # contract; `mix-test` compiles with the flag too, in dev. This job
+        # compiles only so it has something to benchmark, so a warning here is
+        # a THIRD report of a verdict two other jobs already publish, under a
+        # name that promises a perf measurement. Six of the seven reds this job
+        # produced in the 4.6 days measured 2026-09-06 were exactly that.
+        # A compile ERROR still reds, and rightly: there is no bench to run.
+        # Warning TEXT still appears in this job's log; what is dropped is the
+        # merge verdict, which belongs to the compile job.
+        run: mix compile
 
-      - name: Run validation perf bench (median-of-5, fail if >100ms)
+      - name: Run validation perf bench (relative alarm vs a measured runner baseline)
         # --no-start skips OTP app boot. The bench is pure-compute; we don't
         # need Postgres just to time the rule evaluator.
+        #
+        # THE ONLY STEP IN THIS JOB WHOSE RED IS A PERF VERDICT. It measures a
+        # fixed-work runner baseline in the same process, prints it beside the
+        # validation sample, and reds when the ratio exceeds a recorded
+        # nominal by more than the alarm multiple — so a slow runner moves
+        # both numbers and the verdict does not move. Full derivation:
+        # api/bench/validation_perf.exs.
         run: mix run --no-start bench/validation_perf.exs
 
   elixir-gate:
@@ -1875,6 +2784,21 @@ jobs:
     needs: [changes, mix-test, mix-prod-compile, validation-perf, path-escape, format]
     runs-on: ubuntu-latest
     steps:
+      # ── THE TEST PARTITIONS' RECORDS (task-8345bf4c2ca2b989) ─────────────
+      # `needs.mix-test.result` folds the matrix: any failed or cancelled cell
+      # makes it non-success. It cannot say that EVERY partition existed, and a
+      # cell dropped from the matrix is simply absent while the rest succeed
+      # over half a suite. Nor can the matrix carry the refusal channel, because
+      # job outputs are last-writer-wins. Both ride per-cell records, folded at
+      # the top of Decide below. This download is best-effort ON PURPOSE: a
+      # missing record is judged there, and red, not here.
+      - name: Download the Test partitions' records
+        if: always() && needs.mix-test.result != 'skipped'
+        continue-on-error: true
+        uses: actions/download-artifact@v4
+        with:
+          pattern: mix-test-cell-p*
+          path: ${{ runner.temp }}/mix-test-cells
       - name: Decide (fail-closed over every upstream result)
         env:
           R_CHANGES: ${{ needs.changes.result }}
@@ -1885,12 +2809,87 @@ jobs:
           R_FORMAT: ${{ needs.format.result }}
           O_COMPILE: ${{ needs.changes.outputs.compile }}
           O_TEST: ${{ needs.changes.outputs.test }}
+          # ── THE REFUSAL CHANNEL (cchi-w64-…-exit-2-vocabulary) ───────────
+          # `R_*` is a RESULT — success/failure/skipped — and a failure on that
+          # channel is ONE word over two utterly different facts: "I measured
+          # and found a defect" and "I could not measure at all". `V_*` is the
+          # second fact, published by `scripts/run-instrument.sh` at the call
+          # site of every refusal-capable instrument in the job. Empty means
+          # the job never reached one of those steps (skipped, or it died
+          # earlier) — which is NOT a claim that nothing refused, so this step
+          # never reads an empty V_* as MEASURED.
+          V_ESCAPE: ${{ needs.path-escape.outputs.verdict }}
+          V_FORMAT: ${{ needs.format.outputs.verdict }}
+          # mix-test is a matrix, and its outputs are last-writer-wins, so
+          # V_TEST alone could lose a refusal. It is folded worst-first with the
+          # per-partition records at the top of the run body
+          # (task-8345bf4c2ca2b989), and the records are the authority.
+          V_TEST: ${{ needs.mix-test.outputs.verdict }}
+          MIX_TEST_CELLS: ${{ runner.temp }}/mix-test-cells
+          V_PROD: ${{ needs.mix-prod-compile.outputs.verdict }}
           # NOT a second verdict — R_FORMAT above is the verdict. This is the
           # NAMES, so the ::error:: (the only line the check-run API carries)
           # says WHICH file, per D770/D771. Empty on every green path.
           F_IN_DIFF: ${{ needs.format.outputs.unformatted_in_diff }}
         run: |
           set -euo pipefail
+
+          # ── fold the Test partitions (task-8345bf4c2ca2b989) ─────────────
+          # Every record is `partition=<n>`, `of=<total>`, `verdict=<channel>`.
+          # P_TEST is `ok` only if the partitions present are EXACTLY 1..total,
+          # each once, and every cell agrees on the total. Anything else, no
+          # records included, is `no` with the reason in P_TEST_WHY. V_TEST
+          # starts from the (last-writer-wins) job output and every record is
+          # folded into it worst-first, so a refusal in ANY cell survives.
+          V_TEST="${V_TEST:-}"; P_TEST="no"; P_TEST_WHY=""
+          if [ "${R_TEST:-}" = "skipped" ]; then
+            P_TEST="skipped"
+          else
+            shopt -s nullglob
+            cell_records=("${MIX_TEST_CELLS:-/nonexistent}"/*/cell.txt)
+            shopt -u nullglob
+            if [ "${#cell_records[@]}" -eq 0 ]; then
+              P_TEST_WHY="no partition uploaded a record"
+              # A SUCCESS with no record is a refusal to measure; a failed
+              # matrix is already red and needs no second word.
+              if [ "${R_TEST:-}" = "success" ]; then V_TEST="UNKNOWN"; fi
+            else
+              cell_of=""; cell_seen=""
+              for r in "${cell_records[@]}"; do
+                cp_="$(sed -n 's/^partition=//p' "$r")"
+                co_="$(sed -n 's/^of=//p' "$r")"
+                cv_="$(sed -n 's/^verdict=//p' "$r")"
+                echo "partition record: partition=${cp_} of=${co_} verdict=${cv_:-<empty>}"
+                case "${cp_}${co_}" in
+                  '' | *[!0-9]*) P_TEST_WHY="${P_TEST_WHY}unreadable record ${r}; "; continue ;;
+                esac
+                if [ -z "$cell_of" ]; then cell_of="$co_"
+                elif [ "$cell_of" != "$co_" ]; then P_TEST_WHY="${P_TEST_WHY}cells disagree on the total (${cell_of} vs ${co_}); "; fi
+                cell_seen="${cell_seen} ${cp_}"
+                case "$cv_" in
+                  REFUSED | UNKNOWN) V_TEST="REFUSED" ;;
+                  MEASURED-DEFECT) [ "$V_TEST" = "REFUSED" ] || V_TEST="MEASURED-DEFECT" ;;
+                  MEASURED-CLEAN) [ -n "$V_TEST" ] || V_TEST="MEASURED-CLEAN" ;;
+                  '') : ;;
+                  *) V_TEST="REFUSED"; P_TEST_WHY="${P_TEST_WHY}unrecognised verdict '${cv_}' from partition ${cp_}; " ;;
+                esac
+              done
+              if [ -n "$cell_of" ] && [ "$cell_of" -ge 1 ]; then
+                for i in $(seq 1 "$cell_of"); do
+                  n_="$(printf '%s\n' $cell_seen | grep -cx "$i" || true)"
+                  [ "$n_" = 1 ] || P_TEST_WHY="${P_TEST_WHY}partition ${i} of ${cell_of} reported ${n_} times; "
+                done
+                for p_ in $cell_seen; do
+                  { [ "$p_" -ge 1 ] && [ "$p_" -le "$cell_of" ]; } || P_TEST_WHY="${P_TEST_WHY}partition ${p_} is outside 1..${cell_of}; "
+                done
+              else
+                P_TEST_WHY="${P_TEST_WHY}no usable total; "
+              fi
+              [ -n "$P_TEST_WHY" ] || P_TEST="ok"
+            fi
+          fi
+          echo "Test partitions: ${P_TEST}${P_TEST_WHY:+ — ${P_TEST_WHY}}"
+          echo
 
           echo "dispatcher outputs: compile='${O_COMPILE}' test='${O_TEST}'"
           echo
@@ -2010,9 +3009,44 @@ jobs:
 
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged.
+          # ── the refusal ledger ───────────────────────────────────────────
+          # Built BEFORE the verdict, so the `::error::` below can say WHICH
+          # instruments refused. Derived from ${job}, never a hardcoded name.
+          refusals=""
+          note_verdict() {
+            local job="$1" v="$2"
+            case "$v" in
+              REFUSED|UNKNOWN)
+                echo "  REFUSED ${job}: the instrument exited 2 — it COULD NOT MEASURE and made NO"
+                echo "          claim in either direction. Read that job's own log: it printed the"
+                echo "          cause by name. This is still red — a refusal is not a pass."
+                refusals="${refusals:+${refusals}, }${job}"
+                ;;
+              MEASURED-DEFECT)
+                echo "  measured ${job}: the instrument RAN and found a defect. The fault is in the"
+                echo "          tree, not on the runner." ;;
+              MEASURED-CLEAN|'') : ;;
+              *) echo "  note    ${job}: unrecognised verdict '${v}' on the refusal channel." ;;
+            esac
+          }
+          note_verdict "path-escape ratchet" "${V_ESCAPE:-}"
+          note_verdict "format (diff-scoped)" "${V_FORMAT:-}"
+          note_verdict "mix-test"             "${V_TEST:-}"
+          note_verdict "mix-prod-compile"     "${V_PROD:-}"
+
           decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
           decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
           decide "mix-test"                "${R_TEST}"    "${O_TEST}"
+          # Every partition must have reported (task-8345bf4c2ca2b989). A result
+          # of success over a MISSING partition is half a suite, so it is red.
+          # Judged only where the matrix itself succeeded: a failed or
+          # cancelled mix-test is already red above, and naming it twice would
+          # say nothing new.
+          if [ "${R_TEST:-}" = "success" ] && [ "$P_TEST" != "ok" ]; then
+            echo "  FAIL    mix-test partitions: ${P_TEST_WHY:-the fold did not complete}"
+            bad=1
+            reds="${reds:+${reds}, }mix-test (partitions incomplete)"
+          fi
           decide "mix-prod-compile"        "${R_PROD}"    "${O_COMPILE}"
           decide "validation-perf"         "${R_PERF}"    "${O_COMPILE}"
           # DIFF-SCOPED. This job fails only when a file the PR TOUCHES is
@@ -2032,7 +3066,25 @@ jobs:
           fi
 
           if [ "$bad" -ne 0 ]; then
-            echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            if [ -n "$refusals" ]; then
+              # The ONE line the check-run API carries. Say which half of the
+              # vocabulary fired, or the reader re-derives it from scratch and
+              # usually guesses "the runner".
+              echo "::error title=Elixir gate RED — an instrument REFUSED TO MEASURE::RED because at least one upstream job is not in the allow-set.%0AREFUSED TO MEASURE (exit 2): ${refusals}%0AA refusal is the ABSENCE of a measurement: those instruments made no claim about this tree in either direction — nothing here says it is clean and nothing here says it is broken. exit 2 is ONE code over MANY causes and this aggregate measured none of them: an unknown path-set or argument name, a source root that is not there, a base ref that does not resolve, a toolchain the box does not carry. READ THE REFUSING JOB'S OWN LINE — it printed the cause by name, and that cause may well be a committed file in this repo rather than the runner.%0ANOT IN THE ALLOW-SET: ${reds}"
+            else
+              echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose. NOT IN THE ALLOW-SET: ${reds}"
+            fi
+            exit 1
+          fi
+
+          if [ -n "$refusals" ]; then
+            # Every upstream is in the allow-set and an instrument still refused
+            # — possible when a refusing step sits behind `!cancelled()` in a
+            # job that ends green some other way, or inside the advisory
+            # `format` job, which is `continue-on-error` and so reports success
+            # whatever it found. A green required context over an unmeasured
+            # hole is precisely the vacuous green this channel exists to kill.
+            echo "::error title=Elixir gate RED — a refusal reached the aggregate with every job green::REFUSED TO MEASURE (exit 2): ${refusals}%0AEvery upstream job is in the allow-set, and an instrument still refused to measure. Greening on that would publish a required context over a hole nothing looked into. Read the refusing job's own line for the cause."
             exit 1
           fi
 

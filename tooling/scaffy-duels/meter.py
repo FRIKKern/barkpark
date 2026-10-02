@@ -3,6 +3,7 @@
 
 Usage:
     meter.py verify <results-dir-or-envelope.json> [...]
+    meter.py shares [<results-dir>]  (re-takes the §3 dollar figures)
     meter.py --self-test            (alias: meter.py self-test)
 
 `verify` walks every *.agent.json under the given paths (recursively), recomputes
@@ -27,8 +28,18 @@ Three things are carried by the EXIT CODE, not by prose a human has to read:
    single copyable dependency-free script — must be byte-identical to this one.
    Asserted by --self-test, so the gate carries it.
 
+4. The §3 dollar figures must be RE-TAKEN, not remembered. `shares` recomputes the
+   corpus total, the by-dollar component shares, the median envelope cost and the
+   median component shares straight from the envelopes; `verify` asserts METER.md
+   §3's published literals against that recompute whenever the run covers the
+   canonical corpus. Before 2026-09-11 those figures were hand-computed literals
+   with no re-taker: adding an envelope and bumping the population markers left
+   §3 untouched at rc=0.
+
 Honesty (distrust-vacuous-green): --self-test proves the verifier REDS on a
-perturbed envelope and GREENS on a faithful one.
+perturbed envelope and GREENS on a faithful one — and it never prints an arm it
+did not run. A missing `results/` corpus or a missing `tally_wf.py` twin is a
+REFUSAL here, not a skipped arm with a banner that claims it fired.
 """
 import glob
 import json
@@ -59,6 +70,23 @@ METER_DOC = os.path.join(HERE, "METER.md")
 # with each other AND with what verify actually walked.
 POP_MARKER_RE = re.compile(r"<!--\s*meter:population\s+(\d+)\s*-->")
 POP_PROSE_RE = re.compile(r"on\s+(\d+)/(\d+)\*\*\s+recorded duel envelopes")
+
+
+def in_repo_checkout(start=None):
+    """Is meter.py running from inside a git checkout (as opposed to a copied-out tree)?
+
+    Used to tell a DELETION from a legitimate copy-away. Inside a checkout every file
+    this instrument asserts against — the corpus, the doc, the mirrored twin — is
+    committed next to it, so an absence is a broken tree, not a supported mode.
+    """
+    d = start or HERE
+    while True:
+        if os.path.exists(os.path.join(d, ".git")):
+            return True
+        parent = os.path.dirname(d)
+        if parent == d:
+            return False
+        d = parent
 
 
 def rate_for(model):
@@ -108,6 +136,177 @@ def declared_population(path=METER_DOC):
             f"§2 prose says {n_prose} — the doc's own population is not one number"
         )
     return n_marker, None
+
+
+COMPONENTS = ("cache writes", "cache reads", "output tokens", "fresh input")
+
+# §3's own row labels, with the bolding stripped.
+DOC_ROW_LABELS = {
+    "cache writes": "cache writes",
+    "cache reads": "cache reads",
+    "output tokens": "output tokens",
+    "fresh input": "fresh input",
+}
+
+
+def split_cost(usage, rate):
+    """The §2 formula, kept apart by component. None when the TTL split is absent."""
+    rate_in, rate_out = rate
+    cc = usage.get("cache_creation") or {}
+    if not cc and usage.get("cache_creation_input_tokens"):
+        return None
+    return {
+        "cache writes": (
+            cc.get("ephemeral_5m_input_tokens", 0) * rate_in * CACHE_WRITE_5M
+            + cc.get("ephemeral_1h_input_tokens", 0) * rate_in * CACHE_WRITE_1H
+        ) / 1e6,
+        "cache reads": usage.get("cache_read_input_tokens", 0) * rate_in * CACHE_READ / 1e6,
+        "output tokens": usage.get("output_tokens", 0) * rate_out / 1e6,
+        "fresh input": usage.get("input_tokens", 0) * rate_in / 1e6,
+    }
+
+
+def corpus_shares(files):
+    """(stats, error). The §3 statistics, re-taken from `files`.
+
+    Every figure §3 publishes for a population comes from here: the corpus total,
+    the by-dollar component shares, the median envelope cost and the median
+    per-envelope component shares. A file this cannot decompose is an error, not a
+    skipped row — a share computed over a subset is a number nothing measured.
+    """
+    import statistics
+
+    totals = {c: 0.0 for c in COMPONENTS}
+    per_envelope, costs = [], []
+    for f in files:
+        name = os.path.basename(f)
+        try:
+            env = json.load(open(f))
+        except Exception as e:  # noqa: BLE001
+            return None, f"{name}: unreadable ({e})"
+        usage, mu = env.get("usage"), env.get("modelUsage") or {}
+        if usage is None or len(mu) != 1:
+            return None, f"{name}: not a single-model CLI envelope — shares are not derivable"
+        rate = rate_for(next(iter(mu)))
+        if rate is None:
+            return None, f"{name}: no rate registered for model {next(iter(mu))} — update RATES"
+        parts = split_cost(usage, rate)
+        if parts is None:
+            return None, f"{name}: cache_creation_input_tokens with no TTL split — refusing"
+        cost = sum(parts.values())
+        if cost <= 0:
+            return None, f"{name}: recomputed cost is {cost} — cannot take a share of it"
+        for c in COMPONENTS:
+            totals[c] += parts[c]
+        costs.append(cost)
+        per_envelope.append({c: parts[c] / cost * 100.0 for c in COMPONENTS})
+    if not costs:
+        return None, "no envelopes — nothing to take a share of"
+    grand = sum(totals.values())
+    return {
+        "n": len(costs),
+        "total_usd": grand,
+        "dollar_share": {c: totals[c] / grand * 100.0 for c in COMPONENTS},
+        "median_cost_usd": statistics.median(costs),
+        "median_share": {
+            c: statistics.median([e[c] for e in per_envelope]) for c in COMPONENTS
+        },
+    }, None
+
+
+def _doc_tables(doc):
+    """Every markdown table in `doc`, as a list of rows of stripped cells."""
+    tables, cur = [], []
+    for line in doc.splitlines():
+        if line.lstrip().startswith("|"):
+            cells = [c.strip() for c in line.strip().strip("|").split("|")]
+            if not all(set(c) <= set("-: ") and c for c in cells):
+                cur.append(cells)
+        elif cur:
+            tables.append(cur)
+            cur = []
+    if cur:
+        tables.append(cur)
+    return tables
+
+
+def _cell_matches(cell, value):
+    """Does §3's published cell agree with the re-taken `value` (a percentage)?"""
+    cell = cell.replace("**", "").strip()
+    if cell.startswith("~0"):
+        return value < 0.05
+    return cell == f"{value:.1f}%"
+
+
+DOC_TOTAL_RE = re.compile(r"by dollars,\s*n=(\d+)\s*\(\$([\d.]+)\)")
+DOC_MEDIAN_COST_RE = re.compile(r"\$([\d.]+)\s*\(n=(\d+)\)")
+
+
+def assert_published_shares(stats, path=METER_DOC):
+    """Errors where METER.md §3's literals disagree with the re-taken statistics.
+
+    §3 used to be four hand-computed dollar literals and eight percentages with no
+    re-taker in the repo: MUT_E (add a 35th envelope, bump both population markers,
+    leave §3 alone) returned rc=0. This is the re-taker.
+    """
+    n = stats["n"]
+    try:
+        doc = open(path).read()
+    except OSError as e:  # noqa: BLE001
+        return [f"cannot read {os.path.basename(path)} ({e})"]
+    errs = []
+
+    totals = {int(m.group(1)): m.group(2) for m in DOC_TOTAL_RE.finditer(doc)}
+    if n not in totals:
+        errs.append(
+            f"METER.md §3 publishes no `by dollars, n={n} ($X)` column — the corpus holds "
+            f"{n} envelopes and the doc's dollar columns are for n={sorted(totals) or 'none'}"
+        )
+    elif totals[n] != f"{stats['total_usd']:.2f}":
+        errs.append(
+            f"§3 dollar total drift: the corpus totals ${stats['total_usd']:.4f} "
+            f"(prints as ${stats['total_usd']:.2f}), METER.md §3 publishes ${totals[n]} for n={n}"
+        )
+
+    medians = {int(m.group(2)): m.group(1) for m in DOC_MEDIAN_COST_RE.finditer(doc)}
+    if n not in medians:
+        errs.append(f"METER.md §3 publishes no `$X (n={n})` median envelope cost")
+    elif medians[n] != f"{stats['median_cost_usd']:.4f}":
+        errs.append(
+            f"§3 median-cost drift: the corpus median is ${stats['median_cost_usd']:.4f}, "
+            f"METER.md §3 publishes ${medians[n]} for n={n}"
+        )
+
+    want_cols = {
+        f"by dollars, n={n}": ("dollar_share", f"by dollars, n={n}"),
+        f"median share, n={n}": ("median_share", f"median share, n={n}"),
+    }
+    for header_key, (stat_key, label) in want_cols.items():
+        col = None
+        for table in _doc_tables(doc):
+            head = table[0]
+            for i, cell in enumerate(head):
+                if cell.startswith(header_key):
+                    col, rows = i, table[1:]
+                    break
+            if col is not None:
+                break
+        if col is None:
+            errs.append(f"METER.md §3 publishes no `{label}` column to assert against")
+            continue
+        by_label = {r[0].replace("**", "").strip(): r for r in rows if len(r) > col}
+        for comp in COMPONENTS:
+            row = by_label.get(DOC_ROW_LABELS[comp])
+            if row is None:
+                errs.append(f"METER.md §3 `{label}` has no `{comp}` row")
+                continue
+            if not _cell_matches(row[col], stats[stat_key][comp]):
+                errs.append(
+                    f"§3 share drift [{label} / {comp}]: re-taken "
+                    f"{stats[stat_key][comp]:.1f}%, METER.md publishes "
+                    f"{row[col].replace('**', '').strip()}"
+                )
+    return errs
 
 
 def verify_envelope(path, errs):
@@ -225,6 +424,25 @@ def cmd_verify(paths):
         else:
             print(f"meter.py: population {n_corpus} — matches METER.md")
 
+        # THE §3 FIGURES ARE RE-TAKEN, NOT REMEMBERED. The population marker forces
+        # a doc TOUCH when the corpus grows; it does not force the DOLLARS to move.
+        # MUT_E (add a 35th envelope, bump both markers, leave §3) returned rc=0.
+        stats, why_stats = corpus_shares(corpus_files)
+        if stats is None:
+            errs.append(f"§3 figures unassertable: {why_stats}")
+        else:
+            share_errs = assert_published_shares(stats)
+            errs.extend(share_errs)
+            if not share_errs:
+                print(
+                    f"meter.py: §3 re-taken — corpus totals ${stats['total_usd']:.4f}, "
+                    f"median ${stats['median_cost_usd']:.4f}, shares by dollars "
+                    + " / ".join(
+                        f"{c.split()[-1]} {stats['dollar_share'][c]:.1f}%" for c in COMPONENTS
+                    )
+                    + " — all match METER.md §3"
+                )
+
     if counts.get("exact", 0) != total:
         errs.append(
             f"not all-exact: {total - counts.get('exact', 0)} of {total} envelopes were not "
@@ -234,6 +452,35 @@ def cmd_verify(paths):
     for e in errs:
         print(f"  FAIL {e}", file=sys.stderr)
     return 1 if errs else 0
+
+
+def cmd_shares(paths):
+    """Emit the §3 statistics from the envelopes themselves. The re-taker."""
+    files, _ = _collect(paths or [CORPUS_DIR])
+    if not files:
+        print("meter.py: no envelopes found", file=sys.stderr)
+        return 1
+    stats, why = corpus_shares(files)
+    if stats is None:
+        print(f"meter.py: cannot take shares — {why}", file=sys.stderr)
+        return 1
+    n = stats["n"]
+    print(f"meter.py: shares over {n} envelopes")
+    print(f"  corpus total          ${stats['total_usd']:.4f}")
+    print(f"  median envelope cost  ${stats['median_cost_usd']:.4f}")
+    print(f"  {'component':<16}{'by dollars':>12}{'median share':>15}")
+    for c in COMPONENTS:
+        print(
+            f"  {c:<16}{stats['dollar_share'][c]:>11.1f}%{stats['median_share'][c]:>14.1f}%"
+        )
+    if os.path.realpath(files[0]).startswith(os.path.realpath(CORPUS_DIR) + os.sep):
+        errs = assert_published_shares(stats)
+        for e in errs:
+            print(f"  FAIL {e}", file=sys.stderr)
+        if errs:
+            return 1
+        print(f"  METER.md §3 agrees with this re-take (n={n})")
+    return 0
 
 
 def _fixture(cost_usd):
@@ -262,7 +509,18 @@ def _assert_tally_table_parity():
     """
     twin = os.path.join(HERE, "tally_wf.py")
     if not os.path.exists(twin):
-        return "tally_wf.py not adjacent — parity unasserted"
+        # THE TWIN-ABSENT FAIL-OPEN. "not adjacent — parity unasserted" at rc=0 made
+        # an in-repo deletion and a legitimate copy-away indistinguishable to the exit
+        # code. The copy-away constraint is about tally_wf.py travelling, not about
+        # meter.py running outside its checkout — so inside a checkout, absence is a
+        # deletion and a refusal. Outside one, the arm is named as NOT RUN.
+        if in_repo_checkout():
+            raise AssertionError(
+                "tally_wf.py is not adjacent to meter.py, but meter.py is running from a "
+                "git checkout — the twin is committed here, so this is a deletion, not a "
+                "copy-away. The mirrored rate table is unasserted; refusing."
+            )
+        return None
     import importlib.util
 
     spec = importlib.util.spec_from_file_location("_meter_twin", twin)
@@ -331,27 +589,69 @@ def cmd_self_test():
     # walks the same envelopes and the drift check quietly did not apply, so a CI
     # job wired to the parent would have carried the gate's name and none of its
     # force. Proven by RUNNING both paths, not by reading the condition.
-    if os.path.isdir(CORPUS_DIR):
+    # THE CORPUS-ABSENT FAIL-OPEN. This whole arm used to sit behind a bare
+    # `if os.path.isdir(CORPUS_DIR)` while the banner below printed "the population
+    # assertion fires from the corpus path AND an ancestor" regardless — a receipt
+    # naming a measurement it did not take. The corpus is committed data of record
+    # next to this file, so inside a checkout its absence is a broken tree.
+    arms = []
+    if not os.path.isdir(CORPUS_DIR):
+        if in_repo_checkout():
+            print(
+                f"meter.py: self-test REFUSED — the canonical corpus {CORPUS_DIR} is absent "
+                f"but meter.py is running from a git checkout, where results/ is committed "
+                f"data of record. The population and §3 arms cannot run; a pass here would "
+                f"assert two measurements that were never taken.",
+                file=sys.stderr,
+            )
+            return 1
+    else:
         import io
         import contextlib
 
         for label, arg in (("corpus", CORPUS_DIR), ("ancestor", HERE)):
-            buf = io.StringIO()
-            with contextlib.redirect_stdout(buf):
-                rc = cmd_verify([arg])
-            out = buf.getvalue()
-            assert rc == 0, f"{label} path did not verify clean: {out}"
-            assert "matches METER.md" in out, (
-                f"the population assertion did NOT fire when verify was given the {label} "
-                f"path ({arg}) — that is the fail-open, back:\n{out}"
+                buf = io.StringIO()
+                with contextlib.redirect_stdout(buf):
+                    rc = cmd_verify([arg])
+                out = buf.getvalue()
+                assert rc == 0, f"{label} path did not verify clean: {out}"
+                assert "matches METER.md" in out, (
+                    f"the population assertion did NOT fire when verify was given the {label} "
+                    f"path ({arg}) — that is the fail-open, back:\n{out}"
+                )
+                assert "§3 re-taken" in out, (
+                    f"the §3 share assertion did NOT fire when verify was given the {label} "
+                    f"path ({arg}) — the dollars would be unmoored literals again:\n{out}"
+                )
+        arms.append("the population AND §3 assertions fire from the corpus path AND an ancestor")
+
+        # MUT_E, taken not remembered: the §3 assertion must RED on a corpus that
+        # grew, even when both population markers were dutifully bumped.
+        with tempfile.TemporaryDirectory() as d:
+            grown = os.path.join(d, "results")
+            import shutil
+
+            shutil.copytree(CORPUS_DIR, grown)
+            seed = sorted(glob.glob(os.path.join(grown, "*.agent.json")))[0]
+            extra = json.load(open(seed))
+            json.dump(extra, open(os.path.join(grown, "zz-mut-e.agent.json"), "w"))
+            grown_files, _ = _collect([grown])
+            grown_stats, why_g = corpus_shares(grown_files)
+            assert grown_stats is not None, f"MUT_E control could not be measured: {why_g}"
+            assert assert_published_shares(grown_stats), (
+                "MUT_E: a 35th envelope left METER.md §3 assertable — the dollars are "
+                "still frozen literals with no re-taker"
             )
+        arms.append("MUT_E: a grown corpus reds §3 even with the population markers bumped")
 
     parity = _assert_tally_table_parity()
+    arms.append(parity if parity else "tally_wf.py NOT adjacent — the mirror arm did NOT run")
+    arms.append(f"METER.md declares {n}")
     print(
         "meter.py: self-test OK (greens on faithful, reds on 1.25x-trap fixture; "
         "two-model / modelUsage-less / nested-envelope paths all refuse; "
-        "the population assertion fires from the corpus path AND an ancestor; "
-        f"METER.md declares {n}; {parity})"
+        + "; ".join(arms)
+        + ")"
     )
     return 0
 
@@ -360,6 +660,8 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args[:1] in (["--self-test"], ["self-test"]):
         sys.exit(cmd_self_test())
+    if args[:1] == ["shares"]:
+        sys.exit(cmd_shares(args[1:]))
     if args[:1] == ["verify"]:
         if len(args) > 1:
             sys.exit(cmd_verify(args[1:]))
@@ -369,6 +671,6 @@ if __name__ == "__main__":
         print(__doc__, file=sys.stderr)
         sys.exit(2)
     if args:
-        print(f"meter.py: unknown command {args[0]!r} — expected `verify <path>` or `--self-test`", file=sys.stderr)
+        print(f"meter.py: unknown command {args[0]!r} — expected `verify <path>`, `shares [path]` or `--self-test`", file=sys.stderr)
     print(__doc__, file=sys.stderr)
     sys.exit(2)

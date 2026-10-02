@@ -16,8 +16,10 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   """
 
   require Logger
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.StudioComponents.EditorFields
 
   # ── Schema-action helpers (Task #16 — action registry) ─────────────────────
   @doc false
@@ -65,6 +67,12 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     end
   end
 
+  # The referenced document's title, for the bucket-aware header label. An
+  # untitled doc gets the same "Untitled" the card's own header prints, so the
+  # two surfaces name the same document the same way.
+  defp secondary_doc_title(%{title: title}) when is_binary(title) and title != "", do: title
+  defp secondary_doc_title(_), do: gettext("Untitled")
+
   defp doc_id_from_assigns(assigns) do
     case assigns[:editor_doc] do
       %{doc_id: doc_id} -> doc_id
@@ -100,6 +108,13 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     content_preview_visible = assigns[:content_preview_visible] == true
     content_preview_rendered = assigns[:content_preview_rendered]
     diff_visible = assigns[:diff_visible] == true
+    secondary_doc = assigns[:secondary_doc]
+    # A raw-assigns caller (the ordering test, a plugin resolver ctx) may carry
+    # no bucket at all; "wide" is the same default the socket mounts with and
+    # the same one `secondary_editor_card/1` declares, so an absent key means
+    # "render the card", never "hide it and offer a close for a card that IS
+    # on screen".
+    width_bucket = assigns[:width_bucket] || "wide"
 
     has_published_twin = is_draft and not is_nil(published_doc)
     has_content_preview = not is_nil(content_preview_rendered)
@@ -112,7 +127,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if is_draft do
         %{
           "name" => "publish",
-          "label" => "Publish",
+          "label" => gettext("Publish"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -124,7 +139,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       else
         %{
           "name" => "unpublish",
-          "label" => "Unpublish",
+          "label" => gettext("Unpublish"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -150,7 +165,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       preview_doc_action(editor_schema, editor_doc),
       %{
         "name" => "show-history",
-        "label" => "History",
+        "label" => gettext("History"),
         "kind" => "event",
         "scope" => "editor_header",
         "opts" => %{
@@ -162,7 +177,11 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_content_preview do
         %{
           "name" => "toggle-content-preview",
-          "label" => if(content_preview_visible, do: "Hide preview", else: "Show preview"),
+          "label" =>
+            if(content_preview_visible,
+              do: gettext("Hide preview"),
+              else: gettext("Show preview")
+            ),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -176,7 +195,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_published_twin do
         %{
           "name" => "toggle-diff",
-          "label" => if(diff_visible, do: "Edit", else: "Diff"),
+          "label" => if(diff_visible, do: gettext("Edit"), else: gettext("Diff")),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -190,7 +209,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if has_published_twin do
         %{
           "name" => "discard-draft",
-          "label" => "Discard draft",
+          "label" => gettext("Discard draft"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -205,7 +224,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "duplicate-doc",
-          "label" => "Duplicate",
+          "label" => gettext("Duplicate"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -219,13 +238,47 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "open-secondary-picker",
-          "label" => "Open another",
+          "label" => gettext("Open another"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
             "event" => "open-secondary-picker",
             "class" => "btn btn-ghost btn-sm",
             "data_test_id" => "open-secondary-picker",
+            "icon" => "panel-right-open"
+          }
+        }
+      end,
+      # 'Close reference' — the header half of the secondary-pane bucket yield
+      # (spd-b39 successor, charter D36). Below `standard` the read-only
+      # secondary card is not rendered at all, and that card's own ✕ is the
+      # desk's ONLY close control for it: without this entry a user who opens a
+      # reference at `wide` and then narrows the window holds a live
+      # `@secondary_doc` with no indicator that it exists and no way to close
+      # it. So at exactly the buckets where the card yields, the header says so
+      # BY NAME (the referenced document's title is in the label — this is the
+      # indicator, not just a button) and offers the same `close-secondary`
+      # event the card's ✕ fires.
+      #
+      # The bucket test is `EditorFields.secondary_pane_bucket?/1`, the same
+      # predicate the card renders on, so "no card" and "header close offered"
+      # can never disagree.
+      #
+      # Icon: `panel-right-open` is reused deliberately. `icon/1` RAISES on an
+      # unknown glyph name in :test, the icon map lives in `icons.ex` (a file
+      # this slice does not own), and this action is the secondary PANE's
+      # control — the panel family is the honest glyph available.
+      if editor_doc && secondary_doc && not EditorFields.secondary_pane_bucket?(width_bucket) do
+        %{
+          "name" => "close-secondary",
+          "label" =>
+            gettext("Close reference: %{title}", title: secondary_doc_title(secondary_doc)),
+          "kind" => "event",
+          "scope" => "editor_header",
+          "opts" => %{
+            "event" => "close-secondary",
+            "class" => "btn btn-ghost btn-sm",
+            "data_test_id" => "close-secondary-bucket",
             "icon" => "panel-right-open"
           }
         }
@@ -238,7 +291,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if editor_doc do
         %{
           "name" => "view-graph",
-          "label" => "View blast radius",
+          "label" => gettext("View blast radius"),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
@@ -255,7 +308,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       # the hot zone (sup-w5-doc-actions-order).
       %{
         "name" => "delete-doc",
-        "label" => "Delete",
+        "label" => gettext("Delete"),
         "kind" => "event",
         "scope" => "editor_header",
         "opts" => %{
@@ -311,7 +364,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
          true <- placeholders_resolvable?(template, doc) do
       %{
         "name" => "preview",
-        "label" => "Preview",
+        "label" => gettext("Preview"),
         "kind" => "link",
         "scope" => "editor_header",
         "opts" => %{

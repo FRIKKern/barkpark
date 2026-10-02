@@ -21,6 +21,9 @@ defmodule BarkparkWeb.Studio.StudioPluginLinkAriaCurrentTest do
   """
   use BarkparkWeb.ConnCase, async: false
 
+  # Plugins-off: the media plugin (its Media Library :plugin_link row in the structure)
+  @moduletag :requires_plugins
+
   import Phoenix.LiveViewTest
 
   alias Barkpark.Repo

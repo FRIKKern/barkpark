@@ -82,6 +82,18 @@ defmodule Barkpark.PortableDoc.TaskResolver do
     end
   end
 
+  @doc """
+  Every query map `resolve/3` would fetch in `blocks`, as
+  `{row_queries, agg_queries}` — the SAME traversal and type guards the
+  resolver itself fetches under, so a caller asking "which live task queries
+  does this paper hold?" (`Barkpark.Tasks.PaperRefresh`, the task-transition →
+  paper cache-bust) can never disagree with what a read would resolve.
+  Author-pinned blocks (no `query`) contribute nothing. Duplicates are kept.
+  """
+  @spec query_maps(term()) :: {[map()], [map()]}
+  def query_maps(blocks) when is_list(blocks), do: collect_query_maps(blocks, {[], []})
+  def query_maps(_blocks), do: {[], []}
+
   # Collect every query map `resolve_block/3` would fetch, walking the same
   # three container shapes (`children` / `blocks` / `columns`). Row and
   # aggregate queries pool separately — they run against different fetchers.
@@ -121,6 +133,80 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   end
 
   defp collect_block_queries(_block, acc), do: acc
+
+  @doc """
+  Mark every query-carrying task block in `blocks` as UNAVAILABLE — the
+  plugins-off twin of `resolve/3` (task-9c59aa555e1e015e). Used when no task
+  resolver is loaded (the Tasks plugin is out of the load order): each task-row
+  (`tasks`/`task-list`/`task-board`/`roadmap`/`task-detail`) and data-viz
+  (`chart`/`heatmap`/`stat`) block carrying a `query` gains
+  `"unavailable" => true`, keeping its `query`, so every renderer shows an
+  explicit placeholder instead of an empty board that reads as "no tasks".
+  Walks the same three container shapes as `resolve/3`; an author-pinned
+  literal block (no `query`) and every other block pass through untouched.
+  """
+  @unavailable_types @snapshot_types ++ [@detail_type | @dataviz_types]
+
+  def mark_unavailable(blocks) when is_list(blocks), do: Enum.map(blocks, &mark_block/1)
+  def mark_unavailable(blocks), do: blocks
+
+  @doc "The block types `mark_unavailable/1` marks when they carry a `query`."
+  def unavailable_types, do: @unavailable_types
+
+  defp mark_block(%{"type" => type, "query" => query} = block)
+       when type in @unavailable_types and is_map(query),
+       do: Map.put(block, "unavailable", true)
+
+  defp mark_block(%{"children" => children} = block) when is_list(children),
+    do: Map.put(block, "children", mark_unavailable(children))
+
+  defp mark_block(%{"blocks" => blocks} = block) when is_list(blocks),
+    do: Map.put(block, "blocks", mark_unavailable(blocks))
+
+  defp mark_block(%{"columns" => cols} = block) when is_list(cols) do
+    Map.put(
+      block,
+      "columns",
+      Enum.map(cols, fn
+        col when is_list(col) -> mark_unavailable(col)
+        col -> col
+      end)
+    )
+  end
+
+  defp mark_block(block), do: block
+
+  @doc """
+  The id-keyed preview entries for an UNAVAILABLE task resolver — the
+  plugins-off twin of `preview/3` (task-f4d19b64198780b6). Every block
+  `mark_unavailable/1` would mark that also carries a stable `id` yields
+  `%{"block_id" => id, "type" => t, "unavailable" => true}`; `apply_preview/2`
+  turns that entry back into the marked block, so the Studio editor preview
+  paints the reader's own placeholder (`Components.task_unavailable_html/1`).
+  Walks the same three container shapes as `preview/3`.
+  """
+  def unavailable_previews(blocks) when is_list(blocks) do
+    blocks |> mark_unavailable() |> collect_unavailable()
+  end
+
+  def unavailable_previews(_blocks), do: []
+
+  defp collect_unavailable(blocks), do: Enum.flat_map(blocks, &unavailable_entry/1)
+
+  defp unavailable_entry(%{"type" => type, "unavailable" => true, "id" => id})
+       when type in @unavailable_types and is_binary(id) and id != "",
+       do: [%{"block_id" => id, "type" => type, "unavailable" => true}]
+
+  defp unavailable_entry(%{"children" => children}) when is_list(children),
+    do: collect_unavailable(children)
+
+  defp unavailable_entry(%{"blocks" => blocks}) when is_list(blocks),
+    do: collect_unavailable(blocks)
+
+  defp unavailable_entry(%{"columns" => cols}) when is_list(cols),
+    do: cols |> Enum.filter(&is_list/1) |> Enum.flat_map(&collect_unavailable/1)
+
+  defp unavailable_entry(_block), do: []
 
   defp resolve_list(blocks, fetch, agg_fetch) when is_list(blocks) do
     Enum.map(blocks, &resolve_block(&1, fetch, agg_fetch))
@@ -186,6 +272,12 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       when type in @dataviz_types and is_map(attrs) do
     block |> Map.merge(attrs) |> Map.delete("query")
   end
+
+  # An `unavailable_previews/1` entry: no task resolver for this workspace. The
+  # block is marked (query kept) so the reader's placeholder emitter paints it.
+  def apply_preview(%{"type" => type} = block, %{"type" => type, "unavailable" => true})
+      when type in @unavailable_types,
+      do: Map.put(block, "unavailable", true)
 
   def apply_preview(block, _entry), do: block
 
@@ -422,6 +514,20 @@ defmodule Barkpark.PortableDoc.TaskResolver do
   design language turns on); `open` WITH blockers stays `open` (backlog).
   Everything else maps straight through (`blocked`/`in_progress`/`done`/
   `cancelled`). A `phase:`/`wave:` label becomes the row's phase group.
+
+  DRAFT DISCRIMINATOR (PDS-D749, task-b258d691989c7a99). The paper task-snapshot
+  board is a reader that CAN show a `drafts.` twin (the scope leak is filed
+  separately as task-b10e10b944f6f55b), and this projection is the LAST place the
+  `drafts.` SPELLING still exists: every downstream painter sees only this row.
+  So the spelling is read HERE, off `doc_id`, and carried forward as an explicit
+  `"draft" => true` boolean — the discriminator PDS-D749's label contract needs.
+
+  The key is emitted ONLY for a draft row (`prune/1` drops the nil), so every
+  published row is BYTE-IDENTICAL to what it was before: the shared
+  `<type>.golden.json` component-parity fixtures and the JS twin emitter are
+  untouched by this change. Painting the marker is the painters' half of the
+  row and does NOT ship here; `Components.task_board_html/1` carries the note on
+  why (its JS twin is byte-pinned, so both painters must land together).
   """
   def row_from_task(task) when is_map(task) do
     %{
@@ -430,7 +536,8 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       "priority" => get(task, "priority") |> stringish(),
       "worker" => worker_of(task),
       "criteria" => criteria_of(task),
-      "phase" => phase_of(task)
+      "phase" => phase_of(task),
+      "draft" => draft_of(task)
     }
     |> prune()
   end
@@ -448,6 +555,18 @@ defmodule Barkpark.PortableDoc.TaskResolver do
       "open" -> "ready"
       "" -> if deps > 0, do: "open", else: "ready"
       other -> other
+    end
+  end
+
+  # The `drafts.` spelling, read off the doc's OWN id before any published-id
+  # normalisation can strip it. `DraftId.draft?/1` is the one owner of the
+  # prefix test — never a second `String.starts_with?("drafts.")` here.
+  # Returns `true` for a draft and `nil` otherwise, so `prune/1` omits the key
+  # on a published row (byte-stable snapshot) rather than emitting `false`.
+  defp draft_of(task) do
+    case task |> get("doc_id") |> stringish() do
+      nil -> nil
+      id -> if Barkpark.Content.DraftId.draft?(id), do: true, else: nil
     end
   end
 

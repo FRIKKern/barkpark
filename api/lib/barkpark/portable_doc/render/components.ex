@@ -63,12 +63,35 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def tasks_html(_), do: ""
 
+  @task_unavailable_note "tasks unavailable — the Tasks plugin is not loaded"
+
+  @doc """
+  The explicit placeholder a query-carrying task block renders when no task
+  resolver is loaded (`TaskResolver.mark_unavailable/1` set
+  `"unavailable" => true`, task-9c59aa555e1e015e): the block's type and a
+  named "tasks unavailable" note in the dashed `bp-dataviz--empty` frame, so
+  the block keeps its place and never reads as an empty "no tasks" board.
+  """
+  def task_unavailable_html(block) do
+    ~s|<div class="bp-dataviz--empty bp-task-unavailable" data-unavailable="tasks" role="note">| <>
+      escape_html(task_unavailable_kind(block)) <>
+      " — " <> @task_unavailable_note <> "</div>"
+  end
+
+  @doc "The placeholder note text (shared with the email variant)."
+  def task_unavailable_note, do: @task_unavailable_note
+
+  @doc "The block type a placeholder names (`\"tasks\"` for a malformed block)."
+  def task_unavailable_kind(%{"type" => t}) when is_binary(t) and t != "", do: t
+  def task_unavailable_kind(_), do: "tasks"
+
   @doc """
   Render a `task-detail` block: the "open a task and SEE it" card — a vertical
   stack of CONDITIONAL sections (a thin task stays thin), matching the design
-  spec §15: title · meta line · timestamps · status timeline · criteria
-  checklist with evidence · dependencies in words · children rail · papers rail
-  · labels. The task map is at `block["task"]` (or the block itself).
+  spec's component inventory (`.claude/workflows/bp-task-design-language-spec.md`
+  §4, table row `task-detail`): title · meta line · timestamps · status timeline
+  · criteria checklist with evidence · dependencies in words · children rail ·
+  papers rail · labels. The task map is at `block["task"]` (or the block itself).
   """
   def task_detail_html(block) when is_map(block) do
     t =
@@ -81,7 +104,13 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     case title do
       "" ->
-        ""
+        # The block IS a task-detail, its query just resolved to nothing. Say so
+        # in the reader instead of erasing the block: a silent "" is a blank gap
+        # the author cannot diagnose, and it diverges from the edit canvas, which
+        # paints an explicit note. Same shape as the sibling live-query widgets
+        # (`bp-tasks bp-tasks--empty`), and the same copy the canvas preview uses
+        # so edit and reader read identically for the empty case.
+        ~s|<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>|
 
       _ ->
         role = t |> get("status") |> stringish() |> role_of()
@@ -105,6 +134,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
     end
   end
 
+  # Policy (one rule, both arities): a MAP is a task-detail block — an
+  # unresolved one renders the `bp-tdetail--empty` placeholder above. A non-map
+  # argument is not a block at all (malformed input, never authored), so it
+  # emits nothing rather than a placeholder that would claim a block exists.
   def task_detail_html(_), do: ""
 
   defp detail_meta(t, role) do
@@ -388,13 +421,19 @@ defmodule Barkpark.PortableDoc.Render.Components do
     block
     |> Slots.slot_elements("media")
     |> Enum.map(&normalize_media_element/1)
-    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(
+      style,
+      Barkpark.PortableDoc.Render.Compose.render_opts(block)
+    )
   end
 
   defp card_slot_html(block, name, style) do
     block
     |> Slots.slot_elements(name)
-    |> Barkpark.PortableDoc.Render.Compose.render_children(style)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(
+      style,
+      Barkpark.PortableDoc.Render.Compose.render_opts(block)
+    )
   end
 
   # A media element persisted WITHOUT a `type` key (a bare `{src, alt}` map from an
@@ -561,6 +600,15 @@ defmodule Barkpark.PortableDoc.Render.Components do
   (`web/lib/task-board-columns.ts`) so a populated `open` bucket is NEVER
   silently dropped — the omit-empty layout used to have no `open` column at all,
   so `open` tasks vanished from the Studio/View board (bug-taskboard-drops-open-tasks).
+
+  A DRAFT row is labelled. `TaskResolver.row_from_task/1` carries
+  `"draft" => true` on a row whose doc_id spells `drafts.` (task-b258d691989c7a99),
+  and PDS-D749 rules that "a draft row must be VISIBLY LABELLED on EVERY reader
+  that can show one", so each card, task-list row and roadmap lane paints
+  `draft_html/1`'s chip inside its title span. This emitter is pinned
+  byte-for-byte to its JS twin `js/packages/react/src/blocks/taskboard.ts`
+  (charter D14) by the pd-parity goldens, so the chip moved on BOTH painters in
+  one commit (task-0310f53709aca6de); a published row is byte-identical.
   """
   def task_board_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()
@@ -586,12 +634,16 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   def task_board_html(_), do: ""
 
-  # The board's column roles, in white-ladder order (cancel folds to a tally, so
-  # it is NOT a column). One place defines the order; labels are DERIVED, never a
-  # second hardcoded copy. The two thought states are dim columns at the ladder
-  # BOTTOM (charter D12 — thought states ARE visible board columns); empty columns
-  # are dropped, so a board with no considering/researching rows is byte-stable.
-  defp board_roles, do: ~w(open ready progress blocked done considering researching)
+  # The board's column roles — DERIVED from design/status-manifest.json roles[]
+  # via `StatusVocab.board_roles/0`, never retyped here. Every manifest rung is a
+  # column, in manifest order, with the terminal `cancel` rung LAST and
+  # de-emphasised (`.bp-board__col--cancel`). Before task-881952f8d8417f4b this
+  # was a hand-typed seven-role list that omitted `cancel`, so a cancelled row was
+  # silently DROPPED from the board — a failure whose success state is quiet.
+  # Labels are DERIVED too (the fold), never a second hardcoded copy. Empty
+  # columns are still dropped, so a board with no cancelled/thought rows is
+  # byte-stable.
+  defp board_roles, do: StatusVocab.board_roles()
 
   # A board column header: the canonical lowercase label sentence-cased at render
   # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
@@ -610,7 +662,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
         meta_html = if meta == "", do: "", else: ~s|<div class="bp-bcard__m">#{meta}</div>|
 
-        ~s|<div class="bp-bcard">#{glyph_html(role)}<span class="bp-bcard__t">#{title}</span>#{meta_html}</div>|
+        ~s|<div class="bp-bcard">#{glyph_html(role)}<span class="bp-bcard__t">#{draft_html(r)}#{title}</span>#{meta_html}</div>|
       end)
       |> Enum.join("")
 
@@ -618,11 +670,53 @@ defmodule Barkpark.PortableDoc.Render.Components do
   end
 
   @doc """
-  Render a `roadmap` block: phase/task bars on a timeline. Author-driven —
-  the task domain has no due dates, so each row carries an explicit
-  `left`/`width` percentage (0–100). Bars are coloured by status; an optional
-  `today` percentage draws the now-marker; `scale` labels the axis.
+  Render a `roadmap` block (v2): phase/task bars on a timeline.
+
+  **v1 (author-positioned pct)** — each row carries an explicit `left`/`width`
+  percentage (0–100); bars are coloured by status; a numeric `today` percentage
+  draws the now-marker; `scale` labels the axis. That path is UNTOUCHED and
+  byte-identical.
+
+  **v2 (date rails + marker layer)** — mirrors the Go reader
+  `internal/pdrender/taskblocks.go` (`roadmapSpan`/`roadmapLeftWidth`/
+  `roadmapTodayCell`), which is the ratified contract:
+
+    * DATE RAILS — when the BLOCK carries `start`+`end` ISO dates (both parse,
+      `end` after `start`), a row's own `start`/`end` derive its left/width off
+      that span. A row without parseable dates falls back to its literal pct —
+      byte-identical to the v1 path (the pct math is untouched).
+    * `today` accepts a NUMBER (pct, the v1 path) **or** an ISO date, which
+      derives its pct off the span.
+    * MARKERS — `milestone: true` marks the bar's END edge (`bp-rm__ms`),
+      `note: true` marks the bar's START edge (`bp-rm__note`).
+
+  PRECEDENCE. Go resolves coinciding markers per track cell by
+  `today > milestone > note > fill` (`taskblocks.go` `clsToday > clsMilestone >
+  clsNote > clsFill`). The HTML twin realizes the SAME order as PAINT order: the
+  track emits `bar`, then `note`, then `milestone`, then `today`, so a later
+  (higher-precedence) marker paints over an earlier one at the same offset.
+
+  Go's `┊` month ticks have no HTML counterpart here — the `scale` axis already
+  labels the months on this surface — and are deliberately out of scope.
+
+  NOT A PRODUCER SEAM. No code anywhere computes `left`/`width`/`today`:
+  `TaskResolver.row_from_task/1` emits only title/status/priority/worker/
+  criteria/phase, so every roadmap geometry field is AUTHOR-LITERAL and reaches
+  this function verbatim. Live resolver-backed date rails are owned by
+  `tr-agg-resolver-wave` criterion 3, not by this renderer.
+
+  **UNPLACED (offline degrade)** — which is why a LIVE-QUERY roadmap has no
+  geometry at all. `roadmap_placeable?/2` names the only two trustworthy sources
+  (the block span + the row's own dates, or an author-typed `left`/`width`
+  number); a row with neither draws NO bar, because the clamp's {0, 100} default
+  would render it as a full-width bar indistinguishable from every other
+  geometry-less lane. With NO row placeable the block renders the sibling
+  `bp-tasks--empty` state; with SOME placeable the unplaced lanes render
+  `bp-rm__lane--unplaced` with an explicit marker beside the real bars.
   """
+  @roadmap_unplaced_copy "No schedule to place these items on."
+  @roadmap_lane_unplaced_copy "not scheduled"
+
   def roadmap_html(block) when is_map(block) do
     rows = block |> get("snapshot") |> as_list()
 
@@ -631,43 +725,205 @@ defmodule Barkpark.PortableDoc.Render.Components do
         ~s|<div class="bp-tasks bp-tasks--empty">No roadmap items.</div>|
 
       _ ->
-        today =
-          case get(block, "today") do
-            n when is_number(n) ->
-              ~s|<span class="bp-rm__today" style="left:#{clampf(n)}%"></span>|
+        span = roadmap_span(block)
 
-            _ ->
-              ""
-          end
-
-        scale =
-          case block |> get("scale") |> as_list() do
-            [] ->
-              ""
-
-            cells ->
-              ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
-          end
-
-        lanes =
-          rows
-          |> Enum.map(fn r ->
-            role = r |> get("status") |> stringish() |> role_of()
-            title = r |> get("title") |> stringish() |> escape_html()
-            phase = truthy(get(r, "phase_row"))
-            left = r |> get("left") |> clampf()
-            width = r |> get("width") |> clampf_width(left)
-            cls = if phase, do: "bp-rm__lane bp-rm__lane--phase", else: "bp-rm__lane"
-
-            ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{title}</span><div class="bp-rm__track"><span class="bp-rm__bar bp-rm__bar--#{role}" style="left:#{left}%;width:#{width}%"></span>#{today}</div></div>|
-          end)
-          |> Enum.join("")
-
-        ~s|<div class="bp-roadmap">#{scale}<div class="bp-rm__lanes">#{lanes}</div></div>|
+        if Enum.any?(rows, &roadmap_placeable?(&1, span)) do
+          roadmap_lanes_html(block, rows, span)
+        else
+          # NOT ONE row has geometry: the whole timeline would be N identical
+          # full-width bars. Say so in the sibling empty family — and then render
+          # the ITEMS through the task-list emitter, because "cannot place them"
+          # is not a licence to drop them. The author asked for these rows; only
+          # the timeline is unavailable.
+          ~s|<div class="bp-tasks bp-tasks--empty">#{@roadmap_unplaced_copy}</div>| <>
+            tasks_html(%{"snapshot" => rows})
+        end
     end
   end
 
   def roadmap_html(_), do: ""
+
+  defp roadmap_lanes_html(block, rows, span) do
+    today = roadmap_today_html(block, span)
+
+    scale =
+      case block |> get("scale") |> as_list() do
+        [] ->
+          ""
+
+        cells ->
+          ~s|<div class="bp-rm__scale">#{cells |> Enum.map(fn c -> ~s|<span>#{escape_html(stringish(c))}</span>| end) |> Enum.join("")}</div>|
+      end
+
+    lanes =
+      rows
+      |> Enum.map(fn r ->
+        role = r |> get("status") |> stringish() |> role_of()
+        title = r |> get("title") |> stringish() |> escape_html()
+        phase = truthy(get(r, "phase_row"))
+        placed? = roadmap_placeable?(r, span)
+
+        # Every branch is a STRING LITERAL, deliberately: the lane class is the
+        # one attribute here whose value is not a number, and the attr-escape
+        # source scan proves a class safe by reading its branches. A `base <>
+        # modifier` concatenation is the same four strings and an UNPROVEN
+        # verdict.
+        cls =
+          case {phase, placed?} do
+            {true, true} -> "bp-rm__lane bp-rm__lane--phase"
+            {true, false} -> "bp-rm__lane bp-rm__lane--phase bp-rm__lane--unplaced"
+            {false, true} -> "bp-rm__lane"
+            {false, false} -> "bp-rm__lane bp-rm__lane--unplaced"
+          end
+
+        body =
+          if placed? do
+            {left, width} = roadmap_left_width(r, span)
+            marks = roadmap_marks_html(r, left, width)
+
+            ~s|<span class="bp-rm__bar bp-rm__bar--#{role}" style="left:#{left}%;width:#{width}%"></span>#{marks}|
+          else
+            # A lane in a roadmap that IS otherwise placeable, but which carries
+            # no geometry of its own. It draws NO bar: a bar here would be the
+            # clamp default (left:0;width:100) sitting under every other lane and
+            # reading as "runs the whole span", a claim the row never made.
+            ~s|<span class="bp-rm__unplaced">#{@roadmap_lane_unplaced_copy}</span>|
+          end
+
+        ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{draft_html(r)}#{title}</span><div class="bp-rm__track">#{body}#{today}</div></div>|
+      end)
+      |> Enum.join("")
+
+    ~s|<div class="bp-roadmap">#{scale}<div class="bp-rm__lanes">#{lanes}</div></div>|
+  end
+
+  @doc false
+  # The copy both roadmap unplaced states use, exposed so the email twin and the
+  # tests read ONE string instead of retyping it (a retyped placeholder is how
+  # two surfaces silently stop saying the same thing).
+  def roadmap_unplaced_copy, do: @roadmap_unplaced_copy
+  @doc false
+  def roadmap_lane_unplaced_copy, do: @roadmap_lane_unplaced_copy
+
+  # Is this row's position READ from a source field, or invented by the clamp?
+  #
+  # PLACEABLE means one of exactly two documented sources:
+  #
+  #   * DATE RAILS — the BLOCK carries a parseable `start`+`end` span AND this row
+  #     carries its own parseable `start`+`end` (the v2 path; Go twin
+  #     `internal/pdrender/taskblocks.go` `roadmapLeftWidth`). Trustworthy because
+  #     both endpoints are author-stated ISO dates measured against an
+  #     author-stated span — nothing is inferred.
+  #   * AUTHOR PCT — the row carries a NUMBER in `left` or `width` (the v1 path).
+  #     Trustworthy for the same reason: the author typed the position.
+  #
+  # Everything else has NO geometry, and `roadmap_pct_left_width/1` answers
+  # {0, 100} for it — `clampf(nil)` is 0, `clampf_width(nil, 0)` is 100. That is
+  # exactly what a LIVE-QUERY roadmap hits: `TaskResolver.row_from_task/1` emits
+  # title/status/priority/worker/criteria/phase/draft and NO schedule field, so
+  # every resolved lane used to paint one identical left:0;width:100 bar — a
+  # confident, uniform, fabricated timeline. There is no field on a task to
+  # derive a date from (lifecycle carries no schedule), so this renderer does not
+  # invent one; it renders the explicit unplaced state instead.
+  defp roadmap_placeable?(r, span) do
+    dated? =
+      match?({_, _}, span) and
+        match?({:ok, _}, roadmap_date(get(r, "start"))) and
+        match?({:ok, _}, roadmap_date(get(r, "end")))
+
+    dated? or is_number(get(r, "left")) or is_number(get(r, "width"))
+  end
+
+  # ── roadmap v2: date rails + marker layer (Go twin: taskblocks.go) ───────────
+
+  # The block-level ISO span that anchors date-derived lanes. Both dates must
+  # parse AND `end` must be strictly after `start` — the exact guard Go's
+  # `roadmapSpan` applies; anything else yields nil and every lane keeps its
+  # literal pct geometry (the v1 path, byte-for-byte).
+  defp roadmap_span(block) do
+    with {:ok, s} <- roadmap_date(get(block, "start")),
+         {:ok, e} <- roadmap_date(get(block, "end")),
+         :gt <- Date.compare(e, s) do
+      {s, e}
+    else
+      _ -> nil
+    end
+  end
+
+  # A YYYY-MM-DD author-literal date. Mirrors Go's `parseISODate`, which parses
+  # with the layout "2006-01-02" — so a datetime string or a blank is NOT a date.
+  defp roadmap_date(v) when is_binary(v), do: v |> String.trim() |> Date.from_iso8601()
+  defp roadmap_date(_), do: :error
+
+  # A date's 0–100 position inside the span. A degenerate span collapses to 0,
+  # matching Go's `dateToPct`.
+  defp roadmap_date_pct(d, {s, e}) do
+    case Date.diff(e, s) do
+      days when days > 0 -> Date.diff(d, s) / days * 100
+      _ -> 0
+    end
+  end
+
+  # A lane's {left, width}. With a span AND parseable row dates the geometry
+  # derives off the span; otherwise the literal pct path. Both funnel through the
+  # SAME clampf/clampf_width, so date- and pct-positioned lanes share one clamp.
+  # The width subtracts the CLAMPED left (Go's note): a row starting before the
+  # span clamps to the left edge, and its bar must still end at the row-end's
+  # true position.
+  defp roadmap_left_width(r, {_s, _e} = span) do
+    with {:ok, rs} <- roadmap_date(get(r, "start")),
+         {:ok, re} <- roadmap_date(get(r, "end")) do
+      left = clampf(roadmap_date_pct(rs, span))
+      {left, clampf_width(roadmap_date_pct(re, span) - left, left)}
+    else
+      _ -> roadmap_pct_left_width(r)
+    end
+  end
+
+  defp roadmap_left_width(r, _no_span), do: roadmap_pct_left_width(r)
+
+  defp roadmap_pct_left_width(r) do
+    left = r |> get("left") |> clampf()
+    {left, r |> get("width") |> clampf_width(left)}
+  end
+
+  # The now-marker. A NUMBER is a 0–100 pct (the v1 path, kept byte-identical);
+  # an ISO date derives its pct off the span. Absent/uncoercible → no marker.
+  defp roadmap_today_html(block, span) do
+    case roadmap_today_pct(get(block, "today"), span) do
+      nil -> ""
+      pct -> ~s|<span class="bp-rm__today" style="left:#{pct}%"></span>|
+    end
+  end
+
+  defp roadmap_today_pct(n, _span) when is_number(n), do: clampf(n)
+
+  defp roadmap_today_pct(v, {_s, _e} = span) when is_binary(v) do
+    case roadmap_date(v) do
+      {:ok, d} -> clampf(roadmap_date_pct(d, span))
+      _ -> nil
+    end
+  end
+
+  defp roadmap_today_pct(_v, _span), do: nil
+
+  # The per-row point markers, emitted in PRECEDENCE order (note, then milestone)
+  # so the later element paints over the earlier where they coincide — the HTML
+  # realization of Go's `clsMilestone > clsNote`. `today` is appended after both
+  # by the caller, completing `today > milestone > note > fill`.
+  defp roadmap_marks_html(r, left, width) do
+    note =
+      if truthy(get(r, "note")),
+        do: ~s|<span class="bp-rm__note" style="left:#{left}%"></span>|,
+        else: ""
+
+    milestone =
+      if truthy(get(r, "milestone")),
+        do: ~s|<span class="bp-rm__ms" style="left:#{clampf(left + width)}%"></span>|,
+        else: ""
+
+    note <> milestone
+  end
 
   # ═══ Chat tool / todo / thinking rows (charter D25 — dual-surface Law 1) ══════
   #
@@ -1552,7 +1808,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
     ~s|<div class="bp-trow bp-trow--#{role}" style="padding-left:#{pad}px">| <>
       arrow <>
       glyph_html(role) <>
-      ~s|<span class="bp-trow__t">#{title}</span>| <>
+      ~s|<span class="bp-trow__t">#{draft_html(r)}#{title}</span>| <>
       meta_html <>
       ~s|</div>|
   end
@@ -1636,6 +1892,18 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp truthy("true"), do: true
   defp truthy(1), do: true
   defp truthy(_), do: false
+
+  # The DRAFT chip on a task-snapshot row (THE DRAFT LABEL CONTRACT,
+  # `Barkpark.Tasks.Board` / PDS-D749). `TaskResolver.row_from_task/1` carries
+  # `"draft" => true` on a draft-only row and NOTHING on a published one, so the
+  # chip keys off boolean `true` only — never `truthy/1`, whose "true"/1 arms
+  # would let a stray string paint a label the row never earned. A published row
+  # gets "" and its markup stays byte-identical. It rides INSIDE the title span
+  # (as the TUI's draftMark rides the title) so no layout slot moves. Twin:
+  # `draftHtml` in js/packages/react/src/inline.ts — same bytes.
+  defp draft_html(r) do
+    if get(r, "draft") == true, do: ~s|<span class="bp-draft">DRAFT</span> |, else: ""
+  end
 
   # A pnode's `source` coercion (RATIFIED): boolean `true` → an ORIGIN accent (the
   # `bp-pnode--src` border, existing origin signal); a non-empty STRING → a

@@ -347,3 +347,84 @@ describe('createWebhookHandler', () => {
     })
   })
 })
+
+describe('createWebhookHandler — body size cap (r4a)', () => {
+  // The HMAC covers the whole body, so the body is read before the sender is
+  // authenticated (only the freshness of the unsigned `t=` is checked first).
+  // Without a cap, anyone could make the handler buffer an arbitrarily large body.
+  beforeEach(() => {
+    __resetDedupForTests()
+  })
+
+  function streamOf(bytes: number, chunk = 64 * 1024) {
+    let sent = 0
+    const body = new ReadableStream<Uint8Array>({
+      pull(ctrl) {
+        if (sent >= bytes) {
+          ctrl.close()
+          return
+        }
+        const n = Math.min(chunk, bytes - sent)
+        sent += n
+        ctrl.enqueue(new Uint8Array(n).fill(0x61))
+      },
+    })
+    return { body, pulled: () => sent }
+  }
+
+  it('refuses a declared Content-Length over the cap with 413, onMutation untouched', async () => {
+    const onMutation = vi.fn(async () => {})
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation, maxBodyBytes: 1024 })
+    const t = Math.floor(Date.now() / 1000)
+    const big = 'a'.repeat(2048)
+    const req = new Request('https://example.test/api/webhook', {
+      method: 'POST',
+      headers: {
+        'x-barkpark-signature': `t=${t},v1=${'0'.repeat(64)}`,
+        'content-length': String(big.length),
+      },
+      body: big,
+    })
+    const res = await POST(req)
+    expect(res.status).toBe(413)
+    expect(await res.json()).toEqual({ error: 'payload_too_large' })
+    expect(onMutation).not.toHaveBeenCalled()
+  })
+
+  it('stops reading an undeclared (streamed) body at the cap instead of buffering all of it', async () => {
+    const onMutation = vi.fn(async () => {})
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation, maxBodyBytes: 256 * 1024 })
+    const t = Math.floor(Date.now() / 1000)
+    const { body, pulled } = streamOf(64 * 1024 * 1024)
+    const req = new Request('https://example.test/api/webhook', {
+      method: 'POST',
+      headers: { 'x-barkpark-signature': `t=${t},v1=${'0'.repeat(64)}` },
+      body,
+      duplex: 'half',
+    } as RequestInit)
+    const res = await POST(req)
+    expect(res.status).toBe(413)
+    // Far less than the 64 MiB offered was pulled from the stream.
+    expect(pulled()).toBeLessThan(2 * 1024 * 1024)
+    expect(onMutation).not.toHaveBeenCalled()
+  })
+
+  it('the default cap is 4 MiB: a valid body under it verifies, one over it is 413', async () => {
+    const onMutation = vi.fn(async () => {})
+    const { POST } = createWebhookHandler({ secret: SECRET, onMutation })
+    const small = JSON.stringify({ event: 'update', doc_id: 'p1', pad: 'x'.repeat(1024 * 1024) })
+    expect((await POST(makeRequest({ body: small }))).status).toBe(200)
+
+    const huge = JSON.stringify({ event: 'update', doc_id: 'p2', pad: 'x'.repeat(4 * 1024 * 1024) })
+    expect((await POST(makeRequest({ body: huge }))).status).toBe(413)
+    expect(onMutation).toHaveBeenCalledTimes(1)
+  })
+
+  it('rejects a non-positive maxBodyBytes at factory time', () => {
+    for (const bad of [0, -1, Number.NaN]) {
+      expect(() =>
+        createWebhookHandler({ secret: SECRET, onMutation: () => {}, maxBodyBytes: bad }),
+      ).toThrow(/maxBodyBytes/)
+    }
+  })
+})

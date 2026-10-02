@@ -367,4 +367,53 @@ defmodule Barkpark.Content.Papers.EpicQualityTest do
 
     refute EpicQuality.empty_paragraph?(%{"type" => "heading", "level" => 1, "text" => "Heading"})
   end
+
+  describe "overload limits on the wire" do
+    test "a heading overload carries max 16 and the actual count, and only that budget" do
+      content =
+        valid_content()
+        |> Map.update!("blocks", fn blocks ->
+          blocks ++
+            for i <- 1..17 do
+              %{"id" => "x#{i}", "type" => "heading", "level" => 2, "text" => "Section #{i}"}
+            end
+        end)
+
+      assert {:error, {:invalid_epic_paper_quality, details}} = EpicQuality.validate(content)
+      assert "top_level_heading_overload" in details["failures"]
+
+      headings =
+        Enum.count(content["blocks"], &(Map.get(&1, "type") == "heading"))
+
+      assert details["limits"]["top_level_headings"] == %{"max" => 16, "actual" => headings}
+      assert headings > 16
+    end
+
+    test "a paper that trips NEITHER overload carries an empty limits map" do
+      # The discriminator: `limits` is not a catalogue of the module's
+      # constants. A refusal for a different failure names no budget at all.
+      content = Map.put(valid_content(), "blocks", [%{"type" => "paragraph", "text" => "one"}])
+
+      assert {:error, {:invalid_epic_paper_quality, details}} = EpicQuality.validate(content)
+      assert details["failures"] != []
+      refute "top_level_block_overload" in details["failures"]
+      refute "top_level_heading_overload" in details["failures"]
+      assert details["limits"] == %{}
+    end
+  end
+
+  test "the moduledoc records the RULING on the /ops door's asymmetry" do
+    # task-4ff0ef8d27e6453b c2. POST /v1/plugins/bulldocs/papers/:slug/ops
+    # appends a 17th heading / 81st block onto a Paper already at both caps and
+    # answers 200 — the publish door refuses what the edit door accepts. The
+    # ruling was NOT to teach the ops door these two caps (it runs no wall gate
+    # at all, so it would then enforce 2 of 5 by accident of filing) but to
+    # state the asymmetry and its reason where the caps live. This pin reds if
+    # the ruling is deleted, so the hole cannot go back to being undocumented.
+    {:docs_v1, _, _, _, %{"en" => doc}, _, _} = Code.fetch_docs(EpicQuality)
+
+    assert doc =~ "/ops door does NOT enforce this floor"
+    assert doc =~ "AuthoringWall.enforce/5"
+    assert doc =~ "ratchet"
+  end
 end

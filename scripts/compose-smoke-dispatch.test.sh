@@ -65,6 +65,9 @@ check "api/config/runtime.exs triggers"        true  "$(dispatch 'api/config/run
 check "api/lib/barkpark/accounts.ex triggers"  true  "$(dispatch 'api/lib/barkpark/accounts.ex')"
 check "docker-compose.yml triggers"            true  "$(dispatch 'docker-compose.yml')"
 check "scripts/env-census.py triggers"         true  "$(dispatch 'scripts/env-census.py')"
+# VERSION is a BUILD INPUT (api/Dockerfile COPYs it; Barkpark.BuildInfo reads it
+# at compile time), so a PR that edits only it must still run this gate.
+check "VERSION triggers"                       true  "$(dispatch 'VERSION')"
 
 echo ""
 echo "== 2. the cloud root — THE DEFECT. Every one of these is a file the =="

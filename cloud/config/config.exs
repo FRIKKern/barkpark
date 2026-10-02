@@ -165,6 +165,16 @@ config :barkpark_cloud, BarkparkCloud.Web.Endpoint, server: true, port: 4100
 # a per-process fake.
 config :barkpark_cloud, BarkparkCloud.Azure.Pricing, http_client: nil
 
+# azure-transport-wiring: the transport for the CREDENTIAL Azure client
+# (BarkparkCloud.Azure.RealClient — OAuth2 client-credentials + ARM). A DIFFERENT
+# key from BarkparkCloud.Azure.Pricing above: that one is the credential-free
+# Retail Prices client. Default nil in dev/test → RealClient fails CLOSED
+# (:http_client_not_configured) so no byte reaches login.microsoftonline.com or
+# management.azure.com without an explicit wiring. prod (runtime.exs) wires the
+# real verified-TLS :httpc transport; dev/test select Azure.FakeClient at the
+# module seam (:azure_http_client) and never reach this key at all.
+config :barkpark_cloud, BarkparkCloud.Azure, http_client: nil
+
 # portable-archives (S14/D39): the read conduit into Hetzner Object Storage for
 # archived-instance bundles. Default is UNCONFIGURED (blank creds) → the store
 # fails closed with {:error, :not_configured} and GET /v1/archives degrades
@@ -293,10 +303,31 @@ config :barkpark_cloud, Oban,
        # enforced in-band by consume_oauth_exchange_code/1 — pure hygiene, so it
        # rides :maintenance beside its three twins.
        {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
+       # cch-bl-lifecycle-token-reaper: the fifth of the same sweep, for the last
+       # three short-lived `user_tokens` contexts that had no owner — `reset`,
+       # `confirm`, `change_email`. All three soft-stamp `revoked_at` and never
+       # DELETE, so every reset link ever requested was still a row. NOT a copy of
+       # the four above: `Accounts.throttled?/3` implements the confirm (1/300s)
+       # and change_email (3/3600s) DELIVERY throttles by counting unrevoked rows
+       # WITHOUT filtering `expires_at`, so reaping on expiry alone would return a
+       # resend slot early. Revoked rows go immediately; expired-unrevoked ones
+       # wait out a grace window double the largest throttle window. Pure hygiene
+       # otherwise, so it rides :maintenance beside its four twins.
+       {"* * * * *", BarkparkCloud.Workers.LifecycleTokenReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.
        {"* * * * *", BarkparkCloud.Workers.StaleDeploymentReaper},
+       # ssw9-bl-artifact-retention-quota: reap `site_artifacts` bytes whose
+       # deployment has settled. `Sites.Deploy` drops them in-driver on the live
+       # and failed paths, but a row terminated by the reaper ABOVE (a prebuilt
+       # deploy minted, uploaded and then abandoned) never runs a driver at all,
+       # and neither does a `cancelled` one — so those bytes had no reaper. This
+       # sweep keys on the STORED status, deriving "terminal" from
+       # `Deployment.transitions/0`, so it covers every terminal writer including
+       # ones that do not exist yet. Ordered after the deployment reaper on
+       # purpose: the tick that fails an abandoned row is the tick that reaps it.
+       {"* * * * *", BarkparkCloud.Sites.ArtifactReaper},
        # warm-pool twin of the two reapers above (task-d5f8c2634f323169). Recovery
        # of a leaked `warm_servers` claim was LAZY — `reap_stale_warm_claims/0`
        # ran only from INSIDE the two claim transactions — and the provisioner

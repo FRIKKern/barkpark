@@ -1,0 +1,183 @@
+<!doctype html>
+<!--
+  studio-lockonly-ref.html — THE LOCK-ONLY REF, produced by the real client.
+
+  Driven by `scripts/studio-lockonly-ref-control.mjs` (task-b1254cbd3115c3e2).
+
+  WHAT IS REAL HERE. Almost everything. This page loads the SHIPPED
+  `api/priv/static/assets/phoenix.js` and `api/priv/static/assets/phoenix_live_view.js`
+  byte for byte (the control injects their contents at run time — nothing is
+  copied into this file), constructs a REAL `LiveView.LiveSocket` over a real
+  `Phoenix.Socket`, and lets that client stamp every ref. `putRef`,
+  `pushLinkPatch`, `pushHistoryPatch`, `bindNav`, `bindClick` and the whole
+  `phx-click-loading` decision are the vendor's own code, unmodified. No
+  attribute in this fixture's evidence is set by hand — that is the entire
+  point of criterion 0.
+
+  WHAT IS MODELLED. Only the SERVER: `__FakeWS` is a WebSocket-shaped transport
+  that answers `phx_join` with a static-only rendered template and then answers
+  NOTHING ELSE. A `live_patch` or `event` frame therefore stays unanswered for
+  the whole run, which holds the in-flight window open — the same state the
+  desk is in for the measured 400/405/411 ms, without a server or a clock.
+
+  THE FOUR CONTROLS RENDERED BY THE JOIN
+    · #sess-a — `<.link patch={…}>`: the shape the Studio chat sidebar
+      actually ships (`session_link_path` in chat_live.ex), attribute for
+      attribute.
+    · #sess-b — a second patch link to a DIFFERENT href, so "a press aimed at
+      another control" can be told apart from "a re-press of the in-flight one".
+    · #js-patch — `phx-click={JS.patch(…)}`: the other `pushLinkPatch` caller
+      (`exec_patch`), whose ref lands on a plain `phx-click` element rather
+      than on an anchor.
+    · #plain — an ordinary `phx-click` control that is never in flight. It is
+      the NO-REGRESSION control: whatever the guard is keyed on, this must
+      still fire.
+
+  #studio-panes carries the hook, exactly as studio_live/components.ex ships it
+  (`<.pane_layout id="studio-panes" phx_hook="WidthBucket">`), because the hook's
+  own mount push puts a `data-phx-ref-src` ON THE CONTAINER. That container ref
+  is why a guard keyed on a bare `[data-phx-ref-src]` would blanket-block the
+  whole desk, and the control measures that as a named mutation arm.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>lock-only ref fixture</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font: 14px system-ui, sans-serif; }
+    #studio-panes { padding: 16px; }
+    a, button { display: block; margin: 8px 0; padding: 8px 12px; border: 1px solid #888; }
+  </style>
+
+  <!-- INJECTED-CSS-BEGIN -->
+  <style id="bp-injected-css"></style>
+  <!-- INJECTED-CSS-END -->
+</head>
+<body>
+  <!-- #studio-panes is rendered BY the join, INSIDE the LiveView container, as
+       studio_live/components.ex ships it. Outside it, the view does not own the
+       element and never mounts its hook — so the container ref the mutation
+       arm needs is never stamped, and that arm goes vacuously green. -->
+  <div id="phx-main"
+       data-phx-main
+       data-phx-root-id="phx-main"
+       data-phx-session="fixture-session"
+       data-phx-static=""
+       class="phx-connected"></div>
+
+  <!-- The press-answer region lives in the ROOT LAYOUT on the real desk, i.e.
+       outside the LiveView container, so it survives every patch. -->
+  <div id="bp-press-answer"></div>
+
+  <!-- INJECTED-PHOENIX-BEGIN --><script id="bp-phoenix"></script><!-- INJECTED-PHOENIX-END -->
+  <!-- INJECTED-LV-BEGIN --><script id="bp-lv"></script><!-- INJECTED-LV-END -->
+
+  <!-- The guard sits BEFORE the LiveSocket construction, as it does in
+       root.html.heex. It is a document-capture listener, so its position in the
+       body does not decide its order against LiveView's window listeners — the
+       PHASE does — but keeping the shipped order removes one difference. -->
+  <!-- INJECTED-GUARD-BEGIN -->
+  <script id="bp-injected-guard"></script>
+  <!-- INJECTED-GUARD-END -->
+
+  <script>
+    // ── the server, modelled; everything above this line is the real client ──
+    window.__sent = [];      // every frame the client put on the socket
+    window.__events = [];    // phx "event"/"live_patch" frames, decoded
+
+    window.__RENDERED = {
+      s: [
+        '<div id="studio-panes" phx-hook="WidthBucket">' +
+          '<a id="sess-a" href="/studio/chat/a" data-phx-link="patch" data-phx-link-state="push">session A</a>' +
+          '<a id="sess-b" href="/studio/chat/b" data-phx-link="patch" data-phx-link-state="push">session B</a>' +
+          '<button id="js-patch" type="button" phx-click=\'[["patch",{"href":"/studio/chat/j","replace":false}]]\'>js patch</button>' +
+          '<button id="plain" type="button" phx-click="plain-press">plain</button>' +
+        '</div>'
+      ]
+    };
+
+    window.__FakeWS = function (url) {
+      var self = this;
+      this.url = url;
+      this.readyState = 0; // CONNECTING
+      this.binaryType = "arraybuffer";
+      window.__socketTransport = this;
+      setTimeout(function () {
+        self.readyState = 1; // OPEN
+        if (self.onopen) self.onopen({});
+      }, 0);
+    };
+    window.__FakeWS.prototype.send = function (data) {
+      window.__sent.push(data);
+      var m;
+      try { m = JSON.parse(data); } catch (e) { return; }
+      var joinRef = m[0], ref = m[1], topic = m[2], event = m[3], payload = m[4];
+      var self = this;
+      var reply = function (response) {
+        setTimeout(function () {
+          if (self.onmessage) {
+            self.onmessage({ data: JSON.stringify([joinRef, ref, topic, "phx_reply",
+              { status: "ok", response: response }]) });
+          }
+        }, 0);
+      };
+      if (event === "phx_join") {
+        if (topic.indexOf("lv:") === 0) {
+          reply({
+            rendered: window.__RENDERED,
+            // Read off the client itself, so a vendor bump cannot turn this
+            // fixture into a version-mismatch warning that hides a real fault.
+            liveview_version: window.__liveSocket && window.__liveSocket.version()
+          });
+        } else {
+          reply({});
+        }
+        return;
+      }
+      if (event === "heartbeat") { reply({}); return; }
+      // EVERY OTHER FRAME IS LEFT UNANSWERED ON PURPOSE. The ref it opened is
+      // never undone, so the in-flight window stays open for the whole run.
+      window.__events.push({ event: event, payload: payload });
+    };
+    window.__FakeWS.prototype.close = function () {
+      this.readyState = 3;
+      if (this.onclose) this.onclose({});
+    };
+
+    // ── the boot, as root.html.heex does it ─────────────────────────────────
+    window.__liveSocket = new LiveView.LiveSocket("/live", Phoenix.Socket, {
+      transport: window.__FakeWS,
+      params: function () { return { _csrf_token: "fixture" }; },
+      hooks: {
+        // The desk's own container hook. Its mount push is what puts a
+        // data-phx-ref-src ON #studio-panes — see the header comment.
+        WidthBucket: {
+          mounted() {
+            // The hook's own mount push is what puts a data-phx-ref-src ON THE
+            // CONTAINER. It has to RETRY: at __mounted() the view is mid-join
+            // and `pushHookEvent` rejects with "LiveView not connected", which
+            // on the real desk is simply a slightly later push and here would
+            // otherwise leave the container ref absent — and an absent
+            // container ref makes the mutation arm vacuous rather than failing.
+            const push = () => {
+              let p;
+              try { p = this.pushEvent("width-bucket", { w: 1280 }); }
+              catch (e) { window.setTimeout(push, 25); return; }
+              if (p && p.catch) p.catch(() => window.setTimeout(push, 25));
+            };
+            push();
+          }
+        }
+      }
+    });
+    window.__liveSocket.connect();
+
+    // Readiness, asserted rather than raced: the control waits on this.
+    window.__joined = function () {
+      var m = document.querySelector("[data-phx-main]");
+      return !!m && m.classList.contains("phx-connected") && !!document.getElementById("sess-a");
+    };
+  </script>
+</body>
+</html>

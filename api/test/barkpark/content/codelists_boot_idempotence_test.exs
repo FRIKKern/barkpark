@@ -23,6 +23,7 @@ defmodule Barkpark.Content.CodelistsBootIdempotenceTest do
   `codelists_bulk_write_test.exs` does.
   """
 
+  # sync: statement census attaches node-global `[:barkpark, :repo, :query]` telemetry
   use Barkpark.DataCase, async: false
 
   alias Barkpark.Content.Codelists

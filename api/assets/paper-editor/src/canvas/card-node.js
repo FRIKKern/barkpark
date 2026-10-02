@@ -64,6 +64,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 // imports this file for the pure mediaUrlFromValue helper without dragging the WC/DOM
 // path into the harness.
 import { canvasScope } from "./field-node.js";
+import { safeUrl } from "../safe-url.js";
 
 // The BINARY priority collapse the reader performs (walk.ex button/2): primary iff
 // =="primary", else secondary. Used for the priority-select display; the WRITE path
@@ -447,7 +448,7 @@ export const Card = Node.create({
           (!Object.prototype.hasOwnProperty.call(media, "type") || media.type === "image")
         );
         if (src) {
-          mediaImg.setAttribute("src", src);
+          mediaImg.setAttribute("src", safeUrl(src));
           mediaImg.setAttribute("alt", (media && media.alt) || "");
           if (media && media.width != null) {
             mediaImg.setAttribute("width", String(media.width));
@@ -497,7 +498,7 @@ export const Card = Node.create({
         }
         const hasAction = Boolean(action && typeof action === "object");
         actionLink.textContent = label;
-        actionLink.setAttribute("href", href);
+        actionLink.setAttribute("href", href ? safeUrl(href) : "");
         actionLink.className =
           action && action.priority === "primary"
             ? "bp-button bp-button--primary"

@@ -60,8 +60,11 @@ co-locate, over-budget or over-cap work is refused (not dropped). Reserve big bo
 that needs them; fill lean boxes with the rest. `python3 helpers/route.py` runs its 9-check proof.
 
 **The live path is `helpers/dispatch.sh <orders.json>`** — one batch end-to-end, every decision
-printed with its reason. It re-reads the spend ledger on EVERY invocation (the cap gate runs
-before every batch, never cached; a malformed ledger row is a named ABORT), fetches the live
+printed with its reason. It re-reads the spend ledger SET on EVERY invocation through
+`tooling/fleet/spend-aggregate.py` — every `$FLEET_HOME/<worker>/spend.jsonl` `record_spend`
+writes plus the orchestrator's own (the cap gate runs before every batch, never cached; a
+malformed row is a named ABORT, exit 12; NO readable ledger with a cap set is CANNOT READ,
+exit 13, a refusal — never a compliant $0.00), fetches the live
 roster, prints every excluded-offline row by name BEFORE routing, pipes
 roster → `helpers/transform.py` → `helpers/route.py --route`, prints
 `order → worker (klass): reason` per assignment and files it via file-order.sh, and prints

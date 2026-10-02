@@ -63,6 +63,10 @@
 # bash 3.2 compatible (macOS system bash).
 
 set -euo pipefail
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/bp-curl.sh"   # 429 backoff, shared (task-c2f96f8121c64601)
+# shellcheck disable=SC1091
+. "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/pds-live-lib.sh"   # the vocabulary both pds-live L1 runners share (pds-bl-live-runners-duplicated)
 
 SELF="$(basename "$0")"
 SCRIPT_DIR="$(cd -P -- "$(dirname -- "$0")" && pwd)"
@@ -76,29 +80,10 @@ GO_BIN="${PDS_LIVE_GO:-go}"
 
 mkdir -p "$ART"
 
-say()    { printf '%s\n' "$*"; }
-step()   { printf '\n== %s\n' "$*"; }
-ok()     { printf '  PASS    %s\n' "$*"; }
-refuse() { printf '\n%s: REFUSE — %s\n' "$SELF" "$*" >&2; exit 3; }
-failed() { printf '\n%s: FAIL — %s\n' "$SELF" "$*" >&2; exit 1; }
-usage()  { printf '%s: %s\n' "$SELF" "$*" >&2; exit 2; }
 
-jsonq() {
-  python3 -c '
-import sys, json
-try:
-    d = json.load(open(sys.argv[1]))
-except Exception as e:
-    sys.stderr.write("not JSON: %s\n" % e)
-    sys.exit(9)
-v = eval(sys.argv[2])
-print("" if v is None else v)
-' "$1" "$2"
-}
 
 # ── the bp under proof: built from THIS worktree ─────────────────────────────
 
-BP=""
 apparatus_or_refuse() {
   local missing=""
   grep -rq 'screenWriteReceipt' "$REPO_ROOT/internal/cli/" 2>/dev/null \
@@ -106,19 +91,6 @@ apparatus_or_refuse() {
   [ -f "$REPO_ROOT/internal/cli/hetzner_respost.go" ] \
     || missing="$missing internal/cli/hetzner_respost.go"
   [ -z "$missing" ] || refuse "this tree predates the write-receipt apparatus (missing:$missing). Measuring a pre-fence binary would prove nothing about the receipts under test — and the installed bp on this host is exactly such a binary."
-}
-
-build_bp() {
-  if [ -n "${PDS_LIVE_BP:-}" ]; then
-    BP="$PDS_LIVE_BP"
-    [ -x "$BP" ] || refuse "PDS_LIVE_BP=$BP is not executable"
-    return 0
-  fi
-  apparatus_or_refuse
-  [ -d "$REPO_ROOT/cmd/barkpark" ] || refuse "no $REPO_ROOT/cmd/barkpark — note ./cmd/bp DOES NOT EXIST; the binary's package is cmd/barkpark"
-  BP="$ART/bp"
-  ( cd "$REPO_ROOT" && CC="${CC:-/usr/bin/clang}" "$GO_BIN" build -o "$BP" ./cmd/barkpark ) \
-    || refuse "go build ./cmd/barkpark failed — refusing to prove anything with a binary this worktree could not produce"
 }
 
 # ── PREFLIGHT ────────────────────────────────────────────────────────────────
@@ -292,7 +264,7 @@ PY
 # query PERSPECTIVE OUTFILE — an INDEPENDENT read of the reserved type.
 query() {
   local persp="$1" out="$2" code
-  code="$(curl -sS --max-time 60 -o "$out" -w '%{http_code}' \
+  code="$(bp_curl_code -sS --max-time 60 -o "$out" \
       -H "Authorization: Bearer $ORACLE_TOKEN" \
       "$BASE/v1/data/query/$DATASET/$DOC_TYPE?perspective=$persp&limit=50")"
   [ "$code" = "200" ] || { printf '  independent read of perspective %s answered HTTP %s\n' "$persp" "$code" >&2; return 1; }
@@ -384,20 +356,6 @@ PLAN
 # ── --selftest ───────────────────────────────────────────────────────────────
 
 ST_FAIL=0
-st_case() {
-  local label="$1" want="$2"; shift 2
-  local out="$ART/st.$$.out" rc=0
-  set +e
-  env "$@" "$0" --preflight >"$out" 2>&1
-  rc=$?
-  set -e
-  local verdict="PASS"
-  [ "$rc" = "$want" ] || { verdict="FAIL"; ST_FAIL=1; }
-  printf '  %-6s %-58s rc=%s (want %s)\n' "$verdict" "$label" "$rc" "$want"
-  printf '         %s\n' "$(grep -Eo 'REFUSE — [^.]*\.|CREDENTIAL RUNG THAT PAID: .*' "$out" | head -1 | cut -c1-120)"
-  ST_LAST_OUT="$out"
-}
-
 selftest() {
   build_bp
   local empty="$ART/empty-home"

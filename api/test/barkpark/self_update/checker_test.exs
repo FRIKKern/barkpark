@@ -4,6 +4,7 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
   use ExUnit.Case, async: false
 
   alias Barkpark.BuildInfo
+  alias Barkpark.BuildInfo.Resolve
   alias Barkpark.SelfUpdate
   alias Barkpark.SelfUpdate.Checker
 
@@ -99,6 +100,45 @@ defmodule Barkpark.SelfUpdate.CheckerTest do
 
     # status/0 returns the cached result of that check.
     assert SelfUpdate.status() == status
+  end
+
+  test "run_check/0 never takes the {:running, :error} arm on a build with a real release" do
+    # THE ARM (checker.ex run_check/0): `{:running, :error} -> %{base | error:
+    # "running release is ... (no vA.B.C build tag)"}`. It fires whenever
+    # BuildInfo.release() fails ^A.B.C$ — and on a compose/tarball install it
+    # then fired FOREVER, because the image compiled with no `.git` and reported
+    # release "unknown" (task-2ab4f5f0a07e887a). Every other test in this file
+    # asserts a happy path that silently depends on the running release parsing;
+    # none says so, so none of them would name the cause if it stopped.
+    assert BuildInfo.release() =~ ~r/^\d+\.\d+\.\d+$/,
+           "the running build reports release #{inspect(BuildInfo.release())}, which " <>
+             "parse_release/1 refuses — run_check/0 can only take its error arm"
+
+    prime(latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}})
+    start_supervised!({Checker, @quiet_opts})
+
+    status = SelfUpdate.check_now()
+
+    assert status.state in [:current, :behind]
+    assert status.latest_release == "999.0.0"
+    assert status.error == nil
+    refute status.state == :unknown
+  end
+
+  test "a `.git`-less build resolves the same parseable release from the VERSION tier" do
+    # The image and the tarball have no describe output at all. This is the
+    # tier that has to answer, expressed through the same function BuildInfo
+    # calls at compile time.
+    gitless = Resolve.release(Resolve.version(nil, nil, "1.2.3"))
+
+    assert gitless == "1.2.3"
+    assert gitless =~ ~r/^\d+\.\d+\.\d+$/
+
+    # CONTROL — the pre-fix state of exactly that build. Without it the line
+    # above is a statement about the string "1.2.3", not about the arm.
+    stranded = Resolve.release(Resolve.version(nil, nil, nil))
+    assert stranded == "unknown"
+    refute stranded =~ ~r/^\d+\.\d+\.\d+$/
   end
 
   test "check_now/0 reports :current when the latest release does not exceed the running one" do

@@ -41,6 +41,8 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
   end
 
   describe "POST /v1/media/:dataset/upload — the receipt names every id" do
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "carries mediaFileId alongside assetDocId, with no regexing", %{conn: conn} do
       body =
         conn
@@ -66,6 +68,8 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
   end
 
   describe "POST /v1/media/:dataset/upload — metadata inline" do
+    # Plugins-off: the media plugin (its mediaAsset document and schema back the /v1/media doors)
+    @tag :requires_plugins
     test "altText, caption and tags land in ONE call", %{conn: conn} do
       body =
         conn
@@ -91,6 +95,8 @@ defmodule BarkparkWeb.Integration.V1MediaUploadReceiptTest do
       rm_uploaded(body["result"])
     end
 
+    # Plugins-off: the media plugin owns mediaAsset, its processing and the media routes
+    @tag :requires_plugins
     test "an upload with no metadata parts is unchanged", %{conn: conn} do
       body =
         conn

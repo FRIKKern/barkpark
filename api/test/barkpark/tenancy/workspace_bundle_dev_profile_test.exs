@@ -1,6 +1,6 @@
 defmodule Barkpark.Tenancy.WorkspaceBundleDevProfileTest do
   @moduledoc """
-  The profile-aware, dataset-granular export gate (PDS-D3/D7 · D27/D28/D29/D31).
+  The profile-aware, dataset-granular export gate (PDS-D3/PDS-D7 · D27/D28/D29/D31).
 
   Every proof here is MECHANICAL and adversarial: the secret scan reads the RAW
   tar bytes (not the manifest's own summary of itself), the skip-not-post-filter

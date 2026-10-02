@@ -33,6 +33,17 @@ on:
       - "templates/astro-search-starter/public/bp-graph.js"
       - "scripts/check-bp-graph-drift.sh"
       - ".github/workflows/bp-graph-drift.yml"
+      # A PREDICATE, not a list. The four literals above stay for readability,
+      # but they cannot fire on a FIFTH copy nobody remembered to add here —
+      # the same enumeration defect the census step below closes inside the
+      # gate. This glob makes a new mirror trigger its own guard on the very PR
+      # that introduces it. Strictly wider: it can never hide what the literals
+      # already catch.
+      - "**/bp-graph.js"
+      # The predicate-driven census and the walk it shares with
+      # design/graph-palette-authority.test.mjs.
+      - "design/bp-graph-mirror-census.test.mjs"
+      - "design/bp-graph-copies.mjs"
   pull_request:
     paths:
       - "api/priv/static/assets/bp-graph.js"
@@ -41,6 +52,17 @@ on:
       - "templates/astro-search-starter/public/bp-graph.js"
       - "scripts/check-bp-graph-drift.sh"
       - ".github/workflows/bp-graph-drift.yml"
+      # A PREDICATE, not a list. The four literals above stay for readability,
+      # but they cannot fire on a FIFTH copy nobody remembered to add here —
+      # the same enumeration defect the census step below closes inside the
+      # gate. This glob makes a new mirror trigger its own guard on the very PR
+      # that introduces it. Strictly wider: it can never hide what the literals
+      # already catch.
+      - "**/bp-graph.js"
+      # The predicate-driven census and the walk it shares with
+      # design/graph-palette-authority.test.mjs.
+      - "design/bp-graph-mirror-census.test.mjs"
+      - "design/bp-graph-copies.mjs"
 
 concurrency:
   group: bp-graph-drift-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
@@ -61,3 +83,13 @@ jobs:
 
       - name: Check mirror identity
         run: bash scripts/check-bp-graph-drift.sh
+
+      # The list the script above guards with is a SNAPSHOT: a fifth bp-graph.js
+      # copy that nobody adds to its MIRRORS block drifts silently and the script
+      # still exits 0 with "OK — all 3 mirrors are byte-identical". This census
+      # enrols by PREDICATE (every bp-graph.js the walk finds, the shared
+      # design/bp-graph-copies.mjs rule), checks byte identity against the
+      # canonical without consulting any list, and reconciles the script's own
+      # MIRRORS literal against the tree both directions — UNLISTED and PHANTOM.
+      - name: Census the mirror set against the tree (predicate, not list)
+        run: node design/bp-graph-mirror-census.test.mjs

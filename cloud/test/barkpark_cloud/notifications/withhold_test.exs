@@ -478,8 +478,11 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   ##    server would reject. The counterpart pin is in
   ##    `cloud/priv/static/__app.test.mjs` ("pinned by EQUALITY").
 
-  test "the delivery status vocabulary is EXACTLY these four words" do
-    assert Delivery.statuses() == ~w(pending sent failed suppressed)
+  # ccpca-bl added the FIFTH word, `unconfirmed`, and this pin is exactly why
+  # that was not a one-line change: it reds in both trees at once, and the
+  # console counterpart had to move in the same PR.
+  test "the delivery status vocabulary is EXACTLY these five words" do
+    assert Delivery.statuses() == ~w(pending sent failed suppressed unconfirmed)
   end
 
   test "a suppressed row inserts, reads back team-scoped, and answers ?status=suppressed" do
@@ -732,11 +735,20 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   # their own filed backlog task, `cch-w32-bl-receipt-loss-branches-have-no-trace`,
   # which needs a trace of its own class — this row does not silently duplicate it.
   @receipt_loss %{
-    # cch-w52-s3 widened this to /6 (the carrier the send actually used rides in
-    # as the sixth argument). The BRANCH is unchanged — same `{:error, changeset}`
-    # arm, same class, same owner — so this row is re-keyed rather than re-judged.
-    {:record_delivery, 6, :nil_shape} =>
-      "record_delivery/6's `{:error, changeset}` arm: the email send returned, " <>
+    # RE-KEYED TWICE, RE-JUDGED NEVER. cch-w52-s3 widened this to /6 (the carrier
+    # the send actually used rides in as the sixth argument); dr-w34 widened it
+    # to /7 (the rendered `%Swoosh.Email{}` the receipt fingerprints, defaulted to
+    # `nil`). The BRANCH is unchanged through both — same `{:error, changeset}`
+    # arm, same class, same owner.
+    #
+    # The key is the CLAUSE HEAD's arity, which is 7 even though the default
+    # argument also makes `record_delivery/6` callable: the census reads the
+    # source, not the export list. So the /6 row is DELETED rather than kept
+    # beside this one — a named branch the census can no longer derive is a row
+    # that would red this test in the other direction, and this map is an
+    # adjudication of branches, not a changelog of signatures.
+    {:record_delivery, 7, :nil_shape} =>
+      "record_delivery/7's `{:error, changeset}` arm: the email send returned, " <>
         "the row did not write. Logger-only; owned by cch-w32-bl-receipt-loss-*.",
     {:log_chat_delivery, 6, :nil_shape} =>
       "log_chat_delivery/6's `{:error, changeset}` arm: the chat POST returned, " <>

@@ -83,32 +83,45 @@ ASLONG FILE DONT CONTAIN "MARK:claude-route-{{.card-name}}"
 
 # --------------------------------------------------------------------------
 # 3. The INDEX sweep.
-# docs/INDEX.md:4 is a brace-expansion line:
+# RE-ANCHORED 2026-09-11. The old anchor was the brace-expansion line
 #   Cards: cards/{studio,plugins,cli,js-sdk,onix-bokbasen,search-media,tui}.md
-# A3 comma-append = a fenced REPLACE that re-emits an element. The new
-# element lands BEFORE the final 'tui', not after it: appending after tui
-# would put the token flush against the closing brace — '{{.card-name}}}',
-# a '}}}' run, the exact A5 adjacency violation — so the element goes one
-# slot earlier, commas on both sides. No comment syntax survives inside a
-# brace expansion, so no plantable mark exists here — this is the corpus's
-# MARK VIRTUAL case (D24): the mark is a nominal handle with ZERO in-file
-# bytes, and idempotency must rest ENTIRELY on the required ASLONG guard —
-# the payload literal ',{{.card-name}},tui' (unique, payload-derived,
-# brace-free per A5; the structural target does not survive its own
-# replacement, A4).
+# which #17188 (sha 3766201a5, 2026-09-10) DELETED: docs/INDEX.md is now two
+# ordered read paths plus a per-folder reference block, and every entry is a
+# real markdown link, because the old brace shorthand was unclickable and
+# docs-anchors-check's extractor could not read past '{'. That deletion made
+# this REPLACE unappliable and reddened doc-gates' scaffy anchor-drift step
+# (R-002) on every push to main from 2026-09-10T00:28Z.
+#
+# The anchor is now the reference block's folder line, which exists today:
+#   [ops/](ops/), [cheatsheets/](cheatsheets/), [setup/](setup/).
+# The new element lands one slot IN from the front (after ops/), not at the
+# end: appending after '[setup/](setup/).' would leave the old target as a
+# literal prefix of its own replacement — a self-consuming REPLACE, which A4
+# requires to carry BOTH a payload-derived ASLONG and a REANCHOR. Inserting
+# mid-list keeps the target non-surviving, so the op stays the simple
+# ASLONG-only shape it has always had.
+#
+# docs/INDEX.md has no comment syntax that survives its 1200B cap (it sits at
+# 1196B on 2026-09-11 — 4B of headroom), so no plantable mark exists here:
+# this is still the corpus's MARK VIRTUAL case (D24), a nominal handle with
+# ZERO in-file bytes, and idempotency rests ENTIRELY on the required ASLONG
+# guard. The guard is the payload-derived link literal
+# '[cards/{{.card-name}}.md](cards/{{.card-name}}.md)' — unique (the card is
+# new), written by the op itself, ASCII, and brace-free per A5 (every '}}'
+# in it is followed by '.', never by a literal '}').
 # --------------------------------------------------------------------------
 IN "docs/INDEX.md"
-### Sweep the Cards: brace list with {{.card-name}}
+### Link {{.card-name}} into the INDEX reference block
 REPLACE
-::: cards list tail :::
-search-media,tui}.md
-::: cards list tail :::
+::: index reference folders :::
+[ops/](ops/), [cheatsheets/](cheatsheets/), [setup/](setup/).
+::: index reference folders :::
 WITH
-::: cards list tail swept :::
-search-media,{{.card-name}},tui}.md
-::: cards list tail swept :::
+::: index reference folders swept :::
+[ops/](ops/), [cards/{{.card-name}}.md](cards/{{.card-name}}.md), [cheatsheets/](cheatsheets/), [setup/](setup/).
+::: index reference folders swept :::
 MARK VIRTUAL "index-cards-{{.card-name}}"
-ASLONG FILE DONT CONTAIN ",{{.card-name}},tui"
+ASLONG FILE DONT CONTAIN "[cards/{{.card-name}}.md](cards/{{.card-name}}.md)"
 
 # ==========================================================================
 # HONESTY BLOCK — what the gates say MID-SCRATCH (before remove-docs-card)
@@ -118,10 +131,13 @@ ASLONG FILE DONT CONTAIN ",{{.card-name}},tui"
 # doing its job, not this command misfiring:
 #   1. card count — "docs/cards/ holds 8 cards, hard cap is exactly 7"
 #      (check-doc-budgets.sh:78-84);
-#   2. docs/INDEX.md budget — 1197 B against a 1200 B cap; the swept Cards:
-#      line overflows it for any card name longer than 2 characters;
-#   3. CLAUDE.md budget — 9930 B against a 10000 B cap; the routing row +
-#      MARK comment (~115 B) overflow the 70 B of headroom.
+#   2. docs/INDEX.md budget — 1196 B against a 1200 B cap (measured
+#      2026-09-11); the swept reference line adds ~34 B + 2x the card name,
+#      so it overflows for every card name;
+#   3. CLAUDE.md budget — 9797 B against a 10000 B cap with a 200 B minimum
+#      headroom (check_headroom, check-doc-budgets.sh:1234), so the 203 B of
+#      slack cannot absorb the routing row + MARK comment (~115 B) and stay
+#      above the floor (measured 2026-09-11).
 # The pair's budget-gate PASS lives in remove-docs-card, after the tree is
 # byte-clean again. docs-anchors-check.sh, by contrast, is green
 # mid-scratch: the new card satisfies G1 + gate 3 + gate 5, and the routing
@@ -131,5 +147,5 @@ ASLONG FILE DONT CONTAIN ",{{.card-name}},tui"
 # Post-conditions
 ASSERT FILE "docs/cards/{{.card-name}}.md" CONTAINS "canonical-for: {{.card-name}}-overview"
 ASSERT FILE "CLAUDE.md" CONTAINS "MARK:claude-route-{{.card-name}}"
-ASSERT FILE "docs/INDEX.md" CONTAINS ",{{.card-name}},tui"
+ASSERT FILE "docs/INDEX.md" CONTAINS "[cards/{{.card-name}}.md](cards/{{.card-name}}.md)"
 ASSERT CMD "bash scripts/docs-anchors-check.sh # LOCAL with the clean-checkout caveat: 24s green in a fresh worktree; HANGS (>115s) in a litter-saturated primary checkout — run from a clean checkout only"

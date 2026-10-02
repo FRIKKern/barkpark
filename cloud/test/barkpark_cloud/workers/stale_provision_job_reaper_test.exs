@@ -112,6 +112,39 @@ defmodule BarkparkCloud.Workers.StaleProvisionJobReaperTest do
     assert is_nil(reaped.claimed_at)
   end
 
+  # ccpca-bl-pending-provision-no-timeout: the RULING (see the
+  # `Registry.reap_stale_provision_jobs/0` doc) is that `pending` has no age-based
+  # timeout — a worker-down outage must not bulk-fail queued provisions or strand
+  # a billed box behind a failed deprovision. This pins the ruling: a change that
+  # adds a pending-age edge reds here and must re-argue it.
+  for kind <- ["provision", "deprovision"] do
+    test "a pending #{kind} job days old is NOT failed or touched by the sweep" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+
+      {:ok, job} =
+        case unquote(kind) do
+          "provision" -> Registry.enqueue_provision_job(bp)
+          "deprovision" -> Registry.enqueue_deprovision_job(bp)
+        end
+
+      old =
+        DateTime.add(DateTime.utc_now(), -3 * 86_400, :second)
+        |> DateTime.truncate(:microsecond)
+
+      Repo.update_all(
+        from(j in ProvisionJob, where: j.id == ^job.id),
+        set: [inserted_at: old, updated_at: old]
+      )
+
+      assert {:ok, %{reaped: 0, failed: 0}} = perform_job(StaleProvisionJobReaper, %{})
+
+      row = Repo.get(ProvisionJob, job.id)
+      assert row.status == "pending"
+      assert row.updated_at == old
+    end
+  end
+
   ## 3. Idempotency — nothing stale is a no-op, never raises.
 
   test "perform is a no-op when no claimed job is stale" do

@@ -47,8 +47,10 @@
 # EXIT CODES   0 = agree · 1 = DRIFT (measured: live, spec and rendered names
 #              disagree, or a workflow's prose contradicts the spec)
 #              3 = DEADLOCK · 4 = RE-RUN
-#              5 = BLOCKED — an input could not be READ or a producer refused.
-#              This run reached NO verdict about the required set.
+#              5 = BLOCKED — an input could not be READ, a producer refused, or
+#              (--deadlock only) the spec this checkout carries is STALE against
+#              origin/main and the set difference would have run without names
+#              GitHub enforces. This run reached NO verdict about the required set.
 #              64 = USAGE (the caller typed it wrong — not a measurement,
 #              so it must not borrow drift's word or its code)
 #
@@ -99,10 +101,61 @@
 #   scripts/required-checks-verify.sh                 # full three-way check
 #   scripts/required-checks-verify.sh --branch <b>    # live-read b, not .branch
 #   scripts/required-checks-verify.sh --ci            # the CI guard
-#   scripts/required-checks-verify.sh --deadlock      # detector only
+#   scripts/required-checks-verify.sh --deadlock      # detector only; also
+#                                                     refuses a spec this checkout
+#                                                     carries but origin/main has
+#                                                     moved past (see
+#                                                     spec_freshness_check)
 #   scripts/required-checks-verify.sh --selftest      # mutation-prove the clauses
+#   scripts/required-checks-verify.sh --require-prose-candidates
+#                                                     # the merge-truth clause's
+#                                                     zero-candidate green
+#                                                     becomes exit 1; for a
+#                                                     caller about to stand on
+#                                                     that clause (see
+#                                                     REQUIRE_PROSE_CANDIDATES)
+
+# INTERPRETER GUARD — shebang-independent, and it must stay ABOVE the first
+# process substitution in this file. bash reads a script INCREMENTALLY: invoked
+# as `sh` it is in POSIX mode, where `<(…)` cannot be parsed, so everything
+# above the offending line has ALREADY RUN and the script dies with the status
+# of the last completed command. MEASURED 2026-09-13: under `sh` this file exited 0 with output byte-identical to the bash control, because its process substitution sits inside spec_freshness_check, which that invocation never reached. A LATENT vacuous green: reach that function under sh and `missing` is empty, so "the spec and main agree" is concluded having compared nothing — on the verifier the merge path depends on.
+# Pinned by scripts/posix-vacuous-green-census.sh, which reds if this guard is
+# removed or moved below the first process substitution.
+if [ -z "${BASH_VERSION:-}" ]; then
+  echo "required-checks-verify.sh: needs bash (this script uses process substitution); run: bash scripts/required-checks-verify.sh" >&2
+  exit 2
+fi
+case ":${SHELLOPTS:-}:" in
+  *:posix:*)
+    echo "required-checks-verify.sh: bash is in POSIX mode (invoked as \`sh\`?), which cannot parse this script's process substitution; run: bash scripts/required-checks-verify.sh" >&2
+    exit 2
+    ;;
+esac
 
 set -euo pipefail
+
+# ── THE LOCALE PIN — one line, and it is not a style preference ──────────────
+# Every text tool this script runs (sed, awk, grep, sort, tr, cut, comm) reads
+# the TRACKED CORPUS, and that corpus carries bytes that are not valid UTF-8 (a
+# mojibake'd em dash in one wave ledger; see the long note above the merge-truth
+# awk at the `LC_ALL=C awk` call in merge_truth_prose_check, which has pinned
+# itself since cch-w34). In an ambient UTF-8 locale BWK awk does not skip such a
+# byte — it ABORTS with "towc: multibyte conversion failure", and macOS sed
+# errors "RE error: illegal byte sequence". Left to the caller's environment the
+# SAME tree therefore reads green under LC_ALL=C and red under en_US.UTF-8, so
+# the verdict is about the operator's shell instead of about the repo. Pin it
+# here, once, for the whole process and everything it forks.
+#
+# WHY THIS IS SAFE TO EXPORT PROCESS-WIDE: nothing in this script needs the
+# caller's locale. There is no `date` call (no month/day names are formatted),
+# no `printf "%'d"` (no thousands separators), and no sort whose ORDER a human
+# reads — every `sort`/`sort -u` here feeds a set comparison (comm/diff/dedup),
+# which C collation makes MORE deterministic, not less. Every comparison is a
+# byte comparison and every tolower() runs on ASCII context names. Literal
+# non-ASCII in messages (— – …) is emitted by printf/echo as bytes and is
+# unaffected. jq and gh decode UTF-8 themselves and ignore LC_ALL.
+export LC_ALL=C
 
 REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 
@@ -137,7 +190,17 @@ CHECK_RUNS_LIB="${BARKPARK_CHECK_RUNS_LIB:-$REPO_ROOT/scripts/lib/check-runs.sh}
 # widen away.
 SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 
-SPEC="$REPO_ROOT/.github/required-checks.json"
+SPEC_REL=".github/required-checks.json"
+SPEC="$REPO_ROOT/$SPEC_REL"
+# DID THE CALLER NAME THE SPEC, OR DID THIS SCRIPT DEFAULT TO WHATEVER THE
+# CHECKOUT CARRIES? The freshness clause below turns on exactly that difference,
+# and it keys on the FLAG rather than on the path the flag carries. A caller who
+# types `--spec .github/required-checks.json` has made a statement about which
+# file it means; a caller who types nothing has made no statement at all and is
+# relying on the checkout being current. Keying on the resolved path would
+# collapse those two into one — required-checks-apply.sh passes `--spec "$SPEC"`
+# where $SPEC is that very default path.
+SPEC_EXPLICIT=0
 # Read the live protection of a branch OTHER than the one the spec names. The
 # only caller is required-checks-apply.sh --branch <throwaway>, whose live
 # probe applies to a scratch branch and must then verify THAT branch. Without
@@ -190,6 +253,112 @@ read_spec() {
 spec_repo()   { jq -r '.repo'   "$SPEC"; }
 spec_branch() { if [ -n "$BRANCH_OVERRIDE" ]; then printf '%s' "$BRANCH_OVERRIDE"; else jq -r '.branch' "$SPEC"; fi; }
 spec_enforced() { jq -r '.enforced == true' "$SPEC"; }
+
+# ── the FOURTH input: is THIS COPY of the spec the one main requires? ───
+#
+# THE HOLE (cchi-w51-bl, measured 2026-08-09). Until this clause there was not
+# one occurrence of `origin/main`, `git show` or `git fetch` in this file: it
+# verified whatever `.github/required-checks.json` the checkout happened to
+# carry and called the agreement OK. That is harmless in the modes that ALSO
+# read live protection (compare_protection diffs the full live object, so a
+# stale spec reds there on its own). It is not harmless in `--deadlock`, which
+# reads the spec and the rendered check names and NOTHING live. scripts/
+# bp-merge.sh resolves this script out of whatever checkout the merger sits in
+# and runs `--deadlock` as its merge pre-flight, so a stale checkout's
+# pre-flight PASSES having subtracted the wrong set: measured on this wave, a
+# 652-commit-stale copy loaded 2 of the 4 live required contexts and exited 0.
+# Two names that GitHub will block on were never asked about, and the answer
+# still read "every required context is present on this head."
+#
+# WHY THIS IS SCOPED TO --deadlock AND TO THE DEFAULT SPEC, rather than bolted
+# on as a blanket "local spec differs from origin/main" refusal. The obstacle
+# was measured before the guard was written: required-checks-apply.sh calls this
+# script as its post-PUT read-back (`--spec "$SPEC"`, full mode), and applying a
+# CHANGED spec is the entire point of apply. A blanket refusal would red apply
+# on the one workflow it exists to serve — a WRONG REFUSE, which for an
+# instrument is worse than the blindness it replaces. Both keys are therefore
+# structural rather than negotiated:
+#
+#   1. MODE. Only `--deadlock` runs this. It is the only mode with no live
+#      side to check the spec against, and its only caller (bp-merge.sh's
+#      pre-flight) never legitimately edits the spec.
+#   2. THE FLAG. Only a run that did NOT pass `--spec` runs this. `--spec` says
+#      "I mean THIS file, on purpose"; its absence says "whatever the checkout
+#      carries", which is precisely the assumption at risk.
+#
+# apply.sh is immune on BOTH keys and needs no escape clause and no edit. The
+# escape nonetheless exists and is named: `--spec .github/required-checks.json`
+# means this file deliberately, and is the documented way to run the pre-flight
+# on a branch that is deliberately editing the required set.
+#
+# THE COMPARISON IS ONE-DIRECTIONAL, and the direction is the dangerous one.
+# Only contexts origin/main requires and this copy does NOT list are a refusal.
+# Extra local contexts are tolerated for the same reason `deadlock_check`
+# tolerates extra rendered names: a name this copy adds can only make the set
+# difference STRICTER, so its worst outcome is a false DEADLOCK (exit 3), which
+# is named, printed and actionable. A name this copy has LOST is the silent
+# direction — it makes the subtraction skip a gate nobody will mention again.
+# So a PR that ADDS a required context can still merge through bp-merge; one
+# that REMOVES a required name from the spec gets told so by name.
+#
+# 5 (BLOCKED), NOT 1 (DRIFT), AND THE REASON IS WHAT THE RUN CAN CLAIM. Drift
+# here is a verdict about the repo: I read all sides and they disagree. A stale
+# spec is not that — the repo may be perfectly healthy and this copy simply is
+# not entitled to say so, because the set it subtracted is not the set GitHub
+# enforces. That is the BLOCKED sentence verbatim: this run reached NO verdict
+# about the required set. bp-merge.sh already translates 5 into a named refusal
+# ("the pre-flight is BLOCKED: it could not READ an input"), and
+# required-checks.test.sh already translates it into the suite's HOLD, so the
+# refusal lands correctly at both existing call sites without either changing.
+#
+# KNOWN LIMIT, NAMED RATHER THAN IMPLIED. The refusal lives in the copy being
+# asked. A checkout old enough to predate this commit carries a verify.sh with
+# no freshness clause at all and cannot refuse — this closes the case where the
+# SPEC is stale and the SCRIPT is not, which is the common shape (a branch cut
+# before a spec change, a long-lived worktree, a revert), and does not close the
+# case where the whole checkout predates the guard. Closing that one means
+# resolving the verifier itself from origin/main inside bp-merge.sh, which is a
+# change to how the merge verb loads its own tools and belongs in its own PR.
+spec_freshness_check() {
+  local live missing n
+
+  if ! command -v git >/dev/null 2>&1; then
+    blocked "spec freshness: git is not on PATH, so I COULD NOT LOOK at origin/main:$SPEC_REL. This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  if ! git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
+    blocked "spec freshness: $REPO_ROOT is not a git checkout, so I COULD NOT LOOK at origin/main:$SPEC_REL. This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  # The ref, checked BY NAME and before the read. `git show origin/main:<path>`
+  # on a checkout with no such ref fails with a message about the PATH, which
+  # reads like a missing file rather than a missing ref.
+  if ! git -C "$REPO_ROOT" rev-parse --verify --quiet origin/main >/dev/null 2>&1; then
+    blocked "spec freshness: this checkout has no origin/main ref, so I COULD NOT LOOK at the spec main requires (run \`git fetch origin main\`). This is NOT \"the spec and main agree\" — nothing was compared."
+  fi
+  if ! live="$(git -C "$REPO_ROOT" show "origin/main:$SPEC_REL" 2>&1)"; then
+    blocked "spec freshness: cannot read origin/main:$SPEC_REL — $(head -1 <<<"$live"). I COULD NOT LOOK; this is NOT \"the spec and main agree\"."
+  fi
+  if ! jq -e '.protection.required_status_checks.checks | length > 0' <<<"$live" >/dev/null 2>&1; then
+    blocked "spec freshness: origin/main:$SPEC_REL is not readable as a spec with at least one required context, so I COULD NOT LOOK. This is NOT \"the spec and main agree\"."
+  fi
+
+  # Process substitution, not pipes into comm: a `blocked` inside either side
+  # would exit only its own subshell, so both sides are materialised by jq -e
+  # (already proven readable above for `live`, and by read_spec for $SPEC).
+  missing="$(comm -23 \
+    <(jq -r '.protection.required_status_checks.checks[].context' <<<"$live" | LC_ALL=C sort -u) \
+    <(jq -r '.protection.required_status_checks.checks[].context' "$SPEC" | LC_ALL=C sort -u))"
+
+  if [ -n "$missing" ]; then
+    n="$(printf '%s\n' "$missing" | wc -l | tr -d ' ')"
+    blocked "spec freshness: this checkout's $SPEC_REL is STALE — origin/main requires $n context(s) it does not list:
+$(printf '%s\n' "$missing" | sed 's/^/         only-on-origin-main: /')
+         The set difference below would have run WITHOUT those names, so a pass
+         would have certified a required set this copy has never heard of. This
+         is a HOLD, not a finding about the head: rebase onto origin/main (or
+         pass --spec $SPEC_REL to mean this file on purpose) and ask again."
+  fi
+  say "  spec freshness: every context origin/main requires is listed by this checkout's $SPEC_REL."
+}
 
 # ── the live read-back ───────────────────────────────────────────────────────
 # Unreadable is FAILURE. Wave 1's review found three guards that turned an
@@ -650,6 +819,135 @@ census_check() {
   return 0
 }
 
+# ── the partial-accounting clause: the census's blind spot, closed STATICALLY ─
+# THE DEFECT THIS EXISTS FOR, and it is this file's own concession made
+# actionable. census_check above says so in its header: "SAMPLE-SCOPED BY
+# CONSTRUCTION … a workflow that did not run on that head renders no name, so an
+# unaccounted name can hide simply by not being sampled." MEASURED 2026-09-17
+# (task-49ec172e0fa91f9a): #18847 added the job `astro-starter-content-link` to
+# search-template-gates.yml at 04:53Z, beside four siblings that ALL carry
+# exclusion rows. Every required-checks-drift.yml run on main between 04:53Z and
+# 09:25Z read GREEN at the census clause — not because the ledger was complete,
+# but because no sampled head had rendered the new name yet. At 09:25Z a PR
+# head finally rendered it and the job has been red on main and on every PR
+# since. Four and a half hours of a red that already existed and could not be
+# seen.
+#
+# THE CLAUSE, and it is a PREDICATE, not a list. There is no allowlist here and
+# no skip list; both go stale silently, which is the fault one layer out. The
+# rule is: IF a workflow file already has at least one job whose `name:` carries
+# a status in the spec, THEN every non-templated job `name:` in that file must
+# carry one too. A file in the ledger stays complete.
+#
+# WHY THAT ANTECEDENT AND NOT "EVERY WORKFLOW". Measured on the same tree: 161
+# job-level `name:` declarations, 38 with no status. Making the whole set
+# fail-closed today would red on 31 workflows nobody has adjudicated, and a
+# gate that reds over inherited debt is the advisory-red problem this repo keeps
+# filing rows about. The antecedent picks out exactly the population where
+# SOMEONE ALREADY DID the adjudication — so a new unaccounted name there is a
+# REGRESSION of a decision, not undone work. After the seven rows this clause
+# shipped with, the population is 4 workflows and the finding count is 0.
+#
+# ITS CEILING, stated: it sees job-level `name:` only. A workflow whose names
+# are all unaccounted is invisible to it (that is the deliberate antecedent
+# above, not an oversight), and a matrix-templated name (`${{ … }}`) is skipped
+# because the rendered string is not derivable from the file. Those are
+# census_check's job, on the heads that render them. The two clauses are the two
+# halves: census reads what GitHub RENDERED, this reads what the tree DECLARES,
+# and the defect above lived in the gap between them.
+# ITS OWN SCAN ROOT, and the reason is the same one `--prose` carries. Nearly
+# every --selftest probe overrides the SPEC with a three-name fixture while
+# leaving $WORKFLOWS_DIR pointed at the REAL tree. Under a truncated accounted
+# set half the committed workflows look "partially accounted", so this clause
+# would red inside probes 1, 15, 25, 26 and 29 — probes about entirely different
+# clauses. MEASURED, not predicted: that is exactly how those five failed the
+# first time this clause was wired in. `--partial-workflows` lets the suite point
+# THIS clause at a neutral fixture while the prose clauses keep reading the real
+# tree, which is the isolation --prose already buys. Every real invocation leaves
+# it empty and reads .github/workflows.
+WORKFLOWS_DIR_EXPLICIT=0
+PARTIAL_WF_DIR_OVERRIDE=""
+
+partial_accounting_check() {
+  local tmp rc=0 files n_acc n_files findings scan_dir
+  # IT STANDS DOWN ON A REDIRECTED TREE, and this is the rule, not a patch.
+  # `--workflows` is a TEST-ONLY override: it points the prose clauses at a
+  # fixture so they can be mutated. This clause's whole question is "is the
+  # COMMITTED tree's ledger complete", and a fixture tree has no ledger — so
+  # when a caller redirects the scan and does NOT name a tree for this clause,
+  # it has nothing to judge and says so out loud rather than manufacturing a
+  # finding about somebody else's fixture.
+  #
+  # MEASURED, both harnesses, and this is why the rule is the redirect and not a
+  # list of probe names: without it this clause red inside required-checks.
+  # test.sh §26(d) — "the clause accused a leaf that genuinely blocks through
+  # `Cloud gate` … it has become a word filter" — a section about
+  # blocking_authority_check, whose fixture `aggregated.yml` pairs an accounted
+  # aggregator with an unaccounted leaf ON PURPOSE. Three harnesses point
+  # fixtures at this verifier; enumerating their probes would go stale the next
+  # time one is added.
+  if [ -z "$PARTIAL_WF_DIR_OVERRIDE" ] && [ "${WORKFLOWS_DIR_EXPLICIT:-0}" -eq 1 ]; then
+    say "  note   partial-accounting stands down: --workflows redirected the scan to $WORKFLOWS_DIR, which has no ledger to be complete against. Pass --partial-workflows to point this clause at a tree."
+    return 0
+  fi
+  scan_dir="${PARTIAL_WF_DIR_OVERRIDE:-$WORKFLOWS_DIR}"
+  tmp="$(mktemp -d)"
+  jq -r '(.protection.required_status_checks.checks[]?.context),
+         (.exclusions[]?.context)' "$SPEC" | sort -u > "$tmp/accounted"
+  n_acc="$(grep -c . < "$tmp/accounted" || true)"
+  # CONTROL 1: the accounted set must be non-empty. An unreadable spec would
+  # otherwise make every workflow "fully unaccounted", the antecedent would
+  # never fire, and this clause would report a silent green having compared
+  # nothing at all.
+  if [ "${n_acc:-0}" -lt 2 ]; then
+    rm -rf "$tmp"
+    blocked "partial-accounting: the spec yielded $n_acc accounted context(s) — with no accounted set the antecedent can never fire and a green here would mean nothing."
+  fi
+  files="$(find "$scan_dir" -maxdepth 1 -type f \( -name '*.yml' -o -name '*.yaml' \) | sort)"
+  n_files="$(printf '%s\n' "$files" | grep -c . || true)"
+  # CONTROL 2: there must be a workflow to read. Scanning ZERO files is a vacuous
+  # pass, not a green — the same refusal merge_truth_prose_check makes. The floor
+  # is 1, not 2, and that is measured rather than guessed: every --selftest probe
+  # that plants a fixture tree passes a `--workflows` dir holding exactly ONE
+  # file, so a floor of 2 turns all four of this clause's own probes into BLOCKED
+  # and the suite reds over its harness instead of over the clause.
+  if [ "${n_files:-0}" -lt 1 ]; then
+    rm -rf "$tmp"
+    blocked "partial-accounting: $scan_dir yielded $n_files workflow file(s) — scanning zero is a vacuous pass, not a green."
+  fi
+  findings=0
+  local f base names acc_here miss_here
+  while IFS= read -r f; do
+    [ -n "$f" ] || continue
+    base="$(basename "$f")"
+    # Job-level `name:` is exactly four spaces of indent under `jobs:`. Step
+    # names sit deeper (six or more) and workflow-level `name:` at zero, so the
+    # indent IS the discriminator — no YAML parser, no new dependency.
+    names="$(awk '/^    name: /{ s=$0; sub(/^    name: /,"",s);
+                                 gsub(/^[ \t]+|[ \t]+$/,"",s);
+                                 gsub(/^"|"$|^'"'"'|'"'"'$/,"",s);
+                                 if (s !~ /\$\{\{/) print s }' "$f" | sort -u)"
+    [ -n "$names" ] || continue
+    printf '%s\n' "$names" > "$tmp/names"
+    acc_here="$(comm -12 "$tmp/names" "$tmp/accounted" | grep -c . || true)"
+    [ "${acc_here:-0}" -gt 0 ] || continue          # the antecedent: not in the ledger yet
+    miss_here="$(comm -23 "$tmp/names" "$tmp/accounted")"
+    [ -n "$miss_here" ] || continue
+    findings=$((findings+1)); rc=1
+    echo "FAIL: $base already has $acc_here job name(s) with a status in $SPEC, but these declare none:" >&2
+    printf '%s\n' "$miss_here" | sed 's/^/         unaccounted: /' >&2
+    echo "         A file in the ledger stays complete: someone adjudicated its siblings, so an unaccounted name here is a REGRESSION of that decision, not undone work." >&2
+    echo "         FIX: add a row to .exclusions saying WHAT the check is and WHY it does not gate (S2 advisory / S3 subsumed / S4 paths-filtered or structurally absent on a PR head / S6 leaf of an excluded aggregator / S7 by decision), or register it." >&2
+  done <<EOF
+$files
+EOF
+  rm -rf "$tmp"
+  if [ "$rc" -eq 0 ]; then
+    say "  ok     every partially-accounted workflow is FULLY accounted — $n_files workflow file(s) read against $n_acc accounted context(s), 0 finding(s)"
+  fi
+  return "$rc"
+}
+
 # ── the advisory-prose clause ────────────────────────────────────────────────
 # THE DEFECT THIS EXISTS FOR (cch-w32-s4). console-harness.yml told a builder,
 # in three separate comments, that `Console gate` "is ADVISORY today — the live
@@ -843,6 +1141,22 @@ advisory_prose_check() {
 # dated record reds and needs a pin. It is a tripwire on the phrasing that
 # actually rotted here twice, not a proof that every charter sentence is true.
 PROSE_ROOT_OVERRIDE=""
+# THE PRE-FILTER'S OWN VACUOUS EXIT (cchi-w39). `candidates` below is the set of
+# files the attribution scanner is actually handed, and when it is EMPTY the awk
+# never runs at all: the clause returns 0 having examined, with its detector,
+# nothing. Until this flag existed the only thing standing between that and a
+# false green was a PRINTED count — and a count printed is not a refusal. Worse,
+# the pre-filter's exit status is deliberately discarded (`|| true`, because
+# grep/git-grep exit 1 on no-match), so a pre-filter that ERRORED and a corpus
+# that is genuinely clean arrive here byte-identical.
+#
+# It cannot red unconditionally, and that is measured, not assumed: --selftest's
+# neutral corpus is built to name no required context (see `neutral_prose`), so
+# ~27 probes legitimately reach ncand=0. So the run always STATES the absence
+# (NO COVERAGE, below), and a caller who is about to stand on this clause —
+# anyone authorizing a protection flip on it — passes
+# --require-prose-candidates to make the same state exit 1 instead.
+REQUIRE_PROSE_CANDIDATES=0
 # Rule 2. Anchored at the head of the attributed span, so it is the CONTEXT the
 # disclaimer is predicated of and never the next noun along.
 PROSE_COPULA='^[^a-z]*(is|are|was|were|remains|stays|reads|counts as|has been|have been)[^a-z]'
@@ -958,6 +1272,24 @@ merge_truth_prose_check() {
       | while IFS= read -r f; do printf '%s/%s\n' "$REPO_ROOT" "$f"; done || true)"
   fi
   ncand="$(printf '%s\n' "$candidates" | grep -c . || true)"
+
+  # ZERO CANDIDATES — the clause's own vacuous exit, named. See
+  # REQUIRE_PROSE_CANDIDATES above for why this is flag-gated and not a plain
+  # refusal. The order is deliberate: the refusal first, so a caller that asked
+  # for it never sees a NO COVERAGE line it is supposed to be unable to proceed
+  # past.
+  if [ "$ncand" -eq 0 ]; then
+    if [ "$REQUIRE_PROSE_CANDIDATES" -eq 1 ]; then
+      rm -rf "$tmp"
+      fail "the merge-truth pre-filter selected 0 of $nfiles scanned file(s), so the attribution scanner read NO file and this clause reached its green having examined nothing with its detector. Under --require-prose-candidates that is exit 1 and not a pass: 'no tracked prose disclaims a required context' is a statement this run did not measure, and a pre-filter that ERRORED is byte-identical here to a corpus that is clean. Point --prose at a corpus that names a required context, or authorize on evidence gathered another way and say in writing that this clause did NOT support it."
+    fi
+    # THE COPY FENCE: this line STATES the absence and stops. It does not tell
+    # the operator to re-run or to pass the flag — advice attached to a
+    # diagnosis nobody asked for is what gets skimmed past. The sentence exists
+    # so that there IS a line to quote, and so that quoting it is visibly the
+    # wrong thing to paste under an authorization.
+    echo "NO COVERAGE: the merge-truth pre-filter selected 0 of $nfiles scanned file(s), so the attribution scanner was handed no file and read nothing — whether any tracked prose disclaims one of the $nctx required context(s) was never asked."
+  fi
 
   # LC_ALL=C, and it is not a style preference. The tracked corpus carries bytes
   # that are not valid in the ambient UTF-8 locale (a mojibake'd em dash in one
@@ -1215,7 +1547,22 @@ BLOCKING_PROSE_CLAIM='(^|[^A-Za-z])BLOCKING([^A-Za-z]|$)|blocks the merge|must b
 # somebody can review. And the annotation is checked in BOTH directions —
 # putting it on a context that IS required reds, because that is the same lie
 # advisory_prose_check catches, wearing a machine-readable hat.
-BLOCKING_HEADER_UNRESOLVED_BASELINE=0
+# THE BASELINE, AND WHY IT IS THREE AND NOT ZERO. It read 0 from the ratchet in
+# #16195 until the header window above was widened, and that 0 was VACUOUS: the
+# window closed on line 1's `name:` key, so the clause scanned no header prose
+# at all in any workflow whose comment block sits under that key. Widening it
+# surfaces four files; connectors.yml's was a real overclaim and is corrected in
+# the same change, leaving three whose prose is the CURE and not the disease —
+# exactly the D3 case this is a baseline for rather than a red-on-sight:
+#
+#   landed-open-report.yml    "can never be promoted into a merge gate"
+#   pr-meta.yml               "BLOCKING vs ADVISORY IS PRESERVED PER STEP"
+#   search-starter-smoke.yml  "it can never be a merge gate"
+#
+# A FOURTH reds. Re-derive the list with the clause itself — there is no
+# separate printer:
+#   bash scripts/required-checks-verify.sh --ci 2>&1 | sed -n '/file-header/,/^$/p'
+BLOCKING_HEADER_UNRESOLVED_BASELINE=3
 
 # A job `name:` template as an anchored ERE — `${{ … }}` holes punched out
 # BEFORE metacharacters are escaped, so literal parens stay literal. Same
@@ -1229,24 +1576,138 @@ wf_tmpl_to_regex() {
   printf '%s' "$t"
 }
 
-blocking_authority_check() {
-  [ -d "$WORKFLOWS_DIR" ] \
-    || blocked "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a HOLD, never a skip)"
-  local files
-  # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
-  # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
-  # widened required-checks-generate.sh's glob for the same reason). A guard
-  # that scans only one spelling is silent on the other — the vacuity class this
-  # whole file exists to refuse, so the scan covers both even though zero
-  # `*.yaml` workflows exist today.
-  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
-  [ -n "$files" ] \
-    || blocked "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+# ── a whole-expression job name that DECLARES its finite leg set ─────────────
+#
+# A `name:` that is entirely `${{ … }}` renders a string no static reader can
+# derive. wf_tmpl_to_regex turns it into `^.+$`, and the closure builder below
+# resolves each required context to the FIRST index row whose regex matches it —
+# so ONE such row claims every required context, collapses the blocking closure
+# onto that single job, and reports every OTHER workflow's header prose as
+# UNRESOLVED. The files it then names are bystanders; the defect is one row.
+#
+# THIS IS LIVE ON THIS TREE, and the only thing holding it is `find | sort`.
+# `.github/workflows/shell-harnesses.yml` job `harness` carries
+# `name: ${{ matrix.leg.name }}` WITH a legs declaration. required-checks-
+# generate.sh resolves that declaration to 53 literals; this guard did not, and
+# read the row as `^.+$`. It stayed green because `shell-harnesses.yml` sorts
+# LATE — after the files carrying the real required names, which therefore match
+# first. A file sorting EARLY wins instead, and the verdict flips.
+#
+# MEASURED on 157155cda, four arms, one variable each:
+#   A  the tree as committed                                          GREEN
+#   B  + a job `name: ${{ … }}` WITH a valid declaration, in a file
+#      sorting early                                                  RED
+#      ("UNRESOLVED file-header blocking prose … (4 > 3)")
+#   C  the SAME file with a LITERAL name                               GREEN
+#   D  the SAME job, file renamed to sort LATE                         GREEN
+# B and D differ in NOTHING but the filename. A guard whose whole job is to be
+# exact must not answer out of `sort` order.
+#
+# THE FIX IS THE DECLARATION THAT ALREADY EXISTS. required-checks-generate.sh
+# resolves this shape: the job declares
+# `# required-checks: matrix-name-legs <committed-file> <jq-filter>` and the
+# template expands into that many LITERAL rows. This function is the SAME
+# resolution for this guard's own index — the same directive, the same file, the
+# same promise. Keeping it local (like wf_tmpl_to_regex above) is deliberate:
+# this guard must not depend on the generator it exists to be independent of.
+#
+# WHAT SURVIVES, AND IT IS THE POINT: only a name that is ENTIRELY interpolation
+# is touched; a partial template (`Test (${{ matrix.otp }})`) passes through
+# unchanged. A row with NO declaration also passes through unchanged, so the
+# existing UNRESOLVED-interpolation refusal still says its own sentence about
+# it. Expansion can only ever produce LITERALS read out of a committed file — an
+# unreadable file, a filter that yields nothing, or a "literal" that is itself an
+# interpolation leaves the row exactly as it was. No path here widens a regex.
+wf_expand_name_legs() {
+  local idx="$1" tmp_out="$1.expanded"
+  local tag file job jobline jname matrixed needs namehit stephit adjhit mark
+  local bare d legsfile filter legsroot legspath names nm ok
+  : > "$tmp_out"
+  while IFS=$'\t' read -r tag file job jobline jname matrixed needs namehit stephit adjhit mark; do
+    if [ "$tag" = "COE" ]; then
+      # COE<TAB>file<TAB>job<TAB>value — the value landed in `jobline`.
+      printf '%s\t%s\t%s\t%s\n' "$tag" "$file" "$job" "$jobline" >> "$tmp_out"
+      continue
+    fi
+    if [ "$tag" != "JOB" ]; then
+      if [ -n "$file" ]; then printf '%s\t%s\n' "$tag" "$file" >> "$tmp_out"
+      else printf '%s\n' "$tag" >> "$tmp_out"; fi
+      continue
+    fi
+    bare="$(printf '%s' "$jname" | sed -E 's/\$\{\{[^}]*\}\}//g')"
+    if [ -n "$bare" ] || ! grep -q '\${{' <<<"$jname"; then
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$tag" "$file" "$job" "$jobline" "$jname" "$matrixed" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+      continue
+    fi
+    d="$(awk -v want="$job" '
+      /^jobs:/ { injobs = 1; next }
+      injobs && /^[a-z]/ { injobs = 0 }
+      injobs && /^  [A-Za-z0-9_.-]+:/ { j = $0; sub(/^  /, "", j); sub(/:.*$/, "", j); cur = j; next }
+      injobs && cur == want && /^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]/ {
+        line = $0
+        sub(/^[ \t]*#[ \t]*required-checks:[ \t]*matrix-name-legs[ \t]+/, "", line)
+        sub(/[ \t]+$/, "", line)
+        print line; exit
+      }
+    ' "$WORKFLOWS_DIR/$file" 2>/dev/null)"
+    legsfile="${d%%[[:space:]]*}"
+    filter="${d#*[[:space:]]}"
+    names=""
+    if [ -n "$d" ] && [ -n "$legsfile" ] && [ -n "$filter" ] && [ "$filter" != "$d" ]; then
+      case "$legsfile" in
+        /*|*..*) : ;;
+        *)
+          legsroot="$(cd "$WORKFLOWS_DIR/../.." 2>/dev/null && pwd)" || legsroot=""
+          legspath=""
+          if [ -n "$legsroot" ] && [ -f "$legsroot/$legsfile" ]; then legspath="$legsroot/$legsfile"
+          elif [ -f "$REPO_ROOT/$legsfile" ]; then legspath="$REPO_ROOT/$legsfile"; fi
+          if [ -n "$legspath" ]; then
+            # Same charset guard as the generator: a readable jq path, nothing else.
+            if grep -qE '^[]A-Za-z0-9_.@:|()[ "'"'"'-]+$' <<<"$filter"; then
+              names="$(jq -r "[ $filter ] | map(if type == \"string\" then . else error(\"not a string\") end) | .[]" "$legspath" 2>/dev/null)" || names=""
+            fi
+          fi
+          ;;
+      esac
+    fi
+    ok=0
+    if [ -n "$names" ]; then
+      ok=1
+      while IFS= read -r nm; do
+        # A blank row, or a "literal" that still interpolates, is not an
+        # enumeration — one bad leg voids the whole expansion rather than
+        # half-resolving the template.
+        { [ -n "$nm" ] && ! grep -q '\${{' <<<"$nm"; } || { ok=0; break; }
+      done <<LEGCHECK
+$names
+LEGCHECK
+    fi
+    if [ "$ok" -eq 1 ]; then
+      while IFS= read -r nm; do
+        [ -n "$nm" ] || continue
+        printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+          "$tag" "$file" "$job" "$jobline" "$nm" "0" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+      done <<LEGS
+$names
+LEGS
+    else
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$tag" "$file" "$job" "$jobline" "$jname" "$matrixed" "$needs" "$namehit" "$stephit" "$adjhit" "$mark" >> "$tmp_out"
+    fi
+  done < "$idx"
+  mv "$tmp_out" "$idx"
+}
 
-  local tmp idx out
-  tmp="$(mktemp -d)"
-  idx="$tmp/index.tsv"
-
+# ── the workflow/job index: ONE parser, read by every clause that asks about jobs ─
+# Built from $WORKFLOWS_DIR. Rows (TAB-separated):
+#   JOB  file job line rendered-name matrixed needs name-token step-token adjacent-prose annotation
+#   COE  file job value      — the job carries JOB-LEVEL continue-on-error (value verbatim)
+#   PARSE file               — a file yielding no jobs
+#   HDR  file                — file-header blocking prose
+# Every reader filters on the tag, so a new tag is invisible to the old readers.
+wf_job_index() { # <idx-out> <files (newline-separated)> <label for a refusal>
+  local idx="$1" files="$2" label="$3" out
   # One row per job: JOB<TAB>file<TAB>job<TAB>line<TAB>rendered-name<TAB>matrixed
   # <TAB>needs<TAB>name-token<TAB>step-token<TAB>adjacent-prose<TAB>annotation.
   # Plus PARSE<TAB>file for a file yielding no jobs and HDR<TAB>file for
@@ -1260,7 +1721,8 @@ blocking_authority_check() {
       printf "JOB\t%s\t%s\t%d\t%s\t%d\t%s\t%d\t%d\t%d\t%s\n", file, job, jobline,
              (jname == "" ? job : jname), matrixed, (needs == "" ? "-" : needs),
              namehit, stephit, ((n ~ BLOCK_PROSE) ? 1 : 0), (mark == "" ? "-" : mark)
-      job = ""; jname = ""; matrixed = 0; needs = ""; namehit = 0; stephit = 0
+      if (coe != "") printf "COE\t%s\t%s\t%s\n", file, job, coe
+      job = ""; jname = ""; matrixed = 0; needs = ""; namehit = 0; stephit = 0; coe = ""
       adj = ""; mark = ""; instrategy = 0; inneeds = 0
     }
     function endfile() {
@@ -1291,14 +1753,25 @@ blocking_authority_check() {
       file = FILENAME; sub(/^.*\//, "", file)
       injobs = 0; instrategy = 0; inneeds = 0; njobs = 0
       hdr = ""; hdrhit = 0; inhdr = 1; ncbuf = 0
-      job = ""; adj = ""; mark = ""
+      job = ""; adj = ""; mark = ""; coe = ""
     }
     {
       line = $0
 
+      # THE HEADER WINDOW IS THE WHOLE PREAMBLE, NOT THE LINES BEFORE THE FIRST
+      # YAML KEY. It used to close on the first non-blank non-comment line,
+      # which is `name: <workflow>` in every workflow this repo has ever
+      # written — so the block a human calls "the file header" started on the
+      # line AFTER the window shut, and this clause read an empty string for 63
+      # of 79 files. hdr_n was 0 because nothing was scanned, not because
+      # nothing claimed. Reproduce the old blind spot by restoring the
+      # `!~ /^[ \t]*$/` terminator: the count drops from 4 to 0 with no other
+      # edit. The window now runs to the first top-level `on:` / `jobs:` key
+      # (both spellings of the `on` key, which YAML 1.1 lets a writer quote),
+      # and still collects comment lines only.
       if (inhdr) {
         if (line ~ /^[ \t]*#/) { h = line; sub(/^[ \t]*#[ \t]?/, "", h); hdr = hdr " " h }
-        else if (line !~ /^[ \t]*$/) { inhdr = 0; if (hdr ~ BLOCK_PROSE) hdrhit = 1 }
+        else if (line ~ /^"?on"?:|^jobs:/) { inhdr = 0; if (hdr ~ BLOCK_PROSE) hdrhit = 1 }
       }
 
       if (line ~ /^jobs:[ \t]*$/) { emit_job(); injobs = 1; ncbuf = 0; next }
@@ -1318,6 +1791,19 @@ blocking_authority_check() {
         if (line ~ /^    strategy:/) instrategy = 1
         else if (instrategy && line ~ /^    [a-z]/) instrategy = 0
         if (instrategy && line ~ /^      matrix:/) matrixed = 1
+
+        # JOB-LEVEL continue-on-error, and the indent IS the discriminator:
+        # four spaces is a key of the job; the flag on a step sits at eight
+        # (`      - name:` / `        continue-on-error:`) and never lands
+        # here. Same normalisation as required-checks-generate.sh: `false`,
+        # a quoted false and an empty value are all FALSE to GitHub (no row);
+        # any other literal, a `${{ … }}` included, is carried verbatim.
+        if (line ~ /^    continue-on-error:/) {
+          v = line; sub(/^    continue-on-error:[ \t]*/, "", v)
+          sub(/[ \t]+#.*$/, "", v); sub(/[ \t]+$/, "", v); gsub(/\t/, " ", v)
+          vn = v; gsub(/^["\047]|["\047]$/, "", vn)
+          coe = (vn == "false" || v == "") ? "" : v
+        }
 
         if (line ~ /^    name:/) {
           v = line; sub(/^    name:[ \t]*/, "", v); sub(/[ \t]*#.*$/, "", v)
@@ -1354,8 +1840,30 @@ blocking_authority_check() {
       else if (line !~ /^[ \t]*$/) ncbuf = 0
     }
     END { endfile() }
-  ' 2>&1)" || { rm -rf "$tmp"; blocked "blocking-authority scan could not run: $out"; }
+  ' 2>&1)" || blocked "$label: the workflow/job index could not be built: $out"
   printf '%s\n' "$out" > "$idx"
+  wf_expand_name_legs "$idx"
+}
+
+blocking_authority_check() {
+  [ -d "$WORKFLOWS_DIR" ] \
+    || blocked "cannot read $WORKFLOWS_DIR — the blocking-authority clause has nothing to scan (a HOLD, never a skip)"
+  local files
+  # BOTH legal spellings. GitHub runs a workflow written `*.yaml` exactly like a
+  # `*.yml` one (never-cancel-main-check.sh:96 already scans both, and cgsiw-s2
+  # widened required-checks-generate.sh's glob for the same reason). A guard
+  # that scans only one spelling is silent on the other — the vacuity class this
+  # whole file exists to refuse, so the scan covers both even though zero
+  # `*.yaml` workflows exist today.
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
+  [ -n "$files" ] \
+    || blocked "no *.yml or *.yaml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+
+  local tmp idx
+  tmp="$(mktemp -d)"
+  idx="$tmp/index.tsv"
+
+  wf_job_index "$idx" "$files" "blocking-authority scan"
 
   local njobs nfiles
   njobs="$(grep -c '^JOB	' "$idx" || true)"
@@ -1519,6 +2027,130 @@ EOF
   return 0
 }
 
+# ── the S2-premise clause: an exclusion reason's claim, checked against its job ─
+# THE DEFECT (task-036ed38c30be705c). An `S2 ADVISORY:` exclusion reason makes a
+# MECHANICAL claim — the named workflow job carries JOB-LEVEL continue-on-error —
+# and nothing compared it with the workflow it names. #20382 took the flag off
+# security.yml job `sobelow`; the row kept saying S2 until #20410 fixed the text
+# by hand, and putting the false reason back redded no guard at all.
+#
+# SCOPE, and it is the reason's own prefix, not a list:
+#   `S2 ADVISORY:`            claims the job-level flag  -> CHECKED here
+#   `S2 ADVISORY BY INTENT:`  says the job is advisory for a stated reason and
+#                             claims NO flag (several of those jobs carry none
+#                             on purpose)                -> not this clause's claim
+#   any other `S2…` spelling  an S2 row this clause cannot read -> UNRESOLVED
+#
+# RESOLUTION. The file and job the reason NAMES (`<file>.yml job 'x'`, with ',
+# ` or " around the job key); a reason that names none falls back to the row's
+# context, matched against the rendered names of the same index
+# blocking_authority_check reads (wf_job_index). The flag is that index's COE
+# row, so step-level lines never count: the indent decides.
+#
+# TWO REDS, never merged: MISMATCH (the job resolves and carries no job-level
+# continue-on-error — the reason is false) and UNRESOLVED (the named job is not
+# in the tree, or the context resolves to zero or several jobs — the claim
+# cannot be checked, which is never a silent skip).
+#
+# IT STANDS DOWN ON A REDIRECTED TREE — partial_accounting_check's rule, for the
+# same reason. `--workflows` is a TEST-ONLY override that points the prose
+# clauses at a fixture; the spec's S2 rows name jobs of the COMMITTED tree, so
+# resolving them against somebody else's fixture would report every one
+# UNRESOLVED. MEASURED: without this, required-checks.test.sh went 381/6 — all
+# six were §26/§27 probes about blocking_authority_check, reddened here.
+# `--s2-workflows` names a tree for THIS clause; every real run passes neither.
+S2_WF_DIR_OVERRIDE=""
+
+s2_premise_check() {
+  if [ -z "$S2_WF_DIR_OVERRIDE" ] && [ "${WORKFLOWS_DIR_EXPLICIT:-0}" -eq 1 ]; then
+    say "  note   S2-premise stands down: --workflows redirected the scan to $WORKFLOWS_DIR, which is not the tree the spec's S2 rows name. Pass --s2-workflows to point this clause at a tree."
+    return 0
+  fi
+  # Dynamic scope: wf_job_index and wf_expand_name_legs read $WORKFLOWS_DIR.
+  local WORKFLOWS_DIR="${S2_WF_DIR_OVERRIDE:-$WORKFLOWS_DIR}"
+  [ -d "$WORKFLOWS_DIR" ] \
+    || blocked "cannot read $WORKFLOWS_DIR — the S2-premise clause has nothing to resolve against (a HOLD, never a skip)"
+  local rows
+  rows="$(jq -r '.exclusions[]? | select((.reason // "") | startswith("S2")) | [.context, .reason] | @tsv' "$SPEC")" \
+    || blocked "S2-premise: could not read .exclusions from $SPEC"
+  if [ -z "$rows" ]; then
+    say "  ok     no S2 exclusion row in $SPEC — nothing claims a job-level continue-on-error"
+    return 0
+  fi
+
+  local files tmp idx
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 \( -name '*.yml' -o -name '*.yaml' \) | sort)"
+  [ -n "$files" ] \
+    || blocked "S2-premise: no *.yml or *.yaml under $WORKFLOWS_DIR — resolving against zero files is a vacuous pass"
+  tmp="$(mktemp -d)"
+  idx="$tmp/index.tsv"
+  wf_job_index "$idx" "$files" "S2-premise scan"
+
+  local ctx reason f j hits re n_checked=0 n_intent=0 mismatch="" unresolved=""
+  local named_re='([A-Za-z0-9_.-]+\.ya?ml)[[:space:]]+job[[:space:]]+[`'"'"'"]?([A-Za-z0-9_.-]+)'
+  while IFS=$'\t' read -r ctx reason; do
+    [ -n "$ctx" ] || continue
+    case "$reason" in
+      "S2 ADVISORY BY INTENT:"*) n_intent=$((n_intent + 1)); continue ;;
+      "S2 ADVISORY:"*) : ;;
+      *) unresolved="$unresolved  \"$ctx\": an S2 reason in neither known form (\`S2 ADVISORY:\` / \`S2 ADVISORY BY INTENT:\`) — ${reason:0:80}
+"; continue ;;
+    esac
+    n_checked=$((n_checked + 1))
+    f=""; j=""
+    if [[ "$reason" =~ $named_re ]]; then
+      f="${BASH_REMATCH[1]}"; j="${BASH_REMATCH[2]}"
+      if ! awk -F'\t' -v f="$f" -v j="$j" '$1 == "JOB" && $2 == f && $3 == j { hit = 1 } END { exit !hit }' "$idx"; then
+        unresolved="$unresolved  \"$ctx\": the reason names $f job '$j', and $WORKFLOWS_DIR has no such job
+"
+        continue
+      fi
+    else
+      hits=""
+      while IFS=$'\t' read -r tag rf rj _ln nm mx _rest; do
+        [ "$tag" = "JOB" ] || continue
+        re="$(wf_tmpl_to_regex "$nm")"
+        if grep -qE "^${re}$" <<<"$ctx" \
+           || { [ "$mx" = "1" ] && ! grep -q '\${{' <<<"$nm" && grep -qE "^${re} \(.+\)$" <<<"$ctx"; }; then
+          grep -qxF "$rf	$rj" <<<"$hits" || hits="$hits$rf	$rj
+"
+        fi
+      done < "$idx"
+      if [ "$(printf '%s' "$hits" | grep -c .)" -ne 1 ]; then
+        unresolved="$unresolved  \"$ctx\": the reason names no <file>.yml job, and the context resolves to $(printf '%s' "$hits" | grep -c .) job(s), not exactly one
+"
+        continue
+      fi
+      IFS=$'\t' read -r f j <<<"${hits%$'\n'}"
+    fi
+    if ! awk -F'\t' -v f="$f" -v j="$j" '$1 == "COE" && $2 == f && $3 == j { hit = 1 } END { exit !hit }' "$idx"; then
+      mismatch="$mismatch  \"$ctx\": $f job '$j' carries NO job-level continue-on-error (step-level lines do not count)
+"
+    fi
+  done <<EOF
+$rows
+EOF
+  rm -rf "$tmp"
+
+  local rc=0
+  if [ -n "$mismatch" ]; then
+    rc=1
+    echo "FAIL: S2 MISMATCH — an \`S2 ADVISORY:\` exclusion reason claims a job-level continue-on-error the workflow does not carry:" >&2
+    printf '%s' "$mismatch" >&2
+    echo "         FIX: re-ground the row in .github/required-checks.json on what the job IS now (S6 leaf / S7 by decision / …), or restore the flag if the job is meant to be advisory." >&2
+  fi
+  if [ -n "$unresolved" ]; then
+    rc=1
+    echo "FAIL: S2 UNRESOLVED — an S2 exclusion row whose job this clause cannot resolve, so its claim cannot be checked:" >&2
+    printf '%s' "$unresolved" >&2
+    echo "         FIX: name the job in the reason as \`<file>.yml job '<job-key>'\`, or remove the row if the job is gone." >&2
+  fi
+  if [ "$rc" -eq 0 ]; then
+    say "  ok     every \`S2 ADVISORY:\` row names a job that carries job-level continue-on-error — $n_checked checked, $n_intent BY INTENT (claims no flag)"
+  fi
+  return "$rc"
+}
+
 # ── modes ────────────────────────────────────────────────────────────────────
 run_full() {
   read_spec
@@ -1544,9 +2176,13 @@ run_full() {
     advisory_prose_check || return 1
     say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
     blocking_authority_check || return 1
+    say "── S2-premise clause (an S2 reason's continue-on-error claim vs the job it names) ──"
+    s2_premise_check || return 1
     say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
     merge_truth_prose_check || return 1
     local sha0="${HEAD_SHA:-$(recent_pr_head)}"
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || return 1
     say "── census clause (the OTHER subtraction: rendered names with no status) ──"
     census_check "$sha0" || return 1
     local drc0=0
@@ -1564,9 +2200,13 @@ run_full() {
   advisory_prose_check || rc=1
   say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
   blocking_authority_check || rc=1
+  say "── S2-premise clause (an S2 reason's continue-on-error claim vs the job it names) ──"
+  s2_premise_check || rc=1
   say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
   merge_truth_prose_check || rc=1
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || rc=1
   say "── census clause (the OTHER subtraction: rendered names with no status) ──"
   census_check "$sha" || rc=1
   say "── deadlock detector ──"
@@ -1599,6 +2239,8 @@ run_ci() {
   deadlock_check "$sha" || drc=$?
   [ "$drc" -eq 3 ] || [ "$drc" -eq 4 ] || [ "$drc" -eq 0 ] || rc=1
 
+  say "── partial-accounting clause (the tree's OWN declarations: a workflow in the ledger stays complete) ──"
+  partial_accounting_check || rc=1
   say "── census clause (the OTHER subtraction: rendered names with no status) ──"
   census_check "$sha" || rc=1
 
@@ -1606,6 +2248,8 @@ run_ci() {
   advisory_prose_check || rc=1
   say "── blocking-authority clause (the inverse: prose claiming authority the spec denies) ──"
   blocking_authority_check || rc=1
+  say "── S2-premise clause (an S2 reason's continue-on-error claim vs the job it names) ──"
+  s2_premise_check || rc=1
   say "── merge-truth clause (the same names, the prose an agent actually reads) ──"
   merge_truth_prose_check || rc=1
 
@@ -1737,12 +2381,34 @@ JSON
   printf '%s\n' "Neutral corpus. It names no required context, so the merge-truth clause has something real to scan and nothing to say about it." \
     > "$neutral_prose/neutral.md"
 
+  # THE NEUTRAL WORKFLOW TREE for partial_accounting_check: one file, one job
+  # name, and that name is in no spec any probe uses — so the clause's antecedent
+  # ("this file is already in the ledger") cannot fire and it has nothing to say.
+  local neutral_partial="$tmp/wf-neutral-partial"
+  mkdir -p "$neutral_partial"
+  cat > "$neutral_partial/neutral.yml" <<'YML'
+name: Neutral
+on: [pull_request]
+jobs:
+  neutral:
+    name: Neutral fixture job in no ledger
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+
   probe() { # label expect_rc <args…>
     local label="$1" expect="$2"; shift 2
     local out rc=0
     # Only when the caller has not chosen its own corpus — probes 24-27 are ABOUT
     # this clause and pass their own --prose, which must win.
     case " $* " in *" --prose "*) : ;; *) set -- "$@" --prose "$neutral_prose" ;; esac
+    # Same reasoning, one clause over: partial_accounting_check is SPEC-DERIVED
+    # over the workflow tree, and nearly every probe below hands it a three-name
+    # fixture spec while $WORKFLOWS_DIR still points at the real one. Default it
+    # to a neutral tree; the four probes that are ABOUT this clause pass their
+    # own --partial-workflows, which wins.
+    case " $* " in *" --partial-workflows "*) : ;; *) set -- "$@" --partial-workflows "$neutral_partial" ;; esac
     out="$(bash "$SELF" "$@" 2>&1)" || rc=$?
     if [ "$rc" -eq "$expect" ]; then
       echo "  ok   $label (exit $rc)"
@@ -1769,39 +2435,39 @@ JSON
     return 1
   }
 
-  probe "1/31 honest read-back passes" 0 \
+  probe "1/42 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/31 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/42 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/31 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/42 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/31 a wrong app_id reds" 1 \
+  probe "4/42 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/31 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/42 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/31 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/42 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/31 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/42 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/31 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/42 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/31 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/42 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
   # 10-12 ARE THE BLOCKED ARM, AND THEY ARE THE PROOF IN BOTH DIRECTIONS
@@ -1810,14 +2476,14 @@ JSON
   # keeps drift's code. Probes 10-12 feed an input that cannot be read at all and
   # must exit 5. Flip either expectation and this selftest reds, so neither
   # condition can quietly borrow the other's word.
-  probe "10/31 an unreadable protection read-back is BLOCKED — exit 5, not drift's 1 and never a skip" 5 \
+  probe "10/42 an unreadable protection read-back is BLOCKED — exit 5, not drift's 1 and never a skip" 5 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/31 an unreadable check-run feed is BLOCKED — exit 5 (this is the E2BIG shape that was filed as a protection breach on 2026-09-07)" 5 \
+  probe "11/42 an unreadable check-run feed is BLOCKED — exit 5 (this is the E2BIG shape that was filed as a protection breach on 2026-09-07)" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/31 an EMPTY check-run feed is BLOCKED — a producer that returned nothing is a refusal to be held on, not a verdict about the spec" 5 \
+  probe "12/42 an EMPTY check-run feed is BLOCKED — a producer that returned nothing is a refusal to be held on, not a verdict about the spec" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -1827,7 +2493,7 @@ JSON
   # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/cancelledruns.json"
-  probe "13/31 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+  probe "13/42 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
 
   # The mirror clause: cancellation on a NON-required check is none of our
@@ -1835,13 +2501,13 @@ JSON
   # checks are cancelled by concurrency groups all day.
   jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/advcancelled.json"
-  probe "14/31 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+  probe "14/42 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
 
   # The caller-scope clause above, proven rather than asserted: --ci must NOT
   # turn a cancelled run on an arbitrary sampled head into a red, while
   # --deadlock (13/15) still exits 4 on the identical input.
-  probe "15/31 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+  probe "15/42 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
 
   # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
@@ -1852,7 +2518,7 @@ JSON
   # out and pinned the removal here, so re-adding it reds this probe.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
     "$good_runs" > "$tmp/skippedruns.json"
-  probe "16/31 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+  probe "16/42 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
 
   # 17 & 18 are the cch-w32-s4 clause, and they are ONE mutation proven from
@@ -1872,7 +2538,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "17/31 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
+  probe "17/42 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # The mirror, and the whole point: the guard tracks the SPEC, not a frozen
@@ -1889,7 +2555,7 @@ YML
   jq '.required_status_checks.contexts = ["PR references an active task"]
       | .required_status_checks.checks = [{"context":"PR references an active task","app_id":15368}]' \
     "$good_rb" > "$tmp/noelixir_rb.json"
-  probe "18/31 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
+  probe "18/42 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
     --spec "$tmp/noelixir_spec.json" --readback "$tmp/noelixir_rb.json" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   # 19-22 are the cgsiw-s1 clause, the INVERSE of 17/18: a workflow claiming
@@ -1909,7 +2575,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "19/31 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
+  probe "19/42 a workflow claiming BLOCKING authority for a context the spec does NOT require reds (the inverse of 17; nothing caught this before cgsiw-s1)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # The mirror, and the whole point: the subject set is the COMPLEMENT of the
@@ -1923,7 +2589,7 @@ YML
     "$good_rb" > "$tmp/widget_rb.json"
   jq '.check_runs += [{"name":"Widget gate (blocking)","conclusion":"success","started_at":"2026-07-28T01:00:00Z"}]' \
     "$good_runs" > "$tmp/widget_runs.json"
-  probe "20/31 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
+  probe "20/42 the SAME claim in the SAME file goes GREEN once that context IS required (the clause reads the complement of the committed set, not a frozen string)" 0 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-block" || rc=1
 
   # 21/23 establishes the escape hatch, and 22/23 is why it is an escape hatch
@@ -1942,7 +2608,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "21/31 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
+  probe "21/42 the escape hatch WITH a reason greens the identical violation (a spec-authority advisory-ok comment carrying a real why)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch" || rc=1
 
   mkdir -p "$tmp/wf-hatch-empty"
@@ -1957,7 +2623,7 @@ jobs:
     steps:
       - run: 'true'
 YML
-  probe "22/31 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
+  probe "22/42 the hatch with an EMPTY reason REDS — a bare token is a silencer, a reason is a decision somebody can review" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-hatch-empty" || rc=1
 
   # The hatch checked in the OTHER direction. An annotation saying "the spec
@@ -1966,7 +2632,7 @@ YML
   # it must red rather than exempt. Same fixture as 21, only the spec moves: the
   # identical annotated file is fine while the context is denied, and a failure
   # the moment it is required.
-  probe "23/31 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
+  probe "23/42 an advisory-ok annotation on a context the spec REQUIRES reds (the hatch lying in the other direction)" 1 \
     --spec "$tmp/widget_spec.json" --readback "$tmp/widget_rb.json" --runs "$tmp/widget_runs.json" --sha probe --workflows "$tmp/wf-hatch" || rc=1
 
   # ── 24-27: the merge-truth clause, OUTSIDE .github/workflows (cch-w34) ─────
@@ -1989,7 +2655,7 @@ YML
   is `Elixir gate` and `PR references an active task`; doc-gates hosts the
   shell check but is NOT required.
 MD
-  probe "24/31 a charter TWO directories deep, named .md, calling a required context advisory REDS — the corpus the depth-1 workflow glob cannot reach" 1 \
+  probe "24/42 a charter TWO directories deep, named .md, calling a required context advisory REDS — the corpus the depth-1 workflow glob cannot reach" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2000,7 +2666,7 @@ MD
   # probe exists to hold shut.
   sed -e '/D1 — the ASSERTION/,+1d' "$tmp/prose/nested/deeper/bp-fixture-charter.md" > "$tmp/prose/nested/deeper/x" \
     && mv "$tmp/prose/nested/deeper/x" "$tmp/prose/nested/deeper/bp-fixture-charter.md"
-  probe "25/31 …and with ONLY the claim removed the dated record, the quoted past reason and the proximity row all stay GREEN (assertion vs. record, told apart)" 0 \
+  probe "25/42 …and with ONLY the claim removed the dated record, the quoted past reason and the proximity row all stay GREEN (assertion vs. record, told apart)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2011,14 +2677,14 @@ MD
   cat > "$tmp/prose-denied/charter.md" <<'MD'
 - **D1.** `Widget gate` is ADVISORY today, so a red one does not stop the merge.
 MD
-  probe "26/31 the SAME sentence about a context the committed spec does NOT require is green — the clause reads the spec, never a frozen name" 0 \
+  probe "26/42 the SAME sentence about a context the committed spec does NOT require is green — the clause reads the spec, never a frozen name" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-denied" || rc=1
 
   # Scanning nothing is the vacuous pass this whole file exists to refuse, and
   # the clause has to make that refusal for its OWN corpus too.
   mkdir -p "$tmp/prose-empty"
-  probe "27/31 a prose root with no readable text file is BLOCKED — scanning zero files is never a green, and it is a no-read, not a finding" 5 \
+  probe "27/42 a prose root with no readable text file is BLOCKED — scanning zero files is never a green, and it is a no-read, not a finding" 5 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose-empty" || rc=1
 
@@ -2030,10 +2696,10 @@ MD
   jq '.enforced = false' "$good_spec" > "$unapplied"
   local unprotected="$tmp/rb-unprotected.json"
   printf '%s\n' '{"message":"Branch not protected","documentation_url":"https://docs.github.com/rest/branches/branch-protection"}' > "$unprotected"
-  probe "28/31 --ci on an enforced=false spec against a PROTECTED branch REDS — the direction no amount of spec-reading can see" 1 \
+  probe "28/42 --ci on an enforced=false spec against a PROTECTED branch REDS — the direction no amount of spec-reading can see" 1 \
     --ci --spec "$unapplied" --readback "$good_rb" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
-  probe "29/31 …and --ci on the same spec against a genuinely unprotected branch still exits 0 — the fix is not \"always red here\"" 0 \
+  probe "29/42 …and --ci on the same spec against a genuinely unprotected branch still exits 0 — the fix is not \"always red here\"" 0 \
     --ci --spec "$unapplied" --readback "$unprotected" --runs "$good_runs" --sha probe \
     --workflows "$WORKFLOWS_DIR" --prose "$tmp/prose" || rc=1
 
@@ -2045,12 +2711,176 @@ MD
   # honest input is a trap — both halves are asserted, not one.
   jq '.check_runs += [{"name":"Freshly landed gate nobody wrote down","conclusion":"success","started_at":"2026-09-06T01:00:00Z"}]' \
     "$good_runs" > "$tmp/runs-unaccounted.json"
-  probe "30/31 a rendered name with NO status in the spec REDS (planted: an unaccounted check run)" 1 \
+  probe "30/42 a rendered name with NO status in the spec REDS (planted: an unaccounted check run)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/runs-unaccounted.json" --sha probe || rc=1
 
   jq 'del(.exclusions)' "$good_spec" > "$tmp/spec-no-exclusions.json"
-  probe "31/31 …and removing the exclusion row for a name that DOES render reds the same way — the ledger is the only thing that accounts for it" 1 \
+  probe "31/42 …and removing the exclusion row for a name that DOES render reds the same way — the ledger is the only thing that accounts for it" 1 \
     --spec "$tmp/spec-no-exclusions.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
+
+  # ── 32-35: the partial-accounting clause, proven in BOTH directions ────────
+  # THE PAIR THAT DISCRIMINATES. 32 and 33 differ in ONE line of ONE fixture:
+  # whether the second job's name carries a status. A clause hard-wired to red
+  # passes 32 and fails 33; one hard-wired to green does the reverse. Neither
+  # alone measures anything — it is their disagreement that pins the rule.
+  # 34 and 35 are the QUIET controls, and they are what stop the obvious wrong
+  # fix ("red on every unaccounted job name") from passing 32: a workflow NOT in
+  # the ledger at all must stay silent (that is census_check's population, on
+  # the heads that render it), and a matrix-templated name must be skipped
+  # rather than compared against a string the file cannot produce.
+  jq '.exclusions += [
+        { "context": "Ledgered alpha", "reason": "S7 fixture row." },
+        { "context": "Ledgered beta",  "reason": "S7 fixture row." }
+      ]' "$good_spec" > "$tmp/spec-partial.json"
+
+  mkdir -p "$tmp/wf-partial"
+  cat > "$tmp/wf-partial/widget.yml" <<'YML'
+name: Widget
+on: [pull_request]
+jobs:
+  alpha:
+    name: Ledgered alpha
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+  gamma:
+    name: Unledgered gamma
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+  probe "32/42 a workflow with one LEDGERED job name and one that carries no status REDS — the #18847 shape, caught from the tree instead of waiting for a head to render it" 1 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-partial" || rc=1
+
+  mkdir -p "$tmp/wf-complete"
+  sed 's/name: Unledgered gamma/name: Ledgered beta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-complete/widget.yml"
+  probe "33/42 …and the IDENTICAL file with that one name accounted is GREEN — one line apart, opposite verdicts" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-complete" || rc=1
+
+  mkdir -p "$tmp/wf-orphan"
+  sed 's/name: Ledgered alpha/name: Unledgered delta/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-orphan/widget.yml"
+  probe "34/42 a workflow where NOTHING is accounted stays QUIET — the antecedent is 'already in the ledger', not 'every job name in the tree' (31 workflows of inherited debt do not become this clause's red)" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-orphan" || rc=1
+
+  mkdir -p "$tmp/wf-matrix"
+  sed 's/name: Unledgered gamma/name: Gate (${{ matrix.v }})/' "$tmp/wf-partial/widget.yml" > "$tmp/wf-matrix/widget.yml"
+  probe "35/42 a MATRIX-TEMPLATED name beside a ledgered one stays quiet — the rendered string is not derivable from the file, so it is census_check's to judge, not this clause's" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --partial-workflows "$tmp/wf-matrix" || rc=1
+
+  # THE STAND-DOWN, and its twin is probe 32 — the SAME fixture tree, the same
+  # spec, the same everything except HOW the tree is named. Named through
+  # --partial-workflows the clause judges it and reds; reached only because
+  # --workflows redirected the prose scan, it declines and says so. Without this
+  # pair the stand-down is indistinguishable from the clause being asleep, which
+  # is what it would have to be for required-checks.test.sh §26(d) to pass.
+  probe "36/42 the SAME tree that reds in 32 is DECLINED when it arrives only via --workflows — a redirected scan has no ledger to be complete against, and the clause says so instead of accusing a fixture" 0 \
+    --spec "$tmp/spec-partial.json" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf-partial" --partial-workflows "" || rc=1
+
+  # ── 37-38: the declared-leg expansion, proven in BOTH directions ──────────
+  # THE PAIR THAT DISCRIMINATES, and it is a REAL tree, not a two-file fixture:
+  # the defect is that ONE catch-all row claims the FIRST match for every
+  # required context, so it only shows up beside the rows it steals from.
+  # The tree is a copy of the committed one plus ONE planted file, named to sort
+  # EARLY — because on the committed tree the same shape sits in
+  # shell-harnesses.yml, which sorts LATE and is therefore green by `sort` order
+  # rather than by anything this guard decided.
+  # 37 plants the job WITHOUT its declaration: still a catch-all, still a red.
+  # 38 adds the declaration back, one line, and the identical tree greens.
+  # Neither alone measures anything — a clause hard-wired either way passes one.
+  local legtree="$tmp/tree-legs"
+  mkdir -p "$legtree/.github/workflows"
+  cp "$WORKFLOWS_DIR"/*.yml "$legtree/.github/workflows/" 2>/dev/null || true
+  # DERIVED FROM THE TEXT, never listed: every leg file the copied workflows
+  # declare comes across, so a NEW declaration in any workflow arrives with its
+  # own file instead of reddening this probe months later.
+  grep -rhoE '#[[:space:]]*required-checks:[[:space:]]*matrix-name-legs[[:space:]]+[^[:space:]]+' \
+    "$legtree/.github/workflows" 2>/dev/null \
+    | sed -E 's/^.*matrix-name-legs[[:space:]]+//' | sort -u \
+    | while IFS= read -r _d; do
+        [ -n "$_d" ] || continue
+        case "$_d" in /*|*..*) continue ;; esac
+        mkdir -p "$legtree/$(dirname "$_d")"
+        cp "$REPO_ROOT/$_d" "$legtree/$_d" 2>/dev/null || true
+      done
+  printf '%s\n' '["Probe leg alpha","Probe leg beta"]' > "$legtree/.github/probe-legs.json"
+
+  cat > "$legtree/.github/workflows/aaa-legs-probe.yml" <<'YML'
+name: aaa-legs-probe
+on: [pull_request]
+jobs:
+  probe:
+    name: ${{ matrix.leg }}
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+  probe "37/42 an UNDECLARED whole-expression job name in an early-sorting file REDS — its regex is ^.+\$, it wins the first match for every required context, and the blocking closure collapses onto it" 1 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$legtree/.github/workflows" || rc=1
+
+  sed 's|^    name: \${{ matrix.leg }}|    # required-checks: matrix-name-legs .github/probe-legs.json .[]\
+    name: ${{ matrix.leg }}|' "$legtree/.github/workflows/aaa-legs-probe.yml" > "$legtree/.github/workflows/x" \
+    && mv "$legtree/.github/workflows/x" "$legtree/.github/workflows/aaa-legs-probe.yml"
+  grep -q 'matrix-name-legs' "$legtree/.github/workflows/aaa-legs-probe.yml" \
+    || { echo "  SELFTEST FAIL: 38/42 fixture never gained its declaration — the probe below would measure nothing" >&2; rc=1; }
+  probe "38/42 …and the IDENTICAL tree with the leg declaration added is GREEN — one comment line apart, opposite verdicts" 0 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe \
+    --workflows "$legtree/.github/workflows" || rc=1
+
+  # ── the S2-premise clause (task-036ed38c30be705c) ──────────────────────────
+  # The fixture is security.yml job `sobelow` AS IT IS AFTER #20382: its
+  # continue-on-error lines are STEP-level (eight spaces), none on the job. The
+  # row is the one #20410 corrected, with the false S2 reason put back.
+  probe_says() { # label expect_rc must-print must-not-print <args…>
+    local label="$1" expect="$2" want="$3" unwanted="$4"; shift 4
+    local out rc=0
+    out="$(bash "$SELF" "$@" --prose "$neutral_prose" --partial-workflows "$neutral_partial" 2>&1)" || rc=$?
+    if [ "$rc" -eq "$expect" ] && grep -qF -- "$want" <<<"$out" \
+       && { [ -z "$unwanted" ] || ! grep -qF -- "$unwanted" <<<"$out"; }; then
+      echo "  ok   $label (exit $rc)"
+      return 0
+    fi
+    echo "  SELFTEST FAIL: $label expected exit $expect printing \"$want\"${unwanted:+ and never \"$unwanted\"}, got $rc" >&2
+    printf '%s\n' "$out" | sed 's/^/        /' >&2
+    return 1
+  }
+  mkdir -p "$tmp/wf-s2-flagless" "$tmp/wf-s2-flagged"
+  cat > "$tmp/wf-s2-flagless/security.yml" <<'YML'
+name: Security
+on: [pull_request]
+jobs:
+  sobelow:
+    name: Sobelow static analysis (fixture)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Scan
+        continue-on-error: true
+        run: 'true'
+      - continue-on-error: true
+        run: 'true'
+YML
+  sed 's|^    runs-on: ubuntu-latest$|    runs-on: ubuntu-latest\
+    continue-on-error: true|' "$tmp/wf-s2-flagless/security.yml" > "$tmp/wf-s2-flagged/security.yml"
+  grep -q '^    continue-on-error: true$' "$tmp/wf-s2-flagged/security.yml" \
+    || { echo "  SELFTEST FAIL: 39/42 fixture never gained its job-level flag — probe 40 would measure nothing" >&2; rc=1; }
+  s2_spec() { # <out> <reason>
+    jq --arg r "$2" '.exclusions += [{ "context": "Sobelow static analysis (fixture)", "reason": $r }]' "$good_spec" > "$1"
+  }
+  s2_spec "$tmp/s2-false.json" "S2 ADVISORY: security.yml job 'sobelow' carries continue-on-error:true"
+  probe_says "39/42 the #20410 MUTATION: the false S2 reason put back on the sobelow row, over a job whose continue-on-error lines are all STEP-level, REDS as a MISMATCH" 1 \
+    "S2 MISMATCH" "S2 UNRESOLVED" \
+    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagless" || rc=1
+  probe_says "40/42 …and the IDENTICAL row over the job WITH a job-level continue-on-error is GREEN — one YAML line apart, opposite verdicts" 0 \
+    "1 checked" "" \
+    --spec "$tmp/s2-false.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagged" || rc=1
+  s2_spec "$tmp/s2-unresolved.json" "S2 ADVISORY: security.yml job 'sobelow-gone' carries continue-on-error:true"
+  probe_says "41/42 an S2 row naming a job the tree does not have REDS as UNRESOLVED — distinct from a mismatch, never a silent skip" 1 \
+    "S2 UNRESOLVED" "S2 MISMATCH" \
+    --spec "$tmp/s2-unresolved.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagged" || rc=1
+  s2_spec "$tmp/s2-intent.json" "S2 ADVISORY BY INTENT: security.yml job 'sobelow' is advisory for a stated reason and claims no flag"
+  probe_says "42/42 an \`S2 ADVISORY BY INTENT:\` row claims NO flag, so over the flagless job it stays GREEN — the clause checks the claim the reason makes" 0 \
+    "1 BY INTENT" "" \
+    --spec "$tmp/s2-intent.json" --readback "$good_rb" --runs "$good_runs" --sha probe --s2-workflows "$tmp/wf-s2-flagless" || rc=1
 
   rm -rf "$tmp"
   echo
@@ -2065,16 +2895,23 @@ MD
 main() {
   while [ $# -gt 0 ]; do
     case "$1" in
-      --spec) SPEC="$2"; shift 2 ;;
+      --spec) SPEC="$2"; SPEC_EXPLICIT=1; shift 2 ;;
       --branch) BRANCH_OVERRIDE="$2"; shift 2 ;;
       --readback) READBACK_FILE="$2"; shift 2 ;;
       --runs) RUNS_FILE="$2"; shift 2 ;;
       --sha) HEAD_SHA="$2"; shift 2 ;;
-      --workflows) WORKFLOWS_DIR="$2"; shift 2 ;;
+      --workflows) WORKFLOWS_DIR="$2"; WORKFLOWS_DIR_EXPLICIT=1; shift 2 ;;
       # The merge-truth clause's scan root. Same contract as --workflows: an
       # override exists ONLY so the suite can point the identical clause at a
       # fixture tree; every real invocation reads the committed corpus.
       --prose) PROSE_ROOT_OVERRIDE="$2"; shift 2 ;;
+      # Same contract as --workflows and --prose: an override exists ONLY so the
+      # suite can point the partial-accounting clause at a fixture tree.
+      --partial-workflows) PARTIAL_WF_DIR_OVERRIDE="$2"; shift 2 ;;
+      --s2-workflows) S2_WF_DIR_OVERRIDE="$2"; shift 2 ;;
+      # Turn the merge-truth clause's zero-candidate green into a refusal. For
+      # a caller about to STAND on this clause; see REQUIRE_PROSE_CANDIDATES.
+      --require-prose-candidates) REQUIRE_PROSE_CANDIDATES=1; shift ;;
       --deadlock) MODE="deadlock"; shift ;;
       --ci) MODE="ci"; shift ;;
       --selftest) MODE="selftest"; shift ;;
@@ -2088,6 +2925,15 @@ main() {
     selftest) selftest ;;
     deadlock)
       read_spec
+      # The freshness clause runs HERE and only here: --deadlock has no live
+      # side, and a caller who did not name a spec is trusting the checkout.
+      # See spec_freshness_check for why both keys are structural and why
+      # required-checks-apply.sh (full mode, explicit --spec) is immune to both.
+      if [ "$SPEC_EXPLICIT" -eq 0 ]; then
+        spec_freshness_check
+      else
+        say "  spec freshness: SKIPPED — the caller named the spec with --spec, which is a deliberate statement about which file it means."
+      fi
       deadlock_check "${HEAD_SHA:-$(recent_pr_head)}"
       ;;
     ci)   run_ci ;;

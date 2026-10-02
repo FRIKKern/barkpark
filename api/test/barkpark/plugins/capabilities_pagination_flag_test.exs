@@ -307,6 +307,8 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
   # The reachability table is BOUND to the enumeration above, not parallel to
   # it: a surface here that the manifest does not call paginated would mean the
   # two axes are measuring different endpoints.
+  # Plugins-off: asserts on what enabled plugins contribute (registry, schemas, desk nodes, manifest commands)
+  @tag :requires_plugins
   test "every surface whose page-two reachability is proved below is a paginated command" do
     by_id = Map.new(commands(), &{&1["id"], &1})
 

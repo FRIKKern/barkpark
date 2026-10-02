@@ -58,7 +58,7 @@ see `docs/api-v1.md` §1a.
 | Endpoint | Auth | Purpose |
 |----------|------|---------|
 | `GET /w/:workspace_slug/p/:project_slug/v1/data/search/:dataset` | optional | Hybrid title search (+ `searchEventId`) |
-| `GET …/search/:dataset/suggestions` | optional | Recent / popular / nohits |
+| `GET …/search/:dataset/suggestions` | optional | Recent / popular / nohits (≥3 searches each); anonymous callers see only anonymously-recorded queries |
 | `GET …/search/:dataset/insights` | admin | Crystals, merge patterns, hints, synonymCandidates |
 | `GET …/search/:dataset/synonyms` | admin | List synonym map |
 | `POST …/search/:dataset/synonyms` | admin | Create synonym |

@@ -43,12 +43,36 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   the same 429). Mirrors the `Notifications.deliver_test/2` precedent, which
   already returns `{:error, {:rate_limited, retry_after}}` so the router can put
   a real number in the 429 body instead of an opaque "try again later".
+
+  ## The daily bound (task-4ce7aa98a5aaa885)
+
+  5/min alone is 7,200 guesses a day for anyone holding the password: they
+  re-mint the challenge token at will. Against a 6-digit TOTP that is roughly a
+  1-2% chance a day, and 20-45% over a month. So an attempt that clears the
+  per-minute window also spends a per-user, per-UTC-day budget of 30
+  (`@daily_limit`). Past it the challenge answers 429 until the day rolls over, and
+  `retry_after` names that wait.
+
+  THE COST, STATED: an attacker who already holds the password can spend the
+  day's budget and hold the account's 2FA challenge shut until the next UTC
+  day. That is a lockout of someone whose password is already lost, and it is
+  the price of a second factor that cannot be guessed. Attempts refused by the
+  per-minute window do not spend the daily budget, since they never reach a
+  code check.
+
+  Day counters live in the same table, keyed `{user_id, {:day, day}}`. The
+  per-key sweep and the global prune drop elapsed days exactly as they drop
+  elapsed minutes. A tuple never compares below an integer window, so the
+  minute sweeps cannot touch a day row.
   """
   use GenServer
 
   @table __MODULE__
   @limit 5
   @window_ms 60_000
+  # The daily bound — see the moduledoc.
+  @daily_limit 30
+  @day_ms 86_400_000
   # See `DeviceAuth.RateLimiter` — below this the global sweep is not worth the
   # `insert_new` it costs.
   @prune_floor 256
@@ -73,16 +97,28 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
     # earlier, never merely different: a caller whose `window` view is stale —
     # by the scheduling gap since it was derived, or by a backwards clock step —
     # would otherwise delete a NEWER window's counter and hand it a fresh budget.
+    day = div(now_ms, @day_ms)
+
     :ets.select_delete(@table, [
-      {{{user_id, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
+      {{{user_id, :"$1"}, :_}, [{:<, :"$1", window}], [true]},
+      {{{user_id, {:day, :"$1"}}, :_}, [{:<, :"$1", day}], [true]}
     ])
 
-    maybe_prune(window)
+    maybe_prune(window, day)
 
     # update_counter is atomic; the default {key, 0} seeds a fresh window.
     count = :ets.update_counter(@table, {user_id, window}, {2, 1}, {{user_id, window}, 0})
 
-    if count > @limit, do: {:error, {:rate_limited, retry_after(window, now_ms)}}, else: :ok
+    if count > @limit do
+      {:error, {:rate_limited, retry_after(window, now_ms)}}
+    else
+      day_key = {user_id, {:day, day}}
+      daily = :ets.update_counter(@table, day_key, {2, 1}, {day_key, 0})
+
+      if daily > @daily_limit,
+        do: {:error, {:rate_limited, retry_after_day(day, now_ms)}},
+        else: :ok
+    end
   end
 
   # THE GLOBAL SWEEP, at most once per window — the twin of
@@ -96,15 +132,22 @@ defmodule BarkparkCloud.Accounts.TwoFactorRateLimiter do
   # pay the scan. The guard deletes only STRICTLY earlier windows, so a
   # concurrent caller's current counter is never reset and handed a fresh budget
   # — the same reason the per-key sweep above is `<` and not `/=`.
-  defp maybe_prune(window) do
+  defp maybe_prune(window, day) do
     if :ets.info(@table, :size) > @prune_floor and
          :ets.insert_new(@table, {{:__prune__, window}, 0}) do
       :ets.select_delete(@table, [
-        {{{:_, :"$1"}, :_}, [{:<, :"$1", window}], [true]}
+        {{{:_, :"$1"}, :_}, [{:<, :"$1", window}], [true]},
+        {{{:_, {:day, :"$1"}}, :_}, [{:<, :"$1", day}], [true]}
       ])
     end
 
     :ok
+  end
+
+  # Whole seconds until the UTC day rolls over and the daily budget refills.
+  defp retry_after_day(day, now_ms) do
+    remaining_ms = (day + 1) * @day_ms - now_ms
+    remaining_ms |> Kernel./(1000) |> Float.ceil() |> trunc() |> max(1)
   end
 
   # Whole seconds until the fixed window rolls over and the budget refills.

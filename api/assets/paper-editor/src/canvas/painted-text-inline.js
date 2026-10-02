@@ -3,22 +3,29 @@
 // enter the existing canvas history/save/conflict pipeline immediately.
 const object = value => value !== null && typeof value === "object" && !Array.isArray(value);
 const scalar = value => typeof value === "string" || typeof value === "number";
+// A field is a flat key of its item, or — when the painted run is a slice of one
+// stored string (a file-tree line) — a read/write pair over the item. `verbatim`
+// keeps leading/trailing whitespace the reader paints (white-space: pre).
+const valueOf = (field, item) => field.read ? field.read(item) : item[field.key];
 
-export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo, redo }, describeFields) {
+// `collection` names the block key holding the rows (default `items`; pipeline
+// `nodes`, lineage `entries`, …); a field with `index: null` is a block-level key.
+export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo, redo, collection = "items" }, describeFields) {
   let fields = new Map();
   let pendingHtml = null;
   let composing = false;
   let sourceBlock = null;
   const dirty = new Set();
   const allowed = () => isEditable() && !getBlock()?.locked && getBlock()?.query == null;
-  const itemAt = (block, index) => index == null ? block : block?.items?.[index];
+  const itemAt = (block, index) => index == null ? block : block?.[collection]?.[index];
 
   function decorate() {
     fields = new Map();
     if (!allowed()) return;
-    for (const { el, item, index, key, label } of describeFields(body, sourceBlock || getBlock())) {
-      if (!el || !object(item) || item.locked === true || item.query != null || !scalar(item[key])) continue;
-      fields.set(el, { index, key, original: item[key], shown: el.textContent });
+    for (const { el, item, index, key, label, read, write, verbatim } of describeFields(body, sourceBlock || getBlock())) {
+      const value = read ? read(item) : item?.[key];
+      if (!el || !object(item) || item.locked === true || item.query != null || !scalar(value)) continue;
+      fields.set(el, { index, key, read, write, verbatim, original: value, shown: el.textContent });
       el.contentEditable = "plaintext-only";
       el.setAttribute("role", "textbox");
       el.setAttribute("aria-label", label);
@@ -36,9 +43,9 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
       el.contentEditable = enabled ? "plaintext-only" : "false";
       el.tabIndex = enabled ? 0 : -1;
       if (!item || (composing && document.activeElement === el)) continue;
-      const value = item[field.key];
+      const value = valueOf(field, item);
       const shown = value === field.original ? field.shown : scalar(value)
-        ? (document.activeElement === el ? String(value) : String(value).trim()) : "";
+        ? (document.activeElement === el || field.verbatim ? String(value) : String(value).trim()) : "";
       if (el.textContent !== shown) el.textContent = shown;
     }
   }
@@ -65,10 +72,10 @@ export function wirePaintedTextInline(body, { getBlock, isEditable, commit, undo
     const text = event.target.textContent || "";
     const value = text === field.shown ? field.original : text;
     dirty.delete(event.target);
-    if (item[field.key] === value) return;
-    const updated = { ...item, [field.key]: value };
+    if (valueOf(field, item) === value) return;
+    const updated = field.write ? field.write(item, value) : { ...item, [field.key]: value };
     commit(field.index == null ? updated : {
-      ...block, items: block.items.map((row, index) => index === field.index ? updated : row),
+      ...block, [collection]: block[collection].map((row, index) => index === field.index ? updated : row),
     });
   }
   function onKey(event) {

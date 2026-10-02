@@ -85,6 +85,8 @@ defmodule Barkpark.Tasks.CriteriaRequiredFenceTest do
 
   # ── (a) THE HOLE — refused ───────────────────────────────────────────────
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "a criteria-less BIRTH under a flagged parent is REFUSED, naming the field " <>
          "and the parent's flag",
        %{scope: scope} do
@@ -103,6 +105,8 @@ defmodule Barkpark.Tasks.CriteriaRequiredFenceTest do
              Content.get_document("drafts.crf-child-refuse", "task", @dataset, scope)
   end
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "an EMPTY criteria list is the same population as an absent one — also REFUSED",
        %{scope: scope} do
     flagged_parent!("crf-parent-empty", scope)
@@ -192,6 +196,8 @@ defmodule Barkpark.Tasks.CriteriaRequiredFenceTest do
 
   # ── (d) THE FLAG'S OWN SHAPE — a typo must not silently disarm the fence ──
 
+  # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+  @tag :requires_plugins
   test "`require_criteria` must be a boolean: a typo'd \"true\" is REFUSED rather than " <>
          "read as absent",
        %{scope: scope} do

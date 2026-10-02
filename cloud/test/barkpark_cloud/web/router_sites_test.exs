@@ -22,7 +22,16 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   alias BarkparkCloud.Cloudflare.Fake, as: CfFake
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Sites.FakeBoxRelay
+  alias BarkparkCloud.Sites.RollbackAttribution
   alias BarkparkCloud.Web.Router
+
+  defmodule AttributionSink do
+    @moduledoc "Forwards a rollback attribution report to the test process."
+    def report(r) do
+      send(Process.get(:attribution_owner), {:attribution, r})
+      :ok
+    end
+  end
 
   @opts Router.init([])
   @password "correct-horse-battery"
@@ -356,6 +365,51 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
+  ## task-6e6b76f60997dad6 — :id accepts a team-scoped SLUG
+  ##
+  ## Every with_team_site route resolves through `Registry.get_team_site/2`, so
+  ## proving the wrapper on ONE verb proves it for the family (status, deploy,
+  ## delete, settings, promote, rollback). Before this, the CLI had to spend a
+  ## list-ALL `GET /v1/sites` (measured ~0.4 s) turning the slug the user typed
+  ## into a uuid the route would accept.
+
+  describe "GET /v1/sites/:id addressed by SLUG (task-6e6b76f60997dad6)" do
+    test "the team's own slug → 200, same row as the uuid" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "slug-route-x"})
+      token = login_token(user)
+
+      # REDS if get_team_site/2's slug fallback is removed: the route 404s.
+      conn = call(:get, "/v1/sites/slug-route-x", nil, token)
+      assert conn.status == 200
+      assert json_body(conn)["site"]["id"] == site.id
+
+      # Control: the uuid form still answers, and with the same row.
+      by_uuid = call(:get, "/v1/sites/#{site.id}", nil, token)
+      assert by_uuid.status == 200
+      assert json_body(by_uuid)["site"]["id"] == site.id
+    end
+
+    test "CONTROL: another team's slug → 404, not a cross-tenant read" do
+      {_o, other_team} = user_with_team()
+      other_bp = barkpark_fixture(other_team)
+      {:ok, _other_site} = Registry.create_site(other_bp, %{name: "S", slug: "foreign-slug"})
+
+      {user, _team} = user_with_team()
+      token = login_token(user)
+
+      conn = call(:get, "/v1/sites/foreign-slug", nil, token)
+      assert conn.status == 404
+    end
+
+    test "CONTROL: a slug nobody owns → 404, never a 500" do
+      {user, _team} = user_with_team()
+      conn = call(:get, "/v1/sites/no-such-slug-anywhere", nil, login_token(user))
+      assert conn.status == 404
+    end
+  end
+
   ## POST /v1/sites/:id/deploy — enqueue a Deployment (the build job)
 
   describe "POST /v1/sites/:id/deploy" do
@@ -591,20 +645,25 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert json_body(conn)["site"]["id"] == site.id
     end
 
-    # PINS TODAY'S PAT CONTRACT, deliberately — see the PR body for the cost.
+    # THE D219 RE-TIERING, DRIVEN — dr-w14-bl-pat-cannot-read-the-owners-number.
     #
-    # The refusal on the two reads above is CREDENTIAL-CLASS, not role-class: no
-    # PAT of any tier reaches a `:session` route, so a read PAT is 401 (not 403 —
-    # `require_user` never saw a session token) on both, while the single-
-    # deployment poll, which is gated `{:ability, "read"}`, answers 200 on a REAL
-    # row with the SAME token. A member's read PAT is equally 401.
+    # This test used to pin the opposite fact, and the pin's own comment recorded
+    # the cost: with the LIST route session-only, no automation credential could
+    # compute the owner's number, because `bp cloud site status` reads the ledger
+    # through it (ListSpawnSiteDeployments) and the single-deployment poll returns
+    # exactly one row — an outcome, never a rate. That refusal was
+    # CREDENTIAL-CLASS, not role-class: every PAT tier got 401, because
+    # `Auth.require_user/2` never saw a session token and the ability gate was not
+    # consulted at all.
     #
-    # The consequence, stated so the pin is deliberate: no automation credential
-    # can compute the owner's number, because `bp cloud site status` reads the
-    # ledger through the session-only list route. Re-tiering it to
-    # {:ability, "read"} sits inside cloud-console-hardening's auth fence and is
-    # FILED, not built here (deploy-reliability charter D219).
-    test "a read PAT is 401 on BOTH owner reads while the single-deployment poll is 200" do
+    # The cross-epic ruling (deploy-reliability charter D219, inside
+    # cloud-console-hardening's auth fence) re-tiered the LIST route — and ONLY
+    # the list route — to `{:ability, "read"}`. So the line this test draws moved
+    # by exactly one path: `GET /v1/sites/:id` is still session-only and still
+    # 401s the very same token, in the same call, three lines apart. That
+    # adjacency is the assertion: it proves the change is a re-tier of one route
+    # and not a collapse of the session tier.
+    test "a read PAT now LISTS deployments (D219) while GET /v1/sites/:id stays 401" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
@@ -618,19 +677,58 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert stored.abilities == ["read"]
 
+      # THE DENOMINATOR, reachable by an automation credential at last. Asserted
+      # on the ROWS, not on the status: an admitted gate proves the door opened,
+      # only rows prove a number can be computed.
       list = call(:get, "/v1/sites/#{site.id}/deployments", nil, read_pat)
-      assert list.status == 401
-      assert json_body(list)["error"] == "unauthorized"
+      assert list.status == 200
+      assert [%{"id" => listed}] = json_body(list)["deployments"]
+      assert listed == dep.id
 
+      # THE UNMOVED HALF. Same token, same site, the sibling read — still 401,
+      # still `unauthorized` (not 403), because that route still runs
+      # `Auth.require_user/2` and never reaches an ability gate.
       show = call(:get, "/v1/sites/#{site.id}", nil, read_pat)
       assert show.status == 401
+      assert json_body(show)["error"] == "unauthorized"
 
-      # The SAME token, on the SAME site, one path segment deeper — 200 on a real
-      # row. The refusal above is therefore about the credential CLASS the route
-      # accepts, not about what the token is allowed to read.
+      # The SAME token, one path segment deeper — 200 on a real row, as it always
+      # was. The list now agrees with its own child instead of contradicting it.
       poll = call(:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil, read_pat)
       assert poll.status == 200
       assert json_body(poll)["deployment"]["id"] == dep.id
+    end
+
+    # THE LOW SIDE of the same widening. A read PAT belonging to a DIFFERENT team
+    # must not reach this list by naming the id — and the refusal must be 404, the
+    # same answer a nonexistent id gets, never a 403 that would confirm the site
+    # exists.
+    test "another team's read PAT is 404 on this site's deployments, identical to a nonexistent id" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
+      {:ok, _dep} = Registry.create_deployment(site, %{git_ref: "a"})
+
+      {outsider, outsider_team} = user_with_team()
+
+      {:ok, outsider_pat, _} =
+        Accounts.create_personal_access_token(outsider, outsider_team, %{
+          name: "outsider-read",
+          abilities: ["read"]
+        })
+
+      # The token is live and read-capable — without this the 404 could just mean
+      # "broken token" and the fence would be unproven.
+      assert call(:get, "/v1/sites", nil, outsider_pat).status == 200
+
+      foreign = call(:get, "/v1/sites/#{site.id}/deployments", nil, outsider_pat)
+      assert foreign.status == 404
+      assert json_body(foreign)["error"] == "not_found"
+      refute Map.has_key?(json_body(foreign), "deployments")
+
+      absent = call(:get, "/v1/sites/#{Ecto.UUID.generate()}/deployments", nil, outsider_pat)
+      assert absent.status == 404
+      assert foreign.resp_body == absent.resp_body
     end
   end
 
@@ -1711,9 +1809,23 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute body["detail"] =~ "3328"
       # …and never a type the site's own token could not prove it can read.
       refute body["detail"] =~ "session"
-      # …and the EXACT re-run, not "check your dataset".
-      assert body["detail"] =~ "acme/blog/production"
-      assert body["detail"] =~ "--doc-type"
+
+      # cch-w69-bl — THE DETAIL IS SURFACE-NEUTRAL, AND THE TERMINAL RE-RUN HAS
+      # ITS OWN KEY. This route serves two surfaces, so `detail` is written in
+      # nobody's accent: it states the facts and stops. The `bp cloud site create
+      # …` incantation still exists, and it still names the exact dataset and the
+      # `--doc-type` flag — it just rides `cli_hint`, where a terminal renders it
+      # and a web modal simply does not look. Before this slice the incantation
+      # was welded to the END of `detail`, and the console had to CUT IT BACK OFF
+      # by matching the prose ("Re-run naming a type" — siteDetailWithoutCliReRun,
+      # now deleted). These four assertions are the contract that makes that strip
+      # unnecessary: no terminal voice in `detail`, ALL of it in `cli_hint`.
+      refute body["detail"] =~ "bp cloud site create"
+      refute body["detail"] =~ "--doc-type"
+      assert body["cli_hint"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "--doc-type"
+      # …and the hint still carries the EXACT binding, not "check your dataset".
+      assert body["cli_hint"] =~ "--dataset acme/blog/production"
       # Machine-readable menu for the CLI/console, same intersection, same
       # provenance. Order is the admin candidate order (task outranks paper);
       # the NUMBERS are the site's.
@@ -1762,6 +1874,11 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert body["detail"] =~ "404"
       # No menu was obtainable — say that, do not invent one.
       assert body["detail"] =~ "could not list what IS readable"
+      # Same split on the arm where no menu was obtainable: the prose stays
+      # surface-neutral and the terminal line rides its own key.
+      refute body["detail"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "bp cloud site create"
+      assert body["cli_hint"] =~ "--dataset acme/blog/prodcution"
       refute Map.has_key?(body, "readable_types")
       assert Registry.list_sites_for_team(team) == []
     end
@@ -2189,10 +2306,15 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 422
       body = json_body(conn)
       assert body["error"] == "content_binding_required"
-      # The message names the FLAG that fixes it, and exactly what is missing.
-      assert body["detail"] =~ "--dataset"
+      # cch-w69-bl — the message names exactly what is missing, in nobody's
+      # accent. It used to say "bind it with `--dataset <workspace>/<project>/
+      # <dataset>`" — a FLAG, read by a console modal that has those three fields
+      # on screen. The flag moved to `cli_hint`; the sentence now names the
+      # FIELDS, which is true on both surfaces.
       assert body["detail"] =~ "workspace"
       assert body["detail"] =~ "dataset"
+      refute body["detail"] =~ "--dataset"
+      assert body["cli_hint"] == "--dataset <workspace>/<project>/<dataset>"
 
       # No ghost row.
       assert Registry.list_sites_for_team(team) == []
@@ -2596,6 +2718,80 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert Registry.list_sites_for_team(team) == []
     end
 
+    # ── the route's OWN time is measured (rollback-latency c0) ────────────────
+    #
+    # The relay's attribution line (PR #18130) starts AFTER auth, the team-scoped
+    # site read and the box row read, and stops BEFORE the site-pointer write, the
+    # audit row, the two console pushes and the render. Those two ends were simply
+    # not in anyone's sum, so a live 3.8s rollback could not be blamed on the route
+    # or acquitted of it. These arms prove the route now measures both.
+    test "a rollback reports the route's own work either side of the box call" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, _prev} = Registry.transition_deployment(prev, %{status: "live"})
+      {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
+      {:ok, site} = Registry.set_site_current_deployment(site, live.id)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 200, %{"status" => "rolled_back", "build_id" => "prevbuild0000001"}}
+      )
+
+      # The route runs IN THIS PROCESS under Plug.Test, and the accumulator is
+      # request-scoped, so redirecting the report here needs no global.
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 200
+
+      assert_receive {:attribution, report}, 500
+
+      assert report.site_ref == site.id
+      assert report.outcome == "rolled_back"
+
+      for key <- [:total_ms, :route_pre_ms, :route_post_ms, :deploy_own_ms] do
+        assert is_integer(Map.fetch!(report, key)),
+               "#{key} is not measured on the route path: #{inspect(report)}"
+      end
+
+      # The stopwatch opened BEFORE auth and closed AFTER the render, so the whole
+      # request is inside it — the sum cannot exceed the wall clock it spans.
+      assert report.route_pre_ms + report.deploy_own_ms + report.route_post_ms <=
+               report.total_ms,
+             "the route's legs exceed the request's own span: #{inspect(report)}"
+    end
+
+    # THE CONTROL. A rollback the box REFUSED still spent route work, and the
+    # report must name the refusal rather than quietly reporting a success — a
+    # reporter wired only into the 200 branch would look green above and be blind
+    # to every failure, which is the half an operator actually greps for.
+    test "a REFUSED rollback still reports, and reports the refusal" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      FakeBoxRelay.program(
+        rollback: {:ok, 422, %{"error" => "no previous release", "code" => "no_previous"}}
+      )
+
+      Process.put(:attribution_owner, self())
+      RollbackAttribution.redirect_reports_to(AttributionSink)
+
+      conn = call(:post, "/v1/sites/#{site.id}/rollback", %{}, token)
+      assert conn.status == 422
+
+      assert_receive {:attribution, report}, 500
+      assert report.outcome == "no_previous"
+      assert is_integer(report.route_pre_ms)
+    end
+
     test "a node site IS rollbackable → NOT 422 not_rollbackable (it flips the Caddy upstream to the previous slot)" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
@@ -2890,6 +3086,24 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     ## RESTRICT, this whole file was 104 tests / 0 failures and
     ## `fk_census_test.exs` was 5/0. The structural half of the guard lives in
     ## `site_cascade_census_test.exs`; these are the behavioural half.
+
+    test "a site's hostname claims cascade on delete, freeing its domains" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+      host = "claimed-#{System.unique_integer([:positive])}.example.com"
+      {:ok, site} = Registry.add_site_domain(site, host)
+      assert Repo.get_by(Registry.HostnameClaim, host: host, site_id: site.id)
+
+      FakeBoxRelay.program(teardown: {:ok, 200, %{"status" => "torn_down"}})
+
+      conn = call(:delete, "/v1/sites/#{site.id}", %{}, token)
+
+      assert conn.status == 200, "site delete answered #{conn.status}: #{conn.resp_body}"
+      assert Registry.get_site(site.id) == nil
+      refute Repo.get_by(Registry.HostnameClaim, host: host)
+    end
 
     test "an uploaded artifact BOUND TO A DEPLOYMENT cascades on delete" do
       {user, team} = user_with_team()

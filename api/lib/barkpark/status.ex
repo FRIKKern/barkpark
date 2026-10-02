@@ -10,6 +10,7 @@ defmodule Barkpark.Status do
   """
   import Ecto.Query, warn: false
 
+  alias Barkpark.Content.CodelistHealth
   alias Barkpark.Repo
   alias Barkpark.Status.Incident
 
@@ -24,11 +25,18 @@ defmodule Barkpark.Status do
   """
   @spec health() :: map()
   def health do
+    # Each probe runs ONCE per request and feeds both the component verdict
+    # and the inventory published beside it, so the two can never disagree.
+    migrations = migration_state()
+    plugins = safe(fn -> Barkpark.Plugins.Registry.all() end, :probe_failed)
+
     components = [
       check(:database, &database_ok?/0),
-      check(:migrations, &migrations_current?/0),
-      check(:plugins, &plugins_ok?/0),
-      check(:mail, &mail_deliverable?/0)
+      component(:migrations, if(migrations.pending == 0, do: :operational, else: :degraded), nil),
+      component(:plugins, if(is_list(plugins), do: :operational, else: :degraded), nil),
+      check(:mail, &mail_deliverable?/0),
+      codelists_component(),
+      kek_previous_component()
     ]
 
     incidents = open_incidents()
@@ -40,6 +48,9 @@ defmodule Barkpark.Status do
       open_incidents: length(incidents),
       version: safe(fn -> Barkpark.BuildInfo.version() end, "unknown"),
       commit: commit(),
+      shape: Barkpark.Shape.current(),
+      migrations: migrations,
+      plugins_enabled: if(is_list(plugins), do: length(plugins)),
       uptime_seconds: node_uptime_seconds(),
       checked_at: DateTime.utc_now()
     }
@@ -47,20 +58,184 @@ defmodule Barkpark.Status do
 
   defp check(name, probe) do
     status = if safe(probe, false), do: :operational, else: :degraded
-    %{component: name, status: status}
+    %{component: name, status: status, detail: nil}
+  end
+
+  @doc """
+  The `:codelists` component: does the box actually hold the codelists its
+  plugins declare?
+
+  A boot seed that times out is rescued at three levels, so a node with no Thema
+  codes at all still answers 200 and still reports every other component green.
+  This is the one probe that says otherwise, and its `detail` NAMES the lists —
+  `"codelist onixedit:thema is empty or stale: …"` — because "codelists:
+  degraded" is not something an operator can act on.
+
+  Skipped (reported `:operational`, no detail) on a node configured not to run
+  the boot codelist seeders — `config :barkpark, run_boot_codelist_seeders:
+  false`, which is the test env. Such a node never promised to hold codelist
+  DATA, so dyeing it degraded would be noise, not signal.
+
+  `opts` are passed through to `CodelistHealth.audit/1` (`:requirements`), so a
+  caller can probe an arbitrary roster.
+  """
+  @spec codelists_component(keyword()) :: %{
+          component: :codelists,
+          status: :operational | :degraded,
+          detail: String.t() | nil
+        }
+  def codelists_component(opts \\ []) do
+    cond do
+      not boot_codelist_seeders_enabled?() ->
+        component(:codelists, :operational, nil)
+
+      true ->
+        case safe(fn -> CodelistHealth.audit(opts) end, :probe_failed) do
+          %{status: :ok} ->
+            component(:codelists, :operational, nil)
+
+          %{status: :degraded} = audit ->
+            component(:codelists, :degraded, CodelistHealth.summary(audit))
+
+          _ ->
+            component(:codelists, :degraded, "codelist audit could not be run")
+        end
+    end
+  end
+
+  defp component(name, status, detail),
+    do: %{component: name, status: status, detail: detail}
+
+  @doc """
+  The `:kek_previous` component: is every BARKPARK_KEK_PREVIOUS rotation key
+  actually usable?
+
+  `Barkpark.Crypto.LocalKek.keys/0` DISCARDS a malformed previous key in silence
+  (`Enum.filter(&match?(<<_::binary-size(32)>>, &1))`), so a single typo in a
+  rotation entry makes every blob sealed under that KEK permanently
+  undecryptable — with a clean boot and, until now, nothing an operator could
+  read. `config/runtime.exs` audits each entry at boot and records the verdict
+  under `Barkpark.Crypto.LocalKek`'s `:kek_previous_audit` key; this probe
+  republishes it where a human actually looks. A boot log line alone would be
+  theatre.
+
+  `detail` names HOW MANY entries were discarded and their 1-based POSITIONS.
+  It NEVER echoes an entry: those are key material.
+
+  The four states are deliberately distinguishable, so that a FAILED READ can
+  never be mistaken for a healthy box:
+
+    * audit says `checked: true, discarded: 0` -> `:operational`, no `detail`
+      (and `component_json/1` omits the key entirely) — the only silent arm.
+    * audit says `discarded: n > 0` -> `:degraded`, `detail` names n + positions.
+    * audit says `checked: false` -> `:operational` WITH a `detail` saying the
+      audit did not apply: with no primary BARKPARK_KEK, runtime.exs never
+      configures `previous_keys`, so no entry is consumed and none is discarded.
+    * NO audit recorded (anything else, including `nil`) -> `:degraded`, because
+      that means config/runtime.exs did not run or did not record a verdict.
+      This box's rotation keys are UNKNOWN, which is not the same as good.
+  """
+  @spec kek_previous_component() :: %{
+          component: :kek_previous,
+          status: :operational | :degraded,
+          detail: String.t() | nil
+        }
+  def kek_previous_component do
+    # Never let a surprising config shape 500 the public status page: anything
+    # that is not a keyword list carrying an audit falls through to the
+    # `:degraded` "audit is MISSING" arm, which is the honest verdict.
+    case Application.get_env(:barkpark, Barkpark.Crypto.LocalKek, []) do
+      config when is_list(config) -> Keyword.get(config, :kek_previous_audit)
+      _ -> nil
+    end
+    |> kek_previous_verdict()
+  end
+
+  defp kek_previous_verdict(%{checked: true, discarded: 0}),
+    do: component(:kek_previous, :operational, nil)
+
+  defp kek_previous_verdict(%{checked: true, discarded: n, positions: positions})
+       when is_integer(n) and n > 0 do
+    component(
+      :kek_previous,
+      :degraded,
+      "BARKPARK_KEK_PREVIOUS: #{n} malformed #{plural_entry(n)} discarded at 1-based " <>
+        "position#{if n == 1, do: "", else: "s"} #{Enum.join(positions, ", ")} — " <>
+        "not base64 of exactly 32 raw bytes. Barkpark.Crypto.LocalKek drops " <>
+        "#{if n == 1, do: "it", else: "them"}, so blobs sealed under that KEK cannot be " <>
+        "unwrapped and DataKeys.rewrap_all/0 cannot finish the rotation. Fix or remove " <>
+        "the named position(s) and restart. The entries themselves are never published here."
+    )
+  end
+
+  defp kek_previous_verdict(%{checked: false}),
+    do:
+      component(
+        :kek_previous,
+        :operational,
+        "not applicable: BARKPARK_KEK is unset, so config/runtime.exs configures no " <>
+          "previous_keys and no BARKPARK_KEK_PREVIOUS entry is consumed or discarded."
+      )
+
+  defp kek_previous_verdict(_missing),
+    do:
+      component(
+        :kek_previous,
+        :degraded,
+        "BARKPARK_KEK_PREVIOUS audit is MISSING: config/runtime.exs recorded no verdict " <>
+          "under Barkpark.Crypto.LocalKek :kek_previous_audit. The rotation keys on this " <>
+          "box are UNKNOWN, which is NOT the same as known-good — do not read this as healthy."
+      )
+
+  defp plural_entry(1), do: "entry"
+  defp plural_entry(_), do: "entries"
+
+  defp boot_codelist_seeders_enabled? do
+    Application.get_env(:barkpark, :run_boot_codelist_seeders, true)
   end
 
   defp database_ok? do
     match?({:ok, _}, Repo.query("SELECT 1"))
   end
 
-  defp migrations_current? do
-    Ecto.Migrator.migrations(Repo)
-    |> Enum.all?(fn {status, _v, _n} -> status == :up end)
+  @doc """
+  Migration state of this node: the highest APPLIED migration version and how
+  many on-disk migrations are still PENDING (`:down`).
+
+  One `Ecto.Migrator.migrations/2` read — the same read the `:migrations`
+  component's verdict comes from (`pending == 0` is operational), so the
+  published numbers and the colour cannot drift apart.
+
+  A probe that fails reports `%{latest_applied: nil, pending: nil}`: UNKNOWN,
+  never a `0` that would read as "nothing pending". `latest_applied` is also
+  `nil` on a database with no applied migration at all.
+
+  `directories` defaults to `Barkpark.MigrationPaths.enabled/1`, the set the
+  migrator applies (the core directory plus each enabled plugin or capability
+  folder); a caller (a test) may point it at another directory to stage a
+  pending migration.
+  """
+  @spec migration_state([String.t()] | nil) :: %{
+          latest_applied: non_neg_integer() | nil,
+          pending: non_neg_integer() | nil
+        }
+  def migration_state(directories \\ nil) do
+    case safe(fn -> read_migrations(directories) end, :probe_failed) do
+      list when is_list(list) -> summarize_migrations(list)
+      _ -> %{latest_applied: nil, pending: nil}
+    end
   end
 
-  defp plugins_ok? do
-    is_list(Barkpark.Plugins.Registry.all())
+  defp read_migrations(nil), do: Ecto.Migrator.migrations(Repo, Barkpark.MigrationPaths.enabled())
+  defp read_migrations(dirs), do: Ecto.Migrator.migrations(Repo, dirs)
+
+  defp summarize_migrations(list) do
+    applied = for {:up, version, _name} <- list, do: version
+
+    %{
+      latest_applied: if(applied == [], do: nil, else: Enum.max(applied)),
+      pending: Enum.count(list, &match?({:down, _, _}, &1))
+    }
   end
 
   # A node whose mailer discards every message is NOT operational: password

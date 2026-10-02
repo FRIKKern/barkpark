@@ -64,8 +64,15 @@ defmodule Barkpark.Content.OwnerScopedTest do
 
   # ── create helpers ────────────────────────────────────────────────────────
 
+  # CLASS (c) DECLARATION (the seeded-Default ruling, task-e6523cc7154304f0).
+  # These writes carry a caller_context so the OWNERSHIP stamp has a principal,
+  # but they name no workspace and this suite tests ownership, not tenancy. A
+  # principal-bearing write with no workspace is class (a) at the funnel now —
+  # infer-or-refuse — and these synthetic UUID users are members of no
+  # workspace, so the door would (correctly) refuse. `instance_wide: true` says
+  # what the fixture actually means: an instance-wide write.
   defp create_owned(type, attrs, opts) do
-    {:ok, doc} = Content.create_document(type, attrs, @dataset, opts)
+    {:ok, doc} = Content.create_document(type, attrs, @dataset, [instance_wide: true] ++ opts)
     doc
   end
 

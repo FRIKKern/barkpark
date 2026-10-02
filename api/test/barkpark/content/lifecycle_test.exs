@@ -109,7 +109,11 @@ defmodule Barkpark.Content.LifecycleTest do
 
   defp task_draft!(doc_id, scope, extra) do
     content =
-      %{"kind" => "task", "lifecycle_status" => "open"}
+      %{
+        "kind" => "task",
+        "brief" => Barkpark.TaskBriefFixtures.brief(),
+        "lifecycle_status" => "open"
+      }
       |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
       |> Map.merge(extra)
 
@@ -664,7 +668,7 @@ defmodule Barkpark.Content.LifecycleTest do
 
   # ── the acceptance_criteria fence at the publish door (PDS wave 26) ─────────
   #
-  # MECHANISM, observed end-to-end (PDS-D360/D362), not derived: `bp task
+  # MECHANISM, observed end-to-end (PDS-D360/PDS-D362), not derived: `bp task
   # stamp` writes the PUBLISHED row (`Tasks.Stamp`, `Repo.update_all`) and
   # never touches the draft twin, and a draft NEVER rebases. A draft minted
   # DURING an active claim therefore carries that claim VERBATIM, sails past
@@ -699,6 +703,8 @@ defmodule Barkpark.Content.LifecycleTest do
       %{scope: scope}
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a claim-identical stale draft that would clear a met:true flag is REFUSED, " <>
            "and the stamp survives",
          %{scope: scope} do
@@ -728,6 +734,8 @@ defmodule Barkpark.Content.LifecycleTest do
       assert evidence =~ "gate green"
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a draft that DROPS the proof-bearing row entirely is REFUSED", %{scope: scope} do
       claim_and_stamp!("fence-drop", scope, "fence-worker")
 
@@ -748,6 +756,8 @@ defmodule Barkpark.Content.LifecycleTest do
                true
     end
 
+    # Plugins-off: the cycle_fleet capability mounts /v1/cycles
+    @tag :requires_plugins
     test "a draft that keeps met:true but BLANKS the evidence is REFUSED", %{scope: scope} do
       claim_and_stamp!("fence-blank", scope, "fence-worker")
 

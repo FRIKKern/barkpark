@@ -60,6 +60,9 @@ defmodule Barkpark.Plugins.OnixEdit.Phase8E2ETest do
   """
 
   use BarkparkWeb.ConnCase, async: false
+
+  # Plugins-off: the onixedit plugin starts Bokbasen.Auth and owns the book schemas
+  @moduletag :requires_plugins
   use Oban.Testing, repo: Barkpark.Repo
 
   import Phoenix.LiveViewTest

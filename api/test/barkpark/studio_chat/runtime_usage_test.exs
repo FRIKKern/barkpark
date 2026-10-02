@@ -1,6 +1,9 @@
 defmodule Barkpark.StudioChat.RuntimeUsageTest do
   use Barkpark.DataCase, async: false
 
+  # Plugins-off: the studio_chat capability owns the chat supervisors, registries and /v1/chat routes
+  @moduletag :requires_plugins
+
   import Ecto.Query
 
   alias Barkpark.{Content, CycleFleet, Repo, StudioChat, Tasks, Tenancy, TenancyFixtures}
@@ -65,8 +68,12 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     Application.put_env(:barkpark, :studio_chat_runtime_adapters, %{codex: FakeCodex})
 
     on_exit(fn ->
-      Barkpark.StudioChat.RuntimeSupervisor
-      |> DynamicSupervisor.which_children()
+      # Guarded: with studio_chat off there is no RuntimeSupervisor, and a raise
+      # here would skip the env restores below (public_demo_studio leak).
+      if(Process.whereis(Barkpark.StudioChat.RuntimeSupervisor),
+        do: DynamicSupervisor.which_children(Barkpark.StudioChat.RuntimeSupervisor),
+        else: []
+      )
       |> Enum.each(fn
         {_, pid, _, _} when is_pid(pid) ->
           DynamicSupervisor.terminate_child(Barkpark.StudioChat.RuntimeSupervisor, pid)
