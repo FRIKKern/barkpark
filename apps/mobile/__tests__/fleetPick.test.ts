@@ -131,6 +131,83 @@ describe('resolveTarget — owner/admin (credentials reveal)', () => {
   })
 })
 
+// https-only (task-4edcfaf85d569b2d): Cloud only ever returns https, so a
+// cleartext (or any non-https) instance address from Cloud is a bug or an
+// attack. The cascade refuses it with a typed outcome — and when the fleet row
+// itself is cleartext, refuses BEFORE asking Cloud for a token at all.
+describe('resolveTarget — https only for Cloud-sourced addresses', () => {
+  const member = { id: 'team-1', name: 'Guerrilla', role: 'member' }
+
+  it('a cleartext fleet row is refused before any token is minted or revealed', async () => {
+    for (const team of [member, { id: 'team-1', name: 'Guerrilla', role: 'owner' }]) {
+      const client = stubClient({})
+      const outcome = await resolveTarget(client, park({ url: 'http://guerrilla.barkpark.cloud', team }))
+      expect(outcome).toEqual({
+        kind: 'insecure',
+        name: 'guerrilla',
+        address: 'http://guerrilla.barkpark.cloud',
+      })
+      expect(client.mintAppToken).not.toHaveBeenCalled()
+      expect(client.getCredentialsForTeam).not.toHaveBeenCalled()
+    }
+  })
+
+  it('a non-https scheme of any kind is refused, case-insensitively', async () => {
+    for (const url of ['HTTP://g.example', 'ws://g.example', 'ftp://g.example']) {
+      const outcome = await resolveTarget(stubClient({}), park({ url }))
+      expect(outcome.kind).toBe('insecure')
+    }
+  })
+
+  it('a cleartext address in the app-token mint response is refused (the token is never handed back)', async () => {
+    const client = stubClient({
+      mintAppToken: jest.fn().mockResolvedValue({
+        kind: 'minted',
+        token: 'app-tok',
+        url: 'http://evil.example',
+        host: '',
+      }),
+    })
+    const outcome = await resolveTarget(client, park({ team: member }))
+    expect(outcome).toEqual({ kind: 'insecure', name: 'guerrilla', address: 'http://evil.example' })
+    expect(JSON.stringify(outcome)).not.toContain('app-tok')
+  })
+
+  it('a cleartext address in the credentials reveal is refused (the admin token is never handed back)', async () => {
+    const client = stubClient({
+      getCredentialsForTeam: jest.fn().mockResolvedValue({
+        adminToken: 'admin-tok',
+        url: 'http://guerrilla.barkpark.cloud',
+        host: '',
+      }),
+    })
+    const outcome = await resolveTarget(client, park({}))
+    expect(outcome.kind).toBe('insecure')
+    expect(JSON.stringify(outcome)).not.toContain('admin-tok')
+  })
+
+  it('a cleartext fleet row never offers the paste fallback (that would send a pasted token over http)', async () => {
+    const client = stubClient({
+      getCredentialsForTeam: jest
+        .fn()
+        .mockRejectedValue(new CloudApiError('get credentials: no_admin_token', 404, 'no_admin_token')),
+      mintAppToken: jest.fn().mockResolvedValue({ kind: 'unsupported' }),
+    })
+    for (const team of [member, { id: 'team-1', name: 'Guerrilla', role: 'owner' }]) {
+      const outcome = await resolveTarget(client, park({ url: '', host: 'http://g.example', team }))
+      expect(outcome.kind).toBe('insecure')
+    }
+  })
+
+  it('scheme-less hosts still promote to https and connect as before', async () => {
+    const client = stubClient({
+      getCredentialsForTeam: jest.fn().mockResolvedValue({ adminToken: 't', url: '', host: 'g.example' }),
+    })
+    const outcome = await resolveTarget(client, park({ url: '', host: 'g.example' }))
+    expect(outcome).toMatchObject({ kind: 'connected', target: { server: 'https://g.example' } })
+  })
+})
+
 describe('connectFromPaste', () => {
   it('stores Server/Token/Name ONLY — instanceId/team backfill on reconcile (charter D14)', () => {
     const target = connectFromPaste(

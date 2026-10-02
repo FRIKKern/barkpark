@@ -411,3 +411,27 @@ describe('a server switch clears the instance it left (mounted App)', () => {
     expect(rowsFor(A)).toBe(1)
   })
 })
+
+/* ── https only (task-4edcfaf85d569b2d) ─────────────────────────────────────── */
+
+describe('a cleartext Cloud address is refused on screen (mounted App)', () => {
+  it('names the address, connects nowhere, and never asks Cloud for a token', async () => {
+    saveConfig({ cloudUrl: CLOUD, cloudToken: 'cloud-tok' }) // signed in, no server yet
+    cloudFleet([barkpark('plain', 'http://plain.example')], { url: 'http://plain.example', adminToken: 'tok' })
+
+    const app = await mountApp()
+    try {
+      const painted = textOf(app)
+      expect(painted).toContain('unencrypted address')
+      expect(painted).toContain('http://plain.example')
+      expect(painted).toContain('your credentials were not sent')
+      expect(painted).not.toContain('Papers') // never reached the connected shell
+      expect(loadConfig().server).toBeUndefined()
+      expect(loadConfig().token).toBeUndefined()
+      const client = mockCloudClient.mock.results.at(-1)?.value as { getCredentialsForTeam: jest.Mock }
+      expect(client.getCredentialsForTeam).not.toHaveBeenCalled()
+    } finally {
+      await unmount(app)
+    }
+  })
+})
