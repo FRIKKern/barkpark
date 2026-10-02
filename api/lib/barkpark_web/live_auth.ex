@@ -161,7 +161,8 @@ defmodule BarkparkWeb.LiveAuth do
             {:cont,
              socket
              |> assign(:api_token, api_token)
-             |> assign(:api_token_raw, token)}
+             |> assign(:api_token_raw, token)
+             |> arm_revocation_teardown(api_token)}
 
           _ ->
             {:cont,
@@ -242,10 +243,48 @@ defmodule BarkparkWeb.LiveAuth do
       end)
 
     case granted do
-      nil -> authorize_user(socket, session, denial_flash)
-      api_token -> {:cont, assign(socket, :api_token, api_token)}
+      nil ->
+        authorize_user(socket, session, denial_flash)
+
+      api_token ->
+        {:cont, socket |> assign(:api_token, api_token) |> arm_revocation_teardown(api_token)}
     end
   end
+
+  # ── Revocation reaches an OPEN LiveView too (r4a realtime authz sweep) ─────
+  #
+  # `Auth.revoke_token/1` (and SCIM's bulk revoke) broadcast "disconnect" on
+  # `UserSocket.disconnect_topic/1`, but only the search WebSocket listened. A
+  # LiveView verified its bearer once, at mount, so a revoked token kept a
+  # Studio socket reading — panes, navigation, live document pushes — until
+  # the browser reconnected. A connected socket now subscribes to the same
+  # topic and, on that broadcast, leaves through a full redirect to /login
+  # (where the dead token no longer verifies). Idempotent per process.
+  defp arm_revocation_teardown(socket, %Barkpark.Auth.ApiToken{id: id}) when is_binary(id) do
+    if connected?(socket) and not Map.get(socket.assigns, :revocation_teardown_armed?, false) do
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, BarkparkWeb.UserSocket.disconnect_topic(id))
+
+      socket
+      |> assign(:revocation_teardown_armed?, true)
+      |> attach_hook(:live_auth_revocation, :handle_info, &revocation_teardown/2)
+    else
+      socket
+    end
+  end
+
+  defp arm_revocation_teardown(socket, _token), do: socket
+
+  defp revocation_teardown(
+         %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:" <> _},
+         socket
+       ) do
+    {:halt,
+     socket
+     |> put_flash(:error, "Your access token was revoked — sign in again")
+     |> redirect(to: "/login")}
+  end
+
+  defp revocation_teardown(_msg, socket), do: {:cont, socket}
 
   # studio-user-login: the account-session arm of the admin/ops gates. Users
   # carry no permissions[] — the grant is the membership ROLE, and the flat
@@ -297,8 +336,11 @@ defmodule BarkparkWeb.LiveAuth do
       end)
 
     case granted do
-      nil -> scoped_admin_authorize_user(socket, session, ws)
-      api_token -> {:cont, assign(socket, :api_token, api_token)}
+      nil ->
+        scoped_admin_authorize_user(socket, session, ws)
+
+      api_token ->
+        {:cont, socket |> assign(:api_token, api_token) |> arm_revocation_teardown(api_token)}
     end
   end
 
