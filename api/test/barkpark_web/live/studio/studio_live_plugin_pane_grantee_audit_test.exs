@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.StudioLivePluginPaneGranteeAuditTest do
   ## VERDICT — NO LEAK (fail-closed by grant row-narrowing, not by absence)
 
   A grant-admitted, non-member Studio socket ({:grant, ctx} admission via
-  `BarkparkWeb.LiveScope.authorize_read/4`, live_scope.ex:104-160) does NOT
+  `BarkparkWeb.LiveScope`'s private `authorize_read/4`) does NOT
   execute any UNNARROWED plugin-context read through the pane-load path. Traced
   end-to-end:
 
@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLivePluginPaneGranteeAuditTest do
       `PaneBuilder.build(dataset, nav_path, scope: …)`.
     * For a grant socket `scope_opts/1` carries `grant_scoped: true` +
       the grant-bearing `caller_context` (scope_helpers.ex:72-81,
-      set by `LiveScope.assign_grant_scope/2`, live_scope.ex:281-286).
+      set by `LiveScope`'s private `assign_grant_scope/2`).
     * `PaneBuilder`'s `scope(opts)` (pane_builder.ex:526-531) returns that
       whole keyword UNTOUCHED into EVERY content read it performs —
       `Content.list_documents` (pane_builder.ex:258, :310),
