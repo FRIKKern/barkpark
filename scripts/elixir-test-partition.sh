@@ -33,11 +33,14 @@
 #       per-file seconds from `mix test --trace` CI logs (a module's time is
 #       the gap from its `<Module> [test/…_test.exs]` header to the next
 #       header or `Finished in`; modules run one at a time under --trace).
+#       Pass the cells of SEVERAL runs and each file weighs its MEAN over the
+#       runs it appeared in, so one runner's noise (one census file measured
+#       33 s on one run and 69 s on the next) stops steering the pack.
 #
 # WEIGHTS defaults to scripts/elixir-test-weights.tsv (`<path>\t<seconds>`).
-# Regenerate it from the Test cells of one green full-suite run:
-#   gh api repos/FRIKKern/barkpark/actions/jobs/<id>/logs > p<k>.log  (each cell)
-#   bash scripts/elixir-test-partition.sh --weights-from-logs p*.log > scripts/elixir-test-weights.tsv
+# Regenerate it from the Test cells of one or more green full-suite runs:
+#   gh api repos/FRIKKern/barkpark/actions/jobs/<id>/logs > r<run>p<k>.log  (each cell)
+#   bash scripts/elixir-test-partition.sh --weights-from-logs r*.log > scripts/elixir-test-weights.tsv
 #
 # P1_EXTRA: cell 1 also runs the one-time guard steps (measured ~40 s more
 # job time than the other cells), so it starts that many seconds loaded.
@@ -157,12 +160,13 @@ case "$mode" in
           t = ts(stamp)
           if (cur != "") secs[cur] += t - t0
           f = rest; sub(/^[^[]*\[/, "", f); sub(/\].*$/, "", f)
+          if (!((f, FILENAME) in seen)) { seen[f, FILENAME] = 1; runs[f]++ }
           cur = f; t0 = t
           next
         }
         if (rest ~ /^Finished in / && cur != "") { secs[cur] += ts(stamp) - t0; cur = "" }
       }
-      END { for (f in secs) printf "%s\t%.2f\n", f, secs[f] }' "$@" | LC_ALL=C sort
+      END { for (f in secs) printf "%s\t%.2f\n", f, secs[f] / runs[f] }' "$@" | LC_ALL=C sort
     ;;
   *)
     echo "usage: $0 --cell K N [WEIGHTS] | --plan N [WEIGHTS] | --weights-from-logs LOG..." >&2
