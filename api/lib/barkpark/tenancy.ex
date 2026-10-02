@@ -1820,6 +1820,22 @@ defmodule Barkpark.Tenancy do
   def create_dataset(%Project{id: project_id}, attrs), do: create_dataset(project_id, attrs)
 
   def create_dataset(project_id, attrs) when is_binary(project_id) do
+    # ONE LOCK ORDER: audit chain BEFORE the dataset row (Run-4 Lane B deadlock
+    # hunt — 261 of 327 logged 40P01s). A write into a new dataset inserts this
+    # row inside its transaction and emits audit afterwards (row → audit), while
+    # a publish (`DedupWall.lock_publish_scope!/3`) or an unscoped mutate batch
+    # takes the workspace's audit-chain lock FIRST and may then create the same
+    # dataset (audit → row): the uncommitted unique row and the advisory lock
+    # closed a cycle. Taking the chain lock before the insert puts both on
+    # audit → row. `Audit.lock_chain!/1` is re-entrant, so the emit later in the
+    # same transaction does not wait on itself; outside a transaction the
+    # xact-scoped lock is released at once (one round-trip, and only when a
+    # dataset is actually created). Taken UNCONDITIONALLY — not gated on
+    # `Repo.in_transaction?/0` — because under the Ecto sandbox that answers
+    # false while the row IS held uncommitted for the whole test: gated, the
+    # broad parallel suite still logged 34 of these 40P01s; ungated, zero.
+    lock_project_audit_chain(project_id)
+
     %Dataset{}
     |> Dataset.changeset(Map.put(attrs, :project_id, project_id))
     # `on_conflict: :nothing` keeps a concurrent duplicate insert from ABORTING
@@ -1831,6 +1847,19 @@ defmodule Barkpark.Tenancy do
     # `conflict_target` matches the `datasets_project_id_slug_index` unique index
     # (project_id, slug).
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:project_id, :slug])
+  end
+
+  defp lock_project_audit_chain(project_id) do
+    case Repo.uuid_or_nil(project_id) do
+      nil ->
+        :ok
+
+      uuid ->
+        case Repo.one(from(p in Project, where: p.id == ^uuid, select: p.workspace_id)) do
+          ws when is_binary(ws) -> Barkpark.Audit.lock_chain!(ws)
+          _ -> :ok
+        end
+    end
   end
 
   @doc """
