@@ -17,6 +17,7 @@
     "@legendapp/list": "3.3.3",
     "expo": "~57.0.25",
     "expo-haptics": "~57.0.3",
+    "expo-secure-store": "~57.0.4",
     "expo-sqlite": "~57.0.3",
     "expo-status-bar": "~57.0.1",
     "fast-text-encoding": "^1.0.6",

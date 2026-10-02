@@ -5,11 +5,51 @@
 import type { ServerEntry, StoredConfig } from '../cascade/knownServers'
 import { rememberServer } from '../cascade/knownServers'
 import { getCacheStore, instanceCacheKey } from './cache'
+import { getSecretStore } from './secrets'
 import { getStorage } from './storage'
 
 const CONFIG_KEY = 'barkpark.config.v1'
 
-export function loadConfig(): StoredConfig {
+// THE CREDENTIAL SPLIT (task-d524e210de241375). The MMKV blob is a plain file,
+// so the two bearer tokens the app holds live in the SecretStore (Keychain /
+// Keystore) and the blob carries only addresses, names and scope. Callers
+// still see one StoredConfig — the split is invisible above this module.
+// The MRU entries keep NO token at all: nothing reads one today (a server
+// switch goes back through the Cloud cascade, which mints a fresh one), and
+// twenty dormant tokens are twenty things to leak.
+const CLOUD_TOKEN_KEY = 'barkpark.cloudToken'
+const INSTANCE_TOKEN_KEY = 'barkpark.instanceToken'
+
+function hasPlaintextToken(config: StoredConfig): boolean {
+  return (
+    config.cloudToken !== undefined ||
+    config.token !== undefined ||
+    (config.knownServers ?? []).some((e) => e.token !== undefined)
+  )
+}
+
+/** The blob's shape: the config minus every token. */
+function withoutTokens(config: StoredConfig): StoredConfig {
+  const blob: StoredConfig = { ...config }
+  delete blob.cloudToken
+  delete blob.token
+  if (blob.knownServers !== undefined) {
+    blob.knownServers = blob.knownServers.map((entry) => {
+      const kept = { ...entry }
+      delete kept.token
+      return kept
+    })
+  }
+  return blob
+}
+
+function writeSecret(key: string, value: string | undefined): void {
+  const secrets = getSecretStore()
+  if ((value ?? '').trim() === '') secrets.delete(key)
+  else secrets.set(key, value as string)
+}
+
+function readBlob(): StoredConfig {
   const raw = getStorage().getString(CONFIG_KEY)
   if (raw === undefined) return {}
   try {
@@ -22,8 +62,30 @@ export function loadConfig(): StoredConfig {
   return {}
 }
 
+export function loadConfig(): StoredConfig {
+  let blob = readBlob()
+  // Migration: an install from before the split holds its tokens in the
+  // blob. Move them into the SecretStore and rewrite the blob clean — the
+  // user stays signed in, and the plaintext copy is gone from this launch on.
+  if (hasPlaintextToken(blob)) {
+    saveConfig(blob)
+    blob = withoutTokens(blob)
+  }
+  const config: StoredConfig = { ...blob }
+  const secrets = getSecretStore()
+  const cloudToken = secrets.get(CLOUD_TOKEN_KEY)
+  const token = secrets.get(INSTANCE_TOKEN_KEY)
+  if (cloudToken !== undefined) config.cloudToken = cloudToken
+  if (token !== undefined) config.token = token
+  return config
+}
+
 export function saveConfig(config: StoredConfig): void {
-  getStorage().set(CONFIG_KEY, JSON.stringify(config))
+  // Secrets first: a sign-out (saveConfig({})) must drop the credentials even
+  // if the blob write that follows were to fail.
+  writeSecret(CLOUD_TOKEN_KEY, config.cloudToken)
+  writeSecret(INSTANCE_TOKEN_KEY, config.token)
+  getStorage().set(CONFIG_KEY, JSON.stringify(withoutTokens(config)))
 }
 
 /** Store the Cloud session (device-flow approval or paste-era login). */
