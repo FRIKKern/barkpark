@@ -81,6 +81,13 @@ defmodule Barkpark.Application do
     # with every plugin off (see `Barkpark.Content.Graph.CorpusSlots`).
     Barkpark.Content.Graph.CorpusSlots.init()
 
+    # The same ownership rule for three caches that used to be created lazily
+    # by their first caller and died with it (task-45913114e6d4ffbe): the DEK
+    # cache, the tenancy default-scope cache and the codelist alias cache.
+    Barkpark.Crypto.DataKeys.init_cache()
+    Barkpark.Tenancy.DefaultScopeCache.init_cache()
+    Barkpark.Content.Codelists.init_cache()
+
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
     # call is a pure function — Registry.collect_workers/1 does NOT depend
