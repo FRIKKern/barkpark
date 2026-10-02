@@ -44,6 +44,7 @@ defmodule BarkparkWeb.QuizPlayLive do
              question: snapshot.question,
              tally: snapshot.tally,
              picked: nil,
+             locked: snapshot.phase != :question,
              error: nil
            )}
 
@@ -63,6 +64,7 @@ defmodule BarkparkWeb.QuizPlayLive do
       question: nil,
       tally: %{},
       picked: nil,
+      locked: false,
       error: nil
     )
   end
@@ -83,6 +85,24 @@ defmodule BarkparkWeb.QuizPlayLive do
   # under the player without a reconnect; clear their pick for the new question.
   def handle_info({:quiz, _pin, {:question_updated, question}}, socket),
     do: {:noreply, assign(socket, question: question, picked: nil)}
+
+  # The host started (or restarted) the question: answers were cleared, so the
+  # phone clears its pick and opens the buttons again.
+  def handle_info({:quiz, _pin, {:phase, :question, payload}}, socket),
+    do:
+      {:noreply,
+       assign(socket,
+         question: payload.question,
+         tally: payload.tally,
+         picked: nil,
+         locked: false
+       )}
+
+  # Reveal, scores, end: the room refuses answers now (`:wrong_phase`), so the
+  # phone says so instead of offering buttons that do nothing.
+  def handle_info({:quiz, _pin, {:phase, phase, _payload}}, socket)
+      when phase in [:reveal, :leaderboard, :ended],
+      do: {:noreply, assign(socket, locked: true)}
 
   def handle_info(_msg, socket), do: {:noreply, socket}
 
@@ -126,12 +146,16 @@ defmodule BarkparkWeb.QuizPlayLive do
               class={"q-choice c#{rem(idx, 4)} #{if @picked == choice.id, do: "is-picked"}"}
               phx-click="answer"
               phx-value-choice={choice.id}
+              disabled={@locked}
             >
               {choice.label}
               <span class="q-count"> · {Map.get(@tally, choice.id, 0)}</span>
             </button>
           </div>
-          <p :if={@picked} class="q-status">Answer locked in — tap another to change it.</p>
+          <p :if={@locked} class="q-status">Answers are closed — look up at the host screen.</p>
+          <p :if={@picked != nil and not @locked} class="q-status">
+            Answer locked in — tap another to change it.
+          </p>
         <% true -> %>
           <p class="q-status">Connecting to the room…</p>
       <% end %>
