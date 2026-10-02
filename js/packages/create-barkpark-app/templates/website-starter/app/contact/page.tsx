@@ -18,6 +18,14 @@ export default function ContactPage() {
       </header>
 
       <form action={formAction} className="space-y-4">
+        {/* Honeypot: hidden from people and assistive tech, filled by bots
+            (lib/contact-guard.ts). Leave it empty. */}
+        <div aria-hidden="true" style={{ position: 'absolute', left: '-10000px' }}>
+          <label>
+            Leave this field empty
+            <input name="bp_hp" type="text" tabIndex={-1} autoComplete="off" defaultValue="" />
+          </label>
+        </div>
         <label className="block">
           <span className="mb-1 block text-sm font-medium">Name</span>
           <input
