@@ -132,18 +132,24 @@ defmodule Barkpark.Search.SurfaceConfigs do
     config
   end
 
+  # The table is normally created at boot by `SurfaceConfigs.CacheOwner`, which
+  # holds it for the life of the node. This fallback only fires where no
+  # application is running (mix tasks, scripts): there the caller owns it.
   defp ensure_cache do
     case :ets.whereis(@cache) do
-      :undefined ->
-        try do
-          :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
-        rescue
-          ArgumentError -> :ok
-        end
-
-      _ref ->
-        :ok
+      :undefined -> create_cache_table()
+      _ref -> :ok
     end
+  end
+
+  @doc false
+  # Creates the cache table owned by the CALLING process. Called by
+  # `SurfaceConfigs.CacheOwner.init/1` at boot; idempotent when the table exists.
+  def create_cache_table do
+    :ets.new(@cache, [:named_table, :public, :set, read_concurrency: true])
+    :ok
+  rescue
+    ArgumentError -> :ok
   end
 
   @spec upsert(String.t(), String.t(), map(), binary() | nil) ::

@@ -458,6 +458,9 @@ defmodule Barkpark.Application do
       # Endpoint so the first login never races an unstarted pool.
       {Finch, name: Barkpark.Auth.Finch, pools: %{default: [size: 10, count: 1]}},
       Barkpark.RateLimiter,
+      # Owns the search surface-config ETS cache for the node's lifetime. A
+      # lazily-created table died with whichever caller made it first.
+      Barkpark.Search.SurfaceConfigs.CacheOwner,
       BarkparkWeb.Telemetry,
       # Rolling req/s + p95 aggregator over [:phoenix, :endpoint, :stop]
       # (cloud-console W5). Up before the Endpoint so early traffic is counted;
