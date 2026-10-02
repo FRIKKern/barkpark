@@ -28,7 +28,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "byline" => ~w(id),
     # `start` (an ordered list's first number) rides with `ordered` for the same reason.
     "ul" => ~w(id ordered start),
-    "stats" => ~w(id),
+    "stats" => ~w(id sourceDefault),
     "steps" => ~w(id),
     "table" => ~w(id headcol),
     "h1" => ~w(id align),
@@ -36,7 +36,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h3" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
-    "stat" => ~w(label value denom verdict),
+    "stat" => ~w(label value denom verdict source),
     # The grid/widget tier (task-3b08cbd8a16ad48e criterion 1) — the corpus's
     # biggest unspellable types and their child elements. `stat` above is
     # SHARED by <stats> and <stat-grid>: the renderer composes both through one
@@ -55,14 +55,14 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "action" => ~w(id label href priority),
     "pipeline" => ~w(id),
     "node" => ~w(title kind source files),
-    "stat-grid" => ~w(id),
+    "stat-grid" => ~w(id sourceDefault),
     "blockquote" => ~w(id cite),
     "toc" => ~w(id depth numbered sticky),
     "entry" => ~w(level anchor),
     "bar-chart" => ~w(id title values),
     "bar" => ~w(label value),
-    "lineage" => ~w(id),
-    "lineage-node" => ~w(title overline source tone),
+    "lineage" => ~w(id sourceDefault),
+    "lineage-node" => ~w(title overline source tone unit value),
     "chart" => ~w(id kind caption min max xlabels),
     "series" => ~w(label),
     "step" => ~w(id title),
@@ -77,7 +77,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "description" => [],
     "a" => ~w(href),
     "hr" => ~w(id),
-    "expandable" => ~w(id summary),
+    "expandable" => ~w(id summary open),
     # The flagship taste tier (task-2957c0caa1ffd1b0) — the three types the
     # SEAL papers use that the kernel could not spell. `<column>` is the
     # positional child of `<columns>` (the `<slot>` precedent, minus the name),
@@ -345,7 +345,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
 
   defp build_block("stats", attrs, sc, cur) do
     with {:ok, items, cur} <- child_seq("stats", "stat", sc, cur, &stat_item_builder/3) do
-      {:ok, %{"type" => "stats", "items" => items} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "stats", "items" => items}
+       |> put_attr("id", attrs)
+       |> put_attr("sourceDefault", attrs), cur}
     end
   end
 
@@ -553,7 +556,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   # `stat-grid` — the renderer's accepted alias of `stats`; SAME `<stat>` child.
   defp build_block("stat-grid", attrs, sc, cur) do
     with {:ok, items, cur} <- child_seq("stat-grid", "stat", sc, cur, &stat_item_builder/3) do
-      {:ok, %{"type" => "stat-grid", "items" => items} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "stat-grid", "items" => items}
+       |> put_attr("id", attrs)
+       |> put_attr("sourceDefault", attrs), cur}
     end
   end
 
@@ -628,6 +634,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
           |> put_attr("overline", node_attrs)
           |> put_attr("source", node_attrs)
           |> put_attr("tone", node_attrs)
+          |> put_attr("unit", node_attrs)
+          |> put_attr("value", node_attrs)
           |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
         {:ok, node, cur}
@@ -635,7 +643,10 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     end
 
     with {:ok, nodes, cur} <- child_seq("lineage", "lineage-node", sc, cur, builder) do
-      {:ok, %{"type" => "lineage", "nodes" => nodes} |> put_attr("id", attrs), cur}
+      {:ok,
+       %{"type" => "lineage", "nodes" => nodes}
+       |> put_attr("id", attrs)
+       |> put_attr("sourceDefault", attrs), cur}
     end
   end
 
@@ -705,7 +716,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
       {:ok,
        %{"type" => "expandable", "blocks" => []}
        |> put_attr("id", attrs)
-       |> put_attr("summary", attrs), cur}
+       |> put_attr("summary", attrs)
+       |> put_bool_attr("open", attrs), cur}
     else
       {blocks, errors, cur} = block_seq(cur, "expandable")
       {errors, cur} = expect_close("expandable", cur, errors)
@@ -714,7 +726,8 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         {:ok,
          %{"type" => "expandable", "blocks" => blocks}
          |> put_attr("id", attrs)
-         |> put_attr("summary", attrs), cur}
+         |> put_attr("summary", attrs)
+         |> put_bool_attr("open", attrs), cur}
       else
         {:skip, errors, cur}
       end
@@ -890,6 +903,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
         |> put_attr("label", stat_attrs)
         |> put_attr("denom", stat_attrs)
         |> put_attr("verdict", stat_attrs)
+        |> put_attr("source", stat_attrs)
         |> then(&if body == "", do: &1, else: Map.put(&1, "body", body))
 
       {:ok, item, cur}

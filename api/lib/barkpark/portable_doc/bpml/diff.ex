@@ -29,7 +29,10 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
   @spec derive([map()], [map()]) ::
           {:ok, [map()], [op :: map()]} | {:error, :diff_verification_failed}
   def derive(old, new) when is_list(old) and is_list(new) do
-    new = BlockIds.ensure_block_ids(new)
+    new =
+      new
+      |> BlockIds.ensure_block_ids()
+      |> keep_unedited(old)
 
     if old == new do
       {:ok, new, []}
@@ -37,6 +40,39 @@ defmodule Barkpark.PortableDoc.Bpml.Diff do
       ops = removes(old, new) ++ walk(old, new)
       verify(old, new, ops)
     end
+  end
+
+  # AN UNEDITED BLOCK KEEPS ITS STORED BYTES (Run-4 round-trip matrix).
+  #
+  # The parser emits the CANONICAL spelling of a block, and the store holds
+  # whatever dialect wrote it: object marks (`%{"type" => "bold"}`) where BPML
+  # reads back `"strong"`, an empty step with no `blocks` key where the parser
+  # adds `[]`, a `role`/`locked` the grammar cannot spell. Compared by full map
+  # equality, every such block derived a `replace-block` on a push nobody
+  # edited — rewriting stored data (and, for a locked block, a refused batch).
+  #
+  # A pushed block whose BPML spelling equals the stored block's spelling was
+  # not edited: the author can only change what BPML spells. So it is replaced
+  # by the stored block before the diff, and derives no op. A block the printer
+  # cannot spell is compared by map equality as before.
+  defp keep_unedited(new, old) do
+    old_by_id = Map.new(old, &{&1["id"], &1})
+
+    Enum.map(new, fn block ->
+      case Map.fetch(old_by_id, block["id"]) do
+        {:ok, stored} when stored != block ->
+          if same_spelling?(stored, block), do: stored, else: block
+
+        _ ->
+          block
+      end
+    end)
+  end
+
+  defp same_spelling?(a, b) do
+    Barkpark.PortableDoc.Bpml.print_blocks([a]) == Barkpark.PortableDoc.Bpml.print_blocks([b])
+  rescue
+    _ -> false
   end
 
   defp removes(old, new) do
