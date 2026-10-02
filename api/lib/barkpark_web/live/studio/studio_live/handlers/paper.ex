@@ -628,10 +628,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           %{"op" => "append-block", "block" => new}
       end
 
-    paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
+    socket
+    |> Shared.paper_op(write_meta(server_minted_block(op), params))
+    |> focus_new_block(new)
+    |> paper_reply()
   end
 
   def paper_add_block(params, socket), do: failed_reply(socket, params)
+
+  # A freshly added or materialized EMPTY paragraph is invisible at rest: the
+  # canvas collapses empty paragraph/ingress scaffolds unless the caret is in
+  # them (resting-scaffolds.js). Without a caret the author clicked Add (or the
+  # Ingress ghost), saw nothing, and typed into the void. On an accepted write,
+  # ask the canvas to put the caret in the new block — the canvas focuses it if
+  # the block is in its run, so the scaffold opens where the author is looking.
+  defp focus_new_block(socket, %{"id" => id, "type" => "paragraph"}) when is_binary(id) do
+    if socket.assigns[:last_paper_save_ok?] == true,
+      do: push_event(socket, "bp:focus-block", %{id: id}),
+      else: socket
+  end
+
+  defp focus_new_block(socket, _block), do: socket
 
   @doc """
   pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
@@ -659,7 +676,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
               %{"op" => "append-block", "block" => block}
           end
 
-        paper_reply(Shared.paper_op(socket, write_meta(server_minted_block(op), params)))
+        socket
+        |> Shared.paper_op(write_meta(server_minted_block(op), params))
+        |> focus_new_block(block)
+        |> paper_reply()
     end
   end
 
