@@ -140,7 +140,7 @@ defmodule BarkparkWeb.LiveScope do
   # ── Seat changes reach an OPEN socket (r4a realtime authz sweep) ───────────
   #
   # Read admission ran at mount and on a scope-changing patch only, so a member
-  # removed or demoted (roster UI, `/v1` members API, SCIM deprovision) kept an
+  # removed or demoted (roster UI or the `/v1` members API) kept an
   # open Studio tab reading the workspace — panes, navigation, live pushes —
   # until the browser reconnected. `Tenancy.Members.announce_seats_changed/1`
   # now publishes on the workspace's seats topic after every seat change; a

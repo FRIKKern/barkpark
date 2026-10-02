@@ -175,20 +175,8 @@ defmodule Barkpark.Scim do
   """
   @spec deprovision_user(Organization.t(), User.t(), keyword()) :: {:ok, map()}
   def deprovision_user(%Organization{} = org, %User{} = user, opts \\ []) do
-    ws_ids = org |> workspace_ids()
-    result = do_deprovision_user(org, user, ws_ids, opts)
-
-    # After COMMIT: open LiveViews in these workspaces re-check their seat
-    # (r4a realtime authz sweep) — the deprovisioned user's tabs close.
-    with {:ok, _} <- result do
-      Enum.each(ws_ids, &Barkpark.Tenancy.Members.announce_seats_changed/1)
-    end
-
-    result
-  end
-
-  defp do_deprovision_user(org, user, ws_ids, opts) do
     hard = Keyword.get(opts, :hard, false)
+    ws_ids = org |> workspace_ids()
 
     Repo.transaction(fn ->
       {:ok, sessions_revoked} = Accounts.revoke_all_user_sessions(user)
