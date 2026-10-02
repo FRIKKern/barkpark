@@ -103,7 +103,7 @@ defmodule BarkparkCloud.DeployLedgerBoxRatesTest do
     test = self()
     id = {@handler_id, make_ref()}
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       id,
       [:barkpark_cloud, :repo, :query],
       fn _e, _m, meta, _c -> send(test, {:sql, meta.query}) end,
@@ -113,7 +113,7 @@ defmodule BarkparkCloud.DeployLedgerBoxRatesTest do
     try do
       fun.()
     after
-      :telemetry.detach(id)
+      BarkparkCloud.TelemetryTap.detach(id)
     end
 
     drain([])

@@ -14,3 +14,7 @@ ExUnit.start()
 BarkparkCloud.SharedTestDb.report!(BarkparkCloud.Repo)
 
 Ecto.Adapters.SQL.Sandbox.mode(BarkparkCloud.Repo, :manual)
+
+# One telemetry handler for the whole run; tests register through it instead
+# of `:telemetry.attach/4` (see BarkparkCloud.TelemetryTap's moduledoc).
+BarkparkCloud.TelemetryTap.start!()
