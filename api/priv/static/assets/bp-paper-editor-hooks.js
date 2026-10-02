@@ -4046,6 +4046,18 @@
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
 
+        // After an Add-block / Ingress-ghost write the server names the new
+        // block: an empty paragraph is collapsed at rest, so the caret must land
+        // in it or the author sees nothing and types into the void. Every run's
+        // hook hears the event; the WC focuses only a block in its own run (and
+        // briefly remembers one that has not arrived yet).
+        this._onFocusBlock = (payload) => {
+          const wc = this.el.querySelector("bp-paper-canvas");
+          if (!wc || typeof wc.focusBlock !== "function") return;
+          wc.focusBlock(payload && payload.id);
+        };
+        this.handleEvent("bp:focus-block", this._onFocusBlock);
+
         // t9 — LIVE TASK-BLOCK PREVIEW (parallel display channel). The server
         // resolves every query-carrying task block into id-keyed rows and pushes
         // `bp:task-preview` {previews:[{block_id, type, snapshot|task|error}, …]}
