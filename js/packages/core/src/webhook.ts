@@ -92,6 +92,9 @@ function timingSafeEqual(a: string, b: string): boolean {
  * if (!ok) return new Response('bad signature', { status: 401 })
  */
 export async function verifyWebhookSignature(opts: VerifyWebhookOptions): Promise<boolean> {
+  // An unset secret (`process.env.X!` with X missing) refuses by guard — never
+  // by relying on the runtime to reject a zero-length HMAC key.
+  if (typeof opts.secret !== 'string' || opts.secret.length === 0) return false
   const parsed = parseSignature(opts.signature)
   if (parsed === null) return false
 
