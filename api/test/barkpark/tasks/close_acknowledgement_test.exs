@@ -79,7 +79,7 @@ defmodule Barkpark.Tasks.CloseAcknowledgementTest do
         "task",
         %{"doc_id" => doc_id, "title" => "outsider report ##{number}", "content" => content},
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     {doc, number}
@@ -93,7 +93,7 @@ defmodule Barkpark.Tasks.CloseAcknowledgementTest do
         "task",
         %{"doc_id" => doc_id, "title" => doc_id, "content" => content},
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     doc

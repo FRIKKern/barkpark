@@ -87,7 +87,7 @@ defmodule Barkpark.Plugins.Github.AckGateBackfillTest do
         "task",
         %{"doc_id" => doc_id, "title" => "outsider report ##{number}", "content" => content},
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     # A criteria-less row cannot even be CLAIMED without saying so out loud —
