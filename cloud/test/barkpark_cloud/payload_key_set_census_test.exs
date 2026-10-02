@@ -4238,7 +4238,8 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
     marker = if marker_bounded?(Map.values(splits)), do: @internal_marker, else: ""
 
     Enum.reduce(files, empty, fn rel, acc ->
-      body = root |> Path.join(rel) |> File.read!()
+      # raw: see walk/2
+      body = root |> Path.join(rel) |> read_raw!()
 
       if String.contains?(body, marker) do
         scan_lines(body, marker, routes, splits, rel, acc)
@@ -4337,11 +4338,43 @@ defmodule BarkparkCloud.WorkerSeamCallerCensus do
     |> Enum.sort()
   end
 
+  # RAW, NOT THROUGH THE FILE SERVER (task-78e0c72801843f0f). `File.read!/1`,
+  # `File.regular?/1` and `File.dir?/1` are each a call into the node's ONE
+  # `file_server_2`, which every async test in the suite shares. MUTATION D walks
+  # a 2733-file corpus (all of tooling/ and every .md) three times — about 11k
+  # file-server round trips per corpus — and on PR #21031's run it hit the 60 s
+  # ExUnit timeout PARKED in `File.read!` -> `:file.call`, queued behind other
+  # tests' file IO. Alone it takes ~1.4 s. A `:raw` stat or open runs in the
+  # calling process and never queues there; only the ~261 `File.ls!/1` calls
+  # (no raw form) still do. The bytes read and the files listed are identical.
   defp walk(path, root) do
     cond do
-      File.regular?(path) -> [Path.relative_to(path, root)]
-      File.dir?(path) -> path |> File.ls!() |> Enum.flat_map(&walk(Path.join(path, &1), root))
-      true -> []
+      File.regular?(path, [:raw]) ->
+        [Path.relative_to(path, root)]
+
+      File.dir?(path, [:raw]) ->
+        path |> File.ls!() |> Enum.flat_map(&walk(Path.join(path, &1), root))
+
+      true ->
+        []
+    end
+  end
+
+  defp read_raw!(path) do
+    {:ok, fd} = :file.open(path, [:read, :raw, :binary])
+
+    try do
+      read_all(fd, [])
+    after
+      :file.close(fd)
+    end
+  end
+
+  defp read_all(fd, acc) do
+    case :file.read(fd, 1_048_576) do
+      {:ok, chunk} -> read_all(fd, [acc | chunk])
+      :eof -> IO.iodata_to_binary(acc)
+      {:error, reason} -> raise File.Error, reason: reason, action: "read file", path: "(raw fd)"
     end
   end
 
