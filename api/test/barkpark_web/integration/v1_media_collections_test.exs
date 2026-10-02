@@ -195,6 +195,74 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
     end
   end
 
+  # The Studio explorer creates AND publishes every folder. Sharing one used to
+  # write the share link through `upsert_document/4`, which always writes
+  # `drafts.<id>`: the folder forked, the index listed it twice, and the share
+  # link served the fork — whose id no asset's membership names — as an EMPTY
+  # gallery (r4-lane-c dogfood).
+  describe "share links on a published folder" do
+    @tag :requires_plugins
+    test "the link serves the folder's assets and the folder stays one row", %{conn: conn} do
+      draft = create_collection!(%{title: "Published set"})
+      folder_id = Content.published_id(draft.doc_id)
+      {:ok, _} = Content.publish_document(folder_id, "mediaCollection", "production")
+      created = upload_asset(conn)
+
+      conn
+      |> authed()
+      |> post(~p"/v1/media/production/collections/#{folder_id}/members", %{
+        "assetId" => created["result"]["id"]
+      })
+      |> json_response(200)
+
+      token =
+        conn
+        |> authed()
+        |> post(~p"/v1/media/production/collections/#{folder_id}/share")
+        |> json_response(200)
+        |> get_in(["result", "token"])
+
+      public =
+        scoped_conn()
+        |> get("/v1/media/production/share/#{token}")
+        |> json_response(200)
+
+      assert public["result"]["total"] == 1, "the share link served an empty gallery"
+      assert public["result"]["collection"]["id"] == folder_id
+
+      rows =
+        conn
+        |> authed()
+        |> get(~p"/v1/media/production/collections")
+        |> json_response(200)
+        |> get_in(["result", "collections"])
+        |> Enum.filter(&(&1["slug"] == folder_id))
+
+      assert [%{"id" => ^folder_id, "shareEnabled" => true}] = rows
+
+      conn
+      |> authed()
+      |> delete(~p"/v1/media/production/collections/#{folder_id}/share")
+      |> json_response(200)
+
+      assert scoped_conn() |> get("/v1/media/production/share/#{token}") |> Map.get(:status) ==
+               410
+
+      rows_after =
+        conn
+        |> authed()
+        |> get(~p"/v1/media/production/collections")
+        |> json_response(200)
+        |> get_in(["result", "collections"])
+        |> Enum.filter(&(&1["slug"] == folder_id))
+
+      assert [%{"id" => ^folder_id, "shareEnabled" => false}] = rows_after
+
+      cleanup_upload(created)
+      Content.delete_document(folder_id, "mediaCollection", "production")
+    end
+  end
+
   # ── Tenancy: workspace-scope isolation (w1.5-E, Goal barkpark-qprk) ──────
   #
   # The flat `/v1/media/:dataset/collections` surface assigns the seeded
