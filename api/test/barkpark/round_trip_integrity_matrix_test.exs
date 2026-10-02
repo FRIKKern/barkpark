@@ -445,7 +445,7 @@ defmodule Barkpark.RoundTripIntegrityMatrixTest do
         {:ok, _minted, ops} = Bpml.Diff.derive(stored, parsed["blocks"])
 
         pushed =
-          build_conn()
+          scoped_conn()
           |> put_req_header("authorization", "Bearer barkpark-test-ingest-token")
           |> put_req_header("content-type", "application/json")
           |> post("/v1/plugins/bulldocs/papers/#{slug}/sync", %{"bpml" => bpml, "baseRev" => rev})
