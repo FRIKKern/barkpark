@@ -98,7 +98,7 @@ defmodule BarkparkWeb.PluginTokenBucketWriteGateTest do
           }
         },
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     task

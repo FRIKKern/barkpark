@@ -255,7 +255,7 @@ defmodule Barkpark.Plugins.Github.AdoptTest do
           "task",
           %{"doc_id" => doc_id, "title" => "Intake #{number}", "content" => content},
           @dataset,
-          scope
+          scope ++ [source: :github]
         )
 
       {:ok, _} = Content.publish_document(doc_id, "task", @dataset, scope)
