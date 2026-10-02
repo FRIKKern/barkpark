@@ -637,9 +637,13 @@ defmodule BarkparkWeb.ChatController do
   end
 
   defp fleet_chunk_or_stop(conn, data, scope, epoch, boundary) do
-    case chunk(conn, data) do
-      {:ok, conn} -> fleet_stream_loop(conn, scope, epoch, boundary)
-      {:error, _} -> conn
+    if sse_credential_live?(conn) do
+      case chunk(conn, data) do
+        {:ok, conn} -> fleet_stream_loop(conn, scope, epoch, boundary)
+        {:error, _} -> conn
+      end
+    else
+      end_unauthorized(conn)
     end
   end
 
@@ -793,11 +797,47 @@ defmodule BarkparkWeb.ChatController do
   end
 
   defp chunk_or_stop(conn, data) do
-    case chunk(conn, data) do
-      {:ok, conn} -> stream_loop(conn)
-      # Chunk error (client gone) terminates the stream — the try/after stops the
-      # forwarder; Recorder/ClaudeChat are untouched.
-      {:error, _} -> conn
+    if sse_credential_live?(conn) do
+      case chunk(conn, data) do
+        {:ok, conn} -> stream_loop(conn)
+        # Chunk error (client gone) terminates the stream — the try/after stops the
+        # forwarder; Recorder/ClaudeChat are untouched.
+        {:error, _} -> conn
+      end
+    else
+      end_unauthorized(conn)
+    end
+  end
+
+  # ── The chat SSE streams outlive no credential (r4a realtime authz sweep) ──
+  #
+  # Both streams (`events/2`, `fleet_events/2`) authorized ONCE, at connect, and
+  # never shed (D5), so a revoked or expired bearer — including a SCIM bulk
+  # revoke — kept receiving a session's live transcript frames and the fleet
+  # herd until the client chose to disconnect. Before writing each frame (and
+  # each keepalive) the stream re-asks `Auth.token_live?/1`, at most once per
+  # `:chat_sse_reauth_interval_ms` (default 2s); a dead bearer gets one
+  # `unauthorized` frame and the stream ends. The never-shed law is about load,
+  # not about authority.
+  defp sse_credential_live?(conn) do
+    now = System.monotonic_time(:millisecond)
+    interval = Application.get_env(:barkpark, :chat_sse_reauth_interval_ms, 2_000)
+
+    case Process.get(:chat_sse_credential_checked_at) do
+      at when is_integer(at) and now - at < interval ->
+        true
+
+      _ ->
+        live? = Barkpark.Auth.token_live?(conn.assigns[:api_token])
+        if live?, do: Process.put(:chat_sse_credential_checked_at, now)
+        live?
+    end
+  end
+
+  defp end_unauthorized(conn) do
+    case chunk(conn, "event: unauthorized\ndata: {}\n\n") do
+      {:ok, conn} -> conn
+      _ -> conn
     end
   end
 
