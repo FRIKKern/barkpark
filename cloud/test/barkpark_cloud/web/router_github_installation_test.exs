@@ -282,6 +282,50 @@ defmodule BarkparkCloud.Web.RouterGithubInstallationTest do
       assert GitHub.installation_for(b_team) == nil
     end
 
+    test "another team's admin cannot record A's id under B's OWN valid state" do
+      # r4a: the state binds the caller's team and user, never the id. B mints
+      # its own state (GET /v1/github/installation hands it out) and pairs it
+      # with the id A recorded — that must not connect B to A's org.
+      configure_github()
+      {a_user, a_team} = user_with_team("owner")
+      {b_user, b_team} = user_with_team("admin")
+
+      assert call(
+               :post,
+               "/v1/github/installations",
+               post_body(a_team, a_user, "4343"),
+               login_token(a_user)
+             ).status == 201
+
+      conn =
+        call(
+          :post,
+          "/v1/github/installations",
+          post_body(b_team, b_user, "4343"),
+          login_token(b_user)
+        )
+
+      assert conn.status == 422, "B recorded A's installation id (#{conn.status})"
+      assert body(conn)["error"] == "installation_not_found"
+      assert GitHub.installation_for(b_team) == nil
+      assert GitHub.connected?(a_team)
+
+      # Control: B's own install still records, and A re-recording its own id is fine.
+      assert call(
+               :post,
+               "/v1/github/installations",
+               post_body(b_team, b_user, "4344"),
+               login_token(b_user)
+             ).status == 201
+
+      assert call(
+               :post,
+               "/v1/github/installations",
+               post_body(a_team, a_user, "4343"),
+               login_token(a_user)
+             ).status == 201
+    end
+
     test "another team's state (stolen from A's install link) does not bind B" do
       configure_github()
       {a_user, a_team} = user_with_team("owner")

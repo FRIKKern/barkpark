@@ -171,21 +171,43 @@ defmodule BarkparkCloud.GitHub do
 
     case client().get_installation(installation_id) do
       {:ok, %{account_login: login}} ->
-        attrs = %{
-          team_id: tid,
-          account_login: login,
-          installation_id_encrypted: Vault.encrypt(to_string(installation_id))
-        }
-
-        base = installation_for(tid) || %Installation{}
-
-        base
-        |> Installation.changeset(attrs)
-        |> Repo.insert_or_update()
+        if held_by_other_team?(installation_id, tid) do
+          # r4a: the existence check above answers for EVERY install of the App,
+          # and the sealed `state` binds the caller's team, not the id. An id
+          # another team has already recorded is that team's org: answer exactly
+          # like an unknown id so the refusal is no ownership oracle.
+          {:error, :installation_not_found}
+        else
+          write_installation(tid, login, installation_id)
+        end
 
       {:error, _reason} ->
         {:error, :installation_not_found}
     end
+  end
+
+  defp write_installation(tid, login, installation_id) do
+    attrs = %{
+      team_id: tid,
+      account_login: login,
+      installation_id_encrypted: Vault.encrypt(to_string(installation_id))
+    }
+
+    base = installation_for(tid) || %Installation{}
+
+    base
+    |> Installation.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  # The handle is AEAD-encrypted with a random nonce, so equality cannot be a
+  # query; installations are one row per team and few, so decrypt and compare.
+  defp held_by_other_team?(installation_id, tid) do
+    wanted = to_string(installation_id)
+
+    from(i in Installation, where: i.team_id != ^tid)
+    |> Repo.all()
+    |> Enum.any?(fn inst -> reveal_installation_id(inst) == {:ok, wanted} end)
   end
 
   @doc """
