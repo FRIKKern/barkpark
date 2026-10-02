@@ -468,7 +468,12 @@ defmodule Barkpark.Content.DedupWallTest do
         handler,
         [:barkpark, :dedup_wall, :defect],
         fn event, measurements, meta, _ ->
-          send(parent, {:defect_event, event, measurements, meta})
+          # OURS ONLY. A handler runs in whichever process emits, and this module
+          # is async: a peer test's event would satisfy (or break) the receive
+          # below. Keep events from this test's process and its $callers lineage.
+          if self() == parent or parent in List.wrap(Process.get(:"$callers")) do
+            send(parent, {:defect_event, event, measurements, meta})
+          end
         end,
         nil
       )
