@@ -850,7 +850,7 @@ jobs:
           filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       - name: Set up Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: "20"
 

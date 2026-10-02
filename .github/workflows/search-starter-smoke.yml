@@ -74,7 +74,7 @@ jobs:
       # stable-by-default only from 22. Under 20 it refuses on the GUARD path
       # (exit 2) rather than reporting an environment failure as a site defect.
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
@@ -103,7 +103,7 @@ jobs:
 
       # Node 22 strips TypeScript types natively — no npm ci, no build step, so
       # this job stays seconds-fast and cannot be broken by a dependency.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: "22"
 
@@ -228,7 +228,7 @@ jobs:
 
       # Node 22: the template's `engines` pins >=22, and graph-smoke.mjs boots
       # the BUILT `.next/standalone/server.js` that Next 16 emits.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         if: steps.decide.outputs.touched == 'true'
         with:
           node-version: "22"
@@ -298,7 +298,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
 
