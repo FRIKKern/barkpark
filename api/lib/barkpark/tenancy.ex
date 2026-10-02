@@ -623,6 +623,9 @@ defmodule Barkpark.Tenancy do
   # wrong, whereas deciding not to bust can.
   defp bust_default_scope(result) do
     DefaultScopeCache.invalidate()
+    # …and the writing process's own request memo (dataset / project / schema
+    # resolutions), so the rest of this request or Studio callback reads fresh.
+    Barkpark.Content.WriteScope.reset_request_memo()
     # Every workspace write funnels here; a Studio socket memoizing this
     # workspace's plugin enablement forgets it (task-c8a87043cb286a2f).
     Barkpark.Plugins.Enablement.workspace_changed(result)
@@ -1831,6 +1834,8 @@ defmodule Barkpark.Tenancy do
     # `conflict_target` matches the `datasets_project_id_slug_index` unique index
     # (project_id, slug).
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:project_id, :slug])
+    # this process's request memo may hold "no such dataset" for this slug
+    |> tap(fn _ -> Barkpark.Content.WriteScope.reset_request_memo() end)
   end
 
   @doc """
