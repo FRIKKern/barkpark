@@ -4,6 +4,7 @@ import { createHmac, timingSafeEqual } from "node:crypto";
 import { FIND_TAG } from "@/lib/find-search";
 import { bpAll } from "@/lib/bp-tags";
 import { DATASET } from "@/lib/config";
+import { WEBHOOK_MAX_BODY_BYTES, readBodyCapped } from "@/lib/read-body-capped";
 
 // Node runtime: HMAC verification needs node:crypto. Force-dynamic: this is a
 // pure side-effect endpoint (verify → revalidate), never cached.
@@ -126,7 +127,13 @@ export async function POST(req: Request): Promise<NextResponse> {
 
   let rawBody: string;
   try {
-    rawBody = await req.text();
+    // Capped read: the body is read before the HMAC can be checked, so an
+    // unsigned sender must not be able to make us buffer an arbitrary amount.
+    const read = await readBodyCapped(req, WEBHOOK_MAX_BODY_BYTES);
+    if (read === null) {
+      return NextResponse.json({ error: "payload_too_large" }, { status: 413 });
+    }
+    rawBody = read;
   } catch {
     return NextResponse.json({ error: "bad_request" }, { status: 400 });
   }
