@@ -59,7 +59,7 @@ defmodule BarkparkWeb.ChatSseTokenLivenessTest do
       Task.async(fn ->
         send(parent, {:streaming, self()})
 
-        build_conn()
+        scoped_conn()
         |> put_req_header("authorization", "Bearer " <> ctx.raw)
         |> get("/v1/chat/sessions/#{ctx.sid}/events")
       end)
