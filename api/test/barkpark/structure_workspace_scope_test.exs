@@ -158,6 +158,43 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
     refute "Bokbasen" in b_titles, "the Bokbasen divider must drop with its link"
   end
 
+  # task-90c3a512181b8537. The Tasks and Tickets plugins used to decide their
+  # desk list with an UNSCOPED `Content.get_schema/2` — "does ANY workspace
+  # have this type in the dataset". So workspace A's plugin output flipped
+  # from no list to a list the moment workspace B registered the type: a read
+  # of B's catalog on A's behalf. Under a workspace scope the plugin no longer
+  # probes. It emits the list, and the host gate decides against A's own
+  # catalog.
+  for {plugin, type, label} <- [
+        {Barkpark.Plugins.Tasks, "task", "Tasks"},
+        {Barkpark.Plugins.Tickets, "ticket", "Tickets"}
+      ] do
+    @plugin plugin
+    @type_name type
+    @label label
+
+    test "#{inspect(plugin)}'s desk presence check never reads another workspace's schema",
+         ctx do
+      a_scope = scope(ctx.ws_a, ctx.proj_a)
+      desk_ctx = %{dataset: @dataset, current_path: nil, scope: a_scope}
+      labels = fn -> @plugin.resolve_desk_items([], desk_ctx) |> Enum.map(& &1.label) end
+
+      before_plugin = labels.()
+      before_desk = Structure.build(@dataset, a_scope)
+
+      register_schema!(@type_name, @label, scope(ctx.ws_b, ctx.proj_b))
+
+      assert labels.() == before_plugin,
+             "workspace B registering `#{@type_name}` changed what #{inspect(@plugin)} " <>
+               "contributes to workspace A's desk"
+
+      assert titles(Structure.build(@dataset, a_scope)) == titles(before_desk)
+
+      # The host gate still keeps the list out of A, which has no such schema.
+      refute @type_name in type_names(Structure.build(@dataset, a_scope))
+    end
+  end
+
   test "an unscoped build keeps legacy (unfiltered) behaviour", ctx do
     register_schema!("paper", "Papers", scope(ctx.ws_a, ctx.proj_a))
     register_schema!("post", "Posts", scope(ctx.ws_b, ctx.proj_b))
