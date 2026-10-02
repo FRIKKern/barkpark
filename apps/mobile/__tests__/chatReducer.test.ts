@@ -330,6 +330,31 @@ test('a Studio answer resolves the same card', () => {
   expect(state.messages[0]?.metadata?.approval_status).toBe('denied')
 })
 
+// One answer per card (task-5478ca0f8a238680): the buttons vanish only on the
+// NEXT render, so two taps that land before that commit — a double tap, or
+// Allow then Deny — both reach the reducer. The first decision stands: the
+// second emits no POST and does not overwrite the badge. Once the first
+// answer FAILS the latch is gone, so the retry still goes out.
+test('a second answer while one is in flight posts nothing', () => {
+  const st: ChatState = {
+    ...initialChatState('s1'),
+    messages: [pendingCardRow(3, 'approval', 'req-1')],
+    lastSeq: 3,
+  }
+  let { state, effects } = drive(st, t0, { type: 'answer', requestId: 'req-1', decision: 'allow' })
+  expect(effects.filter((e) => e.type === 'answerCard')).toHaveLength(1)
+
+  for (const decision of ['deny', 'allow'] as const) {
+    const again = drive(state, t0, { type: 'answer', requestId: 'req-1', decision })
+    expect(again.effects.filter((e) => e.type === 'answerCard')).toHaveLength(0)
+    expect(again.state.answerInFlight['req-1']).toBe('allow')
+  }
+
+  ;({ state } = drive(state, t0, { type: 'answered', requestId: 'req-1', error: 'HTTP 503' }))
+  ;({ effects } = drive(state, t0, { type: 'answer', requestId: 'req-1', decision: 'deny' }))
+  expect(effects).toEqual([{ type: 'answerCard', requestId: 'req-1', decision: 'deny' }])
+})
+
 // The D28 scope fence: a blank request_id or a decision outside allow/deny is
 // a silent no-op (no POST, no state change).
 test('answer scope is allow/deny only', () => {
