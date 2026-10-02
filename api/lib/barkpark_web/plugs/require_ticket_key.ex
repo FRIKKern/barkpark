@@ -36,12 +36,18 @@ defmodule BarkparkWeb.Plugs.RequireTicketKey do
     else
       # One shared emitter → the 403 now carries request_id (+ hint) too; it was
       # the one hand-built branch that dropped it (the 401 already enveloped).
+      # The code-keyed default hint for "forbidden" tells the caller to use a
+      # write/admin workspace token — advice a ticket-key holder cannot act on
+      # and that contradicts the message. The paused key gets its own.
       {:error, :paused} ->
         BarkparkWeb.ErrorResponse.emit_custom(
           conn,
           :forbidden,
           "forbidden",
-          "key paused — contact the operator"
+          "key paused — contact the operator",
+          %{},
+          "The operator who issued this ticket key has paused it. Ask them to resume it; " <>
+            "nothing sent with this key is accepted until then, and your tickets are kept."
         )
 
       _ ->
