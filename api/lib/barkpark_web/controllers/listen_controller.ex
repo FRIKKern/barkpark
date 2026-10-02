@@ -148,6 +148,8 @@ defmodule BarkparkWeb.ListenController do
         conn
       end
 
+    conn = arm_reauth(conn, workspace_id)
+
     try do
       listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
@@ -258,38 +260,10 @@ defmodule BarkparkWeb.ListenController do
         shed(conn)
 
       {:document_changed, %{event_id: _eid} = msg} ->
-        if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
-          # Re-render the live document under THIS subscriber instead of
-          # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
-          # `private` / `owner_only` field never reaches a non-authorized caller.
-          # A `:drop` means this caller is denied the live row — the owner-row
-          # ACL (an owner_scoped doc owned by another user) or her grant ladder
-          # (task-c9c962c3451fd831) — so skip emitting: the frozen snapshot of
-          # that row never reaches a subscriber who cannot read it.
-          #
-          # `live_result/4` short-circuits the per-event `Content.get_document`
-          # round-trip for an ADMIN caller (both redaction gates are proven
-          # no-ops for admins — see its doc), forwarding the broadcast's
-          # already-in-hand `:internal` render; every redacting caller still
-          # re-derives visibility through `redacted_result/4` below.
-          case live_result(msg, dataset, caller_context, scope) do
-            :drop ->
-              listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
-
-            result ->
-              if ListenFilter.pass_result?(lf, result) do
-                case chunk(conn, format_event(live_event(msg, result), dataset)) do
-                  {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
-                  _ -> conn
-                end
-              else
-                listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
-              end
-          end
-        else
-          # Event belongs to a different workspace, or its type/perspective is
-          # outside this subscriber's `?types=` / `?perspective=` — drop it.
-          listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+        # Re-authorize BEFORE emitting this event (r4a): see `reauth_step/1`.
+        case reauth_step(conn) do
+          {:revoked, conn} -> conn
+          {:ok, conn} -> forward_live(conn, msg, dataset, workspace_id, caller_context, scope, lf)
         end
 
       # Ignore legacy messages without event_id (defensive)
@@ -297,12 +271,112 @@ defmodule BarkparkWeb.ListenController do
         listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       30_000 ->
-        case chunk(conn, ": keepalive\n\n") do
-          {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
+        with {:ok, conn} <- reauth_step(conn),
+             {:ok, c} <- chunk(conn, ": keepalive\n\n") do
+          listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
+        else
+          {:revoked, conn} -> conn
           _ -> conn
         end
     end
   end
+
+  defp forward_live(conn, msg, dataset, workspace_id, caller_context, scope, lf) do
+    if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
+      # Re-render the live document under THIS subscriber instead of
+      # forwarding the broadcast's pre-rendered (unredacted) envelope, so a
+      # `private` / `owner_only` field never reaches a non-authorized caller.
+      # A `:drop` means this caller is denied the live row — the owner-row
+      # ACL (an owner_scoped doc owned by another user) or her grant ladder
+      # (task-c9c962c3451fd831) — so skip emitting: the frozen snapshot of
+      # that row never reaches a subscriber who cannot read it.
+      #
+      # `live_result/4` short-circuits the per-event `Content.get_document`
+      # round-trip for an ADMIN caller (both redaction gates are proven
+      # no-ops for admins — see its doc), forwarding the broadcast's
+      # already-in-hand `:internal` render; every redacting caller still
+      # re-derives visibility through `redacted_result/4` below.
+      case live_result(msg, dataset, caller_context, scope) do
+        :drop ->
+          listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+
+        result ->
+          if ListenFilter.pass_result?(lf, result) do
+            case chunk(conn, format_event(live_event(msg, result), dataset)) do
+              {:ok, c} -> listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
+              _ -> conn
+            end
+          else
+            listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+          end
+      end
+    else
+      # Event belongs to a different workspace, or its type/perspective is
+      # outside this subscriber's `?types=` / `?perspective=` — drop it.
+      listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
+    end
+  end
+
+  # ── Mid-stream re-authorization (r4a realtime authz sweep) ───────────────
+  #
+  # The stream used to authorize ONCE, at connect, and then emit for as long as
+  # the client stayed connected (the 30s keepalive keeps it open forever): a
+  # revoked or expired token, or a member removed from the workspace, kept
+  # receiving fully re-rendered documents. `Auth.revoke_token/1`'s teardown
+  # broadcast reaches only WebSocket transports, never an SSE process.
+  #
+  # Before emitting each live event, and on each keepalive, it re-asks, at most
+  # once per `:listen_reauth_interval_ms` (default 2s): is the bearer still live (`Auth.token_live?/1` —
+  # verify_token's own predicate), and, when it was admitted as a MEMBER of the
+  # stream's workspace, is it still one? A failure writes one `unauthorized`
+  # frame and ends the stream. A grant-admitted caller is held to token
+  # liveness; its grant narrowing is the read path's job.
+  defp arm_reauth(conn, workspace_id) do
+    case conn.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{} = token ->
+        member? =
+          is_binary(workspace_id) and
+            Barkpark.Tenancy.Auth.authorize(token, workspace_id, :read) == :ok
+
+        put_private(conn, :listen_reauth, %{
+          token: token,
+          workspace_id: workspace_id,
+          member?: member?,
+          checked_at: System.monotonic_time(:millisecond)
+        })
+
+      _ ->
+        conn
+    end
+  end
+
+  defp reauth_step(%Plug.Conn{private: %{listen_reauth: state}} = conn) do
+    now = System.monotonic_time(:millisecond)
+
+    cond do
+      now - state.checked_at < reauth_interval_ms() ->
+        {:ok, conn}
+
+      still_authorized?(state) ->
+        {:ok, put_private(conn, :listen_reauth, %{state | checked_at: now})}
+
+      true ->
+        case chunk(conn, "event: unauthorized\ndata: {}\n\n") do
+          {:ok, c} -> {:revoked, c}
+          _ -> {:revoked, conn}
+        end
+    end
+  end
+
+  defp reauth_step(conn), do: {:ok, conn}
+
+  defp still_authorized?(%{token: token, workspace_id: ws_id, member?: member?}) do
+    Barkpark.Auth.token_live?(token) and
+      (not member? or Barkpark.Tenancy.Auth.authorize(token, ws_id, :read) == :ok)
+  end
+
+  defp reauth_interval_ms,
+    do: Application.get_env(:barkpark, :listen_reauth_interval_ms, 2_000)
 
   defp start_event_forwarder(topic, listener, limit) do
     caller = self()
