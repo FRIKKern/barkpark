@@ -144,7 +144,7 @@ defmodule Barkpark.Media.Storage.Collections do
   (`get/3`, `assets/3`), so an author can still see and edit it.
   """
   @spec pending_drafts([Document.t()], String.t(), keyword()) :: MapSet.t(String.t())
-  def pending_drafts(docs, dataset, opts \\ []) when is_list(docs) and is_binary(dataset) do
+  def pending_drafts(docs, dataset, _opts \\ []) when is_list(docs) and is_binary(dataset) do
     published =
       for %Document{doc_id: id} = doc <- docs, not draft_id?(id), into: %{}, do: {id, doc}
 
@@ -155,14 +155,20 @@ defmodule Barkpark.Media.Storage.Collections do
       ids ->
         draft_ids = Enum.map(ids, &("drafts." <> &1))
 
+        # Tenancy comes from each PUBLISHED row the caller was already allowed
+        # to list (`list/2`): a draft twin counts only when it sits in exactly
+        # that row's workspace + project — the same pairing `list_query/2`
+        # uses to hide it — so no second tenancy envelope is opened here.
         Document
         |> where([d], d.type == ^@collection_type and d.dataset == ^dataset)
         |> where([d], d.doc_id in ^draft_ids)
-        |> Scope.scope_to_workspace_or_global(opts[:workspace_id], opts[:project_id])
         |> Repo.all()
         |> Enum.flat_map(fn draft ->
           pub = Map.fetch!(published, Content.published_id(draft.doc_id))
-          if differs?(draft, pub), do: [pub.doc_id], else: []
+
+          if same_tenancy?(draft, pub) and differs?(draft, pub),
+            do: [pub.doc_id],
+            else: []
         end)
         |> MapSet.new()
     end
@@ -204,6 +210,9 @@ defmodule Barkpark.Media.Storage.Collections do
 
   defp same_tenancy(query, %Document{workspace_id: ws, project_id: pj}),
     do: where(query, [d], d.workspace_id == ^ws and d.project_id == ^pj)
+
+  defp same_tenancy?(%Document{} = a, %Document{} = b),
+    do: a.workspace_id == b.workspace_id and a.project_id == b.project_id
 
   defp draft_id?(id), do: String.starts_with?(id, "drafts.")
 
