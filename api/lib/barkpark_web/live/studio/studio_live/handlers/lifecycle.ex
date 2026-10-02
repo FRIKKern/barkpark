@@ -62,9 +62,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   # behaviour). With unsaved local edits (`editor_dirty`), do NOT overwrite the
   # buffer — that would silently drop the user's pre-debounce edits. Instead
   # raise the `doc_conflict` banner and let the user choose to reload.
-  def doc_updated(%{sender: sender, doc: doc_data}, socket) do
+  #
+  # A SIBLING PROJECT's save is ignored (r4a realtime authz sweep). The doc
+  # topic is keyed by id + type + workspace + dataset NAME, which a same-id
+  # document in another project of the workspace shares; replacing the form
+  # with it streamed an unshared project's content to a share viewer, and could
+  # autosave it into this project's document for a member.
+  def doc_updated(%{sender: sender, doc: doc_data} = msg, socket) do
     cond do
       sender == self() or is_nil(socket.assigns[:editor_doc]) ->
+        {:noreply, socket}
+
+      other_project?(msg, socket) ->
         {:noreply, socket}
 
       socket.assigns[:editor_dirty] ->
@@ -80,6 +89,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
            doc_conflict: false,
            save_status: "Updated by another user"
          )}
+    end
+  end
+
+  defp other_project?(msg, socket) do
+    case {Map.get(msg, :project_id), socket.assigns[:current_project]} do
+      {msg_proj, %{id: mounted}} when is_binary(msg_proj) and is_binary(mounted) ->
+        msg_proj != mounted
+
+      _ ->
+        false
     end
   end
 
