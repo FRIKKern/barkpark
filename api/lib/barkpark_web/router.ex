@@ -2331,10 +2331,22 @@ defmodule BarkparkWeb.Router do
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────
+  # The flat LISTEN stream rides `:api_grant_read`, like flat analytics below
+  # (r4a realtime authz sweep). On bare `[:api, :require_token]` it never ran
+  # `AssignGrantScope`, so a workspace-less personal token admitted to Default
+  # by a NARROW grant (`DeriveWorkspaceFromToken.grant_covers_read?`) carried no
+  # `:grant_scoped`, `ListenController`'s grant drop never fired, and the grantee
+  # streamed the whole Default workspace — every type, replay and live. GET only,
+  # so the plug's never-on-a-write rule holds.
+  scope "/v1/data", BarkparkWeb do
+    pipe_through([:api, :require_token, :api_grant_read])
+
+    get("/listen/:dataset", ListenController, :listen)
+  end
+
   scope "/v1/data", BarkparkWeb do
     pipe_through([:api, :require_token])
 
-    get("/listen/:dataset", ListenController, :listen)
     # Trigger an Indx blue/green rebuild for the scope. Oban-unique per scope,
     # so concurrent triggers collapse into one rebuild.
     #
