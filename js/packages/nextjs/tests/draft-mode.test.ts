@@ -69,6 +69,49 @@ describe('createDraftModeRoutes — GET (happy path)', () => {
 
     expect(res.headers.get('Location')).toBe('/preview/posts/x')
   })
+
+  it('keeps the redirect on the request origin even for a validly SIGNED off-site path', async () => {
+    // r4a: a signature proves who signed the path, not where it points. A signer
+    // that signs an attacker-shaped slug must not turn this route into an open
+    // redirect — including the forms a browser rewrites to `//host`.
+    const secret = 'shh'
+    const { GET } = createDraftModeRoutes({ previewSecret: secret })
+    for (const bad of [
+      '//evil.example',
+      '/\\evil.example',
+      '/\t/evil.example',
+      '/\n/evil.example',
+      '/x/../\\evil.example',
+      'https://evil.example/p',
+      'javascript:alert(1)',
+    ]) {
+      const { path, expiry, sign } = signDraftModeToken({ path: bad, secret })
+      const res = await GET(makeGet({ path, expiry: String(expiry), sign }))
+      expect(res.status, `status for ${JSON.stringify(bad)}`).toBe(307)
+      expect(res.headers.get('Location'), `Location for ${JSON.stringify(bad)}`).toBe('/')
+    }
+  })
+
+  it('an off-origin resolvePath result falls back to /; a same-origin absolute one keeps its path', async () => {
+    const secret = 'shh'
+    const { path, expiry, sign } = signDraftModeToken({ path: '/posts/x?y=1#z', secret })
+
+    const off = createDraftModeRoutes({
+      previewSecret: secret,
+      resolvePath: () => 'https://evil.example/x',
+    })
+    expect(
+      (await off.GET(makeGet({ path, expiry: String(expiry), sign }))).headers.get('Location'),
+    ).toBe('/')
+
+    const same = createDraftModeRoutes({
+      previewSecret: secret,
+      resolvePath: (p) => `http://localhost/preview${p}`,
+    })
+    expect(
+      (await same.GET(makeGet({ path, expiry: String(expiry), sign }))).headers.get('Location'),
+    ).toBe('/preview/posts/x?y=1#z')
+  })
 })
 
 describe('createDraftModeRoutes — GET (rejections)', () => {
