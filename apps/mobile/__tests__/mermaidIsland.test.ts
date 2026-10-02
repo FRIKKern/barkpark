@@ -73,3 +73,31 @@ describe('the island document pins mermaid to securityLevel strict', () => {
     expect(html).toContain('startOnLoad:false')
   })
 })
+
+// Supply-chain pin (task-48c9adeaec689599): the island loads ONE exact mermaid
+// build, and the WebView refuses it unless its bytes hash to the recorded
+// sha384. A floating `@11` would run every future 11.x — or a compromised CDN
+// file — inside every reader's island. The hash was computed from the CDN file
+// and cross-checked byte-for-byte against the npm tarball's dist/mermaid.min.js.
+describe('the island document pins mermaid by exact version + SRI', () => {
+  const html = islandHtml('flowchart TD\n  A --> B', theme)
+  const tag = /<script src="([^"]+)"([^>]*)><\/script>/.exec(html)
+
+  it('loads an exact version, never a floating major or "latest"', () => {
+    expect(tag?.[1]).toBe('https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js')
+    expect(html).not.toMatch(/mermaid@\d+\//)
+    expect(html).not.toContain('mermaid@latest')
+  })
+
+  it('carries a sha384 integrity hash and anonymous CORS (SRI needs both)', () => {
+    expect(tag?.[2]).toContain(
+      'integrity="sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2"',
+    )
+    expect(tag?.[2]).toContain('crossorigin="anonymous"')
+  })
+
+  it('the CSP still admits exactly that host for scripts and nothing for connect', () => {
+    expect(html).toContain("script-src https://cdn.jsdelivr.net 'unsafe-inline'")
+    expect(html).toContain("connect-src 'none'")
+  })
+})
