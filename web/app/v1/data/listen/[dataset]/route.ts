@@ -1,6 +1,7 @@
 import "server-only";
 import { PUBLIC_API_URL, READ_TOKEN } from "@/lib/bp-env";
 import { DATASET } from "@/lib/config";
+import { DOC_TYPES } from "@/lib/find";
 
 /**
  * Same-origin SSE proxy for the live-listen stream.
@@ -118,6 +119,29 @@ const DRAFT_ID_PREFIX = "drafts.";
  * Anything else that is not a verified-published `mutation` is DROPPED.
  */
 const DOCUMENTLESS_EVENTS = new Set(["welcome", "overloaded"]);
+
+/**
+ * The document types this site serves (`lib/find.ts`'s `DOC_TYPES` — the same
+ * list search and the reader routes use). A PUBLISHED frame of any other type
+ * is dropped: the stream is rendered for the SERVER token, so a published
+ * document of a private type (a `contact` submission, an internal config doc…)
+ * would otherwise reach the anonymous browser with every field the token can
+ * see. The browser only uses a frame as a "something changed, refresh" signal,
+ * so dropping types the site never renders loses nothing.
+ */
+const SERVED_TYPES: ReadonlySet<string> = new Set(DOC_TYPES.map((t) => t.type));
+
+/** Does the frame name a served type — on the frame AND on its result, if any? */
+function isServedType(payload: Record<string, unknown>): boolean {
+  const type = payload.type;
+  if (typeof type !== "string" || !SERVED_TYPES.has(type)) return false;
+  const result = payload.result;
+  if (result !== undefined && result !== null && typeof result === "object") {
+    const resultType = (result as Record<string, unknown>)._type;
+    if (resultType !== undefined && resultType !== type) return false;
+  }
+  return true;
+}
 
 /** SSE frame terminators, per spec: CRLF CRLF, LF LF, or CR CR. */
 const FRAME_TERMINATORS = ["\r\n\r\n", "\n\n", "\r\r"];
@@ -243,7 +267,7 @@ function framePasses(block: string): boolean {
 
   if (event !== "mutation") return false;
   if (payload === null) return false;
-  return isPublishedPayload(payload);
+  return isPublishedPayload(payload) && isServedType(payload);
 }
 
 /**
