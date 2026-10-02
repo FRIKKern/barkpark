@@ -712,7 +712,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
         with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
              :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
           row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
-          write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title)
+
+          # The history row is written INSIDE the row write's transaction (Run-4
+          # concurrent-writer matrix). In the after-commit tail, a concurrent
+          # ingest that committed in between made the revision snapshot differ
+          # from the document, the snapshot trigger RAISED ("revision snapshot
+          # does not exactly match its document"), and the caller got a 500 for
+          # a write that had already landed — with its history row lost. Here
+          # the UPDATE still holds the row, so the snapshot is exactly what was
+          # written; `save_revision` takes the savepoint path in a transaction.
+          with {:ok, %Document{} = doc} <-
+                 write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title) do
+            save_upsert_revision(doc, type, dataset, row, opts)
+            {:ok, doc}
+          end
         end
       end)
 
@@ -817,7 +830,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # firing a pre-commit broadcast. Wrapped: telemetry can never fail a write.
   defp persist_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
     emit_tail_boundary_telemetry(type, dataset, slug)
-    save_upsert_revision(doc, type, dataset, existing, opts)
+    # The history row is no longer written here: it rides the row write's own
+    # transaction in `persist_blocks_doc` (see the note there).
+    _ = {existing, opts}
     broadcast_paper_update(doc)
     enqueue_edge_projection(doc)
     # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
@@ -2459,7 +2474,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @spec apply_document_block_op(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_apply_document_block_op(doc_id, type, op, dataset, opts) end)
+    do:
+      Door.admit(fn ->
+        document_revless(opts, &admitted_apply_document_block_op(doc_id, type, op, dataset, &1))
+      end)
+
+  # [document-revless-cas] (Run-4 concurrent-writer matrix) — the document twin
+  # of [blockops-revless-cas]. A revision-LESS document block op read the row,
+  # patched its block list and wrote the WHOLE content back unfenced, so two ops
+  # on DIFFERENT fields of one document raced and one was silently lost (20/20
+  # rounds). It keeps its API — no revision needed, never refused for a stale
+  # one — but now writes fenced on the rev it read and, on a lost race, re-runs
+  # on the fresh row (bounded). The last attempt falls back to the legacy plain
+  # write: a pathologically hot document degrades to last-writer-wins, never to
+  # an error. An op that carries `:if_rev` is untouched (it already 412s).
+  @document_revless_attempts 8
+
+  defp document_revless(opts, fun) do
+    if Keyword.get(opts, :if_rev) in [nil, ""] do
+      document_revless_attempt(opts, fun, @document_revless_attempts)
+    else
+      fun.(opts)
+    end
+  end
+
+  defp document_revless_attempt(opts, fun, 1), do: fun.(opts)
+
+  defp document_revless_attempt(opts, fun, attempts) do
+    case fun.(Keyword.put(opts, :document_revless_cas, true)) do
+      {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
+      other -> other
+    end
+  end
 
   defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
        when is_binary(doc_id) and is_binary(type) and is_map(op) do
@@ -2530,6 +2576,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       "status" => doc.status,
       "content" => content
     }
+
+    # [document-revless-cas]: fence the write on the row this attempt read —
+    # only when that row IS the write target (the draft); a first fork from the
+    # published row inserts the draft and has no row to fence on.
+    {cas?, opts} = Keyword.pop(opts, :document_revless_cas, false)
+
+    opts =
+      if cas? and doc.doc_id == attrs["doc_id"] and is_binary(doc.rev),
+        do: Keyword.put(opts, :if_rev, doc.rev),
+        else: opts
 
     case Content.upsert_document(type, attrs, dataset, opts) do
       {:ok, saved} ->

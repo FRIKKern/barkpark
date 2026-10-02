@@ -310,6 +310,7 @@ defmodule Barkpark.Content.Forms do
   defp empty_input_state?(field, posted) do
     case coerce_field_value(field, posted) do
       false -> field["type"] == "boolean"
+      "" -> true
       [] -> true
       %{} = m -> map_size(m) == 0
       _ -> false
@@ -572,13 +573,22 @@ defmodule Barkpark.Content.Forms do
   # block list is re-projected, and FREE blocks + block ORDER survive
   # byte-identical. A document WITHOUT blocks (legacy, never Beta-edited) keeps
   # the existing build_content/2 field-map behavior unchanged.
-  defp classic_save_content(base_doc, params, schema, dataset) do
-    base_content = Map.get(base_doc, :content) || %{}
+  #
+  # TWO documents, on purpose (Run-4 concurrent-writer matrix). `base_doc` is
+  # the SNAPSHOT the form was rendered from — "did the author touch this
+  # field?" is answered against it. `current_doc` is what the store holds NOW,
+  # and everything the author did not touch is merged onto IT. Merging onto the
+  # snapshot wrote the mount-time value of every untouched field back, so a
+  # Classic save silently reverted any other writer's change that landed after
+  # the editor mounted (20/20 rounds against a concurrent REST patch).
+  defp classic_save_content(base_doc, current_doc, params, schema, dataset) do
+    snapshot = Map.get(base_doc, :content) || %{}
+    base_content = Map.get(current_doc, :content) || %{}
 
     params =
       params
-      |> preserve_datetime_values(base_content, schema)
-      |> preserve_untouched_fields(base_content, schema)
+      |> preserve_datetime_values(snapshot, schema)
+      |> preserve_untouched_fields(snapshot, schema)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
@@ -800,17 +810,74 @@ defmodule Barkpark.Content.Forms do
   """
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
-  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
+  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []),
+    do: upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, 5)
+
+  # Read the CURRENT draft (else the published row, else the snapshot), merge
+  # the author's changes onto it, and write fenced on the rev just read. A
+  # writer that lands between the read and the write moves the rev, the fence
+  # refuses, and the merge is redone on top of it — so a concurrent change to a
+  # field this save did not touch is never overwritten.
+  defp upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts) do
+    current = current_doc(base_doc, type, dataset, opts)
+
+    case upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
+      {:error, {:rev_mismatch, _}} when attempts > 1 ->
+        upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
+
+      other ->
+        other
+    end
+  end
+
+  defp current_doc(base_doc, type, dataset, opts) do
+    published = DraftId.published_id(base_doc.doc_id)
+    read_opts = Keyword.take(opts, [:workspace_id, :project_id])
+
+    case Content.get_document(DraftId.draft_id(published), type, dataset, read_opts) do
+      {:ok, %Document{} = draft} ->
+        draft
+
+      _ ->
+        case Content.get_document(published, type, dataset, read_opts) do
+          {:ok, %Document{} = pub} -> Map.put(pub, :rev, nil)
+          _ -> Map.put(base_doc, :rev, nil)
+        end
+    end
+  rescue
+    _ -> Map.put(base_doc, :rev, nil)
+  end
+
+  # A row-level field the author did not change keeps what the store holds now.
+  defp row_field(params, key, base_doc, current) do
+    case Map.fetch(params, key) do
+      {:ok, posted} ->
+        if posted == Map.get(base_doc, String.to_existing_atom(key)),
+          do: Map.get(current, String.to_existing_atom(key)) || posted,
+          else: posted
+
+      :error ->
+        Map.get(current, String.to_existing_atom(key))
+    end
+  end
+
+  defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
     with content when is_map(content) <-
-           classic_save_content(base_doc, params, schema, dataset) do
-      new_title = Map.get(params, "title", base_doc.title)
+           classic_save_content(base_doc, current, params, schema, dataset) do
+      new_title = row_field(params, "title", base_doc, current)
 
       attrs = %{
         "doc_id" => DraftId.draft_id(DraftId.published_id(base_doc.doc_id)),
         "title" => new_title,
-        "status" => Map.get(params, "status", base_doc.status),
+        "status" => row_field(params, "status", base_doc, current),
         "content" => content
       }
+
+      opts =
+        case current do
+          %{rev: rev} when is_binary(rev) and rev != "" -> Keyword.put(opts, :if_rev, rev)
+          _ -> opts
+        end
 
       # Validate against the schema the caller RESOLVED (the Studio's scoped
       # lookup), not an unscoped `get_schema/2` re-read: in a non-default
