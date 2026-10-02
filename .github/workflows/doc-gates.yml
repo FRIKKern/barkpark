@@ -847,6 +847,7 @@ jobs:
           # actually check anything. Every other step here reads the worktree
           # and is indifferent to depth.
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       - name: Set up Node
         uses: actions/setup-node@v4

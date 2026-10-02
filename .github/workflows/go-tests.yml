@@ -410,6 +410,7 @@ jobs:
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
           # miss it, which this step treats as a hard failure.
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       # THE READ RATCHET (task-bb930319aeac0266). Runs BEFORE the path verdict,
       # in the always-running dispatcher, so it renders on every event and

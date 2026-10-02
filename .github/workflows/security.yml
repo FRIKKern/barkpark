@@ -262,6 +262,7 @@ jobs:
           # three-dot diff below. A shallow checkout makes `git cat-file -e`
           # miss it, which this step treats as a hard failure.
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       - id: sets
         name: Compute the changed-path set

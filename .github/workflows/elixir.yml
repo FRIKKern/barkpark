@@ -1501,8 +1501,18 @@ jobs:
         # "unknown", which fails BuildInfoTest ("version derives from git … v0.2.23
         # exists") and the git-tag-dependent SelfUpdate.CheckerTest suite. Only
         # this Test job asserts on the derived version, so only it needs the tags.
+        #
+        # `filter: blob:none` (task-d58797f4a9e0c1e2): every commit, tree and
+        # tag still arrives — `git describe`, `HEAD^1`, merge bases and
+        # `--name-only` diffs are unchanged by construction — but blob CONTENTS
+        # arrive only for the checked-out tree (and lazily, on demand, for the
+        # rare test that reads an old revision's file). origin carries ~4,300
+        # branch heads whose 8,000 commits are not on main; the full fetch of
+        # their blobs was most of this step's ~30 s in every cell. Same flag
+        # and reasoning as the `changes` dispatcher above.
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
