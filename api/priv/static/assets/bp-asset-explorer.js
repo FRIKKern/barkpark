@@ -1133,6 +1133,13 @@
         this._renderFacets();
         this._renderToolbarPills();
         this._renderGrid();
+        // The folder inspector shows the folder's asset count. Opening a folder
+        // renders it before this load returns, so it read the PREVIOUS list
+        // (All assets: 7) for a folder holding 1 until something else
+        // re-rendered it. Repaint it once the folder's own list has landed.
+        if (!append && this._collectionId && this._inspectorMode === "collection" && !this._selected) {
+          this._renderCollectionInspector();
+        }
       }
     }
 
@@ -1662,7 +1669,10 @@
       this._inspectorMode = "collection";
 
       const kindLabel = col.kind === "virtual" ? "Smart collection" : "Folder";
-      const count = this._assets.length;
+      // The folder's own total, not the loaded page (a folder larger than one
+      // page would otherwise read as the page size).
+      const count = Math.max(this._total || 0, this._assets.length);
+      const countLabel = count === 1 ? "1 asset" : count + " assets";
 
       this._inspectorBody.innerHTML =
         '<div class="bp-ae-collection-icon">' +
@@ -1673,7 +1683,7 @@
         "</h3>" +
         '<div class="bp-ae-inspector-status">' +
         this._statusBadge(kindLabel, "visibility") +
-        this._statusBadge(count + " assets", "muted") +
+        this._statusBadge(countLabel, "muted") +
         "</div>" +
         (col.description
           ? '<p class="bp-ae-collection-desc text-sm text-muted">' + esc(col.description) + "</p>"
