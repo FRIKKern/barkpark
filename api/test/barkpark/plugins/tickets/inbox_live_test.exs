@@ -202,6 +202,37 @@ defmodule Barkpark.Plugins.Tickets.InboxLiveTest do
       assert html =~ "1h ago"
     end
 
+    test "an attachment link reads the uploaded file name, not the asset id" do
+      thread = %{
+        "id" => "t9",
+        "subject" => "Invoice wrong",
+        "status" => "open",
+        "key_name" => "Kari",
+        "messages" => [
+          %{
+            "author_kind" => "submitter",
+            "body" => "Here it is",
+            "at" => ago(60),
+            "attachments" => ["1426cec4-b9e6-4dfa-918b-b785d1cea22b", "unresolved-id"]
+          }
+        ]
+      }
+
+      html =
+        render_component(&InboxLive.thread_detail/1, %{
+          thread: thread,
+          now: @now,
+          attachment_names: %{"1426cec4-b9e6-4dfa-918b-b785d1cea22b" => "invoice.pdf"}
+        })
+
+      assert html =~ "📎 invoice.pdf"
+      refute html =~ "📎 1426cec4-b9e6-4dfa-918b-b785d1cea22b"
+      # the href still targets the asset id
+      assert html =~ "/attachments/1426cec4-b9e6-4dfa-918b-b785d1cea22b"
+      # an id with no resolved name falls back to the id, never a blank link
+      assert html =~ "📎 unresolved-id"
+    end
+
     test "nil thread renders the unavailable honest state" do
       html = render_component(&InboxLive.thread_detail/1, %{thread: nil})
       assert html =~ ~s(data-test-id="thread-missing")
