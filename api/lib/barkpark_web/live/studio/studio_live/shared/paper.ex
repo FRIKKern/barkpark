@@ -524,7 +524,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
 
           {:error, {:halted, reason}} ->
-            {:error, put_paper_halt(socket, reason)}
+            socket = socket |> sync_paper_edit_doc() |> put_paper_halt(reason)
+
+            {:error,
+             assign(socket, last_paper_save_result: halted_result(socket, request_id, reason))}
 
           {:error, _reason} ->
             {:error,
@@ -1293,6 +1296,48 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> put_flash(:error, message)
     |> assign(save_status: "Save failed")
     |> assign(last_paper_save_ok?: false)
+  end
+
+  @doc """
+  The reply for a canvas batch the server REFUSED with a lifecycle halt (the
+  hollow ratchet: "a published paper cannot be hollowed out").
+
+  A bare `%{saved: false}` left the canvas showing the refused state — an
+  author who undid all their prose saw an empty paper while storage kept the
+  text, and a reload "brought it back". The refusal is final (retrying the
+  same batch is refused again), so the reply says so and carries what the
+  author needs to put view and storage back in step: the reason (`rejected:
+  "halted"` + the server's copy, never editor-authored) and the STORED canvas
+  runs, which the host applies to the run that sent the batch. What the server
+  accepts is unchanged.
+  """
+  @spec halted_result(Phoenix.LiveView.Socket.t(), String.t() | nil, term()) :: map()
+  def halted_result(socket, request_id, reason) do
+    %{
+      saved: false,
+      request_id: request_id,
+      rejected: "halted",
+      reason: halt_reason(reason),
+      current_rev: socket.assigns[:paper_rev],
+      runs: canvas_resync_runs(socket)
+    }
+  end
+
+  @doc """
+  The paper's STORED canvas runs as `%{run_id, blocks}` — the same partition
+  `push_canvas_echo/2` sends — for a host that must resync a run to storage.
+  """
+  @spec canvas_resync_runs(Phoenix.LiveView.Socket.t()) :: [map()]
+  def canvas_resync_runs(socket) do
+    case socket.assigns[:paper_doc] do
+      %{doc_id: slug, content: %{"blocks" => blocks}} when is_list(blocks) ->
+        slug
+        |> canvas_echo_runs(blocks, socket.assigns[:paper_canvas_retained])
+        |> Enum.map(&Map.take(&1, [:run_id, :blocks]))
+
+      _ ->
+        []
+    end
   end
 
   # Normalise a lifecycle-hook halt reason into a display string. The paper

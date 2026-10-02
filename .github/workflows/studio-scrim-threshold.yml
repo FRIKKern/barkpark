@@ -89,6 +89,7 @@ jobs:
           # resolvable for the diff below.
           ref: ${{ github.event.pull_request.head.sha }}
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
 
       - id: set
         name: Does this head touch the scrim cascade or its instruments?

@@ -2927,6 +2927,9 @@ defmodule BarkparkCloud.Accounts do
     query =
       from t in UserToken,
         where: t.token_hash == ^hash and t.context == "2fa_pending",
+        # A password reset stamps revoked_at on pending challenges
+        # (revoke_recovery_credentials/2); a revoked challenge must not verify.
+        where: is_nil(t.revoked_at),
         where: is_nil(t.expires_at) or t.expires_at > ^now
 
     case Repo.one(query) do
@@ -2960,6 +2963,9 @@ defmodule BarkparkCloud.Accounts do
     query =
       from t in UserToken,
         where: t.token_hash == ^hash and t.context == "2fa_pending",
+        # A password reset stamps revoked_at on pending challenges
+        # (revoke_recovery_credentials/2); a revoked challenge must not verify.
+        where: is_nil(t.revoked_at),
         where: is_nil(t.expires_at) or t.expires_at > ^now,
         select: t.sent_to
 

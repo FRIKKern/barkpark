@@ -50,7 +50,11 @@ defmodule Barkpark.Plugins.PreWriteFencesTest do
     # Plugins-off: exercises the write/publish fences that enabled plugins register
     @tag :requires_plugins
     test "the Registry resolves exactly those nine, in that order, under the default load order" do
-      assert Registry.collect_pre_write_fences() == @writer_order
+      # The GitHub plugin loads before Tasks and declares ONE fence of its own
+      # (`content.github` is server-owned — r4a async authz sweep). The Tasks
+      # nine follow it, in the writer's order, unchanged.
+      assert Registry.collect_pre_write_fences() ==
+               [{Barkpark.Plugins.Github.LinkFence, :check} | @writer_order]
     end
   end
 

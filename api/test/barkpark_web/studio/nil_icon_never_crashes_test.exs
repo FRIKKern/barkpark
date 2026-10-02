@@ -103,20 +103,23 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
       assert Enum.count(rows) > 0,
              "the Plugins column rendered no plugin-group row at all — this render proves nothing"
 
-      # A NAMED row, not just "some row": `onixedit` is an installed plugin in
-      # every env (`:barkpark, :plugins`), and the desk resolves its column
-      # under `gating: :none`, so its group row is present on a clean DB.
-      row = LazyHTML.query(doc, ~s(button#item-plugin-grp-onixedit.pane-item))
+      # A NAMED row, not just "some row": `quiz` is installed in every env, ON
+      # by default and placed in the Plugins folder, and it contributes its
+      # `quiz` document list whenever the schema exists — so the GATED desk
+      # carries its group row on a clean DB. (This used to name `onixedit`,
+      # which is OFF by default: it only showed because an empty gated
+      # Plugins tier fell back to the ungated tree.)
+      row = LazyHTML.query(doc, ~s(button#item-plugin-grp-quiz.pane-item))
 
       assert Enum.count(row) == 1,
-             "the Plugins column must carry the onixedit group row; it rendered " <>
+             "the Plugins column must carry the quiz group row; it rendered " <>
                inspect(plugin_group_ids(rows))
 
       label =
         row |> LazyHTML.query("span.pane-item-label") |> LazyHTML.text() |> String.trim()
 
-      assert label == "Onix",
-             "the onixedit group row must wear its display name, got #{inspect(label)}"
+      assert label == "Quiz",
+             "the quiz group row must wear its display name, got #{inspect(label)}"
 
       # THE ICON, DRAWN. The call site is `<.icon name={Icons.drawable_name(item.icon)} />`,
       # which collapses a nil to the neutral "file" glyph — so a nil icon can
@@ -128,13 +131,13 @@ defmodule BarkparkWeb.Studio.NilIconNeverCrashesTest do
       drawn = path_shapes(row, "span.pane-item-icon svg")
 
       assert drawn == glyph_shapes("puzzle"),
-             "the onixedit group row drew a different glyph than the emitters " <>
+             "the quiz group row drew a different glyph than the emitters " <>
                "\"puzzle\" — a plugin row that fell back to " <>
                "#{inspect(fallback_glyph_name(drawn))} is the nil-icon defect wearing " <>
                "a fail-safe costume"
 
       refute drawn == glyph_shapes("file"),
-             "the onixedit group row drew the neutral \"file\" fallback — the emitter " <>
+             "the quiz group row drew the neutral \"file\" fallback — the emitter " <>
                "stopped naming a glyph, or the PaneBuilder forwarding lost it"
     end
   end

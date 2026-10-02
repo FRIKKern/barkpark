@@ -146,6 +146,79 @@ defmodule BarkparkWeb.PaperViewer do
      |> assign(:can_edit?, false)}
   end
 
+  # ── Scoped reader admission, re-run on every socket mount (r4a) ───────────
+  #
+  # The router pipeline (`ResolveWorkspace`, allow_anonymous_default: true)
+  # admits a scoped-reader dead render for a member, an anonymous visitor of
+  # the Default workspace, or a non-member user holding an active read grant.
+  # A socket mounts again on live_redirect, reconnect, or a join replaying the
+  # signed session (~14 days), and none of those run the pipeline — so a
+  # member REMOVED from the workspace kept reading its papers. This hook re-asks
+  # the same three questions on every mount. Share-granted sessions are left to
+  # `PluginScopeSession`, which re-checks item links and section shares itself.
+  # Runs AFTER `:viewer` (it reads that hook's `:current_user` / `:api_token`).
+  #
+  # Skipped on the DEAD render: the pipeline has just admitted that exact
+  # request (possibly by an `Authorization: Bearer` header this session-only
+  # hook cannot see). Skipped too when the URL names another workspace than
+  # the session: `PluginScopeSession` then sends the browser back through HTTP
+  # for that URL, which is the stronger answer.
+  def on_mount(:scoped_admission, params, session, socket) do
+    case socket.assigns[:current_workspace] do
+      %{id: ws_id} = ws when is_binary(ws_id) ->
+        if not Phoenix.LiveView.connected?(socket) or
+             url_names_other_workspace?(params, ws) or
+             session[@session_share_public] == true or
+             scoped_read_admitted?(socket.assigns, ws_id, session["scoped_project_id"]) do
+          {:cont, socket}
+        else
+          {:halt,
+           socket
+           |> Phoenix.LiveView.put_flash(:error, "You no longer have access to this workspace")
+           |> Phoenix.LiveView.redirect(to: "/login")}
+        end
+
+      _ ->
+        {:cont, socket}
+    end
+  end
+
+  defp url_names_other_workspace?(%{"workspace_slug" => slug}, %{slug: ws_slug})
+       when is_binary(slug) and is_binary(ws_slug),
+       do: slug != ws_slug
+
+  defp url_names_other_workspace?(_params, _ws), do: false
+
+  defp scoped_read_admitted?(assigns, ws_id, project_id) do
+    token = assigns[:api_token]
+    user = assigns[:current_user]
+
+    TenancyAuth.authorize(token, ws_id, :read) == :ok or
+      (match?(%User{}, user) and TenancyAuth.authorize(user, ws_id, :read) == :ok) or
+      (is_nil(token) and default_workspace_id?(ws_id)) or
+      grant_admits_read?(user, ws_id, project_id)
+  end
+
+  defp default_workspace_id?(ws_id) do
+    match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+  end
+
+  # Same admission as `ResolveWorkspace.grant_read_ctx/2`: an ACTIVE grant that
+  # admits the mounted desk (workspace + project; the reader route has no
+  # dataset segment) for :read.
+  defp grant_admits_read?(%User{id: uid}, ws_id, project_id) when is_binary(uid) do
+    desk =
+      if is_binary(project_id),
+        do: %{workspace_id: ws_id, project_id: project_id},
+        else: %{workspace_id: ws_id}
+
+    uid
+    |> Barkpark.Access.list_active_grants_for_grantee()
+    |> Enum.any?(&(Barkpark.Access.admits_desk?(&1, :read, desk) == true))
+  end
+
+  defp grant_admits_read?(_user, _ws_id, _project_id), do: false
+
   @doc """
   Whether the mounted viewer may EDIT a paper owned by `workspace_id`.
 

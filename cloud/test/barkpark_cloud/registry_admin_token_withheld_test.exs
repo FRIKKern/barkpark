@@ -55,14 +55,14 @@ defmodule BarkparkCloud.RegistryAdminTokenWithheldTest do
     me = self()
     handler = "xt-withheld-#{System.unique_integer([:positive])}"
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :registry, :admin_token_withheld],
       fn _e, _m, meta, _ -> send(me, {:withheld, meta}) end,
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
 
     log =
       capture_log(fn ->

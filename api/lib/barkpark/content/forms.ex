@@ -154,6 +154,29 @@ defmodule Barkpark.Content.Forms do
             acc
         end
 
+      # A REFERENCE stored as an object (`{"_ref": id, …}` — what `bp seed`, the
+      # SDK and `--set 'author:={"_ref":…}'` write) renders through the picker's
+      # hidden input as the bare id (`FieldInputs.reference_id/1`) and posts it
+      # back. The save stored that bare string, so editing ONLY the title of a
+      # seeded post rewrote `author: {"_ref": "seed-author-3"}` to
+      # `"seed-author-3"` and every `post.author?._ref` reader dropped the post.
+      # Same rule as the clauses around it, and NO new value contract
+      # (task-fcb752b43e11df9b stays the owner's): an untouched reference keeps
+      # its stored value byte-identical; an EDITED one is written in the shape
+      # it was stored in (the object, `_ref` replaced, sibling keys kept). A
+      # bare-string or empty stored value, and a cleared ("") post, are left
+      # exactly as before.
+      %{"type" => "reference", "name" => key}, acc when is_binary(key) ->
+        case {Map.fetch(acc, key), Map.get(base_content, key)} do
+          {{:ok, posted}, %{"_ref" => ref} = stored} when is_binary(posted) and posted != "" ->
+            if posted == ref,
+              do: Map.put(acc, key, stored),
+              else: Map.put(acc, key, Map.put(stored, "_ref", posted))
+
+          _ ->
+            acc
+        end
+
       # A NUMBER or BOOLEAN stored in a field whose Classic input is a string
       # control (string/slug/text/url/…) renders as its string form and posts
       # it back unchanged — and the save stored that string, flipping `42` to
@@ -179,6 +202,120 @@ defmodule Barkpark.Content.Forms do
   end
 
   defp preserve_datetime_values(params, _base_content, _schema), do: params
+
+  # ── THE UNTOUCHED-FIELD RULE, generalised (Run-4 save-path matrix) ────────
+  #
+  # Runs 1–3 fixed this class one cell at a time — 42→"42", true→"true",
+  # erased datetimes, `{_ref}` → bare id — each clause above pinning ONE shape.
+  # The general statement: the Classic form posts EVERY rendered input, so a
+  # field the author never touched arrives as its FORM IMAGE (what the input
+  # showed for the stored value), not as the stored value. A posted value whose
+  # coerced form equals the coerced form image of the stored value was not
+  # edited, and the stored value — whatever shape `bp seed`, the API or the SDK
+  # wrote — is kept byte-identical. This decides no value contract: an EDITED
+  # field is written exactly as before.
+  #
+  # Recursive where the form is: inside an edited composite every untouched
+  # subfield keeps its stored value (and a stored key the form never rendered
+  # survives), and inside an edited arrayOf of the same length every untouched
+  # row does. A wholly untouched top-level field is DROPPED from the params, so
+  # both save branches leave it alone (the merge branch keeps keys it was not
+  # given; the bound-block branch leaves the block unpatched). A field ABSENT
+  # from storage whose post is only the input's empty state — an unchecked
+  # checkbox's "false", an empty list — stays absent instead of gaining a
+  # phantom default. Pinned cell by cell by
+  # `test/barkpark_web/save_path_untouched_field_matrix_test.exs`.
+  defp preserve_untouched_fields(params, base_content, %{fields: fields})
+       when is_map(params) and is_map(base_content) and is_list(fields) do
+    Enum.reduce(fields, params, fn
+      %{"name" => key} = field, acc when is_binary(key) and key not in ["title", "status"] ->
+        case {Map.fetch(acc, key), Map.fetch(base_content, key)} do
+          {{:ok, posted}, {:ok, stored}} when not is_nil(stored) ->
+            restored = restore_untouched(field, posted, stored)
+            if restored === stored, do: Map.delete(acc, key), else: Map.put(acc, key, restored)
+
+          {{:ok, posted}, _absent} ->
+            if empty_input_state?(field, posted), do: Map.delete(acc, key), else: acc
+
+          _ ->
+            acc
+        end
+
+      _, acc ->
+        acc
+    end)
+  end
+
+  defp preserve_untouched_fields(params, _base_content, _schema), do: params
+
+  defp restore_untouched(field, posted, stored) do
+    coerced = coerce_field_value(field, posted)
+
+    cond do
+      coerced === stored ->
+        stored
+
+      coerced === coerce_field_value(field, form_image(field, stored)) ->
+        stored
+
+      field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
+        restore_composite(field, coerced, stored)
+
+      field["type"] == "arrayOf" and is_list(coerced) and is_list(stored) and
+          length(coerced) == length(stored) ->
+        of = Map.get(field, "of") || %{}
+
+        coerced
+        |> Enum.zip(stored)
+        |> Enum.map(fn {p, s} -> restore_untouched(of, p, s) end)
+
+      true ->
+        coerced
+    end
+  end
+
+  defp restore_composite(field, coerced, stored) do
+    subs =
+      case Map.get(field, "fields") do
+        list when is_list(list) -> list
+        _ -> []
+      end
+
+    restored =
+      Enum.reduce(subs, coerced, fn sub, acc ->
+        name = Map.get(sub, "name")
+
+        case is_binary(name) && {Map.fetch(acc, name), Map.fetch(stored, name)} do
+          {{:ok, p}, {:ok, s}} when not is_nil(s) ->
+            Map.put(acc, name, restore_untouched(sub, p, s))
+
+          _ ->
+            acc
+        end
+      end)
+
+    # A stored key the form never rendered (a read-only structured subfield, an
+    # undeclared key) is absent from the post — keep it.
+    Map.merge(Map.drop(stored, Map.keys(restored)), restored)
+  end
+
+  # What the Classic input showed for a stored value — the value the browser
+  # posts back when the author does not touch it.
+  defp form_image(%{"type" => "reference"}, %{"_ref" => ref}) when is_binary(ref), do: ref
+  defp form_image(%{"type" => "datetime"}, v) when is_binary(v), do: datetime_form_value(v)
+  defp form_image(_field, v) when is_number(v) or is_boolean(v), do: to_string(v)
+  defp form_image(_field, nil), do: ""
+  defp form_image(_field, v), do: v
+
+  defp empty_input_state?(field, posted) do
+    case coerce_field_value(field, posted) do
+      false -> field["type"] == "boolean"
+      "" -> true
+      [] -> true
+      %{} = m -> map_size(m) == 0
+      _ -> false
+    end
+  end
 
   # A field's projected content value, flattened to the SCALAR the Classic form
   # input expects. A `body` REGION projects to a body map (`%{"blocks" => …,
@@ -436,9 +573,22 @@ defmodule Barkpark.Content.Forms do
   # block list is re-projected, and FREE blocks + block ORDER survive
   # byte-identical. A document WITHOUT blocks (legacy, never Beta-edited) keeps
   # the existing build_content/2 field-map behavior unchanged.
-  defp classic_save_content(base_doc, params, schema, dataset) do
-    base_content = Map.get(base_doc, :content) || %{}
-    params = preserve_datetime_values(params, base_content, schema)
+  #
+  # TWO documents, on purpose (Run-4 concurrent-writer matrix). `base_doc` is
+  # the SNAPSHOT the form was rendered from — "did the author touch this
+  # field?" is answered against it. `current_doc` is what the store holds NOW,
+  # and everything the author did not touch is merged onto IT. Merging onto the
+  # snapshot wrote the mount-time value of every untouched field back, so a
+  # Classic save silently reverted any other writer's change that landed after
+  # the editor mounted (20/20 rounds against a concurrent REST patch).
+  defp classic_save_content(base_doc, current_doc, params, schema, dataset) do
+    snapshot = Map.get(base_doc, :content) || %{}
+    base_content = Map.get(current_doc, :content) || %{}
+
+    params =
+      params
+      |> preserve_datetime_values(snapshot, schema)
+      |> preserve_untouched_fields(snapshot, schema)
 
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
@@ -660,17 +810,74 @@ defmodule Barkpark.Content.Forms do
   """
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
-  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
+  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []),
+    do: upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, 5)
+
+  # Read the CURRENT draft (else the published row, else the snapshot), merge
+  # the author's changes onto it, and write fenced on the rev just read. A
+  # writer that lands between the read and the write moves the rev, the fence
+  # refuses, and the merge is redone on top of it — so a concurrent change to a
+  # field this save did not touch is never overwritten.
+  defp upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts) do
+    current = current_doc(base_doc, type, dataset, opts)
+
+    case upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
+      {:error, {:rev_mismatch, _}} when attempts > 1 ->
+        upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
+
+      other ->
+        other
+    end
+  end
+
+  defp current_doc(base_doc, type, dataset, opts) do
+    published = DraftId.published_id(base_doc.doc_id)
+    read_opts = Keyword.take(opts, [:workspace_id, :project_id])
+
+    case Content.get_document(DraftId.draft_id(published), type, dataset, read_opts) do
+      {:ok, %Document{} = draft} ->
+        draft
+
+      _ ->
+        case Content.get_document(published, type, dataset, read_opts) do
+          {:ok, %Document{} = pub} -> Map.put(pub, :rev, nil)
+          _ -> Map.put(base_doc, :rev, nil)
+        end
+    end
+  rescue
+    _ -> Map.put(base_doc, :rev, nil)
+  end
+
+  # A row-level field the author did not change keeps what the store holds now.
+  defp row_field(params, key, base_doc, current) do
+    case Map.fetch(params, key) do
+      {:ok, posted} ->
+        if posted == Map.get(base_doc, String.to_existing_atom(key)),
+          do: Map.get(current, String.to_existing_atom(key)) || posted,
+          else: posted
+
+      :error ->
+        Map.get(current, String.to_existing_atom(key))
+    end
+  end
+
+  defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
     with content when is_map(content) <-
-           classic_save_content(base_doc, params, schema, dataset) do
-      new_title = Map.get(params, "title", base_doc.title)
+           classic_save_content(base_doc, current, params, schema, dataset) do
+      new_title = row_field(params, "title", base_doc, current)
 
       attrs = %{
         "doc_id" => DraftId.draft_id(DraftId.published_id(base_doc.doc_id)),
         "title" => new_title,
-        "status" => Map.get(params, "status", base_doc.status),
+        "status" => row_field(params, "status", base_doc, current),
         "content" => content
       }
+
+      opts =
+        case current do
+          %{rev: rev} when is_binary(rev) and rev != "" -> Keyword.put(opts, :if_rev, rev)
+          _ -> opts
+        end
 
       # Validate against the schema the caller RESOLVED (the Studio's scoped
       # lookup), not an unscoped `get_schema/2` re-read: in a non-default

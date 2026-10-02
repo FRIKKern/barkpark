@@ -20,6 +20,7 @@ import (
 	"golang.org/x/term"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
+	"github.com/FRIKKern/barkpark/internal/manifest"
 	"github.com/FRIKKern/barkpark/internal/pdrender"
 )
 
@@ -80,6 +81,16 @@ func runPaper(out *writer, g globals, args []string) int {
 		return exitUsage
 	}
 	verb := args[0]
+	// The working-copy verbs have no usage block of their own; the paper usage
+	// lists them. The global parser strips -h/--help into g.help, so without this
+	// `bp paper export --help` read as a missing <slug> and exited 2.
+	switch verb {
+	case "pull", "export", "status", "diff", "push":
+		if g.help && len(args) == 1 {
+			usagePaper(out, true)
+			return exitOK
+		}
+	}
 	switch verb {
 	case "view":
 		// `bp paper view -h` strips -h into g.help; the only positional left may be
@@ -272,7 +283,12 @@ func runPaperView(out *writer, g globals, args []string) int {
 		}
 	}
 	if qerr != nil {
-		return paperError(out, jsonOut, "not_found", fmt.Sprintf("read paper %q failed: %v", opt.slug, qerr), exitNotFound)
+		msg := fmt.Sprintf("read paper %q failed: %v", opt.slug, qerr)
+		if !pinned && target.share == "" && paperDraftOnly(client, ctx, opt.slug, perspective, qerr) {
+			hint := fmt.Sprintf("paper %q has no published version yet, only a draft — view it with: bp paper view %s --perspective drafts", opt.slug, opt.slug)
+			return paperErrorHint(out, jsonOut, "not_found", msg, hint, exitNotFound)
+		}
+		return paperError(out, jsonOut, "not_found", msg, exitNotFound)
 	}
 	match := paperRawDoc{id: opt.slug, slug: opt.slug, raw: raw}
 
@@ -1542,6 +1558,36 @@ func paperError(out *writer, jsonOut bool, code, msg string, exit int) int {
 	}
 	out.userErr("%s", msg)
 	return exit
+}
+
+// paperErrorHint is paperError plus a next step: a `hint` key in JSON, an
+// indented line on stderr otherwise.
+func paperErrorHint(out *writer, jsonOut bool, code, msg, hint string, exit int) int {
+	if jsonOut {
+		out.renderJSON(map[string]any{
+			"ok":    false,
+			"error": map[string]any{"code": code, "message": msg, "hint": hint},
+		})
+		return exit
+	}
+	out.userErr("%s", msg)
+	out.errf("  hint: %s", hint)
+	return exit
+}
+
+// paperDraftOnly answers "is this 404 a paper that exists only as a draft?".
+// Every new paper starts as a draft and `bp paper view` reads the published
+// perspective by default, so the first view of one's own paper used to fail
+// with a bare 404 and no pointer (r4-lane-c dogfood). It asks only when the
+// published read 404'd and the caller holds a token (drafts are never
+// anonymous), and never renders the draft itself: the published default stays
+// the published default.
+func paperDraftOnly(client *apiclient.Client, ctx manifest.Context, slug, perspective string, readErr error) bool {
+	if perspective != "published" || ctx.Token == "" || !strings.Contains(readErr.Error(), "status 404") {
+		return false
+	}
+	_, err := client.PaperDoc(ctx.Dataset, slug, "drafts")
+	return err == nil
 }
 
 // paperHTMLEntities decodes the handful of entities a paper's body_html

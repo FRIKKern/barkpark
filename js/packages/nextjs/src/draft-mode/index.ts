@@ -145,7 +145,10 @@ export function createDraftModeRoutes(cfg: DraftModeConfig): DraftModeHandlers {
 
     const verifiedPath = path as string
     const target = cfg.resolvePath !== undefined ? cfg.resolvePath(verifiedPath) : verifiedPath
-    return new Response(null, { status: 307, headers: { Location: target } })
+    return new Response(null, {
+      status: 307,
+      headers: { Location: sameOriginLocation(target, url.origin) },
+    })
   }
 
   const DELETE = async (_req: Request): Promise<Response> => {
@@ -155,6 +158,26 @@ export function createDraftModeRoutes(cfg: DraftModeConfig): DraftModeHandlers {
   }
 
   return { GET, DELETE }
+}
+
+/**
+ * The redirect target, kept on the request's own origin. A signature proves who
+ * signed the path, not that the path stays on this site: a signer that signs a
+ * slug like `//evil.example` (or `/\tevil`, which browsers strip to `//evil`)
+ * would otherwise turn the draft route into an open redirect. Control characters
+ * and backslashes are refused outright; anything that resolves off-origin falls
+ * back to `/`. A same-origin absolute URL from `resolvePath` is kept as its path.
+ */
+function sameOriginLocation(target: unknown, origin: string): string {
+  if (typeof target !== 'string' || /[\u0000-\u001f\u007f\\]/.test(target)) return '/'
+  let resolved: URL
+  try {
+    resolved = new URL(target, origin)
+  } catch {
+    return '/'
+  }
+  if (resolved.origin !== origin) return '/'
+  return resolved.pathname + resolved.search + resolved.hash
 }
 
 function validateConfig(cfg: DraftModeConfig): void {

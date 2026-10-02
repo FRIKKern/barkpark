@@ -163,7 +163,7 @@ func TestCheckTagRegistryFailsOpenAndSaysSo(t *testing.T) {
 	defer func() { registeredTagReader = prior }()
 	registeredTagReader = func(manifest.Context) ([]string, bool) { return nil, false }
 
-	ref, blind := checkTagRegistry(manifest.Context{}, goodBody())
+	ref, blind, _ := checkTagRegistry(manifest.Context{}, goodBody())
 	if ref != nil {
 		t.Fatalf("a blind read produced a refusal: %+v", ref)
 	}
@@ -226,6 +226,50 @@ func TestTaskCreatePublishRefusesWhenTheRegistryIsUnreadable(t *testing.T) {
 		if !strings.Contains(se.String(), want) {
 			t.Errorf("the refusal does not carry %q:\n%s", want, se.String())
 		}
+	}
+}
+
+// An EMPTY registry is not an unreadable one (r4-lane-c dogfood, fresh install):
+// the read worked and returned no tags, and `bp doc ls tag --all` said count 0
+// while the refusal said "could not be read". Still fail closed before the
+// create, but name the registry as empty and say how to register a tag.
+func TestTaskCreatePublishNamesAnEmptyRegistry(t *testing.T) {
+	var creates int
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		rw.Header().Set("Content-Type", "application/json")
+		if strings.Contains(req.URL.Path, "/v1/data/query/") {
+			_, _ = rw.Write([]byte(`{"result":{"documents":[],"hasMore":false}}`))
+			return
+		}
+		creates++
+		_ = json.NewEncoder(rw).Encode(map[string]any{"results": []any{}})
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se}
+	code := runTaskCreate(w, globals{yes: true}, manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"},
+		[]string{"a task", "--publish", "--description", wallPassingDescription, "--set", wallPassingTags})
+	if code == exitOK {
+		t.Fatalf("an empty registry still published: %s", so.String())
+	}
+	if creates != 0 {
+		t.Fatalf("creates=%d, want 0 — the refusal must land BEFORE the create", creates)
+	}
+	got := se.String()
+	for _, want := range []string{
+		tagRegistryEmptyCode,
+		`dataset "production" is EMPTY`,
+		"bp doc create tag --set _id=",
+		"bp doc publish tag ",
+		"nothing was created — no draft was left behind.",
+	} {
+		if !strings.Contains(got, want) {
+			t.Errorf("the refusal does not carry %q:\n%s", want, got)
+		}
+	}
+	if strings.Contains(got, "could not be read") || strings.Contains(got, tagRegistryUnreadableCode) {
+		t.Errorf("an empty registry is reported as unreadable:\n%s", got)
 	}
 }
 

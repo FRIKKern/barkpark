@@ -40,6 +40,7 @@ export type ResolveOutcome =
   | { kind: 'connected'; target: ConnectTarget }
   | { kind: 'paste'; request: PasteRequest }
   | { kind: 'provisioning'; name: string }
+  | { kind: 'insecure'; name: string; address: string }
 
 export type FleetDecision =
   | { kind: 'empty' }
@@ -57,6 +58,21 @@ export function fleetTarget(url: string, host: string): string {
   if (raw === '') return ''
   if (!raw.includes('://')) raw = `https://${raw}`
   return raw
+}
+
+/**
+ * HTTPS ONLY for Cloud-sourced addresses (task-4edcfaf85d569b2d). Cloud only
+ * ever returns https instance URLs, so a cleartext (or any other non-https)
+ * address from the fleet list, the app-token mint or the credentials reveal
+ * is a Cloud bug or an attack — and the app would hand it a bearer token.
+ * Release-build OS defaults (ATS, Android cleartext) usually block the
+ * request anyway; this refusal does not lean on them. '' (no address yet) is
+ * not insecure — it is still provisioning. The app has no manual server-URL
+ * entry (paste takes a token, never a URL), so no local/dev flow is touched.
+ */
+export function isInsecureAddress(address: string): boolean {
+  const a = address.trim()
+  return a !== '' && !/^https:\/\//i.test(a)
 }
 
 /** The n==0 / n==1 / n>=2 decision — pure, synchronous, trivially testable. */
@@ -93,6 +109,9 @@ export async function resolveTarget(
   picked: CloudBarkpark,
 ): Promise<ResolveOutcome> {
   const server = fleetTarget(picked.url, picked.host)
+  // Refuse a cleartext fleet row BEFORE asking Cloud for any token, and
+  // before the paste fallback could send a pasted one over http.
+  if (isInsecureAddress(server)) return { kind: 'insecure', name: picked.name, address: server }
 
   if (isMemberRole(picked)) {
     // A member cannot reveal the admin token (the CLI stops here); the app's
@@ -101,10 +120,14 @@ export async function resolveTarget(
     if (server === '') return { kind: 'provisioning', name: picked.name }
     const minted = await client.mintAppToken(picked.id, picked.team?.id ?? '')
     if (minted.kind === 'minted' && minted.token !== '') {
+      const mintedAt = fleetTarget(minted.url, minted.host) || server
+      if (isInsecureAddress(mintedAt)) {
+        return { kind: 'insecure', name: picked.name, address: mintedAt }
+      }
       return {
         kind: 'connected',
         target: {
-          server: fleetTarget(minted.url, minted.host) || server,
+          server: mintedAt,
           token: minted.token,
           name: picked.name,
           instanceId: picked.id.trim(),
@@ -130,6 +153,7 @@ export async function resolveTarget(
 
   const target = fleetTarget(creds.url, creds.host)
   if (target === '') return { kind: 'provisioning', name: picked.name }
+  if (isInsecureAddress(target)) return { kind: 'insecure', name: picked.name, address: target }
   return {
     kind: 'connected',
     target: {

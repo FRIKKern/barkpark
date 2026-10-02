@@ -53,6 +53,32 @@ defmodule BarkparkCloud.AccountsResetRevokesRecoveryCredentialsTest do
     assert live(user.id, "change_email") == 0
   end
 
+  # r3b sweep: revoke_recovery_credentials/2 stamps `revoked_at` on 2fa_pending
+  # rows, but the verifier never read the stamp — an attacker who had already
+  # cleared the PASSWORD leg kept a live second-factor challenge for the rest of
+  # its 5-minute TTL after the victim reset. The revoke has to mean something.
+  test "a reset kills an in-flight 2FA challenge (the pending token stops verifying)", %{
+    user: user
+  } do
+    {:ok, pending} = Accounts.create_two_factor_pending_token(user)
+    assert %{id: id} = Accounts.verify_two_factor_pending_token(pending)
+    assert id == user.id
+
+    {:ok, {_user, reset}} = Accounts.request_password_reset("recover@example.com")
+    assert {:ok, _} = Accounts.reset_password_by_token(reset, "new horse battery 22")
+
+    assert live(user.id, "2fa_pending") == 0
+    assert Accounts.verify_two_factor_pending_token(pending) == nil
+    assert Accounts.two_factor_pending_first_factor(pending) == nil
+  end
+
+  test "CONTROL: an unrevoked pending challenge still verifies", %{user: user} do
+    {:ok, pending} = Accounts.create_two_factor_pending_token(user, "github")
+    assert %{id: id} = Accounts.verify_two_factor_pending_token(pending)
+    assert id == user.id
+    assert Accounts.two_factor_pending_first_factor(pending) == "github"
+  end
+
   test "CONTROL: sign-out-everywhere (the password-CHANGE path) still spares PATs", %{
     pat: pat,
     user: user

@@ -131,8 +131,15 @@ defmodule BarkparkCloud.Workers.DailyDigestWorker do
   rescue
     e ->
       # A digest is best-effort operator convenience — one bad render/send must
-      # never wedge the maintenance queue. Log and move on (next day retries).
-      Logger.error("DailyDigestWorker crashed: #{Exception.message(e)}")
-      :ok
+      # never wedge the maintenance queue, so the crash is caught and logged.
+      # But it is NOT returned as `:ok` (task-db39f46df0b3ac21): that wrote
+      # `completed` over a run that mailed nobody — the same active false claim
+      # the `{:cancel, :no_team_recipients}` arm above refuses. `{:error, msg}`
+      # with `max_attempts: 1` lands the row in `discarded` carrying the crash
+      # message, which is the state that reads as a crash. No retry storm: there
+      # is no second attempt (the next day's tick is the retry).
+      message = Exception.message(e)
+      Logger.error("DailyDigestWorker crashed: #{message}")
+      {:error, message}
   end
 end

@@ -245,6 +245,10 @@ func humanizeReason(err error) string {
 		return "server unreachable (" + rootCause(uerr).Error() + ")"
 	}
 	raw := strings.TrimSpace(err.Error())
+	// "not_holder:<worker>" — the server's refusal of a close by a non-holder.
+	if holder, ok := strings.CutPrefix(raw, "not_holder:"); ok {
+		return "held by " + holder + " — only the holder can close it"
+	}
 	switch strings.ToLower(raw) {
 	case "fenced_off":
 		return "stale epoch (task moved)"

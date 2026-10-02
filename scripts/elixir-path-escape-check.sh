@@ -158,6 +158,9 @@ scripts/elixir-path-escape-check.sh
 scripts/elixir-path-escape-check.test.sh
 scripts/elixir-impacted-tests.sh
 scripts/elixir-impacted-tests.test.sh
+scripts/elixir-test-partition.sh
+scripts/elixir-test-partition.test.sh
+scripts/elixir-test-weights.tsv
 scripts/elixir-main-red-attribution.sh
 scripts/elixir-main-red-attribution.test.sh
 scripts/gate-announces-skips.test.sh
@@ -1025,24 +1028,72 @@ norm_path() {
 # `**` is substituted through a placeholder rather than directly: a naive
 # `s/\*\*/.*/` followed by `s/\*/[^\/]*/` would re-rewrite the `*` it just
 # emitted and turn `.*` into `.[^/]*`.
-glob_to_ere() {
-  local g="$1" body
+#
+# NO FORKS (task-94379622c9572d2c). This used to spell each form as a
+# `$(printf | sed)` — two forks per glob — and `set_ere` runs it once per glob
+# in the set (~116 for `test`), so every `--match` paid ~230 forks before it
+# read a byte of stdin. scripts/pds-door-census.sh asks `--match` twice per
+# instrument row, 118 times per `--check`, and those forks were 95% of its
+# wall time (145 of 153 s measured locally) and most of PdsDoorCensusTest's
+# 80-120 s on CI. The escape class is the one the sed spelled, character for
+# character; scripts/elixir-path-escape-check.test.sh pins the emitted ERE
+# byte-for-byte against the sed spelling, so the two cannot drift apart.
+#
+# `glob_to_ere_var` leaves its answer in GLOB_ERE (no subshell);
+# `glob_to_ere` prints it, for callers that want a string.
+ere_escape_var() {
+  # $1 = text, $2 = `star` to escape `*` as well. Answer in ERE_ESCAPED.
+  # Walks the text a RUN at a time: the longest prefix holding none of the
+  # class is copied whole, then the one special character after it is
+  # handled. A path has a handful of specials (`.`, `*`), so this is a few
+  # iterations per glob rather than one per character.
+  # The class rides a single-quoted variable, never inline: a literal `}`
+  # inside `${…}` closes the expansion early (measured — every ERE broke).
+  local rest="$1" run c cls='[]\[\\.^$+?(){}|*]'
+  ERE_ESCAPED=""
+  while [ -n "$rest" ]; do
+    run="${rest%%$cls*}"
+    ERE_ESCAPED="$ERE_ESCAPED$run"
+    rest="${rest:${#run}}"
+    [ -n "$rest" ] || break
+    c="${rest:0:1}"
+    rest="${rest:1}"
+    case "$c" in
+      '[' | ']' | '\' | '.' | '^' | '$' | '+' | '?' | '(' | ')' | '{' | '}' | '|')
+        ERE_ESCAPED="$ERE_ESCAPED\\$c"
+        ;;
+      '*')
+        if [ "$2" = star ]; then ERE_ESCAPED="$ERE_ESCAPED\\*"; else ERE_ESCAPED="$ERE_ESCAPED*"; fi
+        ;;
+      *) ERE_ESCAPED="$ERE_ESCAPED$c" ;;
+    esac
+  done
+}
+
+glob_to_ere_var() {
+  local g="$1" t
   case "$g" in
     */'**')
-      body="${g%/**}"
-      printf '^%s(/|$)' "$(printf '%s' "$body" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ere_escape_var "${g%/**}" star
+      GLOB_ERE="^${ERE_ESCAPED}(/|\$)"
       ;;
     *'*'*)
-      printf '^%s$' "$(printf '%s' "$g" |
-        sed -e 's/[][\\.^$+?(){}|]/\\&/g' \
-            -e 's/\*\*/@@ELIXIRDSTAR@@/g' \
-            -e 's,\*,[^/]*,g' \
-            -e 's,@@ELIXIRDSTAR@@,.*,g')"
+      ere_escape_var "$g" keep
+      t="${ERE_ESCAPED//\*\*/@@ELIXIRDSTAR@@}"
+      t="${t//\*/[^/]*}"
+      t="${t//@@ELIXIRDSTAR@@/.*}"
+      GLOB_ERE="^${t}\$"
       ;;
     *)
-      printf '^%s$' "$(printf '%s' "$g" | sed -e 's/[][\\.^$*+?(){}|]/\\&/g')"
+      ere_escape_var "$g" star
+      GLOB_ERE="^${ERE_ESCAPED}\$"
       ;;
   esac
+}
+
+glob_to_ere() {
+  glob_to_ere_var "$1"
+  printf '%s' "$GLOB_ERE"
 }
 
 # ---------------------------------------------------------------------------
@@ -1174,15 +1225,25 @@ family_derive() {
     ELIXIR_FAMILY_BLIND=root
     return 0
   fi
+  # ONE pipeline over every source, not one per source (task-94379622c9572d2c).
+  # All three stages are line filters and `-h` drops the file names, so this
+  # prints the same lines in the same order as the per-file loop it replaced —
+  # which cost three greps per source (~100 forks) on EVERY invocation, since
+  # this derivation runs before any mode. `|| true` keeps the old per-file
+  # semantics: a source that matches nothing (or cannot be read) adds nothing.
   ELIXIR_FAMILY_GLOBS="$(
+    family_files=()
     while IFS= read -r src; do
       [ -n "$src" ] || continue
-      grep -v '^[[:space:]]*#' "$ELIXIR_FAMILY_ROOT/$src" |
-        grep -E "$ELIXIR_FAMILY_ENUM_VERBS" |
-        grep -oE "($ELIXIR_FAMILY_ROOTS)/[A-Za-z0-9_./*-]*\*[A-Za-z0-9_./*-]*" || true
+      family_files+=("$ELIXIR_FAMILY_ROOT/$src")
     done <<EOF
 $ELIXIR_FAMILY_SOURCES
 EOF
+    if [ "${#family_files[@]}" -gt 0 ]; then
+      grep -hv '^[[:space:]]*#' "${family_files[@]}" |
+        grep -E "$ELIXIR_FAMILY_ENUM_VERBS" |
+        grep -oE "($ELIXIR_FAMILY_ROOTS)/[A-Za-z0-9_./*-]*\*[A-Za-z0-9_./*-]*" || true
+    fi
   )"
   # Strip trailing punctuation a prose line leaves behind (`scripts/pds-*.`
   # out of `scripts/pds-*.{sh,exs}`), drop the bare-`*` last segment — that is
@@ -1282,7 +1343,8 @@ set_ere() {
   while IFS= read -r g; do
     [ -n "$g" ] || continue
     if [ -n "$out" ]; then out="$out|"; fi
-    out="$out$(glob_to_ere "$g")"
+    glob_to_ere_var "$g"
+    out="$out$GLOB_ERE"
   done <<EOF
 $(set_globs "$1" "${2:-whole}")
 EOF

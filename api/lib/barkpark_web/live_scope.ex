@@ -46,10 +46,17 @@ defmodule BarkparkWeb.LiveScope do
   alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ReturnTo
 
+  # The {workspace_slug, project_slug, dataset} triple `resolve_and_authorize/2`
+  # last admitted. Written ONLY there; `reauthorize/3` compares the URL with it.
+  @authorized_scope :live_scope_authorized_scope
+
   def on_mount(:resolve, params, _session, socket) do
     case resolve_and_authorize(socket, params) do
       {:ok, socket} ->
-        {:cont, attach_hook(socket, :live_scope_reauth, :handle_params, &reauthorize/3)}
+        {:cont,
+         socket
+         |> attach_hook(:live_scope_reauth, :handle_params, &reauthorize/3)
+         |> arm_seat_watch()}
 
       {:halt, socket} ->
         {:halt, socket}
@@ -72,22 +79,33 @@ defmodule BarkparkWeb.LiveScope do
   # comparison is a map lookup, not a query, so the hot path (pane nav within one
   # dataset) still short-circuits; re-authorization fires ONLY on a real dataset
   # change.
+  #
+  # COMPARED AGAINST THE AUTHORIZED STAMP, NOT THE LIVE ASSIGNS (r4a LiveView
+  # authz sweep). This used to compare the URL with `current_workspace` /
+  # `current_project` / `dataset` — but StudioLive's `switch-project` and
+  # `switch-workspace` handlers WRITE the new project/workspace into those
+  # assigns before they push_patch, so the patch compared the new URL with the
+  # new assigns, matched, and skipped `authorize_read/4`. Shares are per
+  # project and both events are on `@readonly_events`, so an anonymous
+  # `:docs`-share viewer could switch into an UNSHARED sibling project (same
+  # dataset slug) and read it. `@authorized_scope` is written only by
+  # `resolve_and_authorize/2`, so no LiveView handler can make a scope look
+  # already-authorized.
   defp reauthorize(params, _uri, socket) do
-    ws = socket.assigns[:current_workspace]
-    proj = socket.assigns[:current_project]
-
     same_scope? =
-      is_map(ws) and is_map(proj) and
-        Map.get(ws, :slug) == params["workspace_slug"] and
-        Map.get(proj, :slug) == params["project_slug"] and
-        socket.assigns[:dataset] == params["dataset"]
+      socket.assigns[@authorized_scope] ==
+        {params["workspace_slug"], params["project_slug"], params["dataset"]}
 
     if same_scope? do
       {:cont, socket}
     else
       case resolve_and_authorize(socket, params) do
-        {:ok, socket} -> {:cont, socket}
-        {:halt, socket} -> {:halt, socket}
+        {:ok, socket} ->
+          {:cont,
+           if(socket.assigns[:seat_watch?], do: watch_current_workspace(socket), else: socket)}
+
+        {:halt, socket} ->
+          {:halt, socket}
       end
     end
   end
@@ -108,6 +126,7 @@ defmodule BarkparkWeb.LiveScope do
           scope_prefix: "/w/#{ws.slug}/p/#{proj.slug}",
           share_access: if(grade == :share_read, do: :read, else: nil)
         )
+        |> assign(@authorized_scope, {ws_slug, proj_slug, params["dataset"]})
         |> assign_grant_scope(grade)
 
       {:ok, maybe_attach_readonly_gate(socket, grade)}
@@ -117,6 +136,62 @@ defmodule BarkparkWeb.LiveScope do
   end
 
   defp resolve_and_authorize(socket, _params), do: deny(socket)
+
+  # ── Seat changes reach an OPEN socket (r4a realtime authz sweep) ───────────
+  #
+  # Read admission ran at mount and on a scope-changing patch only, so a member
+  # removed or demoted (roster UI or the `/v1` members API) kept an
+  # open Studio tab reading the workspace — panes, navigation, live pushes —
+  # until the browser reconnected. `Tenancy.Members.announce_seats_changed/1`
+  # now publishes on the workspace's seats topic after every seat change; a
+  # connected socket listens for its CURRENT workspace and re-runs the same
+  # `resolve_and_authorize/2` against the scope it last admitted. A refusal is
+  # the ordinary `deny/1` (full redirect to /login).
+  defp arm_seat_watch(socket) do
+    if Phoenix.LiveView.connected?(socket) and not Map.get(socket.assigns, :seat_watch?, false) do
+      socket
+      |> assign(:seat_watch?, true)
+      |> watch_current_workspace()
+      |> attach_hook(:live_scope_seat_watch, :handle_info, &seat_changed/2)
+    else
+      socket
+    end
+  end
+
+  # Subscribe to the seats topic of the workspace the socket is in now; a live
+  # patch into another workspace re-subscribes (`reauthorize/3` → here).
+  defp watch_current_workspace(socket) do
+    case {socket.assigns[:current_workspace], socket.assigns[:seat_watch_ws]} do
+      {%{id: ws_id}, ws_id} ->
+        socket
+
+      {%{id: ws_id}, previous} when is_binary(ws_id) ->
+        if is_binary(previous),
+          do: Phoenix.PubSub.unsubscribe(Barkpark.PubSub, Tenancy.Members.seats_topic(previous))
+
+        Phoenix.PubSub.subscribe(Barkpark.PubSub, Tenancy.Members.seats_topic(ws_id))
+        assign(socket, :seat_watch_ws, ws_id)
+
+      _ ->
+        socket
+    end
+  end
+
+  defp seat_changed({:workspace_seats_changed, ws_id}, socket) do
+    with %{id: ^ws_id} <- socket.assigns[:current_workspace],
+         {ws_slug, proj_slug, dataset} <- socket.assigns[@authorized_scope] do
+      params = %{"workspace_slug" => ws_slug, "project_slug" => proj_slug, "dataset" => dataset}
+
+      case resolve_and_authorize(socket, params) do
+        {:ok, socket} -> {:halt, socket}
+        {:halt, socket} -> {:halt, socket}
+      end
+    else
+      _ -> {:halt, socket}
+    end
+  end
+
+  defp seat_changed(_msg, socket), do: {:cont, socket}
 
   # Membership + read permission via the canonical gate. Anonymous (nil
   # token) is allowed into: (a) the seeded Default workspace — the
@@ -360,6 +435,17 @@ defmodule BarkparkWeb.LiveScope do
   # type/doc_id refinement of the target scope.
   defp doc_scope("new-document", %{"type" => type}, _socket) when is_binary(type),
     do: %{type: type}
+
+  # `duplicate-doc` CREATES a document (a fresh id from `clone_document/4`), so
+  # it targets the TYPE like `new-document`, never the open doc's id — otherwise
+  # a grant naming one document admitted the clone of it (r4a LiveView authz
+  # sweep). No editor type → desk level, which a doc/type grant does not admit.
+  defp doc_scope("duplicate-doc", _params, socket) do
+    case socket.assigns[:editor_type] do
+      type when is_binary(type) -> %{type: type}
+      _ -> %{}
+    end
+  end
 
   defp doc_scope(_event, _params, socket) do
     case socket.assigns do

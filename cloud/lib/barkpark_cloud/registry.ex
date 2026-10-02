@@ -953,6 +953,19 @@ defmodule BarkparkCloud.Registry do
   defp insert_with_url_reservation(_team, attrs, _slug, insert_fun), do: insert_fun.(attrs)
 
   @doc """
+  Is `host` the recorded host of a barkpark owned by a team OTHER than
+  `team_id`? The support register path refuses such a host (r4a cloud authz
+  sweep): the platform worker SSHes to a support's host as root, so a host
+  another team holds is never a valid support for this one. nil / blank → false.
+  """
+  @spec host_held_by_other_team?(String.t() | nil, binary()) :: boolean()
+  def host_held_by_other_team?(host, team_id) when is_binary(host) and host != "" do
+    Repo.exists?(from(b in Barkpark, where: b.host == ^host and b.team_id != ^team_id))
+  end
+
+  def host_held_by_other_team?(_host, _team_id), do: false
+
+  @doc """
   Register a SUPPORT machine as a fleet group row bound to a main (Personal Dev
   Fleet Wave C, PDF-D61). The support is an ordinary `barkparks` row carrying the
   three fleet columns — `fleet_role: "support"`, `fleet_parent_id` = the main's
@@ -988,6 +1001,7 @@ defmodule BarkparkCloud.Registry do
   up). Both register modes get it: a support's url is its reservation from
   birth.
   """
+
   @spec register_support_barkpark(Team.t() | binary(), map()) ::
           {:ok, Barkpark.t()} | {:error, Ecto.Changeset.t()}
   def register_support_barkpark(team, attrs) do

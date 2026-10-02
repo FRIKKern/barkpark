@@ -468,6 +468,45 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  @doc """
+  Every stored row (draft and published — no perspective overlay) of `type`
+  whose `field` is a JSON array holding `target_id`, in EITHER reference shape:
+  the bare id (`["ada"]`) or the `{"_ref": id}` object
+  (`[%{"_ref" => "ada"}]`). Scoped exactly like `list_documents/3` (dataset,
+  workspace/project, owner and grant fences ride `base_query/4`).
+
+  Exists for `Edges.disconnect_references/3`: arrayOf-of-reference holders
+  used to be found ONLY through the materialised edge table, which the async
+  projector fills after the write — so a referrer written moments before the
+  disconnect (or before the projector ever ran) kept its reference. This scan
+  reads the documents themselves, like the scalar `find_referencing_docs/3`.
+  Capped at `limit` (default 1000); the disconnect drains it in passes.
+  """
+  @spec list_array_reference_holders(String.t(), String.t(), String.t(), String.t(), keyword()) ::
+          [Document.t()]
+  def list_array_reference_holders(type, dataset, field, target_id, opts \\ [])
+      when is_binary(field) and is_binary(target_id) do
+    type
+    |> base_query(dataset, %{}, opts)
+    |> where(
+      [d],
+      fragment(
+        "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(?::text) OR ?->? @> jsonb_build_array(jsonb_build_object('_ref', ?::text)))",
+        d.content,
+        ^field,
+        d.content,
+        ^field,
+        ^target_id,
+        d.content,
+        ^field,
+        ^target_id
+      )
+    )
+    |> order_by([d], asc: d.doc_id)
+    |> limit(^Keyword.get(opts, :limit, 1000))
+    |> Repo.all()
+  end
+
   defp base_query(type, dataset, filter_map, opts) do
     Document
     |> where([d], d.type == ^type)

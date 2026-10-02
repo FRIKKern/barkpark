@@ -335,7 +335,7 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
       me = self()
       handler = {__MODULE__, make_ref()}
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         handler,
         [:barkpark_cloud, :repo, :query],
         fn _event, _measure, meta, _cfg ->
@@ -363,7 +363,7 @@ defmodule BarkparkCloud.Web.RouterLaunchFlowTest do
         try do
           call(:post, "/v1/launch", @dup_body, token)
         after
-          :telemetry.detach(handler)
+          BarkparkCloud.TelemetryTap.detach(handler)
         end
 
       # PRECONDITION: the interleaving really happened — the winner landed

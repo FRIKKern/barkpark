@@ -660,12 +660,36 @@ defmodule Barkpark.Content.WriteScope do
   # "cached nil" from "not yet computed" via a private sentinel so a
   # legitimately-nil resolution is not recomputed.
   @memo_miss :"$barkpark_memo_miss"
-  defp memoize?(opts, key, fun) do
-    if Keyword.get(opts, :memoize, false) do
+  @process_memo_flag :barkpark_process_memo
+  defp memoize?(opts, key, fun), do: request_memo(opts, key, fun)
+
+  @doc """
+  The per-request / per-callback read memo (barkpark-5znv, gated by
+  barkpark-sknf; widened by task-dbfa7f69abb3b2ed / task-43754c756edf2af6).
+
+  Memoizes `fun.()` under `key` in the calling process's dictionary when the
+  caller opted in — an HTTP controller via `memoize: true` in its scope opts,
+  or a connected Studio LiveView via `enable_process_memo/0` — and calls `fun`
+  fresh otherwise. The memo NEVER outlives the unit of work it was built for:
+
+    * `reset_request_memo/0` runs at the top of every HTTP request
+      (`BarkparkWeb.Endpoint`): Bandit serves a keep-alive connection's
+      requests in ONE process, so without the reset a memo built by request 1
+      answered request 2 on the same connection;
+    * the Studio LiveView resets it at the start of every callback
+      (`handle_params`, `handle_event`, `handle_info`), so one callback and its
+      render share it and the next callback reads fresh — sknf's guarantee
+      that a long-lived LiveView never pins a deleted dataset id;
+    * a write in the SAME process that can change a memoized answer — a schema
+      upsert/delete, a dataset create, any workspace write — resets it at once.
+  """
+  def request_memo(opts, key, fun, cap \\ :infinity) do
+    if Keyword.get(opts, :memoize, false) or Process.get(@process_memo_flag, false) do
       case Process.get({:barkpark_request_memo, key}, @memo_miss) do
         @memo_miss ->
           value = fun.()
           Process.put({:barkpark_request_memo, key}, value)
+          if is_integer(cap), do: evict_beyond(key, cap)
           value
 
         value ->
@@ -674,6 +698,52 @@ defmodule Barkpark.Content.WriteScope do
     else
       fun.()
     end
+  end
+
+  # A CAPPED bucket keeps only its `cap` newest entries. The gain is a REPEAT
+  # (one request asking for the same schema row four times); a caller walking
+  # every type once (`/v1/graph`'s corpus fold) gains nothing from the memo,
+  # and holding every schema it touched raised that request's peak heap past
+  # its one-type bound (GraphCorpusHeapBoundTest). The bucket is the key's tag.
+  defp evict_beyond(key, cap) do
+    bucket = {:barkpark_request_memo_lru, elem(key, 0)}
+    keys = Process.get(bucket, []) ++ [key]
+
+    keys =
+      if length(keys) > cap do
+        [oldest | rest] = keys
+        Process.delete({:barkpark_request_memo, oldest})
+        rest
+      else
+        keys
+      end
+
+    Process.put(bucket, keys)
+  end
+
+  @doc "Opt the calling process into `request_memo/3` without a `memoize:` opt (a Studio LiveView, either leg)."
+  def enable_process_memo do
+    Process.put(@process_memo_flag, true)
+    :ok
+  end
+
+  @doc """
+  Start a fresh HTTP request: empty the memo AND drop a process opt-in. The
+  Studio dead render opts its request process in; the next request served by
+  the same keep-alive process must start as an ordinary request.
+  """
+  def begin_request do
+    Process.delete(@process_memo_flag)
+    reset_request_memo()
+  end
+
+  @doc "Drop every `request_memo/3` entry in the calling process."
+  def reset_request_memo do
+    for {k, _v} <- Process.get(),
+        match?({:barkpark_request_memo, _}, k) or match?({:barkpark_request_memo_lru, _}, k),
+        do: Process.delete(k)
+
+    :ok
   end
 
   # Apply the W2 dataset scope to a read query. When the dataset string resolves

@@ -660,8 +660,14 @@ func retryIn(at, now time.Time) string {
 // snapshot (Conn is ConnPolling, the newModel default) and none has landed yet
 // (LastSync is still zero). It is DISTINCT from offline (a failed fetch) and
 // from steady polling (a live board leaning on the backstop after a sync).
+//
+// It keys on the missing snapshot, not on ConnPolling: the SSE stream usually
+// pulses BEFORE the first snapshot lands, and handlePulse lifts Conn to
+// ConnLive, so the old ConnPolling test flipped the empty spine to "All clear —
+// no open tasks." for the length of the first fetch (r4-lane-c dogfood). Only
+// a failed fetch (ConnOffline) ends the syncing state without a snapshot.
 func isSyncing(st UIState) bool {
-	return st.Conn == ConnPolling && st.LastSync.IsZero()
+	return st.LastSync.IsZero() && st.Conn != ConnOffline
 }
 
 // renderActionStrip draws the one-line act-verb status directly above the

@@ -152,6 +152,47 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
     assert is_map(body(conn)["details"])
   end
 
+  # r3b sweep: the control plane dials the team relay itself, so an internal
+  # relay host turned the settings form into a probe of the plane's network.
+  test "PUT settings refuses an internal SMTP relay host (loopback, metadata, private, internal names)" do
+    {_user, team, token} = user_with_team()
+
+    for host <- [
+          "127.0.0.1",
+          "169.254.169.254",
+          "10.0.0.5",
+          "localhost",
+          "relay.internal",
+          "[::1]"
+        ] do
+      conn =
+        call(
+          :put,
+          "/v1/notifications/settings",
+          %{"transport" => "smtp", "smtp_host" => host, "smtp_port" => 25},
+          token
+        )
+
+      assert conn.status == 422, "smtp_host #{host} must be refused, got #{conn.status}"
+      assert body(conn)["error"] == "invalid"
+      assert Map.has_key?(body(conn)["details"], "smtp_host")
+    end
+
+    # Nothing was stored for any of them.
+    assert BarkparkCloud.Notifications.get_or_create_settings(team).smtp_host_encrypted == nil
+
+    # CONTROL: a public relay name still saves.
+    conn =
+      call(
+        :put,
+        "/v1/notifications/settings",
+        %{"transport" => "smtp", "smtp_host" => "smtp.example.com", "smtp_port" => 587},
+        token
+      )
+
+    assert conn.status == 200
+  end
+
   test "POST test sends once then 429s on the immediate retry" do
     {user, _team, token} = user_with_team()
 

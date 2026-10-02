@@ -56,6 +56,7 @@ defmodule BarkparkWeb.FederatedSearchController do
 
     record_opts = [
       actor_key: SearchIntel.actor_key(conn),
+      audience: SearchIntel.audience(conn),
       parent_event_id: SearchIntel.parent_event_id(conn),
       session_key: SearchIntel.session_key(conn),
       source: SearchIntel.source(conn, "federated"),

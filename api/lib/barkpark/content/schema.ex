@@ -85,6 +85,21 @@ defmodule Barkpark.Content.Schema do
   end
 
   def list_schemas(dataset, opts \\ []) do
+    # Memoized per request / per Studio callback, like `get_schema_raw/3`: one
+    # connected desk callback built the SAME catalog twice (`Structure`'s
+    # `scope_plugin_nodes/4`, once per attributed plugin). Keyed on the WHOLE opts — the
+    # catalog reads scope, dataset pin and grant narrowing out of them — so two
+    # calls share a result only when they would have run the same query. The
+    # newest 4 catalogs; every schema write in this module resets the memo.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      {:list_schemas, dataset, Keyword.delete(opts, :memoize)},
+      fn -> do_list_schemas(dataset, opts) end,
+      4
+    )
+  end
+
+  defp do_list_schemas(dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -133,6 +148,25 @@ defmodule Barkpark.Content.Schema do
   # next partial update) and the read the inliner itself resolves object types
   # through. Readers use `get_schema/3`.
   def get_schema_raw(name, dataset, opts \\ []) do
+    # Memoized per request / per Studio callback (task-43754c756edf2af6): one
+    # `GET /v1/data/query` asked for the same row FOUR times (auth, redaction,
+    # owner scope, count). Every schema write in this module resets the memo in
+    # the writing process — see `WriteScope.request_memo/3` for its lifetime.
+    Barkpark.Content.WriteScope.request_memo(
+      opts,
+      # keyed on exactly what the lookup reads: the scope keys, PRESENCE
+      # included (`resolve_read_dataset_id/2` treats a pinned-but-nil
+      # workspace differently from an absent one); list opts riding along
+      # (limit, perspective, caller context) do not change the row
+      {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
+       Keyword.fetch(opts, :project_id)},
+      fn -> do_get_schema_raw(name, dataset, opts) end,
+      # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
+      8
+    )
+  end
+
+  defp do_get_schema_raw(name, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
@@ -290,7 +324,9 @@ defmodule Barkpark.Content.Schema do
            attrs
            |> Map.put("dataset", dataset)
            |> Content.put_scope_attrs(opts) do
-      case name && get_schema_raw(name, dataset, opts) do
+      # FRESH, never the request memo: a write decides insert-vs-update on the
+      # row as it is now (task-43754c756edf2af6).
+      case name && do_get_schema_raw(name, dataset, opts) do
         {:ok, existing} ->
           if owned_by_other_workspace?(existing, attrs) do
             insert_schema(attrs, dataset, opts)
@@ -299,6 +335,7 @@ defmodule Barkpark.Content.Schema do
             |> SchemaDefinition.changeset(attrs)
             |> check_named_types(dataset, opts)
             |> Repo.update()
+            |> reset_read_memo()
           end
 
         _ ->
@@ -312,6 +349,14 @@ defmodule Barkpark.Content.Schema do
     |> SchemaDefinition.changeset(attrs)
     |> check_named_types(dataset, opts)
     |> Repo.insert()
+    |> reset_read_memo()
+  end
+
+  # A schema write drops the calling process's request memo, so the same
+  # request / Studio callback reads the row it just wrote.
+  defp reset_read_memo(result) do
+    Barkpark.Content.WriteScope.reset_request_memo()
+    result
   end
 
   @doc """
@@ -439,7 +484,7 @@ defmodule Barkpark.Content.Schema do
 
             # A concurrent double-DELETE would raise Ecto.StaleEntryError (→ 500).
             # stale_error_field turns the race into {:error, :not_found} (rendered 404).
-            case Repo.delete(schema, stale_error_field: :id) do
+            case schema |> Repo.delete(stale_error_field: :id) |> reset_read_memo() do
               {:error, cs} ->
                 if stale?(cs), do: schema_not_found(name, dataset), else: {:error, cs}
 

@@ -338,6 +338,14 @@ config :barkpark, Barkpark.Plugins.Github.DrainWorker, enabled: false
 # unaffected (`Barkpark.StudioChat.Supervisor.children/0` proves it).
 config :barkpark, Barkpark.StudioChat.BlockedSweeper, enabled: false
 
+# The host-vitals sampler ticks every 3 s and every Studio LiveView re-renders
+# its footer from that tick with the MACHINE's live CPU/RAM/disk/load bytes, so
+# a boot-started sampler makes any two renders of one page differ by bytes no
+# test caused (BoardLiveTest reddened main run 36554218282 that way). Dormant in
+# test: the footer shows the honest all-nil frame; `sample/0` / `snapshot/0`
+# are tested directly. Defaults ON — dev/prod unchanged (task-31dc7c0068696546).
+config :barkpark, Barkpark.HostVitals.Sampler, enabled: false
+
 # Managed-runtime admission ceiling (Barkpark.StudioChat.RuntimeAdmission).
 # The cap is NODE-GLOBAL: a lease count over the single shared
 # `Barkpark.StudioChat.RecorderRegistry`, with a deliberately conservative

@@ -1059,8 +1059,11 @@
     /* Boolean fields render as a labeled switch (Sanity-style), not a bare
        checkbox. The real checkbox stays in the DOM (form semantics, a11y,
        keyboard toggle) but is visually replaced by the track + thumb; the
-       On/Off text states the value in words. */
-    .form-switch { display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
+       On/Off text states the value in words. `position: relative` makes the
+       switch the hidden checkbox's containing block — without it the checkbox
+       lays out on <html>, outside any page scroller, and focusing one below
+       the fold scrolls the whole Studio shell off-screen. */
+    .form-switch { position: relative; display: inline-flex; align-items: center; gap: 8px; cursor: pointer; }
     .form-switch input[type="checkbox"] {
       position: absolute; width: 1px; height: 1px; opacity: 0;
     }
@@ -1901,9 +1904,15 @@
     }
     .bp-desk-search-input:focus { outline: none; box-shadow: none; }
     .bp-desk-search-input::placeholder { color: var(--fg-muted); }
+    /* The pane's own clear button is the one clear control; hide the native
+       type="search" cancel glyph that rendered a second x beside it. */
+    .bp-desk-search-input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
     /* A hit is an <a>, so it needs the row's block layout and its own link
-       reset; the rest of the row look comes from .pane-doc-item above. */
-    .bp-desk-search-hit {
+       reset; the rest of the row look comes from .pane-doc-item above.
+       Compound selector on purpose: the later `.pane-doc-item { padding: 0 }`
+       (doc rows moved their padding onto an inner button) otherwise zeroes a
+       hit's padding and leaves 21px rows flush against the pane edge. */
+    .pane-doc-item.bp-desk-search-hit {
       display: flex; align-items: center; justify-content: space-between; gap: 8px;
       padding: 8px 12px; text-decoration: none;
     }
@@ -2179,6 +2188,9 @@
     /* Paper actions are direct links/buttons, not the classic overflow menu.
        Give them their own row when the pane is narrow: flex-end overflow would
        otherwise paint Open standalone over the title. Desktop stays unchanged. */
+    /* The Classic/Beta mode switch is one unit: never wrap its two buttons
+       apart, never shrink it (task-43fe1756e8ae8120). */
+    .editor-mode-toggle { display: inline-flex; flex: none; gap: 4px; }
     @container panel (max-width: 720px) {
       .editor-panel[data-test-id="studio-paper-editor"] > .editor-header {
         display: grid; grid-template-columns: minmax(0, 1fr);
@@ -2186,6 +2198,17 @@
       }
       .editor-panel[data-test-id="studio-paper-editor"] > .editor-header > div:last-child {
         flex-wrap: wrap;
+      }
+      /* A doc editor carrying the mode toggle gets the same second row off the
+         wide desk: the toggle and the collapsible doc-action menu share it,
+         the menu takes what is left and folds its overflow into "•••"
+         (task-43fe1756e8ae8120). Bucket-scoped: the wide desk is untouched. */
+      html:not([data-width-bucket="wide"]) .editor-panel > .editor-header:has(.editor-mode-toggle) {
+        display: grid; grid-template-columns: minmax(0, 1fr);
+        height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+      }
+      html:not([data-width-bucket="wide"]) .editor-panel > .editor-header:has(.editor-mode-toggle) > div:last-child {
+        justify-content: flex-start;
       }
     }
     .editor-body { flex: 1; overflow-y: auto; padding: 20px 24px; max-width: 720px; }

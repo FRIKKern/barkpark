@@ -255,6 +255,12 @@
       this._collectionsEl = this.querySelector(".bp-ae-collections");
       this._gridWrapEl = this.querySelector(".bp-ae-grid-wrap");
       this._gridEl = this.querySelector(".bp-ae-grid");
+      // `error` does not bubble; listen in the capture phase so one handler on
+      // the explorer covers every thumbnail in the grid, list and filmstrip.
+      if (!this._thumbErrorWired) {
+        this._thumbErrorWired = true;
+        this.addEventListener("error", (e) => this._onThumbError(e), true);
+      }
       this._loadMoreEl = this.querySelector(".bp-ae-load-more");
       this._filmstripEl = this.querySelector(".bp-ae-filmstrip-track");
       this._searchEl = this.querySelector(".bp-ae-search");
@@ -315,8 +321,11 @@
         });
       }
       this._uploadInput.addEventListener("change", (e) => {
-        const files = e.target.files;
-        if (files && files.length) this._uploadFiles(files);
+        // Snapshot the FileList: it is LIVE, and clearing the input below
+        // empties it while the async uploader is still awaiting the first
+        // file — only that one would ever upload.
+        const files = Array.from(e.target.files || []);
+        if (files.length) this._uploadFiles(files);
         e.target.value = "";
       });
       this._densityInput.addEventListener("input", (e) => {
@@ -1124,6 +1133,13 @@
         this._renderFacets();
         this._renderToolbarPills();
         this._renderGrid();
+        // The folder inspector shows the folder's asset count. Opening a folder
+        // renders it before this load returns, so it read the PREVIOUS list
+        // (All assets: 7) for a folder holding 1 until something else
+        // re-rendered it. Repaint it once the folder's own list has landed.
+        if (!append && this._collectionId && this._inspectorMode === "collection" && !this._selected) {
+          this._renderCollectionInspector();
+        }
       }
     }
 
@@ -1139,17 +1155,24 @@
               : "FILE";
     }
 
-    // onerror attribute that swaps a broken <img> for the same file-icon
-    // placeholder used for non-image kinds, so a deleted/unprocessed/404'd
-    // asset never shows the browser's broken-image glyph.
+    // Marks a thumbnail <img> for the delegated error handler (`_onThumbError`,
+    // wired once beside the grid lookup), which swaps a broken image for the
+    // same file-icon placeholder used for non-image kinds — so a deleted /
+    // unprocessed / 404'd asset never shows the browser's broken-image glyph.
+    // NOT an inline `onerror` attribute: the Studio CSP forbids inline event
+    // handlers, so the old attribute never ran — the browser blocked it, logged
+    // a CSP violation, and the broken glyph stayed.
     _thumbFallbackAttr(kind) {
-      const label = this._thumbLabel(kind);
-      return (
-        ' onerror="this.onerror=null;this.outerHTML=&quot;' +
-        "<div class='bp-ae-file-icon'>" +
-        label +
-        "</div>&quot;\""
-      );
+      return ' data-bp-thumb-fallback="' + esc(this._thumbLabel(kind)) + '"';
+    }
+
+    _onThumbError(e) {
+      const img = e.target;
+      if (!img || img.tagName !== "IMG" || !img.hasAttribute("data-bp-thumb-fallback")) return;
+      const icon = document.createElement("div");
+      icon.className = "bp-ae-file-icon";
+      icon.textContent = img.getAttribute("data-bp-thumb-fallback");
+      img.replaceWith(icon);
     }
 
     _cardThumb(doc) {
@@ -1646,7 +1669,10 @@
       this._inspectorMode = "collection";
 
       const kindLabel = col.kind === "virtual" ? "Smart collection" : "Folder";
-      const count = this._assets.length;
+      // The folder's own total, not the loaded page (a folder larger than one
+      // page would otherwise read as the page size).
+      const count = Math.max(this._total || 0, this._assets.length);
+      const countLabel = count === 1 ? "1 asset" : count + " assets";
 
       this._inspectorBody.innerHTML =
         '<div class="bp-ae-collection-icon">' +
@@ -1657,7 +1683,7 @@
         "</h3>" +
         '<div class="bp-ae-inspector-status">' +
         this._statusBadge(kindLabel, "visibility") +
-        this._statusBadge(count + " assets", "muted") +
+        this._statusBadge(countLabel, "muted") +
         "</div>" +
         (col.description
           ? '<p class="bp-ae-collection-desc text-sm text-muted">' + esc(col.description) + "</p>"

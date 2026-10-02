@@ -68,6 +68,62 @@ defmodule BarkparkCloud.GitHub do
     end
   end
 
+  @doc """
+  The install URL carrying a TEAM-BOUND `state` (see `install_state/2`). GitHub
+  hands `state` back on the App's Setup URL redirect beside `installation_id`, so
+  the console can return it with the POST that records the installation. `nil`
+  when no slug is configured, exactly like `install_url/0`.
+  """
+  @spec install_url(Team.t() | binary(), binary()) :: String.t() | nil
+  def install_url(team, user_id) when is_binary(user_id) do
+    case install_url() do
+      nil -> nil
+      url -> url <> "?state=" <> URI.encode_www_form(install_state(team, user_id))
+    end
+  end
+
+  # task-r3b-gh-install-bind. GET /app/installations/:id (the only validation
+  # record_installation/2 performs) is answered with the APP's JWT, so it says the
+  # id EXISTS — for every install of the App, whoever owns it. Without a binding,
+  # an admin of team B could submit team A's integer id and drive A's org (list
+  # its repos, create repos, push files). The state is an AEAD-sealed (Vault,
+  # AES-256-GCM) {team, user, expiry} minted when the console offers the install
+  # link and required back on the record POST, so only the team that STARTED an
+  # install can record the id GitHub returned to it.
+  @install_state_ttl_seconds 3600
+
+  @doc "Seal a team+user-bound install `state`, valid for one hour."
+  @spec install_state(Team.t() | binary(), binary()) :: String.t()
+  def install_state(team, user_id) when is_binary(user_id) do
+    exp = System.system_time(:second) + @install_state_ttl_seconds
+    Vault.encrypt(Jason.encode!(%{"t" => team_id(team), "u" => user_id, "e" => exp}))
+  end
+
+  @doc """
+  `:ok` when `state` was sealed by this plane for THIS team and user and has not
+  expired; `{:error, :install_state_invalid}` for anything else (missing,
+  tampered, foreign team, foreign user, expired).
+  """
+  @spec verify_install_state(term(), Team.t() | binary(), binary()) ::
+          :ok | {:error, :install_state_invalid}
+  def verify_install_state(state, team, user_id) when is_binary(state) and is_binary(user_id) do
+    tid = team_id(team)
+    now = System.system_time(:second)
+
+    with {:ok, json} <- Vault.decrypt(state),
+         {:ok, %{"t" => ^tid, "u" => ^user_id, "e" => exp}} when is_integer(exp) <-
+           Jason.decode(json),
+         true <- exp > now do
+      :ok
+    else
+      _ -> {:error, :install_state_invalid}
+    end
+  rescue
+    _ -> {:error, :install_state_invalid}
+  end
+
+  def verify_install_state(_state, _team, _user_id), do: {:error, :install_state_invalid}
+
   @doc "The team's installation row, or `nil`. Team-scoped — never crosses teams."
   @spec installation_for(Team.t() | binary()) :: Installation.t() | nil
   def installation_for(team) do
@@ -115,21 +171,43 @@ defmodule BarkparkCloud.GitHub do
 
     case client().get_installation(installation_id) do
       {:ok, %{account_login: login}} ->
-        attrs = %{
-          team_id: tid,
-          account_login: login,
-          installation_id_encrypted: Vault.encrypt(to_string(installation_id))
-        }
-
-        base = installation_for(tid) || %Installation{}
-
-        base
-        |> Installation.changeset(attrs)
-        |> Repo.insert_or_update()
+        if held_by_other_team?(installation_id, tid) do
+          # r4a: the existence check above answers for EVERY install of the App,
+          # and the sealed `state` binds the caller's team, not the id. An id
+          # another team has already recorded is that team's org: answer exactly
+          # like an unknown id so the refusal is no ownership oracle.
+          {:error, :installation_not_found}
+        else
+          write_installation(tid, login, installation_id)
+        end
 
       {:error, _reason} ->
         {:error, :installation_not_found}
     end
+  end
+
+  defp write_installation(tid, login, installation_id) do
+    attrs = %{
+      team_id: tid,
+      account_login: login,
+      installation_id_encrypted: Vault.encrypt(to_string(installation_id))
+    }
+
+    base = installation_for(tid) || %Installation{}
+
+    base
+    |> Installation.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  # The handle is AEAD-encrypted with a random nonce, so equality cannot be a
+  # query; installations are one row per team and few, so decrypt and compare.
+  defp held_by_other_team?(installation_id, tid) do
+    wanted = to_string(installation_id)
+
+    from(i in Installation, where: i.team_id != ^tid)
+    |> Repo.all()
+    |> Enum.any?(fn inst -> reveal_installation_id(inst) == {:ok, wanted} end)
   end
 
   @doc """
@@ -235,6 +313,44 @@ defmodule BarkparkCloud.GitHub do
       {:error, :not_configured}
     end
   end
+
+  @doc """
+  The BUILD clone credential for `full_name` ("owner/repo"): an installation
+  token narrowed to that one repository with `contents: read` (r3b sweep). The
+  unscoped `installation_token_for/1` token carries the App's full permissions
+  over every repo the installation reaches; a box running arbitrary build code
+  must never hold that. Same error ladder as `installation_token_for/1`, plus
+  `{:error, :scoped_token_unsupported}` when the configured client cannot mint a
+  scoped token — the caller then clones anonymously, never broadly.
+  """
+  @spec repo_read_token_for(Team.t() | binary(), String.t()) ::
+          {:ok, String.t()} | {:error, term}
+  def repo_read_token_for(team, full_name) when is_binary(full_name) do
+    repo_name = full_name |> String.split("/") |> List.last()
+    mod = client()
+
+    cond do
+      not configured?() ->
+        {:error, :not_configured}
+
+      not (Code.ensure_loaded?(mod) and function_exported?(mod, :exchange_repo_read_token, 2)) ->
+        {:error, :scoped_token_unsupported}
+
+      true ->
+        case installation_for(team) do
+          nil ->
+            {:error, :no_installation}
+
+          %Installation{} = inst ->
+            case reveal_installation_id(inst) do
+              {:ok, id} -> mod.exchange_repo_read_token(id, repo_name)
+              :error -> {:error, :installation_unreadable}
+            end
+        end
+    end
+  end
+
+  def repo_read_token_for(_team, _full_name), do: {:error, :no_repo}
 
   @doc """
   The repos the team's GitHub App installation can access — the "Import Git

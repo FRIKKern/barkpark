@@ -53,7 +53,7 @@ describe('starter pages filter the whole type, not its first page', () => {
   it('blog-starter tag and author pages read every post', async () => {
     for (const rel of ['app/tags/[slug]/page.tsx', 'app/authors/[id]/page.tsx']) {
       const src = await fs.readFile(path.join(TEMPLATES_DIR, 'blog-starter', rel), 'utf8')
-      expect(src, rel).toMatch(/await getAllDocs<Post>\('post'\)/)
+      expect(src, rel).toMatch(/await getAllDocs<Post>\('post'(, POST_ORDER)?\)/)
     }
   })
 })

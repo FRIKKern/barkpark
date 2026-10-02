@@ -7,9 +7,17 @@ defmodule Barkpark.Sync.PushConflict do
   PRESERVED here — its full envelope copied into `local_document` on INSERT only
   — and the push cursor is advanced only AFTER this durable write
   (write-then-advance, mirroring `Barkpark.Sync.DeadLetter`). The conflict is
-  thus an inspectable quarantine, never a silent skip. The operator
-  resolve/retry workflow and the Studio Conflicts pane that reads `list_open/2`
-  are P3.
+  thus an inspectable quarantine, never a silent skip.
+
+  ## The exit (task-b2b871424bd184eb)
+
+  `status` is `"open"` on insert and leaves quarantine ONLY through
+  `resolve/3`, an operator act: `"open"` → `"resolved"`, once the operator has
+  reconciled the preserved loser against the remote (re-pushed it, or let the
+  remote win). The row and its `local_document` are kept for audit — resolving
+  never deletes. Today the call is the operator's from a remote console
+  (`bin/barkpark rpc 'Barkpark.Sync.PushConflict.resolve("api", "production", 42)'`);
+  the Studio Conflicts pane over `list_open/2` + `resolve/3` remains unbuilt.
   """
   use Ecto.Schema
   import Ecto.Query
@@ -76,7 +84,26 @@ defmodule Barkpark.Sync.PushConflict do
     :ok
   end
 
-  @doc "Queryable surface (P3 Studio pane): all open conflicts for `{source, dataset}`."
+  @doc """
+  Take one open conflict OUT of quarantine: `"open"` → `"resolved"`. Returns
+  `:ok`, or `{:error, :not_found}` when no open row matches. The preserved
+  loser is kept.
+  """
+  @spec resolve(String.t(), String.t(), non_neg_integer()) :: :ok | {:error, :not_found}
+  def resolve(source, dataset, event_id) do
+    from(c in __MODULE__,
+      where:
+        c.source == ^source and c.dataset == ^dataset and c.event_id == ^event_id and
+          c.status == "open"
+    )
+    |> Repo.update_all(set: [status: "resolved", updated_at: DateTime.utc_now()])
+    |> case do
+      {1, _} -> :ok
+      {0, _} -> {:error, :not_found}
+    end
+  end
+
+  @doc "Queryable surface (the unbuilt Studio pane reads this): all open conflicts for `{source, dataset}`."
   @spec list_open(String.t(), String.t()) :: [%__MODULE__{}]
   def list_open(source, dataset) do
     from(c in __MODULE__,

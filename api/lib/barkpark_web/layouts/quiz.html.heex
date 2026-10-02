@@ -86,6 +86,18 @@
     .q-count { font-variant-numeric: tabular-nums; color: var(--ink-soft); }
     p.q-status { color: var(--ink-soft); font-size: 0.95rem; margin-top: 20px; }
     .q-big { font-size: 3rem; font-weight: 800; }
+    .q-host-controls { display: flex; flex-wrap: wrap; gap: 10px; margin: 0 0 24px; }
+    .q-host-btn {
+      font: inherit; font-weight: 600; cursor: pointer; padding: 8px 16px; border-radius: 8px;
+      border: 1px solid var(--ink-soft); background: var(--panel); color: var(--ink);
+    }
+    .q-host-btn:hover:not([disabled]) { border-color: var(--accent); color: var(--accent); }
+    .q-host-btn[disabled] { cursor: default; opacity: 0.45; }
+    .q-timer { font-weight: 700; color: var(--accent); font-variant-numeric: tabular-nums; }
+    .q-correct { color: var(--accent); }
+    ol.q-scores { margin: 24px 0 0; padding-left: 1.4em; font-size: 1.1rem; }
+    ol.q-scores li { max-width: 420px; padding: 4px 0; }
+    ol.q-scores li .q-count { float: right; }
     /* P2 cursor overlay — full-viewport, never intercepts clicks. */
     .quiz-cursor-canvas { position: fixed; inset: 0; width: 100vw; height: 100vh; pointer-events: none; z-index: 50; }
   </style>

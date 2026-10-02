@@ -39,6 +39,18 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
       epoch != nil and socket.assigns.epoch != epoch ->
         socket |> assign(epoch: epoch) |> refetch(rev)
 
+      # A SIBLING frame of the flush we just applied: a cross-tab edit settles
+      # as ONE recompute that broadcasts one delta per dirty tab, every one
+      # stamped with the SAME rev (Sheets.Session.Ops.flush_whole_doc/1). The
+      # edited tab's frame lands first; dropping the rest as duplicates left
+      # every DEPENDENT tab showing its pre-edit values until a remount.
+      # Merge it once per tab — a second frame for a tab already merged at
+      # this rev is a true duplicate and falls through to the drop below.
+      rev == socket.assigns.rev and not Map.has_key?(payload, :structure) and
+        is_integer(Map.get(payload, :tab)) and
+          not MapSet.member?(rev_tabs(socket), payload.tab) ->
+        merge_changed(socket, payload)
+
       # Stale or duplicate frame (our own op's echo after a refetch).
       rev <= socket.assigns.rev ->
         socket
@@ -71,9 +83,20 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
           end)
 
         tabs = List.replace_at(tabs, tab_idx, Map.put(tab, "cells", cells))
-        assign(socket, content: Map.put(content, "tabs", tabs), rev: rev)
+
+        # The tabs merged at THIS rev — what tells a sibling frame of the same
+        # flush (merge it) from a true duplicate (drop it). Resets per rev.
+        applied =
+          if rev == socket.assigns.rev,
+            do: MapSet.put(rev_tabs(socket), tab_idx),
+            else: MapSet.new([tab_idx])
+
+        assign(socket, content: Map.put(content, "tabs", tabs), rev: rev, rev_tabs: applied)
     end
   end
+
+  # Read with `[]` so a socket built before this assign existed reads empty.
+  defp rev_tabs(socket), do: socket.assigns[:rev_tabs] || MapSet.new()
 
   defp refetch(socket, rev), do: refetch(socket, rev, nil)
 
@@ -118,7 +141,9 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
     clamped = min(remapped, max(length(GridData.tabs(socket)) - 1, 0))
 
     socket
-    |> assign(tab: clamped)
+    # A refetch replaces the content wholesale, so no tab counts as merged at
+    # this rev any more; a sibling frame after it re-merges idempotently.
+    |> assign(tab: clamped, rev_tabs: MapSet.new())
     |> clear_editing_if_clamped(clamped, remapped)
     |> remap_selection(structure)
     |> refresh_find_hits()

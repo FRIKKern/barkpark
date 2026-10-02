@@ -735,6 +735,8 @@ const PIN = [
   { key: "MAP|ERRORS.already_subscribed", verdict: "CONSULTED", copy: "Your team already has a paid plan. Change or cancel it from Manage bil..." },
   // task-e4cdc0f2e7766e1a: the 409 on POST /v1/account/two-factor/enroll while 2FA is ON.
   { key: "MAP|ERRORS.already_enabled", verdict: "CONSULTED", copy: "Two-factor is already on. Turn it off first if you want to set it up a..." },
+  // r4a: the 422 on POST /v1/fleet/supports when the host is another team's box.
+  { key: "MAP|ERRORS.host_taken", verdict: "CONSULTED", copy: "That host is already registered to another team. Use the address of a ..." },
   { key: "MAP|ERRORS.instance_not_armed", verdict: "CONSULTED", copy: "This instance hasn't armed one-click apply, so resuming aut..." },
   { key: "MAP|ERRORS.network_error", verdict: "CONSULTED", copy: "Network error — is the control plane running?" },
   { key: "MAP|ERRORS.limit_reached", verdict: "CONSULTED", copy: "You're at your plan's instance limit." },
@@ -767,6 +769,7 @@ const PIN = [
   // all; the leg made it human-reachable and the sentence was paid in the same
   // diff that deleted its wire-vs-reader census row.
   { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
+  { key: "MAP|ERRORS.install_state_invalid", verdict: "CONSULTED", copy: "That GitHub install link was started by another account or..." },
   // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
   // a refusal CAUSE: the first is the console's own success line for a 201 it
   // verified (installation.connected === true and nothing less), the second is

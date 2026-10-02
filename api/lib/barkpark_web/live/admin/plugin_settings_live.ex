@@ -64,8 +64,25 @@ defmodule BarkparkWeb.Admin.PluginSettingsLive do
   alias Barkpark.Plugins.Registry
   alias Barkpark.Plugins.Settings
 
+  # The MOUNT reads the instance-wide credential record too: `load_all_rows/1`
+  # decrypts it into assigns and the form renders every non-secret field (API
+  # base URLs, roles) plus a "stored" marker per secret. The REST twin
+  # (`GET /v1/plugins/settings/:name`) and every event below are operator-tier,
+  # so the mount is as well (r4a LiveView authz sweep). Allowlist unset →
+  # `permits?/1` admits every admin, exactly like the plug.
   @impl true
-  def mount(%{"dataset" => dataset, "plugin" => plugin_name}, _session, socket) do
+  def mount(params, _session, socket) do
+    if BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token]) do
+      mount_settings(params, socket)
+    else
+      {:ok,
+       socket
+       |> put_flash(:error, "Managing plugin credentials requires the platform operator.")
+       |> redirect(to: "/studio")}
+    end
+  end
+
+  defp mount_settings(%{"dataset" => dataset, "plugin" => plugin_name}, socket) do
     case Registry.lookup(plugin_name) do
       {:ok, entry} ->
         fields = resolve_schema(entry.module)

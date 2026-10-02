@@ -336,16 +336,22 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     test = self()
     handler = "digest-probe-#{System.unique_integer([:positive])}"
 
-    :telemetry.attach(
+    BarkparkCloud.TelemetryTap.attach(
       handler,
       [:barkpark_cloud, :notifications, :fleet_digest, :settled],
       fn _event, measurements, metadata, _ ->
-        send(test, {:fleet_digest, ref, measurements, metadata})
+        # OURS ONLY. The handler runs in whichever process emits, and other
+        # async modules settle fleet digests too (DailyDigestWorkerTest,
+        # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+        # main push run 36885879832. Keep events from this test's lineage.
+        if self() == test or test in List.wrap(Process.get(:"$callers")) do
+          send(test, {:fleet_digest, ref, measurements, metadata})
+        end
       end,
       nil
     )
 
-    on_exit(fn -> :telemetry.detach(handler) end)
+    on_exit(fn -> BarkparkCloud.TelemetryTap.detach(handler) end)
     ref
   end
 
@@ -561,6 +567,51 @@ defmodule BarkparkCloud.Workers.DailyDigestWorkerTest do
     digest_rows = Enum.filter(rows, &(&1.event == "fleet_digest"))
     assert Enum.count(digest_rows, &(&1.status == "sent")) == 1
     assert Enum.count(digest_rows, &(&1.status == "failed")) == 1
+  end
+
+  ## 7. A CRASH is not a completed digest (task-db39f46df0b3ac21)
+  ##
+  ##    The worker's `rescue` used to return `:ok`, so a digest that raised
+  ##    mid-send wrote `state = "completed"` — the same active false claim §4b
+  ##    refuses for the empty audience, one arm over. A raising transport is the
+  ##    honest seam: `Mailer.deliver/1` is not rescued inside the digest send.
+
+  test "a digest that CRASHES mid-send lands the Oban row in `discarded`, never `completed`" do
+    admin = user("op-#{System.unique_integer([:positive])}@example.com")
+    t = team(admin)
+    _bp = instance(t, "Prod", "prod-#{System.unique_integer([:positive])}", %{})
+
+    set_admins([])
+    swap_mailer_adapter(BarkparkCloud.Workers.DailyDigestWorkerTest.ExplodingAdapter)
+
+    {:ok, job} = Oban.insert(DailyDigestWorker.new(%{}))
+
+    log =
+      capture_log(fn ->
+        Oban.drain_queue(queue: :maintenance, with_safety: false)
+      end)
+
+    row = Repo.get!(Oban.Job, job.id)
+
+    refute row.state == "completed",
+           "a crashed digest must not read as a healthy run: #{inspect(row.state)}"
+
+    assert row.state == "discarded"
+    assert row.attempt == 1
+
+    assert Enum.any?(row.errors, fn e ->
+             e |> Map.get("error", "") |> to_string() =~ "smtp relay exploded"
+           end),
+           "the discarded row must carry the crash reason: #{inspect(row.errors)}"
+
+    assert log =~ "DailyDigestWorker crashed: smtp relay exploded"
+  end
+
+  defmodule ExplodingAdapter do
+    use Swoosh.Adapter
+
+    @impl true
+    def deliver(%Swoosh.Email{}, _config), do: raise("smtp relay exploded")
   end
 
   # Swap the platform mailer adapter for one test and restore it after. The

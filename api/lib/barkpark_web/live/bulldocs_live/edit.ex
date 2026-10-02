@@ -1069,18 +1069,22 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
   # no copy of its own (the same D5/D6 stance the Studio editor holds).
   defp handle_result({:error, {:halted, reason}}, socket, request_id) do
     message = halt_reason(reason)
+    socket = sync(socket)
 
     socket
     |> assign(:paper_halt, message)
     |> put_flash(:error, message)
     |> assign(:save_status, "Save failed")
     |> assign(:last_save_ok?, false)
-    |> assign(:last_save_result, %{
-      saved: false,
-      request_id: request_id,
-      changed: false,
-      history_step: nil
-    })
+    |> assign(
+      :last_save_result,
+      # The refusal is final: say so, with the server's reason and the STORED
+      # runs, so the canvas host can put the author's view back on storage
+      # (see `SharedPaper.halted_result/3`).
+      socket
+      |> SharedPaper.halted_result(request_id, reason)
+      |> Map.merge(%{changed: false, history_step: nil})
+    )
   end
 
   defp handle_result({:error, _reason}, socket, request_id) do

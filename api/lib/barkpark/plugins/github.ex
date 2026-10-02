@@ -419,6 +419,16 @@ defmodule Barkpark.Plugins.Github do
     %{after_delete: [&Barkpark.Plugins.Github.RetireJob.enqueue_for_deleted/1]}
   end
 
+  @doc """
+  ONE pre-write fence: `content.github` is server-owned
+  (`Barkpark.Plugins.Github.LinkFence`). The mirror and retire jobs act on the
+  link with the App's token, so a user write may never add or change it.
+  """
+  @impl Barkpark.Plugin
+  def pre_write_fences do
+    [{Barkpark.Plugins.Github.LinkFence, :check}]
+  end
+
   # Auth is a LAZY singleton (no boot DB, no timer — safe to supervise always,
   # like onixedit's Bokbasen.Auth). The DrainWorker, by contrast, runs a periodic
   # DB-touching tick; a boot-started instance in the test env fires against a

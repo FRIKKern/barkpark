@@ -75,6 +75,18 @@ defmodule BarkparkWeb.SearchIntel do
   """
   def session_key(conn), do: client_id(conn)
 
+  @doc """
+  Which audience a search caller belongs to (task-bee78e63628ffe9b): `:public`
+  when the caller is pinned to the published corpus (no token, or a
+  public-read site token — `BarkparkWeb.AnonPerspective.anon_pinned?/1`),
+  `:private` otherwise. Stamped on every recorded search event and passed to
+  the suggestions read, so a public caller is only ever shown queries that
+  public callers made — never an editor's token or drafts search.
+  """
+  @spec audience(Plug.Conn.t()) :: :public | :private
+  def audience(conn),
+    do: if(BarkparkWeb.AnonPerspective.anon_pinned?(conn), do: :public, else: :private)
+
   @doc false
   def parent_event_id(conn) do
     case Plug.Conn.get_req_header(conn, "x-bp-search-parent") do

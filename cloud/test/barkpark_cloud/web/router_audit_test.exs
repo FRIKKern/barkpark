@@ -765,7 +765,6 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
   @instance_admin_token "instance-admin-token-plaintext"
   @instance_url "https://prod.barkpark.cloud"
-  @bundle "s3://barkpark-archives/shop-2026-07-09.tar.zst"
 
   # All-green fake for the :verify_http_client seam — every probe answers a
   # bare 200, so Verify.run/1 yields {:ok, result} with reachable: true. The
@@ -1035,9 +1034,11 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
     test "POST /v1/resurrect writes barkpark.resurrected for the fresh row with the resolved bundle" do
       {user, team, token} = logged_in()
       {:ok, _sub} = Billing.subscribe(team, "supporter")
+      # r4a: an explicit ref must live under the caller's own archives/<team_id>/.
+      bundle = "archives/#{team.id}/shop.barkpark.cloud/20260709T000000Z/"
 
       conn =
-        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: @bundle}, token)
+        call(:post, "/v1/resurrect", %{name: "Shop", bundle_ref: bundle}, token)
 
       assert conn.status == 202
       new_id = json_body(conn)["id"]
@@ -1046,7 +1047,7 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.actor_user_id == user.id
       assert ev.target_type == "barkpark"
       assert ev.target_id == new_id
-      assert ev.metadata == %{"name" => "Shop", "bundle_ref" => @bundle}
+      assert ev.metadata == %{"name" => "Shop", "bundle_ref" => bundle}
     end
   end
 
@@ -1238,7 +1239,11 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       configure_github()
       {user, team, token} = logged_in()
 
-      conn = call(:post, "/v1/github/installations", %{installation_id: "4242"}, token)
+      state = BarkparkCloud.GitHub.install_state(team, user.id)
+
+      conn =
+        call(:post, "/v1/github/installations", %{installation_id: "4242", state: state}, token)
+
       assert conn.status == 201
 
       assert [ev] = events(team, "github.installation_connected")

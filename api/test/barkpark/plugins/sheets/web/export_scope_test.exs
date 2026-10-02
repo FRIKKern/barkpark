@@ -257,6 +257,79 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportScopeTest do
     end
   end
 
+  # ── 4. The read-your-writes flush is not a cross-tenant lever ───────────────
+  #
+  # Run-4 Lane B. `fetch_sheet/3` asked EVERY tenant's live session for the slug
+  # to persist BEFORE it read the caller's own scope, so a ws-B token naming a
+  # slug that lives only in ws-A force-persisted A's session (a write on A's
+  # row driven by B), and a failed persist answered B a 503 `flush_failed`
+  # instead of 404 — telling B the slug is live in some tenant.
+  describe "the export's session flush" do
+    setup do
+      prev = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
+
+      # A debounce no test outlives: only an explicit flush persists.
+      Application.put_env(
+        :barkpark,
+        Barkpark.Plugins.Sheets.Session,
+        Keyword.merge(prev, debounce_ms: 600_000, flush_after_ops: 10_000)
+      )
+
+      on_exit(fn -> Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, prev) end)
+      :ok
+    end
+
+    test "a ws-B export of a ws-A-only slug does not persist A's live session",
+         %{conn: conn, ws_a: ws_a, raw_b: raw_b} do
+      slug = unique_slug("flush-a-only")
+      doc = create_sheet!(ws_a, slug, @a_secret)
+
+      # A's live, UNPERSISTED edit.
+      {:ok, _} =
+        Barkpark.Plugins.Sheets.Session.apply_ops(
+          slug,
+          @dataset,
+          [%{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "A-UNSAVED"}],
+          nil,
+          ws_a.id
+        )
+
+      refute persisted_text(doc) =~ "A-UNSAVED", "precondition: the edit is not persisted yet"
+
+      assert %{"error" => %{"code" => "not_found"}} =
+               conn |> bearer(raw_b) |> get(export_csv(slug)) |> json_response(404)
+
+      refute persisted_text(doc) =~ "A-UNSAVED",
+             "a workspace-B export flushed workspace A's live sheet session"
+    end
+
+    test "the owner's export still flushes its own live session (read-your-writes)",
+         %{conn: conn, ws_b: ws_b, raw_b: raw_b} do
+      slug = unique_slug("flush-b-own")
+      create_sheet!(ws_b, slug, @b_own)
+
+      {:ok, _} =
+        Barkpark.Plugins.Sheets.Session.apply_ops(
+          slug,
+          @dataset,
+          [%{"op" => "set_cell", "tab" => 0, "ref" => "B1", "raw" => "B-LIVE"}],
+          nil,
+          ws_b.id
+        )
+
+      resp = conn |> bearer(raw_b) |> get(export_csv(slug))
+      assert resp.status == 200
+      assert resp.resp_body =~ "B-LIVE"
+    end
+  end
+
+  defp persisted_text(doc) do
+    {:ok, row} =
+      Content.get_document(doc.doc_id, "sheet", @dataset, workspace_id: doc.workspace_id)
+
+    Jason.encode!(row.content)
+  end
+
   # ── helpers ─────────────────────────────────────────────────────────────────
 
   defp bearer(conn, token), do: put_req_header(conn, "authorization", "Bearer " <> token)

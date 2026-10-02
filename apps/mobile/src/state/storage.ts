@@ -8,6 +8,8 @@
 // instead of sprinkling try/catch at call sites. Swapping the seam also keeps
 // the expo-sqlite row cache (src/state/cache.ts) symmetrical.
 
+import { setSecretStoreForTesting } from './secrets'
+
 export interface KeyValueStorage {
   getString(key: string): string | undefined
   set(key: string, value: string): void
@@ -51,7 +53,11 @@ export function getStorage(): KeyValueStorage {
   return storage
 }
 
-/** Test seam: replace the storage backing (pass undefined to reset). */
+/** Test seam: replace the storage backing (pass undefined to reset). A reset
+ * also resets the secret store (src/state/secrets.ts), so a "clean MMKV slate"
+ * in a test is a clean credential slate too — the tokens moved out of this
+ * blob, and a test that wipes the blob means to wipe them with it. */
 export function setStorageForTesting(next: KeyValueStorage | undefined): void {
   storage = next
+  if (next === undefined) setSecretStoreForTesting(undefined)
 }

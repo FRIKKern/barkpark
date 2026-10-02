@@ -269,6 +269,7 @@ const INSERT_META = {
   "field-select": { label: "Select", hint: "▾" },
   "field-datetime": { label: "Date & time", hint: "◷" },
   "field-color": { label: "Color", hint: "●" },
+  sheet: { label: "Sheet", hint: "▦" },
 };
 
 // Stable insertion order for the Insert group (CANVAS_SLASH_TYPES is a Set; pin the
@@ -307,6 +308,7 @@ const INSERT_ORDER = [
   "field-select",
   "field-datetime",
   "field-color",
+  "sheet",
 ];
 
 // The FORMAT toggle commands. id, label, the StarterKit toggle command name, and the

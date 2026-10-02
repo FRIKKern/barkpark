@@ -187,6 +187,20 @@ defmodule BarkparkWeb.FormsSubmissionControllerTest do
       assert [] == submissions()
     end
 
+    # Run-4 lane C: the code-keyed `forbidden` hint told an anonymous poster to
+    # "use a token with write/admin permission" — a form post never has one.
+    test "the 403 hint names the allowed origins, not a token", ctx do
+      enable!(ctx.ws_a, ctx.proj_a)
+
+      conn =
+        post_form(form_path(ctx.ws_a, ctx.proj_a), %{"name" => "x"}, "https://evil.example.com")
+
+      hint = json_response(conn, 403)["error"]["hint"]
+
+      assert hint =~ "allowed_origins"
+      refute hint =~ "token"
+    end
+
     test "an operator bearer token does not bypass the origin check", ctx do
       enable!(ctx.ws_a, ctx.proj_a)
       raw = "bp_forms_admin_#{System.unique_integer([:positive])}"

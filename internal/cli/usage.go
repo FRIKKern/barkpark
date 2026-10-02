@@ -238,7 +238,7 @@ func usageCommand(out *writer, cmd manifest.Command) {
 			// placeholder for value flags so the two are distinguishable, matching
 			// the native surfaces' `--name <value>` style.
 			name := f.Name
-			if f.Type != "bool" {
+			if !f.IsSwitch() {
 				name = f.Name + " <value>"
 			}
 			out.errf("  --%-14s %s", name, f.Summary)

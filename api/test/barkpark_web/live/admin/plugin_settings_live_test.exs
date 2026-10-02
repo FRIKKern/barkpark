@@ -205,29 +205,14 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
-      {:ok, view, _html} =
-        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
+      # r4a: the MOUNT is operator-tier now (its REST twin is), so a
+      # non-operator admin never reaches the form, save, clear or
+      # test-connection at all. The per-event gate stays as defense in depth.
+      assert {:error, {:redirect, %{to: "/studio", flash: %{"error" => msg}}}} =
+               live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
-      html =
-        view
-        |> form(~s|[data-test-id="plugin-settings-form"]|,
-          settings: %{
-            "bokbasen.api_base" => "https://api.bokbasen.io",
-            "bokbasen.oauth_token_url" => "https://attacker.example/token",
-            "bokbasen.client_id" => "id-1",
-            "bokbasen.client_secret" => "",
-            "bokbasen.client_role" => "publisher"
-          }
-        )
-        |> render_submit()
-
-      assert html =~ "requires the platform operator"
+      assert msg =~ "requires the platform operator"
       assert {:ok, ^stored} = Settings.get(@row_name)
-
-      render_hook(view, "clear", %{"name" => "bokbasen.client_secret"})
-      assert {:ok, ^stored} = Settings.get(@row_name)
-
-      assert render_hook(view, "test-connection", %{}) =~ "requires the platform operator"
     end
 
     # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)
@@ -306,16 +291,11 @@ defmodule BarkparkWeb.Admin.PluginSettingsLiveTest do
 
       conn = init_test_session(conn, %{"api_token" => @admin_token})
 
-      {:ok, view, _html} =
-        live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
+      # r4a: refused at MOUNT — no form, no reveal button, no secret.
+      assert {:error, {:redirect, %{to: "/studio", flash: %{"error" => msg}}}} =
+               live(conn, "/w/default/p/default/d/production/studio/_plugins/onixedit/settings")
 
-      html =
-        view
-        |> element(~s|button[data-test-action="reveal-bokbasen.client_secret"]|)
-        |> render_click()
-
-      refute html =~ "operator-only-secret"
-      assert html =~ "requires the platform operator"
+      assert msg =~ "requires the platform operator"
     end
 
     # Plugins-off: the onixedit plugin registered (its bokbasen settings_schema is the fixture)

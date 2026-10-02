@@ -213,6 +213,9 @@
     not_live: "The instance isn't live yet — wait for provisioning to finish.",
     no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
     instance_unreachable: "Couldn't reach the instance — try again in a moment.",
+    // r4a — the 422 on POST /v1/fleet/supports when the host already belongs to
+    // another team's server: a support must be a machine your team controls.
+    host_taken: "That host is already registered to another team. Use the address of a server your team controls.",
     // task-71082f5541c13b53 (N-08) — the 409 every /v1/sites/:id/forms route
     // sends when the instance's plugin roster has no `forms`: the intake route
     // does not exist there, so there is nothing to turn on or read. Names the
@@ -265,6 +268,11 @@
     // that can change it. It does NOT say "GitHub refused" — the refusal is the
     // plane's own validation of what GitHub's API answered about that id.
     installation_not_found: "Barkpark can't see that GitHub installation any more — it was removed, or the link was used after the fact. Install the Barkpark app on GitHub again, then come back.",
+    // The record POST must carry back the team+user-bound `state` the plane
+    // sealed into the install link (GitHub.install_url/2). Reachable when the
+    // link was opened more than an hour ago, by another account, or for another
+    // team. Permanent for that link, so no transience verb; names the one act.
+    install_state_invalid: "That GitHub install link was started by another account or team, or more than an hour ago, so Barkpark didn't record it. Start the install from Settings \u2192 Providers, then come back.",
     suspended: "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.",
     // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
     // PROVES. This key used to read "Only the team owner can manage billing."
@@ -4684,7 +4692,7 @@
     if (typeof history === "undefined" || !history.replaceState) return;
     var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
       var k = kv.split("=")[0];
-      return kv !== "" && k !== "installation_id" && k !== "setup_action";
+      return kv !== "" && k !== "installation_id" && k !== "setup_action" && k !== "state";
     });
     var qs = kept.length ? "?" + kept.join("&") : "";
     history.replaceState(null, "", (location.pathname || "/") + qs + "#settings/providers");
@@ -4724,8 +4732,18 @@
 
   // THE RECORDING PATH. This single api() call is the whole return leg's reason
   // to exist; the guard cch-w73-bl-* in __app.test.mjs mutates it away and reds.
+  // The team+user-bound install `state` GitHub handed back beside the id on the
+  // Setup-URL redirect (the plane sealed it into install_url). Read once at boot
+  // by handleGithubInstallReturn, BEFORE the scrub drops it from the address bar.
+  var githubInstallState = "";
+
+  function githubInstallStateFromSearch(search) {
+    try { return (new URLSearchParams(search || "").get("state") || "").trim(); }
+    catch (e) { return ""; }
+  }
+
   function recordGithubInstall(id) {
-    return api("POST", "/v1/github/installations", { installation_id: id }).then(function (r) {
+    return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState }).then(function (r) {
       toast(githubInstallOutcome(r));
       // The install just proved the deployment IS configured (a 503 arm cannot
       // mint a 201), so the site screen's one-shot readiness band learns it for
@@ -4829,6 +4847,7 @@
   function handleGithubInstallReturn() {
     var ret = githubInstallReturnFromSearch(location.search);
     if (!ret) return false;
+    githubInstallState = githubInstallStateFromSearch(location.search);
     scrubGithubInstallParams();
     if (!ret.installation_id) {
       toast(githubInstallUnconfirmedToast());
@@ -31314,6 +31333,7 @@
       // outcome, honest-absence) plus the DOM-free recorder, so the harness can
       // drive the whole leg and mutate the recording path away.
       githubInstallReturnFromSearch: githubInstallReturnFromSearch,
+      githubInstallStateFromSearch: githubInstallStateFromSearch,
       githubInstallOutcome: githubInstallOutcome,
       githubInstallUnconfirmedToast: githubInstallUnconfirmedToast,
       handleGithubInstallReturn: handleGithubInstallReturn,

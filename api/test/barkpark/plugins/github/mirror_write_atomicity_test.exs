@@ -89,7 +89,7 @@ defmodule Barkpark.Plugins.Github.MirrorWriteAtomicityTest do
         "task",
         %{"doc_id" => doc_id, "title" => "Intake #{number}", "content" => content},
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     {:ok, published} = Content.publish_document(doc_id, "task", @dataset, scope)

@@ -582,16 +582,22 @@ defmodule BarkparkCloud.NotificationsTest do
       ref = make_ref()
       test_pid = self()
 
-      :telemetry.attach(
+      BarkparkCloud.TelemetryTap.attach(
         "covered-#{inspect(ref)}",
         [:barkpark_cloud, :notifications, :fleet_digest, :settled],
         fn _event, measurements, metadata, _cfg ->
-          send(test_pid, {ref, measurements, metadata})
+          # OURS ONLY. The handler runs in whichever process emits, and other
+          # async modules settle fleet digests too (DailyDigestWorkerTest,
+          # NotificationsTest); unfiltered, their `instances: 1` arrived first on
+          # main push run 36885879832. Keep events from this test's lineage.
+          if self() == test_pid or test_pid in List.wrap(Process.get(:"$callers")) do
+            send(test_pid, {ref, measurements, metadata})
+          end
         end,
         nil
       )
 
-      on_exit(fn -> :telemetry.detach("covered-#{inspect(ref)}") end)
+      on_exit(fn -> BarkparkCloud.TelemetryTap.detach("covered-#{inspect(ref)}") end)
 
       assert {:ok, %{sent: 1}} = Notifications.deliver_fleet_digest(fleet)
 

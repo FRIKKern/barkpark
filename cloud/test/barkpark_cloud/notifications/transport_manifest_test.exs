@@ -81,6 +81,22 @@ defmodule BarkparkCloud.Notifications.TransportManifestTest do
   @dead_relay_host "127.0.0.1"
   @dead_relay_port 1
 
+  # Loopback is refused as an SMTP relay in production (an internal host turns the
+  # control plane into a port scanner); this suite needs it as the instant-refuse
+  # relay, so it opens the one test seam for its own duration only.
+  setup do
+    prior = Application.get_env(:barkpark_cloud, :allow_internal_smtp_relay)
+    Application.put_env(:barkpark_cloud, :allow_internal_smtp_relay, true)
+
+    on_exit(fn ->
+      if is_nil(prior),
+        do: Application.delete_env(:barkpark_cloud, :allow_internal_smtp_relay),
+        else: Application.put_env(:barkpark_cloud, :allow_internal_smtp_relay, prior)
+    end)
+
+    :ok
+  end
+
   ## ── Fixtures ───────────────────────────────────────────────────────────
 
   # A team with exactly one member (so one dispatch = one email = one Delivery).

@@ -52,20 +52,42 @@ defmodule BarkparkWeb.Admin.PluginsLive do
     {:checkers, 0}
   ]
 
+  # The plugin registry, its run status and the Reload buttons are
+  # INSTANCE-wide. Their REST twin (`GET /v1/plugins`) sits behind
+  # RequirePlatformOperator, so this LiveView applies the same tier at mount
+  # and on the instance-wide Reload events (r4a LiveView authz sweep): with the
+  # operator allowlist armed, an `:admin` that is not the operator (a
+  # global-admin token, or an admin of the Default workspace) is refused. With
+  # the allowlist unset, `permits?/1` admits every admin, as the plug does.
+  @operator_refusal "Plugin administration requires the platform operator."
+
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
-    {:ok,
-     socket
-     |> assign(
-       page_title: "Plugins",
-       dataset: dataset,
-       plugins: load_plugin_rows()
-     )}
+    if operator?(socket) do
+      {:ok,
+       socket
+       |> assign(
+         page_title: "Plugins",
+         dataset: dataset,
+         plugins: load_plugin_rows()
+       )}
+    else
+      {:ok, socket |> put_flash(:error, @operator_refusal) |> redirect(to: "/studio")}
+    end
   end
+
+  defp operator?(socket),
+    do: BarkparkWeb.Plugs.RequirePlatformOperator.permits?(socket.assigns[:api_token])
 
   # ── events ──────────────────────────────────────────────────────────
 
   @impl true
+  def handle_event(event, params, socket) when event in ~w(reload-plugin reload-all) do
+    if operator?(socket),
+      do: reload(event, params, socket),
+      else: {:noreply, put_flash(socket, :error, @operator_refusal)}
+  end
+
   def handle_event("refresh", _params, socket) do
     {:noreply,
      socket
@@ -73,7 +95,14 @@ defmodule BarkparkWeb.Admin.PluginsLive do
      |> put_flash(:info, "Refreshed.")}
   end
 
-  def handle_event("reload-plugin", %{"name" => name}, socket) do
+  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
+  # the session. Keep LAST among handle_event/3 clauses.
+  def handle_event(event, _params, socket) do
+    Logger.warning("admin/plugins: unhandled event #{inspect(event)}")
+    {:noreply, socket}
+  end
+
+  defp reload("reload-plugin", %{"name" => name}, socket) do
     schemas_result = Bootstrap.install_by_name(name)
     seed_result = Registry.run_codelist_seeders_by_name(name)
 
@@ -100,7 +129,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
      |> put_flash(kind, msg)}
   end
 
-  def handle_event("reload-all", _params, socket) do
+  defp reload("reload-all", _params, socket) do
     bootstrap_result = Bootstrap.register_all_schemas()
     :ok = Registry.run_all_codelist_seeders()
 
@@ -116,10 +145,8 @@ defmodule BarkparkWeb.Admin.PluginsLive do
      |> put_flash(kind, msg)}
   end
 
-  # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
-  # the session. Keep LAST among handle_event/3 clauses.
-  def handle_event(event, _params, socket) do
-    Logger.warning("admin/plugins: unhandled event #{inspect(event)}")
+  defp reload(event, _params, socket) do
+    Logger.warning("admin/plugins: malformed #{inspect(event)} event")
     {:noreply, socket}
   end
 

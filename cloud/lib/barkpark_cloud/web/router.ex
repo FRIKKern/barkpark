@@ -2898,29 +2898,47 @@ defmodule BarkparkCloud.Web.Router do
             })
 
           %Barkpark{team_id: tid} = parent when tid == team.id ->
-            attrs = %{
-              name: name,
-              slug: slugify(name),
-              host: string_param_or_nil(conn.body_params["host"]),
-              parent_id: parent.id,
-              token_id: string_param_or_nil(conn.body_params["token_id"])
-            }
+            host = string_param_or_nil(conn.body_params["host"])
 
-            # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
-            # never returns :limit_reached, so a saturated ceiling can't 403 here.
-            case Registry.register_support_barkpark(team, attrs) do
-              {:ok, support} ->
-                push_event(team.id, "fleet")
-                json(conn, 201, %{barkpark: barkpark_json(support)})
-
-              {:error, %Ecto.Changeset{} = cs} ->
-                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            # r4a: the platform worker SSHes to a support's `host` as root
+            # (agent-key, attach-domain, auto-update jobs). A host already
+            # registered to ANOTHER team is somebody else's box — naming it
+            # here would aim those root writes at it. Refused before the row
+            # exists.
+            if Registry.host_held_by_other_team?(host, team.id) do
+              json(conn, 422, %{
+                error: "host_taken",
+                detail: "that host is registered to a different team"
+              })
+            else
+              register_support(conn, team, name, parent, host)
             end
 
           # Cross-team, unknown, or malformed parent id → 404 (no existence leak).
           _ ->
             json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  defp register_support(conn, team, name, parent, host) do
+    attrs = %{
+      name: name,
+      slug: slugify(name),
+      host: host,
+      parent_id: parent.id,
+      token_id: string_param_or_nil(conn.body_params["token_id"])
+    }
+
+    # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
+    # never returns :limit_reached, so a saturated ceiling can't 403 here.
+    case Registry.register_support_barkpark(team, attrs) do
+      {:ok, support} ->
+        push_event(team.id, "fleet")
+        json(conn, 201, %{barkpark: barkpark_json(support)})
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        json(conn, 422, %{error: "invalid", details: errors(cs)})
     end
   end
 
@@ -6558,8 +6576,14 @@ defmodule BarkparkCloud.Web.Router do
         json(conn, 200, github_installation_json(%{connected: false, account_login: nil}))
 
       true ->
-        state = GitHub.connection_state(conn.assigns.current_team)
-        json(conn, 200, github_installation_json(state))
+        team = conn.assigns.current_team
+        state = GitHub.connection_state(team)
+
+        json(
+          conn,
+          200,
+          github_installation_json(state, team, conn.assigns.current_user.id)
+        )
     end
   end
 
@@ -6625,6 +6649,18 @@ defmodule BarkparkCloud.Web.Router do
 
       not valid_installation_id?(conn.body_params["installation_id"]) ->
         json(conn, 422, %{error: "installation_id_required"})
+
+      # The id must come back with the team-bound `state` this plane sealed into
+      # the install link (GitHub.install_url/2): the existence check below is
+      # answered by the App's own JWT and so proves nothing about WHOSE install
+      # it is. A missing, foreign-team, foreign-user, tampered or expired state is
+      # the same 422 and nothing is written.
+      GitHub.verify_install_state(
+        conn.body_params["state"],
+        conn.assigns.current_team,
+        conn.assigns.current_user.id
+      ) != :ok ->
+        json(conn, 422, %{error: "install_state_invalid"})
 
       true ->
         team = conn.assigns.current_team
@@ -10907,8 +10943,11 @@ defmodule BarkparkCloud.Web.Router do
   # tampered handle, an unexpected seam return) leaves the anonymous source
   # untouched, so a public repo keeps deploying and a private one fails at the
   # builder with the honest terminal repo-inaccessible reason.
+  # The clone credential is REPO-SCOPED and READ-ONLY (r3b sweep): the box runs
+  # arbitrary build code, so it gets a token for this site's repo with
+  # contents:read, never the installation's full-permission, every-repo token.
   defp put_clone_token(source, site) do
-    case GitHub.installation_token_for(site.team_id) do
+    case GitHub.repo_read_token_for(site.team_id, site.github_repo) do
       {:ok, token} when is_binary(token) and token != "" ->
         Map.put(source, :token, token)
 
@@ -12452,8 +12491,13 @@ defmodule BarkparkCloud.Web.Router do
     case conn.body_params["bundle_ref"] do
       ref when is_binary(ref) ->
         case String.trim(ref) do
-          "" -> newest_bundle_ref(conn.assigns.current_team)
-          trimmed -> {:ok, trimmed}
+          "" ->
+            newest_bundle_ref(conn.assigns.current_team)
+
+          trimmed ->
+            if own_bundle_ref?(trimmed, conn.assigns.current_team.id),
+              do: {:ok, trimmed},
+              else: {:error, :invalid_bundle_ref}
         end
 
       nil ->
@@ -12466,6 +12510,21 @@ defmodule BarkparkCloud.Web.Router do
         {:error, :invalid_bundle_ref}
     end
   end
+
+  # r4a: an explicit ref is client input, and the worker restores whatever key
+  # prefix the claim carries — another team's `archives/<B>/…` would restore
+  # B's database onto a box the caller owns. The same boundary
+  # `ArchiveStore.delete_bundle/2` holds: the ref must live under the caller's
+  # OWN `archives/<team_id>/` prefix, with no `.`/`..` segment or backslash that
+  # could walk it back out.
+  defp own_bundle_ref?(ref, team_id) when is_binary(team_id) and team_id != "" do
+    prefix = "archives/" <> team_id <> "/"
+
+    String.starts_with?(ref, prefix) and ref != prefix and not String.contains?(ref, "\\") and
+      ref |> String.split("/") |> Enum.all?(&(&1 not in [".", ".."]))
+  end
+
+  defp own_bundle_ref?(_ref, _team_id), do: false
 
   defp newest_bundle_ref(team) do
     case ArchiveStore.list_archives(team.id) do
@@ -15067,6 +15126,12 @@ defmodule BarkparkCloud.Web.Router do
       configured: GitHub.configured?(),
       install_url: GitHub.install_url()
     }
+  end
+
+  # The team member's read: the install link carries the team+user-bound
+  # `state` the record POST requires back (GitHub.install_url/2).
+  defp github_installation_json(state, team, user_id) do
+    %{github_installation_json(state) | install_url: GitHub.install_url(team, user_id)}
   end
 
   # A GitHub installation id arrives as JSON — GitHub uses a numeric id, but the

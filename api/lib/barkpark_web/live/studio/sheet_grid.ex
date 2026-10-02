@@ -412,6 +412,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         |> assign(save_state: :saving)
         |> Ops.apply_delta(payload)
         |> GridData.derive_grid()
+        |> follow_added_tab()
 
       {:ok, if(stale?, do: socket, else: announce_remote_change(socket, payload))}
     end
@@ -1261,40 +1262,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # coordinates on the tab the viewer moved to — the same axis as
   # `presence-meta` above.
   def handle_event("tab-switch", %{"tab" => idx}, socket) do
-    idx = to_int(idx)
-    count = length(GridData.tabs(socket))
-
-    {:noreply,
-     socket
-     |> assign(
-       tab: idx,
-       row_offset: 0,
-       active: {1, 1},
-       anchor: nil,
-       editing: nil,
-       menu: nil,
-       renaming_tab: nil,
-       # The picker targets the active tab; switching tabs closes it so it
-       # never lingers pointed at a tab the user just left.
-       tab_color_open: false,
-       # Matches are keyed to the previous tab's cells — drop them so the
-       # highlight never bleeds onto the new tab's grid.
-       find_hits: MapSet.new(),
-       find_query: "",
-       # The filter criteria are likewise keyed to the previous tab's columns —
-       # drop them so rows of the NEW tab never vanish under a filter the
-       # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
-       filters: %{},
-       filter_panel: nil,
-       status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
-     )
-     |> GridData.derive_grid()
-     |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})}
+    {:noreply, switch_tab(socket, to_int(idx))}
   end
 
+  # Add a tab and FOLLOW it, as every spreadsheet does: the add_tab op lands
+  # through the session, and its structural delta (which carries the new tab
+  # into @content) arrives AFTER this handler returns — so the switch is armed
+  # here and taken in update/2 once the tab exists. Staying on the old tab was
+  # a trap: the editor's next keystrokes overwrote the tab they had just left.
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
-    {:noreply, send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])}
+    socket = send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])
+
+    if socket.assigns[:notice] == nil,
+      do: {:noreply, assign(socket, follow_tab: n - 1)},
+      else: {:noreply, socket}
   end
 
   # ◀ / ▶ move the active tab one slot. The move_tab op reindexes the tab list
@@ -2559,6 +2541,50 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # The tab's display name (falls back to the 1-based default) — used for the
   # polite-region announcements on switch / move / duplicate.
+  # tab-add armed `follow_tab`; take it once the delta has delivered that tab.
+  defp follow_added_tab(socket) do
+    case socket.assigns[:follow_tab] do
+      idx when is_integer(idx) ->
+        if idx < length(GridData.tabs(socket)),
+          do: socket |> assign(follow_tab: nil) |> switch_tab(idx),
+          else: socket
+
+      _ ->
+        socket
+    end
+  end
+
+  # The tab-switch assigns, shared by a click on a tab and by tab-add's follow.
+  defp switch_tab(socket, idx) do
+    count = length(GridData.tabs(socket))
+
+    socket
+    |> assign(
+      tab: idx,
+      row_offset: 0,
+      active: {1, 1},
+      anchor: nil,
+      editing: nil,
+      menu: nil,
+      renaming_tab: nil,
+      # The picker targets the active tab; switching tabs closes it so it
+      # never lingers pointed at a tab the user just left.
+      tab_color_open: false,
+      # Matches are keyed to the previous tab's cells — drop them so the
+      # highlight never bleeds onto the new tab's grid.
+      find_hits: MapSet.new(),
+      find_query: "",
+      # The filter criteria are likewise keyed to the previous tab's columns —
+      # drop them so rows of the NEW tab never vanish under a filter the
+      # viewer set on a different tab (per-tab view-state, SF-D2/SF-D7).
+      filters: %{},
+      filter_panel: nil,
+      status: "Sheet #{idx + 1} of #{count}: #{tab_name(socket, idx)}"
+    )
+    |> GridData.derive_grid()
+    |> Ops.push_presence(%{tab: idx, active: "A1", selection: nil, editing: nil})
+  end
+
   defp tab_name(socket, idx) do
     case Enum.at(GridData.tabs(socket), idx) do
       %{"name" => name} when is_binary(name) and name != "" -> name

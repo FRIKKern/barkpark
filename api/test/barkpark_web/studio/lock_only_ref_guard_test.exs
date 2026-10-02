@@ -11,7 +11,7 @@ defmodule BarkparkWeb.Studio.LockOnlyRefGuardTest do
 
       for(let{el:a,lock:l,loading:h}of e){
         if(!l&&!h)throw new Error("putRef requires lock or loading");
-        if(a.setAttribute(N,this.refSrc()),      # N = "data-phx-ref-src"
+        if(a.setAttribute(F,this.refSrc()),      # N = "data-phx-ref-src"
            h&&a.setAttribute(ve,r),              # ve = "data-phx-ref-loading"
            l&&a.setAttribute(C,r),               # C  = "data-phx-ref-lock"
            !h||…)continue;                       # not loading: LEAVE NOW
@@ -76,7 +76,7 @@ defmodule BarkparkWeb.Studio.LockOnlyRefGuardTest do
       # BEFORE classList.add.
       assert String.contains?(
                vendor(),
-               ~S|if(a.setAttribute(N,this.refSrc()),h&&a.setAttribute(ve,r),l&&a.setAttribute(C,r),!h|
+               ~S|if(a.setAttribute(F,this.refSrc()),h&&a.setAttribute(ve,r),l&&a.setAttribute(C,r),!h|
              ),
              "putRef no longer stamps data-phx-ref-src unconditionally ahead of the not-loading " <>
                "exit. The guard's second arm is keyed on that attribute precisely because it " <>
@@ -99,15 +99,15 @@ defmodule BarkparkWeb.Studio.LockOnlyRefGuardTest do
     end
 
     test "bindClick still drops a press on an element that already holds a ref" do
-      assert String.contains?(vendor(), ~S|!r.hasAttribute(N)&&this.debounce(r,n,"click"|),
+      assert String.contains?(vendor(), ~S|!r.hasAttribute(F)&&this.debounce(r,n,"click"|),
              "bindClick's early return is the drop the guard is announcing; without it the " <>
                "second press is not dropped and the guard would be announcing a fiction"
     end
 
     test "SABOTAGE CONTROL — the vendor checks can fail" do
-      broken = String.replace(vendor(), ~S|!r.hasAttribute(N)&&this.debounce(r,n,"click"|, "")
+      broken = String.replace(vendor(), ~S|!r.hasAttribute(F)&&this.debounce(r,n,"click"|, "")
 
-      refute String.contains?(broken, ~S|!r.hasAttribute(N)&&this.debounce(r,n,"click"|),
+      refute String.contains?(broken, ~S|!r.hasAttribute(F)&&this.debounce(r,n,"click"|),
              "this check cannot fail, so it is not a check"
     end
   end

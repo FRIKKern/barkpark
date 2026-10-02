@@ -712,7 +712,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
         with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
              :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
           row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
-          write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title)
+
+          # The history row is written INSIDE the row write's transaction (Run-4
+          # concurrent-writer matrix). In the after-commit tail, a concurrent
+          # ingest that committed in between made the revision snapshot differ
+          # from the document, the snapshot trigger RAISED ("revision snapshot
+          # does not exactly match its document"), and the caller got a 500 for
+          # a write that had already landed — with its history row lost. Here
+          # the UPDATE still holds the row, so the snapshot is exactly what was
+          # written; `save_revision` takes the savepoint path in a transaction.
+          with {:ok, %Document{} = doc} <-
+                 write_blocks_doc_row(type, content, row, dataset, slug, scope_attrs, title) do
+            save_upsert_revision(doc, type, dataset, row, opts)
+            {:ok, doc}
+          end
         end
       end)
 
@@ -817,7 +830,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # firing a pre-commit broadcast. Wrapped: telemetry can never fail a write.
   defp persist_blocks_doc_tail(%Document{} = doc, attrs, type, dataset, slug, existing, opts) do
     emit_tail_boundary_telemetry(type, dataset, slug)
-    save_upsert_revision(doc, type, dataset, existing, opts)
+    # The history row is no longer written here: it rides the row write's own
+    # transaction in `persist_blocks_doc` (see the note there).
+    _ = {existing, opts}
     broadcast_paper_update(doc)
     enqueue_edge_projection(doc)
     # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
@@ -1001,7 +1016,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks = patched |> ensure_block_ids() |> normalize_render_shapes(),
+         new_blocks =
+           patched
+           |> ensure_block_ids()
+           |> normalize_render_shapes()
+           |> hydrate_changed_sheet_blocks(blocks, doc, dataset, slug),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -1650,6 +1669,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # current rev, no write or broadcast. Canonical ops keep their semantics.
         {:ok, blocks, paper_current_rev(doc), nil}
       else
+        new_blocks = hydrate_changed_sheet_blocks(new_blocks, blocks, doc, dataset, slug)
         rev = paper_next_rev(doc)
         style = get_in(doc.content || %{}, ["style"])
         scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
@@ -2459,7 +2479,38 @@ defmodule Barkpark.Content.Papers.BlockOps do
   @spec apply_document_block_op(String.t(), String.t(), map(), String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
-    do: Door.admit(fn -> admitted_apply_document_block_op(doc_id, type, op, dataset, opts) end)
+    do:
+      Door.admit(fn ->
+        document_revless(opts, &admitted_apply_document_block_op(doc_id, type, op, dataset, &1))
+      end)
+
+  # [document-revless-cas] (Run-4 concurrent-writer matrix) — the document twin
+  # of [blockops-revless-cas]. A revision-LESS document block op read the row,
+  # patched its block list and wrote the WHOLE content back unfenced, so two ops
+  # on DIFFERENT fields of one document raced and one was silently lost (20/20
+  # rounds). It keeps its API — no revision needed, never refused for a stale
+  # one — but now writes fenced on the rev it read and, on a lost race, re-runs
+  # on the fresh row (bounded). The last attempt falls back to the legacy plain
+  # write: a pathologically hot document degrades to last-writer-wins, never to
+  # an error. An op that carries `:if_rev` is untouched (it already 412s).
+  @document_revless_attempts 8
+
+  defp document_revless(opts, fun) do
+    if Keyword.get(opts, :if_rev) in [nil, ""] do
+      document_revless_attempt(opts, fun, @document_revless_attempts)
+    else
+      fun.(opts)
+    end
+  end
+
+  defp document_revless_attempt(opts, fun, 1), do: fun.(opts)
+
+  defp document_revless_attempt(opts, fun, attempts) do
+    case fun.(Keyword.put(opts, :document_revless_cas, true)) do
+      {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
+      other -> other
+    end
+  end
 
   defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
        when is_binary(doc_id) and is_binary(type) and is_map(op) do
@@ -2530,6 +2581,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       "status" => doc.status,
       "content" => content
     }
+
+    # [document-revless-cas]: fence the write on the row this attempt read —
+    # only when that row IS the write target (the draft); a first fork from the
+    # published row inserts the draft and has no row to fence on.
+    {cas?, opts} = Keyword.pop(opts, :document_revless_cas, false)
+
+    opts =
+      if cas? and doc.doc_id == attrs["doc_id"] and is_binary(doc.rev),
+        do: Keyword.put(opts, :if_rev, doc.rev),
+        else: opts
 
     case Content.upsert_document(type, attrs, dataset, opts) do
       {:ok, saved} ->
@@ -3119,6 +3180,54 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp reject_hollow_result(_no_blocks_list), do: :ok
+
+  # Sheet-embed hydration on the op paths (sheets-engine.md §Embed pipeline):
+  # a paper save that adds a `{"type":"sheet","ref":…}` block, or retargets
+  # one, fills its snapshot from the referenced sheet. `upsert_blocks_doc`
+  # hydrates every sheet block; the canvas op paths hydrate only a sheet block
+  # that is NEW (id absent before the op) or whose ref/tab CHANGED, so an
+  # ordinary typing batch never queries sheets. The chip retarget clears the
+  # old snapshot and relies on this to draw the new grid. The batch path runs
+  # it after the contextual-history exactness check.
+  defp hydrate_changed_sheet_blocks(new_blocks, old_blocks, %Document{} = doc, dataset, slug)
+       when is_list(new_blocks) and is_list(old_blocks) do
+    before =
+      for %{"type" => "sheet", "id" => id} = block <- old_blocks,
+          into: %{},
+          do: {id, {block["ref"], block["tab"]}}
+
+    changed? = fn
+      %{"type" => "sheet", "ref" => ref} = block when is_binary(ref) and ref != "" ->
+        Map.get(before, block["id"]) != {ref, block["tab"]}
+
+      _ ->
+        false
+    end
+
+    case Enum.filter(new_blocks, changed?) do
+      [] ->
+        new_blocks
+
+      changed ->
+        scope = %{
+          "dataset" => dataset,
+          "dataset_id" => doc.dataset_id,
+          "workspace_id" => doc.workspace_id
+        }
+
+        hydrated =
+          changed
+          |> Sheets.hydrate_sheet_blocks(scope, slug)
+          |> Map.new(&{&1["id"], &1})
+
+        Enum.map(new_blocks, fn block ->
+          if changed?.(block), do: Map.get(hydrated, block["id"], block), else: block
+        end)
+    end
+  end
+
+  defp hydrate_changed_sheet_blocks(new_blocks, _old_blocks, _doc, _dataset, _slug),
+    do: new_blocks
 
   # Quality gate, op-path RATCHET (p-quality-gate): halt only on the
   # non-hollow → hollow edge. Fresh hollow papers (seeded title + empty
@@ -3793,7 +3902,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
     * `notes`/`cards` ITEMS that arrive as bare strings (or inline arrays)
       become text maps, and `pipeline` NODES become TITLE maps (the key its
-      readers render) — the readers address item FIELDS
+      readers render; an inline array also keeps its structure under `inline`) — the readers address item FIELDS
       through `get/2`, which is nil on a binary, so the raw shape renders an
       EMPTY row while the paper answers 200 (live: `heggemsnes-act`). The arm
       is TYPE-KEYED, never generic over `items` — `byline` string items are
@@ -3804,7 +3913,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
       (render/inline.ex), so a text-keyed leaf renders as the empty string
       and a paragraph whose only leaf carries it VANISHES (live:
       `deploy-reliability-wave-4-2026-08-06`). Leaves already carrying a
-      `value` are left byte-identical.
+      STRING `value` are left byte-identical; a `value: null` leaf with real
+      `text` is rescued like a text-keyed one.
   """
   @spec normalize_render_shapes(list()) :: list()
   def normalize_render_shapes(blocks) when is_list(blocks) do
@@ -4320,17 +4430,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   # ONE widget item/node → the text-map dialect the readers understand. A map
   # (the canonical shape) is untouched; a bare string becomes `%{"text" => s}`;
-  # an inline ARRAY flattens to its plain text. An inline array with NO
-  # derivable text — or any other scalar — is left as-is: this is a rescue
-  # arm, never a destroyer.
+  # an inline ARRAY gets its plain text under `text` for today's readers. An
+  # inline array with NO derivable text — or any other scalar — is left as-is:
+  # this is a rescue arm, never a destroyer.
+  #
+  # POLICY for inline-array items and nodes (task-95e93702fdae9fd6, F4): the
+  # author's structure is NEVER flattened away. The plain text is ADDED under
+  # the key every reader renders (`text`, or `title` for pipeline nodes), and
+  # the original inline array — leaf dialect normalized, marks, links,
+  # wikilinks and code intact — is KEPT under the sibling key `inline`. No
+  # reader in either engine reads `inline` today, so render bytes are exactly
+  # what the flattening produced; a reader that learns rich item rendering
+  # reads `inline` and gets the markup back. Writing only the flattened text
+  # (the old behaviour) was one-way: the markup could never return.
+  @widget_inline_key "inline"
+
   defp normalize_widget_item(item) when is_binary(item), do: %{"text" => item}
 
-  defp normalize_widget_item(item) when is_list(item) do
-    case inline_plain_text(item) do
-      "" -> item
-      text -> %{"text" => text}
-    end
-  end
+  defp normalize_widget_item(item) when is_list(item), do: rescue_inline_array(item, "text")
 
   defp normalize_widget_item(item), do: item
 
@@ -4338,14 +4455,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Same rescue discipline as normalize_widget_item, different key.
   defp normalize_pipeline_node(node) when is_binary(node), do: %{"title" => node}
 
-  defp normalize_pipeline_node(node) when is_list(node) do
-    case inline_plain_text(node) do
-      "" -> node
-      text -> %{"title" => text}
-    end
-  end
+  defp normalize_pipeline_node(node) when is_list(node), do: rescue_inline_array(node, "title")
 
   defp normalize_pipeline_node(node), do: node
+
+  defp rescue_inline_array(inline, text_key) do
+    case inline_plain_text(inline) do
+      "" -> inline
+      text -> %{text_key => text, @widget_inline_key => normalize_inline_nodes(inline)}
+    end
+  end
 
   # Flatten an inline array (or one inline node) to concatenated PLAIN text,
   # marks dropped: a leaf contributes its `value` (or TipTap `text`), a mark
@@ -4503,8 +4622,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp normalize_inline_nodes(nodes), do: Enum.map(nodes, &normalize_inline_node/1)
 
+  # A STRING `value` already wins at render and is left byte-identical. Any
+  # other value — an explicit `null` from a JSON producer, which the renderer
+  # coerces to "" — is no value at all, so the real `text` is rescued into it
+  # (task-40529c5ad14ae43e; a `Map.has_key?` guard read the null as canonical).
   defp normalize_inline_node(%{"type" => "text", "text" => text} = leaf) when is_binary(text) do
-    if Map.has_key?(leaf, "value") do
+    if is_binary(Map.get(leaf, "value")) do
       leaf
     else
       leaf |> Map.delete("text") |> Map.put("value", text)

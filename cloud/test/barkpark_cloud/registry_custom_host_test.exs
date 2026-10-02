@@ -55,11 +55,11 @@ defmodule BarkparkCloud.RegistryCustomHostTest do
 
   describe "set_custom_host/2 vs a url-held FQDN" do
     test "a domain held as ANOTHER row's url is :taken" do
-      _victim = live_row_holding_url("https://gyldendal.barkpark.cloud")
+      _victim = live_row_holding_url("https://hostsnatch.barkpark.cloud")
 
       thief = barkpark_fixture(team_fixture())
 
-      assert {:error, :taken} = Registry.set_custom_host(thief, "gyldendal.barkpark.cloud")
+      assert {:error, :taken} = Registry.set_custom_host(thief, "hostsnatch.barkpark.cloud")
 
       # And nothing was written: the pre-check refuses before Repo.update/1.
       assert Registry.get_barkpark(thief.id).custom_host == nil

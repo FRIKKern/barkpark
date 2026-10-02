@@ -30,6 +30,14 @@ export interface WebhookConfig {
    * Freshness tolerance in seconds. Default 300 (5 minutes).
    */
   toleranceSeconds?: number
+  /**
+   * Largest request body accepted, in bytes. Default 4 MiB (4194304) — above a
+   * typical revalidation payload and at the request cap serverless hosts
+   * already enforce. A larger body is answered 413 `payload_too_large` without
+   * being read in full; raise it only if your documents ride the payload and
+   * exceed it.
+   */
+  maxBodyBytes?: number
 }
 
 /** Shape returned by createWebhookHandler — mount at an App Router route file. */

@@ -356,6 +356,11 @@ function reduceAnswer(st: ChatState, ev: AnswerEvent): ReduceResult {
   if (ev.requestId === '' || (ev.decision !== 'allow' && ev.decision !== 'deny')) {
     return { state: st, effects: none }
   }
+  // One answer per card: the buttons vanish only on the next render, so a
+  // double tap (or Allow then Deny) can land twice before that commit. The
+  // first decision stands; a FAILED answer clears this latch (reduceAnswered),
+  // so a retry still goes out.
+  if (st.answerInFlight[ev.requestId] !== undefined) return { state: st, effects: none }
   let notice = ev.decision === 'deny' ? 'denying…' : 'allowing…'
   // An approved plan card is the autopilot promise: say so now — the badge
   // lands on truth at the turn boundary / next init frame.

@@ -106,6 +106,27 @@ defmodule Barkpark.Webhooks.DispatcherTest do
   defp set_or_delete(k, nil), do: Application.delete_env(:barkpark, k)
   defp set_or_delete(k, v), do: Application.put_env(:barkpark, k, v)
 
+  # `Dispatcher.record/3` fires the fan-out TELEMETRY, then writes the
+  # `webhook_fanout` LOG line, then calls the sink — in that order, in the
+  # fan-out task. A test that leaves `capture_log` as soon as the `:settled`
+  # telemetry message arrives can close the capture before the task has
+  # logged: main run 36556050298 read `log == ""`, and a 100 ms pause before
+  # the log line makes it red every time (task-05e65bca7730225e). The sink runs
+  # AFTER the log, so receiving the sink's `:settled` inside the capture is the
+  # event that proves the line exists.
+  defp sync_on_fanout_sink do
+    test_pid = self()
+    prev = Application.get_env(:barkpark, :webhook_fanout_sink)
+
+    # Keyed by doc_id, as the telemetry probe is: the sink is node-global, so a
+    # fan-out task left over from an earlier test can call it too.
+    Application.put_env(:barkpark, :webhook_fanout_sink, fn %{phase: phase, metadata: meta} ->
+      send(test_pid, {:fanout_sink, phase, meta.doc_id})
+    end)
+
+    on_exit(fn -> set_or_delete(:webhook_fanout_sink, prev) end)
+  end
+
   defp new_event_id do
     id = "e-" <> (Ecto.UUID.generate() |> binary_part(0, 8))
     {:ok, doc} = Content.create_document("widget", %{"_id" => id, "title" => "t"}, "test")
@@ -958,6 +979,7 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       on_exit(fn -> set_or_delete(:webhook_delivery_concurrency, prev_conc) end)
 
       :ok = FakeHTTP.start([])
+      sync_on_fanout_sink()
       eid = new_event_id()
       selected = length(active_ids())
       assert selected == 2
@@ -984,6 +1006,8 @@ defmodule Barkpark.Webhooks.DispatcherTest do
           assert meta.dedup == true
           assert meta.abort_reason != nil
           assert meta.event_id == eid
+          # the log line is written after the telemetry and before the sink
+          assert_receive {:fanout_sink, :settled, "zero-mint"}, 2_000
         end)
 
       # journald-greppable, at WARNING so it needs no metrics pipeline.
@@ -1027,6 +1051,7 @@ defmodule Barkpark.Webhooks.DispatcherTest do
       attach_fanout_probe("legacy")
 
       :ok = FakeHTTP.start([{:ok, 200}, {:ok, 200}])
+      sync_on_fanout_sink()
 
       log =
         capture_log(fn ->
@@ -1042,6 +1067,9 @@ defmodule Barkpark.Webhooks.DispatcherTest do
           assert m.settled == 2
           # Row-less by design — a 0 here is construction, never loss…
           assert m.minted == 0
+          # the refute below must read a log that has been WRITTEN — without
+          # this sync it passes on an empty capture.
+          assert_receive {:fanout_sink, :settled, "legacy"}, 2_000
         end)
 
       # …so it must NOT be reported as loss.

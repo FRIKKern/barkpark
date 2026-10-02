@@ -230,7 +230,7 @@ defmodule BarkparkWeb.NonBinaryWriteParam500Test do
           }
         },
         @dataset,
-        scope
+        scope ++ [source: :github]
       )
 
     task

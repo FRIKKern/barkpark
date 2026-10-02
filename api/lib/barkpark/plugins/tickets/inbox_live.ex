@@ -54,7 +54,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content.Document
-  alias Barkpark.Plugins.Tickets.{InboxPresenter, Keys, Thread}
+  alias Barkpark.Plugins.Tickets.{Attachments, InboxPresenter, Keys, Thread}
 
   # All Tickets slices now live in ONE tree, so the sibling contexts
   # (`Thread`, `Keys`) are compile-time-checked direct calls — the old dynamic
@@ -107,7 +107,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
   def handle_event("open_thread", %{"id" => id}, socket) do
     case fetch_thread(socket, id) do
       {:ok, ticket} ->
-        {:noreply, assign(socket, view: :thread, thread: ticket, data_error: nil)}
+        {:noreply, socket |> assign(view: :thread, data_error: nil) |> put_thread(ticket)}
 
       {:error, reason} ->
         {:noreply, socket |> assign(view: :thread, thread: nil) |> put_error(reason)}
@@ -133,7 +133,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
       {:ok, ticket} ->
         {:noreply,
          socket
-         |> assign(thread: ticket)
+         |> put_thread(ticket)
          |> put_flash(:info, "Ticket closed.")}
 
       {:error, reason} ->
@@ -215,7 +215,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
           {:noreply,
            socket
-           |> assign(thread: ticket)
+           |> put_thread(ticket)
            |> update(:composer_rev, &(&1 + 1))
            |> put_flash(:info, msg)}
 
@@ -329,6 +329,58 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
 
       {:ok, tickets}
     end)
+  end
+
+  # The thread plus the display names of its attachments. A message carries
+  # only asset ids; the timeline used to print those raw UUIDs as the link text
+  # (`📎 1426cec4-…`), so an operator could not tell an invoice from a
+  # screenshot without opening each one.
+  defp put_thread(socket, ticket) do
+    assign(socket,
+      thread: ticket,
+      attachment_names: attachment_names(ticket, dataset(socket), scope_opts(socket))
+    )
+  end
+
+  # The operator download route (`TicketsAttachmentsController.operator_scope/1`)
+  # resolves an attachment by WORKSPACE only — the stored media file carries no
+  # project, so a project-scoped lookup never finds it. Mirror that exactly, or
+  # the label and the link would disagree about whether the file exists.
+  defp attachment_scope(scope) do
+    case Keyword.get(scope, :workspace_id) do
+      nil -> []
+      ws -> [workspace_id: ws]
+    end
+  end
+
+  @doc false
+  # Resolve each attachment id on `thread` to the uploaded file's original name,
+  # through the SAME ticket-scoped lookup the operator download route uses
+  # (`Attachments.linked_asset/4`) — an id that does not resolve inside this
+  # ticket simply keeps its id as the label. Never raises: a lookup failure is a
+  # missing name, not a broken thread.
+  @spec attachment_names(map() | nil, String.t(), keyword()) :: %{String.t() => String.t()}
+  def attachment_names(thread, dataset, scope) when is_map(thread) do
+    ticket_id = thread |> tval(:id, "") |> to_string()
+    scope = attachment_scope(scope)
+
+    for msg <- thread_messages(thread),
+        aid <- msg_attachments(msg),
+        is_binary(aid),
+        name = attachment_name(aid, ticket_id, dataset, scope),
+        into: %{},
+        do: {aid, name}
+  end
+
+  def attachment_names(_thread, _dataset, _scope), do: %{}
+
+  defp attachment_name(aid, ticket_id, dataset, scope) do
+    case Attachments.linked_asset(aid, ticket_id, dataset, scope) do
+      {:ok, file} -> Map.get(file, :original_name) || Map.get(file, :filename)
+      _ -> nil
+    end
+  rescue
+    _ -> nil
   end
 
   defp fetch_thread(socket, id) do
@@ -715,6 +767,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
       assigns
       |> assign_new(:now, fn -> DateTime.utc_now() end)
       |> assign_new(:composer_rev, fn -> 0 end)
+      |> assign_new(:attachment_names, fn -> %{} end)
 
     ~H"""
     <div class="bp-tk-thread" data-test-id="thread-detail">
@@ -755,7 +808,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
                 target="_blank"
                 rel="noopener"
               >
-                📎 {aid}
+                📎 {Map.get(@attachment_names, aid) || aid}
               </a>
             </div>
           </li>

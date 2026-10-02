@@ -112,7 +112,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     options = Barkpark.Content.SelectOptions.normalize(opts)
     has_selection = val in Enum.map(options, & &1.value)
     required = get_in(f, ["validation", "required"]) == true
@@ -224,7 +224,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def input(%{field: %{"type" => t, "name" => name} = f} = assigns)
       when t == "text" do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     rows = Map.get(f, "rows") || 3
     assigns = assign(assigns, n: name, v: val, rows: rows)
 
@@ -234,7 +234,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def input(%{field: %{"type" => "boolean", "name" => name}} = assigns) do
-    checked = Map.get(assigns.editor_form, name, "") == "true"
+    # A stored JSON `true` (what the API, SDK and `bp seed` write) is checked
+    # too — reading only the string "true" rendered it UNCHECKED, so the
+    # hidden "false" posted and an edit of ANY other field flipped it to false.
+    checked = Map.get(assigns.editor_form, name, "") in [true, "true"]
     assigns = assign(assigns, n: name, c: checked)
 
     ~H"""
@@ -396,7 +399,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # exactly like a typed value. The input itself stays the standard text
   # input (hand-editing always wins).
   def input(%{field: %{"type" => "slug", "name" => name} = f} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
     source = slug_source_of(f)
     assigns = assign(assigns, n: name, v: val, source: source)
 
@@ -454,7 +457,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   end
 
   def input(%{field: %{"name" => name}} = assigns) do
-    val = Map.get(assigns.editor_form, name, "")
+    val = scalar_text(Map.get(assigns.editor_form, name, ""))
 
     # A field DECLARED "number" always gets the numeric treatment — the
     # name heuristic below only exists for ONIX's string-typed numerics
@@ -494,6 +497,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # read-only display. nil / "" → an em-dash placeholder; values that
   # cannot JSON-encode (shouldn't happen for jsonb-sourced content)
   # fall back to `inspect/1` rather than crash the editor pane.
+  # A JSON number or boolean stored in a field whose Classic control is a text
+  # input / select (a string field holding `true`, a select whose options are
+  # numbers). HEEx renders `value={true}` as a BARE attribute, which a browser
+  # posts as "" — an edit of another field erased the value — and a select
+  # compares option strings to the raw number and selected nothing. Render the
+  # text the input holds; `Forms` keeps the stored type when it comes back
+  # unedited.
+  defp scalar_text(v) when is_number(v) or is_boolean(v), do: to_string(v)
+  defp scalar_text(v), do: v
+
   defp readonly_json(nil), do: "—"
   defp readonly_json(""), do: "—"
 
@@ -570,8 +583,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   "reference"}`, api-v1.md), so documents written through the JS SDK or
   `bp --set 'author:={"_ref":…}'` carry it. Rendered raw, that map crashed the
   whole editor with `Phoenix.HTML.Safe not implemented for Map` (a 500 on the
-  document route; stranger walk 2026-09-30). The id it names is shown instead;
-  saving from Studio then stores the bare string.
+  document route; stranger walk 2026-09-30). The id it names is shown instead,
+  and a Classic save keeps the stored object (an edit replaces its `_ref`) —
+  `Forms` preserve guard.
 
   `nil` and anything with no readable id render as `""` (an empty picker).
   """

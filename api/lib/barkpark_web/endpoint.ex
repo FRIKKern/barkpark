@@ -123,6 +123,14 @@ defmodule BarkparkWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # A NEW REQUEST STARTS WITH AN EMPTY READ MEMO (task-43754c756edf2af6).
+  # Bandit serves every request on a keep-alive HTTP/1.1 connection in ONE
+  # process, so the per-request memo `WriteScope.request_memo/3` keeps in the
+  # process dictionary would otherwise answer request 2 with request 1's
+  # dataset / schema resolutions — measured: after one request the memo key
+  # was still set when the next request on the same process began.
+  plug :reset_request_memo
+
   # P7 safe external sharing: when BARKPARK_SHARE_HOST (a tunnel domain) is set,
   # any request NOT from a local/LAN host may reach ONLY the public read/share
   # surfaces; everything else 404s. No-op (default-OFF) when unset. Runs after
@@ -145,6 +153,11 @@ defmodule BarkparkWeb.Endpoint do
 
   plug BarkparkWeb.Router
 
+  defp reset_request_memo(conn, _opts) do
+    Barkpark.Content.WriteScope.begin_request()
+    conn
+  end
+
   defp secure_session(conn, _opts) do
     Plug.Session.call(conn, Plug.Session.init(session_options()))
   end
@@ -162,6 +175,35 @@ defmodule BarkparkWeb.Endpoint do
     end
   end
 
+  # ── Low-trust doors cap the body AT THE PARSER (Run-4 Lane B) ─────────────
+  #
+  # The general cap is 100 MB (media uploads, imports). Two doors are reachable
+  # by callers with no account: the ANONYMOUS form-submission door and the
+  # OUTSIDER ticket door (`bptk_` keys). Their real caps — 64 KiB per form
+  # body, 64 KiB per ticket message, 10 MiB per attachment — lived only in the
+  # controllers, which run AFTER this parse, and a chunked request carries no
+  # `content-length` for a pre-check to read. So one anonymous client could
+  # make the server decode ~100 MB per request before the rate limit or the key
+  # check ran. These caps stop the read at the door's own ceiling (plus
+  # multipart slack for attachments); an oversize body gets the same enveloped
+  # 413 `payload_too_large` the general cap answers. Pinned by
+  # `test/barkpark_web/endpoint_low_trust_body_cap_test.exs`.
+  @general_body_length 100_000_000
+  @forms_submission_body_length 64 * 1024
+  @ticket_attachment_body_length 11 * 1024 * 1024
+  @ticket_body_length 1_000_000
+
+  defp body_length(%Plug.Conn{
+         path_info: ["v1", "plugins", "forms", "w", _, "p", _, "d", _, "sites", _, "submissions"]
+       }),
+       do: @forms_submission_body_length
+
+  defp body_length(%Plug.Conn{path_info: ["v1", "tickets", _id, "attachments"]}),
+    do: @ticket_attachment_body_length
+
+  defp body_length(%Plug.Conn{path_info: ["v1", "tickets" | _]}), do: @ticket_body_length
+  defp body_length(_conn), do: @general_body_length
+
   defp parse_body(conn, _opts) do
     try do
       Plug.Parsers.call(
@@ -170,7 +212,7 @@ defmodule BarkparkWeb.Endpoint do
           parsers: [:urlencoded, :multipart, :json],
           pass: ["*/*"],
           json_decoder: Phoenix.json_library(),
-          length: 100_000_000,
+          length: body_length(conn),
           # Tee the RAW body into conn.assigns[:raw_body] ONLY on the GitHub
           # webhook path, so BarkparkWeb.Plugs.GithubWebhookSignature can verify
           # the HMAC over the exact bytes GitHub signed. Every other path reads
@@ -187,14 +229,32 @@ defmodule BarkparkWeb.Endpoint do
       # this branch it escapes parse_body → a generic 413 that is NOT the
       # canonical {error:{code,message,request_id}} envelope. Mirror the
       # ParseError branch so an oversize upload returns a typed, enveloped 413.
+      #
+      # The limit named in the message and hint is the one THIS route applied
+      # (`body_length/1`): the code-keyed default hint says "100 MB", which told
+      # an anonymous form poster refused at 64 KB to keep their 200 KB body.
       Plug.Parsers.RequestTooLargeError ->
-        conn
-        |> parse_error_json(413, %{
-          code: "payload_too_large",
-          message: "request body exceeds the maximum allowed size"
-        })
+        limit = format_bytes(body_length(conn))
+
+        BarkparkWeb.ErrorResponse.emit_custom(
+          conn,
+          413,
+          "payload_too_large",
+          "request body exceeds the maximum allowed size (#{limit} for this route)",
+          %{},
+          "Reduce the request body — this route accepts at most #{limit}. Upload a smaller file or split the request."
+        )
     end
   end
+
+  defp format_bytes(bytes) when bytes >= 1_000_000 and rem(bytes, 1_000_000) == 0,
+    do: "#{div(bytes, 1_000_000)} MB"
+
+  defp format_bytes(bytes) when bytes >= 1024 * 1024,
+    do: "#{Float.round(bytes / (1024 * 1024), 1)} MiB"
+
+  defp format_bytes(bytes) when bytes >= 1024, do: "#{div(bytes, 1024)} KiB"
+  defp format_bytes(bytes), do: "#{bytes} bytes"
 
   # Emit a canonical §9 error envelope from parse_body's rescue (it runs before
   # any controller, so there's no action_fallback here). Routes through the ONE

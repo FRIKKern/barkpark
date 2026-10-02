@@ -79,14 +79,35 @@ defmodule BarkparkWeb.Studio.StudioLive do
         _ ->
           :ok
       end
+
+      # PERF ONLY (task-c8a87043cb286a2f): this socket's renders resolve plugin
+      # enablement several times each, and presence re-renders every open
+      # socket. Read the workspace's overrides once, keep them until a workspace
+      # write announces a change (handle_info below). Same answer, fewer reads.
+      case socket.assigns[:current_workspace] do
+        %{id: ws_id} when is_binary(ws_id) -> Barkpark.Plugins.Enablement.memoize!(ws_id)
+        _ -> :ok
+      end
     end
 
     # ag-studio-capability-hide: the LOAD-BEARING server-side deny-gate. Attach
     # on EVERY Studio socket (member/anonymous/share/grant) so a forged event
     # for a hidden affordance is server-DENIED (hidden ≠ denied). The gate
     # re-derives caps per event → mid-session grant expiry denies at once.
+    # PERF ONLY (task-dbfa7f69abb3b2ed): one mount resolved the same dataset,
+    # project and schema rows ~7x each. The CONNECTED socket memoizes those
+    # reads; its memo is reset before every handle_params / handle_event /
+    # handle_info, so it never outlives one callback and its render — the
+    # barkpark-sknf guarantee that a long-lived socket never pins a changed row.
+    # Writes in this process reset it too. The dead render does NOT opt in: it
+    # runs in the request process, which goes on to other work after this
+    # mount (the next keep-alive request; in tests, the test itself), and a
+    # mount that redirects never reaches a hook that could switch it off.
+    if connected?(socket), do: Barkpark.Content.WriteScope.enable_process_memo()
+
     socket =
       socket
+      |> reset_read_memo_per_callback()
       |> Mount.init()
       |> BarkparkWeb.PaperCanvasLease.prepare_socket()
       |> Caps.attach()
@@ -94,6 +115,29 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> schedule_access_expiry()
 
     {:ok, socket}
+  end
+
+  # The read memo's lifetime is ONE callback (task-dbfa7f69abb3b2ed): each hook
+  # empties it before its callback runs. Only connected sockets memoize at all
+  # (see mount); on the dead render this is a cheap no-op.
+  defp reset_read_memo_per_callback(socket) do
+    if connected?(socket) do
+      socket
+      |> attach_hook(:read_memo_reset_params, :handle_params, fn _params, _uri, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+      |> attach_hook(:read_memo_reset_event, :handle_event, fn _event, _params, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+      |> attach_hook(:read_memo_reset_info, :handle_info, fn _msg, socket ->
+        Barkpark.Content.WriteScope.reset_request_memo()
+        {:cont, socket}
+      end)
+    else
+      socket
+    end
   end
 
   # ── Access grants + live expiry (airdrop-grants slice 3) ────────────────────
@@ -360,6 +404,15 @@ defmodule BarkparkWeb.Studio.StudioLive do
 
   # Fall-through: a stray PubSub message must not FunctionClauseError-crash the
   # session (mirrors bulldocs_live.ex). Keep LAST among handle_info/2 clauses.
+  # A workspace write (plugin toggle, rename, archive, delete): forget the
+  # memoized enablement so the next render reads the row, exactly as an
+  # unmemoized socket would. Nothing is re-rendered here — the same as before
+  # the memo, when a settings change surfaced on the socket's next render.
+  def handle_info({:plugin_enablement_changed, ws_id}, socket) do
+    Barkpark.Plugins.Enablement.forget(ws_id)
+    {:noreply, socket}
+  end
+
   def handle_info(_other, socket), do: {:noreply, socket}
 
   # ── handle_event/3 routing heads ────────────────────────────────────────────

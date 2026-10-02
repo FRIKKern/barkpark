@@ -317,6 +317,9 @@ import {
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 
+// How long a focusBlock(id) for a block that has not arrived yet stays armed.
+const PENDING_FOCUS_MS = 5000;
+
 // Left is the model's "no alignment" (convert.js stores only center/right; run-convert
 // treats left and absent as one), so Edit paints it as NO alignment too. Stock TextAlign
 // writes an inline `text-align: left` for its default on every paragraph and heading,
@@ -578,6 +581,9 @@ function hasOnlyBpKeys(attrs) {
 const CANVAS_SLASH_ITEMS = [
   ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
     it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
+  // Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
+  // whose server default_block/2 has no sheet clause.
+  { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" },
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
@@ -3649,6 +3655,7 @@ class BpPaperCanvas extends HTMLElement {
         tr.delete(position, position + removed.nodeSize);
       }
       if (tr.docChanged) this._editor.view.dispatch(tr);
+      this._consumePendingFocus();
       return;
     }
     this._editor
@@ -3659,6 +3666,53 @@ class BpPaperCanvas extends HTMLElement {
         return true;
       })
       .run();
+    this._consumePendingFocus();
+  }
+
+  // Put the caret in the top-level block `id` and focus the editor. The host
+  // calls this after an Add-block / Ingress-ghost write: an EMPTY paragraph is
+  // collapsed at rest (resting-scaffolds.js) and only opens while the caret is
+  // in it, so without this the new block was invisible and typing went nowhere.
+  // The block may not have arrived yet (the server's run update can land after
+  // the request) — remember it briefly and retry on the next external apply.
+  // Returns true when the caret was placed. Selection-only: no doc change, no
+  // ops, no history entry.
+  focusBlock(id) {
+    if (typeof id !== "string" || id === "") return false;
+    const pos = this._editor ? this._topLevelPos(id) : null;
+    if (pos == null) {
+      this._pendingFocus = { id, until: Date.now() + PENDING_FOCUS_MS };
+      return false;
+    }
+    this._pendingFocus = null;
+    const { state, view } = this._editor;
+    let selection;
+    try {
+      selection = TextSelection.near(state.doc.resolve(pos + 1));
+    } catch (_e) {
+      return false;
+    }
+    view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
+    view.focus();
+    return true;
+  }
+
+  _topLevelPos(id) {
+    let found = null;
+    this._editor.state.doc.forEach((node, pos) => {
+      if (found == null && node.attrs?.bpId === id) found = pos;
+    });
+    return found;
+  }
+
+  _consumePendingFocus() {
+    const pending = this._pendingFocus;
+    if (!pending) return;
+    if (Date.now() > pending.until) {
+      this._pendingFocus = null;
+      return;
+    }
+    this.focusBlock(pending.id);
   }
 
   // Queue an external-edit re-render to fire once the user stops editing and any
@@ -3751,7 +3805,17 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editor) {
       this._programmaticApply = true;
       try {
-        this._editor.commands.setContent(runToTiptap(this._blocks), false);
+        // The seed is the run's starting point, not an edit: keep it out of
+        // undo history. In history, a Cmd+Z on an untouched run inverted it to
+        // the empty pre-seed doc and ProseMirror threw (doc needs a block).
+        this._editor
+          .chain()
+          .setContent(runToTiptap(this._blocks), false)
+          .command(({ tr }) => {
+            tr.setMeta("addToHistory", false);
+            return true;
+          })
+          .run();
       } catch (error) {
         this._failMount("seed", error);
         return;
@@ -3759,6 +3823,7 @@ class BpPaperCanvas extends HTMLElement {
         this._programmaticApply = false;
       }
       this._verifyPainted("seed");
+      this._consumePendingFocus();
     }
   }
 

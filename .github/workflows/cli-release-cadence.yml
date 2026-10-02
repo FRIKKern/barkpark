@@ -87,6 +87,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          filter: blob:none  # task-d58797f4a9e0c1e2: commits/trees/tags only; no old blobs read
       - id: f
         name: compare the PR against the gate's own inputs
         run: |

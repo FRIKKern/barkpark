@@ -129,7 +129,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     items =
       Enum.map(Map.get(b, "items", []), &"#{pad(d + 1)}#{stat_item(&1)}")
 
-    wrap("stats", attr_str(b, ["id"]), items, d)
+    wrap("stats", attr_str(b, ["id", "sourceDefault"]), items, d)
   end
 
   # The notes grid — the browser twin ships at
@@ -269,7 +269,16 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     body = alias_get(b, ["children", "blocks"]) || []
     children = Enum.map(body, &block(&1, d + 1))
     summary = plain_alias(b, ["summary", "title"])
-    attrs = attr_str(%{"id" => Map.get(b, "id"), "summary" => summary}, ["id", "summary"])
+    # `open` (initially expanded) rides only when stored as a boolean, so an
+    # expandable without the key prints byte-identically to before.
+    open = if is_boolean(Map.get(b, "open")), do: Map.get(b, "open")
+
+    attrs =
+      attr_str(
+        %{"id" => Map.get(b, "id"), "summary" => summary, "open" => open},
+        ["id", "summary", "open"]
+      )
+
     wrap("expandable", attrs, children, d)
   end
 
@@ -351,7 +360,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     end
 
     items = Enum.map(alias_get(b, ["items", "stats"]) || [], &"#{pad(d + 1)}#{stat_item(&1)}")
-    wrap("stat-grid", attr_str(b, ["id"]), items, d)
+    wrap("stat-grid", attr_str(b, ["id", "sourceDefault"]), items, d)
   end
 
   # `blockquote` — an attributed quotation. Inline body read the way the
@@ -394,11 +403,11 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp block(%{"type" => "lineage"} = b, d) do
     nodes =
       Enum.map(alias_get(b, ["nodes", "items"]) || [], fn n ->
-        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source", "tone"])}>" <>
+        "#{pad(d + 1)}<lineage-node#{attr_str(n, ["title", "overline", "source", "tone", "unit", "value"])}>" <>
           "#{esc(plain_alias(n, ["body"]) || "")}</lineage-node>"
       end)
 
-    wrap("lineage", attr_str(b, ["id"]), nodes, d)
+    wrap("lineage", attr_str(b, ["id", "sourceDefault"]), nodes, d)
   end
 
   # `card` — the composition-doctrine SPLIT of the `cards` grid: one standalone
@@ -616,7 +625,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # purpose. `caption`/`note` keep their refusal.
   defp stat_item(%{} = i) do
     if Map.get(i, "caption") in [nil, ""] and Map.get(i, "note") in [nil, ""] do
-      "<stat#{attr_str(i, ["label", "value", "denom", "verdict"])}>#{esc(Map.get(i, "body", ""))}</stat>"
+      "<stat#{attr_str(i, ["label", "value", "denom", "verdict", "source"])}>#{esc(Map.get(i, "body", ""))}</stat>"
     else
       raise(UnprintableError.new(:block, "stat"))
     end

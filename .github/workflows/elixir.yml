@@ -1442,12 +1442,12 @@ jobs:
       SECRET_KEY_BASE: ci-secret-key-base-not-used-in-test-env-just-needs-64-chars-padding
       BARKPARK_CLOAK_KEY: ci-cloak-key-32-chars-padding-aaa
       PREVIEW_JWT_SECRET: ci-preview-jwt-secret-not-used-padding
-      # `mix test --partitions` reads MIX_TEST_PARTITION, and config/test.exs
-      # suffixes the test database with it (barkpark_test1, barkpark_test2).
+      # The Test step hands MIX_TEST_PARTITION to scripts/elixir-test-partition.sh
+      # to pick this cell's files, and config/test.exs suffixes the test database with it (barkpark_test1 .. barkpark_test3).
       # Each cell has its own postgres service, so the suffix only has to be
       # consistent within one cell, which it is: DB setup and Test share it.
       MIX_TEST_PARTITION: ${{ matrix.partition }}
-      TEST_PARTITIONS: "2"
+      TEST_PARTITIONS: "3"
     strategy:
       fail-fast: false
       matrix:
@@ -1480,7 +1480,16 @@ jobs:
         # it was told, and the gate refuses unless it holds EXACTLY the
         # partitions 1..total. A cell dropped from this list is RED, never a
         # silently smaller suite.
-        partition: [1, 2]
+        #
+        # THREE, not two (task-bc3ef53758b916a8). `--slowest` implies `--trace`,
+        # so every module runs serially and a cell's time is the sum of its
+        # files. Measured on 4 green main runs at two cells (36926715315,
+        # 36924113628, 36894114735, 36893500789): Test step p1 565-791 s,
+        # p2 573-791 s, and p1 carries ~40 s more one-time steps, so the two
+        # JOBS were balanced on average and the spread was runner noise.
+        # Rebalancing two cells bought nothing; a third cell cuts each one's
+        # share of the serial suite from 1/2 to 1/3.
+        partition: [1, 2, 3]
     defaults:
       run:
         working-directory: api
@@ -1492,8 +1501,18 @@ jobs:
         # "unknown", which fails BuildInfoTest ("version derives from git … v0.2.23
         # exists") and the git-tag-dependent SelfUpdate.CheckerTest suite. Only
         # this Test job asserts on the derived version, so only it needs the tags.
+        #
+        # `filter: blob:none` (task-d58797f4a9e0c1e2): every commit, tree and
+        # tag still arrives — `git describe`, `HEAD^1`, merge bases and
+        # `--name-only` diffs are unchanged by construction — but blob CONTENTS
+        # arrive only for the checked-out tree (and lazily, on demand, for the
+        # rare test that reads an old revision's file). origin carries ~4,300
+        # branch heads whose 8,000 commits are not on main; the full fetch of
+        # their blobs was most of this step's ~30 s in every cell. Same flag
+        # and reasoning as the `changes` dispatcher above.
         with:
           fetch-depth: 0
+          filter: blob:none
 
       - name: Setup BEAM
         uses: erlef/setup-beam@v1
@@ -1536,6 +1555,16 @@ jobs:
         if: matrix.partition == 1
         working-directory: .
         run: bash scripts/unreachable-assert-message-check.sh --selftest
+
+      # The Test step picks each cell's files with scripts/elixir-test-partition.sh
+      # (task-bc3ef53758b916a8). A defect there is a silently SMALLER required
+      # suite, so its harness rides the job that depends on it — including its
+      # full-cover proof over the REAL tree and the checked-in weights.
+      - name: The test-file partitioner covers every file exactly once
+        # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
+        if: matrix.partition == 1
+        working-directory: .
+        run: bash scripts/elixir-test-partition.test.sh
 
       - name: No NEW unreachable assert messages (never-worse ratchet)
         # ONE-TIME: a repo-wide guard, not a test shard. Partition 1 only.
@@ -2007,6 +2036,9 @@ jobs:
         # are today located only by log timestamps, with the owning test
         # inferred from adjacent lines. This names them.
         #
+        # THE CELL'S FILES ARE CHOSEN BY MEASURED WEIGHT, not by `--partitions`
+        # hash: scripts/elixir-test-partition.sh (task-bc3ef53758b916a8).
+        #
         # THE SELECTION IS READ FROM A FILE, and the ALL branch is the default
         # in three separate ways: a missing file, an empty file, and a file
         # holding the token `ALL` all run everything. `grep -qxF ALL <file>`
@@ -2016,23 +2048,42 @@ jobs:
         run: |
           sel="$GITHUB_WORKSPACE/elixir-impacted-selection.txt"
           echo "partition ${MIX_TEST_PARTITION} of ${TEST_PARTITIONS}"
+          # THE CANDIDATES: every test file (the FULL suite) or the impacted
+          # selection. `find` mirrors mix's own discovery (test/**/*_test.exs,
+          # dot-paths excluded, as Path.wildcard does).
+          cands="$RUNNER_TEMP/elixir-test-candidates.txt"
           if [ ! -s "$sel" ] || grep -qxF 'ALL' "$sel"; then
             echo "running the FULL suite"
-            mix test --slowest 50 --partitions "$TEST_PARTITIONS"
-            exit 0
+            find test -name '*_test.exs' -not -path '*/.*' >"$cands"
+          else
+            sed '/^$/d' "$sel" >"$cands"
+            if [ ! -s "$cands" ]; then
+              echo "::warning::the selection file held no usable paths — running the FULL suite."
+              find test -name '*_test.exs' -not -path '*/.*' >"$cands"
+            else
+              echo "the selection holds $(wc -l <"$cands" | tr -d ' ') test files"
+            fi
           fi
+          # THIS CELL'S SHARE, by measured weight (task-bc3ef53758b916a8). Every
+          # cell computes the same assignment from the same inputs; the script
+          # REFUSES (exit 2, red) unless its cells are disjoint and cover every
+          # candidate exactly once. It is not piped: its exit code is the step's.
+          mine="$RUNNER_TEMP/elixir-test-cell.txt"
+          bash ../scripts/elixir-test-partition.sh --cell "$MIX_TEST_PARTITION" "$TEST_PARTITIONS" <"$cands" >"$mine"
           files=()
           while IFS= read -r f; do
             [ -n "$f" ] || continue
             files+=("$f")
-          done <"$sel"
+          done <"$mine"
           if [ "${#files[@]}" -eq 0 ]; then
-            echo "::warning::the selection file held no usable paths — running the FULL suite."
-            mix test --slowest 50 --partitions "$TEST_PARTITIONS"
+            # Only a narrowed selection can leave a cell empty (the full suite
+            # always fills every cell). A bare `mix test` here would run
+            # EVERYTHING, so an empty cell runs nothing and says so.
+            echo "this cell holds none of the $(wc -l <"$cands" | tr -d ' ') selected files — nothing to run here"
             exit 0
           fi
-          echo "running ${#files[@]} selected test files"
-          mix test --slowest 50 --partitions "$TEST_PARTITIONS" "${files[@]}"
+          echo "running ${#files[@]} test files in this cell"
+          mix test --slowest 50 "${files[@]}"
 
       # The selection is UPLOADED on every run, pass or fail. It is the only
       # record of what a given sha actually executed, and the attribution
