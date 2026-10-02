@@ -117,6 +117,18 @@ wl="$(bash "$SCRIPT" --weights-from-logs "$TMP/p1.log" "$TMP/p2.log")"
 want="$(printf 'test/a_test.exs\t2.00\ntest/b_test.exs\t3.25\ntest/c_test.exs\t2.00')"
 if [ "$wl" = "$want" ]; then ok "a=2.00 b=3.25 c=2.00 (across a month-end midnight)"; else no "got: $(printf '%s' "$wl" | tr '\n' ' ')"; fi
 
+echo "case 7b: several runs' logs average per file (a file counts once per log)"
+cat >"$TMP/r2.log" <<'EOF'
+2026-10-02T01:00:00.0000000Z Barkpark.ATest [test/a_test.exs]
+2026-10-02T01:00:04.0000000Z Barkpark.ATest [test/a_test.exs]
+2026-10-02T01:00:06.0000000Z Finished in 6.0 seconds (0.0s async, 6.0s sync)
+EOF
+wl="$(bash "$SCRIPT" --weights-from-logs "$TMP/p1.log" "$TMP/p2.log" "$TMP/r2.log")"
+# a: 2.00 (run 1) and 4.00+2.00 = 6.00 (run 2, two headers, ONE log) -> mean 4.00
+# b, c: one run each, unchanged
+want="$(printf 'test/a_test.exs\t4.00\ntest/b_test.exs\t3.25\ntest/c_test.exs\t2.00')"
+if [ "$wl" = "$want" ]; then ok "a = mean(2.00, 6.00) = 4.00; single-run files unchanged"; else no "got: $(printf '%s' "$wl" | tr '\n' ' ')"; fi
+
 echo "case 8: the REAL tree and the CHECKED-IN weights — full cover, and balanced"
 if [ -d "$REAL_ROOT/api/test" ] && [ -r "$HERE/elixir-test-weights.tsv" ]; then
   (cd "$REAL_ROOT/api" && find test -name '*_test.exs' -not -path '*/.*') | LC_ALL=C sort >"$TMP/real.txt"
