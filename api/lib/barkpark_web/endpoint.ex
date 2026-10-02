@@ -123,6 +123,14 @@ defmodule BarkparkWeb.Endpoint do
   plug Plug.RequestId
   plug Plug.Telemetry, event_prefix: [:phoenix, :endpoint]
 
+  # A NEW REQUEST STARTS WITH AN EMPTY READ MEMO (task-43754c756edf2af6).
+  # Bandit serves every request on a keep-alive HTTP/1.1 connection in ONE
+  # process, so the per-request memo `WriteScope.request_memo/3` keeps in the
+  # process dictionary would otherwise answer request 2 with request 1's
+  # dataset / schema resolutions — measured: after one request the memo key
+  # was still set when the next request on the same process began.
+  plug :reset_request_memo
+
   # P7 safe external sharing: when BARKPARK_SHARE_HOST (a tunnel domain) is set,
   # any request NOT from a local/LAN host may reach ONLY the public read/share
   # surfaces; everything else 404s. No-op (default-OFF) when unset. Runs after
@@ -144,6 +152,11 @@ defmodule BarkparkWeb.Endpoint do
   plug BarkparkWeb.Plugs.DatasetCors
 
   plug BarkparkWeb.Router
+
+  defp reset_request_memo(conn, _opts) do
+    Barkpark.Content.WriteScope.begin_request()
+    conn
+  end
 
   defp secure_session(conn, _opts) do
     Plug.Session.call(conn, Plug.Session.init(session_options()))
