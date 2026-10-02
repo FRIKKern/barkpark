@@ -28,6 +28,62 @@ defmodule Barkpark.Accounts.Privacy do
   @erased_domain "erased.invalid"
 
   @doc """
+  Redact the `actor_label` of rows written by a since-ERASED user.
+
+  A signed-in user's writes and paper views stamp `actor_label` with their
+  EMAIL on `revisions` and `paper_access_log`. Both are append-only by design
+  (the history trail; the 90-day access trail), so erasure cannot rewrite the
+  stored rows — but the subject's email must not stay READABLE. Every read that
+  serves those rows maps them through here: a `"user"` actor whose account has
+  been erased is shown under its pseudonymised account email. Any other row —
+  a live user, a token, an anonymous reader — is returned unchanged.
+
+  Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
+  `:actor_label`. One query, however many rows.
+  """
+  @spec redact_actor_labels([map()]) :: [map()]
+  def redact_actor_labels(rows) when is_list(rows) do
+    ids =
+      rows
+      |> Enum.flat_map(fn row ->
+        case {Map.get(row, :actor_kind), Map.get(row, :actor_id)} do
+          {"user", id} when is_binary(id) -> [id]
+          _ -> []
+        end
+      end)
+      |> Enum.uniq()
+      |> Enum.flat_map(fn id -> List.wrap(Repo.uuid_or_nil(id)) end)
+
+    erased =
+      case ids do
+        [] ->
+          %{}
+
+        ids ->
+          from(u in User,
+            where: u.id in ^ids and like(u.email, ^("%@" <> @erased_domain)),
+            select: {u.id, u.email}
+          )
+          |> Repo.all()
+          |> Map.new()
+      end
+
+    if erased == %{} do
+      rows
+    else
+      Enum.map(rows, fn row ->
+        with "user" <- Map.get(row, :actor_kind),
+             id when is_binary(id) <- Map.get(row, :actor_id),
+             {:ok, pseudonym} <- Map.fetch(erased, id) do
+          Map.put(row, :actor_label, pseudonym)
+        else
+          _ -> row
+        end
+      end)
+    end
+  end
+
+  @doc """
   Assemble the subject's complete, machine-readable data bundle. Deliberately
   omits secret material (no password hash, session/token hashes, or TOTP secret)
   — it is the subject's *data*, not their credentials.

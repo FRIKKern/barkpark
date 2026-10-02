@@ -49,7 +49,10 @@ defmodule BarkparkWeb.PaperAccessController do
 
     json(conn, %{
       slug: slug,
-      access: Enum.map(rows, &render_row/1),
+      access:
+        rows
+        |> Barkpark.Accounts.Privacy.redact_actor_labels()
+        |> Enum.map(&render_row/1),
       count: length(rows)
     })
   end
