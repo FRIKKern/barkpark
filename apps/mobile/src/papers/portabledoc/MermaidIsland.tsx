@@ -58,7 +58,17 @@ import { WebView } from 'react-native-webview'
 import type { Theme } from '../../ui/theme'
 import { scale } from '../../ui/typography'
 
-const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js'
+// SUPPLY-CHAIN PIN (task-48c9adeaec689599): one EXACT build, admitted only if
+// its bytes hash to MERMAID_SRI. A floating `@11` ran every future 11.x — or a
+// compromised CDN file — inside every reader's island. The sha384 was computed
+// from this URL and cross-checked byte-for-byte against the npm tarball's
+// dist/mermaid.min.js. Bumping the version means recomputing BOTH constants:
+//   curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A
+// A mismatch fails closed: the script never runs, the bootstrap finds no
+// `mermaid` and posts {kind:'error', why:'cdn'}, and the island degrades to
+// the labeled source placeholder.
+const MERMAID_CDN = 'https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js'
+const MERMAID_SRI = 'sha384-EOXBFmc3gx5mb+vn0vPvvGqACToJD24hhacX5Yx+8NUUQrHIle/Qi5Bg9o3zKwW2'
 const INITIAL_HEIGHT = 220
 // Malformed-height-report guard, NOT a design limit: a finite report above
 // this is treated as suspect, clamped, and labeled "diagram truncated" so
@@ -139,7 +149,7 @@ export function islandHtml(source: string, theme: Theme): string {
   #m{display:flex;justify-content:center}
   #m svg{max-width:100%;height:auto}
 </style></head><body><div id="m"></div>
-<script src="${MERMAID_CDN}"></script>
+<script src="${MERMAID_CDN}" integrity="${MERMAID_SRI}" crossorigin="anonymous"></script>
 <script>
 (function(){
   var post = function(msg){ window.ReactNativeWebView && window.ReactNativeWebView.postMessage(JSON.stringify(msg)); };
