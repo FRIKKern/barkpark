@@ -683,12 +683,13 @@ defmodule Barkpark.Content.WriteScope do
     * a write in the SAME process that can change a memoized answer — a schema
       upsert/delete, a dataset create, any workspace write — resets it at once.
   """
-  def request_memo(opts, key, fun) do
+  def request_memo(opts, key, fun, cap \\ :infinity) do
     if Keyword.get(opts, :memoize, false) or Process.get(@process_memo_flag, false) do
       case Process.get({:barkpark_request_memo, key}, @memo_miss) do
         @memo_miss ->
           value = fun.()
           Process.put({:barkpark_request_memo, key}, value)
+          if is_integer(cap), do: evict_beyond(key, cap)
           value
 
         value ->
@@ -697,6 +698,27 @@ defmodule Barkpark.Content.WriteScope do
     else
       fun.()
     end
+  end
+
+  # A CAPPED bucket keeps only its `cap` newest entries. The gain is a REPEAT
+  # (one request asking for the same schema row four times); a caller walking
+  # every type once (`/v1/graph`'s corpus fold) gains nothing from the memo,
+  # and holding every schema it touched raised that request's peak heap past
+  # its one-type bound (GraphCorpusHeapBoundTest). The bucket is the key's tag.
+  defp evict_beyond(key, cap) do
+    bucket = {:barkpark_request_memo_lru, elem(key, 0)}
+    keys = Process.get(bucket, []) ++ [key]
+
+    keys =
+      if length(keys) > cap do
+        [oldest | rest] = keys
+        Process.delete({:barkpark_request_memo, oldest})
+        rest
+      else
+        keys
+      end
+
+    Process.put(bucket, keys)
   end
 
   @doc "Opt the calling process into `request_memo/3` without a `memoize:` opt (a Studio LiveView, either leg)."
@@ -717,7 +739,10 @@ defmodule Barkpark.Content.WriteScope do
 
   @doc "Drop every `request_memo/3` entry in the calling process."
   def reset_request_memo do
-    for {{:barkpark_request_memo, _} = k, _v} <- Process.get(), do: Process.delete(k)
+    for {k, _v} <- Process.get(),
+        match?({:barkpark_request_memo, _}, k) or match?({:barkpark_request_memo_lru, _}, k),
+        do: Process.delete(k)
+
     :ok
   end
 

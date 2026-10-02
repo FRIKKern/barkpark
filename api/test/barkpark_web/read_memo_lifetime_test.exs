@@ -134,6 +134,21 @@ defmodule BarkparkWeb.ReadMemoLifetimeTest do
              "the socket's next callback served the memoized schema, not the row as it is"
     end
 
+    test "the schema memo keeps only its 8 newest rows — a corpus fold cannot pile them up" do
+      opts = [memoize: true]
+      WriteScope.reset_request_memo()
+      names = for i <- 1..10, do: "memocap#{i}_#{System.unique_integer([:positive])}"
+      for n <- names, do: Content.Schema.get_schema_raw(n, @dataset, opts)
+
+      held =
+        for {{:barkpark_request_memo, {:get_schema_raw, n, _, _, _}}, _} <- Process.get(), do: n
+
+      assert length(held) == 8, "the schema memo holds #{length(held)} rows, not 8"
+      refute Enum.at(names, 0) in held, "the OLDEST row was kept and a newer one dropped"
+      assert List.last(names) in held
+      WriteScope.reset_request_memo()
+    end
+
     test "a schema written mid-request is read back by the same request" do
       opts = [memoize: true]
       name = "memowrite#{System.unique_integer([:positive])}"

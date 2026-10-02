@@ -145,7 +145,9 @@ defmodule Barkpark.Content.Schema do
       # (limit, perspective, caller context) do not change the row
       {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
        Keyword.fetch(opts, :project_id)},
-      fn -> do_get_schema_raw(name, dataset, opts) end
+      fn -> do_get_schema_raw(name, dataset, opts) end,
+      # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
+      8
     )
   end
 
