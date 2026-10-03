@@ -346,8 +346,10 @@ defmodule BarkparkWeb.AccessController do
   end
 
   # Grantor-or-workspace-admin — the same authority Access.revoke enforces.
+  # A FORMER grantor (seat gone) is no longer a manager (owner ruling #2).
   defp authorized_manager?(principal, %Access.Grant{} = grant) do
-    principal_matches?(principal, grant.grantor_id) or
+    (principal_matches?(principal, grant.grantor_id) and
+       Auth.authorize(principal, grant.workspace_id, :read) == :ok) or
       Auth.authorize(principal, grant.workspace_id, :admin) == :ok
   end
 

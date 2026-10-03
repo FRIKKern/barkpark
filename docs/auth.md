@@ -45,14 +45,12 @@ lacking `write` gets `403`; reads stay available.
 `ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
 encrypted `client_secret`) and confers **no membership anywhere**.
 
-Three tiers:
-`RequireAdmin`: `permissions` ONLY, no membership. `Tenancy.Auth.authorize/3`:
-member? AND the token's GLOBAL `permissions`. `workspace_admin?/2`: the
-membership ROLE alone.
-A global-`admin` token with zero memberships passes `RequireAdmin` yet fails
-every `Tenancy.Auth` predicate; a plain `member` in B passes
-`authorize(_, B, :admin)` and FAILS `workspace_admin?(_, B)` — never
-unify (`StudioLiveSharesTest` pins it).
+Three tiers (seat rule since ruling #2, 2026-10-03):
+`RequireAdmin`: `admin` permission, plus admin authority in the token's
+workspace (bound token) or its owner's (workspace-less PAT); a workspace-less
+machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
+`permissions` AND the seat role (and a PAT owner's role) allow the action, so
+demotion bites at once. `workspace_admin?/2`: the membership ROLE alone.
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
