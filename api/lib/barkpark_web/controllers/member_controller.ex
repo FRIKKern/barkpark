@@ -52,18 +52,45 @@ defmodule BarkparkWeb.MemberController do
     end
   end
 
+  @doc "`GET /w/:ws/p/:proj/v1/invitations` — pending invitations (owner ruling #7)."
+  def invitations(conn, _params) do
+    case conn.assigns[:current_workspace] do
+      %{id: ws_id} -> json(conn, %{invitations: Members.list_invitations(ws_id)})
+      _ -> unresolved_workspace(conn)
+    end
+  end
+
+  @doc "`DELETE /w/:ws/p/:proj/v1/invitations/:id` — withdraw a pending invitation."
+  def cancel_invitation(conn, %{"id" => id}) do
+    with %{id: ws_id} <- conn.assigns[:current_workspace],
+         {:ok, invitation} <- Members.cancel_invitation(ws_id, id) do
+      json(conn, %{withdrawn: invitation})
+    else
+      {:error, :not_found} -> not_found(conn, "no such invitation in this workspace")
+      _ -> unresolved_workspace(conn)
+    end
+  end
+
   @doc """
   `POST /w/:ws/p/:proj/v1/members` — seat a human.
 
   Body: `{"email": "person@example.com", "role": "member|admin|owner|<custom>"}`.
   `role` defaults to `member`; the membership changeset validates it against
   the built-ins plus this workspace's custom roles.
+
+  An EXISTING, confirmed account is not seated at once (owner ruling #7): the
+  answer is `202 {"invitation": …}` and the seat appears when the user
+  accepts (`POST /v1/auth/invitations/:id/accept`). A new e-mail is seated
+  directly (`201 {"member": …}`), as before.
   """
   def create(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, email} <- fetch_string(params, "email", :missing_email),
          role <- Map.get(params, "role", @default_role) do
       case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
+        {:ok, {:invited, invitation}} ->
+          conn |> put_status(:accepted) |> json(%{invitation: invitation})
+
         {:ok, member} ->
           conn |> put_status(:created) |> json(%{member: member})
 
@@ -483,6 +510,14 @@ defmodule BarkparkWeb.MemberController do
         "last_owner",
         "refused: this is the workspace's last owner — promote another member to owner first, " <>
           "otherwise the workspace would be left with nobody who can administer it"
+      )
+
+  defp deny(conn, :already_invited),
+    do:
+      conflict(
+        conn,
+        "already_invited",
+        "that person already has a pending invitation to this workspace"
       )
 
   # Owner ruling #5 (2026-10-03): the role ceiling.

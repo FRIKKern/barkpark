@@ -289,6 +289,14 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # /v1/auth/app-tokens, DELETE /v1/auth/app-tokens/:id and DELETE
     # /v1/auth/app-tokens/current.
 
+    # Seat consent (owner ruling #7, task-a08da65bc33083d0): the invitation
+    # routes shipped server-first; their bp verbs are task-f9a726252a197911.
+    {"GET", "/v1/invitations"} => "task-f9a726252a197911",
+    {"DELETE", "/v1/invitations/:*"} => "task-f9a726252a197911",
+    {"GET", "/v1/auth/invitations"} => "task-f9a726252a197911",
+    {"POST", "/v1/auth/invitations/:*/accept"} => "task-f9a726252a197911",
+    {"DELETE", "/v1/auth/invitations/:*"} => "task-f9a726252a197911",
+
     # BarkparkWeb.AuthController (9)
     {"POST", "/v1/auth/erase"} => @census_task,
     {"GET", "/v1/auth/export"} => @census_task,

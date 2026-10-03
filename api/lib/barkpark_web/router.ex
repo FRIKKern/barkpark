@@ -2143,6 +2143,10 @@ defmodule BarkparkWeb.Router do
     # ONLY mint a token owned by themselves (no-escalation). Raw token returned
     # ONCE. Powers the terminal `bp access claim`/`mine` grantee verbs.
     post("/tokens", AuthController, :create_token)
+    # Seat consent (owner ruling #7): the invited user's side.
+    get("/invitations", InvitationController, :index)
+    post("/invitations/:id/accept", InvitationController, :accept)
+    delete("/invitations/:id", InvitationController, :decline)
     get("/export", AuthController, :export)
     post("/erase", AuthController, :erase)
     # Self-service password change, gated on the current password — same
@@ -3377,6 +3381,9 @@ defmodule BarkparkWeb.Router do
     post("/v1/members", MemberController, :create)
     patch("/v1/members/:principal_ref", MemberController, :update)
     delete("/v1/members/:principal_ref", MemberController, :delete)
+    # Seat consent (owner ruling #7): an existing account is invited, not seated.
+    get("/v1/invitations", MemberController, :invitations)
+    delete("/v1/invitations/:id", MemberController, :cancel_invitation)
 
     # Workspace Studio locale (Gyldendal parity E7): admin-gated like the roster.
     # `bp workspace set-locale <locale>` lands here.

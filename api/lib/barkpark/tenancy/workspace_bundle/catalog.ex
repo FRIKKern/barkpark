@@ -108,7 +108,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     search_intel_merge_patterns search_surface_config search_synonyms
     secrets secrets_audit share_links sync_cursors sync_dead_letters
     sync_push_conflicts sync_push_cursors sync_push_doc_revs webhooks
-    workspace_memberships
+    workspace_invitations workspace_memberships
   )
 
   # The six 20260715 cycle-fleet children are FK-transitive descendants of
@@ -742,7 +742,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     secrets secrets_audit
     share_links shares sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
-    workspace_memberships
+    workspace_invitations workspace_memberships
   )
 
   # W1 ships an empty scrub set; the key shape is `table => [field]`.

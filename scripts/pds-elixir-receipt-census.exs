@@ -918,6 +918,14 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
+    # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
+    # the row the context function returned (accept: the created seat; decline:
+    # the id it deleted; withdraw: the deleted invitation) behind a tagged
+    # `{:ok, _}` match — a status receipt, never an `ok: true` literal.
+    {:delete, "/v1/auth/invitations/:id", "BarkparkWeb.InvitationController", :decline, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/invitations/:id", "BarkparkWeb.MemberController", :cancel_invitation, :status_only_receipt},
+    {:post, "/v1/auth/invitations/:id/accept", "BarkparkWeb.InvitationController", :accept, :status_only_receipt},
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
