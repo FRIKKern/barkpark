@@ -1,10 +1,15 @@
 {
+  "agents_done": 23,
+  "agents_total": 28,
+  "ended_at": null,
   "label": "core-auth-phases-2-5 — 7-phase epic cycle",
-  "running": 5,
-  "tokens": 1552004,
-  "started_at": 1782767557221,
-  "phase": "Security Review",
   "outcome": "live",
+  "phase": "Security Review",
+  "phase_index": 6,
+  "phases_total": 7,
+  "running": 5,
+  "started_at": 1782767557221,
+  "terminal?": false,
   "ticks": [
     "done",
     "done",
@@ -14,10 +19,5 @@
     "active",
     "future"
   ],
-  "agents_total": 28,
-  "phase_index": 6,
-  "agents_done": 23,
-  "ended_at": null,
-  "phases_total": 7,
-  "terminal?": false
+  "tokens": 1552004
 }
