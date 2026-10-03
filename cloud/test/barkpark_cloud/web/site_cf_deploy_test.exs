@@ -334,7 +334,12 @@ defmodule BarkparkCloud.Web.SiteCfDeployTest do
       {_owner, team} = user_with_team()
       site = team |> live_barkpark() |> static_site()
       connect_cf(team)
-      CfFake.seed_record("zone_acme", %{name: "shop.example.com", type: "CNAME", content: "shops.myshopify.com"})
+
+      CfFake.seed_record("zone_acme", %{
+        name: "shop.example.com",
+        type: "CNAME",
+        content: "shops.myshopify.com"
+      })
 
       conn = cf_deploy(site, "shop.example.com", member_session(team, "member"))
 

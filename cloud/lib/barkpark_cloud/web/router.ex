@@ -16414,10 +16414,17 @@ defmodule BarkparkCloud.Web.Router do
   defp with_team_site(conn, auth, fun) do
     conn =
       case auth do
-        :session -> Auth.require_user(conn, [])
-        :team_admin -> Auth.require_team_admin(conn, [])
-        {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
-        {:team_admin_ability, ab} -> conn |> Auth.require_user_or_pat([]) |> require_admin_ability(ab)
+        :session ->
+          Auth.require_user(conn, [])
+
+        :team_admin ->
+          Auth.require_team_admin(conn, [])
+
+        {:ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+
+        {:team_admin_ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> require_admin_ability(ab)
       end
 
     cond do

@@ -525,7 +525,12 @@ defmodule BarkparkCloud.Web.RouterSiteRebindTest do
       StudioLinkFakeHttpClient.program(%{})
 
       conn =
-        call(:patch, "/v1/sites/#{site.id}", %{theme: "fjord", doc_type: "paper"}, login_token(member))
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{theme: "fjord", doc_type: "paper"},
+          login_token(member)
+        )
 
       assert conn.status == 200, conn.resp_body
       row = Registry.get_site(site.id)

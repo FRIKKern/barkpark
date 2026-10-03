@@ -621,7 +621,10 @@ defmodule BarkparkCloud.Web.RouterSiteFormsTest do
       program_inbox(site, [sub])
 
       {:ok, pat, _} =
-        Accounts.create_personal_access_token(admin, team, %{name: "ci-write", abilities: ["write"]})
+        Accounts.create_personal_access_token(admin, team, %{
+          name: "ci-write",
+          abilities: ["write"]
+        })
 
       assert req(:post, "/v1/sites/#{site.id}/forms/export", pat, body).status == 200
     end
