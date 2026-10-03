@@ -7,7 +7,7 @@
 // normal ProseMirror transaction on the canvas editor, so the existing
 // runToOps diff turns it into patch/insert/remove/move ops with no new wire
 // shapes. The handle is purely additive: read-mode canvases never mount it.
-import { TextSelection, NodeSelection } from "@tiptap/pm/state";
+import { Selection, TextSelection, NodeSelection } from "@tiptap/pm/state";
 
 // Six-dot braille cell: reads as a drag grip without letter-spacing tricks.
 const GRIP = "⠿";
@@ -106,15 +106,38 @@ export function turnTopLevelInto(editor, index, kind) {
   const { state } = editor;
   const src = topLevelAt(state, index);
   if (!src) return false;
-  const chain = editor.chain().setTextSelection(Math.min(src.from + 1, src.to - 1));
+  // Select the block's text from its first to its last inline position. A raw
+  // src.from + 1 lands BETWEEN a list and its first item (no inline content
+  // there), so "Turn into → Checklist / Numbered list" on a list did nothing; and
+  // a list converts as a whole only when the selection spans all its items.
+  const first = Selection.findFrom(state.doc.resolve(src.from), 1, true);
+  const last = Selection.findFrom(state.doc.resolve(src.to), -1, true);
+  const range = first && last && first.from >= src.from && last.to <= src.to
+    ? { from: first.from, to: src.node.isTextblock ? first.from : last.to }
+    : Math.min(src.from + 1, src.to - 1);
+  const chain = editor.chain().setTextSelection(range);
+  const LISTS = ["bulletList", "orderedList", "taskList"];
+  // A list turned into another list kind is the SAME block: keep its id, so the
+  // save is a same-id replace and references to the block survive.
+  const keepListId = (ok) => {
+    const id = src.node.attrs?.bpId;
+    if (!ok || !id || !LISTS.includes(src.node.type.name)) return ok;
+    const after = topLevelAt(editor.state, index);
+    if (after && LISTS.includes(after.node.type.name) && after.node.attrs.bpId == null &&
+        "bpId" in after.node.attrs) {
+      const tr = editor.state.tr.setNodeMarkup(after.from, undefined, { ...after.node.attrs, bpId: id });
+      editor.view.dispatch(tr.setMeta("addToHistory", false));
+    }
+    return ok;
+  };
   switch (kind) {
     case "paragraph": return chain.setParagraph().run();
     case "h1": return chain.setHeading({ level: 1 }).run();
     case "h2": return chain.setHeading({ level: 2 }).run();
     case "h3": return chain.setHeading({ level: 3 }).run();
-    case "bullet": return src.node.type.name === "bulletList" ? true : chain.toggleBulletList().run();
-    case "ordered": return src.node.type.name === "orderedList" ? true : chain.toggleOrderedList().run();
-    case "task": return src.node.type.name === "taskList" ? true : chain.toggleTaskList().run();
+    case "bullet": return src.node.type.name === "bulletList" ? true : keepListId(chain.toggleBulletList().run());
+    case "ordered": return src.node.type.name === "orderedList" ? true : keepListId(chain.toggleOrderedList().run());
+    case "task": return src.node.type.name === "taskList" ? true : keepListId(chain.toggleTaskList().run());
     default: return false;
   }
 }
