@@ -15,13 +15,39 @@ defmodule BarkparkWeb.CapabilitiesController do
 
   use BarkparkWeb, :controller
 
-  alias Barkpark.Plugins.Capabilities
+  alias Barkpark.Plugins.{Capabilities, CapabilitiesBrief}
+  alias BarkparkWeb.ErrorResponse
   alias BarkparkWeb.Http.IfNoneMatch
 
   import Plug.Conn,
     only: [get_req_header: 2, get_resp_header: 2, put_resp_header: 3, send_resp: 3]
 
   def index(conn, params) do
+    # ?view=brief (ctx-b2-server-view-brief): BRIEF-KEEP-LIST v1, the CLI's
+    # born-brief projection adopted verbatim (`CapabilitiesBrief`). OPT-IN like
+    # every other shaping param here: without it the body is byte-identical to
+    # the default contract, which released bp binaries strict-decode. An
+    # unknown view is a 400 naming the two that exist, never a silent full
+    # body, because a caller that asked for a shape must not mistake another
+    # one for it.
+    case params["view"] do
+      v when v in [nil, "full"] -> respond(conn, params, :full)
+      "brief" -> respond(conn, params, :brief)
+      other -> refuse_view(conn, other)
+    end
+  end
+
+  defp refuse_view(conn, other) do
+    ErrorResponse.emit_custom(
+      conn,
+      400,
+      "malformed",
+      "unknown view #{inspect(other)}: GET /v1/capabilities serves view=full (the default) or view=brief",
+      %{parameter: "view", requested: other, allowed: ["full", "brief"]}
+    )
+  end
+
+  defp respond(conn, params, view) do
     caller_tier = Capabilities.tier_for_token(conn.assigns[:api_token])
     # ?build=1 opts in to the "build" identity key. Opt-in (never default):
     # released bp binaries strict-decode the manifest and reject unknown
@@ -66,7 +92,22 @@ defmodule BarkparkWeb.CapabilitiesController do
         server: server
       )
 
-    etag = manifest["etag"]
+    # THE VALIDATOR FOLDS THE VIEW (RFC 9110 §8.8.3). The brief and the full
+    # body are two representations of one resource, so they must not share a
+    # strong ETag. If they did, a client holding the full manifest's ETag could
+    # revalidate a ?view=brief request into a 304 and keep the wrong shape.
+    # `CapabilitiesBrief.http_etag/1` derives the brief's validator from the
+    # full one, so it still moves exactly when the manifest does. The other
+    # shaping params (?build/?views/?chat/?bpml) already change the hashed
+    # body, so `manifest["etag"]` already differs across them.
+    {etag, body} =
+      case view do
+        :full ->
+          {manifest["etag"], manifest}
+
+        :brief ->
+          {CapabilitiesBrief.http_etag(manifest["etag"]), CapabilitiesBrief.project(manifest)}
+      end
 
     conn =
       conn
@@ -76,7 +117,7 @@ defmodule BarkparkWeb.CapabilitiesController do
     if IfNoneMatch.match?(conn, etag) do
       send_resp(conn, 304, "")
     else
-      json(conn, manifest)
+      json(conn, body)
     end
   end
 
