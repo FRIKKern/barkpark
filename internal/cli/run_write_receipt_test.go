@@ -162,6 +162,12 @@ var honestWriteReceipts = []struct {
 	// transaction id wearing the revision's label. A body with no document rev
 	// now prints the transaction under its own name.
 	{"mutate_transaction", `{"result":{"transactionId":"tx1","results":[{"id":"d1","operation":"update"}]}}`, "minimal", "transaction: tx1\n", 200},
+	// task-e792a0ef5d6df084: `bp doc restore-revision` answers the restored draft
+	// WRAPPED as {"restored": true, "document": {...}} (HistoryController.restore). The receipt was
+	// a bare "ok"; it now names the draft and its rev, the way the webhook
+	// wrapper names its id.
+	{"restore_document", `{"restored":true,"document":{"_id":"drafts.rr-1","_rev":"r4","_type":"post","title":"Restorable"}}`, "minimal", "rev: r4\nid: drafts.rr-1\n", 200},
+	{"restore_document", `{"restored":true,"document":{"_id":"drafts.rr-1","_rev":"r4","_type":"post","title":"Restorable"}}`, "json", "{\"document\":{\"_id\":\"drafts.rr-1\",\"_rev\":\"r4\",\"_type\":\"post\",\"title\":\"Restorable\"},\"restored\":true}\n", 200},
 	// The single-document write a user actually runs: the receipt's rev is the
 	// DOCUMENT's _rev (what `bp doc get` shows next), never the transaction id.
 	{"mutate_doc_rev", `{"result":{"transactionId":"tx1","results":[{"id":"drafts.d1","operation":"create","document":{"_id":"drafts.d1","_rev":"docrev9"}}]}}`, "minimal", "rev: docrev9\n", 200},
