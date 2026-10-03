@@ -131,6 +131,7 @@ class BpPaperEditor extends HTMLElement {
     this._tableAwaitingCells = [];
     this._tablePendingAction = null;
     this._tableStructureAwaiting = null;
+    this._tableRefocusNewRow = false;
     this._tableSettlement = null;
     this._tableSourceError = false;
     this._tableEditStatus = null;
@@ -518,6 +519,7 @@ class BpPaperEditor extends HTMLElement {
     this._tableAwaitingCells = [];
     this._tablePendingAction = null;
     this._tableStructureAwaiting = null;
+    this._tableRefocusNewRow = false;
     this._settleTableLifecycle(false);
     this._discardCardBodyDraft = true;
     this._discardTableDraft = true;
@@ -630,6 +632,10 @@ class BpPaperEditor extends HTMLElement {
     if (this._editorMode !== "table" || !this._editor || !this._editable ||
         this._tableSourceError || this._tablePendingAction || this._tableStructureAwaiting ||
         !this._validTableAction(action)) return false;
+    // Tab past the last cell asks for a row while the author is typing in the table.
+    // The editor goes read-only until the server echoes the new shape, which drops
+    // focus; without a caret back in the new row the next keystrokes went nowhere.
+    this._tableRefocusNewRow = action === "add-row" && this._editor.view.hasFocus();
     this._ensureTableSettlement();
     this.flushPendingChanges();
     this._tablePendingAction = action;
@@ -711,6 +717,25 @@ class BpPaperEditor extends HTMLElement {
     this._tableStructureAwaiting = null;
     this._acceptTableProjection(echo.value);
     this._settleTableLifecycle(true);
+    if (this._tableRefocusNewRow) this._focusLastRowFirstCell();
+    this._tableRefocusNewRow = false;
+    return true;
+  }
+
+  _focusLastRowFirstCell() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed || !editor.isEditable) return false;
+    let rowPos = null;
+    editor.state.doc.descendants((node, pos) => {
+      if (node.type.name === "bpTableRow") rowPos = pos;
+      return node.type.name !== "bpTableRow";
+    });
+    if (rowPos == null) return false;
+    // rowPos + 1 is the first cell; + 2 is inside it.
+    editor.commands.setTextSelection(rowPos + 2);
+    // Synchronously: TipTap's focus() would wait a frame, and a fast typist's
+    // next key would land outside the table.
+    editor.view.focus();
     return true;
   }
 
