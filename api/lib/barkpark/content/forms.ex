@@ -581,7 +581,11 @@ defmodule Barkpark.Content.Forms do
   # snapshot wrote the mount-time value of every untouched field back, so a
   # Classic save silently reverted any other writer's change that landed after
   # the editor mounted (20/20 rounds against a concurrent REST patch).
-  defp classic_save_content(base_doc, current_doc, params, schema, dataset) do
+  # `scope` is the save's workspace/project. It binds reference titles in the
+  # re-rendered body HTML to the document's own workspace; with no scope the
+  # dataset resolved to the Default workspace's, so another workspace's saved
+  # HTML showed Default's titles (task-af1a7cc9cd523586).
+  defp classic_save_content(base_doc, current_doc, params, schema, dataset, scope) do
     snapshot = Map.get(base_doc, :content) || %{}
     base_content = Map.get(current_doc, :content) || %{}
 
@@ -593,17 +597,17 @@ defmodule Barkpark.Content.Forms do
     case Map.get(base_content, "blocks") do
       blocks when is_list(blocks) ->
         if block_maps?(blocks) do
-          classic_save_top_level_blocks(base_content, blocks, params, schema, dataset)
+          classic_save_top_level_blocks(base_content, blocks, params, schema, dataset, scope)
         else
           classic_save_preserving_ambiguous_body(base_content, params, schema)
         end
 
       _ ->
-        classic_save_without_top_level_blocks(base_content, params, schema, dataset)
+        classic_save_without_top_level_blocks(base_content, params, schema, dataset, scope)
     end
   end
 
-  defp classic_save_top_level_blocks(base_content, blocks, params, schema, dataset) do
+  defp classic_save_top_level_blocks(base_content, blocks, params, schema, dataset, scope) do
     values = classic_field_values(params, schema)
     new_blocks = Synthesis.patch_bound_values(blocks, values)
 
@@ -626,7 +630,7 @@ defmodule Barkpark.Content.Forms do
     # same write with its scoped article render options before persistence.
     |> Projection.project(
       new_blocks,
-      Map.put(Labels.render_opts(dataset), :style, :article)
+      Map.put(Labels.render_opts(dataset, scope), :style, :article)
     )
   end
 
@@ -637,7 +641,7 @@ defmodule Barkpark.Content.Forms do
   # dropping metadata it does not own. We still apply bound-field values and
   # refresh the derived article HTML, while preserving the exact authored block
   # tree and every unknown body key.
-  defp classic_save_without_top_level_blocks(base_content, params, schema, dataset) do
+  defp classic_save_without_top_level_blocks(base_content, params, schema, dataset, scope) do
     case historical_body_blocks(base_content) do
       {:ok, blocks, body_source} ->
         classic_save_historical_blocks(
@@ -646,7 +650,8 @@ defmodule Barkpark.Content.Forms do
           body_source,
           params,
           schema,
-          dataset
+          dataset,
+          scope
         )
 
       :malformed_top_level_blocks ->
@@ -683,7 +688,8 @@ defmodule Barkpark.Content.Forms do
          body_source,
          params,
          schema,
-         dataset
+         dataset,
+         scope
        ) do
     bound_names =
       blocks
@@ -710,7 +716,7 @@ defmodule Barkpark.Content.Forms do
         |> Projection.project(
           blocks,
           new_blocks,
-          Map.put(Labels.render_opts(dataset), :style, :article)
+          Map.put(Labels.render_opts(dataset, scope), :style, :article)
         )
 
       projected_body = Map.fetch!(projected, "body")
@@ -863,7 +869,14 @@ defmodule Barkpark.Content.Forms do
 
   defp upsert_draft_once(base_doc, current, type, schema, params, dataset, opts) do
     with content when is_map(content) <-
-           classic_save_content(base_doc, current, params, schema, dataset) do
+           classic_save_content(
+             base_doc,
+             current,
+             params,
+             schema,
+             dataset,
+             Keyword.take(opts, [:workspace_id, :project_id])
+           ) do
       new_title = row_field(params, "title", base_doc, current)
 
       attrs = %{
