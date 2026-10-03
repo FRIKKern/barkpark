@@ -79,6 +79,21 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
 
   defp json_body(conn), do: Jason.decode!(conn.resp_body)
 
+  # Mark `user`'s address as proven, the state a clicked confirmation link
+  # leaves behind. Accepting an invitation needs it (task-0cf611238d4ad597 CQ6).
+  defp confirmed!(user) do
+    user |> BarkparkCloud.Accounts.User.confirm_changeset() |> BarkparkCloud.Repo.update!()
+  end
+
+  # Every email the test process has received so far, oldest first.
+  defp drain_emails(acc \\ []) do
+    receive do
+      {:email, email} -> drain_emails([email | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
+  end
+
   describe "GET /v1/teams/:id/members" do
     test "a member sees the roster; a non-member gets 404 (no existence leak)" do
       team = team_fixture()
@@ -271,7 +286,7 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
 
       token = accept_token(json_body(conn)["accept_url"])
 
-      invitee = user_fixture(email: "invitee@example.com")
+      invitee = user_fixture(email: "invitee@example.com") |> confirmed!()
       {:ok, invitee_token} = Accounts.create_user_session_token(invitee)
 
       conn = call(:post, "/v1/invitations/accept", %{token: token}, invitee_token)
@@ -295,6 +310,91 @@ defmodule BarkparkCloud.Web.RouterInvitationsTest do
       wrong = user_fixture(email: "not-other@example.com")
       {:ok, wrong_token} = Accounts.create_user_session_token(wrong)
       assert call(:post, "/v1/invitations/accept", %{token: token2}, wrong_token).status == 403
+    end
+  end
+
+  # task-0cf611238d4ad597 CQ6 (owner ruling #36). A password signup is logged in
+  # before it proves its address, so the email match alone let an account that
+  # merely CLAIMED the invited address join. Accepting now needs the address
+  # proven; the invitation stays live until it is.
+  describe "accept needs a proven email address" do
+    defp invite_token!(team, owner_token, email) do
+      conn = call(:post, "/v1/teams/#{team.id}/invitations", %{email: email}, owner_token)
+      assert conn.status == 201
+      accept_token(json_body(conn)["accept_url"])
+    end
+
+    test "a fresh signup is refused with email_unconfirmed, confirms, then joins" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+      email = "fresh-#{System.unique_integer([:positive])}@example.com"
+      token = invite_token!(team, owner_token, email)
+
+      invitee = user_fixture(email: email)
+      {:ok, session} = Accounts.create_user_session_token(invitee)
+      drain_emails()
+
+      conn = call(:post, "/v1/invitations/accept", %{token: token}, session)
+      assert conn.status == 403
+      body = json_body(conn)
+      assert body["error"] == "email_unconfirmed"
+      assert body["resend"] == "/v1/auth/resend-verification"
+      assert Accounts.team_role(invitee, team) == nil
+      # The refusal spends nothing: the invitation is still live.
+      assert call(:get, "/v1/invitations/#{token}").status == 200
+
+      # The resend hint works, and the emailed link confirms the address.
+      assert call(:post, "/v1/auth/resend-verification", %{}, session).status == 200
+
+      [confirm] =
+        for e <- drain_emails(),
+            [_, t] <- [Regex.run(~r/\?confirm=([^\s]+)/, e.text_body || "")],
+            do: t
+
+      assert call(:post, "/v1/auth/verify-email", %{token: confirm}).status == 200
+
+      conn = call(:post, "/v1/invitations/accept", %{token: token}, session)
+      assert conn.status == 200
+      assert json_body(conn)["team_id"] == team.id
+      assert Accounts.team_role(invitee, team) == "member"
+    end
+
+    test "an address an identity provider verified joins without a confirmation mail" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+      email = "oauth-#{System.unique_integer([:positive])}@example.com"
+      token = invite_token!(team, owner_token, email)
+
+      invitee = user_fixture(email: email)
+      assert is_nil(invitee.confirmed_at)
+
+      {:ok, _} =
+        %BarkparkCloud.Accounts.ExternalIdentity{}
+        |> BarkparkCloud.Accounts.ExternalIdentity.changeset(%{
+          provider: "github",
+          provider_uid: "gh-#{System.unique_integer([:positive])}",
+          email: email,
+          user_id: invitee.id
+        })
+        |> BarkparkCloud.Repo.insert()
+
+      {:ok, session} = Accounts.create_user_session_token(invitee)
+      conn = call(:post, "/v1/invitations/accept", %{token: token}, session)
+      assert conn.status == 200
+      assert Accounts.team_role(invitee, team) == "member"
+    end
+
+    test "the wrong account still gets email_mismatch, not email_unconfirmed" do
+      team = team_fixture()
+      {_owner, owner_token} = member_with_token(team, "owner")
+      email = "right-#{System.unique_integer([:positive])}@example.com"
+      token = invite_token!(team, owner_token, email)
+
+      wrong = user_fixture()
+      {:ok, session} = Accounts.create_user_session_token(wrong)
+      conn = call(:post, "/v1/invitations/accept", %{token: token}, session)
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "email_mismatch"
     end
   end
 

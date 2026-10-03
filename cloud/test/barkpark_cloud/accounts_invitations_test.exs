@@ -15,7 +15,7 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.OffLadderRole
-  alias BarkparkCloud.Accounts.{TeamInvitation, TeamMembership}
+  alias BarkparkCloud.Accounts.{TeamInvitation, TeamMembership, User}
   alias BarkparkCloud.Repo
 
   @password "correct-horse-battery"
@@ -29,7 +29,10 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
       })
       |> Accounts.register_user()
 
-    user
+    # Confirmed, as a person who clicked the emailed link is: accepting an
+    # invitation needs a proven address (task-0cf611238d4ad597 CQ6). The
+    # unconfirmed case is built explicitly where it is under test.
+    user |> User.confirm_changeset() |> Repo.update!()
   end
 
   defp team_fixture(attrs \\ %{}) do
@@ -237,6 +240,24 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
       |> Repo.update!()
 
       assert {:error, :invalid_token} = Accounts.accept_invitation(raw, invitee)
+    end
+
+    test "an unconfirmed account with the invited email → :email_unconfirmed, invite stays live" do
+      {owner, team} = owned_team()
+
+      {:ok, unconfirmed} =
+        Accounts.register_user(%{email: "unproven@example.com", password: @password})
+
+      {:ok, %{token: raw}} =
+        Accounts.invite_member(team, "unproven@example.com", "member", owner)
+
+      assert {:error, :email_unconfirmed} = Accounts.accept_invitation(raw, unconfirmed)
+      assert Accounts.get_membership(team, unconfirmed) == nil
+      assert Accounts.get_live_invitation(raw)
+
+      # Once the address is proven the same token joins.
+      confirmed = unconfirmed |> User.confirm_changeset() |> Repo.update!()
+      assert {:ok, %TeamMembership{role: "member"}} = Accounts.accept_invitation(raw, confirmed)
     end
 
     test "wrong logged-in user (email mismatch) → :email_mismatch" do
