@@ -194,8 +194,75 @@ defmodule Barkpark.Accounts.Privacy do
             occurred_at: e.occurred_at,
             metadata: e.metadata
           }
-        end)
+        end),
+      # Owner ruling #32 item 7 (2026-10-03): three more kinds of row that name
+      # the subject. METADATA ONLY — what, where and when. A revision snapshot's
+      # content is the workspace's data, not the subject's, and a grant's link
+      # token hash is credential material.
+      revisions: export_revisions(user),
+      access_grants: export_grants(user),
+      paper_access: export_paper_access(user)
     }
+  end
+
+  # Revisions the subject authored: stamped `actor_kind "user"` + their id, or
+  # (history written before the kind/id columns) the legacy `actor_user_id`.
+  defp export_revisions(%User{id: id}) do
+    from(r in Barkpark.Content.Revision,
+      where: (r.actor_kind == "user" and r.actor_id == ^id) or r.actor_user_id == ^id,
+      order_by: [asc: r.inserted_at],
+      select: %{
+        id: r.id,
+        workspace_id: r.workspace_id,
+        project_id: r.project_id,
+        dataset: r.dataset,
+        type: r.type,
+        doc_id: r.doc_id,
+        action: r.action,
+        rev: r.rev,
+        created_at: r.inserted_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  # Grants made TO the subject — claimed (grantee_user_id) or addressed to their
+  # email and not yet claimed.
+  defp export_grants(%User{id: id, email: email}) do
+    from(g in Grant,
+      where: g.grantee_user_id == ^id or g.grantee_email == ^email,
+      order_by: [asc: g.inserted_at],
+      select: %{
+        id: g.id,
+        workspace_id: g.workspace_id,
+        project_id: g.project_id,
+        dataset: g.dataset,
+        type: g.type,
+        doc_id: g.doc_id,
+        capabilities: g.capabilities,
+        created_at: g.inserted_at,
+        expires_at: g.expires_at,
+        claimed_at: g.claimed_at,
+        revoked_at: g.revoked_at
+      }
+    )
+    |> Repo.all()
+  end
+
+  # The subject's entries in the 90-day paper access trail.
+  defp export_paper_access(%User{id: id}) do
+    from(a in Barkpark.Content.PaperAccessLog,
+      where: a.actor_kind == "user" and a.actor_id == ^id,
+      order_by: [asc: a.inserted_at],
+      select: %{
+        workspace_id: a.workspace_id,
+        dataset: a.dataset,
+        slug: a.slug,
+        action: a.action,
+        at: a.inserted_at
+      }
+    )
+    |> Repo.all()
   end
 
   @doc """
