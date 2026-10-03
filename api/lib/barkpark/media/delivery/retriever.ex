@@ -94,10 +94,16 @@ defmodule Barkpark.Media.Delivery.Retriever do
   # emitting `workspace_id: nil`. Passing a nil workspace as a PRESENT key
   # would make the guard fire for the genuinely-unscoped flat caller too,
   # dropping it to the legacy `dataset` STRING and re-conflating same-named
-  # datasets across tenants (barkpark-y9ee). `is_binary/1` also leaves the
-  # `:shared_only` sentinel on today's Default-project resolution — that path's
-  # NULL-workspace rows are rescued by the NULL-tolerant `dataset_id` arm
-  # either way, and changing it is a separate call with its own proof.
+  # datasets across tenants (barkpark-y9ee).
+  #
+  # DECIDED (task-273fd8908ec43aa4): `:shared_only` STAYS OUT of the `is_binary/1`
+  # branch. A request that resolved no tenant has no workspace to resolve a
+  # dataset within, so it keeps the Default-project resolution, and the
+  # NULL-tolerant `dataset_id` arm still admits its NULL-workspace rows. The
+  # tenant boundary for the joined metadata is `join_scope_workspace/3`'s
+  # `:shared_only` arm below, not this guard. That reliance is pinned at the door
+  # by test/barkpark/media/shared_only_search_door_test.exs: drop or reorder the
+  # arm and a foreign asset doc's metadata attaches to a shared blob, which reds.
   defp asset_doc_join_query(dataset, workspace_id, project_id) do
     opts =
       if is_binary(workspace_id),
