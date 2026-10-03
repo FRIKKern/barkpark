@@ -9776,10 +9776,15 @@ defmodule BarkparkCloud.Web.Router do
           # Promote and redeploy copy a STORED value through `Registry`, not
           # this door, so they are unaffected.
           not client_artifact_url_allowed?(conn.body_params["artifact_url"]) ->
+            # The same `invalid` + per-field `details` shape a changeset
+            # refusal on this route answers, so no new wire code is minted.
             json(conn, 422, %{
-              error: "invalid_artifact_url",
-              detail:
-                "artifact_url must be an https:// URL; file:// and other schemes are refused"
+              error: "invalid",
+              details: %{
+                artifact_url: [
+                  "must be an https:// URL; file:// and other schemes are refused"
+                ]
+              }
             })
 
           # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO

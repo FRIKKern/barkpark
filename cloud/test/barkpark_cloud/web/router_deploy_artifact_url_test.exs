@@ -63,7 +63,9 @@ defmodule BarkparkCloud.Web.RouterDeployArtifactUrlTest do
         conn = deploy(site, token, %{git_ref: "main", artifact_url: unquote(url)})
 
         assert conn.status == 422
-        assert Jason.decode!(conn.resp_body)["error"] == "invalid_artifact_url"
+        body = Jason.decode!(conn.resp_body)
+        assert body["error"] == "invalid"
+        assert [_message] = body["details"]["artifact_url"]
         assert rows(site) == []
       end
     end
