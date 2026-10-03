@@ -1667,7 +1667,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       match?(%{role: :list}, last) and Map.get(last, :type_name) != nil ->
         %{
           reason: :not_found,
-          doc_id: Map.get(last, :selected),
+          doc_id: missing_doc_id(nav_path, Map.get(last, :selected)),
           doc_type: Map.get(last, :type_name)
         }
 
@@ -1682,6 +1682,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
       true ->
         %{reason: :nothing_selected, doc_id: nil, doc_type: nil}
+    end
+  end
+
+  # The id the card names as missing. When the walk stops on a list pane whose
+  # selection is a FILTER node (`/studio/post/post-all/p404` stops on the Post
+  # pane with `post-all` selected), the missing document is the segment AFTER
+  # that node, not the node itself — the card used to say "No post with the id
+  # post-all". When the selection is the last segment, it is the document id.
+  defp missing_doc_id(nav_path, selected) do
+    case Enum.drop_while(nav_path, &(&1 != selected)) do
+      [^selected, next | _] -> next
+      _ -> selected
     end
   end
 
