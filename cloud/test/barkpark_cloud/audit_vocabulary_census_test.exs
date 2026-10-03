@@ -849,6 +849,15 @@ defmodule BarkparkCloud.AuditVocabularyCensusTest do
           "inside the same request.",
       anchor: ~r/"invitation\.revoked"/
     },
+    "barkpark_cloud/accounts.ex|revoke_invitations_sent_by" => %{
+      kind: :allowlisted,
+      count: 1,
+      reason:
+        "withdraws the open invitations a removed or demoted member sent " <>
+          "(task-0cf611238d4ad597 CQ4). The ACT is member.removed or member.role_changed, " <>
+          "audited at its route in the same transaction; this sweep is that act's remedy.",
+      anchor: ~r/"member\.removed"/
+    },
     "barkpark_cloud/accounts.ex|delete_user_session_tokens" => %{
       kind: :allowlisted,
       count: 1,

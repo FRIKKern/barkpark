@@ -427,6 +427,19 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, :forbidden}),
     do: %{code: "forbidden", message: "token lacks required permission", status: 403}
 
+  # A preview JWT that names documents (`doc_ids`) or a workspace reads only
+  # what it names (owner ruling #17). `reason` discriminates it from the
+  # permission-tier refusal above, as `:replay` does under "unauthorized".
+  defp build({:error, :preview_scope}),
+    do: %{
+      code: "forbidden",
+      message: "this preview token does not cover that read",
+      status: 403,
+      reason: "preview_scope",
+      hint:
+        "A preview token with doc_ids reads only those documents, through /v1/preview/doc and /v1/preview/query without ?expand. Sign a token for the document you want, or one with an empty doc_ids list for the whole dataset."
+    }
+
   # MEMBERSHIP refusal, deliberately distinct from the permission-tier refusal
   # above (gyldendal field report #15). `ResolveWorkspace` halts here when the
   # caller is simply not a member of the workspace named in the URL — a question

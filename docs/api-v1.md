@@ -44,17 +44,17 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | Param | Default | Notes |
 |-------|---------|-------|
 | `perspective` | `published` | `published\|drafts\|raw`; unsupported → 400; tokenless pinned `published` |
-| `limit` | `100` | Int, min 1, max 1000 |
-| `offset` | `0` | Int |
+| `limit` | `100` | Int 1–1000, clamped; non-integer → 400 |
+| `offset` | `0` | Int, clamped; non-integer → 400 |
 | `fields` | — | CSV content-field projection (`title,slug`); system fields kept |
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact match: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
-| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never a silent unfiltered 200) |
-| `expand` | — | `true` (all refs) \| `field1,field2` (named refs). |
+| `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never an unfiltered 200) |
+| `expand` | — | `true` (all refs) \| `field1,field2` (named refs, §5a) |
 
-**Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` = next offset when more.
+**Response:** `result` + outer keys per §3; `count` = page rows; `hasMore` = a row exists past this page (exact, always present) — so **never infer truncation from `count == limit`**; `nextOffset` when more.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
@@ -64,7 +64,7 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ### 5a. Reference Expansion
 
-`?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string).
+`?expand=true` (or `?expand=author,category`) inlines reference fields with the referenced document — single refs and `arrayOf`-of-reference lists, values plain ids or `{_ref: id}`. **Depth 1** only; nested refs and missing targets stay raw (expanded = map, raw = string). A non-reference field → 400.
 
 ### 5b/5c. Graph reads + history [token]
 
@@ -72,7 +72,7 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-A batch of mutations, applied atomically (one failure rolls back all). Body: `{"mutations":[…]}`.
+Mutations applied atomically (one failure rolls back all). Body: `{"mutations":[…]}`.
 
 **Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
@@ -101,11 +101,11 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
-Failures: §9. A write whose searchable text (title + every string in `content`) exceeds Postgres' **1 048 575-byte** full-text index cap is refused `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`) and nothing is written (a cap on the derived tsvector). One document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) is refused `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` (owner decision, persisted) skips the duplicate scan.
+Failures: §9. A write whose searchable text (title + every `content` string) exceeds Postgres' **1 048 575-byte** tsvector cap is refused `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`) and nothing is written. One document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) is refused `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` (owner decision, persisted) skips the duplicate scan.
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
-One PortableDoc block op on any document type (Studio's block editor, over HTTP). Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
+One PortableDoc block op on any document type (Studio's block editor op). Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 

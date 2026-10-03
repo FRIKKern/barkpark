@@ -773,4 +773,47 @@ defmodule BarkparkWeb.ShareControllerTest do
       assert (conn |> admin_conn() |> delete("/v1/shares", %{})).status == 422
     end
   end
+
+  describe "DELETE /v1/shares/tokens/:token_id revokes share tokens only" do
+    # Owner ruling #34 item 3 (2026-10-03, task-d9e8f02056e39763): this door
+    # used to revoke ANY token whose workspace_id named a workspace the caller
+    # administers. API tokens minted before tenancy carry a backfilled Default
+    # workspace_id, so a Default admin could revoke other tenants' tokens here.
+    # The door now serves share-edit tokens (share_scope set) and nothing else;
+    # every other token answers the same 404 as a missing row.
+    test "a workspace admin cannot revoke an ordinary API token in that workspace",
+         %{conn: conn} do
+      ws = create_workspace!("share-door-ws")
+      proj = create_project!(ws, "share-door-proj")
+      scope = "#{ws.slug}/#{proj.slug}/production"
+
+      {:ok, _host} =
+        Auth.create_token(@owner_token, "door-admin", "test", ["read", "write", "admin"], ws.id)
+
+      {:ok, victim} =
+        Auth.create_token(
+          "barkpark-test-share-door-victim",
+          "ordinary",
+          "test",
+          ["read", "write"],
+          ws.id
+        )
+
+      assert is_nil(victim.share_scope)
+
+      rev = conn |> bearer(@owner_token) |> delete("/v1/shares/tokens/#{victim.id}")
+      assert rev.status == 404, "expected 404, got #{rev.status}: #{rev.resp_body}"
+      assert json_response(rev, 404)["error"]["code"] == "not_found"
+      assert is_nil(Repo.get(ApiToken, victim.id).revoked_at)
+      assert {:ok, _} = Auth.verify_token("barkpark-test-share-door-victim")
+
+      # The legitimate path: the same admin still revokes a share-edit token.
+      assert {:ok, _} = Sharing.add_share("#{scope}:docs:edit")
+      {:ok, {_raw, share}} = Auth.create_share_token(ws.slug, proj.slug, "production", ["docs"])
+
+      ok = conn |> bearer(@owner_token) |> delete("/v1/shares/tokens/#{share.id}")
+      assert ok.status == 200, "expected 200, got #{ok.status}: #{ok.resp_body}"
+      refute is_nil(Repo.get(ApiToken, share.id).revoked_at)
+    end
+  end
 end
