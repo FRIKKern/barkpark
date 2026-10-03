@@ -1,11 +1,16 @@
 {
   "epic_cycle_interrupted": {
+    "agents_done": 1,
+    "agents_total": 5,
+    "ended_at": null,
     "label": "bp-epic-cycle — 7-phase epic cycle",
-    "running": 4,
-    "tokens": 68272,
-    "started_at": 1783633546962,
-    "phase": "Explore",
     "outcome": "interrupted",
+    "phase": "Explore",
+    "phase_index": 2,
+    "phases_total": 7,
+    "running": 4,
+    "started_at": 1783633546962,
+    "terminal?": true,
     "ticks": [
       "done",
       "interrupted",
@@ -15,20 +20,20 @@
       "unreached",
       "unreached"
     ],
-    "phase_index": 2,
-    "phases_total": 7,
-    "agents_done": 1,
-    "agents_total": 5,
-    "terminal?": true,
-    "ended_at": null
+    "tokens": 68272
   },
   "epic_cycle_progress": {
+    "agents_done": 29,
+    "agents_total": 29,
+    "ended_at": null,
     "label": "core-auth-phases-2-5 — 7-phase epic cycle",
-    "running": 0,
-    "tokens": 2137873,
-    "started_at": 1782767557221,
-    "phase": null,
     "outcome": "completed",
+    "phase": null,
+    "phase_index": null,
+    "phases_total": 7,
+    "running": 0,
+    "started_at": 1782767557221,
+    "terminal?": true,
     "ticks": [
       "done",
       "done",
@@ -38,11 +43,6 @@
       "done",
       "done"
     ],
-    "phase_index": null,
-    "phases_total": 7,
-    "agents_done": 29,
-    "agents_total": 29,
-    "terminal?": true,
-    "ended_at": null
+    "tokens": 2137873
   }
 }

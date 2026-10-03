@@ -2606,20 +2606,60 @@ defmodule Barkpark.StudioChatTest do
 
   defp normalized_fresh_building, do: fresh_building() |> Jason.encode!() |> Jason.decode!()
 
+  # THE FIXTURE WRITER, one canonical byte form (task-03de03d59f7a3999). A plain
+  # `Jason.encode!(map, pretty: true)` emits keys in the map's INTERNAL order,
+  # and since OTP 26 a small map with atom keys orders them by atom-table index,
+  # i.e. by load order, not by name. The fold is atom-keyed, so a regenerate on
+  # another box (or after a module-load reshuffle) rewrote both mirrors with
+  # identical values in a different key order — a whole-file diff hiding the
+  # real change. Normalising through a JSON round-trip and then emitting every
+  # object with its keys SORTED makes the bytes a function of the values alone.
+  defp encode_fixture(term),
+    do:
+      (term |> Jason.encode!() |> Jason.decode!() |> sorted_keys() |> Jason.encode!(pretty: true)) <>
+        "\n"
+
+  defp sorted_keys(map) when is_map(map),
+    do:
+      map
+      |> Enum.sort_by(&elem(&1, 0))
+      |> Enum.map(fn {k, v} -> {k, sorted_keys(v)} end)
+      |> Jason.OrderedObject.new()
+
+  defp sorted_keys(list) when is_list(list), do: Enum.map(list, &sorted_keys/1)
+  defp sorted_keys(other), do: other
+
   describe "workflow_summary parity fixtures (Mechanism A)" do
     test "the committed api mirror equals a fresh fold" do
       if System.get_env("REGEN_WORKFLOW_SUMMARY") do
-        json = Jason.encode!(fresh_summaries(), pretty: true) <> "\n"
+        json = encode_fixture(fresh_summaries())
         File.write!(@summary_api_path, json)
         File.write!(@summary_go_path, json)
 
-        live_json = Jason.encode!(fresh_building(), pretty: true) <> "\n"
+        live_json = encode_fixture(fresh_building())
         File.write!(@building_api_path, live_json)
         File.write!(@building_go_path, live_json)
       end
 
       assert File.read!(@summary_api_path) |> Jason.decode!() == normalized_fresh(),
              "workflow_summary.json is stale — re-run with REGEN_WORKFLOW_SUMMARY=1."
+    end
+
+    test "the fixture writer is canonical: a regenerate is byte-identical whatever the key order" do
+      # The atom-keyed fold and its string-keyed JSON round-trip carry the SAME
+      # values in DIFFERENT internal map orders — exactly the difference between
+      # two runtimes regenerating the same fixture. The writer must not see it.
+      assert encode_fixture(fresh_summaries()) == encode_fixture(normalized_fresh())
+      assert encode_fixture(fresh_building()) == encode_fixture(normalized_fresh_building())
+
+      # And the COMMITTED bytes are already in that form, so a regenerate on any
+      # box rewrites nothing. The freshness test above decodes to maps and is
+      # blind to key order; this one is not.
+      assert File.read!(@summary_api_path) == encode_fixture(fresh_summaries()),
+             "workflow_summary.json is not in canonical key order — re-run with REGEN_WORKFLOW_SUMMARY=1."
+
+      assert File.read!(@building_api_path) == encode_fixture(fresh_building()),
+             "workflow_building.json is not in canonical key order — re-run with REGEN_WORKFLOW_SUMMARY=1."
     end
 
     test "the api and Go mirrors are byte-identical" do
