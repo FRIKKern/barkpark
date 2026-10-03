@@ -37,14 +37,27 @@ defmodule BarkparkWeb.SearchIntel do
   That is a bearer credential, not an authorization check — never put anything
   behind it that a leaked id must not reach.
   """
+  #
+  # A `public-read` token is NOT an identity (task-e736ea8596e1dede). It is the site
+  # credential shipped in a page's JavaScript to EVERY visitor, so `token:<id>`
+  # with no per-browser header was one bucket shared by the whole audience —
+  # visitor B's search box showed visitor A's queries. With no header it now
+  # files under `"anon"`, the shared bucket that already answers `recent` with
+  # `[]`; with the header it still subdivides into `token:<id>:<client>`.
   def actor_key(conn) do
     case {conn.assigns[:api_token], client_id(conn)} do
-      {%{id: id}, nil} -> "token:" <> id
+      {%{id: id} = token, nil} -> if public_read?(token), do: "anon", else: "token:" <> id
       {%{id: id}, client} -> "token:" <> id <> ":" <> client
       {_, nil} -> "anon"
       {_, client} -> "client:" <> workspace_segment(conn) <> ":" <> client
     end
   end
+
+  # Same predicate as `AnonPerspective`'s public-read check: the tier rides the
+  # token's permissions, and a mixed `["public-read", "read"]` token is still
+  # the browser-shipped site credential.
+  defp public_read?(%{permissions: perms}) when is_list(perms), do: "public-read" in perms
+  defp public_read?(_token), do: false
 
   # The raw per-browser bearer id, capped. `nil` when absent or empty.
   defp client_id(conn) do
