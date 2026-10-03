@@ -140,3 +140,33 @@ func TestTitleCase(t *testing.T) {
 		}
 	}
 }
+
+// TestRunMakeSchemaRichTextIsPortableText pins owner ruling #44: the skeleton's
+// richText placeholder tells the author the stored value is Portable Text
+// blocks, the same value Studio, bp seed and @barkpark/codegen use.
+func TestRunMakeSchemaRichTextIsPortableText(t *testing.T) {
+	var stdout, stderr bytes.Buffer
+	w := newWriter(&stdout, &stderr)
+	w.output = "json"
+
+	if code := runMakeSchema(w, globals{}, []string{"schema", "post"}); code != exitOK {
+		t.Fatalf("runMakeSchema exit = %d, want %d; stderr=%s", code, exitOK, stderr.String())
+	}
+
+	var doc struct {
+		Fields []map[string]any `json:"fields"`
+	}
+	if err := json.Unmarshal(stdout.Bytes(), &doc); err != nil {
+		t.Fatalf("output is not valid JSON: %v", err)
+	}
+	for _, f := range doc.Fields {
+		if f["type"] == "richText" {
+			raw, _ := json.Marshal(f)
+			if !strings.Contains(string(raw), "Portable Text") {
+				t.Fatalf("richText placeholder does not name Portable Text: %s", raw)
+			}
+			return
+		}
+	}
+	t.Fatalf("skeleton has no richText field: %s", stdout.String())
+}

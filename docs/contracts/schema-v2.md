@@ -23,7 +23,7 @@ Members are typed by a single `of` **shape descriptor** (required — a missing 
 
 ### `localizedText` — multi-language string with fallback chain
 
-The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export (Phase 6) and Studio (Phase 5) use the same resolver — single source of truth.
+The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when not declared in the field; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order. ONIX export and Studio use the same resolver.
 
 ## Decisions (locked)
 
@@ -48,7 +48,7 @@ Phase 0 shipped the four v2 types (`parse/2`, `flat?/1`), the recursive validato
 
 ## Stored value shapes
 
-A reference is stored as `{"_ref": id, "_type": "reference"}` (ruling #42) and a slug as `{"_type": "slug", "current": text}` (ruling #43). With flag `canonical_shape_writes` on (default off), Studio writes these, except for plugin-owned types, and rewrites old values on their next save; readers accept both. `mix barkpark.shape.{bare_references,string_slugs}` counts the rest; `--apply` converts.
+References are stored as `{"_ref": id, "_type": "reference"}` (ruling #42), slugs as `{"_type": "slug", "current": text}` (#43), plain `richText` as Portable Text blocks (#44). With flag `canonical_shape_writes` on (default off), Studio writes these, except for plugin-owned types, and converts old values on their next save; readers accept both. `mix barkpark.shape.{bare_references,string_slugs,html_rich_text}` counts the rest; `--apply` converts.
 
 ## `required` lives under `validation`
 

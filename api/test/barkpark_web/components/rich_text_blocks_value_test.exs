@@ -34,14 +34,21 @@ defmodule BarkparkWeb.Components.RichTextBlocksValueTest do
     })
   end
 
-  test "a block-list value renders read-only, with NO form input (a save preserves it)" do
+  # Owner ruling #44: Portable Text is the canonical value, so the editor
+  # opens it as HTML and the save turns the HTML back into blocks.
+  test "a Portable Text value opens in the rich-text editor as HTML" do
     html = render_rt(@blocks)
 
+    assert html =~ "<bp-rich-text-editor"
+    assert html =~ ~s(name="doc[content]")
+    assert html =~ "&lt;p&gt;Hello blocks&lt;/p&gt;"
+    refute html =~ ~s(data-readonly-field="content")
+  end
+
+  test "a list that is not Portable Text still renders read-only" do
+    html = render_rt([%{"type" => "paragraph", "text" => "x"}])
     assert html =~ ~s(data-readonly-field="content")
-    assert html =~ "Hello blocks"
-    assert html =~ "read-only"
-    refute html =~ ~s(name="doc[content]"), "no input may submit a string over the stored blocks"
-    refute html =~ "<bp-rich-text-editor"
+    refute html =~ ~s(name="doc[content]")
   end
 
   test "an HTML string still gets the rich-text editor, unchanged" do

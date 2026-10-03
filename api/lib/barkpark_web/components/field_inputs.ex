@@ -220,6 +220,16 @@ defmodule BarkparkWeb.Components.FieldInputs do
       val when is_binary(val) or is_nil(val) ->
         rich_text_editor(assign(assigns, n: name, v: val))
 
+      # Portable Text (owner ruling #44) edits as HTML in the contenteditable;
+      # the save turns it back into blocks.
+      blocks when name not in ["body", "blocks"] and is_list(blocks) and blocks != [] ->
+        if Barkpark.Content.PortableText.blocks?(blocks),
+          do:
+            rich_text_editor(
+              assign(assigns, n: name, v: Barkpark.Content.PortableText.to_html(blocks))
+            ),
+          else: rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
+
       blocks ->
         rich_text_readonly(assign(assigns, n: name, v: readonly_json(blocks)))
     end

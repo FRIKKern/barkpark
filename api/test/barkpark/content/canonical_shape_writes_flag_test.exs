@@ -12,7 +12,8 @@ defmodule Barkpark.Content.CanonicalShapeWritesFlagTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.{CanonicalShapes, Forms}
-  alias Barkpark.Content.ShapeMigrations.{BareReferences, StringSlugs}
+  alias Barkpark.Content.PortableText
+  alias Barkpark.Content.ShapeMigrations.{BareReferences, HtmlRichText, StringSlugs}
 
   @ds "shape-flag"
   @fields [
@@ -150,6 +151,49 @@ defmodule Barkpark.Content.CanonicalShapeWritesFlagTest do
       form = doc |> Forms.doc_to_form(schema) |> Map.put("title", "After")
       {:ok, saved, _} = Forms.upsert_draft(doc, "flagslug", schema, form, @ds)
       assert saved.content["slug"] == %{"_type" => "slug", "current" => "old-slug"}
+    end
+  end
+
+  describe "plain rich text (owner ruling #44)" do
+    setup do
+      fields = [
+        %{"name" => "title", "type" => "string"},
+        %{"name" => "excerpt", "type" => "richText"}
+      ]
+
+      {:ok, _} =
+        Content.upsert_schema(%{"name" => "flagrich", "title" => "R", "fields" => fields}, @ds)
+
+      {:ok, doc} =
+        Content.create_document(
+          "flagrich",
+          %{"doc_id" => "fr-html", "title" => "T", "content" => %{"excerpt" => "<p>Old</p>"}},
+          @ds
+        )
+
+      %{rich_schema: %{fields: fields}, rich_doc: doc}
+    end
+
+    test "flag off: stored HTML stays HTML on a resave and an edit; apply is refused",
+         %{rich_schema: schema, rich_doc: doc} do
+      flag(false)
+      form = doc |> Forms.doc_to_form(schema) |> Map.put("title", "After")
+      {:ok, saved, _} = Forms.upsert_draft(doc, "flagrich", schema, form, @ds)
+      assert saved.content["excerpt"] == "<p>Old</p>"
+
+      {:ok, edited, _} =
+        Forms.upsert_draft(saved, "flagrich", schema, Map.put(form, "excerpt", "<p>New</p>"), @ds)
+
+      assert edited.content["excerpt"] == "<p>New</p>"
+      assert_raise ArgumentError, fn -> HtmlRichText.run(apply: true) end
+    end
+
+    test "flag on: stored HTML is rewritten as Portable Text blocks",
+         %{rich_schema: schema, rich_doc: doc} do
+      flag(true)
+      form = doc |> Forms.doc_to_form(schema) |> Map.put("title", "After")
+      {:ok, saved, _} = Forms.upsert_draft(doc, "flagrich", schema, form, @ds)
+      assert saved.content["excerpt"] == PortableText.from_html("<p>Old</p>")
     end
   end
 end

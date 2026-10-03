@@ -20,7 +20,7 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels, SlugValue}
+  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels, PortableText, SlugValue}
   alias Barkpark.PortableDoc.{Projection, Synthesis}
 
   # Set on a field of a plugin-owned type: keep the value's stored shape
@@ -58,6 +58,11 @@ defmodule Barkpark.Content.Forms do
             # has no form input, so this map never reaches a form param.
             Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field) ->
               raw
+
+            # A plain richText field stores Portable Text (owner ruling #44);
+            # the Classic contenteditable edits it as HTML.
+            plain_rich_text?(field) and PortableText.blocks?(raw) ->
+              PortableText.to_html(raw)
 
             # An `image` value decoded into a map at the save boundary rides
             # back to the picker as its JSON wire string (Gyldendal parity E1).
@@ -271,6 +276,11 @@ defmodule Barkpark.Content.Forms do
       coerced === stored ->
         stored
 
+      # Plain rich text stored as HTML becomes Portable Text blocks on its
+      # next save, touched or not (owner ruling #44).
+      plain_rich_text?(field) and is_binary(stored) and is_list(coerced) ->
+        coerced
+
       # A reference stored as a bare id is rewritten in the canonical
       # `{_ref}` shape on its next save, touched or not (owner ruling #42).
       field["type"] == "reference" and is_binary(stored) and is_map(coerced) ->
@@ -303,6 +313,12 @@ defmodule Barkpark.Content.Forms do
 
       coerced === coerce_field_value(field, form_image(field, stored)) ->
         stored
+
+      # A plugin-owned type keeps Portable Text blocks blocks when edited
+      # (`@keep_shape`: the posted HTML was not coerced).
+      plain_rich_text?(field) and is_list(stored) and PortableText.blocks?(stored) and
+        is_binary(coerced) and String.trim(coerced) != "" ->
+        PortableText.from_html(coerced)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
         restore_composite(field, coerced, stored)
@@ -352,6 +368,11 @@ defmodule Barkpark.Content.Forms do
   # posts back when the author does not touch it.
   defp form_image(%{"type" => "reference"}, %{"_ref" => ref}) when is_binary(ref), do: ref
   defp form_image(%{"type" => "datetime"}, v) when is_binary(v), do: datetime_form_value(v)
+
+  defp form_image(%{"type" => "richText"} = field, v) when is_list(v) do
+    if plain_rich_text?(field) and PortableText.blocks?(v), do: PortableText.to_html(v), else: v
+  end
+
   defp form_image(%{"type" => "slug"}, %{} = v), do: SlugValue.text(v) || ""
   defp form_image(_field, v) when is_number(v) or is_boolean(v), do: to_string(v)
   defp form_image(_field, nil), do: ""
@@ -578,7 +599,26 @@ defmodule Barkpark.Content.Forms do
     end
   end
 
+  # A plain richText field is stored as Portable Text blocks (owner ruling
+  # #44, task-db56e998e0a5ab3b). The Classic contenteditable posts HTML; this
+  # is where it becomes blocks. A value already in block form passes through.
+  defp coerce_field_value(%{"type" => "richText"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    if plain_rich_text?(field) and String.trim(val) != "",
+      do: PortableText.from_html(val),
+      else: val
+  end
+
   defp coerce_field_value(_field, val), do: val
+
+  # The fields #44 covers: `richText` without the block editor, and not the
+  # PortableDoc body region (`body` / `blocks`), whose stored list is
+  # PortableDoc blocks read by `Projection.read_blocks/1`, not Portable Text.
+  defp plain_rich_text?(%{"type" => "richText", "name" => name} = field)
+       when name not in ["body", "blocks"],
+       do: not Barkpark.PortableDoc.FieldVocabulary.blocks_field?(field)
+
+  defp plain_rich_text?(_), do: false
 
   # `%{"0" => a, "2" => c, "1" => b}` → `[a, b, c]`. Only a map whose EVERY key
   # is a non-negative integer string qualifies; anything else is returned
