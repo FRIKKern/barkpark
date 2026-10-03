@@ -408,10 +408,22 @@ defmodule BarkparkWeb.LiveScope do
   defp write_target_permitted?(ctx, event, params, socket) do
     case write_target(event, params, socket) do
       {:ok, target} ->
-        Enum.any?(ctx.grants, &(Access.validate(&1, :write, target) == :ok))
+        Enum.any?(live_grants(ctx, socket), &(Access.validate(&1, :write, target) == :ok))
 
       :error ->
         false
+    end
+  end
+
+  # The grant set the gate checks: the socket's CURRENT `:caller_context`,
+  # which StudioLive rebuilds from the DB on a revoke or expiry
+  # (`refresh_grant_access`), not the set captured when the gate attached. With
+  # the captured set, a revoked broad write grant kept admitting writes while a
+  # narrower write grant kept the socket write-capable (task-28649621c8cb03ae).
+  defp live_grants(ctx, socket) do
+    case socket.assigns[:caller_context] do
+      %CallerContext{grants: grants} when is_list(grants) -> grants
+      _ -> ctx.grants
     end
   end
 
