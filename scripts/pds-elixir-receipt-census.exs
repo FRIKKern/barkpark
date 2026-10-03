@@ -721,9 +721,21 @@ defmodule PDS.Census do
     # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
     # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
     # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-10-03 at r6a/owner-scope (owner ruling #9, task-84f7e11095ee859c):
+    # read-routed 35 -> 37 and unrouted 15 -> 13. `CallerContext.from_conn/1` now builds a
+    # signed-in user's context with ONE `Tenancy.Auth.membership/3` read (Studio account
+    # sockets act as the user, not anonymous), so two receipts that reached no Repo verb inside
+    # depth 6 now reach that read. The UNROUTED SPLITS block diffed against the run on the
+    # parent tree names them: sheets/web/import_controller.ex:67 and
+    # controllers/search_controller.ex:272 left the unrouted list. `write` (52), `textual`
+    # (115), `ast` (106), `phantom` (9), `consumer` (4) and `emitted` (102) read `==` in the
+    # same run; lens unchanged. DERIVED BY THE INSTRUMENT: the `derived` half of this census's
+    # own D448-DRIFT-REFUSES line on this commit's tree. Engine printed live by that run:
+    # Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
     write: 52,
-    read: 35,
-    unrouted: 15
+    read: 37,
+    unrouted: 13
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
