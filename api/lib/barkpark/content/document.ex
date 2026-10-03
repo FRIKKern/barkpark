@@ -149,6 +149,9 @@ defmodule Barkpark.Content.Document do
     |> validate_length(:type, max: 255)
     |> validate_length(:dataset, max: 255)
     |> validate_length(:title, max: 255)
+    # Per-document size cap (owner ruling #39): every write door goes through
+    # this changeset, so one check bounds the copies history and events keep.
+    |> Barkpark.Content.DocumentSize.validate()
     |> validate_inclusion(:status, @statuses)
     # `scope_source` is a CLOSED vocabulary (task-b389fe352e013dce). The write
     # path only ever produces these five literals, and the column exists to be

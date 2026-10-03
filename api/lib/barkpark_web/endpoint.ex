@@ -23,8 +23,15 @@ defmodule BarkparkWeb.Endpoint do
   # that only holds on websocket is a limiter with a documented bypass.
   # The trust boundary is NOT here — both fields go to
   # `Barkpark.RateLimiter.client_ip/1`, which decides which to believe.
+  #
+  # `max_frame_size` is the websock_adapter default (10 MB), stated here on
+  # purpose (owner ruling #39): it is the LiveView door's half of the
+  # per-document size cap, and leaving it implicit hid the limit from review.
   socket "/live", Phoenix.LiveView.Socket,
-    websocket: [connect_info: [:peer_data, :x_headers, session: @session_options]],
+    websocket: [
+      connect_info: [:peer_data, :x_headers, session: @session_options],
+      max_frame_size: 10_000_000
+    ],
     longpoll: [connect_info: [:peer_data, :x_headers, session: @session_options]]
 
   # Public realtime socket — carries SearchChannel for per-keystroke live search
@@ -202,7 +209,24 @@ defmodule BarkparkWeb.Endpoint do
     do: @ticket_attachment_body_length
 
   defp body_length(%Plug.Conn{path_info: ["v1", "tickets" | _]}), do: @ticket_body_length
+
+  # The document data routes (owner ruling #39). One document is capped by
+  # `Barkpark.Content.DocumentSize` in the changeset; the body cap stops the
+  # server reading and decoding a 100 MB batch first. Three documents at the cap
+  # fit in one request; a bigger batch is split by the caller.
+  defp body_length(%Plug.Conn{path_info: ["v1", "data" | _]}), do: data_body_length()
+
+  defp body_length(%Plug.Conn{path_info: ["w", _ws, "p", _proj, "v1", "data" | _]}),
+    do: data_body_length()
+
   defp body_length(_conn), do: @general_body_length
+
+  defp data_body_length do
+    case Barkpark.Content.DocumentSize.max_bytes() do
+      nil -> @general_body_length
+      cap -> min(cap * 3, @general_body_length)
+    end
+  end
 
   defp parse_body(conn, _opts) do
     try do

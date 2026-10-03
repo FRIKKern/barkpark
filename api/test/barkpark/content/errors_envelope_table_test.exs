@@ -105,6 +105,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"searchable_text_too_large/unlocated",
        {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
        [:details]},
+      # Owner ruling #39: one document over the per-document size cap.
+      {"document_too_large", {:error, {:document_too_large, 10_000_000, 10_000_001}},
+       "document_too_large", 413, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
