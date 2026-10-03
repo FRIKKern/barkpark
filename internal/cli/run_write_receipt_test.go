@@ -158,7 +158,14 @@ var honestWriteReceipts = []struct {
 	{"workspace_deleted", `{"workspace":{"slug":"w1"},"deleted":true}`, "minimal", "workspace: w1\n", 200},
 	{"workspace_deleted", `{"workspace":{"slug":"w1"},"deleted":true}`, "json", "{\"deleted\":true,\"workspace\":{\"slug\":\"w1\"}}\n", 200},
 
-	{"mutate_transaction", `{"result":{"transactionId":"tx1","results":[{"id":"d1","operation":"update"}]}}`, "minimal", "rev: tx1\n", 200},
+	// task-5b487af45acda805: this row USED to pin "rev: tx1", which is the
+	// transaction id wearing the revision's label. A body with no document rev
+	// now prints the transaction under its own name.
+	{"mutate_transaction", `{"result":{"transactionId":"tx1","results":[{"id":"d1","operation":"update"}]}}`, "minimal", "transaction: tx1\n", 200},
+	// The single-document write a user actually runs: the receipt's rev is the
+	// DOCUMENT's _rev (what `bp doc get` shows next), never the transaction id.
+	{"mutate_doc_rev", `{"result":{"transactionId":"tx1","results":[{"id":"drafts.d1","operation":"create","document":{"_id":"drafts.d1","_rev":"docrev9"}}]}}`, "minimal", "rev: docrev9\n", 200},
+	{"mutate_doc_rev", `{"result":{"transactionId":"tx1","results":[{"id":"drafts.d1","operation":"create","document":{"_id":"drafts.d1","_rev":"docrev9"}}]}}`, "json", "{\"results\":[{\"document\":{\"_id\":\"drafts.d1\",\"_rev\":\"docrev9\"},\"id\":\"drafts.d1\",\"operation\":\"create\"}],\"transactionId\":\"tx1\"}\n", 200},
 	{"mutate_transaction", `{"result":{"transactionId":"tx1","results":[{"id":"d1","operation":"update"}]}}`, "json", "{\"results\":[{\"id\":\"d1\",\"operation\":\"update\"}],\"transactionId\":\"tx1\"}\n", 200},
 
 	{"no_ready", `{"ok":false,"reason":"no_ready"}`, "minimal", "no_ready\n", 200},

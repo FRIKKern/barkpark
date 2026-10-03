@@ -3655,6 +3655,8 @@ func renderMinimal(out *writer, payload []byte) {
 			out.outf("%s", line)
 			if rev := findRev(v); rev != "" {
 				out.outf("rev: %s", rev)
+			} else if tx := findTransaction(v); tx != "" {
+				out.outf("transaction: %s", tx)
 			}
 			return
 		}
@@ -3681,8 +3683,11 @@ func renderMinimal(out *writer, payload []byte) {
 	// could learn (stranger walk, 2026-09-30).
 	oneTimeSecret := wrappedOneTimeSecret(v)
 	rev := findRev(v)
+	tx := ""
 	if rev != "" {
 		out.outf("rev: %s", rev)
+	} else if tx = findTransaction(v); tx != "" {
+		out.outf("transaction: %s", tx)
 	}
 	// A write that answers with a top-level `slug` and no id is addressed BY that
 	// slug — the paper-ingest receipt ({"ok":true,"slug":…,"rev":…}) is the
@@ -3704,7 +3709,7 @@ func renderMinimal(out *writer, payload []byte) {
 	if oneTimeSecret != "" {
 		out.outf("secret: %s", oneTimeSecret)
 	}
-	if rev == "" && len(ids) == 0 && !slugPrinted && oneTimeSecret == "" {
+	if rev == "" && tx == "" && len(ids) == 0 && !slugPrinted && oneTimeSecret == "" {
 		out.outf("ok")
 	}
 }
@@ -3907,15 +3912,43 @@ func scalarString(vals ...any) string {
 	return ""
 }
 
+// findRev returns a DOCUMENT revision a write receipt carries, and "" when it
+// carries none. It used to fall through to `transactionId`, so every document
+// write printed the mutate TRANSACTION id under `rev:` (task-5b487af45acda805).
+// _rev is the optimistic-concurrency token, so a user who copied that "rev"
+// into a conditional write got a 412 for a value that names no revision.
+//
+// Order: a top-level _rev/rev (the publish and paper receipts), then the one
+// result of a single-document mutate ({"results":[{"document":{"_rev":…}}]}).
+// A multi-result batch has no single rev, so it returns "".
 func findRev(v any) string {
-	switch t := v.(type) {
-	case map[string]any:
-		for _, k := range []string{"_rev", "rev", "transactionId", "results"} {
-			if val, ok := t[k]; ok {
-				if s, ok := val.(string); ok {
+	t, ok := v.(map[string]any)
+	if !ok {
+		return ""
+	}
+	for _, k := range []string{"_rev", "rev"} {
+		if s, ok := t[k].(string); ok && s != "" {
+			return s
+		}
+	}
+	if results, ok := t["results"].([]any); ok && len(results) == 1 {
+		if r, ok := results[0].(map[string]any); ok {
+			if doc, ok := r["document"].(map[string]any); ok {
+				if s, ok := doc["_rev"].(string); ok && s != "" {
 					return s
 				}
 			}
+		}
+	}
+	return ""
+}
+
+// findTransaction returns a mutate receipt's transaction id. It prints under
+// its own label, `transaction:`, and never as a revision.
+func findTransaction(v any) string {
+	if t, ok := v.(map[string]any); ok {
+		if s, ok := t["transactionId"].(string); ok {
+			return s
 		}
 	}
 	return ""
