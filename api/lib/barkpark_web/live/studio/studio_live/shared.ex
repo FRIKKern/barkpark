@@ -659,7 +659,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
   @doc false
   def hook_opts(socket) do
-    [source: :studio, user_id: socket.assigns[:user_id]] ++ ScopeHelpers.scope_opts(socket)
+    [source: :studio, user_id: actor_user_id(socket)] ++ ScopeHelpers.scope_opts(socket)
+  end
+
+  @doc """
+  The user a Studio write is credited to (owner ruling #51, RQ8,
+  task-6132833921b7dc36): the SIGNED-IN account, never `assigns.user_id`.
+
+  `assigns.user_id` comes from the browser's connect params (localStorage) and
+  exists for presence colour and cursor identity. It used to flow into
+  `hook_opts` and from there into `revisions.actor_user_id` and the audit
+  actor, so any browser could credit its edits to any id it chose. A
+  token-authenticated Studio has no account; it gets `nil` here, and the
+  revision still records the token through the caller context.
+  """
+  def actor_user_id(socket) do
+    case socket.assigns[:current_user] do
+      %{id: id} when not is_nil(id) -> to_string(id)
+      _ -> nil
+    end
   end
 
   @doc false
