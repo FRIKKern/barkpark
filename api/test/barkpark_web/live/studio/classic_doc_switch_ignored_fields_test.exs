@@ -113,4 +113,33 @@ defmodule BarkparkWeb.Studio.ClassicDocSwitchIgnoredFieldsTest do
 
     assert wrapper_ids.(render(view)) == before
   end
+
+  # task-c7b0565a482b9d21 — the same document open in two tabs. Tab B saves a
+  # new body and author; tab A has no unsaved edits, so its form is refreshed
+  # in place. Before the fix its ignored widgets kept the OLD values, and tab
+  # A's next keystroke autosaved them over tab B's edit.
+  test "an idle tab shows the body and author another tab just saved", %{conn: conn} do
+    path = scoped_studio("/d/#{@dataset}/studio/note/n1")
+    {:ok, tab_a, _} = live(conn, path)
+    {:ok, tab_b, html_b} = live(conn, path)
+
+    wrapper_ids = fn html ->
+      Regex.scan(~r{id="(bp-(?:rt|ref|mp)-wrap-[^"]+)"}, html, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.sort()
+    end
+
+    render_change(tab_b, "autosave", %{
+      "doc" => %{"title" => "Note n1", "body" => "<p>tab B body</p>", "author" => "grace"}
+    })
+
+    # The saving tab never remounts its own widgets.
+    assert wrapper_ids.(render(tab_b)) == wrapper_ids.(html_b)
+
+    html_a = render(tab_a)
+    assert hidden_value(html_a, "bp-rt-hidden-body") =~ "tab B body"
+    assert hidden_value(html_a, "bp-ref-hidden-author") == "grace"
+    # The image was not touched; it stays as it was.
+    assert hidden_value(html_a, "bp-mp-hidden-cover") =~ "one.png"
+  end
 end

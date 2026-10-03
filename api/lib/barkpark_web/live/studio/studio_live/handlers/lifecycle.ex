@@ -83,9 +83,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         schema = socket.assigns[:editor_schema]
         updated_form = Content.doc_to_form(doc_data, schema)
 
+        # [server-replaced-widget-values] (Shared): the rich text / reference /
+        # image widgets ignore re-renders, so a changed value must remount them.
+        changed? =
+          Shared.widget_values_changed?(schema, socket.assigns[:editor_form], updated_form)
+
         {:noreply,
          assign(socket,
            editor_form: updated_form,
+           editor_form_gen: Shared.next_form_gen(socket, changed?),
            doc_conflict: false,
            save_status: "Updated by another user"
          )}

@@ -62,6 +62,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # navigation remounts it instead of transplanting the `phx-update="ignore"`
   # wrapper across documents (paper_canvas.ex bug #1c).
   attr :doc_key, :string, default: "doc"
+  # Moves when the server replaced a rich text / reference / image value of the
+  # open document (Shared.next_form_gen/2) — part of doc_wrap_id/4.
+  attr :form_gen, :integer, default: 0
   attr :doc_type, :string, default: "document"
   attr :document_rev, :string, default: nil
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
@@ -312,7 +315,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <div id={doc_wrap_id("bp-mp-ref-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-mp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
@@ -344,7 +347,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
 
     ~H"""
-    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
@@ -376,7 +379,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       )
 
     ~H"""
-    <div id={doc_wrap_id("bp-mp-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-mp-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
@@ -548,7 +551,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp rich_text_editor(assigns) do
     ~H"""
-    <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
     </div>
@@ -564,9 +567,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # (task-eda246dcab63dc3f). Keying by the document makes a switch remount the
   # wrapper. The key is the PUBLISHED id: the first keystroke on a published
   # document turns `p1` into `drafts.p1`, and remounting then would drop the
-  # caret mid-word.
-  defp doc_wrap_id(prefix, name, doc_key) do
-    "#{prefix}-#{name}-#{Barkpark.Content.DraftId.published_id(to_string(doc_key))}"
+  # caret mid-word. `form_gen` adds the same remount for a value the SERVER
+  # replaced in the open document — another tab's save, Reload, a revision
+  # restore (task-c7b0565a482b9d21); it is 0, and left out of the id, until then.
+  defp doc_wrap_id(prefix, name, doc_key, form_gen) do
+    key = "#{prefix}-#{name}-#{Barkpark.Content.DraftId.published_id(to_string(doc_key))}"
+    if is_integer(form_gen) and form_gen > 0, do: "#{key}-g#{form_gen}", else: key
   end
 
   defp rich_text_readonly(assigns) do
