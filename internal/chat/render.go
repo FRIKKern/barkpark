@@ -1000,6 +1000,9 @@ func (m Model) workflowPanelLines() []string {
 			// phase-only panel is byte-identical to before this level existed.
 			if m.wfAgentDetail {
 				lines = append(lines, renderWorkflowAgentDetail(m.width, j, m.now(), m.wfPhase, m.wfAgent, stallOK, m.agentTaskJoin)...)
+				// The managed-Codex session row (wsc-steer-open-session-managed):
+				// painted only when the server named a session for this agent's task.
+				lines = append(lines, m.agentSessionLines()...)
 			}
 		}
 		// D43: the terminal result box — the panel bottom once the rail entry has
@@ -2412,6 +2415,9 @@ func (m Model) chatFooter() string {
 			// collapses; it never interrupts from inside the panel)
 			if m.wfAgentDetail {
 				hints = "↑/↓ agent · esc/← back · ctrl+c quit"
+				if _, ok := m.selectedManagedSession(); ok {
+					hints = "↑/↓ agent · enter open session · esc/← back · ctrl+c quit"
+				}
 			} else if m.wfExpanded {
 				hints = "↑/↓ select phase · enter agent · esc back · ctrl+c quit"
 			} else {

@@ -2463,6 +2463,11 @@ defmodule BarkparkWeb.Router do
     # before the dynamic /sessions/:id routes.
     get("/rollup", ChatController, :rollup)
 
+    # The managed-Codex session behind a task (wsc-steer-open-session-managed):
+    # the TUI's agent detail asks before it offers "open session". STATIC, with
+    # /events and /rollup ahead of the dynamic /sessions/:id routes.
+    get("/managed-session", ChatController, :managed_session)
+
     get("/sessions", ChatController, :index)
     post("/sessions", ChatController, :create)
     get("/sessions/:id", ChatController, :show)

@@ -102,6 +102,11 @@ type Transport interface {
 	// task-wire projection, not a second one grown inside chat. Called at most
 	// once per process, lazily, when the agent-detail level first opens.
 	JoinTasks() ([]taskboard.Task, error)
+	// ManagedSession asks for the managed-Codex session behind a joined task
+	// (wsc-steer-open-session-managed). ok is false for every miss — a
+	// Claude-lane task, a stale or ambiguous attempt, a session outside the
+	// token's scope — and the agent detail then offers no session action.
+	ManagedSession(taskID string) (sessionID string, ok bool, err error)
 }
 
 // clientTransport implements Transport over the shared internal/apiclient chat
@@ -292,6 +297,12 @@ func stringField(fields map[string]any, key string) (*string, bool) {
 // JoinTasks fetches the join's candidate rows through the shared taskboard
 // snapshot decoder. Errors pass through untouched: the shell degrades them to
 // "no task line" rather than painting client chrome into an agent's detail.
+// ManagedSession is a thin wrap over apiclient.ManagedChatSession (GET
+// /v1/chat/managed-session); its 404 is ("", false, nil), never an error.
+func (t clientTransport) ManagedSession(taskID string) (string, bool, error) {
+	return t.c.ManagedChatSession(taskID)
+}
+
 func (t clientTransport) JoinTasks() ([]taskboard.Task, error) {
 	snap, err := taskboard.FetchSnapshot(t.c)
 	if err != nil {

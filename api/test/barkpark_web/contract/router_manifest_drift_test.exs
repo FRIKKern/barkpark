@@ -100,6 +100,13 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # state WHY — "no verb yet" is not a reason, it is the defect this guard
   # exists to find, and such a route belongs in @filed_gaps instead.
   @not_a_cli_surface %{
+    # ── The chat shell's open-session probe (wsc-steer-open-session-managed) ──
+    # The TUI's agent detail asks this, for the task its agent↔task join already
+    # resolved, before it offers "open session"; the answer is a session id the
+    # shell then opens itself. It has no meaning outside that pane, so it is a
+    # lookup inside the chat shell, not a `bp` verb.
+    {"GET", "/v1/chat/managed-session"} =>
+      "chat shell's open-session probe for a joined task — the TUI asks it, not a CLI verb",
     # ── Managed write admission (Barkdown C083) ────────────────────────────
     # The trusted hold endpoint is consumed by Barkdown's migration runner over
     # HTTP while it owns the profile's runtime lease; the capability it returns
