@@ -394,6 +394,10 @@ config :barkpark, Oban,
        # Window: `:paper_access_log_ttl_days` below. Core (not a plugin), so it
        # lives in this static crontab and rides the `default` queue.
        {"15 4 * * *", Barkpark.Content.Workers.PaperAccessSweeper},
+       # Owner ruling #33 — redacts copies of DELETED content older than the
+       # window in mutation_events.document / webhook_deliveries.payload_snapshot.
+       # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
+       {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -497,6 +501,16 @@ config :barkpark, :task_lease_ttl_seconds, 2700
 # the job args rather than overriding this. Runtime override:
 # BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS (see runtime.exs).
 config :barkpark, :paper_access_log_ttl_days, 90
+
+# Owner ruling #33 (2026-10-03) — retention for copies of DELETED content in
+# `mutation_events.document` and media `webhook_deliveries.payload_snapshot`:
+# payloads older than `days` whose document (or media file) is gone are
+# redacted to a stub; rows are kept. SHIPS DISABLED — an operator turns it on
+# with BARKPARK_DELETED_PAYLOAD_RETENTION=on (window:
+# BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS, see runtime.exs) after reading the
+# `mix barkpark.deleted_payload_retention` census. Policy:
+# Barkpark.Content.DeletedPayloadRetention.
+config :barkpark, :deleted_payload_retention, enabled: false, days: 90
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`
