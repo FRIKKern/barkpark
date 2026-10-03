@@ -102,4 +102,8 @@ type Result struct {
 	Profile   string   `json:"profile,omitempty"`
 	StudioURL string   `json:"studio_url,omitempty"`
 	Next      []string `json:"next,omitempty"`
+
+	// Warnings are things the caller must know that do not fail the run, e.g.
+	// a .barkpark.json that shadows the default just saved (additive).
+	Warnings []string `json:"warnings,omitempty"`
 }

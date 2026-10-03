@@ -96,6 +96,16 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		return fmt.Errorf("connect: persist config: %w", err)
 	}
 
+	// A repo file pinning another server OUTRANKS the default just saved for
+	// every command run under it (task-43b7ec75e293c155): say so instead of
+	// "bp now defaults here", which would be false in this directory.
+	defaultsLine := "bp now defaults here"
+	var warnings []string
+	if opts.RepoPin.shadows(server, saved.Name) {
+		defaultsLine = "saved as your default server"
+		warnings = append(warnings, repoPinWarning(opts.RepoPin))
+	}
+
 	// Record the structured outcome for a JSON caller (no-op on the human path).
 	opts.setResult(Result{
 		OK:         true,
@@ -103,7 +113,8 @@ func executeConnect(plan SetupPlan, opts Options) error {
 		Server:     server,
 		Tier:       tier,
 		ConfigPath: configHint(),
-		Message:    "connected to " + server + " as " + tier + "; bp now defaults here",
+		Message:    "connected to " + server + " as " + tier + "; " + defaultsLine,
+		Warnings:   warnings,
 		Profile:    plan.Profile,
 		StudioURL:  server + "/studio",
 		Next:       nextSteps(plan.Profile, tier),
@@ -117,7 +128,10 @@ func executeConnect(plan SetupPlan, opts Options) error {
 	if name == "" {
 		name = "barkpark"
 	}
-	fmt.Fprintf(w, "✓ connected to %s as %s; bp now defaults here\n", server, tier)
+	fmt.Fprintf(w, "✓ connected to %s as %s; %s\n", server, tier, defaultsLine)
+	for _, warn := range warnings {
+		fmt.Fprintf(w, "  ! %s\n", warn)
+	}
 	fmt.Fprintf(w, "  server: %s", name)
 	if srvVersion != "" {
 		fmt.Fprintf(w, " (%s)", srvVersion)
@@ -311,4 +325,12 @@ func redactToken(t string) string {
 
 func configHint() string {
 	return "${XDG_CONFIG_HOME:-~/.config}/barkpark/config.json"
+}
+
+// repoPinWarning names the repo file that shadows the saved default, the
+// server it pins, and the three ways out.
+func repoPinWarning(p *RepoPin) string {
+	return fmt.Sprintf("BUT %s pins server %q, and a repo file outranks the saved default: "+
+		"every bp command run under that directory still talks to %s. "+
+		"Run bp outside that tree, pass -s <name> per command, or edit that file.", p.Path, p.Server, p.Server)
 }
