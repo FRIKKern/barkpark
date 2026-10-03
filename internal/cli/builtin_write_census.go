@@ -242,7 +242,7 @@ var builtinWriteCensus = []builtinWriteReceipt{
 	// ---- token mint ------------------------------------------------------
 	{
 		File: "internal/cli/token_create_cmd.go", Func: "runTokenCreate", Sites: 1,
-		Endpoint: "POST /w/:ws/p/:project/v1/tokens", Class: machineRendered,
+		Endpoint: "POST /w/:ws/p/:project/v1/tokens (or /v1/tokens/elevated for write/admin)", Class: machineRendered,
 		Disposition: dispScreened,
 		Why: "the 2xx runs through screenBuiltinWriteReceipt BEFORE any receipt renders, and the render then " +
 			"REQUIRES three server-only fields (parseTokenMintReceipt: a non-empty `token`, a non-empty " +

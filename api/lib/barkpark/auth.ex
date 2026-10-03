@@ -1083,6 +1083,114 @@ defmodule Barkpark.Auth do
     end)
   end
 
+  # ── Admin-to-admin mint (task-7d4d405e0ee4bcbf) ─────────────────────────────
+
+  # The permissions an admin may hand on. `ops`, `chat` and the share/public
+  # shapes have their own mints and are not delegated here.
+  @delegable_permissions ~w(read write admin)
+
+  @doc false
+  def delegable_permissions, do: @delegable_permissions
+
+  @doc """
+  Mint a workspace-bound token for `workspace_id` on behalf of `actor`, an api
+  token that ALREADY holds the flat `"admin"` permission AND is a workspace
+  admin (`Tenancy.Auth.workspace_admin?/2`) there. This is the CLI path that
+  restores an admin credential without SSH.
+
+  It does not conflict with the 2026-09-02 cap on the PAT self-mint
+  (`@pat_allowed_elevated_permissions`): that cap stops a WORKSPACE ROLE from
+  turning into the instance-wide `admin` bit. Here the actor already holds
+  that bit, and the minted set is capped at the actor's own permissions
+  (literal membership, the same rule `rotate_token/3`'s ceiling uses), so
+  nothing is escalated.
+
+  The token goes through `create_token/6`, which writes the
+  `workspace_memberships` row in the same transaction (role from
+  `role_for_permissions/1`, so an `admin` token is seated as `admin`). A
+  `token_minted` audit row commits with it — ids, label and permissions,
+  never the secret.
+
+  `opts`: `:label` (required), `:permissions` (required, a non-empty subset of
+  `#{inspect(@delegable_permissions)}`), `:dataset` (default `"production"`),
+  `:expires_at` (`nil` → the class default, a `DateTime`, or `:no_expiry`).
+
+  Errors: `:admin_required` (no flat admin), `:not_workspace_admin`,
+  `{:invalid_permissions, bad}`, `{:escalation, perms}` (requested permissions
+  the actor lacks), `:missing_label`, the `TokenExpiry` reasons, or a changeset.
+  """
+  @spec mint_delegated_token(ApiToken.t(), binary(), keyword()) ::
+          {:ok, {binary(), ApiToken.t()}} | {:error, term()}
+  def mint_delegated_token(%ApiToken{} = actor, workspace_id, opts)
+      when is_binary(workspace_id) do
+    label = opts |> Keyword.get(:label) |> to_string() |> String.trim()
+    perms = opts |> Keyword.get(:permissions, []) |> Enum.uniq()
+    dataset = Keyword.get(opts, :dataset, "production")
+
+    with :ok <- if(has_permission?(actor, "admin"), do: :ok, else: {:error, :admin_required}),
+         :ok <- delegate_workspace_admin(actor, workspace_id),
+         :ok <- delegable(perms),
+         :ok <- within_actor(perms, actor),
+         :ok <- if(label == "", do: {:error, :missing_label}, else: :ok) do
+      raw = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+
+      mint_opts = [expires_at: Keyword.get(opts, :expires_at), actor: actor]
+
+      Repo.transaction(fn ->
+        with {:ok, token} <- create_token(raw, label, dataset, perms, workspace_id, mint_opts),
+             {:ok, _event} <- audit_delegated_mint(token, actor) do
+          token
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
+      |> case do
+        {:ok, token} -> {:ok, {raw, token}}
+        {:error, reason} -> {:error, reason}
+      end
+    end
+  end
+
+  def mint_delegated_token(_actor, _workspace_id, _opts), do: {:error, :admin_required}
+
+  defp delegate_workspace_admin(actor, workspace_id) do
+    if TenancyAuth.workspace_admin?(actor, workspace_id),
+      do: :ok,
+      else: {:error, :not_workspace_admin}
+  end
+
+  defp delegable([]), do: {:error, {:invalid_permissions, []}}
+
+  defp delegable(perms) do
+    case Enum.reject(perms, &(is_binary(&1) and &1 in @delegable_permissions)) do
+      [] -> :ok
+      bad -> {:error, {:invalid_permissions, bad}}
+    end
+  end
+
+  defp within_actor(perms, %ApiToken{} = actor) do
+    case Enum.reject(perms, &has_permission?(actor, &1)) do
+      [] -> :ok
+      missing -> {:error, {:escalation, missing}}
+    end
+  end
+
+  defp audit_delegated_mint(%ApiToken{} = token, %ApiToken{} = actor) do
+    Audit.emit(%{
+      category: "token",
+      action: "token_minted",
+      subject: token.id,
+      actor_type: "api_token",
+      actor_id: actor.id,
+      workspace_id: token.workspace_id,
+      metadata: %{
+        "label" => token.label,
+        "permissions" => token.permissions,
+        "expires_at" => token.expires_at && DateTime.to_iso8601(token.expires_at)
+      }
+    })
+  end
+
   # ── Connectors: the per-install chat token (D36/D48) ───────────────────────
 
   # THE ONLY PLACE the connector chat permission set is written. HARDCODED, in

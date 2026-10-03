@@ -2,11 +2,10 @@
 # Auth & roles
 
 Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
-(SHA256 hash + permission list); LiveViews read `session["api_token"]` via
-`LiveAuth` `on_mount` hooks.
+(SHA256 hash + permission list); LiveViews read `session["api_token"]` via `LiveAuth` `on_mount` hooks.
 
-> Accounts, sessions, MFA, login tickets, field encryption/visibility and row
-> ownership: the **core-auth model** — [auth-user-sessions.md](auth-user-sessions.md).
+> Accounts, sessions, MFA, login tickets, field visibility, row ownership:
+> [auth-user-sessions.md](auth-user-sessions.md).
 
 ## Tenancy — token ↔ workspace
 
@@ -29,8 +28,8 @@ lacking `write` gets `403`; reads stay available.
 
 | Permission | Grants | Surfaces |
 |---|---|---|
-| `read` | Reads on private datasets / schemas | `…/v1/data/query/*` (flat alias `/v1/data/query/*`), `/media` |
-| `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` (flat alias under `/v1`) |
+| `read` | Reads on private datasets / schemas | `…/v1/data/query/*` `/media` |
+| `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
 | `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
 | `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
@@ -45,7 +44,7 @@ Orthogonal axes: `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
 `ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
 encrypted `client_secret`) and confers **no membership anywhere**.
 
-Three tiers, never interchangeable — conflate two and you write the bug.
+Three tiers:
 `RequireAdmin`: `permissions` ONLY, no membership. `Tenancy.Auth.authorize/3`:
 member? AND the token's GLOBAL `permissions`. `workspace_admin?/2`: the
 membership ROLE alone.
@@ -56,9 +55,9 @@ unify (`StudioLiveSharesTest` pins it).
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
-*Default*, so every tenant's admin converges there and answers `200` against
-the wrong tenant. Right check, wrong INPUT; the mirror (gate on membership, act
-instance-wide) is the same defect. A flat admin route pins the
+*Default*, so every tenant's admin lands there: a `200` against the wrong
+tenant. The mirror (gate on membership, act instance-wide) is the
+same defect. A flat admin route pins the
 GLOBAL tier explicitly (`SecretController.resolve_scope/1` → `:global`, never
 the assign); acting per-workspace needs a slug-resolving route proving
 `workspace_admin?/2`.
@@ -70,6 +69,12 @@ tenant-less-session bug (`ChatTokenController`).
 **Tier 0 — instance operator** (`RequirePlatformOperator`): an env allowlist
 over the seven instance-global route groups; `admin` NECESSARY, allowlist
 INSUFFICIENT. See [instance-operator-tier.md](contracts/instance-operator-tier.md).
+
+## Minting `write`/`admin`
+
+Only `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`) mints them:
+caller has flat `admin` AND an admin seat, gets at most its own set; seated,
+audited `token_minted`. `bp token create --label X --permissions read,write,admin`.
 
 ## LiveView `on_mount` hooks
 
@@ -89,14 +94,13 @@ on `[:api, :require_admin]` (instance-global only).
 
 Mount every **flat** (`/v1/…`) admin route on `:flat_admin_api`, which
 *replaces* `:api` — `[:api, :require_admin]` is where the convergence above
-bites. **Order is the fix; the wrong order fails silently:**
-`DeriveWorkspaceFromToken` is no-op-if-set, so putting it *after*
-`AssignDefaultScope` is a pure no-op. `FlatAdminTenancyTest` reds on a swap.
+bites. `DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
+`AssignDefaultScope` silently does nothing; `FlatAdminTenancyTest` reds on a swap.
 
 ## Dev token
 
 `barkpark-dev-token` (seeded by the `demo` profile; `clean` mints none) carries
-`["read","write","admin"]` AND a `Default` `workspace_memberships` row — both
-axes — so it passes every gate here.
+`["read","write","admin"]` AND a `Default` `workspace_memberships` row, so it
+passes every gate here.
 **MUST rotate before prod** — starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.
