@@ -24,6 +24,7 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
+  CANVAS_SERVER_INSERT_TYPES,
   compoundInsertBlock,
   compoundKindToNode,
 } from "../canvas/slash-insert.js";
@@ -288,6 +289,19 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   assert.equal(CANVAS_SLASH_TYPES.size, 34, "exactly 34 insertable types (+ note, + stage, + card, + checklist, + quote, + image, + toggle, + steps, + tabs, + equation, + footnotes, + contents, + video, + sheet)");
   // A sheet inserts as an empty reference; its atom mounts the reference picker.
   assert.deepEqual(canvasDefaultBlock("sheet"), { id: null, type: "sheet", ref: "" });
+  // Of the 34, Terminal and Stage are built by the SERVER (owner ruling 2026-10-03 #56,
+  // task-f3c8acd1e09a0eda): the canvas fence refuses a canvas batch that introduces
+  // one, so a pick routes to `paper-slash-insert` like "+ Add block". The other 32 are
+  // inserted as canvas nodes. Both groups stay in the menu and the palette.
+  assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["stage", "terminal"]);
+  for (const t of CANVAS_SERVER_INSERT_TYPES) {
+    assert.ok(CANVAS_SLASH_TYPES.has(t), `${t} is still offered`);
+  }
+  assert.equal(
+    [...CANVAS_SLASH_TYPES].filter((t) => !CANVAS_SERVER_INSERT_TYPES.has(t)).length,
+    32,
+    "32 types insert as canvas nodes; 2 are inserted by the server",
+  );
 });
 
 // (d) THE CALLOUT SHORTHAND — `> [!warn]- ` replaces the para with a bpCallout node
@@ -431,6 +445,20 @@ check("P5 palette: one Insert command per CANVAS_SLASH_TYPES entry", () => {
     CANVAS_SLASH_TYPES.size,
     "exactly one Insert command per insertable type (no extras)",
   );
+});
+
+check("P5 palette: Insert Terminal / Insert Stage route to the server insert", () => {
+  const picked = [];
+  const registry = buildCommandRegistry(undefined, { onServerInsert: (type) => picked.push(type) });
+  for (const type of CANVAS_SERVER_INSERT_TYPES) {
+    const cmd = registry.find((c) => c.id === `insert-${type}`);
+    assert.ok(cmd, `Insert command for ${type} present`);
+    cmd.run(null);
+  }
+  assert.deepEqual(picked.sort(), ["stage", "terminal"], "both hand the type to the host");
+  const heading = registry.find((c) => c.id === "insert-heading");
+  heading.run(null);
+  assert.deepEqual(picked.sort(), ["stage", "terminal"], "a canvas-node type does not");
 });
 
 check("P5 palette: Format + Turn-into commands present (canvas StarterKit set)", () => {

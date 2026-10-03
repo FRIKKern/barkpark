@@ -254,6 +254,7 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
+  CANVAS_SERVER_INSERT_TYPES,
   masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
@@ -2920,6 +2921,12 @@ class BpPaperCanvas extends HTMLElement {
       insertSectionPresetAtSelection(this._editor, item.preset);
       return;
     }
+    // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
+    // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
+    if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
+      this._insertViaServer(item.type, { replaceSlashLine: true });
+      return;
+    }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
       // Non-insertable (e.g. an EXPECTED field-image/field-reference): leave the
       // "/query" text in place and refocus, exactly like a dismiss.
@@ -3010,6 +3017,47 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // Terminal / Stage (CANVAS_SERVER_INSERT_TYPES, owner ruling 2026-10-03 #56): ask
+  // the host to insert the block through the server (`paper-slash-insert`, the same
+  // default_block/2 + insert-after "+ Add block" uses) instead of inserting a node the
+  // server's canvas fence refuses. The anchor is a block the server already holds
+  // (masterInsertAnchor). A slash pick removes its "/query" line first and flushes
+  // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
+  // caret's block and anchors on it when it is confirmed. The editor is blurred so
+  // the server echo carrying the new block renders at once.
+  _insertViaServer(type, { replaceSlashLine = false } = {}) {
+    const editor = this._editor;
+    if (!editor || !this._editable || !CANVAS_SERVER_INSERT_TYPES.has(type)) return false;
+    const index = topLevelIndexAtSelection(editor);
+    const liveIds = [];
+    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
+    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
+    // A palette pick may anchor ON the caret's block (search from index + 1 down);
+    // a slash pick never anchors on the line it removes.
+    const afterId = masterInsertAnchor(liveIds, replaceSlashLine ? index : index + 1, confirmed);
+
+    if (replaceSlashLine) {
+      const { state } = editor;
+      let offset = 0;
+      for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
+      const slashNode = state.doc.child(index);
+      let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
+      if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
+      editor.view.dispatch(tr);
+    }
+    this.flushPendingChanges();
+    editor.commands.blur();
+
+    this.dispatchEvent(
+      new CustomEvent("bp-server-insert", {
+        detail: { type, after_id: afterId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
+  }
+
   // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
   // may want to keep typing a real slash. Mirrors ../index.js:_dismissSlash.
   _dismissSlash() {
@@ -3030,7 +3078,11 @@ class BpPaperCanvas extends HTMLElement {
     // The View-group "Toggle Markdown source" command calls back into the WC's
     // toggle (the canvas owns the rich⇄source swap, not the editor) — the SAME method
     // Mod-Shift-m calls, so both triggers are identical.
-    const registryOpts = { onToggleSource: () => this.toggleSourceMode() };
+    const registryOpts = {
+      onToggleSource: () => this.toggleSourceMode(),
+      // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
+      onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
+    };
     if (!this._palette) {
       this._palette = new CommandPalette({
         commands: buildCommandRegistry(this._editor, registryOpts),
