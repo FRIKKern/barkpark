@@ -64,7 +64,7 @@ defmodule Barkpark.PluginFreeBootTest do
   # explicitly, never drift in silently (Q6 locked).
   #
   # The three demo seeds NOT here — `siteSettings`, `navigation`, `colors` —
-  # are `visibility: "private"` (seeds/demo.ex:185/212/226) and are withheld
+  # are `visibility: "private"` (their specs in `Barkpark.Seeds.Demo.seed/1`) and are withheld
   # from the anonymous `/api/schemas` index by the `Schema.public_schema?/1`
   # filter in `LegacyController.schemas/2` (api-read-path-security-sweep w2).
   # A private seed appearing here again means that filter regressed.
