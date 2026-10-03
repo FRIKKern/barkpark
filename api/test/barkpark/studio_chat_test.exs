@@ -3973,4 +3973,153 @@ defmodule Barkpark.StudioChatTest do
       rev: Ecto.UUID.generate()
     })
   end
+
+  # ── wsc-bl-epic-on-session-json, half 1: the LAUNCHER resolves its epic ────
+  #
+  # A bp-epic-cycle / wild-bulk launcher holds no claim of its own — its
+  # builders claim as `epic-builder-<slug>`. Its epic is reached through its OWN
+  # rail: builder label -> agent<->task join -> task -> parent_id -> epic.
+  describe "epic_goal/2 — the launcher session resolves through its rail" do
+    setup do
+      {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "launch-ws-#{uniq()}", name: "L"})
+
+      {:ok, session} =
+        StudioChat.create_session(
+          %{id: Ecto.UUID.generate(), provider: "claude"},
+          {:workspace, ws.id}
+        )
+
+      insert_task!(
+        "task-launch-epic",
+        "Launcher epic",
+        %{"lifecycle_status" => "in_progress", "wave_status" => "wave 3: building"},
+        ws.id
+      )
+
+      %{ws: ws, session: session}
+    end
+
+    test "a launcher with NO claim of its own resolves the epic its builders advance", ctx do
+      builder_slice!(ctx.ws, "task-launch-s1", "Wire the export door", "task-launch-epic")
+
+      builder_slice!(
+        ctx.ws,
+        "task-launch-s2",
+        "Pin the export receipt",
+        "task-launch-epic",
+        "done"
+      )
+
+      # both emitter shapes: bp-epic-cycle (one segment) and wild-bulk (two)
+      put_rail!(ctx.session, [
+        "build:wire-the-export-door",
+        "build:api:pin-the-export-receipt",
+        "Digest"
+      ])
+
+      goal = StudioChat.epic_goal("claude", ctx.session.id)
+
+      assert goal.id == "task-launch-epic"
+      assert goal.title == "Launcher epic"
+      assert goal.slices_done == 1
+      assert goal.slices_total == 2
+      assert goal.wave_status == "wave 3: building"
+    end
+
+    test "the 40-character emitter slug joins (a long title is the common case)", ctx do
+      title = "A zombied run is detected but never yet re-dispatched to a builder"
+      builder_slice!(ctx.ws, "task-launch-long", title, "task-launch-epic")
+      # the emitter slices AFTER the trim, so the label keeps a trailing hyphen
+      put_rail!(ctx.session, ["build:a-zombied-run-is-detected-but-never-yet-"])
+
+      assert %{id: "task-launch-epic"} = StudioChat.epic_goal("claude", ctx.session.id)
+    end
+
+    test "an AMBIGUOUS label contributes nothing — no best guess", ctx do
+      insert_task!("task-launch-other", "Other epic", %{"lifecycle_status" => "open"}, ctx.ws.id)
+      builder_slice!(ctx.ws, "task-launch-dup-a", "Same title", "task-launch-epic")
+      builder_slice!(ctx.ws, "task-launch-dup-b", "Same title", "task-launch-other", "done")
+      put_rail!(ctx.session, ["build:same-title"])
+
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "builders that resolve to TWO different epics resolve no epic at all", ctx do
+      insert_task!("task-launch-other", "Other epic", %{"lifecycle_status" => "open"}, ctx.ws.id)
+      builder_slice!(ctx.ws, "task-launch-x", "Slice in the first epic", "task-launch-epic")
+      builder_slice!(ctx.ws, "task-launch-y", "Slice in the second epic", "task-launch-other")
+      put_rail!(ctx.session, ["build:slice-in-the-first-epic", "build:slice-in-the-second-epic"])
+
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "a rail with no joinable label, or no rail at all, resolves nil", ctx do
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+
+      put_rail!(ctx.session, ["Digest the survey", "build:no-such-task"])
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "another workspace's task never joins (the hops stay workspace-scoped)", ctx do
+      {:ok, foreign} = Barkpark.Tenancy.create_workspace(%{slug: "launch-f-#{uniq()}", name: "F"})
+      builder_slice!(foreign, "task-launch-foreign", "Foreign slice title", "task-launch-epic")
+      put_rail!(ctx.session, ["build:foreign-slice-title"])
+
+      assert StudioChat.epic_goal("claude", ctx.session.id) == nil
+    end
+
+    test "the session's OWN held claim still wins over its rail", ctx do
+      insert_task!(
+        "task-launch-own",
+        "Own epic",
+        %{"lifecycle_status" => "in_progress"},
+        ctx.ws.id
+      )
+
+      insert_task!(
+        "task-launch-own-held",
+        "Own held slice",
+        %{
+          "lifecycle_status" => "in_progress",
+          "parent_id" => "task-launch-own",
+          "claim" => %{"worker" => BarkparkWeb.Studio.ClaudeChat.worker_id(ctx.session.id)}
+        },
+        ctx.ws.id
+      )
+
+      builder_slice!(ctx.ws, "task-launch-s1", "Wire the export door", "task-launch-epic")
+      put_rail!(ctx.session, ["build:wire-the-export-door"])
+
+      assert %{id: "task-launch-own"} = StudioChat.epic_goal("claude", ctx.session.id)
+    end
+  end
+
+  defp put_rail!(session, labels) do
+    agents =
+      for label <- labels do
+        %{"type" => "workflow_agent", "phaseIndex" => 1, "label" => label, "state" => "progress"}
+      end
+
+    nodes = [%{"type" => "workflow_phase", "index" => 1, "title" => "Build"} | agents]
+    rail = %{"t1" => %{"seq" => 1, "status" => "running", "workflow" => nodes}}
+
+    {1, _} =
+      Barkpark.Repo.update_all(
+        Ecto.Query.from(s in Session, where: s.id == ^session.id),
+        set: [rail_snapshot: rail]
+      )
+  end
+
+  defp builder_slice!(ws, doc_id, title, parent, lifecycle \\ "in_progress") do
+    insert_task!(
+      doc_id,
+      title,
+      %{
+        "lifecycle_status" => lifecycle,
+        "parent_id" => parent,
+        "claim" => %{"worker" => "epic-builder-#{doc_id}"}
+      },
+      ws.id
+    )
+  end
 end

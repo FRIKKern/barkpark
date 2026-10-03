@@ -1602,6 +1602,21 @@ defmodule BarkparkWeb.ChatController do
       context: session_context_json(s),
       messages: Enum.map(messages, &message_json/1)
     }
+    |> put_workflow_epic(s)
+  end
+
+  # The epic-goal map on the SHOW read (wsc-bl-epic-on-session-json, half 2).
+  # Before this the epic rode only the sessions-LIST wire (sidebar_json), so the
+  # open session's result box could show nothing fresher than the picker cache.
+  # Same gate as the list: only a session whose rail carries a workflow, and
+  # only when the ledger resolves an epic (`StudioChat.epic_goal/2` — the
+  # session's own claim, else its rail's builders via the agent↔task join);
+  # otherwise the key is absent, never null.
+  defp put_workflow_epic(json, %StudioChat.Session{} = s) do
+    case StudioChat.workflow_summary(s.rail_snapshot) do
+      nil -> json
+      _workflow -> put_epic(json, s)
+    end
   end
 
   # ── the session's connection identity (chat-local-cloud-context-w3) ─────────

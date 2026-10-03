@@ -458,6 +458,8 @@ func (m Model) openSession(s Session) Model {
 		// The workflow panel decodes from the SAME snapshot (charter D13) — a
 		// resumed mid-run epic cycle lands with its strip already below the composer.
 		Workflow: decodeWorkflow(s.RailSnapshot),
+		// The epic-goal line rides the same full GET (wsc-bl-epic-on-session-json).
+		Epic: s.Epic,
 	}
 	m.input = s.Draft
 	m.mode, m.modelChoice, m.effortChoice = s.Mode, s.ModelChoice, s.EffortChoice

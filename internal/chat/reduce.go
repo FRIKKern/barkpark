@@ -146,6 +146,12 @@ type State struct {
 	// ceiling). nil for plain chats — the below-composer panel then costs zero.
 	Workflow *Workflow
 
+	// Epic is the open session's epic-goal line off the SHOW read
+	// (wsc-bl-epic-on-session-json), hydrated in openSession and refreshed at
+	// every full-session refetch beside Rail/Workflow. nil when the server
+	// resolves none; the result box then falls back to the picker cache.
+	Epic *EpicGoal
+
 	// LiveWorkflow is the COMPACT workflow summary pushed MID-TURN over the SSE
 	// `event: workflow` frame (wsc-bl-workflow-sse) — the same
 	// apiclient.ChatWorkflowSummary the list wire carries, NOT the raw *Workflow
@@ -788,6 +794,9 @@ func reduceTailFetched(st State, ev TailFetchedEvent) (State, []Effect) {
 	if len(ev.Session.RailSnapshot) > 0 {
 		st.Rail = decodeRail(ev.Session.RailSnapshot)
 		st.Workflow = decodeWorkflow(ev.Session.RailSnapshot)
+		// The epic line is projected from the same row at the same moment; a
+		// nil here is the server saying "no epic now", so it clears too.
+		st.Epic = ev.Session.Epic
 	}
 	// Any in-flight answer whose card is no longer pending has been resolved
 	// server-side (by this TUI's POST or by a Studio answer to the SAME row) —

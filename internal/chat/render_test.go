@@ -1251,6 +1251,39 @@ func TestWorkflowStallBadge(t *testing.T) {
 	}
 }
 
+// TestWorkflowResultBoxReadsShowEpic: the open session's SHOW-read epic
+// (State.Epic, wsc-bl-epic-on-session-json) drives the grade line with NO
+// picker-cache row at all, and wins over a stale cache when both exist.
+func TestWorkflowResultBoxReadsShowEpic(t *testing.T) {
+	m := stripModel(t, "rail_workflow_completed.json")
+	m.st.LiveWorkflow = &SessionWorkflow{Label: "core-auth", AgentsDone: 29, AgentsTotal: 29}
+	m.sessions = nil
+	m.st.Epic = &EpicGoal{Title: "Epic", WaveStatus: "wave 3 complete — grade B+"}
+
+	out := strings.Join(m.workflowPanelLines(), "\n")
+	if !strings.Contains(out, "wave 3 complete — grade B+") {
+		t.Fatalf("the show-read epic must drive the grade line with no picker cache, got:\n%s", out)
+	}
+
+	// a stale picker row (still building) must not override the fresher show read
+	m.sessions = []SessionSummary{{ID: "s1",
+		Epic: &EpicGoal{Title: "Epic", WaveStatus: "wave: building 6 slices"}}}
+	out = strings.Join(m.workflowPanelLines(), "\n")
+	if !strings.Contains(out, "grade B+") || strings.Contains(out, "building 6 slices") {
+		t.Fatalf("State.Epic must win over the picker cache, got:\n%s", out)
+	}
+}
+
+// TestOpenSessionHydratesEpic: openSession copies the full GET's epic onto the
+// state, and a tail refetch replaces it (a nil clears a settled-away epic).
+func TestOpenSessionHydratesEpic(t *testing.T) {
+	epic := &EpicGoal{ID: "task-e", Title: "Epic", WaveStatus: "wave 1"}
+	m := Model{}.openSession(Session{ID: "s1", Epic: epic})
+	if m.st.Epic != epic {
+		t.Fatalf("openSession must hydrate State.Epic from the show read, got %+v", m.st.Epic)
+	}
+}
+
 // TestWorkflowResultBox is the D43 proof: once the rail entry settles (while
 // the strip still stands on a fresher live summary), the panel bottom states
 // the EntryStatus verbatim + settled/total + tokens; the grade line rides ONLY
