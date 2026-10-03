@@ -33,7 +33,7 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
-Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Content-table scope FKs are `CASCADE`, so a raw `Repo.delete(workspace)` deletes rows but skips the blob/CDN purge + lifecycle hooks. In order: (1) walk `media_files` → `Media.delete_file/2` (blob, CDN, renditions, hooks); (2) walk `documents` → `Content.delete_document/4` (delete hooks); (3) `Repo.delete(workspace)`, letting CASCADE prune the rest. No `delete_project/1` exists yet.
+Use **`Barkpark.Tenancy.delete_workspace/1`** — the only safe path. Scope FKs `CASCADE`, so a raw `Repo.delete(workspace)` skips the blob/CDN purge + lifecycle hooks. In order: (1) `media_files` → `Media.delete_file/2` (blob, CDN, renditions, hooks); (2) `documents` → `Content.delete_document/4` (delete hooks); (3) `Repo.delete(workspace)`, CASCADE prunes the rest; (4) its chats (`chat_sessions.owner_workspace_id`, no FK) + messages; NULL-owned chats stay. No `delete_project/1` yet.
 
 ## Roles & enforcement
 
@@ -62,7 +62,7 @@ In multi-tenant installs the content-edge projection uses strict `scope_to_works
 
 Dataset is an **additive Wave-2 seam**. The plain `dataset` string (`"production"` default) is still authoritative; `dataset_id` rides alongside and is now the uniqueness key (`documents (doc_id, type, dataset_id)`). `dataset_id` is **nullable everywhere**; its FKs are `CASCADE` (deleting a Dataset deletes its content rows).
 
-`Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (defined in `api/lib/barkpark/content/write_scope.ex`; no `scope_to_dataset` is delegated on the `Content` facade):
+`Barkpark.Content.WriteScope.scope_to_dataset/3` is the **never-worse** read scope (in `api/lib/barkpark/content/write_scope.ex`; not delegated on the `Content` facade):
 
 ```
 resolve_read_dataset_id(dataset, opts) → id | nil
@@ -70,7 +70,7 @@ resolve_read_dataset_id(dataset, opts) → id | nil
   nil → WHERE dataset = $string
 ```
 
-The OR clause keeps legacy/un-backfilled rows (`dataset_id` never stamped) visible via the string path until backfill completes — so a `dataset_id IS NULL` row is **not** invisible to dataset scoping, though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id.
+The OR clause keeps un-backfilled rows (`dataset_id` never stamped) visible via the string path until backfill completes — so a `dataset_id IS NULL` row is **not** invisible to dataset scoping, though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id.
 
 **Known asymmetry:** `resolve_read_dataset_id/2` returns `nil` when scoped by workspace **without** a project (string-path fallback), preventing cross-tenant bleed into the Default project; id-precise dataset scoping requires `project_id`.
 

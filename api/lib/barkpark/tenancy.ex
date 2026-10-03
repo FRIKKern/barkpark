@@ -1993,6 +1993,11 @@ defmodule Barkpark.Tenancy do
        paper_events) sweeps any rows that survived the app-level pass
        (idempotent) and removes the supporting rows that have no
        side-effect cleanup.
+    4. The workspace's Studio chats (`chat_sessions.owner_workspace_id`, no
+       FK, so no cascade reaches them) and their `chat_messages` are deleted
+       (owner ruling #32). NULL-owned chats are no workspace's and stay. A
+       session another workspace's append-only ledger still pins keeps its
+       bare row; its messages still go. See `delete_workspace_chats/1`.
 
   ## The two FK-less audit tables (charter D4/D5, `bl-audit-fk-orphans`)
 
@@ -2179,7 +2184,8 @@ defmodule Barkpark.Tenancy do
          :ok <- prepare_workspace_cycle_teardown(ws_id),
          :ok <- delete_workspace_documents(ws_id),
          :ok <- delete_workspace_audit_sinks(ws_id),
-         {:ok, _} <- Repo.delete(workspace) do
+         {:ok, _} <- Repo.delete(workspace),
+         :ok <- delete_workspace_chats(ws_id) do
       {:ok, workspace}
     else
       {:error, _} = err -> err
@@ -2364,6 +2370,67 @@ defmodule Barkpark.Tenancy do
     |> Repo.delete_all()
 
     :ok
+  end
+
+  # Studio chats die with their workspace (owner ruling #32 item 6, 2026-10-03).
+  # `chat_sessions.owner_workspace_id` carries NO FK (20260713140000), so the
+  # cascade never reaches it; this explicit step does. NULL-owned (global/admin)
+  # chats belong to no workspace and are never matched by the equality.
+  #
+  # POSITION IS LOAD-BEARING — this runs AFTER `Repo.delete(workspace)`: that
+  # delete's BEFORE DELETE trigger (`barkpark_teardown_cycle_ledger`) removes the
+  # workspace's `epic_assignment_runtime_attempts`, whose `ON DELETE RESTRICT`
+  # FK would otherwise pin the attempt's session.
+  #
+  # Two steps, so a pinned session never aborts the teardown:
+  #   1. Every owned session's `chat_messages` go (the transcript text).
+  #   2. Every owned session NOT pinned by an append-only ledger row
+  #      (`epic_assignment_runtime_attempts` / `chat_runtime_usage_receipts`,
+  #      both `ON DELETE RESTRICT` + a no-delete trigger) goes; its
+  #      `on_delete: :delete_all` children (telemetry, leases) go with it. A
+  #      session another workspace's ledger still pins keeps its bare row, which
+  #      no scope can list (its owner no longer exists).
+  # The tables are capability-owned (`studio_chat`, `epic_fleet`), so each is
+  # touched only when `OwnedTables.present?/1` says it exists.
+  defp delete_workspace_chats(ws_id) do
+    if OwnedTables.present?("chat_sessions") do
+      owned =
+        from(s in "chat_sessions",
+          where: s.owner_workspace_id == type(^ws_id, Ecto.UUID),
+          select: s.id
+        )
+
+      Repo.delete_all(from(m in "chat_messages", where: m.session_id in subquery(owned)))
+      Repo.delete_all(from(s in exclude(owned, :select), where: ^unpinned_chat_session()))
+    end
+
+    :ok
+  end
+
+  defp unpinned_chat_session do
+    ~w(epic_assignment_runtime_attempts chat_runtime_usage_receipts)
+    |> OwnedTables.present()
+    |> Enum.reduce(dynamic(true), fn
+      "epic_assignment_runtime_attempts", acc ->
+        dynamic(
+          [s],
+          ^acc and
+            fragment(
+              "NOT EXISTS (SELECT 1 FROM epic_assignment_runtime_attempts a WHERE a.session_id = ?)",
+              s.id
+            )
+        )
+
+      "chat_runtime_usage_receipts", acc ->
+        dynamic(
+          [s],
+          ^acc and
+            fragment(
+              "NOT EXISTS (SELECT 1 FROM chat_runtime_usage_receipts r WHERE r.session_id = ?)",
+              s.id
+            )
+        )
+    end)
   end
 
   # Walk every media_file scoped to the workspace and route it through
