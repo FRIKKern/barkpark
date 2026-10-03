@@ -278,14 +278,18 @@ defmodule Barkpark.Seeds.Demo do
     hours = fn h -> DateTime.add(now, -h * 3600) end
 
     documents = [
-      # Posts — published (clean ID) + some drafts (drafts. prefix)
+      # Posts — published (clean ID) + some drafts (drafts. prefix).
+      # `author` is a REFERENCE to `author`, so it stores the author's id
+      # (a1 Knut Melvaer, a2 Simeon Griggs), never the name — a name left a
+      # dangling chip on every seeded post and nothing to expand or backlink
+      # (pinned by demo_seed_references_resolve_test.exs).
       %{
         doc_id: "p1",
         type: "post",
         dataset: dataset,
         title: "Getting Started with Structured Content",
         status: "published",
-        content: %{"category" => "Technology", "author" => "Knut Melvaer"},
+        content: %{"category" => "Technology", "author" => "a1"},
         inserted_at: hours.(2),
         updated_at: hours.(2)
       },
@@ -295,7 +299,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Why Headless CMS Changes Everything",
         status: "published",
-        content: %{"category" => "Technology", "author" => "Simeon Griggs"},
+        content: %{"category" => "Technology", "author" => "a2"},
         inserted_at: hours.(26),
         updated_at: hours.(26)
       },
@@ -306,7 +310,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Content Modeling Best Practices",
         status: "draft",
-        content: %{"category" => "Engineering", "author" => "Knut Melvaer"},
+        content: %{"category" => "Engineering", "author" => "a1"},
         inserted_at: hours.(50),
         updated_at: hours.(50)
       },
@@ -317,7 +321,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Building with Portable Text",
         status: "draft",
-        content: %{"category" => "Engineering", "author" => "Simeon Griggs"},
+        content: %{"category" => "Engineering", "author" => "a2"},
         inserted_at: hours.(74),
         updated_at: hours.(74)
       },
@@ -327,7 +331,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Real-time Collaboration in Practice",
         status: "published",
-        content: %{"category" => "Design", "author" => "Knut Melvaer"},
+        content: %{"category" => "Design", "author" => "a1"},
         inserted_at: hours.(98),
         updated_at: hours.(98)
       },
@@ -338,7 +342,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "GROQ vs GraphQL Deep Dive",
         status: "published",
-        content: %{"category" => "Technology", "author" => "Simeon Griggs"},
+        content: %{"category" => "Technology", "author" => "a2"},
         inserted_at: hours.(122),
         updated_at: hours.(122)
       },
@@ -348,7 +352,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "GROQ vs GraphQL Deep Dive (updated draft)",
         status: "draft",
-        content: %{"category" => "Technology", "author" => "Simeon Griggs"},
+        content: %{"category" => "Technology", "author" => "a2"},
         inserted_at: hours.(2),
         updated_at: hours.(2)
       },
@@ -358,7 +362,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Design Systems for Content Teams",
         status: "published",
-        content: %{"category" => "Design", "author" => "Knut Melvaer"},
+        content: %{"category" => "Design", "author" => "a1"},
         inserted_at: hours.(146),
         updated_at: hours.(146)
       },
@@ -368,7 +372,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Deploying Studio to Production",
         status: "published",
-        content: %{"category" => "Engineering", "author" => "Simeon Griggs"},
+        content: %{"category" => "Engineering", "author" => "a2"},
         inserted_at: hours.(170),
         updated_at: hours.(170)
       },
