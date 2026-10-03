@@ -35,17 +35,22 @@ defmodule BarkparkWeb.WebauthnController do
   def register_challenge(conn, params) do
     user = conn.assigns.current_user
 
-    if reauthed?(user, params["password"]) do
-      challenge = Webauthn.registration_challenge()
+    case Accounts.reauthenticate(user, params["password"]) do
+      :ok ->
+        challenge = Webauthn.registration_challenge()
 
-      json(conn, %{
-        challenge: b64(challenge.bytes),
-        challenge_token: sign(@reg_salt, {user.id, challenge.bytes}),
-        rp_id: Webauthn.rp_id(),
-        user: %{id: b64(user.id), name: user.email, display_name: user.email}
-      })
-    else
-      error(conn, 403, "reauth_required", "the current password is required")
+        json(conn, %{
+          challenge: b64(challenge.bytes),
+          challenge_token: sign(@reg_salt, {user.id, challenge.bytes}),
+          rp_id: Webauthn.rp_id(),
+          user: %{id: b64(user.id), name: user.email, display_name: user.email}
+        })
+
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
+
+      {:error, :invalid_password} ->
+        error(conn, 403, "reauth_required", "the current password is required")
     end
   end
 
@@ -254,6 +259,9 @@ defmodule BarkparkWeb.WebauthnController do
 
       {:error, :reauth_required} ->
         error(conn, 403, "reauth_required", "the current password is required")
+
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
     end
   end
 
@@ -261,16 +269,26 @@ defmodule BarkparkWeb.WebauthnController do
 
   # Removing a passkey is an MFA change too: a session alone could strip the
   # owner's factors (task-3d64b961fca33036).
+  # The password check spends the shared per-user re-check budget
+  # (`Accounts.reauthenticate/2`, owner ruling #34 item 1).
   defp delete_reauthed(user, id, password) do
-    if reauthed?(user, password),
-      do: Webauthn.delete_credential(user, id),
-      else: {:error, :reauth_required}
+    case Accounts.reauthenticate(user, password) do
+      :ok -> Webauthn.delete_credential(user, id)
+      {:error, :reauth_rate_limited} -> {:error, :reauth_rate_limited}
+      {:error, :invalid_password} -> {:error, :reauth_required}
+    end
   end
 
-  defp reauthed?(user, password) when is_binary(password),
-    do: Barkpark.Accounts.User.valid_password?(user, password)
-
-  defp reauthed?(_user, _), do: false
+  defp reauth_rate_limited(conn) do
+    conn
+    |> put_resp_header("retry-after", "60")
+    |> error(
+      429,
+      "reauth_rate_limited",
+      "too many password attempts for this account",
+      "wait a minute, then try again with the current password"
+    )
+  end
 
   defp sign(salt, bytes), do: Phoenix.Token.sign(BarkparkWeb.Endpoint, salt, bytes)
 

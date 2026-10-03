@@ -183,19 +183,24 @@ defmodule BarkparkWeb.AuthController do
   def erase(conn, %{"password" => password}) do
     user = conn.assigns.current_user
 
-    if reauthed?(user, password) do
-      {:ok, summary} = Barkpark.Accounts.Privacy.erase_subject(user)
+    case reauth(user, password) do
+      :ok ->
+        {:ok, summary} = Barkpark.Accounts.Privacy.erase_subject(user)
 
-      conn
-      |> configure_session(drop: true)
-      |> json(%{ok: true, erased: summary})
-    else
-      error(
-        conn,
-        403,
-        "invalid_password",
-        "the current password is required to erase your account"
-      )
+        conn
+        |> configure_session(drop: true)
+        |> json(%{ok: true, erased: summary})
+
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
+
+      {:error, :invalid_password} ->
+        error(
+          conn,
+          403,
+          "invalid_password",
+          "the current password is required to erase your account"
+        )
     end
   end
 
@@ -236,6 +241,9 @@ defmodule BarkparkWeb.AuthController do
           "invalid_password",
           "the current password is required to change your password"
         )
+
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
 
       {:error, %Ecto.Changeset{} = cs} ->
         error(conn, 422, "invalid_password", changeset_errors(cs))
@@ -673,17 +681,22 @@ defmodule BarkparkWeb.AuthController do
   def mfa_enroll(conn, %{"password" => password}) do
     user = conn.assigns.current_user
 
-    if reauthed?(user, password) do
-      secret = Accounts.totp_secret()
-      uri = Accounts.totp_uri(user, secret)
+    case reauth(user, password) do
+      :ok ->
+        secret = Accounts.totp_secret()
+        uri = Accounts.totp_uri(user, secret)
 
-      json(conn, %{
-        secret: Base.encode32(secret, padding: false),
-        otpauth_uri: uri,
-        qr_svg: uri |> EQRCode.encode() |> EQRCode.svg()
-      })
-    else
-      error(conn, 403, "reauth_required", "the current password is required")
+        json(conn, %{
+          secret: Base.encode32(secret, padding: false),
+          otpauth_uri: uri,
+          qr_svg: uri |> EQRCode.encode() |> EQRCode.svg()
+        })
+
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
+
+      {:error, :invalid_password} ->
+        error(conn, 403, "reauth_required", "the current password is required")
     end
   end
 
@@ -694,11 +707,14 @@ defmodule BarkparkWeb.AuthController do
   def mfa_verify(conn, %{"secret" => secret_b32, "code" => code, "password" => password}) do
     user = conn.assigns.current_user
 
-    cond do
-      not reauthed?(user, password) ->
+    case reauth(user, password) do
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
+
+      {:error, :invalid_password} ->
         error(conn, 403, "reauth_required", "the current password is required")
 
-      true ->
+      :ok ->
         with {:ok, secret} <- decode_secret(secret_b32),
              {:ok, _user, recovery_codes} <- Accounts.enable_totp(user, secret, code) do
           # The user just proved a live TOTP — mark THIS session fresh so a
@@ -741,21 +757,26 @@ defmodule BarkparkWeb.AuthController do
   def mfa_disable(conn, %{"password" => password}) do
     user = conn.assigns.current_user
 
-    if reauthed?(user, password) do
-      {:ok, _user} = Accounts.disable_totp(user)
+    case reauth(user, password) do
+      {:error, :reauth_rate_limited} ->
+        reauth_rate_limited(conn)
 
-      Audit.emit(%{
-        category: "auth",
-        action: "mfa_disabled",
-        subject: user.id,
-        actor_type: "user",
-        actor_id: user.id,
-        metadata: %{}
-      })
+      {:error, :invalid_password} ->
+        error(conn, 403, "reauth_required", "the current password is required")
 
-      json(conn, %{ok: true})
-    else
-      error(conn, 403, "reauth_required", "the current password is required")
+      :ok ->
+        {:ok, _user} = Accounts.disable_totp(user)
+
+        Audit.emit(%{
+          category: "auth",
+          action: "mfa_disabled",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{}
+        })
+
+        json(conn, %{ok: true})
     end
   end
 
@@ -820,10 +841,19 @@ defmodule BarkparkWeb.AuthController do
     do: BarkparkWeb.SessionIssuer.issue(conn, user, opts)
 
   # Verify the current password for a session-authenticated, sensitive action.
-  defp reauthed?(user, password) when is_binary(password),
-    do: Barkpark.Accounts.User.valid_password?(user, password)
+  # Every caller shares one per-user attempt budget (`Accounts.reauthenticate/2`).
+  defp reauth(user, password), do: Accounts.reauthenticate(user, password)
 
-  defp reauthed?(_user, _), do: false
+  defp reauth_rate_limited(conn) do
+    conn
+    |> put_resp_header("retry-after", "60")
+    |> error(
+      429,
+      "reauth_rate_limited",
+      "too many password attempts for this account",
+      "wait a minute, then try again with the current password"
+    )
+  end
 
   # Mark the current session MFA-fresh after a live factor was proven inline
   # (enrolment verify). No-op if the session isn't on the conn (bearer flows
