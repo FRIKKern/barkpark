@@ -21,10 +21,10 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
   ## Why the refusal was unappealable
 
   `present/1` strips the `drafts.` prefix, so the payload named a canonical id
-  while the message said "claim/extend it". For a draft-only match neither verb
-  can be performed: `bp task get <id>` 404s, the row is not on the ready queue,
-  and there is nothing to claim. The refusal named a resource that does not
-  exist as a task.
+  while the message said "claim/extend it" and nothing said the match was a
+  draft no board shows. The task read door now resolves the `drafts.` twin
+  (`Barkpark.Tasks.TwinResolver`), so the note must not claim the id 404s
+  (task-3a56dacebca54684: it said so, and `bp task get` answered 200).
 
   These tests assert STRUCTURE — which id, which flag, which verdict — never
   elapsed milliseconds. Every assertion is scoped to ids this test planted.
@@ -137,6 +137,34 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
     assert payload.message =~ "UNPUBLISHED DRAFT",
            "the refusal must name the draft recovery, not just say claim/extend it; got: " <>
              payload.message
+
+    # task-3a56dacebca54684: every fact the note states must be true. The id it
+    # names resolves through the SAME reader `bp task get` uses, so the note may
+    # not say it 404s, nor send the caller away from a row it can inspect.
+    assert {:ok, resolved} =
+             Tasks.TwinResolver.resolve(
+               debris,
+               fn q ->
+                 q
+                 |> BarkparkWeb.TasksController.Params.maybe_filter_workspace(
+                   scope[:workspace_id]
+                 )
+                 |> BarkparkWeb.TasksController.Params.maybe_filter_project(scope[:project_id])
+               end,
+               &Barkpark.Repo.all/1
+             )
+
+    assert resolved.doc_id == "drafts." <> debris
+
+    refute payload.message =~ "404",
+           "the task read door resolves the draft, so the note must not say it 404s: " <>
+             payload.message
+
+    refute payload.message =~ "nothing there to claim",
+           "a draft-only task is claimable; the note must not say otherwise: " <> payload.message
+
+    assert payload.message =~ "bp task get <id>",
+           "the note must name the inspect verb that works: " <> payload.message
   end
 
   test "a PUBLISHED match is still reported as published (the flag is not hardcoded)", %{
