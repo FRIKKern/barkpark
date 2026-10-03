@@ -1465,6 +1465,89 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   ## tests are the contract.
 
   describe "site-spawner: POST /v1/sites (create + content binding + read-token mint)" do
+    # Owner ruling #27 (2026-10-03): minting a box credential is a TEAM-ADMIN act.
+    test "a plain MEMBER whose create would MINT is refused 403 required admin — no row, nothing minted" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      member = member_of(team, "member")
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          login_token(member)
+        )
+
+      assert conn.status == 403
+      body = json_body(conn)
+      assert body["error"] == "forbidden"
+      assert body["required"] == "admin"
+      assert body["scope"] == "team"
+      assert StudioLinkFakeHttpClient.requests() == []
+      assert Registry.list_sites(bp) == []
+    end
+
+    test "a plain MEMBER still creates a site that mints nothing (201)" do
+      {_owner, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      member = member_of(team, "member")
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{barkpark_id: bp.id, name: "Shop", framework: "nextjs"},
+          login_token(member)
+        )
+
+      assert conn.status == 201, conn.resp_body
+    end
+
+    test "a team ADMIN (not owner) creates a content-bound site — the token is minted (201)" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      admin = member_of(team, "admin")
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_minted"})}}
+      })
+
+      conn =
+        call(
+          :post,
+          "/v1/sites",
+          %{
+            barkpark_id: bp.id,
+            name: "blog",
+            kind: "static",
+            framework: "astro",
+            workspace: "acme",
+            project: "blog",
+            dataset: "production"
+          },
+          login_token(admin)
+        )
+
+      assert conn.status == 201, conn.resp_body
+      site = Registry.get_site(json_body(conn)["site"]["id"])
+      assert {:ok, "bpt_public_read_minted"} = Registry.reveal_site_read_token(site)
+    end
+
     test "accepts the CLI's OWN keys (workspace/project/dataset), mints the read token, and 201s a CONTENT-BOUND site" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)
