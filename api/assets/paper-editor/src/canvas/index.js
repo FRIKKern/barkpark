@@ -57,6 +57,7 @@ import TaskItem from "@tiptap/extension-task-item";
 import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
 import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { prepareHTMLTablePaste } from "./html-table-paste.js";
+import { normalizeWordListHTML } from "./word-paste.js";
 import { Extension } from "@tiptap/core";
 
 // PURE S0 projector + op-mapper — used verbatim (do NOT reinvent the diff).
@@ -1116,6 +1117,10 @@ class BpPaperCanvas extends HTMLElement {
         // TipTap unchanged, so cross-block caret / split / merge are untouched.
         handleKeyDown: (_view, event) => this._onKeyDown(event),
         handlePaste: (view, event, slice) => this._onPaste(view, event, slice),
+        // Word puts list items on the clipboard as <p style="mso-list:…"> with the
+        // bullet as literal text; rebuild them as real lists before parsing, or
+        // they land as paragraphs starting "·   ". See ./word-paste.js.
+        transformPastedHTML: (html) => normalizeWordListHTML(html),
         // Image files dropped onto the canvas land as image nodes at the drop point
         // and upload through the host's mediaUploader (see _insertImageFiles).
         handleDrop: (view, event, _slice, moved) => this._onDrop(view, event, moved),
