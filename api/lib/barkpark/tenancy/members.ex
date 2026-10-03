@@ -165,7 +165,10 @@ defmodule Barkpark.Tenancy.Members do
   The account is resolved through `Sso.find_or_create_user/1` — the same
   just-in-time path SSO, SCIM and the cloud app-token bridge already use — so
   seating somebody who has never signed in works, and seating somebody who has
-  reuses their account. JIT creation is a real side effect: the account is
+  reuses their account. An existing UNCONFIRMED account is reclaimed first
+  (`Accounts.Privacy.reclaim_unconfirmed/1`): whoever registered it never
+  proved the email, so the seat must not go to their password
+  (task-02cb6bfc7b54924d). JIT creation is a real side effect: the account is
   auto-confirmed with a random password and NO e-mail is sent, so the invitee
   must sign in through a channel that does not need that password (SSO, magic
   link, or a reset). Callers that need a notification must send it themselves;
@@ -181,7 +184,8 @@ defmodule Barkpark.Tenancy.Members do
       when is_binary(workspace_id) and is_binary(email) and is_binary(role) do
     with {:ok, email} <- normalize_email(email),
          %User{} = user <- Sso.find_or_create_user(email),
-         nil <- TenancyAuth.membership(user.id, workspace_id, :user) do
+         nil <- TenancyAuth.membership(user.id, workspace_id, :user),
+         {:ok, user} <- Accounts.Privacy.reclaim_unconfirmed(user) do
       case TenancyAuth.create_membership(workspace_id, user.id, role, "user") do
         {:ok, membership} ->
           {:ok, decorate(membership, %{user.id => email}, %{})}
