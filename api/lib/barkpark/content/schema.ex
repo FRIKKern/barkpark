@@ -842,7 +842,15 @@ defmodule Barkpark.Content.Schema do
     f = stringify_keys(field)
     type = f["type"]
 
-    base = Map.put(f, "required?", truthy?(f["required"]))
+    # `required?` must say what Content.Validation enforces: the top-level
+    # `required` OR an ERROR-level `validation` rule carrying `required: true`
+    # (the v2 shape `bp make schema` scaffolds). A warning-level rule never
+    # blocks, so it does not make the field required (task-b1939624d0120aca).
+    required? =
+      truthy?(f["required"]) or
+        truthy?(Barkpark.Content.Validation.rules_at(f["validation"], :error)["required"])
+
+    base = Map.put(f, "required?", required?)
 
     base
     |> maybe_put_of(type, f)
