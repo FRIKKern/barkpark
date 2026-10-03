@@ -209,6 +209,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/deployments/:dep_id/build-log user(s)  the black box recorder's durable per-build record for THAT deployment (read ability; 404 no such deployment / 410 evicted / 200 with an honest log_state)
       GET     /v1/sites/:id/deployments/:dep_id/build-log/bytes operator  the recorded build log's BYTES for THAT deployment — a bounded tail (422 when the bytes were never scrubbed / 410 evicted / 404 no such deployment / 200 with an honest log_state)
       POST    /v1/sites/:id/deployments/:dep_id/promote user(s) rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact (write ability)
+      POST    /v1/sites/:id/deployments/:dep_id/cancel user(s)  OPERATOR cancel — a queued row, or a container row still building, becomes cancelled (operator_cancelled) and frees the slot; 409 illegal_transition on a terminal row, 409 in_flight when the box is driving it (write ability)
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    admin     replace the encrypted env blob (admin-or-owner; task-9dfa4854b5e22e94)
@@ -10210,6 +10211,45 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/sites/:id/deployments/:dep_id/cancel → 200 {ok, status, deployment,
+  # slot_free, next} (task-4187bcf6d0424cfc). The first operator verb that
+  # STOPS a deployment. Before it, an operator facing a stuck or unwanted build
+  # had no way to stop it: `cancelled` was written only by the fleet.
+  #
+  # Team-scoped and write-gated like promote. A wrong-team site, a dep_id that
+  # is not this site's, or a non-UUID all answer the same 404 (no existence
+  # leak). `Registry.operator_cancel_deployment/3` owns the decision and
+  # documents each arm:
+  #
+  #   * 200 `cancelled`: the row is now `cancelled` (failure_reason
+  #     `operator_cancelled`) and the active slot is free (cancel-frees).
+  #   * 200 `already_cancelled`: idempotent, with no write and no audit row.
+  #   * 409 `illegal_transition`: a `live`/`failed`/`deferred` row is
+  #     terminal.
+  #   * 409 `in_flight`: the work is running ON THE BOX (static/node
+  #     `building`, or any `pushing`). Nothing here can stop it, so the
+  #     route says so instead of writing a status the box would contradict.
+  #
+  # The success body says the slot is free and how to rebuild. A cancel never
+  # restarts anything: the same commit rebuilds as a NEW row.
+  post "/v1/sites/:id/deployments/:dep_id/cancel" do
+    conn = conn |> Auth.require_user_or_pat([]) |> Auth.require_ability("write")
+
+    cond do
+      conn.halted ->
+        conn
+
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 404, %{error: "not_found"})
+
+      true ->
+        case Registry.get_team_site(conn.assigns.current_team, conn.path_params["id"]) do
+          %Registry.Site{} = site -> cancel_deployment(conn, site)
+          nil -> json(conn, 404, %{error: "not_found"})
+        end
+    end
+  end
+
   # GET /v1/sites/:id/previews → 200 {previews: [...]} — gh-6 branch previews,
   # one row per branch (the latest push), newest first. Each carries its branch,
   # preview_host (the URL), status, and live build console (the #815 standard).
@@ -16638,6 +16678,68 @@ defmodule BarkparkCloud.Web.Router do
   # a missing one (existence-leak protection), a preview is 422 not_promotable.
   # On success the new queued Deployment + a `deployment.promoted` audit row
   # commit atomically, then the `deployments` + `audit` SSE invalidations fire.
+  @cancel_next "redeploy to build again: `bp cloud site deploy <site>` or the console's Deploy button"
+
+  defp cancel_deployment(conn, site) do
+    dep_id = conn.path_params["dep_id"]
+
+    case Registry.operator_cancel_deployment(site, dep_id, "an operator") do
+      {:ok, :cancelled, dep} ->
+        case Accounts.record_audit(%{
+               team_id: site.team_id,
+               actor_user_id: conn.assigns.current_user.id,
+               action: "deployment.cancelled",
+               target_type: "deployment",
+               target_id: dep.id,
+               metadata: %{site_id: site.id, git_ref: dep.git_ref}
+             }) do
+          {:ok, _event} -> push_event(site.team_id, "audit")
+          {:error, cs} -> Logger.error("audit deployment.cancelled failed: #{inspect(cs)}")
+        end
+
+        push_event(site.team_id, "deployments")
+        cancel_ok(conn, "cancelled", dep)
+
+      {:ok, :already_cancelled, dep} ->
+        cancel_ok(conn, "already_cancelled", dep)
+
+      {:error, :not_found} ->
+        json(conn, 404, %{error: "not_found"})
+
+      {:error, {:illegal_transition, status}} ->
+        json(conn, 409, %{
+          ok: false,
+          error: "illegal_transition",
+          status: status,
+          detail: "a #{status} deployment is terminal and cannot be cancelled"
+        })
+
+      {:error, {:in_flight, status}} ->
+        json(conn, 409, %{
+          ok: false,
+          error: "in_flight",
+          status: status,
+          detail:
+            "this deployment is #{status} on the box, and a cancel from here cannot stop it. " <>
+              "Wait for it to settle (live or failed), then #{@cancel_next}"
+        })
+
+      {:error, other} ->
+        Logger.error("deployment cancel failed: #{inspect(other)}")
+        json(conn, 500, %{ok: false, error: "cancel_failed"})
+    end
+  end
+
+  defp cancel_ok(conn, status, dep) do
+    json(conn, 200, %{
+      ok: true,
+      status: status,
+      deployment: deployment_json(dep),
+      slot_free: true,
+      next: @cancel_next
+    })
+  end
+
   defp promote_deployment(conn, site) do
     source = Registry.get_deployment(conn.path_params["dep_id"])
 

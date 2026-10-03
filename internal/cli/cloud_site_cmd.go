@@ -4196,6 +4196,7 @@ USAGE
   bp cloud site create   --name <n> --dataset <ws/proj/ds> --instance <id|name> [--framework astro|nextjs] [--kind static|node] [--doc-type <type>] [--template <starter>] [--theme <palette>] [--deploy]
   bp cloud site deploy    <site> [--prebuilt <dir> [--deployment <id>]] [--no-follow] [--force] [--wait-for-live <deadline>]  (alias: build)
   bp cloud site rollback  <site>
+  bp cloud site cancel    <site> <deployment-id>                   cancel a queued (or container building) deployment; the slot is freed
   bp cloud site delete    <site> [--yes]                            tear the site down  (alias: rm)
   bp cloud site status    <site> [--window <attempts>]
   bp cloud site doctor    <site>                                   read every substrate this site occupies and name the repair

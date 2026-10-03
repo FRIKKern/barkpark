@@ -18592,8 +18592,8 @@
     });
   }
 
-  // Wire every promote button in a freshly rendered deployment list. Re-run
-  // after each site render (the list is rebuilt on every live SSE tick).
+  // Wire every promote and cancel button in a freshly rendered deployment list.
+  // Re-run after each site render (the list is rebuilt on every live SSE tick).
   function wireDeployActions(scope, site, deployments) {
     var byId = {};
     (deployments || []).forEach(function (d) { byId[String(d.id)] = d; });
@@ -18602,6 +18602,102 @@
         var d = byId[btn.getAttribute("data-dep-id")];
         if (d) confirmPromote(site, d, btn.getAttribute("data-kind"), deployments);
       });
+    });
+    scope.querySelectorAll(".dep-cancel").forEach(function (btn) {
+      btn.addEventListener("click", function () {
+        var d = byId[btn.getAttribute("data-dep-id")];
+        if (d) confirmCancel(site, d);
+      });
+    });
+  }
+
+  // ---------------------------------------------- operator cancel (task-4187bcf6d0424cfc)
+  // POST /v1/sites/:id/deployments/:dep_id/cancel. The server decides what can
+  // be cancelled: a queued row always, a container row still building. A build
+  // the BOX is driving answers 409 in_flight, because nothing on the control
+  // plane can stop it. The console offers the button on queued and building
+  // rows and relays the server's sentence when it refuses. It never claims a
+  // cancel the server did not write.
+  function cancelPath(siteId, depId) {
+    return "/v1/sites/" + encodeURIComponent(String(siteId)) +
+      "/deployments/" + encodeURIComponent(String(depId)) + "/cancel";
+  }
+
+  // Which rows offer Cancel: still queued or building. Terminal rows and rows
+  // already handing off to the box (pushing) offer nothing. Pure; null = none.
+  function cancelActionFor(d) {
+    var st = d && d.status;
+    return st === "queued" || st === "building" ? { label: "Cancel" } : null;
+  }
+
+  function cancelConfirmCopy(ref) {
+    return {
+      title: "Cancel deployment " + ref + "?",
+      consequence: "This stops the build and frees the build slot. The deployment stays in history " +
+        "as cancelled; deploy again to rebuild.",
+      confirmLabel: "Cancel deployment",
+      busyLabel: "Cancelling…",
+    };
+  }
+
+  // A refused cancel → one human sentence + ONE recovery (decision 25). The
+  // server's own detail is relayed for in_flight, because it is the only party
+  // that knows the box is driving the build. Pure.
+  function cancelFailure(status, data) {
+    var err = data && data.error;
+    if (status === 409 && err === "in_flight") {
+      return {
+        message: (data && data.detail) ||
+          "This build is already running on the box and can't be stopped from here. Wait for it to finish, then deploy again.",
+        recovery: "refresh",
+      };
+    }
+    if (status === 409 && err === "illegal_transition") {
+      return { message: "This deployment already finished, so there is nothing to cancel.", recovery: "refresh" };
+    }
+    if (status === 404) {
+      return { message: "This deployment is no longer there. Refresh to see the current list.", recovery: "refresh" };
+    }
+    return { message: "The cancel didn't go through. Try again.", recovery: "retry" };
+  }
+
+  function confirmCancel(site, d) {
+    var copy = cancelConfirmCopy(deployRefLabel(d));
+    openConfirmModal({
+      tier: "mutate",
+      title: copy.title,
+      consequence: copy.consequence,
+      confirmLabel: copy.confirmLabel,
+      busyLabel: copy.busyLabel,
+      onConfirm: function (ctl) { runCancel(site, d, ctl); },
+    });
+  }
+
+  function runCancel(site, d, ctl) {
+    api("POST", cancelPath(site.id, d.id), {}).then(function (r) {
+      if (r.status === 200) {
+        ctl.succeed();
+        var already = r.data && r.data.status === "already_cancelled";
+        toast({
+          kind: "success",
+          title: already ? "Already cancelled" : "Deployment cancelled",
+          body: "The build slot is free. Deploy again to rebuild.",
+        });
+        if (String(currentSiteId) === String(site.id)) loadSite(site.id, { quiet: true });
+        return;
+      }
+      var f = cancelFailure(r.status, r.data);
+      if (f.recovery === "retry") {
+        ctl.fail(f.message, "Try again", function (c) {
+          c.busy();
+          runCancel(site, d, c);
+        });
+      } else {
+        ctl.fail(f.message, "Refresh deployments", function () {
+          closeModal();
+          if (String(currentSiteId) === String(site.id)) loadSite(site.id);
+        });
+      }
     });
   }
 
@@ -19794,6 +19890,10 @@
     var actionBtn = action
       ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
       : "";
+    var cancel = cancelActionFor(d);
+    if (cancel) {
+      actionBtn += '<button type="button" class="btn btn-ghost btn-sm dep-cancel" data-dep-id="' + esc(d.id) + '">' + esc(cancel.label) + "</button>";
+    }
     // "Now live" keys off current_deployment_id equality (isCurrent), NOT status —
     // every history row reads status:"live", so status alone can't tell which one is
     // actually serving traffic. A rolled-back restore names itself.
@@ -23353,7 +23453,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 58 declared verbs have no entry here: they render
+    // 2 of the 59 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23379,6 +23479,7 @@
     "site.rolled_back": "rolled back a site",
     "site.content_secret_minted": "minted a site content-publish secret",
     "deployment.promoted": "promoted a deployment to production",
+    "deployment.cancelled": "cancelled a deployment",
     "webhook.created": "created a webhook",
     "webhook.updated": "updated a webhook",
     "webhook.deleted": "deleted a webhook",
@@ -31552,6 +31653,8 @@
       toastShape: toastShape,
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
+      cancelPath: cancelPath, cancelActionFor: cancelActionFor,
+      cancelConfirmCopy: cancelConfirmCopy, cancelFailure: cancelFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
       deployFailureClassPillHtml: deployFailureClassPillHtml,
       // cch-w28-bl: previewRow was NEVER exported, so the one test named for it

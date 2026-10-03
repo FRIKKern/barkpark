@@ -70,7 +70,11 @@ defmodule BarkparkCloud.Registry.Deployment do
       deployment view, with its `failure_reason`/`detail` as the writer's reason.
       `Sites.Deploy.active_production_deployment/1` uses the same three statuses
       as the index, so the static pipeline never waits behind a cancelled row.
-    * **Writers.** There is no operator cancel route. `cancelled` is written by
+    * **Writers.** The operator cancel route (`POST
+      /v1/sites/:id/deployments/:dep_id/cancel`, `Registry.operator_cancel_deployment/3`,
+      task-4187bcf6d0424cfc) is the one HUMAN writer. It stamps `failure_reason:
+      "operator_cancelled"` and only takes a `queued` row, or a container row
+      still `building`. `cancelled` is also written by
       the builder/agent fenced transition routes, by the unfenced
       `Registry.transition_deployment/2` (AutoDeployWorker's prebuilt refusal),
       by preview teardown/supersede/eviction, and by the active-index migrations'

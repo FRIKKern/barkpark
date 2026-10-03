@@ -1570,8 +1570,10 @@ defmodule BarkparkCloud.DeployLedger do
     * `in_flight` — `queued` / `building` / `pushing`: attempted, not settled.
       Its own cohort because "not failed yet" is not "succeeded".
     * `cancelled` — the fleet stopped it (an auto-deploy refusal, a preview
-      supersede or teardown, or a box filing the terminal). Never a human:
-      there is no human cancel path. Neither a failure nor a success.
+      supersede or teardown, or a box filing the terminal), or an operator did
+      (`POST …/deployments/:dep_id/cancel`, task-4187bcf6d0424cfc, stamped
+      `failure_reason: "operator_cancelled"`, so the two stay separable).
+      Neither a failure nor a success.
     * `residual` — attempted rows whose `status` this census does not name.
       `deployments.status` is a CHECK-less varchar, so the honest answer to a
       status nobody has taught the census about is a number that GOES UP —
@@ -2795,9 +2797,10 @@ defmodule BarkparkCloud.DeployLedger do
   still-waiting cohort this envelope publishes cannot contain one by
   construction (`dr-w11-bl-cancelled-rows-count-as-waiting`).
 
-  A `cancelled` row does NOT mean a person intervened. No human cancel path
-  exists — nothing in `cloud/lib` lets someone stop a deploy, and the console
-  ships no such affordance. Every producer is machine-driven
+  A `cancelled` row does NOT, by itself, mean a person intervened. Since
+  task-4187bcf6d0424cfc ONE human path exists, the operator cancel
+  (`Registry.operator_cancel_deployment/3`), and it always stamps
+  `failure_reason: "operator_cancelled"`. Every OTHER producer is machine-driven
   (`dr-w16-bl-cancelled-rows-rationale-is-wrong`):
 
     * `Sites.AutoDeployWorker.refuse/1` — the prebuilt-overwrite guard. The
@@ -2808,9 +2811,9 @@ defmodule BarkparkCloud.DeployLedger do
     * A build box filing `status: "cancelled"` on the fenced builder/agent
       transition route. Agent-token gated; a machine caller, never a person.
 
-  So the reason a cancelled row must not read as still-waiting is not "do not
-  accuse a user of their own action" — it is "do not report as content that has
-  not arrived yet a deploy the fleet itself refused to ship".
+  So the reason a cancelled row must not read as still-waiting is not only "do
+  not accuse a user of their own action". It is also "do not report as content
+  that has not arrived yet a deploy that somebody, fleet or operator, stopped".
 
   Every percentile is an INSEPARABLE node — the value cannot travel without its
   window width, its sample and its censored count:

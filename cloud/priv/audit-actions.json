@@ -27,6 +27,7 @@
     { "verb": "site.rolled_back", "label": "rolled back a site" },
     { "verb": "site.content_secret_minted", "label": "minted a site content-publish secret" },
     { "verb": "deployment.promoted", "label": "promoted a deployment to production" },
+    { "verb": "deployment.cancelled", "label": "cancelled a deployment" },
     { "verb": "webhook.created", "label": "created a webhook" },
     { "verb": "webhook.updated", "label": "updated a webhook" },
     { "verb": "webhook.deleted", "label": "deleted a webhook" },

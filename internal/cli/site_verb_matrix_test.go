@@ -214,6 +214,7 @@ var siteVerbParityArgs = map[string]func(t *testing.T) []string{
 	"status":      func(*testing.T) []string { return []string{matrixSiteID} },
 	"doctor":      func(*testing.T) []string { return []string{matrixSiteID} },
 	"rollback":    func(*testing.T) []string { return []string{matrixSiteID} },
+	"cancel":      func(*testing.T) []string { return []string{matrixSiteID, "dep-1"} },
 	"delete":      func(*testing.T) []string { return []string{matrixSiteID} },
 	"open":        func(*testing.T) []string { return []string{matrixSiteID, "--print-only"} },
 	"settings":    func(*testing.T) []string { return []string{matrixSiteID, "--theme", "fjord"} },

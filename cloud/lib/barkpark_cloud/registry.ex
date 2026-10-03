@@ -9874,6 +9874,112 @@ defmodule BarkparkCloud.Registry do
     updated
   end
 
+  # THE OPERATOR CANCEL (task-4187bcf6d0424cfc). The first HUMAN writer of
+  # `cancelled`: every other one is the fleet (an auto-deploy refusal, a preview
+  # supersede/teardown/eviction, or a box filing its terminal). The row says
+  # WHICH kind of cancel it is through `failure_reason`, so the ledger can still
+  # separate a person's intervention from the fleet's: the fleet's cancels are
+  # exactly the `cancelled` rows WITHOUT this reason.
+  @operator_cancel_reason "operator_cancelled"
+
+  @doc "The `failure_reason` an operator cancel stamps on the row."
+  @spec operator_cancel_reason() :: String.t()
+  def operator_cancel_reason, do: @operator_cancel_reason
+
+  @doc """
+  An OPERATOR cancels one of `site`'s deployments (`POST
+  /v1/sites/:id/deployments/:dep_id/cancel`). `cancelled` is terminal for the
+  row and frees the active slot at once (the cancel-frees contract in
+  `Registry.Deployment`'s moduledoc), so the same commit rebuilds as a NEW row.
+
+  WHAT CAN BE CANCELLED, and why not everything that is still moving:
+
+    * `queued`: nothing has started. Always cancellable.
+    * `building` on a CONTAINER site: the off-box builder holds the claim, and
+      its next fenced transition is refused by the graph (`cancelled` has no
+      outgoing edge), so the image is never handed to the agent. Cancellable.
+    * `building` on a static/node site, or `pushing` on any site:
+      `{:error, {:in_flight, status}}`. The work is running ON THE BOX
+      (`site-deploy.sh`, or the agent's switch), and nothing here can stop
+      it. Marking such a row cancelled could leave the box serving a release
+      the ledger calls cancelled. The honest answer is "wait for it to settle,
+      then redeploy".
+    * already `cancelled`: `{:ok, :already_cancelled, dep}`. Idempotent: no
+      write and no second terminal dispatch.
+    * `live` / `failed` / `deferred`: `{:error, {:illegal_transition, status}}`.
+      They are terminal, and the graph has no edge out of them.
+    * not this site's row, or not a UUID: `{:error, :not_found}`, the same
+      answer a wrong-team site gets (no existence leak).
+
+  The status check and the write happen under one `FOR UPDATE` lock, so a
+  builder transition racing the cancel is serialised by the row lock rather
+  than interleaved.
+  """
+  @spec operator_cancel_deployment(Site.t(), term(), String.t()) ::
+          {:ok, :cancelled | :already_cancelled, Deployment.t()}
+          | {:error, :not_found | {:illegal_transition, String.t()} | {:in_flight, String.t()}}
+  def operator_cancel_deployment(%Site{} = site, dep_id, actor) when is_binary(actor) do
+    case uuid_or_nil(dep_id) do
+      nil ->
+        {:error, :not_found}
+
+      uuid ->
+        result =
+          Repo.transaction(fn ->
+            from(d in Deployment,
+              where: d.id == ^uuid and d.site_id == ^site.id,
+              lock: "FOR UPDATE"
+            )
+            |> Repo.one()
+            |> operator_cancel_locked(site, actor)
+          end)
+
+        case result do
+          {:ok, {:cancelled, prior, %Deployment{} = updated}} ->
+            # POST-commit and edge-triggered, as on the fenced writers.
+            dispatch_deployment_terminal(prior, updated)
+            {:ok, :cancelled, updated}
+
+          {:ok, {:already_cancelled, %Deployment{} = dep}} ->
+            {:ok, :already_cancelled, dep}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+    end
+  end
+
+  defp operator_cancel_locked(nil, _site, _actor), do: Repo.rollback(:not_found)
+
+  defp operator_cancel_locked(%Deployment{status: "cancelled"} = dep, _site, _actor),
+    do: {:already_cancelled, dep}
+
+  defp operator_cancel_locked(%Deployment{status: status}, _site, _actor)
+       when status in ~w(live failed deferred),
+       do: Repo.rollback({:illegal_transition, status})
+
+  defp operator_cancel_locked(%Deployment{status: status} = dep, %Site{kind: kind}, actor)
+       when status == "queued" or (status == "building" and kind == "container") do
+    line = "cancelled by #{actor} — the slot is free; redeploy to build again"
+    entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+
+    dep
+    |> Deployment.transition_changeset(%{
+      status: "cancelled",
+      failure_reason: @operator_cancel_reason,
+      detail: line,
+      console: cap_console((dep.console || []) ++ [entry])
+    })
+    |> Repo.update()
+    |> case do
+      {:ok, updated} -> {:cancelled, status, updated}
+      {:error, cs} -> Repo.rollback(cs)
+    end
+  end
+
+  defp operator_cancel_locked(%Deployment{status: status}, _site, _actor),
+    do: Repo.rollback({:in_flight, status})
+
   # How many DISTINCT branches currently have an active preview on this site.
   defp active_preview_branch_count(site_id) do
     Deployment
@@ -10724,8 +10830,8 @@ defmodule BarkparkCloud.Registry do
   later is one whose driver never started. Cancelled rows are excluded by
   `d.status == "queued"` (a cancel writes `"cancelled"`), so nothing resurrects a
   build the fleet already refused — an auto-deploy refusal, a superseded or torn
-  down preview, or a box's terminal. There is no human cancel path
-  (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
+  down preview, a box's terminal, or (since task-4187bcf6d0424cfc) an operator's
+  cancel, stamped `failure_reason: "operator_cancelled"`.
 
   Being FOUND here is a re-attempt, not a cure: if the spawn keeps being refused
   the row stays `claim_epoch == 0` and comes back next sweep. Pass (0c) of
@@ -11375,9 +11481,9 @@ defmodule BarkparkCloud.Registry do
     # builder's claim (`queued_deploy_age_map/1` is that class's read-only
     # alarm), and failing a queue for being a queue would be a new defect.
     # `d.status == "queued"` also keeps an ALREADY-CANCELLED row (status
-    # "cancelled") out — nothing here resurrects or re-terminates one. Such a
-    # row was cancelled by the fleet, never by a person: no human cancel path
-    # exists (`dr-w16-bl-cancelled-rows-rationale-is-wrong`).
+    # "cancelled") out — nothing here resurrects or re-terminates one, whether
+    # the fleet cancelled it or an operator did (`operator_cancel_deployment/3`,
+    # stamped `failure_reason: "operator_cancelled"`).
     spawn_budget_before =
       DateTime.add(now, -(max_claims * deployment_stale_after_seconds()), :second)
 

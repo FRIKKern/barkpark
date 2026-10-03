@@ -1021,6 +1021,13 @@ const PIN = [
   { key: "FN|promoteFailure|03de19dd", verdict: "UNREVIEWED", copy: "Branch previews can't be promoted to production." },
   { key: "FN|promoteFailure|2daa1357", verdict: "UNREVIEWED", copy: "This deployment has no stored artifact and the site has no ..." },
   { key: "FN|promoteFailure|2374866a", verdict: "UNREVIEWED", copy: "Couldn't reach the control plane — check your connection." },
+  // task-4187bcf6d0424cfc: the operator cancel. The three code-keyed rows are
+  // AUTHORED against emitters that exist: `cancel_deployment/2` in router.ex
+  // answers 409 in_flight, 409 illegal_transition and 404 not_found.
+  { key: "FN|cancelFailure|6bac3c54", verdict: "AUTHORED", copy: "This build is already running on the box and can't be stoppe..." },
+  { key: "FN|cancelFailure|5858f254", verdict: "AUTHORED", copy: "This deployment already finished, so there is nothing to can..." },
+  { key: "FN|cancelFailure|70765884", verdict: "AUTHORED", copy: "This deployment is no longer there. Refresh to see the curre..." },
+  { key: "FN|cancelFailure|23f44774", verdict: "UNREVIEWED", copy: "The cancel didn't go through. Try again." },
   { key: "ARG|promoteFailure|friendly|30d6c7d4", verdict: "DELEGATED", copy: "The new deployment couldn't be created." },
   { key: "FN|siteRollbackFailure|7f75b122", verdict: "UNREVIEWED", copy: "This site can't be rolled back in place" },
   { key: "FN|siteRollbackFailure|dc702835", verdict: "UNREVIEWED", copy: "It rebuilds a fresh image on every deploy, so there's no pr..." },

@@ -858,20 +858,6 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "deliveries; no human caller. Flip: route re-tiered."
     },
     %{
-      code: "illegal_transition",
-      site: "router.ex POST /v1/builder/deployments/:id/transition",
-      reason:
-        "Machine-only: the builder token drives the deploy state machine; an illegal " <>
-          "edge is a builder-protocol answer. Flip: route re-tiered."
-    },
-    %{
-      code: "illegal_transition",
-      site: "router.ex POST /v1/agent/deployments/:id/transition",
-      reason:
-        "Machine-only: require_agent twin of the builder transition route; same " <>
-          "protocol answer to the agent runtime. Flip: route re-tiered."
-    },
-    %{
       code: "invalid_payload",
       site: "router.ex POST /v1/relay/chat-blocked/:barkpark_id",
       reason:
