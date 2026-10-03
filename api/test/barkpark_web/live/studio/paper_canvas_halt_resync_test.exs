@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.PaperCanvasHaltResyncTest do
 
   Repro: new paper → type five lines → Cmd+Z once. The local undo empties the
   body, the canvas sends the batch, the server refuses it with the D3 ratchet
-  ("a published paper cannot be hollowed out") — and the reply was a bare
+  ("a paper cannot be emptied back to a title alone") — and the reply was a bare
   `%{saved: false}`. The canvas kept showing an empty paper; storage kept the
   text; a reload "brought it back".
 

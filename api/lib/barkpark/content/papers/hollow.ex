@@ -41,10 +41,14 @@ defmodule Barkpark.Content.Papers.Hollow do
     * `message/0` — the hard stop for a hollow published-surface write.
     * `ratchet_message/0` — the canvas ratchet: an edit may not hollow OUT a
       paper that had content (fresh hollow papers stay freely editable).
+      It applies to every paper, published or not: papers publish in place,
+      so there is no unpublished state to exempt. The copy used to say "a
+      published paper", which promised a distinction the code never made;
+      owner ruling #55 (2026-10-03) kept the rule and fixed the words.
   """
 
   @message "This paper has a title but no content yet — add at least one body block."
-  @ratchet_message "This edit would remove the last content block — a published paper cannot be hollowed out to title-only."
+  @ratchet_message "This edit would remove the last content block. A paper cannot be emptied back to a title alone — keep at least one content block."
 
   # Block types whose contribution is their TEXT: they count as content only
   # when the recursively-flattened trimmed text is non-blank.
