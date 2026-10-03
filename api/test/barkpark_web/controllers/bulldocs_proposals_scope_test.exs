@@ -127,4 +127,87 @@ defmodule BarkparkWeb.BulldocsProposalsScopeTest do
     assert default_draft, "the proposal seeded Default's own draft twin"
     assert "d-prop" in block_ids(default_draft)
   end
+
+  # task-dbd897d8b3623175: the draft twin was looked up with NO scope, which
+  # resolves the dataset to Default's. In workspace B the paper's own draft was
+  # never found, so a second proposal re-seeded it and failed, and a same-slug
+  # Default draft was found and written instead.
+  describe "proposals on a non-Default workspace's own paper" do
+    setup %{ws_b: ws_b, proj_b: proj_b} do
+      scope = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+      for slug <- ["prop-b-own", "prop-b-src"] do
+        {:ok, _} =
+          Content.upsert_paper(
+            Barkpark.LabelFixtures.paper_attrs(%{
+              "slug" => slug,
+              "workspace_id" => ws_b.id,
+              "project_id" => proj_b.id,
+              "blocks" => [
+                %{
+                  "id" => "intro",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "B prose."}]
+                }
+              ]
+            }),
+            scope
+          )
+      end
+
+      Barkpark.LabelFixtures.exempt!(["prop-b-own", "prop-b-src"], @dataset)
+
+      raw = "prop-b-admin-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(raw, "workspace B admin", @dataset, ["admin"], ws_b.id)
+      %{token: raw}
+    end
+
+    defp propose_as(conn, token, slug, block_id, source) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> token)
+      |> put_req_header("content-type", "application/json")
+      |> post(propose_path(slug), body(block_id, source))
+    end
+
+    test "a second proposal lands in the same draft", %{conn: conn, token: token, ws_b: ws_b} do
+      first = propose_as(conn, token, "prop-b-own", "b-1", "prop-b-src")
+      assert first.status == 200, "first proposal: #{first.status} #{first.resp_body}"
+
+      second = propose_as(build_conn(), token, "prop-b-own", "b-2", "prop-b-src")
+      assert second.status == 200, "second proposal: #{second.status} #{second.resp_body}"
+
+      [draft] = rows("drafts.prop-b-own") |> Enum.filter(&(&1.workspace_id == ws_b.id))
+      assert "b-1" in block_ids(draft) and "b-2" in block_ids(draft)
+    end
+
+    test "a same-slug Default draft is never written", %{conn: conn, token: token} do
+      # Default holds its own paper of the same slug, with a draft seeded by an
+      # ingest-token proposal.
+      seed_default_paper!("prop-b-own")
+      seed_default_paper!("prop-b-dsrc")
+
+      ingest =
+        build_conn()
+        |> put_req_header("authorization", "Bearer barkpark-test-ingest-token")
+        |> put_req_header("content-type", "application/json")
+        |> post(propose_path("prop-b-own"), body("d-1", "prop-b-dsrc"))
+
+      assert json_response(ingest, 200)["applied_block_ids"] == ["d-1"]
+
+      before = rows("drafts.prop-b-own") |> Enum.filter(&(&1.workspace_id == default_ws()))
+      assert length(before) == 1, "fixture: Default's draft twin must exist"
+
+      first = propose_as(conn, token, "prop-b-own", "b-1", "prop-b-src")
+      assert first.status == 200
+      second = propose_as(build_conn(), token, "prop-b-own", "b-2", "prop-b-src")
+      assert second.status == 200
+
+      after_rows = rows("drafts.prop-b-own") |> Enum.filter(&(&1.workspace_id == default_ws()))
+
+      assert Enum.map(after_rows, &block_ids/1) == Enum.map(before, &block_ids/1),
+             "workspace B's proposal wrote into Default's draft"
+    end
+  end
+
+  defp default_ws, do: TenancyFixtures.default_workspace_id!()
 end
