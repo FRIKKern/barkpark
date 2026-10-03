@@ -274,7 +274,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           # a child that is already synced still re-runs to link its now-mirrored
           # parent. The issue create/PATCH stays idempotent (nothing changed → a
           # redundant no-op PATCH); the point of the re-run is the relations pass.
-          not relink?(opts) and Link.synced?(task_doc) ->
+          # A `restrip: true` job (owner ruling #11, `Github.RestripJob`) also
+          # bypasses it: the task has not moved, but its issue body was written
+          # before the body strip and must be re-PATCHed to the stripped shape.
+          not relink?(opts) and not restrip?(opts) and Link.synced?(task_doc) ->
             :ok
 
           true ->
@@ -1243,6 +1246,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp cfg, do: Application.get_env(:barkpark, @config_key, [])
 
   defp relink?(opts), do: opts[:relink] == true
+  defp restrip?(opts), do: opts[:restrip] == true
 
   defp relink_attempt(opts) do
     case opts[:relink_attempt] do
