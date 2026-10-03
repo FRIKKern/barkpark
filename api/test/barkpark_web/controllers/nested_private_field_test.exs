@@ -203,7 +203,7 @@ defmodule BarkparkWeb.NestedPrivateFieldTest do
       assert meta["secret"] == "NESTEDSECRET"
 
       body =
-        build_conn()
+        scoped_conn()
         |> bearer(@admin)
         |> query("filter[meta.secret]=NESTEDSECRET")
         |> json_response(200)
