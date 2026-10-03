@@ -396,8 +396,8 @@ defmodule Barkpark.PluginFreeBootTest do
           %{name: "slug", title: "Slug", type: "slug"},
           %{name: "client", title: "Client", type: "string"},
           %{
-            name: "status",
-            title: "Status",
+            name: "phase",
+            title: "Phase",
             type: "select",
             options: ["planning", "active", "completed", "archived"]
           },
