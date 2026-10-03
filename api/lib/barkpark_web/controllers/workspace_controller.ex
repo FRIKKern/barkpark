@@ -212,6 +212,12 @@ defmodule BarkparkWeb.WorkspaceController do
     with %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(slug),
          true <- TenancyAuth.workspace_admin?(token, workspace.id),
          {:ok, deleted} <- Tenancy.delete_workspace(workspace) do
+      # The teardown deleted this workspace's `shares` rows with raw SQL; the
+      # live registry is rebuilt from them only by `refresh/0`. Without it the
+      # share stayed live and a workspace created under the freed slug was
+      # anonymously readable (task-e7cd09d1fb989834). Called here, not inside
+      # Tenancy, because kernel -> sharing is a refused boundary edge.
+      Barkpark.Sharing.refresh()
       json(conn, %{workspace: render_workspace(deleted), deleted: true})
     else
       # Unknown slug (get returns nil) OR delete_workspace resolving :not_found

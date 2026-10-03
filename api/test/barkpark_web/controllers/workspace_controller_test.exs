@@ -576,6 +576,40 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
   end
 
   describe "DELETE /api/workspaces/:workspace_slug" do
+    # The teardown deletes `shares` rows with raw SQL; the in-memory registry
+    # must be rebuilt, or a workspace created under the freed slug inherits
+    # the deleted one's anonymous share (task-e7cd09d1fb989834).
+    test "a deleted workspace's share leaves the live registry; another's stays", %{conn: conn} do
+      raw_admin = "ws-admin-#{System.unique_integer([:positive])}"
+      {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
+
+      {:ok, target} =
+        Tenancy.create_workspace_with_owner(%{name: "Shared WS"}, admin_token(raw_admin))
+
+      {:ok, target_proj} = Tenancy.create_project(target, %{slug: "shared-proj", name: "P"})
+
+      {:ok, other} =
+        Tenancy.create_workspace_with_owner(%{name: "Other Shared WS"}, admin_token(raw_admin))
+
+      {:ok, other_proj} = Tenancy.create_project(other, %{slug: "other-shared", name: "P"})
+
+      Barkpark.SharingFixtures.plant_shares!(
+        "#{target.slug}/#{target_proj.slug}/production:docs:read;" <>
+          "#{other.slug}/#{other_proj.slug}/production:docs:read"
+      )
+
+      assert Barkpark.Sharing.shared?(target.slug, target_proj.slug, "production", :docs)
+
+      resp =
+        conn
+        |> authed(raw_admin)
+        |> delete("/api/workspaces/#{target.slug}")
+
+      assert resp.status == 200
+      refute Barkpark.Sharing.shared?(target.slug, target_proj.slug, "production", :docs)
+      assert Barkpark.Sharing.shared?(other.slug, other_proj.slug, "production", :docs)
+    end
+
     test "200 for an admin — deletes the workspace and it is gone from the DB", %{conn: conn} do
       raw_admin = "ws-admin-#{System.unique_integer([:positive])}"
       {:ok, _admin} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
