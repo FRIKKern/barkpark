@@ -95,7 +95,9 @@ defmodule BarkparkWeb.MutateTaskLargeDescriptionTest do
       "kind" => "task",
       "lifecycle_status" => "open",
       "priority" => 2,
-      "acceptance_criteria" => [%{"criterion" => "the description reads back intact", "met" => false}]
+      "acceptance_criteria" => [
+        %{"criterion" => "the description reads back intact", "met" => false}
+      ]
     }
     |> Map.merge(LabelFixtures.weighted_labels())
     |> Map.merge(extra)
