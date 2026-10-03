@@ -2626,6 +2626,10 @@ defmodule BarkparkWeb.Router do
     # Expectation reverse view (lvw-t8): tasks that cite the doc, with their
     # acceptance-criteria state. Three segments — never shadowed by `/graph/:id`.
     get("/graph/:id/tasks", TasksController, :graph_tasks)
+
+    # The bearer describes itself: permissions, expiry and workspace seats
+    # (task-7d4d405e0ee4bcbf) — what `bp whoami -o json` prints as memberships.
+    get("/tokens/current", TokenIdentityController, :show)
   end
 
   # Airdrop-grant grantee surface (JSON) — CLAIM + MINE. The authenticated

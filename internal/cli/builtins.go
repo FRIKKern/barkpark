@@ -307,6 +307,20 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		tierVal = authTier
 	}
 
+	// The token's workspace seats (GET /v1/tokens/current). Permissions and
+	// seats are separate axes: an `admin` token with no seat answers 403
+	// not_a_member on every workspace route, and this is where that shows.
+	// null when there is no token, the server is unreachable, or it predates
+	// the route — "could not measure" is not "no seats".
+	var identity *tokenIdentity
+	var membershipsVal any
+	if tokenPresent && reachable {
+		if id, ierr := fetchTokenIdentity(ctx.Server, ctx.Token); ierr == nil {
+			identity = id
+			membershipsVal = membershipsJSON(id.Memberships)
+		}
+	}
+
 	// THE ENV-SHADOWS-CONFIG WARNING. Three conditions, ALL required:
 	//   1. the token came from an env var (prov.fromEnv),
 	//   2. a DIFFERENT saved/repo-file token for the SAME server sits under it
@@ -419,6 +433,7 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 		"reachable":     reachable,
 		"server_name":   serverName,
 		"auth_tier":     tierVal,
+		"memberships":   membershipsVal,
 		"prod":          prod,
 		"server_time":   meta.ServerTime,
 		"api_version_range": map[string]string{
@@ -503,6 +518,9 @@ func runWhoami(out *writer, g globals, ctx manifest.Context, prov tokenProvenanc
 	}
 	if tokenPresent {
 		out.outf("token:     set (%s)", prov.describe())
+		if identity != nil {
+			out.outf("%s", membershipsLine(identity.Memberships))
+		}
 	} else {
 		out.outf("token:     none — anonymous")
 	}

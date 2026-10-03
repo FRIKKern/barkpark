@@ -450,6 +450,27 @@ defmodule Barkpark.Content.Errors do
         "This is a MEMBERSHIP check, not a permission tier: sign in as — or send a token belonging to — a member of this workspace. A browser session authenticates on any route that reads the session cookie, including the scoped media writes — no data-token is required for those."
     }
 
+  # The same membership refusal when the caller is an API TOKEN
+  # (task-7d4d405e0ee4bcbf). The generic copy above sent an operator hunting
+  # for a permission tier while the token simply had no `workspace_memberships`
+  # row — the guerrilla admin credential sat in exactly that state after a
+  # hand-written insert, and every workspace route answered a bare
+  # `not_a_member`. This arm names the workspace (the caller already sent its
+  # slug in the URL, so nothing is disclosed) and the way to get a seated token.
+  # `code`, `status` and `reason` are byte-identical to the arm above.
+  defp build({:error, {:token_not_a_member, slug}}) when is_binary(slug),
+    do: %{
+      code: "forbidden",
+      message: ~s(this token has no membership in workspace "#{slug}"),
+      status: 403,
+      reason: "not_a_member",
+      hint:
+        "Tokens minted with `bp token create` are seated in their workspace automatically; " <>
+          "a token minted another way may have no seat. Ask an admin of \"#{slug}\" to mint " <>
+          "you a token there (`bp -w #{slug} token create …`), or check which workspaces " <>
+          "this token holds a seat in with `bp whoami -o json` (memberships)."
+    }
+
   # The OTHER arm of the same two-arm predicate, split out by
   # task-d63f91a7f817b4a3. `ResolveWorkspace` used to render EVERY refusal as
   # `:forbidden_membership`, so a caller that holds a seat in the workspace but

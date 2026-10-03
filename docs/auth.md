@@ -15,10 +15,11 @@ hierarchy: `docs/api-v1.md` §1a) by two facts that must agree:
 - `api_tokens.workspace_id` — the workspace the token belongs to.
 - a `workspace_memberships` row — the principal is a member of it.
 
-Content/data requests carry both in the path
+Requests carry both in the path
 (`/w/:workspace_slug/p/:project_slug/v1/data/...`); tenancy is enforced
 **before** any permission check: slug unresolved → `404 not_found`; resolved but
-no `workspace_memberships` row for the token → `403 forbidden`; member → on to
+no `workspace_memberships` row for the token → `403 forbidden`, reason
+`not_a_member`, naming the workspace (`bp whoami` lists seats); member → on to
 permission checks. Flat paths (`/v1/data/:dataset/*`, …) resolve to the `"Default"` scope.
 
 `POST …/v1/data/mutate/:dataset` enforces `write` **after** tenancy: a member
@@ -40,7 +41,7 @@ lacking `write` gets `403`; reads stay available.
 
 ### Hierarchy — permission ⟂ membership
 
-Orthogonal axes: `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
+`admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
 `ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
 encrypted `client_secret`) and confers **no membership anywhere**.
 
@@ -55,16 +56,15 @@ unify (`StudioLiveSharesTest` pins it).
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
-*Default*, so every tenant's admin lands there: a `200` against the wrong
-tenant. The mirror (gate on membership, act instance-wide) is the
+*Default*, so every tenant's admin gets a `200` against the wrong tenant. The mirror (gate on membership, act instance-wide) is the
 same defect. A flat admin route pins the
 GLOBAL tier explicitly (`SecretController.resolve_scope/1` → `:global`, never
 the assign); acting per-workspace needs a slug-resolving route proving
 `workspace_admin?/2`.
 
 `admin` must never enter the hardcoded `chat` literal: `RequireChatAccess`
-resolves it to `:global`, stamping `owner_workspace_id = NULL` — the
-tenant-less-session bug (`ChatTokenController`).
+resolves it to `:global`, stamping `owner_workspace_id = NULL`
+(`ChatTokenController`).
 
 **Tier 0 — instance operator** (`RequirePlatformOperator`): an env allowlist
 over the seven instance-global route groups; `admin` NECESSARY, allowlist
@@ -101,6 +101,6 @@ bites. `DeriveWorkspaceFromToken` is no-op-if-set, so placing it *after*
 
 `barkpark-dev-token` (seeded by the `demo` profile; `clean` mints none) carries
 `["read","write","admin"]` AND a `Default` `workspace_memberships` row, so it
-passes every gate here.
+passes every gate.
 **MUST rotate before prod** — starter templates bake it into `BARKPARK_TOKEN`
 and `BARKPARK_SERVER_TOKEN`; replace **both**.

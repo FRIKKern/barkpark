@@ -63,6 +63,7 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   import Plug.Conn
 
   alias Barkpark.Access
+  alias Barkpark.Auth.ApiToken
   alias Barkpark.Content.CallerContext
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -192,6 +193,11 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       # so rendering the second as the first pointed an operator at widening
       # workspace membership, the more dangerous of the two fixes. Same 403 and
       # same "forbidden" code on both arms; only `reason`/message/hint differ.
+      # An API token with no seat here: name the workspace and the remedy
+      # (task-7d4d405e0ee4bcbf). Same 403 / `forbidden` / `not_a_member`.
+      decision == {:error, :not_a_member} and match?(%ApiToken{}, token) ->
+        halt_envelope(conn, {:error, {:token_not_a_member, workspace.slug}})
+
       true ->
         halt_envelope(conn, {:error, refusal_envelope(decision)})
     end

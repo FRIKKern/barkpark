@@ -261,7 +261,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"PUT", "/api/workspaces/:*/media/blob/:*"} =>
       "bp cloud workspace blob push — internal/cli putOneBlob",
     {"POST", "/v1/tokens/elevated"} =>
-      "bp token create --permissions …write|admin — internal/cli runTokenCreate"
+      "bp token create --permissions …write|admin — internal/cli runTokenCreate",
+    {"GET", "/v1/tokens/current"} => "bp whoami — internal/cli fetchTokenIdentity"
   }
 
   # Routes that SHOULD carry a `bp` verb and do not. This is the census from
