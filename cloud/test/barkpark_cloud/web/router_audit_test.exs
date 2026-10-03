@@ -1247,7 +1247,16 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       state = BarkparkCloud.GitHub.install_state(team, user.id)
 
       conn =
-        call(:post, "/v1/github/installations", %{installation_id: "4242", state: state}, token)
+        call(
+          :post,
+          "/v1/github/installations",
+          %{
+            installation_id: "4242",
+            state: state,
+            code: BarkparkCloud.GitHub.Fake.user_code_for(["4242"])
+          },
+          token
+        )
 
       assert conn.status == 201
 
