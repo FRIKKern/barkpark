@@ -1353,6 +1353,41 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     Path.field_at(fields, path)
   end
 
+  # THE EDITOR CLAMP FOR A NON-EDITING VIEWER (task-df2ea2e004ff4caf).
+  #
+  # `PaneBuilder` builds the editor straight off the stored `%Document{}`:
+  # `doc` and `form` (`Content.doc_to_form/2`) carry every field, private ones
+  # included. An anonymous mount of a `:docs`-shared desk grades `:share_read`
+  # and gets the FULL Studio UI, so a `private` / `owner_only` / `readable_by`
+  # field rendered into the form for anyone holding the share — while the same
+  # document through the share's JSON door was redacted.
+  #
+  # Same predicate as the paper reader clamp (`Paper.write_denied?/1`): a
+  # socket the write tier denies is a viewer, and its document goes through the
+  # one field-visibility chokepoint (`Envelope.redact/4`) before the form is
+  # derived from it. A write-capable socket keeps the raw read, because an
+  # editor's form must hold every field it will save back.
+  defp redact_editor_for_viewer(%{doc: %{} = doc} = editor, socket) do
+    if Paper.write_denied?(socket) do
+      schema = editor[:schema]
+
+      content =
+        Content.Envelope.redact(
+          doc.content || %{},
+          schema,
+          Content.CallerContext.from_conn(socket),
+          Map.get(doc, :owner_id)
+        )
+
+      doc = %{doc | content: content}
+      %{editor | doc: doc, form: (schema && Content.doc_to_form(doc, schema)) || %{}}
+    else
+      editor
+    end
+  end
+
+  defp redact_editor_for_viewer(editor, _socket), do: editor
+
   @doc false
   def rebuild_panes(socket) do
     {panes, editor} =
@@ -1362,6 +1397,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         scope: ScopeHelpers.scope_opts(socket),
         scope_prefix: socket.assigns[:scope_prefix] || ""
       )
+
+    editor = redact_editor_for_viewer(editor, socket)
 
     new_schema = editor && editor[:schema]
     old_schema = socket.assigns[:editor_schema]
