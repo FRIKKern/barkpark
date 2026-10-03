@@ -9402,13 +9402,11 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
           {:error, :mint_requires_admin} ->
-            Auth.forbidden(conn,
-              required: "admin",
-              scope: "team",
-              detail:
-                "binding a site to content MINTS a public-read token on the box, and minting " <>
-                  "a box credential needs a team admin. Ask an admin to create this site."
-            )
+            detail =
+              "binding a site to content MINTS a public-read token on the box, and minting " <>
+                "a box credential needs a team admin. Ask an admin to create this site."
+
+            Auth.forbidden(conn, required: "admin", scope: "team", detail: detail)
 
           # site-spawner W8 (charter D73): the binding was READ and it is empty —
           # the site's OWN token sees nothing at workspace/project/dataset/type.
@@ -9572,14 +9570,12 @@ defmodule BarkparkCloud.Web.Router do
         # ability check alone let every member mint in any scope on the box.
         rebinding? and may_grant? and
             not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-          Auth.forbidden(conn,
-            required: "admin",
-            scope: "team",
-            detail:
-              "repointing a site's content binding MINTS a public-read token on the box, and " <>
-                "minting a box credential needs a team admin. theme, doc_type and " <>
-                "prebuilt_enabled stay open to members."
-          )
+          detail =
+            "repointing a site's content binding MINTS a public-read token on the box, and " <>
+              "minting a box credential needs a team admin. theme, doc_type and " <>
+              "prebuilt_enabled stay open to members."
+
+          Auth.forbidden(conn, required: "admin", scope: "team", detail: detail)
 
         rebinding? and not may_grant? ->
           json(conn, 403, %{
@@ -16548,7 +16544,9 @@ defmodule BarkparkCloud.Web.Router do
   # already serves something else in the team's zone. Returns nil (proceed) or a
   # halted conn. A lookup that fails is a refusal, never a pass.
   defp member_dns_refusal(conn, token, zone_id, domain, origin) do
-    if Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) do
+    team = conn.assigns.current_team
+
+    if team && Authz.team_admin?(conn.assigns.current_user, team) do
       nil
     else
       case Cloudflare.lookup_dns_name(token, zone_id, domain) do
@@ -17306,12 +17304,11 @@ defmodule BarkparkCloud.Web.Router do
     if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
   end
 
-  # site-spawner W7 (charter D62): a node site is content-bound like a static one,
-  # so it mints the SAME public-read token over the SAME scoped route.
   # Would `mint_site_read_token/3` mint? Exactly when it would take its middle
   # arm: a static/node site, a full binding triple, and no BYO read_token. Only
   # then does the caller need to be a team admin (owner ruling #27).
-  defp require_admin_to_mint(conn, team, %{kind: kind} = attrs) when kind in ["static", "node"] do
+  defp require_admin_to_mint(conn, %Team{} = team, %{kind: kind} = attrs)
+       when kind in ["static", "node"] do
     mints? =
       not is_binary(attrs[:read_token]) and is_binary(attrs[:bootstrap_workspace]) and
         is_binary(attrs[:bootstrap_project]) and is_binary(attrs[:bootstrap_dataset])
@@ -17323,6 +17320,8 @@ defmodule BarkparkCloud.Web.Router do
 
   defp require_admin_to_mint(_conn, _team, _attrs), do: :ok
 
+  # site-spawner W7 (charter D62): a node site is content-bound like a static one,
+  # so it mints the SAME public-read token over the SAME scoped route.
   defp mint_site_read_token(bp, %{kind: kind} = attrs, slug) when kind in ["static", "node"] do
     ws = attrs[:bootstrap_workspace]
     proj = attrs[:bootstrap_project]
