@@ -2348,8 +2348,9 @@ defmodule BarkparkCloud.Accounts do
   end
 
   @doc """
-  Remove `user` from `team` and evict their live sessions (Coolify's
-  `RevokeUserTeamTokens` analogue). Guards the last-owner invariant: the sole
+  Remove `user` from `team`, evict their live sessions (Coolify's
+  `RevokeUserTeamTokens` analogue) and withdraw the invitations they sent to
+  `team` that nobody has accepted yet. Guards the last-owner invariant: the sole
   owner cannot be removed. `{:ok, :removed}` | `{:error, :not_found | :last_owner}`.
 
   The UNAUTHORIZED primitive — the member-management route calls the actor-aware
@@ -2380,8 +2381,34 @@ defmodule BarkparkCloud.Accounts do
       # PAT kept authorizing reads and writes on a team they had left. Scoped to
       # this team — PATs they hold elsewhere are untouched.
       {:ok, _} = revoke_team_pats(team, user)
+      # …and the invitations they sent to THIS team stop being redeemable. An
+      # open invite is a grant the inviter is still making; once they are off
+      # the team, nobody should be able to join on their word.
+      {_revoked, _} = revoke_invitations_sent_by(team, user, nil)
       :removed
     end)
+  end
+
+  # Delete `inviter`'s still-unaccepted invitations to `team` whose role
+  # `role` could not grant today. `role = nil` means the inviter is gone from
+  # the team, so every open invite they sent goes. A demotion passes the NEW
+  # role: owner→admin drops their owner-role invites, admin→member drops all of
+  # them, because a member may invite nobody (`can_grant?/2`). Accepted rows
+  # are history and stay. Returns `{count, nil}` from `Repo.delete_all/1`.
+  defp revoke_invitations_sent_by(%Team{id: tid}, %User{id: uid}, role) do
+    ids =
+      from(i in TeamInvitation,
+        where: i.team_id == ^tid and i.invited_by_id == ^uid and is_nil(i.accepted_at),
+        select: {i.id, i.role}
+      )
+      |> Repo.all()
+      |> Enum.reject(fn {_id, inv_role} -> role && can_grant?(role, inv_role) end)
+      |> Enum.map(&elem(&1, 0))
+
+    case ids do
+      [] -> {0, nil}
+      ids -> Repo.delete_all(from(i in TeamInvitation, where: i.id in ^ids))
+    end
   end
 
   @doc """
@@ -2432,7 +2459,8 @@ defmodule BarkparkCloud.Accounts do
   Change `user`'s role in `team` to `new_role`, guarding the last-owner
   invariant on a downgrade away from owner. On ANY demotion — a drop in
   `TeamMembership.rank/1`, owner→admin included — the user's sessions are
-  evicted and the PATs the new role could no longer mint are revoked, so a
+  evicted, the PATs the new role could no longer mint are revoked, and the
+  open invitations the new role could no longer send are withdrawn, so a
   demoted user loses elevated access immediately (mirrors Coolify revoking
   tokens on a role change).
   `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
@@ -2483,6 +2511,9 @@ defmodule BarkparkCloud.Accounts do
       if demoted? do
         {:ok, _} = delete_user_session_tokens(user)
         {:ok, _} = revoke_team_pats_exceeding_role(team, user, new_role)
+        # The same rule for the invitations they sent: an open invite the new
+        # role could not send any more is withdrawn (task-0cf611238d4ad597 CQ4).
+        {_revoked, _} = revoke_invitations_sent_by(team, user, new_role)
       end
 
       updated
