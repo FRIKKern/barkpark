@@ -148,7 +148,7 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
     # below is the fence ADMITTING a legitimate read, not an accident.
     assert {:ok, _} = Content.get_document(qid, "quiz", @dataset, default_scope)
 
-    {:ok, _view, html} = live(build_conn(), "/quiz/host/#{pin}?quiz=#{qid}")
+    {:ok, _view, html} = live(build_conn(), host_url(pin, "#{qid}"))
 
     assert html =~ prompt
     assert Quiz.state(pin).question.prompt == prompt
@@ -199,7 +199,7 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
            "workspace B's stored quiz must carry the inline answer key — otherwise " <>
              "\"the answer did not leak\" is vacuous"
 
-    {:ok, _view, html} = live(build_conn(), "/quiz/host/#{pin}?quiz=#{b_qid}")
+    {:ok, _view, html} = live(build_conn(), host_url(pin, "#{b_qid}"))
 
     refute html =~ b_prompt,
            "CROSS-TENANT LEAK: workspace B's private quiz rendered on an anonymous projector"
@@ -245,7 +245,7 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
     assert both_exist?,
            "both tenants must really hold a row at #{qid} — the collision is the fixture"
 
-    {:ok, _view, html} = live(build_conn(), "/quiz/host/#{pin}?quiz=#{qid}")
+    {:ok, _view, html} = live(build_conn(), host_url(pin, "#{qid}"))
 
     refute html =~ b_prompt, "CROSS-TENANT LEAK: B's colliding row won the resolve"
     refute html =~ b_answer_key, "CROSS-TENANT ANSWER LEAK: B's answer key reached the body"
@@ -275,7 +275,7 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
     assert draft.content["prompt"] == draft_prompt,
            "the draft row must really carry the unpublished prompt — else the refute is vacuous"
 
-    {:ok, _view, html} = live(build_conn(), "/quiz/host/#{pin}?quiz=drafts.#{qid}")
+    {:ok, _view, html} = live(build_conn(), host_url(pin, "drafts.#{qid}"))
 
     refute html =~ draft_prompt,
            "DRAFT LEAK: an unpublished quiz rendered on the anonymous projector"
@@ -287,6 +287,12 @@ defmodule BarkparkWeb.QuizHostTenancyTest do
   end
 
   # ── Helpers ───────────────────────────────────────────────────────────────
+
+  # Owner ruling #23: `?quiz=` binds only with a Studio host link, so every
+  # fence above is exercised WITH a valid link — the tenancy and perspective
+  # fences must hold even for a caller the link admits.
+  defp host_url(pin, qid),
+    do: "/quiz/host/#{pin}?quiz=#{qid}&host=#{Quiz.HostLink.sign(qid)}"
 
   # The REAL schema the plugin registers — `visibility: "private"`, because the
   # doc stores the answer inline. Registered PER-WORKSPACE: schema rows are

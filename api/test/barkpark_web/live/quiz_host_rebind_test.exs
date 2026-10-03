@@ -32,6 +32,11 @@ defmodule BarkparkWeb.QuizHostRebindTest do
   defp browser(token),
     do: scoped_conn() |> Plug.Test.init_test_session(%{"_csrf_token" => token})
 
+  # Owner ruling #23: binding needs a Studio host link. The hijacker holds a
+  # VALID link for its own quiz too, so this still tests PIN ownership.
+  defp link(pin, qid),
+    do: "/quiz/host/#{pin}?quiz=#{qid}&host=#{Quiz.HostLink.sign(qid)}"
+
   defp bound_quiz(pin) do
     Quiz.Bridge.bindings()
     |> Enum.find_value(fn {quiz_id, pins} -> if Map.has_key?(pins, pin), do: quiz_id end)
@@ -39,13 +44,13 @@ defmodule BarkparkWeb.QuizHostRebindTest do
 
   test "another browser cannot swap a live room's quiz; the host can", %{pin: pin} do
     host = session_token()
-    {:ok, _host, _} = live(browser(host), "/quiz/host/#{pin}?quiz=quiz-host-a")
+    {:ok, _host, _} = live(browser(host), link(pin, "quiz-host-a"))
     assert bound_quiz(pin) == "quiz-host-a"
 
-    {:ok, _player, _} = live(browser(session_token()), "/quiz/host/#{pin}?quiz=quiz-hijack")
+    {:ok, _player, _} = live(browser(session_token()), link(pin, "quiz-hijack"))
     assert bound_quiz(pin) == "quiz-host-a", "a second browser swapped the live room's quiz"
 
-    {:ok, _host_again, _} = live(browser(host), "/quiz/host/#{pin}?quiz=quiz-host-b")
+    {:ok, _host_again, _} = live(browser(host), link(pin, "quiz-host-b"))
     assert bound_quiz(pin) == "quiz-host-b", "the host itself must still be able to rebind"
   end
 end
