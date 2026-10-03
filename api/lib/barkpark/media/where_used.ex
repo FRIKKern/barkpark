@@ -90,16 +90,31 @@ defmodule Barkpark.Media.WhereUsed do
 
   def referrers(%MediaFile{path: nil}), do: %{count: 0, sample: []}
 
-  def referrers(%MediaFile{} = file), do: file |> delivery_path() |> scan()
+  # A MediaFile carries its tenant: the census is confined to THAT workspace
+  # (plus the shared NULL-workspace layer) — see `scope_to_owner_tenant/2`.
+  def referrers(%MediaFile{} = file),
+    do: file |> delivery_path() |> scan(Map.get(file, :workspace_id))
 
-  def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan()
+  # A bare path has no tenant to confine to: the legacy all-tenant read.
+  def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan(nil)
 
   @doc """
   True when at least one published document references the blob.
   """
   def referenced?(file_or_path), do: referrers(file_or_path).count > 0
 
-  defp scan(url) do
+  # TENANT, NOT DATASET (task-00a41cec5455bc91). The scan stays cross-DATASET on
+  # purpose (moduledoc: the blob keyspace is flat), but it used to be
+  # cross-WORKSPACE too: a `DELETE` from workspace A answered its 409 with the
+  # doc ids, types and titles of ANOTHER tenant's pages that hotlinked the blob's
+  # public URL, and that tenant's reference counted toward — and blocked — A's
+  # delete of its own blob. The census now covers the blob's own workspace plus
+  # the shared NULL-workspace layer (`scope_to_workspace_including_global/3`, the
+  # canonical clause; a nil workspace keeps the legacy all-tenant read).
+  defp scope_to_owner_tenant(query, workspace_id),
+    do: Barkpark.Content.Scope.scope_to_workspace_including_global(query, workspace_id, nil)
+
+  defp scan(url, workspace_id) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
     # JSON. `url` is a server-built string (a literal prefix plus the row's own
     # stored `path`), never caller text, but it is still bound as a PARAMETER so
@@ -118,6 +133,7 @@ defmodule Barkpark.Media.WhereUsed do
           title: d.title
         }
       )
+      |> scope_to_owner_tenant(workspace_id)
 
     count = Repo.aggregate(query, :count)
     sample = Repo.all(from(q in subquery(query), limit: @sample_limit))
@@ -189,9 +205,10 @@ defmodule Barkpark.Media.WhereUsed do
   CALLER's own log records the choice too.
 
   Deliberately logs IDENTIFIERS ONLY — the blob path, the referrer count, the
-  sampled `doc_id`s and the actor label. The census is cross-dataset and
-  cross-workspace by design (see `scan/1`), so logging document TITLES or bodies
-  here would spill another tenant's content into a shared log file.
+  sampled `doc_id`s and the actor label. The census is cross-dataset by design
+  and includes the shared NULL-workspace layer (see `scan/2`), so logging
+  document TITLES or bodies here would still spill content beyond the deleting
+  dataset into a shared log file.
 
   Returns `%{forced: true, referencedByCount: count}`.
   """
