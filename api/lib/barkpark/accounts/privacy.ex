@@ -28,15 +28,17 @@ defmodule Barkpark.Accounts.Privacy do
   @erased_domain "erased.invalid"
 
   @doc """
-  Redact the `actor_label` of rows written by a since-ERASED user.
+  Resolve the `actor_label` of `"user"` rows from the account, at READ time.
 
-  A signed-in user's writes and paper views stamp `actor_label` with their
-  EMAIL on `revisions` and `paper_access_log`. Both are append-only by design
-  (the history trail; the 90-day access trail), so erasure cannot rewrite the
-  stored rows — but the subject's email must not stay READABLE. Every read that
-  serves those rows maps them through here: a `"user"` actor whose account has
-  been erased is shown under its pseudonymised account email. Any other row —
-  a live user, a token, an anonymous reader — is returned unchanged.
+  Since owner ruling #32 item 1 (2026-10-03) a signed-in user's writes and paper
+  views stamp `revisions` / `paper_access_log` with the user id only — no email
+  at rest. Rows written before that still hold the email they were stamped
+  with, and both tables are append-only (the history trail; the 90-day access
+  trail), so erasure cannot rewrite them. Every read that serves those rows
+  maps them through here: a `"user"` actor is shown under its account's
+  CURRENT email — the pseudonymised one once the account is erased, so an old
+  stamp never stays readable. Any other row (a token, a share, an anonymous
+  reader) and a user row whose account no longer exists are returned unchanged.
 
   Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
   `:actor_label`. One query, however many rows.
@@ -54,28 +56,25 @@ defmodule Barkpark.Accounts.Privacy do
       |> Enum.uniq()
       |> Enum.flat_map(fn id -> List.wrap(Repo.uuid_or_nil(id)) end)
 
-    erased =
+    emails =
       case ids do
         [] ->
           %{}
 
         ids ->
-          from(u in User,
-            where: u.id in ^ids and like(u.email, ^("%@" <> @erased_domain)),
-            select: {u.id, u.email}
-          )
+          from(u in User, where: u.id in ^ids, select: {u.id, u.email})
           |> Repo.all()
           |> Map.new()
       end
 
-    if erased == %{} do
+    if emails == %{} do
       rows
     else
       Enum.map(rows, fn row ->
         with "user" <- Map.get(row, :actor_kind),
              id when is_binary(id) <- Map.get(row, :actor_id),
-             {:ok, pseudonym} <- Map.fetch(erased, id) do
-          Map.put(row, :actor_label, pseudonym)
+             {:ok, email} <- Map.fetch(emails, id) do
+          Map.put(row, :actor_label, email)
         else
           _ -> row
         end
