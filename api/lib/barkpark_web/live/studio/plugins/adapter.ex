@@ -40,6 +40,16 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
 
   @v2_types ~w(composite arrayOf codelist localizedText)
 
+  # [whole-form-autosave] task-cb60c4bab77fbd06. The inputs inside an array,
+  # composite or localized-text field carry NO phx-change of their own. When
+  # the binding sits on the input, LiveView serializes ONLY that input
+  # (view.js `pushInput` -> `serializeForm(form, opts, [inputEl.name])`), so
+  # typing in the second row of `keywords: [alpha, beta, gamma]` posted just
+  # `doc[keywords][1]` and the save stored `[betaX]` — every other row gone.
+  # The Studio editor form already binds `phx-change="autosave"`, which posts
+  # the whole form, rows and subfields included.
+  @structured_on_change nil
+
   @doc """
   Returns `true` if `field` is a v2 plugin field type that this adapter
   handles. Accepts string-keyed maps (the on-disk shape from
@@ -78,7 +88,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           value: ensure_map(value),
           errors: errors_for(assigns, name),
           warnings: warnings_for(assigns, name),
-          on_change: "autosave",
+          on_change: @structured_on_change,
           plugin_name: plugin,
           path: path,
           # Picker context for reference / image subfields (Gyldendal E1.6).
@@ -93,7 +103,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           value: ensure_list(value),
           errors: errors_for(assigns, name),
           warnings: warnings_for(assigns, name),
-          on_change: "autosave",
+          on_change: @structured_on_change,
           on_reorder: "array_op",
           plugin_name: plugin,
           path: path,
@@ -118,7 +128,7 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           field: parsed,
           value: ensure_map(value),
           errors: errors_for(assigns, name),
-          on_change: "autosave",
+          on_change: @structured_on_change,
           path: path
         })
     end
