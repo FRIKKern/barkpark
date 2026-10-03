@@ -1883,12 +1883,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         {Barkpark.Plugins.Sheets.Session.topic(
            doc.doc_id,
            socket.assigns.dataset,
-           doc.workspace_id
+           doc
          ),
          Barkpark.Plugins.Sheets.Session.presence_topic(
            doc.doc_id,
            socket.assigns.dataset,
-           doc.workspace_id
+           doc
          )}
       else
         {nil, nil}

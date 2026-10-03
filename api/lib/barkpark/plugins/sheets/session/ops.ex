@@ -1776,7 +1776,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
 
     Phoenix.PubSub.broadcast(
       Barkpark.PubSub,
-      Session.topic(state.slug, state.dataset, state.workspace_id),
+      Session.topic(state.slug, state.dataset,
+        workspace_id: state.workspace_id,
+        project_id: state.project_id
+      ),
       {:sheets_op, payload}
     )
   end
