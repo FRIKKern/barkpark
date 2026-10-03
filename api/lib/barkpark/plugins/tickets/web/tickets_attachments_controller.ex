@@ -377,16 +377,32 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
     end
   end
 
-  # Dangerous types download rather than render; everything else stays inline with
-  # the sanitized original name (or a bare `inline` when the name isn't ASCII-safe).
+  # Dangerous types download bare. Of the rest, only RASTER images render inline
+  # (the inbox previews screenshots); every other type — PDF, text, anything a
+  # future allowlist admits — DOWNLOADS (task-9fdc7e13e5459344). These bytes come from an
+  # outsider-held ticket key and are opened by an operator on the app origin, so
+  # a non-image renders in a viewer nobody chose; `attachment` keeps the
+  # sanitized original name either way (bare when it isn't ASCII-safe).
+  @inline_raster ~w(image/png image/jpeg image/gif image/webp)
+
   defp disposition(file, mime) do
-    if is_binary(mime) and MediaFile.dangerous_mime?(mime) do
-      "attachment"
-    else
-      case safe_filename(file.original_name || file.filename) do
-        nil -> "inline"
-        name -> ~s(inline; filename="#{name}")
-      end
+    cond do
+      is_binary(mime) and MediaFile.dangerous_mime?(mime) -> "attachment"
+      inline_raster?(mime) -> with_filename("inline", file)
+      true -> with_filename("attachment", file)
+    end
+  end
+
+  defp inline_raster?(mime) when is_binary(mime) do
+    (mime |> String.split(";") |> hd() |> String.trim() |> String.downcase()) in @inline_raster
+  end
+
+  defp inline_raster?(_), do: false
+
+  defp with_filename(kind, file) do
+    case safe_filename(file.original_name || file.filename) do
+      nil -> kind
+      name -> ~s(#{kind}; filename="#{name}")
     end
   end
 

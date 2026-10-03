@@ -361,14 +361,33 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       assert response(conn, 200) == @pdf
     end
 
-    test "streams with the server-derived MIME, nosniff and an inline disposition",
+    # task-9fdc7e13e5459344: an outsider-uploaded, non-image attachment DOWNLOADS. This
+    # pinned `inline; filename="doc.pdf"` until then — the very posture being
+    # removed: a PDF (or any non-raster type) rendered inline on the app origin
+    # from an outsider-held key is a document viewer the operator never chose.
+    test "streams a non-image with the server-derived MIME, nosniff and an ATTACHMENT disposition",
          %{ticket: ticket, asset_id: asset_id} do
       conn = submitter_conn("key-A")
       conn = Controller.show(conn, %{"id" => ticket, "asset_id" => asset_id})
 
       assert get_resp_header(conn, "content-type") |> hd() =~ "application/pdf"
       assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
-      assert get_resp_header(conn, "content-disposition") == [~s(inline; filename="doc.pdf")]
+      assert get_resp_header(conn, "content-disposition") == [~s(attachment; filename="doc.pdf")]
+    end
+
+    test "CONTROL: a raster image attachment still renders inline", %{ticket: ticket} do
+      created =
+        Controller.create(submitter_conn("key-A"), %{
+          "id" => ticket,
+          "file" => upload(@png, "shot.png", "image/png")
+        })
+
+      png_id = json_response(created, 201)["attachment"]["asset_id"]
+      conn = Controller.show(submitter_conn("key-A"), %{"id" => ticket, "asset_id" => png_id})
+
+      assert get_resp_header(conn, "content-type") |> hd() =~ "image/png"
+      assert get_resp_header(conn, "x-content-type-options") == ["nosniff"]
+      assert get_resp_header(conn, "content-disposition") == [~s(inline; filename="shot.png")]
     end
 
     test "foreign key → 404", %{ticket: ticket, asset_id: asset_id} do
