@@ -218,9 +218,12 @@ defmodule Barkpark.Accounts.Privacy do
       linked account with no email check, so it would log straight back in.
 
   `api_tokens.created_by` holds the email of whoever minted the token; rows
-  naming the subject are rewritten to the pseudonym. Machine tokens the subject
-  minted for a workspace (no `owner_user_id`) are the workspace's credentials
-  and are not revoked.
+  naming the subject are rewritten to the pseudonym, and so are app-token labels
+  (`app:<email>`). An app token minted FOR the subject carries their
+  `owner_user_id` and is revoked; one minted before the mint stamped the owner
+  is recognised by its `app:<email>` label (owner ruling #32 item 3). Machine
+  tokens the subject minted for a workspace (no `owner_user_id`) are the
+  workspace's credentials and are not revoked.
   """
   @spec erase_subject(User.t()) :: {:ok, map()} | {:error, term()}
   def erase_subject(%User{} = user) do
@@ -259,6 +262,12 @@ defmodule Barkpark.Accounts.Privacy do
 
     Repo.update_all(from(t in ApiToken, where: t.created_by == ^user.email),
       set: [created_by: erased_email]
+    )
+
+    # The app-token mint's default label carries the email; the revoked rows
+    # keep their history under the pseudonym instead.
+    Repo.update_all(from(t in ApiToken, where: t.label == ^("app:" <> user.email)),
+      set: [label: "app:" <> erased_email]
     )
 
     grants_pseudonymised = pseudonymise_grants(user, erased_email)
@@ -407,8 +416,19 @@ defmodule Barkpark.Accounts.Privacy do
     end
   end
 
-  defp revoke_owned_tokens!(%User{id: user_id}) do
-    from(t in ApiToken, where: t.owner_user_id == ^user_id and is_nil(t.revoked_at))
+  # The subject's credentials: tokens they own, plus LEGACY app tokens minted
+  # for them before the mint stamped `owner_user_id` (owner ruling #32 item 3,
+  # 2026-10-03) — recognised by the mint's own default label, `app:<email>`,
+  # with no owner. A custom-labelled legacy token cannot be told apart from a
+  # workspace credential and is left alone.
+  defp revoke_owned_tokens!(%User{id: user_id, email: email}) do
+    app_label = "app:" <> email
+
+    from(t in ApiToken,
+      where:
+        is_nil(t.revoked_at) and
+          (t.owner_user_id == ^user_id or (is_nil(t.owner_user_id) and t.label == ^app_label))
+    )
     |> Repo.all()
     |> Enum.map(fn token ->
       case Auth.revoke_token(token) do

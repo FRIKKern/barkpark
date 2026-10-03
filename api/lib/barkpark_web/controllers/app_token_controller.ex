@@ -482,7 +482,13 @@ defmodule BarkparkWeb.AppTokenController do
       # `class: :app` — app tokens keep today's no-expiry mint: no max age and
       # no configured default apply until the App shape exists
       # (task-a0f8cfd7f4800236).
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
+      # `owner_user_id` (owner ruling #32 item 3, 2026-10-03): the token is the
+      # USER's credential, so erasing the user revokes it. The member seat
+      # above stays — it is what the token acts through.
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id,
+             class: :app,
+             owner_user_id: user.id
+           ) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.
