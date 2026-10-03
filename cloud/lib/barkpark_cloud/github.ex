@@ -20,6 +20,18 @@ defmodule BarkparkCloud.GitHub do
   handle is stored ENCRYPTED (`Registry.Vault`), the account login plaintext for
   display. `record_installation/2` VALIDATES the id through the client seam
   (`get_installation/1`) before persisting — a forged/uninstalled id never lands.
+
+  ## One installation belongs to one team
+
+  GitHub allows one installation of the App per account or organisation, and
+  since #21132 the first team to record an installation id owns it: another
+  team recording the same id is refused `installation_not_found`, the answer an
+  unknown id gets, so the refusal does not reveal which ids other teams hold.
+  So two Barkpark teams cannot share one GitHub organisation's install. The
+  owner accepted this on 2026-10-03 (ruling #61): sharing would need per-repo
+  ownership proof that does not exist, and without it an install could leak
+  across teams. To work on one organisation's repos from Barkpark, use the
+  team that connected it.
   """
   import Ecto.Query, only: [from: 2]
 
