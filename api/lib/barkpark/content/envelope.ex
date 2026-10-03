@@ -291,7 +291,8 @@ defmodule Barkpark.Content.Envelope do
   defp redact_by_field_visibility(envelope, schema, %CallerContext{} = ctx, owner_id) do
     fields = raw_fields(schema)
 
-    Enum.reduce(envelope, %{}, fn {key, value}, acc ->
+    envelope
+    |> Enum.reduce(%{}, fn {key, value}, acc ->
       cond do
         # Reserved system keys (_id, _type, …) are never user data — always kept.
         key in @reserved ->
@@ -304,7 +305,44 @@ defmodule Barkpark.Content.Envelope do
           Map.put(acc, key, redact_nested(value, find_raw_field(fields, key), ctx, owner_id, 1))
       end
     end)
+    |> redact_preview_manifest(fields, ctx, owner_id)
   end
+
+  # THE DERIVED COPY (task-84c95acb380f41e4). `content["preview"]` is stamped at
+  # WRITE time by `Barkpark.Preview.project/3` over the full content, so its
+  # `description` / `extensions.*` entries are copies of fields this function
+  # just dropped. Drop each entry whose source field (`Preview.derived_from/0`)
+  # is DECLARED and not visible to this caller. Conservative on purpose: a
+  # `description` that could also have come from the public lead paragraph is
+  # dropped when the declared excerpt/description/summary field is hidden.
+  defp redact_preview_manifest(%{"preview" => %{} = preview} = rendered, fields, ctx, owner_id) do
+    hidden? = fn source ->
+      case find_raw_field(fields, source) do
+        nil -> false
+        field -> not field_visible?(field, ctx, owner_id)
+      end
+    end
+
+    preview =
+      Enum.reduce(Barkpark.Preview.derived_from(), preview, fn {path, sources}, acc ->
+        if Enum.any?(sources, hidden?), do: drop_in(acc, path), else: acc
+      end)
+
+    Map.put(rendered, "preview", preview)
+  end
+
+  defp redact_preview_manifest(rendered, _fields, _ctx, _owner_id), do: rendered
+
+  defp drop_in(map, [key]) when is_map(map), do: Map.delete(map, key)
+
+  defp drop_in(map, [key | rest]) when is_map(map) do
+    case Map.get(map, key) do
+      %{} = inner -> Map.put(map, key, drop_in(inner, rest))
+      _ -> map
+    end
+  end
+
+  defp drop_in(other, _path), do: other
 
   # ── NESTED declarations (task-777b7903d79fb32e) ───────────────────────────
   #

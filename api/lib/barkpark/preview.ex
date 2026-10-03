@@ -69,6 +69,33 @@ defmodule Barkpark.Preview do
   @type image :: %{required(String.t()) => term()} | nil
 
   @doc """
+  The content keys each manifest entry is DERIVED from, as
+  `{path_in_manifest, [source_content_key, …]}`. `Content.Envelope` reads this
+  to drop a manifest entry whose source field the caller may not read: the
+  manifest is stamped at write time over the FULL content, so without it a
+  field declared private rode out of every redacted surface inside `preview`
+  (task-84c95acb380f41e4). Keep in lockstep with `description/2` and
+  `extensions/2` below — a new source key read there belongs here too.
+  """
+  @spec derived_from() :: [{[String.t()], [String.t()]}]
+  def derived_from do
+    [
+      {["description"], ~w(excerpt description summary)},
+      {["extensions", "published_time"], ~w(published_time publishedAt published_at)},
+      {["extensions", "authors"], ~w(authors author)},
+      {["extensions", "tags"], ~w(tags)},
+      {["extensions", "section"], ~w(section)},
+      {["extensions", "status"], ~w(lifecycle_status status)},
+      {["extensions", "assignee"], ~w(assignee)},
+      {["extensions", "done_ratio"], ~w(done_ratio)},
+      {["extensions", "priority"], ~w(priority)},
+      {["extensions", "tab_count"], ~w(tabs sheets)},
+      {["extensions", "key"], ~w(key_name)},
+      {["extensions", "state"], ~w(status)}
+    ]
+  end
+
+  @doc """
   Project a document's `content` + full `blocks` list into the preview manifest.
 
   `opts` (all optional):
