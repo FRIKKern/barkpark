@@ -12,10 +12,10 @@ defmodule Barkpark.PortableDoc.BpmlHeadingLevelTest do
   `bp paper push` writes back. Widening this into "guess a level" would rewrite
   papers nobody edited.
 
-    * `"1"` / `"2"` / `"3"` print EXACTLY as `1` / `2` / `3`. The render side
+    * `"1"` .. `"6"` print EXACTLY as `1` .. `6` (six levels since owner ruling 2026-10-03). The render side
       already collapses both spellings (`heading_level("2") -> 2`,
       `Barkpark.PortableDoc.Render.Compose`), so this spells what readers see.
-    * A JUNK level (`"h2"`, `"w14-h2"`, `"state"`, `"4"`, `"01"`, `" 2"`) keeps
+    * A JUNK level (`"h2"`, `"w14-h2"`, `"state"`, `"7"`, `"01"`, `" 2"`) keeps
       raising the typed `UnprintableError` (charter D3 — fail honest, never a
       broadened rescue).
     * A NIL or ABSENT level keeps raising too. THE DECISION IS DELIBERATE and
@@ -35,7 +35,7 @@ defmodule Barkpark.PortableDoc.BpmlHeadingLevelTest do
   end
 
   describe "numeric-string levels print as the integer they spell" do
-    for {str, int} <- [{"1", 1}, {"2", 2}, {"3", 3}] do
+    for {str, int} <- [{"1", 1}, {"2", 2}, {"3", 3}, {"4", 4}, {"5", 5}, {"6", 6}] do
       test "level #{inspect(str)} prints the same BPML as #{int}" do
         assert Bpml.print_blocks([heading(unquote(str))]) ==
                  Bpml.print_blocks([heading(unquote(int))])
@@ -86,7 +86,7 @@ defmodule Barkpark.PortableDoc.BpmlHeadingLevelTest do
           "state",
           "live",
           "w14-h-ledger",
-          "4",
+          "7",
           "0",
           "01",
           " 2",
@@ -104,7 +104,8 @@ defmodule Barkpark.PortableDoc.BpmlHeadingLevelTest do
     end
 
     test "an out-of-range INTEGER level is unchanged — it still refuses" do
-      e = assert_raise UnprintableError, fn -> Bpml.print_blocks([heading(4)]) end
+      # Six levels print since owner ruling 2026-10-03 (#63); 7 is out of range.
+      e = assert_raise UnprintableError, fn -> Bpml.print_blocks([heading(7)]) end
       assert e.kind == :block
     end
   end
