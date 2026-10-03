@@ -34,6 +34,9 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "h1" => ~w(id align),
     "h2" => ~w(id align),
     "h3" => ~w(id align),
+    "h4" => ~w(id align),
+    "h5" => ~w(id align),
+    "h6" => ~w(id align),
     "notes" => ~w(id),
     "note" => ~w(id label lead),
     "stat" => ~w(label value denom verdict source),
@@ -96,15 +99,12 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
     "span" => "plain text needs no wrapper; use <b>/<i>/<code> for emphasis",
     "br" => "line breaks are separate <p> blocks",
     "img" => "the image block is not in the BPML kernel yet",
-    "h4" => "headings stop at <h3>",
-    "h5" => "headings stop at <h3>",
-    "h6" => "headings stop at <h3>",
     "ol" => "ordered lists are not in the BPML kernel yet — use <ul>",
     "em" => "<em>/<i> are inline — valid only inside a text-bearing element like <p>",
     "strong" => "<strong>/<b> are inline — valid only inside a text-bearing element like <p>"
   }
 
-  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
+  @known_block_tags ~w(section p pullquote ingress eyebrow h1 h2 h3 h4 h5 h6 byline ul table code diagram route stats notes note steps callout hr expandable paper-links cards card slot quote terminal action pipeline stat-grid blockquote toc bar-chart lineage chart figure asciicast columns column)
 
   @inline_marks %{
     "b" => "strong",
@@ -245,7 +245,7 @@ defmodule Barkpark.PortableDoc.Bpml.Parser do
   defp build_block("eyebrow", attrs, sc, cur),
     do: text_block("eyebrow", %{"type" => "eyebrow"}, attrs, sc, cur)
 
-  defp build_block(<<"h", l>>, attrs, sc, cur) when l in ?1..?3 do
+  defp build_block(<<"h", l>>, attrs, sc, cur) when l in ?1..?6 do
     base = %{"type" => "heading", "level" => l - ?0} |> put_attr("align", attrs)
     text_block(<<"h", l>>, base, attrs, sc, cur, "text")
   end

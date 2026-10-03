@@ -106,7 +106,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # ".bp-table__td--num.text-align: View=\"right\" Edit=nil" (plus the th twin and
   # both parser-sanity guards); off this list the same deletion ships GREEN through
   # the whole render suite.
-  @parity_elements ~w(h1 h2 h3 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
+  @parity_elements ~w(h1 h2 h3 h4 h5 h6 p li code img a a:focus-visible .bp-table .bp-table__th .bp-table__td .bp-stats .bp-chart .bp-cols .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
                      [".bp-table__spark polyline"]
 
   # scaffy-backlog-blocks-editable-studio — the TECHNICAL pair (diff, filetree).
@@ -382,6 +382,20 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     {:view_edit, "h2", "font-family"} =>
       "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
     {:view_edit, "h3", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
+    # h4–h6 (owner ruling 2026-10-03 #63, six heading levels): the same View group
+    # rule paints them, so the same inheritance holds.
+    {:view_edit, "h4", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h5", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h6", "color"} =>
+      "headings inherit the View group rule in Studio (light-DOM canvas) and the bundle's `.bp-paper-editor-body { color: var(--paper-ink) }` wrapper standalone",
+    {:view_edit, "h4", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
+    {:view_edit, "h5", "font-family"} =>
+      "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy",
+    {:view_edit, "h6", "font-family"} =>
       "same inheritance as heading `color` — the bundle wrapper sets `font-family: var(--paper-font-serif)`, so no editor surface needs a per-heading copy"
     # `max-width` is GONE from the View rule as of pe-w1-evidence-breakout, so its
     # entry is gone too — the rot guard below fails an allowlist that outlives the
@@ -594,7 +608,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # The typed-column modifiers ride here too: §2 gates them reader↔root only, so
   # WITHOUT these entries a bundle-side drift would ship green and an embedded
   # editor would left-align a num column the Studio canvas right-aligns.
-  @mirror_elements ~w(h1 h2 h3 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
+  @mirror_elements ~w(h1 h2 h3 h4 h5 h6 p li ul ol code img a a:focus-visible blockquote hr pre.bp-canvas-code .bp-table .bp-stats .bp-chart .bp-figcaption .bp-table__th--num .bp-table__td--num .bp-table__th--spark .bp-table__td--spark .bp-table__spark) ++
                      [".bp-table__spark polyline"]
 
   test "every Studio inline editor (element, property) is byte-identical in the bundle stylesheet" do

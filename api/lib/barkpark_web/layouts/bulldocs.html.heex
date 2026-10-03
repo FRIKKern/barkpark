@@ -938,7 +938,7 @@
        same selector. This block sits BELOW the surface embed so the
        `.sobelow-skips` anchor on that `raw(...)` line keeps its line number. */
     .bp-paper-shell.bp-paper-article.bp-paper-shell--wide { max-width: 1328px; --bp-section-rule: 0px; --bp-section-gap: 0px; }
-    .bp-paper-shell--wide #paper-body :is(p, h1, h2, h3, ul, ol, blockquote) { max-width: 72ch; margin-inline: 0; }
+    .bp-paper-shell--wide #paper-body :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote) { max-width: 72ch; margin-inline: 0; }
     /* A scorecard's first column is the requirement itself; give it room so the
        verdict columns do not squeeze it into five-line wraps. */
     .bp-paper-shell--wide .bp-table__th:first-child,
@@ -1225,7 +1225,10 @@
        `> :first-child` clamp sees the wrapper div, not the heading inside it). */
     .bp-paper-article [data-block-id]:first-child h1,
     .bp-paper-article [data-block-id]:first-child h2,
-    .bp-paper-article [data-block-id]:first-child h3 { margin-top: 0; }
+    .bp-paper-article [data-block-id]:first-child h3,
+    .bp-paper-article [data-block-id]:first-child h4,
+    .bp-paper-article [data-block-id]:first-child h5,
+    .bp-paper-article [data-block-id]:first-child h6 { margin-top: 0; }
 
     /* Graph-backed related Papers. Flat editorial cards keep the article's
        quiet hierarchy while making each relationship feel like a real object,
