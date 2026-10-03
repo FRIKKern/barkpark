@@ -491,4 +491,372 @@ defmodule Barkpark.Plugins.CapabilitiesPaginationFlagTest do
       )
     end
   end
+
+  # ── axis 3: THE ROUTER ARM (task-de4df581f611d49a) ──────────────────────
+  #
+  # Everything above enumerates the MANIFEST. A list route that is not a
+  # manifest command is invisible to it by construction, which is how
+  # `GET /v1/secrets/:name/audit` paged with no signal at all and
+  # `GET /v1/data/history/...` had no `?offset=` for months. This arm derives a
+  # second population from the ROUTER (Barkpark.Test.PagedRoutes: every GET
+  # action that reads a "limit"/"offset" literal) and holds every member to an
+  # explicit, reasoned classification. A new paged route therefore cannot be
+  # born silent: it reds here until somebody says what it is.
+  #
+  # THE TWO ENDPOINTS, DECIDED (criterion 1 of the row): both take branch (a),
+  # a truncation signal AND a continuation the caller passes back.
+  #   * secrets audit — it already paged by offset but never said there was
+  #     more. Now `has_more` (one row past the page, never a COUNT) and
+  #     `next_offset`, on a TOTAL order (`inserted_at, id`) so the position is
+  #     stable. Branch (b) "this page is the whole set" was never true: the log
+  #     is unbounded and the route already took `?offset=`.
+  #   * history — `?offset=` and `has_more` landed in #18882, but the
+  #     continuation was left for the caller to compute. Now `next_offset`.
+  #     Branch (b) is false here too: a document's trail is unbounded
+  #     (Content.Revisions' retention is INDEFINITE).
+
+  alias Barkpark.Test.PagedRoutes
+
+  # Every member of the router-derived population, classified. The kinds:
+  #   {:probed, why}           reachability is PROVED by a live probe in this
+  #                            file (signal ⇒ continuation ⇒ page two)
+  #   {:manifest, id, why}     a `paginated: true` manifest command; axis 1
+  #                            governs its declaration
+  #   {:signalled, why}        carries its own signal + continuation, not probed
+  #                            here; the reason names the keys
+  #   {:top_n, why}            deliberately a bounded top-N with no page two;
+  #                            the reason says why that is the right shape
+  @router_arm %{
+    "BarkparkWeb.SecretController.audit" =>
+      {:probed, "has_more + next_offset, minted from one expression; probed below"},
+    "BarkparkWeb.HistoryController.index" =>
+      {:probed, "has_more + next_offset over a total order; probed below (and doc.history)"},
+    "BarkparkWeb.TasksController.ready" =>
+      {:probed, "page.has_more + page.next_offset; probed in (a) above"},
+    "BarkparkWeb.TasksController.index" =>
+      {:probed, "page.next_offset, or page.next_cursor under ?cursor=; probed in (b) above"},
+    "BarkparkWeb.SearchController.search" =>
+      {:probed, "hasMore + nextOffset from Search.HitEnvelope; probed in (c) above"},
+    "BarkparkWeb.SearchController.search_local" =>
+      {:probed, "the loopback shares HitEnvelope; probed in (c) above"},
+    "BarkparkWeb.QueryController.index" =>
+      {:manifest, "doc.ls", "query envelope carries hasMore + nextOffset"},
+    "BarkparkWeb.V1.MediaController.index" =>
+      {:manifest, "media.ls", "media list envelope carries hasMore + nextOffset"},
+    "BarkparkWeb.V1.MediaCollectionsController.index" =>
+      {:manifest, "media.collections", "collections list carries hasMore + nextOffset"},
+    "BarkparkWeb.MemberController.index" =>
+      {:manifest, "workspace.member-ls", "members list carries hasMore + nextOffset"},
+    "BarkparkWeb.MemberController.tokens" =>
+      {:manifest, "token.ls", "tokens list carries hasMore + nextOffset"},
+    "BarkparkWeb.V1.MediaCollectionsController.share_view" =>
+      {:signalled, "public share view: hasMore + nextOffset beside total"},
+    "BarkparkWeb.TasksController.events" =>
+      {:signalled, "keyset replay: has_more + cursor, passed back as ?since="},
+    "BarkparkWeb.PulseController.recent" =>
+      {:signalled, "keyset: Pulse.recent/3 returns next (pass back as since) and total"},
+    "BarkparkWeb.TasksController.prime" =>
+      {:top_n, "session orientation, ≤100 cards by design — not a listing to walk"},
+    "BarkparkWeb.FederatedSearchController.search" =>
+      {:top_n,
+       "a top-N preview per surface with per-surface total; walk the surface's own search"},
+    "BarkparkWeb.SearchController.search_suggestions" =>
+      {:top_n, "typeahead, ≤20 suggestions — a ranked head, not a set"},
+    "BarkparkWeb.V1.MediaController.search_suggestions" =>
+      {:top_n, "typeahead, ≤20 suggestions — a ranked head, not a set"},
+    "BarkparkWeb.QueryController.related" =>
+      {:top_n, "a ranked related-documents head, not a set"},
+    "BarkparkWeb.PaperAccessController.index" =>
+      {:top_n,
+       "most-recent-N access rows, NO page two and NO signal — undecided, task-fb4cf8323a9795e5"},
+    "BarkparkWeb.WebhookController.deliveries" =>
+      {:top_n,
+       "most-recent-N deliveries, NO page two and NO signal — undecided, task-fb4cf8323a9795e5"}
+  }
+
+  # The positive control: routes the derivation MUST find. The two this row
+  # named, plus one route that was already honest, so a derivation that found
+  # only the two new ones (or nothing) cannot pass.
+  @router_control [
+    "BarkparkWeb.SecretController.audit",
+    "BarkparkWeb.HistoryController.index",
+    "BarkparkWeb.TasksController.ready"
+  ]
+
+  defp assert_router_control!(population) do
+    keys = MapSet.new(population, & &1.key)
+    missing = Enum.reject(@router_control, &MapSet.member?(keys, &1))
+
+    assert missing == [],
+           """
+           ROUTER ARM IS BLIND to #{Enum.join(missing, ", ")}
+
+           Barkpark.Test.PagedRoutes.derive/2 must find every GET action that
+           reads a "limit"/"offset" literal, and it did not find these. A
+           derivation that reads nothing passes everything, which is how this
+           class of route stayed invisible for months.
+           """
+  end
+
+  test "router arm: the positive control is found (the two named routes + an honest one)" do
+    population = PagedRoutes.derive()
+    assert length(population) >= 10, "router arm derived only #{length(population)} actions"
+    assert_router_control!(population)
+  end
+
+  test "router arm: every derived action is classified, and no classification is stale" do
+    derived = PagedRoutes.derive() |> Enum.map(& &1.key) |> MapSet.new()
+    classified = @router_arm |> Map.keys() |> MapSet.new()
+
+    unclassified = derived |> MapSet.difference(classified) |> Enum.sort()
+    stale = classified |> MapSet.difference(derived) |> Enum.sort()
+
+    assert unclassified == [],
+           """
+           UNCLASSIFIED PAGED ROUTE(S): #{Enum.join(unclassified, ", ")}
+
+           These GET actions read ?limit=/?offset= and nobody has said whether
+           a caller can tell a full page from the last one. Add each to
+           @router_arm with its kind: {:probed, why} plus a probe here,
+           {:manifest, id, why}, {:signalled, why} naming the signal and the
+           continuation, or {:top_n, why} saying why no page two exists.
+           """
+
+    assert stale == [],
+           "@router_arm classifies actions the router no longer derives: #{Enum.join(stale, ", ")} — drop them"
+  end
+
+  test "router arm: every :manifest classification names a paginated: true command" do
+    by_id = Map.new(commands(), &{&1["id"], &1})
+
+    for {key, {:manifest, id, _why}} <- @router_arm do
+      cmd = Map.get(by_id, id)
+
+      assert cmd,
+             "#{key} is classified {:manifest, #{inspect(id)}} but the manifest has no such command"
+
+      assert cmd["paginated"], "#{key} leans on #{id}, which is paginated: false"
+    end
+  end
+
+  test "router arm MUTATION: strip the paging reads from either named controller and the control reds naming it" do
+    for {mod, key} <- [
+          {BarkparkWeb.SecretController, "BarkparkWeb.SecretController.audit"},
+          {BarkparkWeb.HistoryController, "BarkparkWeb.HistoryController.index"}
+        ] do
+      source = PagedRoutes.source_of(mod)
+      anchors = for lit <- ["\"limit\"", "\"offset\""], do: {lit, count(source, lit)}
+
+      for {lit, n} <- anchors do
+        assert n >= 1,
+               "MUTATION ANCHOR #{lit} not found in #{inspect(mod)} — this measured nothing"
+      end
+
+      mutated =
+        source
+        |> String.replace("\"limit\"", "\"lim_mutant\"")
+        |> String.replace("\"offset\"", "\"off_mutant\"")
+
+      assert mutated != source, "the mutation of #{inspect(mod)} did not apply"
+      assert count(mutated, "\"limit\"") + count(mutated, "\"offset\"") == 0
+
+      population =
+        PagedRoutes.derive(BarkparkWeb.Router.__routes__(), fn
+          ^mod -> mutated
+          other -> PagedRoutes.source_of(other)
+        end)
+
+      refute Enum.any?(population, &(&1.key == key)),
+             "#{key} is still derived after its paging reads were stripped — the arm does not read what it claims"
+
+      err = assert_raise ExUnit.AssertionError, fn -> assert_router_control!(population) end
+      assert err.message =~ key, "the control red, but did not NAME #{key}: #{err.message}"
+    end
+  end
+
+  defp count(haystack, needle), do: length(String.split(haystack, needle)) - 1
+
+  # ── the two decided endpoints, probed live ──────────────────────────────
+
+  @audit_label "secrets.audit (GET /v1/secrets/:name/audit)"
+  @history_label "doc.history (GET /v1/data/history/:dataset/:type/:doc_id)"
+
+  # A truncation OBSERVATION, made from the fixture and the rows — never from
+  # the signal under test.
+  defp observe(label, corpus, returned),
+    do: %{label: label, corpus: corpus, page: @page, returned: returned}
+
+  defp truncated?(%{corpus: c, page: p, returned: r}), do: c > p and r == p
+
+  # NON-VACUITY as an executable refusal: a run in which fewer than `min`
+  # probes saw a truncated page proved nothing about continuations.
+  defp assert_observed_truncation!(observations, min) do
+    seen = Enum.filter(observations, &truncated?/1)
+
+    assert length(seen) >= min,
+           """
+           VACUOUS RUN: only #{length(seen)} of #{length(observations)} probe(s) observed a truncated
+           page (need #{min}). Untruncated: #{observations |> Enum.reject(&truncated?/1) |> Enum.map_join(", ", &"#{&1.label} corpus=#{&1.corpus} returned=#{&1.returned}")}.
+           A signal⇒continuation check whose antecedent never held measured nothing.
+           """
+  end
+
+  # SIGNAL HONESTY, the half the conditional invariant deliberately cannot see:
+  # when the FIXTURE proves another page exists (corpus > page, page full),
+  # the route must SAY so. Without this a route with no signal at all — the
+  # audit route before this row — satisfies signal⇒continuation vacuously.
+  defp assert_signal_honest!(%{label: label} = obs, signal) do
+    if truncated?(obs) do
+      assert signal == true,
+             "SILENT TRUNCATION — #{label}: the fixture holds #{obs.corpus} rows and page one returned #{obs.returned} of limit #{obs.page}, yet the paging signal is #{inspect(signal)}. A caller cannot tell this full page from the last one."
+    end
+  end
+
+  defp seed_audit!(conn, n) do
+    name = "pgc_audit_#{System.unique_integer([:positive])}"
+
+    for i <- 1..n//1 do
+      resp =
+        conn
+        |> authed()
+        |> put_req_header("content-type", "application/json")
+        |> put("/v1/secrets/#{name}", Jason.encode!(%{value: "v#{i}"}))
+
+      assert resp.status == 200,
+             "seeding the audit trail failed: #{resp.status} #{resp.resp_body}"
+    end
+
+    name
+  end
+
+  defp audit_page(conn, name, offset) do
+    get_json(conn, "/v1/secrets/#{name}/audit", %{"limit" => "#{@page}", "offset" => "#{offset}"})
+  end
+
+  defp seed_history! do
+    doc_id = "pgch#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => "drafts." <> doc_id, "title" => "v0"},
+        @search_dataset
+      )
+
+    {:ok, _} = Content.publish_document(doc_id, "post", @search_dataset)
+
+    for i <- 1..@corpus do
+      {:ok, _} =
+        Content.apply_mutations(
+          [%{"patch" => %{"id" => doc_id, "type" => "post", "set" => %{"title" => "v#{i}"}}}],
+          @search_dataset
+        )
+    end
+
+    corpus = doc_id |> Content.list_revisions("post", @search_dataset, limit: 1_000) |> length()
+    {doc_id, corpus}
+  end
+
+  defp history_page(conn, doc_id, offset) do
+    get_json(conn, "/v1/data/history/#{@search_dataset}/post/#{doc_id}", %{
+      "limit" => "#{@page}",
+      "offset" => "#{offset}"
+    })
+  end
+
+  defp assert_page_two!(label, first, second, id_key) do
+    one = MapSet.new(first, & &1[id_key])
+    two = MapSet.new(second, & &1[id_key])
+    refute Enum.empty?(two), "#{label}: next_offset was handed back and returned an EMPTY page"
+    assert MapSet.disjoint?(one, two), "#{label}: next_offset re-served rows from page one"
+  end
+
+  describe "(d) the router-arm endpoints this row decided" do
+    test "audit and history: has_more ⇒ next_offset ⇒ a real page two, and the run is non-vacuous",
+         %{conn: conn} do
+      name = seed_audit!(conn, @corpus)
+      a1 = audit_page(conn, name, 0)
+      assert_signal_honest!(observe(@audit_label, @corpus, length(a1["audit"])), a1["has_more"])
+      assert_continuation!(@audit_label, "next_offset", {a1["has_more"], a1["next_offset"]})
+      a2 = audit_page(conn, name, a1["next_offset"] || @page)
+      assert_page_two!(@audit_label, a1["audit"], a2["audit"], "inserted_at")
+
+      {doc_id, h_corpus} = seed_history!()
+      h1 = history_page(conn, doc_id, 0)
+
+      assert_signal_honest!(
+        observe(@history_label, h_corpus, length(h1["revisions"])),
+        h1["has_more"]
+      )
+
+      assert_continuation!(@history_label, "next_offset", {h1["has_more"], h1["next_offset"]})
+      h2 = history_page(conn, doc_id, h1["next_offset"] || @page)
+      assert_page_two!(@history_label, h1["revisions"], h2["revisions"], "id")
+
+      assert_observed_truncation!(
+        [
+          observe(@audit_label, @corpus, length(a1["audit"])),
+          observe(@history_label, h_corpus, length(h1["revisions"]))
+        ],
+        2
+      )
+    end
+
+    test "the last page says so: has_more false and next_offset nil", %{conn: conn} do
+      name = seed_audit!(conn, @corpus)
+      last = audit_page(conn, name, @corpus - 1)
+      assert length(last["audit"]) == 1
+      assert last["has_more"] == false
+      assert is_nil(last["next_offset"])
+    end
+
+    test "NON-VACUITY reds when the fixture shrinks below the page", %{conn: conn} do
+      name = seed_audit!(conn, 1)
+      shrunk = audit_page(conn, name, 0)
+      assert length(shrunk["audit"]) == 1, "the shrunk fixture should return one row"
+
+      assert_raise ExUnit.AssertionError, ~r/VACUOUS RUN/, fn ->
+        assert_observed_truncation!([observe(@audit_label, 1, length(shrunk["audit"]))], 1)
+      end
+    end
+
+    test "MUTATION, both directions: drop the continuation and it reds; drop the signal and it stays green",
+         %{conn: conn} do
+      name = seed_audit!(conn, @corpus)
+      {doc_id, _} = seed_history!()
+
+      for {label, b} <- [
+            {@audit_label, audit_page(conn, name, 0)},
+            {@history_label, history_page(conn, doc_id, 0)}
+          ] do
+        assert b["has_more"] == true and is_integer(b["next_offset"]),
+               "#{label}: the probe never reached the state the mutation breaks"
+
+        # 1. Continuation withheld: the guard must red, naming the surface.
+        no_cont = Map.delete(b, "next_offset")
+        assert no_cont != b, "mutation 1 did not apply"
+
+        err =
+          assert_raise ExUnit.AssertionError, fn ->
+            assert_continuation!(
+              label,
+              "next_offset",
+              {no_cont["has_more"], no_cont["next_offset"]}
+            )
+          end
+
+        assert err.message =~ "CONTINUATION WITHHELD — #{label}"
+
+        # 2. Signal forced false: the invariant is CONDITIONAL, so this is green.
+        no_signal = Map.put(b, "has_more", false) |> Map.delete("next_offset")
+        assert no_signal != b, "mutation 2 did not apply"
+
+        assert_continuation!(
+          label,
+          "next_offset",
+          {no_signal["has_more"], no_signal["next_offset"]}
+        )
+      end
+    end
+  end
 end

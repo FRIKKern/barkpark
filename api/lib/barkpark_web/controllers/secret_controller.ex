@@ -137,20 +137,25 @@ defmodule BarkparkWeb.SecretController do
   `@max_audit_offset` is a 400, not a silent clamp — see the attribute's own
   comment for why the two ends are treated differently.
 
-  HOW TO WALK THE WHOLE TRAIL, stated here because the refusal above depends on
-  it and a justification that cites an undocumented convention is not a
-  justification: this response carries no total and no continuation token, so a
-  caller reads the trail by paging forward — `?offset=` advanced by `?limit=`
-  each time — UNTIL A PAGE COMES BACK EMPTY. That empty page is the only
-  termination signal there is. It is why an over-large `offset` refuses instead
-  of clamping: a clamp would answer every offset at or above the ceiling with
-  the SAME non-empty page, the empty page would never arrive, and a caller
-  walking to exhaustion would loop on one window while believing it had read
-  everything. (The failure needs a trail longer than #{@max_audit_offset} rows
-  for one name in one tier; a shorter trail returns an empty page at the
-  ceiling and terminates correctly either way. Rare is not the same as
-  acceptable on a security read, and an auditor is exactly the caller who
-  eventually has a trail that long.)
+  HOW TO WALK THE WHOLE TRAIL (task-de4df581f611d49a). Every page carries
+  `has_more` and `next_offset`. `has_more` is true exactly when a row exists
+  past this page: it is derived by fetching ONE row beyond `limit` and dropping
+  it, never by a separate COUNT that could disagree with the page.
+  `next_offset` is the `?offset=` to pass back for the next page, and it is
+  `nil` when `has_more` is false. Walk with `?offset=<next_offset>` until
+  `has_more` is false. An empty page still terminates the walk too, so a caller
+  written against the older contract (page until a page comes back empty)
+  keeps working.
+
+  THE CEILING. A `next_offset` above #{@max_audit_offset} is still emitted,
+  because it is the true position of the next row. Passing it back is refused
+  with a 400 that names the ceiling, which is why an over-large `offset`
+  refuses instead of clamping: a clamp would answer every offset at or above
+  the ceiling with the SAME non-empty page, and a caller walking to exhaustion
+  would loop on one window while believing it had read everything. A refusal
+  the caller can see beats a wrong answer it cannot. That needs a trail longer
+  than #{@max_audit_offset} rows for one name in one tier, which is rare. But
+  an auditor is exactly the caller who eventually has a trail that long.
 
   Tenant-walled through the same `resolve_scope/1` D199 guard as every other
   verb: the flat route reads the GLOBAL tier (`workspace_id IS NULL`), the
@@ -166,17 +171,32 @@ defmodule BarkparkWeb.SecretController do
   def audit(conn, %{"name" => name} = params) do
     with {:ok, scope} <- resolve_scope(conn),
          {:ok, {limit, offset}} <- page(params) do
-      rows =
+      # ONE row past the page decides `has_more`; it is dropped before render.
+      fetched =
         SecretAudit
         |> where([a], a.name == ^name)
         |> scope_audit(scope)
-        |> order_by([a], desc: a.inserted_at)
-        |> limit(^limit)
+        # `id` breaks inserted_at ties: without a TOTAL order a page boundary
+        # between two rows stamped in the same microsecond can skip or repeat
+        # one, and `next_offset` would hand back a position that is not stable.
+        |> order_by([a], desc: a.inserted_at, desc: a.id)
+        |> limit(^(limit + 1))
         |> offset(^offset)
         |> Repo.all()
-        |> Enum.map(&audit_view/1)
 
-      json(conn, %{name: name, audit: rows, limit: limit, offset: offset})
+      has_more = length(fetched) > limit
+      rows = fetched |> Enum.take(limit) |> Enum.map(&audit_view/1)
+
+      json(conn, %{
+        name: name,
+        audit: rows,
+        limit: limit,
+        offset: offset,
+        has_more: has_more,
+        # Minted from the SAME `has_more` that promises it, so the signal and
+        # its continuation cannot drift apart.
+        next_offset: if(has_more, do: offset + length(rows))
+      })
     else
       # REUSES the already-registered `malformed` code (400) rather than minting
       # a token: growing `Errors.known_codes/0` grows the served OpenAPI
