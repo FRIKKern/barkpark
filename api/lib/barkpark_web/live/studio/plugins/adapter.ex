@@ -129,7 +129,8 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
           value: ensure_map(value),
           errors: errors_for(assigns, name),
           on_change: @structured_on_change,
-          path: path
+          path: path,
+          wrap_key: widget_wrap_key(assigns)
         })
     end
   end
@@ -210,6 +211,26 @@ defmodule BarkparkWeb.Studio.Plugins.Adapter do
   defp schema_plugin(_), do: nil
 
   # ─── value extraction ───────────────────────────────────────────────────
+
+  # The open document's published id plus the Studio form generation — the
+  # same pair `FieldInputs.doc_wrap_id/4` keys top-level widgets by — so a v2
+  # rich-text wrapper remounts on a document switch or a server-side value
+  # replacement, and never while its own tab types.
+  defp widget_wrap_key(assigns) do
+    doc_key =
+      case assigns do
+        %{editor_doc: %{doc_id: id}} when is_binary(id) ->
+          Barkpark.Content.DraftId.published_id(id)
+
+        _ ->
+          "doc"
+      end
+
+    case Map.get(assigns, :editor_form_gen, 0) do
+      gen when is_integer(gen) and gen > 0 -> "#{doc_key}-g#{gen}"
+      _ -> doc_key
+    end
+  end
 
   defp field_value(%{editor_form: form}, name, _type) when is_map(form), do: Map.get(form, name)
   defp field_value(_, _, _), do: nil

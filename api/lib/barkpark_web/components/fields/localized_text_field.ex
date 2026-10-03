@@ -44,6 +44,10 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   attr :on_change, :string, default: nil
   attr :path, :string, default: ""
   attr :readonly, :boolean, default: false
+  # Keys the rich-text `phx-update="ignore"` wrappers by document (and by the
+  # Studio form generation), so switching documents remounts them instead of
+  # posting the previous document's text (task-1a8a3e408d787608).
+  attr :wrap_key, :string, default: ""
 
   def localized_text_field(assigns) do
     assigns =
@@ -53,6 +57,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
       |> Map.put_new(:on_change, nil)
       |> Map.put_new(:path, "")
       |> Map.put_new(:readonly, false)
+      |> Map.put_new(:wrap_key, "")
 
     field = assigns.field
     value_map = assigns.value || %{}
@@ -106,7 +111,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
             <%= lang %><%= if @warning && @warning.primary == lang, do: " (primary, missing)" %>
           </label>
           <%= if @format == :rich do %>
-            <div id={"bp-rt-wrap-#{@field.name}-#{lang}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+            <div id={"bp-rt-wrap-#{@field.name}-#{lang}" <> if(@wrap_key == "", do: "", else: "-" <> @wrap_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
               <input
                 type="hidden"
                 id={"#{@base_id}-#{lang}"}

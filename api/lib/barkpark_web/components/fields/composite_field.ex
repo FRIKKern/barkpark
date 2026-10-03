@@ -387,9 +387,14 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     """
   end
 
+  # Keyed by VALUE like the reference subfield above: with an id built from the
+  # input id alone, a document switch kept the previous document's ignored
+  # picker and hidden input, and the next autosave posted its image here
+  # (task-1a8a3e408d787608). A picked image changes the value, so the remount
+  # it causes lands on the value the picker just chose.
   defp image_subfield_input(assigns) do
     ~H"""
-    <div id={"bp-mp-wrap-#{@input_id}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={"bp-mp-wrap-#{@input_id}-#{:erlang.phash2(@value)}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@input_id}"} name={@input_name} value={@value} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@value}
