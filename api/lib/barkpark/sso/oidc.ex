@@ -232,9 +232,9 @@ defmodule Barkpark.Sso.Oidc do
   defp find_or_create_user(org_id, email) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
-        if Barkpark.Sso.org_may_adopt?(org_id, user, email),
-          do: {:ok, user},
-          else: {:error, :email_not_owned_by_org}
+        # Seat, or verified domain with an unconfirmed account reclaimed
+        # first (task-0abbf88fd420360d); otherwise refused.
+        Barkpark.Sso.org_adopt(org_id, user, email)
 
       _ ->
         random = Base.encode16(:crypto.strong_rand_bytes(32))

@@ -346,6 +346,67 @@ defmodule Barkpark.Accounts.Privacy do
   # Every not-yet-revoked token the subject owns, any kind, through the one
   # audited revoke primitive. A failed revoke rolls the whole erasure back: a
   # half-erased subject with a live token is the defect this exists to close.
+  @doc """
+  Hand an UNCONFIRMED account to the person who just proved they own its email
+  (a provider-verified social login, or an org SSO login for a verified
+  domain), stripping every credential the PRIOR holder could have set
+  (task-0abbf88fd420360d).
+
+  Registration does not require confirming the email before password login,
+  so anyone can register `victim@example.com`, set a password, and add a
+  passkey or token. Adopting that account for the real owner must not leave
+  the squatter in control. Mirrors the cloud fix (task-b3eb09e83fbb7cbc):
+  the password becomes unknowable, sessions, pending email tokens, passkeys,
+  prior social links and owned API tokens are removed or revoked, TOTP is
+  cleared, and the account is confirmed. Memberships are kept. A CONFIRMED
+  account is returned untouched.
+  """
+  @spec reclaim_unconfirmed(User.t()) :: {:ok, User.t()} | {:error, term()}
+  def reclaim_unconfirmed(%User{confirmed_at: %{}} = user), do: {:ok, user}
+
+  def reclaim_unconfirmed(%User{} = user) do
+    result =
+      Repo.transaction(fn ->
+        Repo.delete_all(from s in UserSession, where: s.user_id == ^user.id)
+        Repo.delete_all(from t in UserEmailToken, where: t.user_id == ^user.id)
+        Repo.delete_all(from c in WebauthnCredential, where: c.user_id == ^user.id)
+        Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user.id)
+        revoked = revoke_owned_tokens!(user)
+
+        reclaimed =
+          user
+          |> Ecto.Changeset.change(%{
+            hashed_password: Argon2.hash_pwd_salt(Base.encode16(:crypto.strong_rand_bytes(32))),
+            totp_secret: nil,
+            totp_enabled: false,
+            recovery_codes_hashed: [],
+            last_totp_at: nil,
+            confirmed_at: DateTime.utc_now()
+          })
+          |> Repo.update!()
+
+        Audit.emit(%{
+          category: "auth",
+          action: "unconfirmed_account_reclaimed",
+          subject: user.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"api_tokens_revoked" => length(revoked)}
+        })
+
+        {reclaimed, revoked}
+      end)
+
+    case result do
+      {:ok, {reclaimed, revoked_ids}} ->
+        Enum.each(revoked_ids, &Auth.broadcast_socket_teardown(%ApiToken{id: &1}))
+        {:ok, reclaimed}
+
+      other ->
+        other
+    end
+  end
+
   defp revoke_owned_tokens!(%User{id: user_id}) do
     from(t in ApiToken, where: t.owner_user_id == ^user_id and is_nil(t.revoked_at))
     |> Repo.all()

@@ -227,8 +227,13 @@ defmodule Barkpark.Sso.Social do
 
   defp find_or_create_user(email, verified_fun) do
     case Accounts.get_user_by_email(email) do
+      # Adopting an UNCONFIRMED account strips the prior holder's credentials
+      # first (task-0abbf88fd420360d): registration lets anyone claim an email
+      # and log in with a password before confirming it.
       %User{} = user ->
-        if verified_fun.(), do: {:ok, user}, else: {:error, :email_unverified}
+        if verified_fun.(),
+          do: Barkpark.Accounts.Privacy.reclaim_unconfirmed(user),
+          else: {:error, :email_unverified}
 
       _ ->
         random = Base.encode16(:crypto.strong_rand_bytes(32))

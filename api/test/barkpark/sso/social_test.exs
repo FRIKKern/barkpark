@@ -136,6 +136,45 @@ defmodule Barkpark.Sso.SocialTest do
     assert user.id == existing.id
   end
 
+  # task-0abbf88fd420360d: registration lets anyone claim an email and log in
+  # with a password before confirming it. When the real owner later signs in
+  # with a provider-verified email, the squatter's credentials must not survive.
+  test "adopting an UNCONFIRMED account strips the prior holder's password, sessions and tokens" do
+    enable("google")
+
+    {:ok, squatter} =
+      Accounts.register_user(%{email: "victim@example.com", password: "squatter-password"})
+
+    assert is_nil(squatter.confirmed_at)
+    {:ok, session} = Accounts.create_user_session_token(squatter)
+
+    userinfo("victim@example.com", "g-victim", true)
+    assert {:ok, user} = callback("google")
+    assert user.id == squatter.id
+
+    refute Accounts.get_user_by_email_and_password("victim@example.com", "squatter-password"),
+           "the squatter's password still signs in after the owner adopted the account"
+
+    refute Accounts.verify_user_session_token(session),
+           "the squatter's session survived the adoption"
+
+    assert Accounts.get_user(user.id).confirmed_at
+  end
+
+  test "adopting a CONFIRMED account leaves its password alone" do
+    enable("google")
+
+    {:ok, owner} =
+      Accounts.register_user(%{email: "owner@example.com", password: "owner-password!"})
+
+    owner = Accounts.confirm_provisioned_user(owner)
+
+    userinfo("owner@example.com", "g-owner", true)
+    assert {:ok, user} = callback("google")
+    assert user.id == owner.id
+    assert Accounts.get_user_by_email_and_password("owner@example.com", "owner-password!")
+  end
+
   test "microsoft has NO verification claim, so it can never adopt an existing account" do
     enable("microsoft")
 
