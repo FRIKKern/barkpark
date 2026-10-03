@@ -96,13 +96,29 @@ defmodule Barkpark.Sso do
           {:ok, User.t()} | {:error, :email_not_owned_by_org}
   def org_login_user(org_id, email) when is_binary(org_id) and is_binary(email) do
     case Accounts.get_user_by_email(email) do
-      %User{} = user ->
-        if org_may_adopt?(org_id, user, email),
-          do: {:ok, user},
-          else: {:error, :email_not_owned_by_org}
+      %User{} = user -> org_adopt(org_id, user, email)
+      _ -> {:ok, jit_create_user(email)}
+    end
+  end
 
-      _ ->
-        {:ok, jit_create_user(email)}
+  @doc """
+  Adopt the EXISTING `user` for an org SSO login, or refuse.
+
+    * Seated in one of the org's workspaces: the org already vouched for THIS
+      account, so it is adopted as it is.
+    * Not seated, but the email's domain is a verified domain of the org: the
+      IdP proved the email, not the account. An UNCONFIRMED account is
+      reclaimed first (`Privacy.reclaim_unconfirmed/1`), because whoever
+      registered it never proved the email (task-0abbf88fd420360d).
+    * Otherwise `{:error, :email_not_owned_by_org}`.
+  """
+  @spec org_adopt(binary(), User.t(), String.t()) ::
+          {:ok, User.t()} | {:error, term()}
+  def org_adopt(org_id, %User{id: uid} = user, email) when is_binary(org_id) do
+    cond do
+      org_member?(org_id, uid) -> {:ok, user}
+      org_owns_email_domain?(org_id, email) -> Barkpark.Accounts.Privacy.reclaim_unconfirmed(user)
+      true -> {:error, :email_not_owned_by_org}
     end
   end
 
