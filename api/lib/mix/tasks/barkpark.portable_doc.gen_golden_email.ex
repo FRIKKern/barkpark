@@ -36,8 +36,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenGoldenEmail do
 
   @doc "The golden's bytes, rendered from the shared parity fixture."
   def render do
-    unless Code.ensure_loaded?(@fixture), do: Code.require_file(@fixture_path)
-    Render.render_html(@fixture.tree(), @fixture.render_opts(:email))
+    # The module is test-only, so it is called through a variable: a literal
+    # remote call fails `mix compile --warnings-as-errors` in prod, where the
+    # module does not exist at compile time.
+    fixture = @fixture
+    unless Code.ensure_loaded?(fixture), do: Code.require_file(@fixture_path)
+    Render.render_html(apply(fixture, :tree, []), apply(fixture, :render_opts, [:email]))
   end
 
   @impl Mix.Task
