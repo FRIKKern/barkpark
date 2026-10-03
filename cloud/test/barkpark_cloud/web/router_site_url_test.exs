@@ -127,7 +127,13 @@ defmodule BarkparkCloud.Web.RouterSiteUrlTest do
       conn = call(:post, "/v1/barkparks/#{bp.id}/site-url", %{url: @site}, token)
 
       assert conn.status == 403
-      assert json_body(conn) == %{"error" => "forbidden", "required" => "admin", "scope" => "team"}
+
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+
       assert StudioLinkFakeHttpClient.requests() == []
     end
 
