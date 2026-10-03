@@ -116,6 +116,11 @@ function bpCanonicalAssetId(id) {
   return v;
 }
 
+// A path, an absolute http(s) URL or a data: URL — anything an <img> can load.
+function bpLooksLikeUrl(s) {
+  return typeof s === "string" && /^(\/|https?:\/\/|data:)/i.test(s);
+}
+
 function bpParseMediaValue(raw) {
   const empty = { url: "", assetId: "", alt: "", focalX: null, focalY: null, width: null, height: null, lqip: null };
   if (!raw || typeof raw !== "string") return empty;
@@ -189,8 +194,12 @@ class BpMediaPicker extends HTMLElement {
     if (this._isReferenceMode()) {
       this._value = raw;
       this._meta.assetId = raw;
-      this._meta.url = parsed.url;
-      if (raw && !parsed.url) this._resolveReferencePreview(raw);
+      // A reference stores the asset ID (a bare uuid), which bpParseMediaValue
+      // reads as a "url" — so the preview painted <img src="a97bf457-…"> and
+      // never asked for the asset (task-b6c5a62bd7b6082e). Only an actual URL
+      // skips the lookup.
+      this._meta.url = bpLooksLikeUrl(parsed.url) ? parsed.url : "";
+      if (raw && !this._meta.url) this._resolveReferencePreview(raw);
     } else {
       this._value = raw;
       this._meta.url = parsed.url;
@@ -227,16 +236,26 @@ class BpMediaPicker extends HTMLElement {
     // requires this header. Sent ONLY when the token is genuinely empty.
     else headers["x-requested-with"] = "bp-media-picker";
     try {
+      // Read the asset DOCUMENT the way Studio holds it (task-b6c5a62bd7b6082e):
+      // an uploaded asset is a draft (`drafts.asset-<uuid>`), so the default
+      // published perspective answered 404 for every one; its id carries the
+      // `asset-` prefix while the stored reference is the bare uuid; and the
+      // scoped mirror wraps the document in {result: …}. Missing any of the
+      // three left every mediaAsset reference showing "Image unavailable".
+      const id = String(docId);
+      const assetDocId = id.startsWith("asset-") ? id : "asset-" + id;
       const url =
         this._scopePrefix() +
         "/v1/data/doc/" +
         encodeURIComponent(this._dataset()) +
         "/mediaAsset/" +
-        encodeURIComponent(docId);
+        encodeURIComponent(assetDocId) +
+        "?perspective=drafts";
       const r = await fetch(url, { credentials: "same-origin", headers: headers });
       if (!r.ok) return;
-      const doc = await r.json();
-      const fi = doc.fileInfo || {};
+      const body = await r.json();
+      const doc = (body && body.result) || body || {};
+      const fi = doc.fileInfo || (doc.content && doc.content.fileInfo) || {};
       this._meta.url = fi.url || "";
       this._meta.mime = fi.mimeType || "";
       this._renderPreview();
@@ -379,7 +398,7 @@ class BpMediaPicker extends HTMLElement {
 
     this._fileInput.addEventListener("change", (e) => {
       const f = e.target.files && e.target.files[0];
-      if (f) this._upload(f);
+      if (f) this._takeFile(f);
       e.target.value = "";
     });
 
@@ -466,7 +485,7 @@ class BpMediaPicker extends HTMLElement {
         this._dragDepth = 0;
         this.classList.remove("bp-mp-drag-over");
         const f = e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files[0];
-        if (f && (!f.type || f.type.indexOf("image/") === 0)) this._upload(f);
+        if (f) this._takeFile(f);
       });
     }
 
@@ -709,7 +728,11 @@ class BpMediaPicker extends HTMLElement {
 
   _renderPreview() {
     if (!this._previewEl) return;
-    let url = this._meta.url || bpParseMediaValue(this._value).url;
+    // In reference mode the value is an asset ID, never a URL: falling back to
+    // parsing it painted <img src="a97bf457-…">, whose late error event then
+    // replaced the resolved preview with "Image unavailable".
+    let url =
+      this._meta.url || (this._isReferenceMode() ? "" : bpParseMediaValue(this._value).url);
     if (this._isReferenceMode() && !url && this._meta.assetId) {
       this._previewEl.innerHTML =
         '<div class="bp-mp-empty" role="button" tabindex="0">Asset ' +
@@ -729,7 +752,10 @@ class BpMediaPicker extends HTMLElement {
       if (hotspot) this._renderFocalMarker();
       // A dead asset URL must not collapse to an invisible sliver — swap in
       // an explicit broken-state card (Remove stays visible to clear it).
-      this._previewEl.querySelector("img").addEventListener("error", () => {
+      const img = this._previewEl.querySelector("img");
+      img.addEventListener("error", () => {
+        // A stale image's error must not overwrite a newer preview.
+        if (!img.isConnected) return;
         this._previewEl.innerHTML =
           '<div class="bp-mp-empty bp-mp-broken" role="button" tabindex="0" aria-label="Replace image">' +
           "Image unavailable — drop a file, or click to replace" +
@@ -806,7 +832,8 @@ class BpMediaPicker extends HTMLElement {
         "/v1/data/doc/" +
         encodeURIComponent(this._dataset()) +
         "/mediaAsset/" +
-        encodeURIComponent(docId);
+        encodeURIComponent(docId) +
+        "?perspective=drafts"; // uploaded assets are drafts — see _resolveReferencePreview
       const r = await fetch(url, { credentials: "same-origin", headers: headers });
       if (!r.ok) return;
       const body = await r.json();
@@ -837,6 +864,23 @@ class BpMediaPicker extends HTMLElement {
       width: fi.width,
       height: fi.height
     });
+  }
+
+  // The one door a chosen or dropped file goes through (task-88472d6e78f2a3cb).
+  // The dialog's accept="image/*" is only a hint — "All files" hands over
+  // anything — and the Upload path stored a .txt as the image, which then
+  // rendered "Image unavailable" with no word about why; a drop was refused
+  // in silence. A file with no type keeps the benefit of the doubt (the
+  // server probes it), exactly as the drop path always did.
+  _takeFile(file) {
+    if (file.type && file.type.indexOf("image/") !== 0) {
+      this._setError(
+        (file.name || "That file") + " is " + file.type + " — choose an image file (JPEG, PNG, GIF, WebP or SVG)."
+      );
+      return false;
+    }
+    this._upload(file);
+    return true;
   }
 
   async _upload(file) {
