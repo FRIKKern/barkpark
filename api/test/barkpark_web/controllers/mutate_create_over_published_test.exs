@@ -83,7 +83,31 @@ defmodule BarkparkWeb.MutateCreateOverPublishedTest do
 
     assert resp.status == 200, resp.resp_body
     assert [w] = warnings(resp)
-    assert w["message"] =~ "createIfNotExists minted an EMPTY draft"
+    assert w["message"] =~ "createIfNotExists minted a FRESH draft"
+    refute w["message"] =~ "EMPTY"
+  end
+
+  # task-b64beb44bafc6023: a create that carries every published field drops
+  # nothing on publish, so it must not warn (it did, calling the draft EMPTY).
+  test "a create over a published-only id that carries every field does NOT warn",
+       %{conn: conn} do
+    publish_full!("cop-full")
+
+    resp =
+      mutate(conn, [
+        %{
+          "create" => %{
+            "_id" => "cop-full",
+            "_type" => "post",
+            "title" => "Dune II",
+            "pages" => 500,
+            "genre" => "scifi"
+          }
+        }
+      ])
+
+    assert resp.status == 200, resp.resp_body
+    assert warnings(resp) == []
   end
 
   test "a create over a fresh id carries no such warning", %{conn: conn} do

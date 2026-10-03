@@ -1470,31 +1470,28 @@ defmodule Barkpark.Content.Mutations do
 
   # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create` and
   # `createIfNotExists` conflict only with an existing DRAFT (docs/api-v1.md),
-  # so over an id whose PUBLISHED row exists they mint an EMPTY draft. It is
+  # so over an id whose PUBLISHED row exists they mint a FRESH draft. It is
   # not seeded from the published row, so the next publish replaces the
   # document with only the fields this create set. That is silent field loss
   # through two documented verbs used in their obvious order (found by
   # dogfooding bp: create, publish, create again, publish, and pages + genre
   # were gone). The contract is unchanged; the response now SAYS so on the
-  # advisory channel and names the fields a publish would drop.
+  # advisory channel and names the fields a publish would drop. A create that
+  # carries every published field drops nothing, so it gets no warning
+  # (task-b64beb44bafc6023: it used to, and called the full draft "EMPTY").
   defp warn_create_over_published(op, type, id, dataset, opts, %_{} = draft)
        when is_binary(id) and is_binary(type) do
     published_id = DraftId.published_id(id)
 
     with true <- published_id != draft.doc_id,
-         {:ok, %{} = published} <- Content.get_document(published_id, type, dataset, opts) do
-      dropped = (field_names(published) -- field_names(draft)) |> Enum.sort()
-
+         {:ok, %{} = published} <- Content.get_document(published_id, type, dataset, opts),
+         [_ | _] = dropped <- Enum.sort(field_names(published) -- field_names(draft)) do
       Warnings.put(
         "create_over_published",
-        "#{op} minted an EMPTY draft over the PUBLISHED #{type} #{inspect(published_id)}: " <>
+        "#{op} minted a FRESH draft over the PUBLISHED #{type} #{inspect(published_id)}: " <>
           "the draft is not seeded from it, so publishing it replaces the document with only " <>
-          "the fields this #{op} set" <>
-          if(dropped == [],
-            do: ".",
-            else: " and DROPS #{Enum.join(dropped, ", ")}."
-          ) <>
-          " To edit the published document, patch it instead (`bp doc patch #{type} #{published_id} --set …`).",
+          "the fields this #{op} set and DROPS #{Enum.join(dropped, ", ")}. " <>
+          "To edit the published document, patch it instead (`bp doc patch #{type} #{published_id} --set …`).",
         "warning"
       )
     end
