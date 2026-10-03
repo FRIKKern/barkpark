@@ -165,9 +165,15 @@ defmodule Barkpark.StructureWorkspaceScopeTest do
   # of B's catalog on A's behalf. Under a workspace scope the plugin no longer
   # probes. It emits the list, and the host gate decides against A's own
   # catalog.
+  #
+  # Quiz and Forms ran the same probe (filed by the run-5 lane D sweep) and now
+  # take the same rule.
   for {plugin, type, label} <- [
         {Barkpark.Plugins.Tasks, "task", "Tasks"},
-        {Barkpark.Plugins.Tickets, "ticket", "Tickets"}
+        {Barkpark.Plugins.Tickets, "ticket", "Tickets"},
+        {Barkpark.Plugins.Quiz, "quiz", "Quizzes"},
+        {Barkpark.Plugins.Forms, Barkpark.Plugins.Forms.Contract.submission_type(),
+         "Form submissions"}
       ] do
     @plugin plugin
     @type_name type

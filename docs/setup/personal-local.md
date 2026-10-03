@@ -47,8 +47,8 @@ plaintext dev token), mints `bp_admin_<24B base64url>` scoped
 `/login` → *API token*, or hand it to `bp setup --target connect --server
 http://localhost:PORT --token bp_admin_…`. Re-running is safe but SILENT: with a
 live token the seed skips, yet still prints `minting the admin credential` and
-exits 0 with NO token line. Store it at first print. `bp login` is a
-**cloud** verb and cannot target a local box.
+exits 0 with NO token line. `bp login` is a
+**cloud** verb, useless on a local box.
 
 ## Traps
 
@@ -60,9 +60,10 @@ exits 0 with NO token line. Store it at first print. `bp login` is a
   gcc and make installed` — both ARE installed; Mix mistranslates clang's `-g`.
 - **Keep `$BARKPARK_HOME` short (under ~85 chars).** `barkpark-pg` puts the Unix
   socket dir inside it (`-k`) and socket paths cap near 104 bytes; a deep path
-  fails inside `pg_ctl`, nowhere that explains itself.
+  fails in `pg_ctl`; only `$BARKPARK_HOME/postgres.log` says why:
+  `FATAL: could not create any Unix-domain sockets`.
 - **Never pipe `up` into `tail`/`head`.** It leaves a detached server holding the
-  pipe's write end, so the pipeline never returns — it looks like a hung launcher.
+  pipe's write end, so the pipeline never returns and looks like a hung launcher.
 - **Postgres tools** resolve via `$BARKPARK_PG_BIN`, Postgres.app, Homebrew
   `postgresql@NN`, `PATH`; the data dir's version is pinned in
   `~/.barkpark/PG_VERSION_PINNED` and a different *major* fails fast.
@@ -90,6 +91,6 @@ The twin is a **pull target**: `bp cloud workspace import` copies a cloud
 workspace's rows in; blobs are re-pointed via an admin-gated raw-blob write,
 `PUT /api/workspaces/:workspace_slug/media/blob/*path` (bytes verbatim at a
 strictly-validated relative path; traversal/absolute `422`) that needs
-`Content-Type: application/octet-stream` or it `422`s `empty_body`. Admin-gated
-means the token from `barkpark token`; a bare infra route, absent from the
-manifest. An unpushed blob serves an honest `404` — a mid-flight import degrades.
+`Content-Type: application/octet-stream` or it `422`s `empty_body`. It takes the
+`barkpark token` admin token and is absent from the manifest.
+An unpushed blob serves an honest `404` — a mid-flight import degrades.
