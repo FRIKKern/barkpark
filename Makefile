@@ -235,7 +235,7 @@ cli-install-safe: cli-build ## LOCAL: back up the installed bp, THEN install (pr
 # GUARDED BY: .github/workflows/pdrender-wasm.yml — its `paths:` filter lists
 # `Makefile`, so editing the targets below fires `make wasm` + the node smoke in
 # CI. Before task-519d5ea68ddca27f it did not, and this recipe was unguarded.
-WASM_GO_VERSION ?= 1.25.8
+WASM_GO_VERSION ?= 1.26.8
 
 WASM_IDENTITY := api/priv/static/assets/bp-pdrender.wasm
 WASM_GZ       := api/priv/static/assets/bp-pdrender.wasm.gz

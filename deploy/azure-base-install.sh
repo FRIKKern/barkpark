@@ -34,7 +34,7 @@ REF="${BARKPARK_REF:-main}"
 # Pins mirror the repo-root .tool-versions + go.mod; override only for a deliberate bump.
 ERLANG_VERSION="${ERLANG_VERSION:-27.3.4}"
 ELIXIR_VERSION="${ELIXIR_VERSION:-1.18.4-otp-27}"
-GO_VERSION="${GO_VERSION:-1.25.0}"
+GO_VERSION="${GO_VERSION:-1.26.8}"
 ASDF_DIR="${ASDF_DIR:-$HOME/.asdf}"
 
 log() { echo "[azure-base-install] $*"; }
