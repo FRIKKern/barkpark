@@ -482,6 +482,14 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # emitting `workspace_id: nil`. Passing a nil workspace as a PRESENT key
   # would make the guard fire for the genuinely-unscoped flat caller too and
   # regress the y9ee dataset_id resolution above.
+  #
+  # DECIDED (task-273fd8908ec43aa4): the `:shared_only` sentinel STAYS OUT of
+  # the `is_binary/1` branch. It names no tenant to resolve a dataset within,
+  # so it keeps the Default-project resolution. The tenant boundary is the
+  # AND-ed `scope_to_workspace_or_global(:shared_only)` (`workspace_id IS
+  # NULL`), not this guard. That reliance is pinned at the door by
+  # test/barkpark_web/controllers/search_scope_shared_layer_test.exs (a
+  # seat-vacant search returns the shared layer and never workspace A's row).
   defp scope_to_dataset(query, scope, project_id, workspace_id) do
     opts =
       if is_binary(workspace_id),
