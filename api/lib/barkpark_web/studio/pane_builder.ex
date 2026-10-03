@@ -111,10 +111,22 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # shadowing group keeps its own address (`/studio/publication` still opens
     # the group) and only the path that opened nothing is rescued. This is the
     # #1851 never-unreachable guarantee applied to a declared desk.
+    #
+    # "Opened no editor" is not the same as "missed": a walk that consumed
+    # every segment — a filtered list such as `/studio/post/post-archived`, or
+    # a document list whose last segment names a missing document — reached
+    # what the URL asked for. Re-routing those turned the Archived list into
+    # the All list plus "No post with the id post-archived"
+    # (task-977dfff0a259eda1), so only a walk that stopped short is retried.
     {panes, editor} =
       case {editor, retry_segments(nav_path, segments, tree)} do
-        {nil, retry} when is_list(retry) -> walk_and_stamp(retry, gated, tree, dataset, opts)
-        _ -> {panes, editor}
+        {nil, retry} when is_list(retry) ->
+          if walk_consumed?(panes, segments),
+            do: {panes, editor},
+            else: walk_and_stamp(retry, gated, tree, dataset, opts)
+
+        _ ->
+          {panes, editor}
       end
 
     # Only an ALIASED walk that actually opened a document earns a canonical
@@ -126,6 +138,19 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         else: editor
 
     {panes, editor}
+  end
+
+  # Did the walk reach the end of `segments`? Either every segment opened a
+  # pane (the root pane plus one per segment — the last one a list), or the
+  # last pane is a document list whose selection is the final segment (a
+  # document id, found or not). A walk that stopped on a group whose children
+  # do not include the next segment is the only miss the retry may rescue.
+  defp walk_consumed?(panes, segments) do
+    last = List.last(panes)
+
+    length(panes) == length(segments) + 1 or
+      (is_map(last) and Map.get(last, :type_name) != nil and
+         Map.get(last, :selected) == List.last(segments))
   end
 
   # `{tree, segments, aliased?}` — see the DEAD-HEAD ALIAS note in `build/3`.
