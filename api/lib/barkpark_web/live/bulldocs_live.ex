@@ -455,10 +455,12 @@ defmodule BarkparkWeb.BulldocsLive do
       |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
       |> maybe_scope(:project_id, Map.get(paper, :project_id))
 
+    # `published_only`: this is the anonymous public reader — an unpublished
+    # citing paper must not surface its title/description here (task-1005db05b44e2c39).
     referencers =
       doc_id
       |> Content.published_id()
-      |> Content.Graph.reverse_referencers(opts)
+      |> Content.Graph.reverse_referencers(Keyword.put(opts, :published_only, true))
 
     socket
     |> assign(:backlinks_html, BarkparkWeb.PaperBacklinks.section_html(referencers))
