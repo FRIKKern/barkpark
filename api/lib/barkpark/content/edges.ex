@@ -240,9 +240,14 @@ defmodule Barkpark.Content.Edges do
 
   # Strip every reference to `target_pub_id` out of one referencing source doc,
   # across BOTH scalar `reference` fields and `arrayOf`-of-`reference` fields.
+  #
+  # The schema is read in the SOURCE document's own scope (task-8a0056c52a002633),
+  # not with no scope: an unscoped read resolves the dataset to the Default
+  # workspace's, so another workspace's referencer was stripped by Default's
+  # field list, or not at all, leaving its reference dangling.
   defp disconnect_one_source(ref_doc_id, type, target_pub_id, dataset, opts) do
-    with {:ok, schema} <- Content.get_schema(type, dataset),
-         {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts) do
+    with {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts),
+         {:ok, schema} <- doc_scoped_schema(doc, type, dataset) do
       content = doc.content || %{}
       updated_content = strip_reference_fields(content, schema.fields, target_pub_id)
 
@@ -273,6 +278,21 @@ defmodule Barkpark.Content.Edges do
   # delete the key. `arrayOf` of `reference` → keep every element that is NOT the
   # target (published-coalesced compare), so OTHER references in the array
   # survive. All other fields pass through untouched.
+  # The source document's own scope, then its workspace, then the shared
+  # global layer; a document with no scope keeps the historical global read.
+  defp doc_scoped_schema(%Document{workspace_id: ws, project_id: proj}, type, dataset) do
+    case Enum.reject([workspace_id: ws, project_id: proj], fn {_k, v} -> is_nil(v) end) do
+      [] ->
+        Content.get_schema(type, dataset)
+
+      scope ->
+        case Content.resolve_schema(type, dataset, scope) do
+          {:ok, schema} -> {:ok, schema}
+          :error -> {:error, :not_found}
+        end
+    end
+  end
+
   defp strip_reference_fields(content, fields, target_pub_id) do
     Enum.reduce(fields, content, fn field, acc ->
       name = field["name"]

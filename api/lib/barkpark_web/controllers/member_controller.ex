@@ -151,7 +151,13 @@ defmodule BarkparkWeb.MemberController do
   def tokens(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace] do
       {limit, offset} = page_window(params)
-      tokens = Members.list_workspace_tokens(ws_id, limit: limit, offset: offset)
+      now = DateTime.utc_now()
+
+      tokens =
+        ws_id
+        |> Members.list_workspace_tokens(limit: limit, offset: offset)
+        |> Enum.map(&put_rotation_facts(&1, now))
+
       total = Members.count_workspace_tokens(ws_id)
 
       json(conn, page_envelope(:tokens, tokens, total, limit, offset))
@@ -247,7 +253,8 @@ defmodule BarkparkWeb.MemberController do
       {:error, :invalid_grace} ->
         unprocessable(
           conn,
-          "grace_seconds must be an integer from 0 to #{Auth.rotation_max_grace()}"
+          "give ONE of grace_seconds (integer), grace (90s / 30m / 24h / 7d) or now=true; " <>
+            "the grace must be from 0 to #{Auth.rotation_max_grace()} seconds"
         )
 
       {:error, :not_rotatable} ->
@@ -270,17 +277,89 @@ defmodule BarkparkWeb.MemberController do
     end
   end
 
+  # Three spellings of ONE knob, and at most one may be given
+  # (task-eaaf13ab768f34f6 criterion 1 — `bp token rotate --grace 2h` / `--now`):
+  #
+  #   * `grace_seconds` — the original integer (kept: scripts already send it);
+  #   * `grace` — a duration with a unit, `90s` / `30m` / `24h` / `7d`, or a bare
+  #     integer read as seconds;
+  #   * `now=true` — revoke the old token immediately (grace 0).
+  #
+  # Two of them together is a 422 rather than a silent precedence: `--now
+  # --grace 24h` is a contradiction, and picking either answer would rotate a
+  # credential on a guess. The range check (0..max) stays in `Auth.rotate_token/3`.
   defp fetch_grace(params) do
-    case Map.get(params, "grace_seconds") do
-      nil -> {:ok, Auth.rotation_default_grace()}
-      n when is_integer(n) -> {:ok, n}
-      s when is_binary(s) -> parse_grace(Integer.parse(s))
+    given =
+      [
+        {"grace_seconds", Map.get(params, "grace_seconds")},
+        {"grace", Map.get(params, "grace")},
+        {"now", Map.get(params, "now")}
+      ]
+      |> Enum.reject(fn {_k, v} -> v in [nil, "", false, "false"] end)
+
+    case given do
+      [] -> {:ok, Auth.rotation_default_grace()}
+      [{"grace_seconds", n}] when is_integer(n) -> {:ok, n}
+      [{"grace_seconds", s}] when is_binary(s) -> parse_grace(Integer.parse(s))
+      [{"grace", d}] when is_binary(d) -> parse_duration(String.trim(d))
+      [{"grace", n}] when is_integer(n) -> {:ok, n}
+      [{"now", v}] when v in [true, "true", "1"] -> {:ok, 0}
       _ -> {:error, :invalid_grace}
     end
   end
 
   defp parse_grace({n, ""}), do: {:ok, n}
   defp parse_grace(_), do: {:error, :invalid_grace}
+
+  @duration_units %{"s" => 1, "m" => 60, "h" => 3600, "d" => 86_400}
+
+  defp parse_duration(d) do
+    case Regex.run(~r/\A(\d+)([smhd]?)\z/, d) do
+      [_, n, ""] -> {:ok, String.to_integer(n)}
+      [_, n, unit] -> {:ok, String.to_integer(n) * Map.fetch!(@duration_units, unit)}
+      _ -> {:error, :invalid_grace}
+    end
+  end
+
+  # The rotation facts `bp token ls` shows (task-eaaf13ab768f34f6 criterion 1).
+  # DERIVED here from columns the row already carries, never stored:
+  #
+  #   * `age_days` — whole days since the token was minted;
+  #   * `rotation_due_at` — when it must be rotated: its own `expires_at` when it
+  #     has one, else mint time + its class's max age
+  #     (`Auth.TokenExpiry.max_age_days/1`, 365d for api and share tokens), else
+  #     nil (a class with no max). Most live tokens predate per-kind expiry and
+  #     carry no `expires_at`; for them this is the policy date, not a deadline
+  #     the server enforces — that is what makes it a DUE date;
+  #   * `rotation_overdue` — `rotation_due_at` is in the past.
+  #
+  # `last_used_at` is already on the row. A revoked token is not due for anything.
+  defp put_rotation_facts(%{inserted_at: %{} = minted} = t, now) do
+    due = rotation_due_at(t, minted)
+
+    Map.merge(t, %{
+      age_days: div(max(DateTime.diff(now, to_utc(minted), :second), 0), 86_400),
+      rotation_due_at: due,
+      rotation_overdue: not is_nil(due) and DateTime.compare(due, now) == :lt
+    })
+  end
+
+  defp put_rotation_facts(t, _now), do: t
+
+  defp rotation_due_at(%{revoked_at: %{}}, _minted), do: nil
+  defp rotation_due_at(%{expires_at: %{} = exp}, _minted), do: to_utc(exp)
+
+  defp rotation_due_at(t, minted) do
+    class = Barkpark.Auth.TokenExpiry.class_for_permissions(Map.get(t, :permissions))
+
+    case Barkpark.Auth.TokenExpiry.max_age_days(class) do
+      nil -> nil
+      days -> DateTime.add(to_utc(minted), days * 86_400, :second)
+    end
+  end
+
+  defp to_utc(%DateTime{} = dt), do: dt
+  defp to_utc(%NaiveDateTime{} = n), do: DateTime.from_naive!(n, "Etc/UTC")
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
