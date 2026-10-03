@@ -47,8 +47,6 @@ defmodule Barkpark.Content.Encryption do
       `{:error, {:encryption_failed, …}}` the moment one cannot be processed.
       A marked field is NEVER persisted as plaintext.
   """
-  # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
-  #
   # `scope` is the document's workspace id (binary | nil) or a keyword list
   # `[workspace_id: …, project_id: …]`. It picks BOTH the DEK and the schema:
   # a scoped write resolves the type in its own workspace, then the shared
@@ -56,6 +54,8 @@ defmodule Barkpark.Content.Encryption do
   # the lookup ran with no scope, which resolves `dataset` to the Default
   # workspace's dataset: a non-Default workspace's `encrypted: true` field was
   # stored as plaintext, or Default's same-named type decided what to encrypt.
+  #
+  # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
   @spec encrypt_marked(map(), String.t(), String.t(), binary() | keyword() | nil) ::
           {:ok, map()} | {:error, {:encryption_failed, term()}}
   def encrypt_marked(content, type, dataset, scope \\ nil)
