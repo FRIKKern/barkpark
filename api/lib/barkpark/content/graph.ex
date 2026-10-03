@@ -1673,8 +1673,23 @@ defmodule Barkpark.Content.Graph do
     Document
     |> where([d], d.id in ^ids)
     |> scope_query(opts)
+    |> maybe_published_only(opts)
     |> Repo.all()
     |> Map.new(fn d -> {d.id, d} end)
+  end
+
+  # `published_only: true` — the PUBLIC reader's posture (task-1005db05b44e2c39). The
+  # edge table is meant to be the published graph, but that holds only on the
+  # default REBUILD path: with `incremental_project` on, a draft save projects
+  # the draft row's outbound edges (`Projector.doc_pk/2` falls back to the
+  # `drafts.` twin when no published row exists). A source that hydrates to a
+  # `drafts.` row is then dropped exactly like an out-of-scope source — the
+  # walk's existing fail-closed rule. Studio and other authenticated callers
+  # omit the flag and keep seeing drafts.
+  defp maybe_published_only(query, opts) do
+    if Keyword.get(opts, :published_only) == true,
+      do: where(query, [d], not like(d.doc_id, "drafts.%")),
+      else: query
   end
 
   # Apply the caller's tenancy scope to a keyed Document read. Pulls

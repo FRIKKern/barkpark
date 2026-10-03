@@ -75,7 +75,7 @@ defmodule BarkparkWeb.ScopedPaperController do
           BarkparkWeb.PaperBacklinks.section_html(
             Content.Graph.reverse_referencers(
               Content.published_id(paper.doc_id),
-              [dataset: @dataset] ++ scope_opts(conn)
+              [dataset: @dataset, published_only: true] ++ scope_opts(conn)
             )
           ),
         # "Driven tasks" (lvw-t8) — same parity note as backlinks_html above.
