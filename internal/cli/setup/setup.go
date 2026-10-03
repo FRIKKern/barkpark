@@ -232,6 +232,33 @@ type Options struct {
 	// package never imports cloudclient. A nil hook makes TargetCloud a clear
 	// error from executeCloud / buildCloudPlan.
 	CloudLogin CloudLoginFunc
+
+	// RepoPin is the .barkpark.json the working directory resolves to, if any
+	// (task-43b7ec75e293c155). A repo file's `server` OUTRANKS the saved active
+	// server for every command run under it, so a connect that saved a new
+	// default must not claim "bp now defaults here" when the repo file pins
+	// another server. The cli built-in fills it, and nil means no repo file.
+	RepoPin *RepoPin
+}
+
+// RepoPin is the server a .barkpark.json pins, and where that file lives.
+type RepoPin struct {
+	Path   string // the file's path, for the receipt
+	Server string // its `server` value: a saved-server name or a URL
+}
+
+// shadows reports whether the pin points somewhere other than the server a
+// connect just saved (by URL, or by the saved handle `name`). An empty pin
+// server shadows nothing, because the file then pins only the scope.
+func (p *RepoPin) shadows(server, name string) bool {
+	if p == nil || strings.TrimSpace(p.Server) == "" {
+		return false
+	}
+	pin := strings.TrimRight(strings.TrimSpace(p.Server), "/")
+	if strings.Contains(pin, "://") {
+		return !strings.EqualFold(pin, strings.TrimRight(server, "/"))
+	}
+	return name == "" || pin != name
 }
 
 // CloudLoginResult is what a CloudLogin hook yields on success. Either it carries

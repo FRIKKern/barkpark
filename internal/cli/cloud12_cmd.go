@@ -535,6 +535,7 @@ func connectToBarkpark(out *writer, server, token, name, instanceID, team string
 		Out:          out.stdout,
 		Store:        configStoreAdapter{},
 		KnownServers: loadKnownServers(),
+		RepoPin:      currentRepoPin(),
 	}
 	if err := setup.Execute(plan, opts); err != nil {
 		out.errf("logged in, but connecting to %s failed: %v", server, err)

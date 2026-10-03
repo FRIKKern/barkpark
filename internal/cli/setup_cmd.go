@@ -182,6 +182,7 @@ func runSetup(out *writer, g globals, tail []string) int {
 		JSON:         jsonOut,
 		KnownServers: loadKnownServers(),
 		CloudLogin:   cloudLoginHook,
+		RepoPin:      currentRepoPin(),
 	}
 
 	// (3) NEVER-PROMPT / NEVER-HANG. No --target: the interactive wizard launches
@@ -273,6 +274,7 @@ func RunFirstTimeSetup() (configured bool, exit int) {
 		Wizard:       setup.Wizard,
 		KnownServers: loadKnownServers(),
 		CloudLogin:   cloudLoginHook,
+		RepoPin:      currentRepoPin(),
 	}
 	if err := setup.RunInteractive(opts); err != nil {
 		out.userErr("%v", err)
@@ -638,4 +640,24 @@ func setupStepOut(out *writer, jsonOut bool) io.Writer {
 		return out.stderr
 	}
 	return out.stdout
+}
+
+// currentRepoPin is the .barkpark.json the working directory resolves to, for
+// the connect receipt (task-43b7ec75e293c155): a repo file's server outranks
+// the saved default, so connect must not promise "bp now defaults here" under
+// one that pins elsewhere. nil when there is no (readable) repo file.
+func currentRepoPin() *setup.RepoPin {
+	cwd, err := os.Getwd()
+	if err != nil {
+		return nil
+	}
+	path, ok := findRepoFile(cwd)
+	if !ok {
+		return nil
+	}
+	rf, err := parseRepoFile(path)
+	if err != nil || rf == nil {
+		return nil
+	}
+	return &setup.RepoPin{Path: path, Server: rf.Server}
 }
