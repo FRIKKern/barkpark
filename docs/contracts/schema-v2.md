@@ -45,16 +45,13 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 - Recursive validator with permanent `flat_mode` branch
 - Codelist registry tables + `Barkpark.Content.Codelists`
 - LiveView HEEx field components for all four v2 types
-- `LocalizedText.resolve/2`
-- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — compiled and deployed, but `validations:` slot evaluation is deferred to Phase 3 (slot is inert in Phase 0; guarded by `validates_validations_slot_is_inert_in_phase_0` test).
-- Bundled EDItEUR + Thema codelists seeded on setup
+- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — deployed; the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
 
-**Phase 1+ (deferred — see `docs/decisions/deferred.md`):**
-- Oban + cloak_ecto wiring
-- Error envelope v2 (`Accept-Version: 2`)
-- Thema tree picker (modal browser)
-- Simplified/Advanced toggle
-- Drag reorder (Sortable.js hook)
+**Phase 1+ (deferred — `docs/decisions/deferred.md`):** Oban + cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder.
+
+## `required` lives under `validation`
+
+Write `validation: {required: true}` (ruling #48). Schema apply refuses a bare field `required` key: 422 `validation_failed` naming the path. The echo's `required?` follows `validation.required` only.
 
 ## `bp_*` prefix lock and reserved namespace
 

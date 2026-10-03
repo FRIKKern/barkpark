@@ -58,7 +58,9 @@ defmodule BarkparkWeb.SchemaValidateOnlyTest do
         "name" => ctx.name,
         "title" => "Validate Only Widget",
         "visibility" => "public",
-        "fields" => [%{"name" => "title", "type" => "string", "required" => true}]
+        "fields" => [
+          %{"name" => "title", "type" => "string", "validation" => %{"required" => true}}
+        ]
       },
       overrides
     )
