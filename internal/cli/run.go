@@ -3948,6 +3948,13 @@ func findRev(v any) string {
 			}
 		}
 	}
+	// A wrapped row ({"document": {...}}, `doc restore-revision`): the rev is
+	// the wrapped document's own _rev.
+	if inner := singleWrappedObject(v); inner != nil {
+		if s, ok := inner["_rev"].(string); ok && s != "" {
+			return s
+		}
+	}
 	return ""
 }
 
@@ -3965,7 +3972,11 @@ func findTransaction(v any) string {
 // wrappedResourceKeys are the write receipts that answer with the created row
 // WRAPPED under its resource name. Extend it when another create answers
 // {"<resource>": {"id": ...}} and prints a bare "ok".
-var wrappedResourceKeys = []string{"webhook"}
+//
+// "document" is `bp doc restore-revision` ({"document": {...}} from
+// HistoryController.restore): its receipt was a bare "ok" that never named the
+// draft the restore wrote (task-e792a0ef5d6df084).
+var wrappedResourceKeys = []string{"webhook", "document"}
 
 // oneTimeSecretKey is the field a write uses to hand back a credential it will
 // never show again (`webhook rotate`). It is only read beside a wrapped row, so
@@ -3983,6 +3994,13 @@ func singleWrappedObject(v any) map[string]any {
 	n := len(m)
 	if s, isStr := m[oneTimeSecretKey].(string); isStr && s != "" {
 		n--
+	}
+	// A `true` verdict flag beside the row adds nothing to name, so it does not
+	// disqualify the wrapper: restore answers {"restored": true, "document": …}.
+	for _, val := range m {
+		if b, isBool := val.(bool); isBool && b {
+			n--
+		}
 	}
 	if n != 1 {
 		return nil
