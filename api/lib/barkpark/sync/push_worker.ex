@@ -103,7 +103,15 @@ defmodule Barkpark.Sync.PushWorker do
       case Door.admit(fn ->
              state = bootstrap(state)
              since = PushCursor.get(source, dataset)
-             events = Outbox.fetch(dataset, since, state.settings.push_batch_size)
+
+             events =
+               Outbox.fetch(
+                 dataset,
+                 since,
+                 state.settings.push_batch_size,
+                 Map.get(state.ctx, :workspace_id)
+               )
+
              {state, Pusher.drain(events, state.ctx, funs)}
            end) do
         {:error, {:write_admission, _reason}} ->

@@ -231,9 +231,54 @@ defmodule Barkpark.Sync.PushWorkerTest do
     end
   end
 
-  defp insert_event!(doc_id) do
+  # task-43b484660f68075d: every workspace owns a dataset with the same string,
+  # and the outbox read only the dataset, so the push sent OTHER workspaces'
+  # events (full document bodies) to this workspace's remote.
+  describe "workspace scope" do
+    test "the drain pushes only the configured workspace's events" do
+      test_pid = self()
+      source = "pw-ws-#{System.unique_integer([:positive])}"
+      ws_a = Barkpark.TenancyFixtures.create_workspace!()
+      ws_b = Barkpark.TenancyFixtures.create_workspace!()
+
+      push_fun = fn _ctx, event, _base ->
+        send(test_pid, {:pushed, event.doc_id})
+        {:ok, "remote-#{event.doc_id}"}
+      end
+
+      settings = %Settings{
+        source: source,
+        dataset: @dataset,
+        push_batch_size: 50,
+        push_interval_ms: 60_000
+      }
+
+      {:ok, pid} =
+        PushWorker.start_link(
+          name: nil,
+          settings: settings,
+          ctx: %{source: source, dataset: @dataset, workspace_id: ws_a.id},
+          push_fun: push_fun,
+          tick_fun: fn _pid, _delay -> :ok end
+        )
+
+      _ = :sys.get_state(pid)
+
+      insert_event!("a-own", ws_a.id)
+      insert_event!("b-foreign", ws_b.id)
+
+      send(pid, :drain_tick)
+      _ = :sys.get_state(pid)
+
+      assert_received {:pushed, "a-own"}
+      refute_received {:pushed, "b-foreign"}
+    end
+  end
+
+  defp insert_event!(doc_id, workspace_id \\ nil) do
     %MutationEvent{}
     |> Ecto.Changeset.change(%{
+      workspace_id: workspace_id,
       dataset: @dataset,
       type: "post",
       doc_id: doc_id,
