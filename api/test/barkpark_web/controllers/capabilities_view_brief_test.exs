@@ -43,7 +43,7 @@ defmodule BarkparkWeb.CapabilitiesViewBriefTest do
 
   test "opt-in: no view and view=full serve the identical default body and ETag", %{conn: conn} do
     plain = caps(conn, "")
-    full = caps(build_conn(), "?view=full")
+    full = caps(scoped_conn(), "?view=full")
 
     assert plain.status == 200 and full.status == 200
     # `generated_at` is the request's clock, the one key that differs between
@@ -56,7 +56,7 @@ defmodule BarkparkWeb.CapabilitiesViewBriefTest do
 
   test "the brief is BRIEF-KEEP-LIST v1: Go's legend, Go's key order, Go's tuples", %{conn: conn} do
     full = Jason.decode!(caps(conn, "").resp_body)
-    resp = caps(build_conn(), "?view=brief")
+    resp = caps(scoped_conn(), "?view=brief")
     assert resp.status == 200
     brief = Jason.decode!(resp.resp_body)
 
@@ -108,7 +108,7 @@ defmodule BarkparkWeb.CapabilitiesViewBriefTest do
   test "RFC 9110: brief and full carry different validators, and each revalidates only itself",
        %{conn: conn} do
     full = caps(conn, "")
-    brief = caps(build_conn(), "?view=brief")
+    brief = caps(scoped_conn(), "?view=brief")
     full_tag = etag(full)
     brief_tag = etag(brief)
 
@@ -116,12 +116,12 @@ defmodule BarkparkWeb.CapabilitiesViewBriefTest do
     refute full_tag == brief_tag
 
     # The full body's ETag must NOT revalidate the brief request, nor vice versa.
-    assert caps(build_conn(), "?view=brief", [{"if-none-match", full_tag}]).status == 200
-    assert caps(build_conn(), "", [{"if-none-match", brief_tag}]).status == 200
+    assert caps(scoped_conn(), "?view=brief", [{"if-none-match", full_tag}]).status == 200
+    assert caps(scoped_conn(), "", [{"if-none-match", brief_tag}]).status == 200
 
     # Each one's own ETag does.
-    assert caps(build_conn(), "?view=brief", [{"if-none-match", brief_tag}]).status == 304
-    assert caps(build_conn(), "", [{"if-none-match", full_tag}]).status == 304
+    assert caps(scoped_conn(), "?view=brief", [{"if-none-match", brief_tag}]).status == 304
+    assert caps(scoped_conn(), "", [{"if-none-match", full_tag}]).status == 304
 
     # Both are a function of the Authorization header.
     for resp <- [full, brief] do
