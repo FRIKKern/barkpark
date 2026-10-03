@@ -64,7 +64,7 @@ const original = {
 function mount(block) {
   const element = document.createElement("div");
   document.body.appendChild(element);
-  return new Editor({ element, extensions: [StarterKit, Note, Opaque], content: runToTiptap([block]) });
+  return new Editor({ element, extensions: [StarterKit.configure({ trailingNode: false }), Note, Opaque], content: runToTiptap([block]) });
 }
 try {
   check("note mounted: schema retains full carrier and label input emits lossless folded edit", () => {

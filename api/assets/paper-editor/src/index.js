@@ -24,7 +24,7 @@ import { ListItemSource } from "./list-item-source.js";
 import { HeadingSource } from "./heading-source.js";
 import { ParagraphSource } from "./paragraph-source.js";
 import { portableTextBoundary } from "./portable-text-boundary.js";
-import Link from "@tiptap/extension-link";
+import { PortableLink as Link } from "./link-mark.js";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 
@@ -223,8 +223,16 @@ class BpPaperEditor extends HTMLElement {
           // PortableDoc quotes use their own inline carrier. The native nested
           // quote cannot round-trip and consumes `> ` before callout shorthand.
           blockquote: false,
+          // tiptap 3 folded Link, Underline, ListKeymap and TrailingNode into
+          // StarterKit. Link is configured below; underline belongs only to the
+          // table mode (TableUnderline); the other two would change keyboard
+          // behaviour and append an empty paragraph to every block.
+          link: false,
+          underline: false,
+          listKeymap: false,
+          trailingNode: false,
           // Marks/nodes left enabled by StarterKit: paragraph, bold, italic,
-          // strike, code, bulletList, orderedList, listItem, history.
+          // strike, code, bulletList, orderedList, listItem, undoRedo.
         }),
         ...(this._editorMode === "table" ? [TableUnderline] : []),
         // Link mark — required for the format bubble's link button and so
@@ -490,7 +498,7 @@ class BpPaperEditor extends HTMLElement {
       }
       return true;
     }
-    this._editor.commands.setContent(doc, false);
+    this._editor.commands.setContent(doc, { emitUpdate: false });
     return true;
   }
 
@@ -1248,7 +1256,7 @@ class BpPaperEditor extends HTMLElement {
           }
           if (this._discardCardBodyDraft) {
             this._sourceBlock = JSON.parse(JSON.stringify(value));
-            this._editor.commands.setContent(projection.doc, false);
+            this._editor.commands.setContent(projection.doc, { emitUpdate: false });
           }
           return;
         }
@@ -1267,10 +1275,10 @@ class BpPaperEditor extends HTMLElement {
         if (!preservesDraft) {
           this._cardBodyDraftJSON = null;
           this._cardBodyDirtyToken = null;
-          this._editor.commands.setContent(projection.doc, false);
+          this._editor.commands.setContent(projection.doc, { emitUpdate: false });
         }
       } else {
-        this._editor.commands.setContent(blockToTiptap(value), false);
+        this._editor.commands.setContent(blockToTiptap(value), { emitUpdate: false });
       }
     }
   }

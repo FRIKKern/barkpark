@@ -95,7 +95,7 @@ try {
   const reverted = mount(source);
   reverted.editor._editor.view.dispatch(reverted.editor._editor.state.tr.insertText(" queued B", 6));
   reverted.editor.flushPendingChanges();
-  reverted.editor._editor.commands.setContent(reverted.editor._editor.options.content, true);
+  reverted.editor._editor.commands.setContent(reverted.editor._editor.options.content, { emitUpdate: true });
   assert.equal(reverted.editor.flushPendingChanges(), true, "reverting to A emits compensation while B is queued");
   assert.equal(reverted.ops.length, 2);
   assert.deepEqual(reverted.ops[1].content, richContent);
@@ -111,12 +111,12 @@ try {
   assert.equal(dirtyToken, 0, "server-owned Card read-only toggles do not synthesize local changes");
   assert.equal(sameDebounce.editor.hasPendingChanges(), false);
   sameDebounce.editor._editor.view.dispatch(sameDebounce.editor._editor.state.tr.insertText(" transient", 6));
-  sameDebounce.editor._editor.commands.setContent(sameDebounce.editor._editor.options.content, true);
+  sameDebounce.editor._editor.commands.setContent(sameDebounce.editor._editor.options.content, { emitUpdate: true });
   assert.equal(sameDebounce.editor.flushPendingChanges(), false, "A→B→A in one debounce is a true no-op with no outstanding save");
   assert.equal(sameDebounce.ops.length, 0);
   assert.deepEqual(noopTokens, ["dirty-2"], "the WC returns the hook-owned token for the latest change");
   sameDebounce.editor._editor.view.dispatch(sameDebounce.editor._editor.state.tr.insertText(" transient again", 6));
-  sameDebounce.editor._editor.commands.setContent(sameDebounce.editor._editor.options.content, true);
+  sameDebounce.editor._editor.commands.setContent(sameDebounce.editor._editor.options.content, { emitUpdate: true });
   assert.equal(sameDebounce.editor.flushPendingChanges(), false);
   assert.deepEqual(noopTokens, ["dirty-2", "dirty-4"], "each no-op settles the exact latest hook token");
   sameDebounce.editor.remove();
@@ -124,7 +124,7 @@ try {
   const activeRevert = mount(source);
   activeRevert.editor._editor.view.dispatch(activeRevert.editor._editor.state.tr.insertText(" queued B", 6));
   activeRevert.editor.flushPendingChanges();
-  activeRevert.editor._editor.commands.setContent(activeRevert.editor._editor.options.content, true);
+  activeRevert.editor._editor.commands.setContent(activeRevert.editor._editor.options.content, { emitUpdate: true });
   activeRevert.editor.flushPendingChanges();
   activeRevert.editor.block = source;
   assert.equal(activeRevert.editor._cardBodyAwaitingContents.length, 2, "a chrome echo carrying later A cannot skip queued B");
@@ -154,7 +154,7 @@ try {
   malformedDuringDraft.editor.remove();
 
   const clearing = mount(source);
-  clearing.editor._editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] }, true);
+  clearing.editor._editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] }, { emitUpdate: true });
   clearing.editor.flushPendingChanges();
   assert.deepEqual(clearing.ops[0].content, [], "clearing asks the server to retain its authoritative paragraph map");
   clearing.editor.remove();

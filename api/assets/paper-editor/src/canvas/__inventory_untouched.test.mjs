@@ -44,7 +44,11 @@ host.blocks = blocks;
 try {
   const editor = host._editor;
   assert.ok(editor, "the whole inventory mounts in one canvas");
-  host.flushPendingChanges();
+  // Diff the mounted run against the stored blocks directly. Under tiptap 2 an
+  // island's no-op attribute flush emitted an update, which scheduled this diff
+  // as a side effect. tiptap 3 emits no update when the document is unchanged,
+  // so the test asks for the mount diff explicitly.
+  host._emitOps();
   // Mounting may materialize ids for nested children that had none (the same ids
   // the server stamps on any write) — and nothing else: every mount op, with ids
   // removed, equals the stored block (unknown keys and body shapes kept).

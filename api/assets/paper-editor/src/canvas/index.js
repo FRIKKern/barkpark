@@ -36,7 +36,7 @@ import { ListItemSource } from "../list-item-source.js";
 import { HeadingSource } from "../heading-source.js";
 import { ParagraphSource } from "../paragraph-source.js";
 import { portableTextBoundary } from "../portable-text-boundary.js";
-import Link from "@tiptap/extension-link";
+import { PortableLink as Link } from "../link-mark.js";
 import Placeholder from "@tiptap/extension-placeholder";
 import Typography from "@tiptap/extension-typography";
 import Underline from "@tiptap/extension-underline";
@@ -845,6 +845,14 @@ class BpPaperCanvas extends HTMLElement {
           // do NOT disable the inline `code` MARK (extension-code, parses <code>) —
           // the canvas KEEPS it so inline-code round-trips (convert.js inline path).
           codeBlock: false,
+          // tiptap 3 folded Link, Underline, ListKeymap and TrailingNode into
+          // StarterKit. Link and Underline are registered below with their own
+          // config; ListKeymap and TrailingNode would change list keyboard
+          // behaviour and append an empty paragraph the run never authored.
+          link: false,
+          underline: false,
+          listKeymap: false,
+          trailingNode: false,
         }),
         // Link mark — same config as ../index.js so existing `link` inline nodes
         // render/edit and the format bubble's link button works.
@@ -3238,7 +3246,7 @@ class BpPaperCanvas extends HTMLElement {
         // not a separate undo step on top of the user's own edits.
         this._editor
           .chain()
-          .setContent(L1Doc, false)
+          .setContent(L1Doc, { emitUpdate: false })
           .command(({ tr }) => {
             tr.setMeta("addToHistory", false);
             return true;
@@ -3586,7 +3594,7 @@ class BpPaperCanvas extends HTMLElement {
   }
 
   // Apply the confirmed external content to the editor WITHOUT entering the undo
-  // stack. setContent(_, false) does not emit an update (so we don't bounce an op
+  // stack. setContent(_, { emitUpdate: false }) does not emit an update (so we don't bounce an op
   // batch back); the addToHistory:false transaction meta keeps the external edit
   // out of the user's undo history. The baseline was already reset by the caller.
   _applyExternalContent(blocks) {
@@ -3660,7 +3668,7 @@ class BpPaperCanvas extends HTMLElement {
     }
     this._editor
       .chain()
-      .setContent(runToTiptap(blocks), false)
+      .setContent(runToTiptap(blocks), { emitUpdate: false })
       .command(({ tr }) => {
         tr.setMeta("addToHistory", false);
         return true;
@@ -3810,7 +3818,7 @@ class BpPaperCanvas extends HTMLElement {
         // the empty pre-seed doc and ProseMirror threw (doc needs a block).
         this._editor
           .chain()
-          .setContent(runToTiptap(this._blocks), false)
+          .setContent(runToTiptap(this._blocks), { emitUpdate: false })
           .command(({ tr }) => {
             tr.setMeta("addToHistory", false);
             return true;

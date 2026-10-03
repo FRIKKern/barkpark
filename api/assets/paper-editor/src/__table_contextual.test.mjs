@@ -122,7 +122,7 @@ function editCell(editor, area, row, column, text) {
   const rowIndex = area === "head" ? 0 : row + offset;
   doc.content[0].content[rowIndex].content[column].content = text == null
     ? [] : [{ type: "text", text }];
-  assert.equal(editor._editor.commands.setContent(doc, true), true);
+  assert.equal(editor._editor.commands.setContent(doc, { emitUpdate: true }), true);
 }
 
 function bubbleNativeInput(editor) {
@@ -338,7 +338,7 @@ try {
     assert.equal(tableTiptapDocSupported(mountedDoc, combinedProjection), true,
       `admitted ${marks.join("+")} remains writable after ProseMirror canonicalization`);
     text.text += " edited";
-    assert.equal(combined.editor._editor.commands.setContent(mountedDoc, true), true);
+    assert.equal(combined.editor._editor.commands.setContent(mountedDoc, { emitUpdate: true }), true);
     assert.equal(combined.editor.flushPendingChanges(), true);
     const expected = clone(inline);
     let leaf = expected;
@@ -513,7 +513,7 @@ try {
 
   const veto = mounted();
   const beforeVeto = clone(veto.editor._editor.getJSON());
-  veto.editor._editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] }, true);
+  veto.editor._editor.commands.setContent({ type: "doc", content: [{ type: "paragraph" }] }, { emitUpdate: true });
   assert.equal(JSON.stringify(veto.editor._editor.getJSON()), JSON.stringify(beforeVeto),
     "mixed paste and singleton escape are rejected before mutation");
   assert.equal(veto.ops.length, 0);
@@ -531,7 +531,7 @@ try {
     { type: "text", text: "Be" },
     { type: "text", text: "ta", marks: [{ type: "bold" }] },
   ];
-  protectedMounted.editor._editor.commands.setContent(splitProtected, true);
+  protectedMounted.editor._editor.commands.setContent(splitProtected, { emitUpdate: true });
   assert.equal(JSON.stringify(protectedMounted.editor._editor.getJSON()),
     JSON.stringify(beforeProtectedRefusal),
     "a protected split is refused before ProseMirror mutates the document");
@@ -542,16 +542,16 @@ try {
   assert.equal(protectedMounted.ops.length, 0,
     "refusal feedback never creates a dirty latch, debounce, or operation");
   const sameStatus = protectedStatus;
-  protectedMounted.editor._editor.commands.setContent(splitProtected, true);
+  protectedMounted.editor._editor.commands.setContent(splitProtected, { emitUpdate: true });
   assert.equal(protectedMounted.editor.querySelector("[data-table-edit-status]"), sameStatus,
     "repeated rejected transactions reuse one editor-local live region");
 
   const markedProtected = clone(beforeProtectedRefusal);
   markedProtected.content[0].content[0].content[0].content[0].marks = [{ type: "bold" }];
-  protectedMounted.editor._editor.commands.setContent(markedProtected, true);
+  protectedMounted.editor._editor.commands.setContent(markedProtected, { emitUpdate: true });
   const markedAndTyped = clone(protectedMounted.editor._editor.getJSON());
   markedAndTyped.content[0].content[0].content[0].content[0].text = "Beta queued";
-  protectedMounted.editor._editor.commands.setContent(markedAndTyped, true);
+  protectedMounted.editor._editor.commands.setContent(markedAndTyped, { emitUpdate: true });
   assert.equal(protectedStatus.hidden, true, "the next accepted edit clears stale refusal feedback");
   assert.equal(protectedMounted.editor._editor.commands.undo(), true);
   assert.equal(protectedMounted.editor._editor.getJSON().content[0].content[0]
@@ -595,13 +595,13 @@ try {
   const retargeted = clone(freeLinkMounted.editor._editor.getJSON());
   retargeted.content[0].content[0].content[0].content[0].marks[0].attrs.href =
     "/papers/new";
-  freeLinkMounted.editor._editor.commands.setContent(retargeted, true);
+  freeLinkMounted.editor._editor.commands.setContent(retargeted, { emitUpdate: true });
   assert.equal(freeLinkMounted.editor.flushPendingChanges(), true);
   assert.equal(freeLinkMounted.ops.length, 1);
   const retargetedAndTyped = clone(freeLinkMounted.editor._editor.getJSON());
   retargetedAndTyped.content[0].content[0].content[0].content[0].text =
     "Retargeted and typed";
-  freeLinkMounted.editor._editor.commands.setContent(retargetedAndTyped, true);
+  freeLinkMounted.editor._editor.commands.setContent(retargetedAndTyped, { emitUpdate: true });
   assert.equal(freeLinkMounted.editor.flushPendingChanges(), true);
   assert.equal(freeLinkMounted.ops.length, 2,
     "metadata-free href then typing queue as two immutable shape-stable operations");
@@ -633,7 +633,7 @@ try {
   const incompatibleProtectedEcho = mounted(metadataProjection);
   const localProtectedDraft = clone(incompatibleProtectedEcho.editor._editor.getJSON());
   localProtectedDraft.content[0].content[0].content[1].content[0].text = "Local source";
-  incompatibleProtectedEcho.editor._editor.commands.setContent(localProtectedDraft, true);
+  incompatibleProtectedEcho.editor._editor.commands.setContent(localProtectedDraft, { emitUpdate: true });
   const retainedProtectedDraft = JSON.stringify(incompatibleProtectedEcho.editor._editor.getJSON());
   const wrongProtectedAuthority = { ...clone(metadataProjection), id: "other-table" };
   assert.equal(incompatibleProtectedEcho.editor.applyTableProjection(wrongProtectedAuthority), false);
@@ -881,7 +881,7 @@ try {
 
   const queuedFormat = clone(queueEditor._editor.getJSON());
   queuedFormat.content[0].content[0].content[0].content[0].marks = [{ type: "bold" }];
-  queueEditor._editor.commands.setContent(queuedFormat, true);
+  queueEditor._editor.commands.setContent(queuedFormat, { emitUpdate: true });
   assert.equal(queueEditor.flushPendingChanges(), true);
   assert.equal(queueReplies.length, 1);
   assert.equal(queueReplies[0].payload.if_rev, 10);
@@ -889,7 +889,7 @@ try {
 
   const queuedType = clone(queueEditor._editor.getJSON());
   queuedType.content[0].content[0].content[0].content[0].text = "Beta after format";
-  queueEditor._editor.commands.setContent(queuedType, true);
+  queueEditor._editor.commands.setContent(queuedType, { emitUpdate: true });
   assert.equal(queueEditor.flushPendingChanges(), true);
   assert.equal(queueReplies.length, 1,
     "the second old-base operation waits behind the active mutation");
@@ -966,7 +966,7 @@ try {
   conflictHook.mounted();
   const conflictDraft = clone(conflictEditor._editor.getJSON());
   conflictDraft.content[0].content[0].content[0].content[0].text = "Local pending source";
-  conflictEditor._editor.commands.setContent(conflictDraft, true);
+  conflictEditor._editor.commands.setContent(conflictDraft, { emitUpdate: true });
   assert.equal(conflictEditor.flushPendingChanges(), true);
   assert.equal(conflictReplies[0].payload.if_rev, 10);
   const retainedConflictDraft = JSON.stringify(conflictEditor._editor.getJSON());
@@ -1027,7 +1027,7 @@ try {
   interleaveHook.mounted();
   const firstInterleaveDraft = clone(interleaveEditor._editor.getJSON());
   firstInterleaveDraft.content[0].content[0].content[0].content[0].text = "Table first";
-  interleaveEditor._editor.commands.setContent(firstInterleaveDraft, true);
+  interleaveEditor._editor.commands.setContent(firstInterleaveDraft, { emitUpdate: true });
   assert.equal(interleaveEditor.flushPendingChanges(), true);
   assert.equal(interleaveCalls.length, 1);
   assert.equal(interleaveCalls[0].kind, "table");
@@ -1056,7 +1056,7 @@ try {
     "the sibling form inherits the Table acknowledgement revision");
   const secondInterleaveDraft = clone(interleaveEditor._editor.getJSON());
   secondInterleaveDraft.content[0].content[0].content[0].content[0].text = "Table second";
-  interleaveEditor._editor.commands.setContent(secondInterleaveDraft, true);
+  interleaveEditor._editor.commands.setContent(secondInterleaveDraft, { emitUpdate: true });
   assert.equal(interleaveEditor.flushPendingChanges(), true);
   assert.equal(interleaveCalls.length, 2,
     "later Table work waits behind the active sibling form save");
