@@ -1187,6 +1187,9 @@ defmodule BarkparkWeb.Router do
   # cap (task-29d335e489b8cf0b). `:api` derives `:current_workspace` from the
   # token first, so this meters the token's OWN workspace. Placed after
   # `:require_token`, before `:require_write`, as in `:scoped_mutate`.
+  # The flat AND scoped revision-restore doors ride it too: restore is a
+  # write, and a suspended workspace kept restoring (task-09009a90725e89ee).
+  # `:scoped_api` has already resolved `:current_workspace` from the path.
   pipeline :flat_within_quota do
     plug(BarkparkWeb.Plugs.RequireWithinQuota)
   end
@@ -2551,7 +2554,7 @@ defmodule BarkparkWeb.Router do
   # token can no longer overwrite a document via restore, while the history +
   # revision GET reads stay reachable by any member token.
   scope "/v1/data", BarkparkWeb do
-    pipe_through([:api, :require_token, :require_write])
+    pipe_through([:api, :require_token, :flat_within_quota, :require_write])
 
     post("/revision/:dataset/:id/restore", HistoryController, :restore)
   end
@@ -3255,7 +3258,7 @@ defmodule BarkparkWeb.Router do
   # document via restore; the scoped history + revision GET reads stay open to
   # any member token.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
-    pipe_through([:scoped_api, :require_token, :require_write])
+    pipe_through([:scoped_api, :require_token, :flat_within_quota, :require_write])
 
     post("/v1/data/revision/:dataset/:id/restore", HistoryController, :restore)
   end
