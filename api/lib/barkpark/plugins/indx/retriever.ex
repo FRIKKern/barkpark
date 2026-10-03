@@ -104,6 +104,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
       # wide pool never costs 200 authoritative re-reads per keystroke.
       ranked =
         indx_docs
+        |> keep_perspective(Keyword.get(opts, :perspective, :published))
         |> reject_excluded(parsed)
         |> rerank_by_title(parsed)
 
@@ -366,6 +367,30 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # `_type` is dropped). The batch read is tenant-scoped via
   # `Content.get_documents_by_ids/3` (same P0 leak guard), so it can never
   # surface another workspace's row.
+  # PERSPECTIVE, applied to the engine's ids BEFORE hydration and the count
+  # (task-d99d712daf6ca959). `QueryPipeline` hands every retriever the caller's
+  # perspective — `:published` for anonymous and public-read callers — and
+  # `DocumentsRetriever.perspective_filter/2` applies it in SQL. This retriever
+  # used to ignore it: the engine returns whatever ids it holds, and with
+  # `incremental_upsert` on that includes every `drafts.` save of a public type;
+  # `Content.get_documents_by_ids/3` is perspective-free by design. So an
+  # anonymous `?engine=indx` search returned and counted unpublished drafts.
+  #
+  # Same rule, same fallback as `perspective_filter/2`, keyed on the same
+  # `drafts.` id prefix: `:raw` keeps all, `:drafts` keeps drafts, and anything
+  # else — `:published`, a stray string, nil — keeps published only.
+  defp keep_perspective(indx_docs, :raw), do: indx_docs
+  defp keep_perspective(indx_docs, :drafts), do: Enum.filter(indx_docs, &draft_hit?/1)
+  defp keep_perspective(indx_docs, _published), do: Enum.reject(indx_docs, &draft_hit?/1)
+
+  defp draft_hit?(indx_doc) do
+    case id_type_pair(indx_doc) do
+      {id, _type} -> String.starts_with?(id, "drafts.")
+      # An id-less record hydrates to nothing anyway; drop it from a filtered view.
+      nil -> true
+    end
+  end
+
   defp hydrate_documents(indx_docs, scope, opts) do
     pairs =
       indx_docs
