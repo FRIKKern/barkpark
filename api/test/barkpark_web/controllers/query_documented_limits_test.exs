@@ -230,13 +230,24 @@ defmodule BarkparkWeb.QueryDocumentedLimitsTest do
     } do
       # `author` has no reference fields of its own, so depth is measured on the
       # SHAPE of the expand spec instead: a dotted `expand=author.employer` names
-      # no top-level reference field and expands NOTHING.
-      body =
+      # no top-level reference field. It used to answer 200 and expand NOTHING;
+      # since owner ruling #53 (2026-10-03) it is a 400 naming the path, so a
+      # caller asking for a second hop is told it does not exist.
+      err =
         query(conn, raw, "expand=author.employer&filter[title]=Beta&perspective=published")
+        |> json_response(400)
+        |> Map.fetch!("error")
+
+      assert err["details"]["parameter"] == "expand"
+      assert err["details"]["unknown"] == ["author.employer"]
+
+      body =
+        query(conn, raw, "expand=author&filter[title]=Beta&perspective=published")
         |> json_response(200)
 
       [doc] = body["result"]["documents"]
-      assert doc["author"] == "au2"
+      assert is_map(doc["author"])
+      refute Map.has_key?(doc["author"], "employer") and is_map(doc["author"]["employer"])
     end
   end
 end

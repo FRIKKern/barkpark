@@ -21,7 +21,18 @@ defmodule BarkparkWeb.HistoryController do
   # `has_more` is derived by asking for ONE row past the page and dropping it,
   # never by a second COUNT query: the count would be a separate snapshot and
   # could disagree with the page it describes.
-  def index(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
+  def index(conn, params) do
+    # Owner ruling #53 (2026-10-03): a non-integer `?limit` / `?offset` is a 400
+    # naming the parameter. It used to read as the default page (limit 50,
+    # offset 0), so a typo looked like it had worked. Out-of-range integers are
+    # still clamped by `parse_int/2` / `parse_offset/1` below.
+    case BarkparkWeb.StrictReadParams.malformed_int(params, ["limit", "offset"]) do
+      nil -> list_revisions(conn, params)
+      bad -> BarkparkWeb.StrictReadParams.refuse_int(conn, bad)
+    end
+  end
+
+  defp list_revisions(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
     limit = parse_int(params["limit"], 50)
     offset = parse_offset(params["offset"])
 
@@ -195,8 +206,9 @@ defmodule BarkparkWeb.HistoryController do
   end
 
   # Offset has no upper clamp (the page it lands on is bounded by `limit`) and
-  # a floor of 0. A negative, non-numeric, or list-shaped param reads as 0 —
-  # the first page — rather than raising or silently inverting the window.
+  # a floor of 0. A negative integer reads as 0 — the first page — rather than
+  # inverting the window. A non-numeric or list-shaped param never gets here:
+  # `index/2` refuses it with a 400 first; the fallbacks stay as defence.
   defp parse_offset(nil), do: 0
 
   defp parse_offset(val) when is_binary(val) do
