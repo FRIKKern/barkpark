@@ -64,6 +64,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unauthorized", {:error, :unauthorized}, "unauthorized", 401, []},
       {"replay", {:error, :replay}, "unauthorized", 401, [:reason]},
       {"forbidden", {:error, :forbidden}, "forbidden", 403, []},
+      # A preview JWT reading outside its doc_ids / workspace (owner ruling #17).
+      {"preview_scope", {:error, :preview_scope}, "forbidden", 403, [:reason]},
       {"forbidden_membership", {:error, :forbidden_membership}, "forbidden", 403, [:reason]},
       # The same membership refusal for an API TOKEN (task-7d4d405e0ee4bcbf):
       # byte-identical code/status/reason, with the workspace named in the
@@ -105,6 +107,10 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"searchable_text_too_large/unlocated",
        {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
        [:details]},
+      # Owner ruling #47: publish refuses an empty list row.
+      {"empty_list_members",
+       {:error, {:empty_list_members, %{"keywords" => ["Keywords row 3 is empty"]}}},
+       "validation_failed", 422, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},

@@ -1280,7 +1280,7 @@ defmodule PDS.Census do
   @exclusion_anchors %{
     {:post, "/w/:workspace_slug/p/:project_slug/v1/members", "BarkparkWeb.MemberController", :create} => {"BarkparkWeb.MemberController.create/2", 1, "92306071"},
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update} => {"BarkparkWeb.MemberController.update/2", 1, "98799982"},
-    {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "29471808"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "59503441"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "129784508"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "75946866"},
@@ -1455,7 +1455,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{522, 522}],
+      basis_spans: [{530, 530}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1471,7 +1471,9 @@ defmodule PDS.Census do
           "still sits on the def's first body line. RE-ANCHORED again off :512 on " <>
           "era-bl-allowed-auth-methods: login/2, above this def, grew by 10 lines when it took " <>
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
-          "body line.",
+          "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
+          "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
+          "the comment still sits on the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1480,7 +1482,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{537, 542}],
+      basis_spans: [{545, 550}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1497,7 +1499,9 @@ defmodule PDS.Census do
           "carrying its revoke count (the token `anti-enumeration` now on :530). RE-ANCHORED " <>
           "again off :527-532 on era-bl-allowed-auth-methods: +10 lines inserted above by " <>
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
-          "on :540).",
+          "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
+          "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
+          "`anti-enumeration` now on :548).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>

@@ -902,8 +902,29 @@ defmodule Barkpark.Search.DocumentsRetriever do
     where(query, [d], not like(d.doc_id, "drafts.%"))
   end
 
+  # `:drafts` is the draft-over-published OVERLAY, the meaning `?perspective=drafts`
+  # has on the query and doc reads (owner ruling #52, 2026-10-03). It used to be
+  # drafts-ONLY here, so a client passing one perspective to both surfaces never
+  # found a published document in search (the Go TUI worked around it by asking
+  # for `raw`). Each logical document appears once: its `drafts.` twin when one
+  # exists, else the published row. A published row whose twin exists is dropped
+  # whether or not the twin matches the query, so the hit set is "the overlay,
+  # then the match" — the rows `Content.Query`'s DISTINCT ON would pick. One
+  # WHERE clause, so results, count and facets (all derived from `base`) stay
+  # consistent. The twin probe rides the (doc_id, type, dataset_id) unique index.
   def perspective_filter(query, :drafts) do
-    where(query, [d], like(d.doc_id, "drafts.%"))
+    where(
+      query,
+      [d],
+      like(d.doc_id, "drafts.%") or
+        fragment(
+          "NOT EXISTS (SELECT 1 FROM documents t WHERE t.doc_id = 'drafts.' || ? AND t.type = ? AND t.dataset_id IS NOT DISTINCT FROM ? AND t.dataset = ?)",
+          d.doc_id,
+          d.type,
+          d.dataset_id,
+          d.dataset
+        )
+    )
   end
 
   def perspective_filter(query, :raw), do: query

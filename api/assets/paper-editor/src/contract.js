@@ -9,6 +9,8 @@ export const DEBOUNCE_MS = 300;
 export const PLACEHOLDER = {
   paragraph: "Start typing, or press / for blocks…",
   heading: (level) => `Heading ${level || 1}`,
+  // The empty locked title of a template paper (owner ruling 2026-10-03 #54).
+  title: "Title",
   eyebrow: "Add a kicker…",
   byline: "Add names, separated by · …",
   ingress: "Write the introduction…",

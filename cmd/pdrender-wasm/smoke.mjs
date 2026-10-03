@@ -130,7 +130,7 @@ console.log("SMOKE OK: bpRenderTUI rendered " + html.length + " bytes of HTML fr
 //       → SGR "38;2;81;81;91" → applySGR emits color:#51515b (81=0x51, 91=0x5b).
 //     So the byte we assert is #51515b, and #52525b must be ABSENT (a raw token
 //       leak would betray a code path that bypassed the lipgloss round-trip).
-//   Probe provenance: re-probed fresh at origin/main@46fc7849 with go1.25.8 —
+//   Probe provenance: re-probed fresh at origin/main@1050e990 with go1.26.8 —
 //     all ten fixtures m17..m26 render color:#51515b present, color:#52525b absent.
 const slateFixtures = [
   ["m17 heat calendar + matrix", "sample_m17.json"],

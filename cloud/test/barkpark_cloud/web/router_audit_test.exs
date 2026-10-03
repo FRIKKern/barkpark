@@ -596,7 +596,12 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
 
     test "POST /v1/invitations/accept writes invitation.accepted under the team" do
       {owner, team, _owner_token} = logged_in()
-      invitee = user_fixture(%{email: "invitee-#{System.unique_integer([:positive])}@x.io"})
+      # Confirmed: accepting needs a proven address (task-0cf611238d4ad597 CQ6).
+      invitee =
+        user_fixture(%{email: "invitee-#{System.unique_integer([:positive])}@x.io"})
+        |> BarkparkCloud.Accounts.User.confirm_changeset()
+        |> BarkparkCloud.Repo.update!()
+
       {:ok, %{token: raw}} = Accounts.invite_member(team, invitee.email, "member", owner)
       {:ok, invitee_token} = Accounts.create_user_session_token(invitee)
 

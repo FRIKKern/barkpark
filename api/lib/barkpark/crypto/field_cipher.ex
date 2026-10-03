@@ -31,9 +31,17 @@ defmodule Barkpark.Crypto.FieldCipher do
 
   @doc """
   Encrypt `value` under the active DEK for `(workspace_id, scope)`. Returns the
-  envelope map. Already-encrypted values pass through untouched (idempotent —
-  re-saving a doc whose secret field is already ciphertext does not
-  double-encrypt).
+  envelope map. An envelope THIS server sealed under the same
+  `(workspace_id, scope)` passes through untouched (idempotent — re-saving a doc
+  whose secret field is already ciphertext does not double-encrypt).
+
+  Owner ruling #18 (task-f462de9e4c1c4621): a value that only LOOKS like an
+  envelope — a caller-built `%{"_bpenc" => 1, "k" => 1, "v" => <plaintext>}`,
+  or a real envelope sealed under another workspace or dataset — fails the
+  round trip and is sealed like any other value instead of being stored as
+  given. The content write path refuses such a value up front with a 422
+  (`Content.Encryption.encrypt_marked/4`); this clause is the floor for every
+  other caller.
 
   The DEK is selected per-workspace (charter D51-D54) but the AAD stays the BARE
   `scope` — the same scope binding a ciphertext cannot be replayed under another
@@ -43,10 +51,33 @@ defmodule Barkpark.Crypto.FieldCipher do
   @spec encrypt(term(), String.t(), binary() | nil) :: map()
   def encrypt(value, scope, workspace_id \\ nil)
 
-  def encrypt(value, _scope, _workspace_id) when is_map(value) and is_map_key(value, @marker),
-    do: value
+  def encrypt(value, scope, workspace_id)
+      when is_map(value) and is_map_key(value, @marker) and is_binary(scope) do
+    case verify(value, scope, workspace_id) do
+      :ok -> value
+      :error -> seal(value, scope, workspace_id)
+    end
+  end
 
-  def encrypt(value, scope, workspace_id) when is_binary(scope) do
+  def encrypt(value, scope, workspace_id) when is_binary(scope),
+    do: seal(value, scope, workspace_id)
+
+  @doc """
+  `:ok` when `value` is an envelope that decrypts under `(workspace_id, scope)`,
+  i.e. one this server sealed for that scope; `:error` for anything else,
+  including a caller-built envelope and a real one from another scope.
+  """
+  @spec verify(term(), String.t(), binary() | nil) :: :ok | :error
+  def verify(%{@marker => _} = value, scope, workspace_id) when is_binary(scope) do
+    case decrypt(value, scope, workspace_id) do
+      {:ok, _} -> :ok
+      :error -> :error
+    end
+  end
+
+  def verify(_value, _scope, _workspace_id), do: :error
+
+  defp seal(value, scope, workspace_id) do
     {version, dek} = DataKeys.active_dek(workspace_id, scope)
     iv = :crypto.strong_rand_bytes(@iv_bytes)
     plaintext = Jason.encode!(value)

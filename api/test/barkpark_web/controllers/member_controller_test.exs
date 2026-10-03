@@ -198,7 +198,7 @@ defmodule BarkparkWeb.MemberControllerTest do
 
       body =
         req(admin_raw)
-        |> post("#{base(ws, project)}/members", Jason.encode!(%{email: email, role: "owner"}))
+        |> post("#{base(ws, project)}/members", Jason.encode!(%{email: email, role: "admin"}))
         |> json_response(409)
 
       assert body["error"]["code"] == "already_member"
@@ -233,27 +233,30 @@ defmodule BarkparkWeb.MemberControllerTest do
       assert body["member"]["role"] == "admin"
     end
 
-    test "REFUSES to demote the last owner", %{ws: ws, project: project, admin_raw: admin_raw} do
-      email = unique_email("lastowner")
-      seat_user!(ws, email, "owner")
+    # Owner ruling #5: only an owner manages the owner role, so the rail is
+    # exercised by the workspace's ONLY owner (a token) demoting itself.
+    test "REFUSES to demote the last owner", %{ws: ws, project: project} do
+      %{raw: owner_raw, token: owner_token} = owner_token!(ws)
 
       body =
-        req(admin_raw)
-        |> patch("#{base(ws, project)}/members/#{email}", Jason.encode!(%{role: "member"}))
+        req(owner_raw)
+        |> patch(
+          "#{base(ws, project)}/members/#{owner_token.id}?principal_type=api_token",
+          Jason.encode!(%{role: "member"})
+        )
         |> json_response(409)
 
       assert body["error"]["code"] == "last_owner"
-      assert %Membership{role: "owner"} = owner_row(ws.id)
+      assert %Membership{role: "owner"} = TenancyAuth.membership(owner_token, ws.id)
     end
 
     test "ALLOWS demoting an owner when another owner remains — the rail is not a wall",
-         %{ws: ws, project: project, admin_raw: admin_raw} do
+         %{ws: ws, project: project} do
+      %{raw: owner_raw} = owner_token!(ws)
       first = unique_email("owner-one")
-      second = unique_email("owner-two")
       seat_user!(ws, first, "owner")
-      seat_user!(ws, second, "owner")
 
-      assert req(admin_raw)
+      assert req(owner_raw)
              |> patch("#{base(ws, project)}/members/#{first}", Jason.encode!(%{role: "member"}))
              |> json_response(200)
     end
@@ -295,17 +298,163 @@ defmodule BarkparkWeb.MemberControllerTest do
     end
 
     test "REFUSES to remove the last owner, and the seat survives",
-         %{ws: ws, project: project, admin_raw: admin_raw} do
-      email = unique_email("solo-owner")
-      seat_user!(ws, email, "owner")
+         %{ws: ws, project: project} do
+      %{raw: owner_raw, token: owner_token} = owner_token!(ws)
 
       body =
-        req(admin_raw) |> delete("#{base(ws, project)}/members/#{email}") |> json_response(409)
+        req(owner_raw)
+        |> delete("#{base(ws, project)}/members/#{owner_token.id}?principal_type=api_token")
+        |> json_response(409)
 
       assert body["error"]["code"] == "last_owner"
-      assert %Membership{role: "owner"} = owner_row(ws.id)
+      assert %Membership{role: "owner"} = TenancyAuth.membership(owner_token, ws.id)
     end
   end
+
+  # OWNER RULING 2026-10-03 #5 (task-6bb5d87128f68d7c, task-e70881a7dd2bedb4):
+  # only an owner grants, changes or removes the owner role; an admin manages
+  # member, admin and custom roles; a re-role never lifts a token seat above
+  # the token's own permissions.
+  describe "role ceiling — only owners manage owners (ruling #5)" do
+    test "an admin cannot promote itself to owner", %{ws: ws, project: project} do
+      %{raw: raw, token: token} = workspace_admin_token!(ws)
+
+      body =
+        req(raw)
+        |> patch(
+          "#{base(ws, project)}/members/#{token.id}?principal_type=api_token",
+          Jason.encode!(%{role: "owner"})
+        )
+        |> json_response(403)
+
+      assert body["error"]["code"] == "owner_required"
+      assert %Membership{role: "admin"} = TenancyAuth.membership(token, ws.id)
+    end
+
+    test "an admin cannot seat a new owner, and no account is created",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      email = unique_email("new-owner")
+
+      body =
+        req(admin_raw)
+        |> post("#{base(ws, project)}/members", Jason.encode!(%{email: email, role: "owner"}))
+        |> json_response(403)
+
+      assert body["error"]["code"] == "owner_required"
+      refute Barkpark.Accounts.get_user_by_email(email)
+    end
+
+    test "an admin cannot demote an owner", %{ws: ws, project: project, admin_raw: admin_raw} do
+      first = unique_email("owner-a")
+      second = unique_email("owner-b")
+      seat_user!(ws, first, "owner")
+      seat_user!(ws, second, "owner")
+
+      body =
+        req(admin_raw)
+        |> patch("#{base(ws, project)}/members/#{first}", Jason.encode!(%{role: "member"}))
+        |> json_response(403)
+
+      assert body["error"]["code"] == "owner_required"
+      assert length(owner_rows(ws.id)) == 2
+    end
+
+    test "an admin cannot remove an owner", %{ws: ws, project: project, admin_raw: admin_raw} do
+      first = unique_email("owner-x")
+      second = unique_email("owner-y")
+      seat_user!(ws, first, "owner")
+      seat_user!(ws, second, "owner")
+
+      body =
+        req(admin_raw)
+        |> delete("#{base(ws, project)}/members/#{first}")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "owner_required"
+      assert length(owner_rows(ws.id)) == 2
+    end
+
+    test "an owner promotes a member to owner, and removes another owner",
+         %{ws: ws, project: project} do
+      %{raw: owner_raw} = owner_token!(ws)
+      email = unique_email("rising")
+      seat_user!(ws, email, "member")
+
+      assert req(owner_raw)
+             |> patch("#{base(ws, project)}/members/#{email}", Jason.encode!(%{role: "owner"}))
+             |> json_response(200)
+
+      assert req(owner_raw)
+             |> delete("#{base(ws, project)}/members/#{email}")
+             |> json_response(200)
+    end
+
+    test "an owner seats a new owner by e-mail", %{ws: ws, project: project} do
+      %{raw: owner_raw} = owner_token!(ws)
+
+      body =
+        req(owner_raw)
+        |> post(
+          "#{base(ws, project)}/members",
+          Jason.encode!(%{email: unique_email("seated-owner"), role: "owner"})
+        )
+        |> json_response(201)
+
+      assert body["member"]["role"] == "owner"
+    end
+
+    test "an admin still demotes and removes admins and members",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      email = unique_email("plain-admin")
+      seat_user!(ws, email, "admin")
+
+      assert req(admin_raw)
+             |> patch("#{base(ws, project)}/members/#{email}", Jason.encode!(%{role: "member"}))
+             |> json_response(200)
+
+      assert req(admin_raw)
+             |> delete("#{base(ws, project)}/members/#{email}")
+             |> json_response(200)
+    end
+
+    test "nobody lifts a read-only token seat to admin or owner",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      %{raw: owner_raw} = owner_token!(ws)
+      raw = "ceiling-reader-#{System.unique_integer([:positive])}"
+      {:ok, reader} = Auth.create_token(raw, "reader", @dataset, ["read"])
+      {:ok, _} = TenancyAuth.create_membership(ws.id, reader.id, "member", "api_token")
+      path = "#{base(ws, project)}/members/#{reader.id}?principal_type=api_token"
+
+      for {caller, role} <- [{admin_raw, "admin"}, {owner_raw, "admin"}, {owner_raw, "owner"}] do
+        body =
+          req(caller)
+          |> patch(path, Jason.encode!(%{role: role}))
+          |> json_response(403)
+
+        assert body["error"]["code"] == "role_exceeds_token"
+      end
+
+      assert %Membership{role: "member"} = TenancyAuth.membership(reader, ws.id)
+      refute TenancyAuth.workspace_admin?(reader, ws.id)
+    end
+  end
+
+  defp owner_token!(ws) do
+    raw = "roster-owner-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "roster-owner", @dataset, ["read", "write", "admin"])
+    {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "owner", "api_token")
+    %{raw: raw, token: token}
+  end
+
+  defp workspace_admin_token!(ws) do
+    raw = "roster-admin-#{System.unique_integer([:positive])}"
+    {:ok, token} = Auth.create_token(raw, "roster-admin", @dataset, ["read", "write", "admin"])
+    {:ok, _} = TenancyAuth.create_membership(ws.id, token.id, "admin", "api_token")
+    %{raw: raw, token: token}
+  end
+
+  defp owner_rows(ws_id),
+    do: Repo.all(from(m in Membership, where: m.workspace_id == ^ws_id and m.role == "owner"))
 
   describe "cross-tenant isolation" do
     test "an admin of A cannot see B's roster", %{
@@ -787,13 +936,5 @@ defmodule BarkparkWeb.MemberControllerTest do
     if body["hasMore"],
       do: walk_pages(raw, path, envelope_key, id_key, body["nextOffset"], acc, guard + 1),
       else: acc
-  end
-
-  defp owner_row(ws_id) do
-    Repo.one(
-      from(m in Membership,
-        where: m.workspace_id == ^ws_id and m.principal_type == "user" and m.role == "owner"
-      )
-    )
   end
 end

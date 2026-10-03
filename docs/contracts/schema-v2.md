@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: schema-v2-field-types | budget: 1800tok -->
 # Schema Definition v2 — contract
 
-Source: `api/lib/barkpark/content/schema_definition.ex` (the canonical reference — the former SCHEMA_V2.md doc was removed; recover from git history). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
+Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
 
 ## Four v2 field types
 
@@ -13,7 +13,9 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
-Members are typed by a single `of` **shape descriptor** (required — a missing or non-object `of` is rejected as `array_missing_of`). `ordered: true` → up/down reorder buttons in the LiveView field component; `ordered: false` → unordered set. Drag reorder (Sortable.js + LiveView JS hook) deferred to Phase 1+.
+Members are typed by a single `of` **shape descriptor** (required — a missing or non-object `of` is rejected as `array_missing_of`). `ordered: true` → up/down reorder buttons in the LiveView field component; `ordered: false` → unordered set.
+
+**Empty rows do not publish** (ruling #47): a scalar or reference list holding `null`, a blank string or a ref without `_ref` refuses publish: 422 `validation_failed`, `details.<field>` names the row. Drafts keep it.
 
 ### `codelist` — registry-backed enum pinned to an issue
 
@@ -45,16 +47,13 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 - Recursive validator with permanent `flat_mode` branch
 - Codelist registry tables + `Barkpark.Content.Codelists`
 - LiveView HEEx field components for all four v2 types
-- `LocalizedText.resolve/2`
-- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — compiled and deployed, but `validations:` slot evaluation is deferred to Phase 3 (slot is inert in Phase 0; guarded by `validates_validations_slot_is_inert_in_phase_0` test).
-- Bundled EDItEUR + Thema codelists seeded on setup
+- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — deployed; the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
 
-**Phase 1+ (deferred — see `docs/decisions/deferred.md`):**
-- Oban + cloak_ecto wiring
-- Error envelope v2 (`Accept-Version: 2`)
-- Thema tree picker (modal browser)
-- Simplified/Advanced toggle
-- Drag reorder (Sortable.js hook)
+**Phase 1+ (deferred — `docs/decisions/deferred.md`):** Oban + cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder.
+
+## `required` lives under `validation`
+
+Write `validation: {required: true}` (ruling #48). Schema apply refuses a bare field `required` key: 422 `validation_failed` naming the path. The echo's `required?` follows `validation.required` only.
 
 ## `bp_*` prefix lock and reserved namespace
 
