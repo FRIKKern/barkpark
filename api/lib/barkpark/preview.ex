@@ -69,22 +69,6 @@ defmodule Barkpark.Preview do
   @type image :: %{required(String.t()) => term()} | nil
 
   @doc """
-  Project a document's `content` + full `blocks` list into the preview manifest.
-
-  `opts` (all optional):
-
-    * `:media_resolver` — `(src :: String.t() -> map() | nil)` closure mapping a
-      `/media/files/<path>` src to `%{"url","width","height","type"}` (see
-      `media_resolver/1`). Absent ⇒ media-backed images degrade to `nil`.
-    * `:doc_type` — the raw doctype string (`"paper"`, `"task"`, …). Absent ⇒
-      `content["type"]` ⇒ `"document"`.
-    * `:url` — the document's RELATIVE reader url (e.g. `/papers/<slug>`).
-    * `:title` — the document row title, used as the last title fallback.
-
-  PURE: no Repo, no mutation of inputs.
-  """
-  # @canonical capability:preview-manifest aka:og,opengraph,unfurl,share-card,twitter-card
-  @doc """
   The content keys each manifest entry is DERIVED from, as
   `{path_in_manifest, [source_content_key, …]}`. `Content.Envelope` reads this
   to drop a manifest entry whose source field the caller may not read: the
@@ -111,6 +95,22 @@ defmodule Barkpark.Preview do
     ]
   end
 
+  @doc """
+  Project a document's `content` + full `blocks` list into the preview manifest.
+
+  `opts` (all optional):
+
+    * `:media_resolver` — `(src :: String.t() -> map() | nil)` closure mapping a
+      `/media/files/<path>` src to `%{"url","width","height","type"}` (see
+      `media_resolver/1`). Absent ⇒ media-backed images degrade to `nil`.
+    * `:doc_type` — the raw doctype string (`"paper"`, `"task"`, …). Absent ⇒
+      `content["type"]` ⇒ `"document"`.
+    * `:url` — the document's RELATIVE reader url (e.g. `/papers/<slug>`).
+    * `:title` — the document row title, used as the last title fallback.
+
+  PURE: no Repo, no mutation of inputs.
+  """
+  # @canonical capability:preview-manifest aka:og,opengraph,unfurl,share-card,twitter-card
   @spec project(map(), [map()], map()) :: manifest()
   def project(content, blocks, opts \\ %{})
       when is_map(content) and is_list(blocks) and is_map(opts) do
