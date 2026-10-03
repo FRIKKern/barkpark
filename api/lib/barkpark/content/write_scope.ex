@@ -627,10 +627,22 @@ defmodule Barkpark.Content.WriteScope do
   # Rows the read could still return under this dataset STRING: this project's,
   # or project-less ones (task-substrate writes and pre-W2 rows carry no
   # project_id, and the flat read path shows them). Existence only, no data.
+  #
+  # A project-less row counts only when it is unstamped or belongs to the
+  # project's own workspace (task-c379dd6a58a6ac91): unfiltered, any
+  # workspace's project-less rows answered, and the gate runs before auth, so
+  # an anonymous caller could probe which dataset names another tenant uses.
   defp legacy_dataset_rows?(project_id, dataset) do
+    project_ws =
+      from(p in Barkpark.Tenancy.Project, where: p.id == ^project_id, select: p.workspace_id)
+
     Barkpark.Repo.exists?(
       from(d in Document,
-        where: d.dataset == ^dataset and (d.project_id == ^project_id or is_nil(d.project_id))
+        where:
+          d.dataset == ^dataset and
+            (d.project_id == ^project_id or
+               (is_nil(d.project_id) and
+                  (is_nil(d.workspace_id) or d.workspace_id in subquery(project_ws))))
       )
     )
   end

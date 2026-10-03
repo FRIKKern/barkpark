@@ -81,4 +81,21 @@ defmodule BarkparkWeb.QueryUnknownDatasetTest do
     assert resp.status == 404
     assert error_of(resp)["message"] == "document not found"
   end
+
+  # task-c379dd6a58a6ac91: the "known dataset" check counted project-less rows
+  # from EVERY workspace, and it runs before auth, so an anonymous caller could
+  # learn which dataset names another tenant writes to.
+  test "another workspace's project-less rows do not make a dataset known here", %{conn: conn} do
+    secret = missing()
+    ws_b = TenancyFixtures.create_workspace!()
+    {:ok, _} = TenancyFixtures.create_document_in!(ws_b, nil, "post", %{}, secret)
+
+    probe = get(conn, "/v1/data/query/#{secret}/post")
+    control = get(conn, "/v1/data/query/#{missing()}/post")
+
+    assert probe.status == control.status,
+           "the dataset another workspace uses answered #{probe.status}, a never-used one #{control.status}"
+
+    assert error_of(probe)["message"] == "dataset #{inspect(secret)} not found"
+  end
 end
