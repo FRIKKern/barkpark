@@ -95,6 +95,10 @@ to that raw token, and `GET /login/ticket/:t` consumes it atomically (one
 winner), sets `session["api_token"]` and redirects to `/studio`.
 Unknown/used/expired are indistinguishable (no oracle); the response is
 `no-store` + `no-referrer`. See `BarkparkWeb.LoginTicketController`.
+The `email` form (signs in AS that account and seats it Default owner) needs
+`admin` and, once the operator allowlist is armed, a bearer it names
+(`403 required: platform_operator`); a Cloud-managed box that arms it lists
+Cloud's credential id in `BARKPARK_OPERATOR_TOKEN_IDS` (ruling #6, 2026-10-03).
 
 Browser password-reset rides the same email tokens as the JSON flow:
 `GET|POST /login/reset` ("Forgot password?", anti-enumeration — always the
