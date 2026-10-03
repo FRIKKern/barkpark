@@ -133,6 +133,93 @@ defmodule Barkpark.Tasks.Criteria do
 
   defp worded_merge_gate?(_), do: false
 
+  # THE NARROW PREDICATE: the marker OPENS the criterion. One home for the
+  # pattern the authoring nag (`Barkpark.Plugins.Tasks`) and the birth flag
+  # (`flag_leading_merge_gates/1`) both read, so the two cannot disagree about
+  # what "a leading MERGE-GATED" is.
+  @merge_gate_lead ~r/^\s*[\[\(]?\s*\*{0,2}\s*MERGE[-\s]GATED\b/i
+
+  @doc """
+  True when the `MERGE-GATED` marker OPENS `text`. An optional `[`/`(` and up
+  to two `*` may precede it. This is a DECLARATION, as opposed to a criterion
+  that mentions gating somewhere in its prose. Anchored at the start, so a
+  prefix of the criterion decides it identically.
+  """
+  @spec leading_merge_gate_marker?(term()) :: boolean()
+  def leading_merge_gate_marker?(text) when is_binary(text),
+    do: Regex.match?(@merge_gate_lead, text)
+
+  def leading_merge_gate_marker?(_), do: false
+
+  @doc """
+  THE BIRTH FLAG (task-0ed428e843b83382, part 3 of the task-d1654bf0d20d5009
+  ruling). This sets `"merge_gate" => true` on every criterion that opens with
+  the marker and carries NO `merge_gate` key. Every other entry is returned
+  unchanged. It also returns the zero-based indices it flagged.
+
+  WHY IT IS SAFE TO ACT ON POSITION, measured over the live ledger on
+  2026-10-03 (every published task, 40,977 criteria, 3,047 of them worded
+  as a merge gate in any spelling):
+
+      wording                              flag true  flag false  absent
+      opens with MERGE-GATED     (2580)       1262          7       1311
+      opens with "MERGE GATE"    (253)         103          0        150
+      marker buried in prose     (214)          11         21        182
+
+  Where an author answered the question explicitly, a MERGE-GATED marker
+  that opens the criterion meant a gate 1262 times in 1269 (99.4%). A buried
+  marker meant NOT a gate 21 times in 32. Position is what separates a
+  declaration from a mention, and the authors who flagged by hand agree. Two
+  verbatim buried cases show what flagging a mention would do. "The four
+  lead-gated rows are adjudicated `open` — NOT closed …" would be stamped met
+  on a merge, which asserts the opposite of what it says. "Every
+  machine-checkable merge gate is verified with `gh pr view` …" would be
+  marked done by work nobody did. That is the fabricated done `Tasks.Close`
+  refuses to permit off wording, so a buried marker is never flagged.
+
+  The "MERGE GATE" spelling (no -D) is left alone ON PURPOSE. It is outside
+  the marker the ruling names, and the nag shares this predicate. A miss
+  costs one unflagged row its author can still flag, whereas a false flag
+  costs a fabricated done.
+
+  DECLARED INTENT ALWAYS WINS. An entry that carries `merge_gate` at all,
+  `true` or `false`, is never touched. `false` is the documented exemption
+  door: 7 leading-marker criteria on the ledger use it.
+
+  It runs on a task's BIRTH only (`Barkpark.Content.Writer`). It is NOT a
+  backfill. The 1311 existing unflagged leading rows are a separate question
+  with a separate blast radius.
+  """
+  @spec flag_leading_merge_gates(term()) :: {term(), [non_neg_integer()]}
+  def flag_leading_merge_gates(list) when is_list(list) do
+    {entries, flagged} =
+      list
+      |> Enum.with_index()
+      |> Enum.map_reduce([], fn {entry, i}, acc ->
+        if birth_flaggable?(entry) do
+          {Map.put(entry, gate_key(entry), true), [i | acc]}
+        else
+          {entry, acc}
+        end
+      end)
+
+    {entries, Enum.reverse(flagged)}
+  end
+
+  def flag_leading_merge_gates(other), do: {other, []}
+
+  defp birth_flaggable?(%{} = entry) do
+    not Map.has_key?(entry, "merge_gate") and not Map.has_key?(entry, :merge_gate) and
+      leading_merge_gate_marker?(fetch(entry, :criterion))
+  end
+
+  defp birth_flaggable?(_), do: false
+
+  # Write the flag in the entry's own key style: an atom-keyed entry (an
+  # in-process caller) must not end up carrying both "criterion" spellings.
+  defp gate_key(entry),
+    do: if(Map.has_key?(entry, :criterion), do: :merge_gate, else: "merge_gate")
+
   @doc """
   The COMPACT PER-CRITERION STATE SEQUENCE — one character per acceptance
   criterion, in checklist order — for a caller that must render the

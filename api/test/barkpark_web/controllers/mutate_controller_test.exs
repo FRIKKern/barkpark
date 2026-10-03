@@ -1737,7 +1737,7 @@ defmodule BarkparkWeb.MutateControllerTest do
 
     # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
     @tag :requires_plugins
-    test "an unflagged MERGE-GATED criterion puts a warning ON THE RESPONSE, not just the journal",
+    test "at BIRTH the server sets the flag itself and says so on the response (task-0ed428e843b83382)",
          %{conn: conn} do
       resp =
         mutate(conn, [
@@ -1753,6 +1753,53 @@ defmodule BarkparkWeb.MutateControllerTest do
 
       assert resp.status == 200
       body = Jason.decode!(resp.resp_body)
+      codes = Enum.map(body["warnings"] || [], & &1["code"])
+
+      # The nag no longer fires for the case the server just handled — a
+      # warning that survives its own fix trains people to ignore warnings.
+      refute "merge_gate_unflagged" in codes
+
+      assert [advisory] =
+               Enum.filter(body["warnings"] || [], &(&1["code"] == "merge_gate_flagged_at_birth"))
+
+      assert advisory["message"] =~ "[1]"
+      assert advisory["message"] =~ "merge_gate\": false"
+
+      # Advisory, never a gate: the write itself landed (as the draft row —
+      # a mutate `create` is draft-first, so the result id carries the prefix).
+      assert [%{"id" => "drafts.mg-advisory-unflagged"}] = body["results"]
+
+      {:ok, doc} =
+        Barkpark.Content.get_document("drafts.mg-advisory-unflagged", "task", "test")
+
+      [plain, gate] = doc.content["acceptance_criteria"]
+      refute Map.has_key?(plain, "merge_gate")
+      assert gate["merge_gate"] == true
+    end
+
+    # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
+    @tag :requires_plugins
+    test "an EDIT adding an unflagged MERGE-GATED criterion still puts the nag ON THE RESPONSE",
+         %{conn: conn} do
+      assert mutate(conn, [
+               gate_task_create("mg-advisory-edit", [
+                 %{"criterion" => "the suite is green", "met" => false}
+               ])
+             ]).status == 200
+
+      edit =
+        gate_task_create("mg-advisory-edit", [
+          %{"criterion" => "the suite is green", "met" => false},
+          %{
+            "criterion" =>
+              "[MERGE-GATED] PR merged to main (LEAD closes this criterion on merge).",
+            "met" => false
+          }
+        ])
+
+      resp = mutate(conn, [%{"createOrReplace" => edit["create"]}])
+      assert resp.status == 200
+      body = Jason.decode!(resp.resp_body)
 
       assert [warning] =
                Enum.filter(body["warnings"] || [], &(&1["code"] == "merge_gate_unflagged"))
@@ -1760,10 +1807,12 @@ defmodule BarkparkWeb.MutateControllerTest do
       assert warning["severity"] == "warning"
       assert warning["message"] =~ "[1]"
       assert warning["message"] =~ "merge_gate\": true"
+      assert warning["message"] =~ "only when a task is BORN"
 
-      # Advisory, never a gate: the write itself landed (as the draft row —
-      # a mutate `create` is draft-first, so the result id carries the prefix).
-      assert [%{"id" => "drafts.mg-advisory-unflagged"}] = body["results"]
+      {:ok, doc} = Barkpark.Content.get_document("drafts.mg-advisory-edit", "task", "test")
+
+      refute Map.has_key?(Enum.at(doc.content["acceptance_criteria"], 1), "merge_gate"),
+             "an edit must never be flagged by the server: that would be a backfill riding an edit"
     end
 
     test "the same criterion CARRYING the flag draws no merge-gate warning", %{conn: conn} do

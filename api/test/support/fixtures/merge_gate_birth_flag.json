@@ -1,0 +1,3283 @@
+{
+  "_comment": "Generated 2026-10-03 from the LIVE guerrilla ledger (every published task, 3047 criteria carrying MERGE-GATED wording) for task-0ed428e843b83382. must_flag: the marker OPENS the criterion and merge_gate is ABSENT, so the birth flag sets it (deduplicated, truncated to 96 chars: the rule is anchored at the start, so a prefix decides it identically). must_not_flag: EVERY buried-marker criterion with the flag absent, full text; the birth flag must leave each alone. explicit_false_leading: authors who wrote merge_gate:false on a leading marker, which must never be overridden.",
+  "counts": {
+    "buried": {
+      "absent": 182,
+      "false": 21,
+      "true": 11
+    },
+    "leading_merge_gated": {
+      "absent": 1311,
+      "false": 7,
+      "true": 1262
+    },
+    "opens_merge_gate_spelling": {
+      "absent": 150,
+      "true": 103
+    }
+  },
+  "explicit_false_leading": [
+    {
+      "doc": "task-49092d8afbaf5519[4]",
+      "criterion": "MERGE-GATED in prose but declared not a gate: this entry carries the marker wording and an explicit merge_gate false, the documented exemption door."
+    },
+    {
+      "doc": "task-0d32d24e0a8b3cf9[0]",
+      "criterion": "MERGE-GATED: this scratch criterion exists only to exercise the merge-gate flag predicate; it is not a real gate."
+    },
+    {
+      "doc": "pds-w42-bl-liveview-derivation-anchor[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and the lead has independently re-derived the emission anchor's denominator."
+    },
+    {
+      "doc": "pdf-bl-cp-version-endpoint[3]",
+      "criterion": "MERGE-GATED (lead closes): merged to origin/main and verified live on the CP."
+    },
+    {
+      "doc": "task-5a3b22be679c826a[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged, and the lead has re-run the per-def equivalence probe in both directions."
+    },
+    {
+      "doc": "dr-w22-s7-platform-node-on-the-fleet-envelope[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged and the live envelope re-read after deploy shows the `platform` node with a real `first_seen_at`, pasted with its as-of instant."
+    },
+    {
+      "doc": "task-6d80c6cc7d97b1d1[6]",
+      "criterion": "MERGE-GATED -- THE LEAD CLOSES THIS, AND ONLY ON THE DEMO. An editor completes the full round trip -- open, edit rich text, set alt text, preview, publish -- in a NON-DEFAULT workspace, WITHOUT touching the API, with the run shown. That is the demo Gyldendal could not run. This criterion CANNOT be honestly met while S1 is open, so its evidence must name the S1 commit that unblocked it. Plus all four required contexts green, read LIVE from .github/required-checks.json."
+    }
+  ],
+  "gate_spelling_opening": [
+    {
+      "doc": "connectors-bridge-tool-lifecycle-tests[3]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with connectors.yml green (typecheck + vitest real-Postgres "
+    },
+    {
+      "doc": "connectors-catalog-connectable-drift[4]",
+      "criterion": "MERGE-GATE (lead closes on merge): PR merged into main with doc-gates green and the drift check "
+    },
+    {
+      "doc": "connectors-catalog-multi-install[4]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with the Elixir Test gate green modulo the D166 inherited se"
+    },
+    {
+      "doc": "connectors-chat-bridge-ddl-drift-gate[3]",
+      "criterion": "[MERGE GATE — lead closes on merge] PR merged into main with doc-gates green."
+    },
+    {
+      "doc": "connectors-chat-permission-docs-registry[3]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with doc-gates green; PR body carries 'Task: connectors-chat"
+    },
+    {
+      "doc": "connectors-linear-tool-connector[6]",
+      "criterion": "MERGE-GATE (lead closes): PR merged (past the inherited elixir.yml red, D87); the live Linear ca"
+    },
+    {
+      "doc": "connectors-oauth-config-env-plumbing[2]",
+      "criterion": "MERGE-GATE (lead closes): PR merged; Elixir failing set unchanged (isolation per charter D97)."
+    },
+    {
+      "doc": "connectors-oauth-return-live-refresh[4]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with 'Task: connectors-oauth-return-live-refresh' body line;"
+    },
+    {
+      "doc": "connectors-orphan-session-on-mint-race[3]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with connectors.yml green; PR body carries 'Task: connectors"
+    },
+    {
+      "doc": "connectors-p4-slack-connect-oauth-route[7]",
+      "criterion": "[MERGE GATE — lead closes on merge] PR merged into main with the connectors gate green (typechec"
+    },
+    {
+      "doc": "connectors-p4-tool-connectors-mcp[6]",
+      "criterion": "MERGE-GATE (lead closes on merge): PR merged into main with the connectors gate green (npm ci + "
+    },
+    {
+      "doc": "connectors-sdk-thread-state-key-lacks-workspace[3]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with connectors.yml green, AFTER connectors-orphan-session-o"
+    },
+    {
+      "doc": "connectors-secrets-audit-read-surface[2]",
+      "criterion": "MERGE GATE (lead closes): PR with `Task: connectors-secrets-audit-read-surface` merged, blocking"
+    },
+    {
+      "doc": "connectors-secrets-scoped-admin-http[4]",
+      "criterion": "MERGE GATE (lead closes): PR with `Task: connectors-secrets-scoped-admin-http` body line merged "
+    },
+    {
+      "doc": "connectors-telegram-poll-supervision[4]",
+      "criterion": "MERGE-GATE (lead closes): PR merged. This slice was telegram.ts's sole toucher this wave."
+    },
+    {
+      "doc": "connectors-telegram-token-shape-guard[3]",
+      "criterion": "MERGE-GATE (lead closes on merge): PR merged into main with the connectors gate green (typecheck"
+    },
+    {
+      "doc": "connectors-tool-connector-studio-card[6]",
+      "criterion": "MERGE-GATE (lead closes): PR merged with doc-gates.yml green (drift + literal + link-lint) + pr-"
+    },
+    {
+      "doc": "connectors-webhook-mount-fanout[5]",
+      "criterion": "MERGE-GATE (lead closes): PR merged, rebased AFTER connectors-linear-tool-connector (both touch "
+    },
+    {
+      "doc": "dwb-reconcile-evidence-backfill[4]",
+      "criterion": "MERGE-GATE (lead closes): lead spot-checked two backfilled trails at Review"
+    },
+    {
+      "doc": "dwb-reconcile-human-gate-parks[5]",
+      "criterion": "MERGE-GATE (lead closes): lead re-read the parent + paper at Review and confirmed a stranger cou"
+    },
+    {
+      "doc": "dwb-reconcile-publish-collapse[3]",
+      "criterion": "MERGE-GATE (lead closes): lead re-ran the verification loop at Review"
+    },
+    {
+      "doc": "dwb-reconcile-stamp-pack[6]",
+      "criterion": "MERGE-GATE (lead closes): lead spot-checked three stamps against HEAD at Review"
+    },
+    {
+      "doc": "felix-w19-bl-authority-lock-remaining-sites[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main; Elixir Test gate green on the PR."
+    },
+    {
+      "doc": "grb-append-e4-e6-scoreboard-rows[3]",
+      "criterion": "MERGE GATE (lead closes): tooling/scaffy-duels/tally_wf.py landed via merged PR (dedup-by-messag"
+    },
+    {
+      "doc": "isu-reconcile-epic-close[5]",
+      "criterion": "MERGE-GATE (lead closes): lead re-read the closed epic + both remainders at Review and confirmed"
+    },
+    {
+      "doc": "isu-reconcile-nag-paper[4]",
+      "criterion": "MERGE-GATE (lead closes): lead re-read the rendered paper at Review and confirmed it tells the c"
+    },
+    {
+      "doc": "mcp-close-doc-truth[5]",
+      "criterion": "MERGE-GATE (lead closes on merge): PR carrying 'Task: mcp-close-doc-truth' merged to main; no --"
+    },
+    {
+      "doc": "mob-bl-close-manifest-lie[3]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main, AFTER the crown capture per charter D71"
+    },
+    {
+      "doc": "mob-bl-runtime-lane-consumer[6]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the mobile and Go gates green."
+    },
+    {
+      "doc": "mob-lm-s6-island-offline[6]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the mobile gate green"
+    },
+    {
+      "doc": "mob-rt-s1-stream-tail-core[6]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the Elixir gate green, and the post-deploy beha"
+    },
+    {
+      "doc": "mob-rt-s2-stable-wire-fixture[5]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the Go and mobile gates green, unblocking the p"
+    },
+    {
+      "doc": "mob-rt-s5-sse-scanner-err[5]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the Go gate green."
+    },
+    {
+      "doc": "mob-rt-s6-stream-skeleton[6]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the mobile gate green. The component ships cons"
+    },
+    {
+      "doc": "mob-rt-s7-stable-emitter[7]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged with the Elixir gate green, and the post-deploy behaviour ve"
+    },
+    {
+      "doc": "mob-w3-rich-tail[8]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the mobile gate green, and the progressive tail"
+    },
+    {
+      "doc": "pbw-w1-broken-blocks-fix[4]",
+      "criterion": "Merge gate (lead closes): PR with body line Task: pbw-w1-broken-blocks-fix merged after Elixir T"
+    },
+    {
+      "doc": "pbw-w1-reader-resolver-fix[4]",
+      "criterion": "Merge gate (lead closes): PR with body line Task: pbw-w1-reader-resolver-fix merged after Elixir"
+    },
+    {
+      "doc": "pbw-w1-stale-comment-truth[2]",
+      "criterion": "Merge gate (lead closes): PR with body line Task: pbw-w1-stale-comment-truth merged"
+    },
+    {
+      "doc": "pbw-w1-usefulness-review-paper[4]",
+      "criterion": "Merge gate (lead closes): lead verified ranking honesty and S-tier task quality"
+    },
+    {
+      "doc": "pbw-w1-wishlist-100-paper[4]",
+      "criterion": "Merge gate (lead closes): lead verified the published Paper against the charter content contract"
+    },
+    {
+      "doc": "task-09ea9f28764a8790[2]",
+      "criterion": "MERGE GATE: PR merged to main; the scoped-path test from #14930 (schema_dataset_hash_tenancy_tes"
+    },
+    {
+      "doc": "task-0cb560706d6fac92[3]",
+      "criterion": "MERGE GATE: merged on main with the four required contexts green, so the Elixir gate clears for "
+    },
+    {
+      "doc": "task-0fc9d55c4725ab92[3]",
+      "criterion": "MERGE GATE (lead closes): PR #3545 merged to origin/main (git merge-base --is-ancestor 4c4051308"
+    },
+    {
+      "doc": "task-1727cf058442c449[3]",
+      "criterion": "MERGE GATE: PR merged on main with the four required contexts green, gettext catalogues extracte"
+    },
+    {
+      "doc": "task-18b2808200230557[3]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main"
+    },
+    {
+      "doc": "task-2b7cbaf8265f6b4e[6]",
+      "criterion": "MERGE GATE (lead): PR #14072 is merged to main with the required checks green."
+    },
+    {
+      "doc": "task-32ee49492917906d[4]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main and the full parallel api/ Elixir CI suite ru"
+    },
+    {
+      "doc": "task-35874fe42e94a903[4]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main with the mobile gate green."
+    },
+    {
+      "doc": "task-3f76bb5b8bcc15f8[3]",
+      "criterion": "MERGE GATE (the lead closes this): merged to main with the four required contexts green, and con"
+    },
+    {
+      "doc": "task-5766dc5ca985ddc8[4]",
+      "criterion": "MERGE GATE (lead closes): PR carrying body line `Task: task-5766dc5ca985ddc8` merged to origin/m"
+    },
+    {
+      "doc": "task-5dbbbe2efc44e48e[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to main with a green Elixir gate; PR number and merge commit"
+    },
+    {
+      "doc": "task-5f4c0d03c05cd10e[2]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main; the Elixir Test gate green."
+    },
+    {
+      "doc": "task-631f13b1799f5915[5]",
+      "criterion": "MERGE GATE (lead-owned): the PR merges to main."
+    },
+    {
+      "doc": "task-6d190e20dd3e8bb4[2]",
+      "criterion": "MERGE GATE (the lead closes this): merged to main with the four required contexts green, and Dis"
+    },
+    {
+      "doc": "task-74f54db3b1f353d2[3]",
+      "criterion": "MERGE GATE (the lead closes this): merged to origin/main, and `scripts/shell-harnesses-dispatch."
+    },
+    {
+      "doc": "task-7997e31b3a9ea3f4[3]",
+      "criterion": "MERGE GATE (the lead closes this): merged to main with the four required contexts green."
+    },
+    {
+      "doc": "task-7a7b6b9c91402621[3]",
+      "criterion": "MERGE GATE (LEAD closes): PR merged to main."
+    },
+    {
+      "doc": "task-7e6071978f700a1a[5]",
+      "criterion": "MERGE GATE (lead): the PR carrying these fixture fixes is merged to main."
+    },
+    {
+      "doc": "task-7f59063625b9a410[3]",
+      "criterion": "MERGE GATE (the lead closes this): merged to origin/main and the harness re-run at the merge sha"
+    },
+    {
+      "doc": "task-8f45a6d91f5f7ce4[4]",
+      "criterion": "MERGE GATE (the lead closes this): the PR is merged to main."
+    },
+    {
+      "doc": "task-97750fc8b61c45cc[6]",
+      "criterion": "MERGE GATE: the PR carrying the guard is merged to origin/main and `git merge-base --is-ancestor"
+    },
+    {
+      "doc": "task-9f9f2acd91bc2640[4]",
+      "criterion": "MERGE GATE: PR merged on main with the four required contexts green."
+    },
+    {
+      "doc": "task-a22b8a135fb65243[3]",
+      "criterion": "MERGE GATE: the Elixir gate is green on a main sha carrying the fix, quoted by run id and sha."
+    },
+    {
+      "doc": "task-b9c618482e688500[4]",
+      "criterion": "MERGE GATE (lead closes): PR merged to main."
+    },
+    {
+      "doc": "task-bb23e6669ce33aed[5]",
+      "criterion": "MERGE GATE (the LEAD closes this): the PR is merged to origin/main with first body line `Task: t"
+    },
+    {
+      "doc": "task-c07717c4346857d5[3]",
+      "criterion": "MERGE GATE: PR merged on main with the four required contexts green; the icon tripwire and the p"
+    },
+    {
+      "doc": "task-c5b0e402137a2d4f[5]",
+      "criterion": "MERGE GATE: PR opened with a single Task: task-c5b0e402137a2d4f trailer in the body, scripts/mer"
+    },
+    {
+      "doc": "task-c70ed1791d1af8ef[1]",
+      "criterion": "MERGE GATE: the PR is merged to main and the next Elixir gate run on main passes the census file"
+    },
+    {
+      "doc": "task-cbf0021ddc6d5ab6[5]",
+      "criterion": "MERGE GATE (the lead closes this): the four required contexts pass AND the check is re-run on th"
+    },
+    {
+      "doc": "task-dbc0c3d0ceb4de97[4]",
+      "criterion": "MERGE GATE (the lead closes this): merged to origin/main and `scripts/exit-laundering-sweep.sh` "
+    },
+    {
+      "doc": "task-eb529fb29fe991f3[2]",
+      "criterion": "MERGE GATE: PR merged to main"
+    },
+    {
+      "doc": "task-f0bdb914d63a2e84[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to main; task closed with evidence citing #2641 / c1210221 /"
+    },
+    {
+      "doc": "task-f7c66c75edebfeed[3]",
+      "criterion": "MERGE GATE (the lead closes this): PR #15528 is merged to main."
+    },
+    {
+      "doc": "task-felix-interop-resource-bound-sweep[5]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main."
+    },
+    {
+      "doc": "task-felix-migrator-task-sandbox-race[2]",
+      "criterion": "MERGE GATE (lead-closed): PR merged to origin/main."
+    },
+    {
+      "doc": "task-felix-phantom-media-atomicity[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged with the protective test proving no phantom media survives a"
+    },
+    {
+      "doc": "task-felix-suite-order-flakes[2]",
+      "criterion": "MERGE GATE (lead-closed): PR merged to origin/main; both files green in the default full suite."
+    },
+    {
+      "doc": "task-felix-w13-boardsnapshot-fieldvis-seal[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main; Elixir Test gate green."
+    },
+    {
+      "doc": "task-felix-w13-github-opslive-mount-gate[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main; the Elixir Test (1.18.1 / OTP 27.0) gate gre"
+    },
+    {
+      "doc": "task-felix-w13-sobelow-stay-advisory-verdict[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged to origin/main (docs-only; merges on its own doc gate)."
+    },
+    {
+      "doc": "task-felix-w20-fk-census-tripwire[3]",
+      "criterion": "MERGE GATE (lead closes): PR merged with cloud.yml green (compile --warnings-as-errors + format "
+    },
+    {
+      "doc": "task-synonyms-insights-tenancy-a96bc24c[3]",
+      "criterion": "MERGE GATE: the PR is merged to main with api/test/barkpark/search/ green"
+    },
+    {
+      "doc": "task-vix-bomb-explicit-ceiling[2]",
+      "criterion": "MERGE GATE (lead closes): PR merged to main with a green Elixir gate; PR calls out that the mech"
+    },
+    {
+      "doc": "wbt-jwt-bl-wire-p7-doc-gates[4]",
+      "criterion": "MERGE GATE (the LEAD closes this, never the builder): the PR is merged to origin/main with first"
+    }
+  ],
+  "must_flag": [
+    {
+      "doc": "acpc-w2-quota-toctou-demonstration[9]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to main"
+    },
+    {
+      "doc": "acpc-w2-ratelimiter-cas-atomic-debit[11]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to main after an INDEPENDENT second reviewer has re-"
+    },
+    {
+      "doc": "acpc-w3-cloud-sweep-guard-strictly-older[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged. On merge the lead also closes acpc-bl-ets-"
+    },
+    {
+      "doc": "acpc-w3-graph-ttl-reap-dead-only[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged, and on merge the lead closes acpc-bl-graph"
+    },
+    {
+      "doc": "acpc-w3-request-stats-cited-safe[5]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged, so the CITED SAFE verdict lives on origin/"
+    },
+    {
+      "doc": "acpc-wave-2-log[2]",
+      "criterion": "MERGE-GATED (lead closes): the charter PR is merged to main"
+    },
+    {
+      "doc": "acpc-wave-3-log[2]",
+      "criterion": "MERGE-GATED (lead closes): the charter PR is merged, so the epic's memory is on origin/main for "
+    },
+    {
+      "doc": "ae-ingest-learn-pointer[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged to main after the full Elixir Test gate is green"
+    },
+    {
+      "doc": "ae-paper-decision-sync-w7[3]",
+      "criterion": "MERGE-GATED (LEAD closes): epic criterion 4 stamped — /papers/authoring-excellence live on guerr"
+    },
+    {
+      "doc": "ae-preview-routes-pollution-guard[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged to main after the doc-gates workflow runs green"
+    },
+    {
+      "doc": "ae-w5-finish-publish-wall[4]",
+      "criterion": "[MERGE-GATED — lead closes] PR #2881 merged to main with the full Elixir Test gate green"
+    },
+    {
+      "doc": "ae-web-listings-weighted-tags[3]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged to main (web/ has no blocking CI gate; local-run evidence i"
+    },
+    {
+      "doc": "am-hg-ai-crawler-stance[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this). Evidence: merge sha."
+    },
+    {
+      "doc": "am-w1-s1-request-stats-route-class[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main as the PROGRAM FIRST MERGE - before"
+    },
+    {
+      "doc": "am-w1-s2-robots-policy-both-surfaces[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged AFTER charter PR #10761 (which carries cch "
+    },
+    {
+      "doc": "am-w1-s3-reader-dedupe-and-harness[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merges only AFTER am-w1-s1 is on main (program first-merge l"
+    },
+    {
+      "doc": "anon-register-unauth-write[3]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main, green. Evidence names the PR."
+    },
+    {
+      "doc": "ao-backlog-anchors-tripwire-claude-noise[3]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main"
+    },
+    {
+      "doc": "ao-w4-live-client-smoke[3]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main; bash scripts/onramp-live-client-smoke.sh exits 0"
+    },
+    {
+      "doc": "ao-w5-crlf-bom-test-lock[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main; CC=/usr/bin/clang go test ./internal/cli/... gre"
+    },
+    {
+      "doc": "ao-w5-doc-drift-agentsmd[3]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged into main."
+    },
+    {
+      "doc": "api-schemas-anon-field-disclosure[4]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main, green in the Elixir gate including the boot-"
+    },
+    {
+      "doc": "arpss-author-email-seed-note[3]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main; independent second reviewer named on the "
+    },
+    {
+      "doc": "arpss-cloud-register-unmetered-oracle[3]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main, Cloud gate green; the independent second "
+    },
+    {
+      "doc": "arpss-cycle-api-publicread-followup[1]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main, Elixir gate green."
+    },
+    {
+      "doc": "arpss-reland-check-zero-landed-signal[3]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main."
+    },
+    {
+      "doc": "arpss-wave1-residue-pins[2]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main, green in the Elixir gate. Evidence names the"
+    },
+    {
+      "doc": "asm-bl-s3-download-response-cap[5]",
+      "criterion": "MERGE-GATED (lead closes): the slice PR merges to main with required gates green"
+    },
+    {
+      "doc": "axi-b6-bulldocs-ifrev-cli-noop[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged to main with fix + test; required gates (Go, task-reference"
+    },
+    {
+      "doc": "bp-doc-patch-file-flag-broken[1]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with a Task: bp-doc-patch-file-flag-broken body line; Go CL"
+    },
+    {
+      "doc": "bp-login-ux-w2-activate-spa-polish[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged (body Task: bp-login-ux-w2-activate-spa-polish) + post-depl"
+    },
+    {
+      "doc": "bp-login-ux-w2-front-door-plug[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged in a tight window + post-deploy live smoke - curl -sI https"
+    },
+    {
+      "doc": "bp-login-ux-w3-2fa-login-card[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-2fa-login-card'; merges BEF"
+    },
+    {
+      "doc": "bp-login-ux-w3-activate-preview[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-activate-preview', rebased "
+    },
+    {
+      "doc": "bp-login-ux-w3-wizard-cloud-exit0[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with body 'Task: bp-login-ux-w3-wizard-cloud-exit0'; on mer"
+    },
+    {
+      "doc": "bp-secgo-completion-eval-injection[4]",
+      "criterion": "[merge-gated, lead closes] PR merged to main and an independent second reviewer (named on the PR"
+    },
+    {
+      "doc": "bp-token-create-scoped-prefix-404[5]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged; required gates green."
+    },
+    {
+      "doc": "bpb-media-search-config-read-thread[3]",
+      "criterion": "[merge-gated — LEAD closes] PR merged to main with CI green."
+    },
+    {
+      "doc": "cch-bl-appcss-orphan-comment-live[3]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: may resolve with no PR (an abandoned working-copy edit); the"
+    },
+    {
+      "doc": "cch-bl-head-denylist-tripwire[13]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA, never a branch SHA. O"
+    },
+    {
+      "doc": "cch-bl-oauth-token-header-redesign[3]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA, never a branch SHA."
+    },
+    {
+      "doc": "cch-bl-pr-task-gate-backtick-regex[7]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA, never a branch SHA. T"
+    },
+    {
+      "doc": "cch-bl-provider-rotation-identity-echo[6]",
+      "criterion": "MERGE-GATED (LEAD CLOSES): the PR is merged to main with Cloud gate and Console gate green and t"
+    },
+    {
+      "doc": "cch-bl-replace-upsert-tripwire[3]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA. If cch-w2-ledger-clos"
+    },
+    {
+      "doc": "cch-bl-tdz-ledger-two-real-crossings-in-app-test[2]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main with the Console gate green on its head."
+    },
+    {
+      "doc": "cch-w1-census-disposition[7]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: ledger-only slice with no PR by design; the lead closes this"
+    },
+    {
+      "doc": "cch-w1-refetch-storm[5]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA (`gh pr view <n> --jso"
+    },
+    {
+      "doc": "cch-w10-destroy-shrink-oracle-merged[9]",
+      "criterion": "MERGE-GATED (lead stamps): the PR is merged to main, the merge SHA is recorded here, and cch-bl-"
+    },
+    {
+      "doc": "cch-w10-register-console-and-cloud-gates[8]",
+      "criterion": "MERGE-GATED (lead stamps): the PR is merged to main and the merge SHA is recorded here."
+    },
+    {
+      "doc": "cch-w10-required-checks-generate-jq-merge[2]",
+      "criterion": "MERGE-GATED (lead stamps): the PR is merged to main and the merge SHA is recorded here"
+    },
+    {
+      "doc": "cch-w13-s2-failure-scrub-display-boundary[7]",
+      "criterion": "MERGE-GATED (LEAD CLOSES): the PR is merged to main with Cloud gate green and the merge SHA reco"
+    },
+    {
+      "doc": "cch-w13-s4-tablet-band-detail-routes[9]",
+      "criterion": "MERGE-GATED (LEAD CLOSES): the PR is merged to main with Console gate green and the merge SHA re"
+    },
+    {
+      "doc": "cch-w13-s6-ledger-truth-closes[8]",
+      "criterion": "MERGE-GATED (LEAD CLOSES): the PR is merged to main and the ledger closes are visible in the pub"
+    },
+    {
+      "doc": "cch-w15-bl-fleet-support-detail-truncated-stacked-band[3]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green."
+    },
+    {
+      "doc": "cch-w15-s8-citation-anchors-e11-widening[9]",
+      "criterion": "MERGE-GATED — the LEAD closes this one: the PR is merged to main with its required checks green."
+    },
+    {
+      "doc": "cch-w16-s5-stale-open-audit-both-directions[11]",
+      "criterion": "MERGE-GATED (the lead closes this): if this slice produced any repo file (a tooling/grip/ledger "
+    },
+    {
+      "doc": "cch-w17-bl-e11-scan-set-app-css-and-shoot-sh[5]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main and its squash merge SHA is recorde"
+    },
+    {
+      "doc": "cch-w18-bl-instance-card-url-ellipsised-on-phone[4]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main and its SQUASH MERGE SHA is recorde"
+    },
+    {
+      "doc": "cch-w18-s3-residue-paid-by-driving[8]",
+      "criterion": "MERGE-GATED (the lead closes this): this slice writes no code and therefore opens no PR — the le"
+    },
+    {
+      "doc": "cch-w19-s1-guard-loses-in-ci[8]",
+      "criterion": "MERGE-GATED (the lead closes this one): the docs-only ledger PR merges and its merge SHA is reco"
+    },
+    {
+      "doc": "cch-w19-s2-topbar-phone-band-620[10]",
+      "criterion": "MERGE-GATED (the lead closes this one): the PR merges and its squash merge SHA is recorded here;"
+    },
+    {
+      "doc": "cch-w20-s3-instance-card-url-bounded[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main. The lead then (a) records the squash SHA "
+    },
+    {
+      "doc": "cch-w20-s7-op-gate-one-declaration[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main. The lead then (a) records the squash SHA,"
+    },
+    {
+      "doc": "cch-w20-s9-attention-name-column-collapse[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main. The lead then records the squash SHA on t"
+    },
+    {
+      "doc": "cch-w21-bl-status-pill-detail-fed-by-uncapped-error[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR merges and its squash merge SHA is recorded here."
+    },
+    {
+      "doc": "cch-w21-s1-members-roster-identity-and-remove[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR merges, its squash merge SHA is recorded here, an"
+    },
+    {
+      "doc": "cch-w22-s5-console-stops-asserting-false-things[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this criterion, never the builder): the PR is merged to `main` and "
+    },
+    {
+      "doc": "cch-w23-bl-cruel-leg-blind-to-status-pill-detail[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this criterion, never the builder): the PR is merged to `main`, its"
+    },
+    {
+      "doc": "cch-w24-bl-word-break-alias-has-no-ruling[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main with all four required contexts green, squash"
+    },
+    {
+      "doc": "cch-w25-bl-d298-footer-value-pair-unobservable[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this criterion, never the builder): merged to main, MERGE sha from "
+    },
+    {
+      "doc": "cch-w26-bl-deploy-row-siblings-unwrapped[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR is merged to main and the squash sha is recorded "
+    },
+    {
+      "doc": "cch-w26-s6-theater-ready-and-new-launch-get-geometry[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR is merged to main. The builder leaves this unmet."
+    },
+    {
+      "doc": "cch-w28-s1-empty-roster-control-asserts-clause-a[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR #9356 is green on `Console gate` and merged to main."
+    },
+    {
+      "doc": "cch-w28-s2-history-unavailable-discrimination[12]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is green on `Console gate` and merged to main."
+    },
+    {
+      "doc": "cch-w28-s4-d307-door-guard-armed-at-the-birth-seat[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is green on the Elixir gate and merged to main."
+    },
+    {
+      "doc": "cch-w28-s8-never-deployed-site-row-says-so[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is green and merged to main."
+    },
+    {
+      "doc": "cch-w29-bl-merge-gates-doc-stale-and-silent-on-break-glass[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is green on all four required contexts and merged to "
+    },
+    {
+      "doc": "cch-w29-s3-overflow-guard-cue-predicate-is-blind-to-overflow[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is green on all four required contexts (Elixir gate, "
+    },
+    {
+      "doc": "cch-w3-claim-overwrite-fence[3]",
+      "criterion": "MERGE-GATED - THE LEAD CLOSES THIS: PR merged to main, cited by MERGE SHA, never a branch SHA."
+    },
+    {
+      "doc": "cch-w31-s4-followup-retire-status0-branches[9]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main with Console gate green. Evidenc"
+    },
+    {
+      "doc": "cch-w32-r2-notifications-withhold-branches[8]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main."
+    },
+    {
+      "doc": "cch-w32-s3-route-table-tier-census[6]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main, and task-b4b3edfc4b8838cf is cl"
+    },
+    {
+      "doc": "cch-w32-s5-legacy-last-error-backfill[6]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main - and the lead orders the merge,"
+    },
+    {
+      "doc": "cch-w33-s3-console-narration-completeness[10]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main with Cloud gate and Console gate"
+    },
+    {
+      "doc": "cch-w34-bl-census-depth-limit-loadproviders[4]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE. Evidence: the merge SHA."
+    },
+    {
+      "doc": "cch-w34-s5-detail-column-is-text[10]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE — and the lead orders the merge, because this carries a mi"
+    },
+    {
+      "doc": "cch-w36-s3-me-cache-has-an-unknown-state[11]",
+      "criterion": "MERGE-GATED, THE LEAD CLOSES THIS ONE: the PR is merged to main with all four required contexts "
+    },
+    {
+      "doc": "cch-w37-s2-six-refusals-name-their-authority[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Cloud gate green on its he"
+    },
+    {
+      "doc": "cch-w37-s3-scope-stops-naming-a-team-it-did-not-consult[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Cloud gate and Console gat"
+    },
+    {
+      "doc": "cch-w38-s2-no-team-stops-being-a-422[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main."
+    },
+    {
+      "doc": "cch-w39-s2-the-account-modal-stops-stating-a-2fa-state-it-never-read[10]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Console gate and Cloud gat"
+    },
+    {
+      "doc": "cch-w39-s4-the-registration-sweep-stops-greening-on-a-candidate-it-never-examined[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with Required-check spec gate green"
+    },
+    {
+      "doc": "cch-w40-s4-the-cli-reads-the-refusal-evidence-instead-of-printing-a-bare-slug[8]",
+      "criterion": "MERGE-GATED (the lead closes this): PR #10086 is merged to main with its two BLOCKING Go checks "
+    },
+    {
+      "doc": "cch-w41-s3-the-admin-limb-gets-a-guard-that-can-lose[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Console gate green on its "
+    },
+    {
+      "doc": "cch-w43-s1-corpus-mints-the-account-the-server-mints[11]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with the Console gate green on its "
+    },
+    {
+      "doc": "cch-w44-bl-binding-census-line-fields-are-documentary-drift[3]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main with the Console gate green."
+    },
+    {
+      "doc": "cch-w44-bl-bp-task-list-parent-returns-zero-for-this-epic[3]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main with the required gates green."
+    },
+    {
+      "doc": "cch-w44-s5-server-crux-disagreement-gets-an-elixir-pin[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir Test gate AND the C"
+    },
+    {
+      "doc": "cch-w45-bl-scope-token-refusals-render-a-remedy-no-admin-can-grant[4]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with all four required contexts gre"
+    },
+    {
+      "doc": "cch-w46-s6-fleet-add-support-stops-offering-a-member-a-403[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Console gate green."
+    },
+    {
+      "doc": "cch-w47-bl-rebase-10256-union-insert-with-proven-resolution[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the union PR is merged FIRST, then #10054/#10256/#10404/#105"
+    },
+    {
+      "doc": "cch-w49-s5-the-epics-own-ledger-stops-reading-open-on-25-merged-rows[10]",
+      "criterion": "MERGE-GATED (the lead closes this): the ledger-file PR is merged to main."
+    },
+    {
+      "doc": "cch-w50-s1-sold-capability-manifest-and-the-two-bullets-that-fail-it[13]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged into main."
+    },
+    {
+      "doc": "cch-w51-s1-timeline-event-vocabulary-manifest-and-the-three-renderers-with-no-producer[12]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main with the Console gate green"
+    },
+    {
+      "doc": "cch-w51-s2-backup-sentinel-cross-fence-pin[7]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after cch-w51-s1 with the Console gate green"
+    },
+    {
+      "doc": "cch-w51-s3-site-rolled-back-becomes-storable[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main with the Elixir gate green"
+    },
+    {
+      "doc": "cch-w51-s4-audit-vocabulary-bidirectional-census[9]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after cch-w51-s3 with the Elixir gate green"
+    },
+    {
+      "doc": "cch-w51-s6-verify-refuses-when-it-declined-to-look[7]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after cch-w51-s5"
+    },
+    {
+      "doc": "cch-w52-s1-api-transport-leaves-the-console-and-a-manifest-reds-when-an-option-outruns-its-mechanism[10]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Cloud gate, the Elixir gat"
+    },
+    {
+      "doc": "cch-w52-s2-a-mute-stops-consuming-the-trial-warning-budget[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Cloud gate and the Elixir "
+    },
+    {
+      "doc": "cch-w53-bl-live-barkpark-deprovision-writes-no-audit-row[2]",
+      "criterion": "MERGE-GATED — the lead closes this. Either a PR is merged, or the row is closed with a written d"
+    },
+    {
+      "doc": "cch-w53-s2-cp-worker-claim-payload-manifest[13]",
+      "criterion": "MERGE-GATED — the lead closes this. The PR is merged to main. HIGH-FLIP-RISK: the CI-wiring judg"
+    },
+    {
+      "doc": "cch-w53-s3-audit-census-false-rationales-and-the-twofa-producers[10]",
+      "criterion": "MERGE-GATED — the lead closes this. The PR is merged to main."
+    },
+    {
+      "doc": "cch-w53-s4-sign-out-everywhere-ends-the-live-stream[10]",
+      "criterion": "MERGE-GATED — the lead closes this. The PR is merged to main. HIGH-FLIP-RISK: the SESSION-REVOCA"
+    },
+    {
+      "doc": "cch-w53-s5-guard-suite-vacuous-green-and-the-blocking-label[10]",
+      "criterion": "MERGE-GATED — the lead closes this. The PR is merged to main. NOTE for the lead: this PR touches"
+    },
+    {
+      "doc": "cch-w53-s6-oauth-exchange-stops-skipping-two-factor[10]",
+      "criterion": "MERGE-GATED — the lead closes this. The PR is merged to main. HIGH-FLIP-RISK: the REFUSAL-SHAPE "
+    },
+    {
+      "doc": "cch-w54-s7-the-ledger-arrears-pays-twenty-five-rows[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the receipt row's PR is merged into main with all four requi"
+    },
+    {
+      "doc": "cch-w55-f1-rederive-lifecycle-manifest-after-10848[10]",
+      "criterion": "MERGE-GATED (the lead closes this): PR #10847 is merged into main with all four required context"
+    },
+    {
+      "doc": "cch-w55-s1-format-unblocks-the-wave-54-crown[7]",
+      "criterion": "MERGE-GATED (the lead closes this): #10847 is merged into main with all four required contexts —"
+    },
+    {
+      "doc": "cch-w55-s4-the-resume-narrowing-and-the-promise-actor-register[13]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged into main with all four required contexts g"
+    },
+    {
+      "doc": "cch-w55-s5-the-wave-54-arrears-pays-eight-rows[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR carrying the receipt is merged into main with all fou"
+    },
+    {
+      "doc": "cch-w57-s1-terminal-act-residue-register[12]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main and its merge commit is an ancestor"
+    },
+    {
+      "doc": "cch-w58-bl-wire-site-url-writes-a-suspended-box[10]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and the full Cloud gate is green on the mer"
+    },
+    {
+      "doc": "cch-w58-s1-the-identity-verdict-stops-being-discarded[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged into main with all four required contexts ("
+    },
+    {
+      "doc": "cch-w58-s6-the-console-states-the-binding-it-already-receives[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and the Console gate is green on the merge "
+    },
+    {
+      "doc": "cch-w59-bl-nine-live-draft-rows-inflate-the-roster-and-pay-zero[4]",
+      "criterion": "MERGE-GATED (the lead closes this): the epic roster is re-read from the server afterwards and BO"
+    },
+    {
+      "doc": "cch-w59-s1-the-gate-goes-green-by-tightening-not-loosening[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and the Cloud control-plane (test) job on t"
+    },
+    {
+      "doc": "cch-w59-s3-mains-tip-carries-a-verdict-or-screams[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and the watch has produced at least one rea"
+    },
+    {
+      "doc": "cch-w60-s7-the-producer-exemption-census-learns-the-third-column[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged, and `gh api repos/FRIKKern/barkpark/compar"
+    },
+    {
+      "doc": "cch-w62-bl-the-autoupdate-route-emits-both-envelope-shapes[5]",
+      "criterion": "MERGE-GATED (the lead closes this): merged, and gh api .../compare/<sha>...main --jq .status ret"
+    },
+    {
+      "doc": "cch-w62-bl-update-unavailable-reason-reaches-the-wire-but-no-human[5]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged."
+    },
+    {
+      "doc": "cch-w63-bl-the-derived-width-axis-has-no-arm-and-its-prose-propagated[4]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged, compare returns `ahead`, four required contexts g"
+    },
+    {
+      "doc": "cch-w63-s1-the-crown-lands-one-cause-one-cell-three-literals[8]",
+      "criterion": "MERGE-GATED (the lead closes this): #11337 is merged with all four required contexts green on it"
+    },
+    {
+      "doc": "cch-w63-s5-the-resting-state-stops-asserting-a-check-that-never-happened[14]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and `gh api repos/:owner/:repo/compare/<mer"
+    },
+    {
+      "doc": "cch-w64-bl-124-typed-wire-codes-have-no-console-reader[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged with the required Cloud gate green, and the indepe"
+    },
+    {
+      "doc": "cch-w64-s5-law-0-twelve-closes-and-three-integers[11]",
+      "criterion": "MERGE-GATED (the lead closes this): the wave-64 charter PR carrying D780/D781 is merged and `gh "
+    },
+    {
+      "doc": "cch-w67-bl-every-teardown-422-opens-by-saying-a-deploy-died[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged with the cross-epic notice to deploy-reliability i"
+    },
+    {
+      "doc": "cch-w68-bl-claim-host-normaliser-twins-unguarded[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged, with the independent second review posted via gh "
+    },
+    {
+      "doc": "cch-w69-bl-in-image-arm-selftest-case[2]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged"
+    },
+    {
+      "doc": "cch-w69-bl-worker-route-stores-url-unnormalised[4]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged."
+    },
+    {
+      "doc": "cch-w69-s1-audit-manifest-moves-into-the-image[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged AND the control-plane deploy for a sha containing "
+    },
+    {
+      "doc": "cch-w72-bl-add-support-reachability-unpinned[2]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged, or the row closes by classification with the cens"
+    },
+    {
+      "doc": "cch-w72-bl-deploy-arm-generic-swallows-the-singular-detail[8]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged with Console gate and Cloud gate green"
+    },
+    {
+      "doc": "cch-w72-bl-no-fallback-friendly-sites-remainder[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged with Console gate green"
+    },
+    {
+      "doc": "cch-w74-census-truth-labels[4]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged with Cloud gate green"
+    },
+    {
+      "doc": "cch-w75-s1-the-seal[5]",
+      "criterion": "MERGE-GATED (lead closes): the slice PR is merged with the Cloud gate and Console gate green."
+    },
+    {
+      "doc": "cchi-bl-bp-dispatch-has-no-transient-500-retry[3]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main with go test ./internal/cli/... ./internal"
+    },
+    {
+      "doc": "cchi-bl-task-get-needs-a-server-side-prefix-lookup[2]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main with the Elixir gate and go test ./internal/c"
+    },
+    {
+      "doc": "cchi-bl-task-get-not-found-hint-is-unsearchable[2]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main with go test ./internal/cli/... green."
+    },
+    {
+      "doc": "cchi-w20-bl-phone-band-billing-chip-unguarded[2]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged and its squash SHA recorded here. REWORDED 2026-08"
+    },
+    {
+      "doc": "cchi-w27-bl-okline-arity-swallows-a-leg[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): merged to main, squash sha recorded."
+    },
+    {
+      "doc": "cf-box-render-internal-tls[4]",
+      "criterion": "(merge-gated, lead closes) PR merged; Go gate green."
+    },
+    {
+      "doc": "cf-connect-expose-endpoint[4]",
+      "criterion": "(merge-gated, lead closes) PR merged; Cloud control-plane (test) + Go gates green."
+    },
+    {
+      "doc": "cf-domain-status-proxied-rung[4]",
+      "criterion": "(merge-gated, lead closes) PR merged; Cloud control-plane (test) gate green."
+    },
+    {
+      "doc": "cf-edge-binding-schema[4]",
+      "criterion": "(merge-gated, lead closes) PR merged to main; the Cloud control-plane (test) gate is green."
+    },
+    {
+      "doc": "cf-w2-adapter-scaffold[5]",
+      "criterion": "[MERGE-GATED — lead closes] PR merged to main"
+    },
+    {
+      "doc": "cloud-console-hardening-epic-wave-69-log[1]",
+      "criterion": "MERGE-GATED (the lead closes this): the charter PR is merged and the wave-69 review log entry is"
+    },
+    {
+      "doc": "cloud-console-hardening-epic-wave-72-log[1]",
+      "criterion": "MERGE-GATED (the lead closes this): the charter PR is merged and the wave log entry is on origin"
+    },
+    {
+      "doc": "cloud-console-hardening-epic-wave-74-log[1]",
+      "criterion": "MERGE-GATED (the lead closes this): the charter PR merged and the wave-74 review log appended"
+    },
+    {
+      "doc": "connectors-ack-first-visible-indicator[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with a Task: connectors-ack-first-visible-indicator body li"
+    },
+    {
+      "doc": "connectors-chatlive-per-write-belt[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with gate green."
+    },
+    {
+      "doc": "connectors-cloud-claude-version-pin[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with 'Task: connectors-cloud-claude-version-pin' body line;"
+    },
+    {
+      "doc": "connectors-discord-modal-open-response[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main; connectors.yml green."
+    },
+    {
+      "doc": "connectors-execution-profile-settings-toggle[4]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying body line Task: connectors-execution-profile-settings-tog"
+    },
+    {
+      "doc": "connectors-imessage-otel-chain-residual[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; connectors.yml green."
+    },
+    {
+      "doc": "connectors-liveauth-admin-target-workspace[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with the targeted LiveView/LiveAuth gate green on elixir.ym"
+    },
+    {
+      "doc": "connectors-per-workspace-execution-profile[6]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying body line Task: connectors-per-workspace-execution-profil"
+    },
+    {
+      "doc": "connectors-replica-socket-poll-safety[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main with connectors.yml green (tsc + blocking prettier "
+    },
+    {
+      "doc": "connectors-require-chat-access-plug-unit-test[1]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with the Elixir failing set unchanged"
+    },
+    {
+      "doc": "connectors-sandbox-runner-deploy-install[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with deploy-harnesses.yml + connectors.yml + doc-gates gree"
+    },
+    {
+      "doc": "connectors-scrubbed-env-selfaudit-widen[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; the widened audit is green on main."
+    },
+    {
+      "doc": "connectors-settings-cred-installation-admin-gate[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate is green AND an independent seco"
+    },
+    {
+      "doc": "connectors-settingslive-load-masked-suffix-gate[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate is green."
+    },
+    {
+      "doc": "connectors-settingslive-theme-plugin-per-write-belt[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate is green. W35 AMENDMENT (charter"
+    },
+    {
+      "doc": "connectors-studio-webhook-url-display[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; Elixir Test gate green."
+    },
+    {
+      "doc": "connectors-w11-cloud-runner-seam[6]",
+      "criterion": "MERGE-GATED (lead closes): PR with Task: connectors-w11-cloud-runner-seam trailer merged to main"
+    },
+    {
+      "doc": "connectors-w12-cloud-policy-knobs[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with Task: connectors-w12-cloud-policy-knobs trailer; Elixi"
+    },
+    {
+      "doc": "connectors-w12-shim-env-allowlist[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with Task: connectors-w12-shim-env-allowlist trailer; conne"
+    },
+    {
+      "doc": "connectors-w14-cloud-session-argv[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w14-cloud-session-argv` body line + "
+    },
+    {
+      "doc": "connectors-w14-sandbox-binding-persistence[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w14-sandbox-binding-persistence` bod"
+    },
+    {
+      "doc": "connectors-w14-shim-session-sandbox[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w14-shim-session-sandbox` body line "
+    },
+    {
+      "doc": "connectors-w14-two-turn-stub-proof[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w14-two-turn-stub-proof` body line +"
+    },
+    {
+      "doc": "connectors-w14-user-turn-persistence[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w14-user-turn-persistence` body line"
+    },
+    {
+      "doc": "connectors-w15-binding-clear-on-failure[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with a Task: connectors-w15-binding-clear-on-failure body l"
+    },
+    {
+      "doc": "connectors-w15-shim-proof-reuse-hardening[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: connectors-w15-shim-proof-reuse-hardening` body"
+    },
+    {
+      "doc": "connectors-w25-elixir-ticket-emission[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with body line Task: connectors-w25-elixir-ticket-emission;"
+    },
+    {
+      "doc": "connectors-w25-shim-credential-fetch-embed[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with body line Task: connectors-w25-shim-credential-fetch-e"
+    },
+    {
+      "doc": "connectors-w26-chatlive-inbox-scoped-mount-proof[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with the gate green."
+    },
+    {
+      "doc": "connectors-w29-elixir-egress-emission[4]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying body line Task: connectors-w29-elixir-egress-emission mer"
+    },
+    {
+      "doc": "connectors-w29-shim-egress-union[4]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying body line Task: connectors-w29-shim-egress-union merged t"
+    },
+    {
+      "doc": "connectors-w35-live-turn-driver[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; connectors.yml green; the independent second reviewer (E2)"
+    },
+    {
+      "doc": "connectors-w36-bridge-route-boundary-pin[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main; connectors.yml green per-HEAD on the PR-head SHA"
+    },
+    {
+      "doc": "connectors-wave-35-log[1]",
+      "criterion": "MERGE-GATED (lead closes): the charter PR is merged to main."
+    },
+    {
+      "doc": "connectors-whatsapp-window-persistence[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with a Task: connectors-whatsapp-window-persistence body li"
+    },
+    {
+      "doc": "connectors-whatsapp-window-wiring[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with 'Task: connectors-whatsapp-window-wiring' body line; f"
+    },
+    {
+      "doc": "cr-s4-pagination-regression[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged (test-only, or a documented premise-refuted note); required"
+    },
+    {
+      "doc": "ct-bl-approval-controller-seal[4]",
+      "criterion": "[merge-gated, LEAD closes] PR merged after the Elixir Test CI gate passes"
+    },
+    {
+      "doc": "ct-bl-manifest-commands[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after the Elixir Test CI gate passes"
+    },
+    {
+      "doc": "ct-bl-toolrow-renderers[4]",
+      "criterion": "[merge-gated, LEAD closes] the Elixir half and Go half merge TOGETHER after the Elixir Test CI g"
+    },
+    {
+      "doc": "ct-bl-tui-apiclient-dedup[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after go vet+test CI gate passes"
+    },
+    {
+      "doc": "ct-blk-elixir-toolrows[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged after the Elixir Test CI gate passes AND the paired ct-blk-"
+    },
+    {
+      "doc": "ct-blk-tui-toolrows[4]",
+      "criterion": "MERGE-GATED (LEAD closes): PR merged together with the paired ct-blk-elixir-toolrows so the cros"
+    },
+    {
+      "doc": "cycle-fleet-list-equality-seal[2]",
+      "criterion": "MERGE-GATED (the lead closes this): the seal + test are merged to main, green in the Elixir gate"
+    },
+    {
+      "doc": "deploy-reliability-wave-35-log[1]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the charter PR is merged to main."
+    },
+    {
+      "doc": "desk-measure-learns-third-state-and-round-trip[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with its gates green"
+    },
+    {
+      "doc": "dr-bl-w6-site-deploy-apply-unset-costs-16pct-of-failures[1]",
+      "criterion": "MERGE-GATED (the LEAD closes this): dr-w13-s2-503-names-its-code-word is merged, and this row cl"
+    },
+    {
+      "doc": "dr-bl-w7-space-probe-multi-root-and-exact-units[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR is merged to main."
+    },
+    {
+      "doc": "dr-w10-s3-absent-required-context-is-dateable[9]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to main with all four required contexts green, and t"
+    },
+    {
+      "doc": "dr-w11-s1-record-the-publish-instant[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main and the migration is ordered and ap"
+    },
+    {
+      "doc": "dr-w11-s4-delivery-census-refuses[11]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main"
+    },
+    {
+      "doc": "dr-w11-s6-declare-the-live-index[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged and the lead orders and applies the migrati"
+    },
+    {
+      "doc": "dr-w11-s7-zero-criteria-backfill[8]",
+      "criterion": "MERGE-GATED (the lead closes this): any repository artefact this pass adds (the census gate scri"
+    },
+    {
+      "doc": "dr-w12-s1-unblock-10192-allowlist-row[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR #10192 is merged to main with every required context gree"
+    },
+    {
+      "doc": "dr-w12-s8-terminal-rate-and-abandonment[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with every required context green o"
+    },
+    {
+      "doc": "dr-w13-s6-publish-clock-first-caller[14]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with all four required contexts gre"
+    },
+    {
+      "doc": "dr-w15-s2-graph-code-split-and-agency[9]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to main with all four required contexts green"
+    },
+    {
+      "doc": "dr-w16-s1-cloud-paths-declares-census-producers[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and `gh pr checks 10400` then shows"
+    },
+    {
+      "doc": "dr-w16-s2-census-names-every-state[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the Cloud gate + Elixir gate ar"
+    },
+    {
+      "doc": "dr-w17-s3-site-outcome-cohort-reaches-bp-sites[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with the Go gate green"
+    },
+    {
+      "doc": "dr-w17-s5-deploy-start-stops-laundering-refusals[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with the Cloud gate green"
+    },
+    {
+      "doc": "dr-w19-s1-unblock-10518-census-rebase[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): #10518's blocking checks (Cloud control-plane (test) and the"
+    },
+    {
+      "doc": "dr-w20-refusal-backoff-depth-derived[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and its required checks are green."
+    },
+    {
+      "doc": "dr-w21-bl-raw-capture-order-still-leaks-on-five-boundaries[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged."
+    },
+    {
+      "doc": "dr-w21-s2-plane-grades-freshness-by-commit-distance[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged, MIGRATION ORDERED BY THE LEAD, and after one hour"
+    },
+    {
+      "doc": "dr-w22-s1-scrub-entry-boundaries-stop-leaking[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged; the lead closes #10019 as superseded on the failu"
+    },
+    {
+      "doc": "dr-w22-s2-the-box-remembers[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged and the Elixir gate reported SUCCESS on the interp"
+    },
+    {
+      "doc": "dr-w22-s3-dirty-tree-can-say-clean[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged, and `GET /v1/barkparks/<guerrilla>/telemetry` re-"
+    },
+    {
+      "doc": "dr-w23-s1-delivery-reaches-origin[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the three new PRs and #10720/#10722 are merged in an order t"
+    },
+    {
+      "doc": "dr-w23-s2-platform-deliveries-table[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with the four required contexts green, and "
+    },
+    {
+      "doc": "dr-w23-s6-register-per-struct-unread[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with the four required contexts green."
+    },
+    {
+      "doc": "dr-w23-s8-ledger-closes-the-closable[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the lead reviews the close-out list and confirms no row was "
+    },
+    {
+      "doc": "dr-w24-s2-commit-distance-reaches-the-cli[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and a post-merge `bp cloud status` run agai"
+    },
+    {
+      "doc": "dr-w24-s3-custom-host-cannot-steal-a-url[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged, and the lead records whether an INDEPENDEN"
+    },
+    {
+      "doc": "dr-w24-s4-census-grows-a-schema-arm[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged AFTER #10811, and the final @go_tag_floor a"
+    },
+    {
+      "doc": "dr-w24-s5-the-rulings-become-readable[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the repair script PR is merged and the lead confirms the fou"
+    },
+    {
+      "doc": "dr-w24-s6-roster-buys-back-seal-headroom[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the lead confirms the new roster number and records the rema"
+    },
+    {
+      "doc": "dr-w25-s3-crown-records-a-rollback[9]",
+      "criterion": "MERGE-GATED, LEAD CLOSES: the PR is merged to main and its branch is on origin. Do not stamp thi"
+    },
+    {
+      "doc": "dr-w26-s1-land-11009-with-the-roster-fix[7]",
+      "criterion": "MERGE-GATED (lead closes): the roster fix is on main — PR #11075 is MERGED (and #11009 closed as"
+    },
+    {
+      "doc": "dr-w26-s2-land-11008-union-and-the-key-set-lie[6]",
+      "criterion": "MERGE-GATED (lead closes): #11008 is MERGED and `git show origin/main:cloud/lib/barkpark_cloud/p"
+    },
+    {
+      "doc": "dr-w26-s3-deliveries-reader-stops-lying-about-carried[9]",
+      "criterion": "MERGE-GATED (lead closes): PR #11080 (loop-epic/bp-cloud-deliveries-stops-rendering-an-u-2) is M"
+    },
+    {
+      "doc": "dr-w26-s4-census-scores-a-caller-less-producer[10]",
+      "criterion": "MERGE-GATED (lead closes): the PR is MERGED and `git show origin/main:scripts/cloud-path-escape-"
+    },
+    {
+      "doc": "dr-w26-s5-crown-gets-its-writer[14]",
+      "criterion": "MERGE-GATED (the LEAD closes this) - THE CROWN CRITERION, quoted from real output on the FIRST m"
+    },
+    {
+      "doc": "dr-w26-s5-crown-gets-its-writer[15]",
+      "criterion": "MERGE-GATED (the LEAD closes this): `bp cloud deliveries <that sha>` renders the row, and if the"
+    },
+    {
+      "doc": "dr-w26-s6-reader-less-instrument-guard-and-the-first-deletion[11]",
+      "criterion": "MERGE-GATED (lead closes): the PR is MERGED and `publish_clock` is gone from every IMPLEMENTATIO"
+    },
+    {
+      "doc": "dr-w26-s7-delete-the-two-api-side-dark-instruments[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, AND the deletion is proven BY ITS REFUTE-GUA"
+    },
+    {
+      "doc": "dr-w26-s8-name-claim-legs-cannot-shrink-silently[10]",
+      "criterion": "MERGE-GATED (lead closes): the PR is MERGED and `git show origin/main:cloud/test/barkpark_cloud/"
+    },
+    {
+      "doc": "dr-w27-s2-crown-wire-census-derived-not-typed[12]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and the emitted-key census is green on main'"
+    },
+    {
+      "doc": "dr-w27-s6-conflicted-pr-stops-asserting[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and one scheduled run has produced a verdict"
+    },
+    {
+      "doc": "dr-w28-s1-crown-records-what-the-box-served[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and the FIRST post-merge run's platform_deli"
+    },
+    {
+      "doc": "dr-w28-s2-crown-reconciler-can-say-behind-or-wrong[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main and ONE scheduled run has fired on the live p"
+    },
+    {
+      "doc": "dr-w28-s3-watch-stops-dying-on-its-own-payload[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main and ONE SCHEDULED run has produced a real ver"
+    },
+    {
+      "doc": "dr-w28-s5-digest-deploy-health-is-per-team[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, #11174 closed as superseded, and the NEXT 06"
+    },
+    {
+      "doc": "dr-w28-s6-abandonment-stamps-its-own-columns[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and the NEXT abandonment on the live control"
+    },
+    {
+      "doc": "dr-w28-s7-no-seal-reading-from-a-stale-checkout[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and one seal reading is taken THROUGH the ru"
+    },
+    {
+      "doc": "dr-w3-s1-9729-sobelow-and-describer[7]",
+      "criterion": "MERGE-GATED (lead closes): PR #9729 merges to main with all four required contexts green"
+    },
+    {
+      "doc": "dr-w3-s2-9727-compile-red-clears[5]",
+      "criterion": "MERGE-GATED (the lead closes this one): PR #9727 merges to main with all four required contexts "
+    },
+    {
+      "doc": "dr-w3-s4-agent-measures-swap-pg-beam[9]",
+      "criterion": "MERGE-GATED (the lead closes this one): the PR merges to main with all four required contexts gr"
+    },
+    {
+      "doc": "dr-w3-s5-door-refuses-box-at-capacity[11]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green,"
+    },
+    {
+      "doc": "dr-w30-s6-push-dedupe-claim-gets-its-pin[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the PR is merged to main."
+    },
+    {
+      "doc": "dr-w30-s7-crown-reader-and-silence[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the PR is merged to main, AND the FIRST s"
+    },
+    {
+      "doc": "dr-w31-s1-500-names-its-fault-family[6]",
+      "criterion": "MERGE-GATED (the lead closes this one): the PR is merged to main with all four required contexts"
+    },
+    {
+      "doc": "dr-w33-bl-10811-reds-mains-census-on-merge[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to origin/main with main still green on the census ga"
+    },
+    {
+      "doc": "dr-w33-bl-crown-skew-arm-has-no-epsilon[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to origin/main. Evidence: the merge commit sha."
+    },
+    {
+      "doc": "dr-w33-followup-comment-path-routing[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main; THEN issue #5658 closed with a reason naming"
+    },
+    {
+      "doc": "dr-w33-s1-coverage-window-contract[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to origin/main, and because this slice is H"
+    },
+    {
+      "doc": "dr-w33-s3-digest-names-the-environment[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to origin/main. Evidence: the merge commit "
+    },
+    {
+      "doc": "dr-w33-s5-ledger-questions-become-runnable[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the ledger-file PR is merged to origin/main and the bp write"
+    },
+    {
+      "doc": "dr-w34-s1-coverage-envelope-window-and-sites[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main with the 999-measured floor lines in the PR b"
+    },
+    {
+      "doc": "dr-w34-s2-provenance-ancestry-refuses-off-history[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and one post-merge `make doctor` run on the "
+    },
+    {
+      "doc": "dr-w35-s1-union-charter-reconcile[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the union PR is merged, and the four superseded PRs are clos"
+    },
+    {
+      "doc": "dr-w35-s3-crown-quiescence-named-deferral[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main; THEN issue #11217 closed naming the reconcil"
+    },
+    {
+      "doc": "dr-w35-s7-ledger-partition-execution[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the record file is merged to main."
+    },
+    {
+      "doc": "dr-w6-s1-land-the-stack[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): #9888 merges to main with all four required contexts green, "
+    },
+    {
+      "doc": "dr-w6-s4-space-reaches-eyes[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this one, not the builder): the PR is merged to main."
+    },
+    {
+      "doc": "dr-w6-s5-5xx-and-degraded-keep-the-reading[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR merges to main with all four required contexts green."
+    },
+    {
+      "doc": "dr-w8-s6-raw-capture-stops-leaking[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): SUPERSEDED DELIVERY, reworded 2026-08-08 by dr-w23-s8. The P"
+    },
+    {
+      "doc": "dr-w9-s5-the-beat-dates-its-own-producer[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this one): the PR is merged to main. Evidence: the merge commit sha"
+    },
+    {
+      "doc": "era-w10-governed-idp-lane[5]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying Task: era-w10-governed-idp-lane merged after Elixir Test "
+    },
+    {
+      "doc": "era-w10-trust-panel[3]",
+      "criterion": "MERGE-GATED (lead closes): PR carrying Task: era-w10-trust-panel merged after Elixir Test green"
+    },
+    {
+      "doc": "felix-pristine-wave-27-log[1]",
+      "criterion": "MERGE-GATED (lead closes): the charter PR is merged to origin/main."
+    },
+    {
+      "doc": "felix-pristine-wave-28-log[1]",
+      "criterion": "MERGE-GATED (lead closes): the charter PR merged to origin/main."
+    },
+    {
+      "doc": "felix-pristine-wave-32-log[1]",
+      "criterion": "MERGE-GATED (lead closes): the docs-only charter PR merges to origin/main"
+    },
+    {
+      "doc": "felix-w24-bl-blobstore-runtime-guard[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir gate green"
+    },
+    {
+      "doc": "felix-w24-s7-continue-on-error-flip[5]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to origin/main with the Elixir gate green"
+    },
+    {
+      "doc": "felix-w25-s2-dataset-slug-format[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after the Elixir Test gate"
+    },
+    {
+      "doc": "felix-w25-s3-bundle-member-guard[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate — an independent second review i"
+    },
+    {
+      "doc": "felix-w25-s6-recorder-turn-cap[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after the Elixir Test gate; lead also closes task-f"
+    },
+    {
+      "doc": "felix-w26-bl-write-scope-swallow-nil[7]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir gate green; the HIGH-FLIP-RI"
+    },
+    {
+      "doc": "felix-w26-s1-11853-rescue[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir gate green AND PR #11853 clo"
+    },
+    {
+      "doc": "felix-w27-bl-media-dataset-swallow-mirror[5]",
+      "criterion": "MERGE-GATED (lead closes): the slice PR is merged to main with the Elixir gate green."
+    },
+    {
+      "doc": "felix-w27-bl-sobelow-baseline-lineshift[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; the next api PRs Sobelow check is green."
+    },
+    {
+      "doc": "felix-w27-s5-spec-gate-pins[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main and the next main-HEAD Required-check spec g"
+    },
+    {
+      "doc": "felix-w27-s6-12041-golden-contingency[2]",
+      "criterion": "MERGE-GATED (lead closes): PR #12041 merged to origin/main with the Elixir gate green AND felix-"
+    },
+    {
+      "doc": "felix-w30-s1-redaction-global-schema-fallback[5]",
+      "criterion": "MERGE-GATED (LEAD): the PR is merged with the Elixir gate green AND an independent second review"
+    },
+    {
+      "doc": "foreign-scope-share-token-flat-read[3]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main, green. Evidence names the PR and the indepen"
+    },
+    {
+      "doc": "github-bridge-console-db-honesty[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main; Elixir Test gate green; no docs/openapi.json drift"
+    },
+    {
+      "doc": "github-bridge-w9-s2-health-dataset-scope[5]",
+      "criterion": "[merge-gated — LEAD closes] PR merged to main with the Elixir Test gate green."
+    },
+    {
+      "doc": "gr-bl-predicate-null-successor-silent-seal[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the PR is merged to origin/main and the M"
+    },
+    {
+      "doc": "gr-bl-shootsh-scen-suggester-false-done[2]",
+      "criterion": "MERGE-GATED - THE LEAD CLOSES THIS. The PR is merged and the MERGE SHA (not a branch head) is re"
+    },
+    {
+      "doc": "gr-grad-encode-blocks[4]",
+      "criterion": "MERGE-GATED (lead closes): PR reviewed and merged to origin/main; the lead's own diff read confi"
+    },
+    {
+      "doc": "gr-grad-paper-record[4]",
+      "criterion": "MERGE-GATED (lead closes): the SHA placeholder is replaced with the real merge SHA after gr-grad"
+    },
+    {
+      "doc": "gr-p5r10-census[7]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS. The census PR is merged to origin/main with a Task: gr-p5r10"
+    },
+    {
+      "doc": "gr-p5r11-successor-charter-refresh[7]",
+      "criterion": "MERGE-GATED - THE LEAD CLOSES THIS. This slice is ledger-only and has no PR; the LEAD closes it "
+    },
+    {
+      "doc": "gr-p5r12-terminal-act[14]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS. The charter PR carrying the terminal-artifact section is mer"
+    },
+    {
+      "doc": "hg-doneset-audit-wave-log-2026-08-18[1]",
+      "criterion": "MERGE-GATED (the lead closes this one): the charter audit-note PR is merged to main"
+    },
+    {
+      "doc": "hgw4-bl-automerge-artifact-side-head-recheck[3]",
+      "criterion": "MERGE-GATED, closed by the LEAD: the PR is merged to main, or the task is closed as declined wit"
+    },
+    {
+      "doc": "hgw4-s3-breakglass-recorded-and-screaming[9]",
+      "criterion": "MERGE-GATED, closed by the LEAD: the PR is merged to main."
+    },
+    {
+      "doc": "hgw5-bl-required-checks-test-honesty[3]",
+      "criterion": "MERGE-GATED (the lead closes this one): the PR is merged to main"
+    },
+    {
+      "doc": "hgw5-s5-task-gate-exit-and-reason[9]",
+      "criterion": "MERGE-GATED (the lead closes this one): the PR is merged to main."
+    },
+    {
+      "doc": "icons-unknown-name-tripwire[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with every required gate green and "
+    },
+    {
+      "doc": "inspector-ladder-standard-dock-in-flow[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir Test gate green"
+    },
+    {
+      "doc": "inspector-narrow-destination-surface[5]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the doc-gates and Elixir Test "
+    },
+    {
+      "doc": "inspector-shape-bracketed-deployed-run[11]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the run artefact committed, ev"
+    },
+    {
+      "doc": "jarl-dogfood-publishing-epic-wave-1-log[1]",
+      "criterion": "MERGE-GATED (the lead closes this): the charter PR is merged to main."
+    },
+    {
+      "doc": "jarl-historiene-epic-wave-1-log[1]",
+      "criterion": "MERGE-GATED (lead): charter PR merged to main."
+    },
+    {
+      "doc": "jh-w1-dossier[3]",
+      "criterion": "MERGE-GATED (lead): live-render sjekket etter deploy, med notat om hvilken renderer som viste st"
+    },
+    {
+      "doc": "jh-w1-story-cloud[3]",
+      "criterion": "MERGE-GATED (lead): live-render sjekket paa jarl.no etter deploy."
+    },
+    {
+      "doc": "jh-w1-story-scaffy[3]",
+      "criterion": "MERGE-GATED (lead): live-render sjekket paa jarl.no etter deploy; figurene korrekte i lys + moer"
+    },
+    {
+      "doc": "nn-w1-velocity-live[6]",
+      "criterion": "MERGE-GATED (lead closes on merge): the slice's branch is merged to noo-noo main with the wave g"
+    },
+    {
+      "doc": "nn-w2-relocation-queue[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to noo-noo main with the wave gate green (CC=/usr/bin/clang"
+    },
+    {
+      "doc": "onb-backlog-doctor-prefer-local-serverentry[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged; CC=clang go build ./... && go vet ./internal/cli/"
+    },
+    {
+      "doc": "onb-backlog-installer-path-postcondition[2]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged."
+    },
+    {
+      "doc": "onb-backlog-isprod-custom-host-write-confirm[4]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged after the independent second review"
+    },
+    {
+      "doc": "onb-backlog-isprod-localhost-substring-corner[4]",
+      "criterion": "MERGE-GATED (lead closes on merge, AFTER the independent second review): PR merged on origin/mai"
+    },
+    {
+      "doc": "onb-backlog-relativeage-clock-injection[2]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged, go build+vet+test green"
+    },
+    {
+      "doc": "onb-backlog-release-cache-refresh-widening[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged on origin/main, go build+vet+test green"
+    },
+    {
+      "doc": "onb-backlog-studio-verify-persistence[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged; Elixir Test CI gate green."
+    },
+    {
+      "doc": "onb-w1-cloud-url-provision-inject[2]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged, go build + setup test green"
+    },
+    {
+      "doc": "onb-w1-release-cadence-guard[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged to main, Go build+vet+test green in CI"
+    },
+    {
+      "doc": "onb-w4-journey-proof-rig[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged"
+    },
+    {
+      "doc": "onb-w5-main-hygiene-repair[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged on origin/main; the next wave-4 PR re-run shows th"
+    },
+    {
+      "doc": "onb-w5-windows-smoke-ci[3]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged; the first windows-smoke run on a PR touching inst"
+    },
+    {
+      "doc": "onb-w6-deploy-sh-embed-drift-reconcile[2]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged on origin/main; the deploy.sh↔embedded-asset advis"
+    },
+    {
+      "doc": "onboarding-composition-epic-wave-5-log[1]",
+      "criterion": "MERGE-GATED (lead closes on merge): the charter PR is merged on origin/main"
+    },
+    {
+      "doc": "onboarding-composition-epic-wave-6-log[1]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged (lead closes on merge)"
+    },
+    {
+      "doc": "onboarding-composition-epic-wave-8-log[0]",
+      "criterion": "MERGE-GATED (lead closes on merge): the wave-8 charter PR is merged to origin/main"
+    },
+    {
+      "doc": "pbw-react-xss-guard[4]",
+      "criterion": "MERGE-GATED (lead closes): the guard PR is merged to origin/main"
+    },
+    {
+      "doc": "pdf-mvp0-cp-support-job[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with CI green"
+    },
+    {
+      "doc": "pdf-mvp0-fleet-card-spa[5]",
+      "criterion": "MERGE-GATED (lead closes): merged via the OC9 sequential train"
+    },
+    {
+      "doc": "pdf-mvp0-journey-proof[5]",
+      "criterion": "MERGE-GATED (lead closes): harness + transcript merged; epic criterion 1 stamped from this trans"
+    },
+    {
+      "doc": "pdf-mvp0-offload-spa[4]",
+      "criterion": "MERGE-GATED (lead closes): merged via the OC9 train after pdf-mvp0-fleet-card-spa"
+    },
+    {
+      "doc": "pdf-w1-bake-seed-reset[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this one, not the builder): the PR is merged to origin/main."
+    },
+    {
+      "doc": "pds-bl-board-tui-reader-honesty[3]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS: the PR is merged."
+    },
+    {
+      "doc": "pds-bl-guerrilla-stale-build-prod-trap[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to origin/main"
+    },
+    {
+      "doc": "pds-bl-sentinel-ok-returner-population[3]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to main."
+    },
+    {
+      "doc": "pds-bl-status-only-residue-payment[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with the Elixir gate green, and the lead ha"
+    },
+    {
+      "doc": "pds-bl-w16-arm-never-records-its-own-floor[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to origin/main -- evidence: the merge commit sha"
+    },
+    {
+      "doc": "pds-bl-w41-readonly-member-sees-published-only[12]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged, and the lead has independently re-derived the axis a"
+    },
+    {
+      "doc": "pds-bl-w49-core-auth-collapses-403-as-unauthenticated[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged with all four required contexts green."
+    },
+    {
+      "doc": "pds-w14-crown-fire[12]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR carrying the fire record is merged to origin/main -- "
+    },
+    {
+      "doc": "pds-w15-runbook-arm-collect[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to origin/main -- evidence: the merge commi"
+    },
+    {
+      "doc": "pds-w16-charter-lands[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR #5402 is merged to origin/main -- evidence: the merge com"
+    },
+    {
+      "doc": "pds-w16-cold-worktree-trap[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR carrying these three files is merged to origin/main -"
+    },
+    {
+      "doc": "pds-w18-crown-fire[9]",
+      "criterion": "[MERGE-GATED — LEAD CLOSES] PR merged to main after rungs 3 & 4 are GREEN in the collected trans"
+    },
+    {
+      "doc": "pds-w19-crown-fire[7]",
+      "criterion": "MERGE-GATED — LEAD ONLY: the fire-record PR is merged to main (merge SHA recorded). The builder "
+    },
+    {
+      "doc": "pds-w20-crown-collect-and-seal[5]",
+      "criterion": "MERGE-GATED (LEAD closes): the crown seals 12/12 under one RUN_ID, OR a named refusal is recorde"
+    },
+    {
+      "doc": "pds-w20-crown-fire[5]",
+      "criterion": "MERGE-GATED (LEAD closes): the fire-record PR is merged to origin/main (merge SHA recorded); the"
+    },
+    {
+      "doc": "pds-w20-launcher-floor-arm[6]",
+      "criterion": "MERGE-GATED (LEAD closes): the PR is merged to origin/main; closing this also closes pds-bl-w16-"
+    },
+    {
+      "doc": "pds-w21-crown-collect-and-seal[4]",
+      "criterion": "[MERGE-GATED - LEAD] crown criterion 10 is stamped only on the actual merge to main, merge SHA r"
+    },
+    {
+      "doc": "pds-w21-diagnose-and-fire[6]",
+      "criterion": "[MERGE-GATED - LEAD closes] The scripts/pds-w21-fire-record.md PR is merged to origin/main."
+    },
+    {
+      "doc": "pds-w25-round-open[7]",
+      "criterion": "[MERGE-GATED] The lead re-derives this shard from the pinned manifest and confirms the 103 rows "
+    },
+    {
+      "doc": "pds-w25-round-parked[7]",
+      "criterion": "[MERGE-GATED] The lead re-derives this shard from the pinned manifest and confirms the 27 rows a"
+    },
+    {
+      "doc": "pds-w25-round-terminal[7]",
+      "criterion": "[MERGE-GATED] The lead confirms the widening was deployed before these writes and re-derives the"
+    },
+    {
+      "doc": "pds-w25-stage-terminal-widening[7]",
+      "criterion": "[MERGE-GATED] PR merged to main AND deployed to guerrilla — pds-w25-round-terminal cannot dispat"
+    },
+    {
+      "doc": "pds-w27-bl-stamp-guard-substring-false-positive[3]",
+      "criterion": "[MERGE-GATED] PR merged to main (LEAD closes this criterion on merge)."
+    },
+    {
+      "doc": "pds-w27-brief-card-disposition[9]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead confirms the hostile probe number moved when the f"
+    },
+    {
+      "doc": "pds-w27-census-self-honesty[11]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead re-runs the selftest from a clean directory, indep"
+    },
+    {
+      "doc": "pds-w27-certify-the-round[8]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead re-runs the certifying command independently from "
+    },
+    {
+      "doc": "pds-w27-reader-transport-honesty[9]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead re-runs the byte-identity fail-before against a fr"
+    },
+    {
+      "doc": "pds-w27-round-bare-30[9]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead independently re-derives clause 4(a) == zero-bare "
+    },
+    {
+      "doc": "pds-w27-round-contradiction-13[8]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead independently re-derives the claimable-and-closed "
+    },
+    {
+      "doc": "pds-w27-round-terminal-15[7]",
+      "criterion": "[MERGE-GATED — THE LEAD CLOSES THIS] The lead independently re-derives clause 3 == 0 from a fres"
+    },
+    {
+      "doc": "pds-w28-birth-fence[10]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS. The PR is merged to main with its required checks green. A b"
+    },
+    {
+      "doc": "pds-w29-registry-postcondition-invariant[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR carrying this slice is merged to main, and pds-w27-bl"
+    },
+    {
+      "doc": "pds-w29-s3-fake-fails-closed[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR carrying this slice is merged to main"
+    },
+    {
+      "doc": "pds-w30-board-envelope-poison-parity[5]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR carrying this slice is merged to main, and pds-bl-boa"
+    },
+    {
+      "doc": "pds-w31-harvest-only[10]",
+      "criterion": "MERGE-GATED (lead closes) — HIGH-FLIP-RISK, INDEPENDENT SECOND REVIEWER OWED: a reviewer OTHER t"
+    },
+    {
+      "doc": "pds-w31-runner-cleanup-failclosed[7]",
+      "criterion": "MERGE-GATED, HIGH-FLIP-RISK (the lead closes this): a GENUINELY INDEPENDENT second reviewer has "
+    },
+    {
+      "doc": "pds-w32-census-binds-the-basis[11]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green, and the wave-32 boundary claim is updated — zero"
+    },
+    {
+      "doc": "pds-w32-census-pin-simplify[10]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green, and pds-bl-census-exact-pins-tax-growth is close"
+    },
+    {
+      "doc": "pds-w34-census-import-arity[10]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir gate green and `mix"
+    },
+    {
+      "doc": "pds-w34-declared-basis-literals-need-constants[9]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green with `CC=/usr/bin/clang go build ./... && go vet "
+    },
+    {
+      "doc": "pds-w34-hand-bucket-register[20]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir gate green, and a S"
+    },
+    {
+      "doc": "pds-w34-ledger-background-write-arms[6]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green with the Elixir gate passing and `mix format --ch"
+    },
+    {
+      "doc": "pds-w34-owning-doc-amendment[11]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and the lead has confirmed the enrolled cap"
+    },
+    {
+      "doc": "pds-w34-unreachable-error-positive-arm[9]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green with Elixir gate passing, and `mix format --check"
+    },
+    {
+      "doc": "pds-w36-groupc-diffs[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir gate green"
+    },
+    {
+      "doc": "pds-w37-declared-key-migration[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this). Close on the register's merge citing criteria 15 and 16 BY I"
+    },
+    {
+      "doc": "pds-w37-unread-callee-receipts[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with the Elixir gate green and the "
+    },
+    {
+      "doc": "pds-w38-charter-ledger-disagreement-sweep[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and the lead has re-derived ONE of the four"
+    },
+    {
+      "doc": "pds-w38-falsifier-promotion[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and the lead has re-run the blinding mutati"
+    },
+    {
+      "doc": "pds-w38-ledger-hygiene-derived[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the ledger row for this slice itself is closed once the reci"
+    },
+    {
+      "doc": "pds-w38-routed-population[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this; a builder never closes a merge-gated criterion): the PR is me"
+    },
+    {
+      "doc": "pds-w38-scim-group-member-receipts[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this) AND a SECOND INDEPENDENT REVIEWER has re-derived the cross-or"
+    },
+    {
+      "doc": "pds-w38-verdict-freshness-arm[11]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the lead has independently re-d"
+    },
+    {
+      "doc": "pds-w39-record-parity-shallow-guard[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged and the lead has run mutant (b) himself and"
+    },
+    {
+      "doc": "pds-w40-derivation-partition[12]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the PR is merged and the lead has INDEPEN"
+    },
+    {
+      "doc": "pds-w40-judgment-coverage-ladder[13]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged, and the lead has independently re-run the staleness "
+    },
+    {
+      "doc": "pds-w40-residue-lens-can-fail[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged."
+    },
+    {
+      "doc": "pds-w40-scim-groups-list-members[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the PR is merged, the `Elixir gate` check"
+    },
+    {
+      "doc": "pds-w41-caps-component-gate[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with an INDEPENDENT second derivation of th"
+    },
+    {
+      "doc": "pds-w41-hop-arg-producer[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged AND the lead has independently re-derived t"
+    },
+    {
+      "doc": "pds-w41-residue-lens-unrun[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged, AND the lead confirms from the first CI run that the"
+    },
+    {
+      "doc": "pds-w42-liveview-authorization-column[13]",
+      "criterion": "MERGE-GATED (the LEAD closes this, AND closes task-2c6e0fff8a8a63c9 on this same merge): the PR "
+    },
+    {
+      "doc": "pds-w42-paper-op-principal-gate[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged, and the lead has INDEPENDENTLY re-derived the bypass"
+    },
+    {
+      "doc": "pds-w43-bl-ledger-census-exunit-door[4]",
+      "criterion": "MERGE-GATED: merged to main with the Elixir gate green."
+    },
+    {
+      "doc": "pds-w43-caps-readonly-share-write-bypass[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with the Elixir gate green, and an "
+    },
+    {
+      "doc": "pds-w43-sheetgrid-read-mode-hook[10]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with its required gates green."
+    },
+    {
+      "doc": "pds-w44-charter-sweep-adjudication[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with both required contexts green, "
+    },
+    {
+      "doc": "pds-w44-judgment-coverage-ladder[14]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with the Elixir gate green."
+    },
+    {
+      "doc": "pds-w44-palette-harness-repair[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main and the Sheet-grid hook unit harnes"
+    },
+    {
+      "doc": "pt-w1-rehydrate-sweep-hardening[6]",
+      "criterion": "MERGE-GATED (the lead closes this on merge, not the builder): PR merged to main with the Elixir "
+    },
+    {
+      "doc": "pt-w1-scheduled-gate-alerting[6]",
+      "criterion": "MERGE-GATED (the lead closes this on merge, not the builder): PR merged to main"
+    },
+    {
+      "doc": "reland-check-silent-falsegreen[4]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main, green, with the mutation fixtures running in"
+    },
+    {
+      "doc": "rpu-backlog-completeness-guard-chat-types[7]",
+      "criterion": "[MERGE-GATED — LEAD closes] PR merged to main; PR #3670 re-checked at merge (in-scope count stil"
+    },
+    {
+      "doc": "rpu-backlog-live-block-hydration[4]",
+      "criterion": "[MERGE-GATED - lead closes] PR merged to origin/main on the Node gate; the W4 hydration vertical"
+    },
+    {
+      "doc": "rpu-w1-css-asset[5]",
+      "criterion": "[merge-gated — lead closes] PR merged to main on the js-tests + changeset gate"
+    },
+    {
+      "doc": "rpu-w1-golden-gen[5]",
+      "criterion": "[merge-gated — lead closes] PR merged to main on the Elixir gate"
+    },
+    {
+      "doc": "rpu-w1-parity-proof[5]",
+      "criterion": "[merge-gated — lead closes] PR merged to main on the js-tests gate"
+    },
+    {
+      "doc": "rpu-w4-image-preset[2]",
+      "criterion": "[MERGE-GATED - lead closes] PR merged to origin/main on the Node gate"
+    },
+    {
+      "doc": "rpu-w5-blog-starter-migrate[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with js-tests gate green"
+    },
+    {
+      "doc": "rpu-w5-web-fork-retire[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with web-checks green"
+    },
+    {
+      "doc": "scc-w3-reopen-adopt[5]",
+      "criterion": "MERGE-GATED (lead closes): PR containing this slice merged to main"
+    },
+    {
+      "doc": "shb-w1-s1a-image-and-compose[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with required gates green; merges before shb-w1-s1c per D9"
+    },
+    {
+      "doc": "shb-w1-s1b-census-cloud-pdfbl[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; lead re-runs env-census on merged main for the cross-slice"
+    },
+    {
+      "doc": "shb-w1-s1c-secret-refusals[5]",
+      "criterion": "MERGE-GATED (lead closes): merges LAST in the wave per D9 with required gates green"
+    },
+    {
+      "doc": "shb-w1-s2-env-example[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged (inert file, may merge first)"
+    },
+    {
+      "doc": "site-spawner-backlog-server-orchestration[7]",
+      "criterion": "[MERGE-GATED — the lead closes this] PR merged to main; the control plane auto-deployed (cloud/*"
+    },
+    {
+      "doc": "site-spawner-w1-astro-adapter[5]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged to main"
+    },
+    {
+      "doc": "site-spawner-w1-caddyfile-static[5]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged to main with the Go CI gate green"
+    },
+    {
+      "doc": "site-spawner-w1-deploy-engine[6]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged to main with the Go/shell CI gate green"
+    },
+    {
+      "doc": "site-spawner-w1-token-hardening[5]",
+      "criterion": "MERGE-GATED (lead closes on merge): PR merged to main with the Elixir Test gate green"
+    },
+    {
+      "doc": "site-spawner-w3-admin-site-deploy-seam[6]",
+      "criterion": "[MERGE-GATED — the lead closes this] PR merged to main; POST /v1/admin/site-deploy on guerrilla "
+    },
+    {
+      "doc": "site-spawner-w3-cli-honesty[5]",
+      "criterion": "[MERGE-GATED — the lead closes this] PR merged to main."
+    },
+    {
+      "doc": "site-spawner-w3-engine-protocol[5]",
+      "criterion": "[MERGE-GATED — the lead closes this] PR merged to main; guerrilla auto-deploy pulled the new eng"
+    },
+    {
+      "doc": "site-spawner-w4-slot-env-persist[4]",
+      "criterion": "[MERGE-GATED - the lead closes this] PR merged to main after the Elixir Test gate (for .ex/.exs/"
+    },
+    {
+      "doc": "site-spawner-w5-autorebuild-proof[3]",
+      "criterion": "[MERGE-GATED — lead runs LIVE] PR merged; lead runs the harness on guerrilla — the bound site au"
+    },
+    {
+      "doc": "site-spawner-w5-cli-provenance[3]",
+      "criterion": "[MERGE-GATED — lead closes] PR merged; CC=clang go build ./... && go vet ./internal/cli/... && g"
+    },
+    {
+      "doc": "site-spawner-w5-cp-autodeploy[5]",
+      "criterion": "[MERGE-GATED — lead closes] PR merged; Elixir Test gate green; regression sites_deploy_test.exs "
+    },
+    {
+      "doc": "site-spawner-w7-box-dispatch[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on the Elixir Test gate"
+    },
+    {
+      "doc": "site-spawner-w7-cli[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on the Go gate"
+    },
+    {
+      "doc": "site-spawner-w7-cloud-node-kind[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on BOTH cloud gates -- Cloud control-plane (test) AND (comp"
+    },
+    {
+      "doc": "site-spawner-w7-next-starter[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on its own gate (templates-only; embedded-catalog regenerat"
+    },
+    {
+      "doc": "site-spawner-w7-node-deploy-engine[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on the deploy-harnesses gate"
+    },
+    {
+      "doc": "site-spawner-w7-node-live-proof[3]",
+      "criterion": "MERGE-GATED + LIVE (lead runs on guerrilla post-merge): the 6-stage walk is green to a served SS"
+    },
+    {
+      "doc": "spd-b39w-decide-landing[2]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is squash-merged to origin/main and git show origin/m"
+    },
+    {
+      "doc": "spd-standard-bucket-scrim-unruled[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to origin/main with every required gate gre"
+    },
+    {
+      "doc": "spd-w13-d175-compound-repro[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to origin/main."
+    },
+    {
+      "doc": "spd-w13-prediction-registered[9]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to origin/main, freezing the prediction BEF"
+    },
+    {
+      "doc": "spd-w13-secondary-doc-zero-coverage[6]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to origin/main with the Elixir Test gate (m"
+    },
+    {
+      "doc": "ssp-w3r-settings-test-dedup[3]",
+      "criterion": "[MERGE-GATED — lead closes] PR merged to main with the Elixir Test gate green and the Task: trai"
+    },
+    {
+      "doc": "ssw-bl-deployment-envelope-drops-stage-timings[3]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to main with the Cloud gate and go test ./internal/cl"
+    },
+    {
+      "doc": "ssw10-public-read-clamp[8]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main, and this criterion's met stamp is "
+    },
+    {
+      "doc": "ssw8-bl-public-read-reaches-export-analytics-listen[3]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main."
+    },
+    {
+      "doc": "ssw8-bl-public-read-test-pins-a-refusal-prod-skips[2]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main, ordered BEFORE the clamp fix so th"
+    },
+    {
+      "doc": "stw1-provisioner-template-axis[5]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main after Elixir Test + cloud gates green"
+    },
+    {
+      "doc": "stw10-backlog-drafts-id-seam[3]",
+      "criterion": "MERGE-GATED (the lead closes this): the regression tests are merged to main and green in the Eli"
+    },
+    {
+      "doc": "stw10-search-visibility-leak[5]",
+      "criterion": "MERGE-GATED (lead closes): an INDEPENDENT second reviewer per charter D65/SR-1 returned HOLDS wi"
+    },
+    {
+      "doc": "stw11-ledger-honesty[8]",
+      "criterion": "MERGE-GATED (lead closes): the ledger state above is confirmed by the lead on integration"
+    },
+    {
+      "doc": "stw11-readme-command-gate[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main"
+    },
+    {
+      "doc": "stw12-arm-tripwires[5]",
+      "criterion": "[MERGE-GATED — lead closes] After the PR opens, the three armed gates fire and run green on the "
+    },
+    {
+      "doc": "stw12-copy-honesty-content-lock[7]",
+      "criterion": "[MERGE-GATED — lead closes] After merge, the live public catalog GET /v1/templates serves the co"
+    },
+    {
+      "doc": "stw4-backlog-console-rollback-history[5]",
+      "criterion": "[merge-gated — lead closes] PR merged; rode both cloud gates + node harness"
+    },
+    {
+      "doc": "stw4-backlog-freshness-badge[4]",
+      "criterion": "[merge-gated — lead closes] PR merged; waited for Elixir Test + both cloud gates + node harness "
+    },
+    {
+      "doc": "stw4-backlog-site-preflight[5]",
+      "criterion": "[merge-gated — lead closes] PR merged; Go-only rode go-tests.yml, no Elixir wait"
+    },
+    {
+      "doc": "stw4-backlog-wire-console-harness-ci[2]",
+      "criterion": "[merge-gated — lead closes] PR merged; workflow-only rode its own gate"
+    },
+    {
+      "doc": "stw5-rail-premium-styling[4]",
+      "criterion": "[merge-gated — lead closes] PR merged to main; rode both cloud gates + the console node harness"
+    },
+    {
+      "doc": "stw7-build-seed-bake[3]",
+      "criterion": "[merge-gated, LEAD closes] PR merged; the live astro-search deploy serves search-seed.json and t"
+    },
+    {
+      "doc": "stw7-finder-drift-tripwire[3]",
+      "criterion": "[merge-gated, LEAD closes] PR merged; the drift workflow is green on main with the verbatim-copi"
+    },
+    {
+      "doc": "stw7-finder-island-mount[5]",
+      "criterion": "[merge-gated, LEAD closes] PR merged; astro-search redeployed on guerrilla; side-by-side with th"
+    },
+    {
+      "doc": "stw7-parity-acceptance-harness[3]",
+      "criterion": "[merge-gated, LEAD closes] PR merged; the harness runs green against guerrilla production for th"
+    },
+    {
+      "doc": "stw9-backlog-bpgraph-identity-tripwire[7]",
+      "criterion": "MERGE-GATED (lead closes): PR merged, the drift workflow runs green on the PR, and task-f8f33ceb"
+    },
+    {
+      "doc": "stw9-backlog-graph-server-honesty[6]",
+      "criterion": "MERGE-GATED (lead closes): PR merged and a token-authenticated live GET /v1/graph on guerrilla e"
+    },
+    {
+      "doc": "stw9-backlog-provision-indx[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged and the deployed flagship bundle no longer contains the 'Ev"
+    },
+    {
+      "doc": "stw9-backlog-ws-dataset-validation[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged and a live WS join against the deployed flagship topic sear"
+    },
+    {
+      "doc": "stw9-copy-honesty-mobile[7]",
+      "criterion": "MERGE-GATED: PR merged to main (lead closes)"
+    },
+    {
+      "doc": "stw9-journey-smoke-harness[5]",
+      "criterion": "MERGE-GATED: PR merged to main (lead closes); the STRICT live run is the wave seal evidence afte"
+    },
+    {
+      "doc": "stw9-ws-live-inline[5]",
+      "criterion": "MERGE-GATED + LIVE: after redeploy, a keystroke over the websocket returns count>0 on live searc"
+    },
+    {
+      "doc": "sup-w5-doc-actions-order[4]",
+      "criterion": "[MERGE-GATED — lead closes] PR merged into main with the Elixir Test gate green"
+    },
+    {
+      "doc": "task-0011535aae572011[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged with all four required contexts green — Elixir gate, "
+    },
+    {
+      "doc": "task-09e04843de0cbf30[2]",
+      "criterion": "MERGE-GATED: PR merged with the required contexts green; merge sha recorded."
+    },
+    {
+      "doc": "task-0c8b9214b7962152[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with `Task: task-0c8b9214b7962152` body line; CC=clang go b"
+    },
+    {
+      "doc": "task-11f875b94ceb7501[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): all required contexts green, read live from .github/required"
+    },
+    {
+      "doc": "task-16e56d05b809dd39[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main with all required contexts green; the requ"
+    },
+    {
+      "doc": "task-1c7f3918240f8981[1]",
+      "criterion": "MERGE-GATED: doc-gates Doc budgets + anchors job is green on a main run at or after the merge co"
+    },
+    {
+      "doc": "task-232022d45a3d648e[4]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main with the doc gates green on its head."
+    },
+    {
+      "doc": "task-27246110ca95342a[7]",
+      "criterion": "MERGE-GATED (lead closes): the PR merges green, and it merges independently of pds-w29-pay-net-d"
+    },
+    {
+      "doc": "task-288c8fc886e7c1f6[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate; nightly cron installed on guerr"
+    },
+    {
+      "doc": "task-2a0848d1a71b2950[2]",
+      "criterion": "MERGE-GATED: PR merged to main with all required checks green"
+    },
+    {
+      "doc": "task-2b396416a680ff0b[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with all four required contexts green — Eli"
+    },
+    {
+      "doc": "task-2e4a3692adf5c565[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged with all four required contexts green, read live from"
+    },
+    {
+      "doc": "task-34ea5ee00dfb7a99[4]",
+      "criterion": "MERGE-GATED — PR merged with required contexts green, deployed to gyl, and proven in the twin wo"
+    },
+    {
+      "doc": "task-36e248383bd399e4[3]",
+      "criterion": "[merge-gated -- LEAD closes] PR merged to main with CI green."
+    },
+    {
+      "doc": "task-37befa974015b2f2[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the anti-echo pin at hetzner_lb_cmd_test.go:596 and :606 sur"
+    },
+    {
+      "doc": "task-3a40435ca1a87818[0]",
+      "criterion": "MERGE-GATED probe criterion: PR merged to main. Exists only so `bp task landed --criterion 0` is"
+    },
+    {
+      "doc": "task-49092d8afbaf5519[2]",
+      "criterion": "MERGE-GATED negative control: same marker wording, no merge_gate key was ever written to this en"
+    },
+    {
+      "doc": "task-4b9ef27e271586e2[6]",
+      "criterion": "MERGE-GATED (the lead's to stamp) — the PR carrying this work is merged and its sha is an ancest"
+    },
+    {
+      "doc": "task-52ea0b816246c017[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the four required contexts green, and a"
+    },
+    {
+      "doc": "task-5753ff3072d00b67[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main with all required contexts green."
+    },
+    {
+      "doc": "task-6672a70bea19dc11[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main; harness lives in scripts/connectors/ and re"
+    },
+    {
+      "doc": "task-680d3f4abf20964d[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main."
+    },
+    {
+      "doc": "task-683b16a400f56ed3[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main with required contexts green."
+    },
+    {
+      "doc": "task-6f12ce2edd4be65a[4]",
+      "criterion": "MERGE-GATED: merged to main with its gates green."
+    },
+    {
+      "doc": "task-758ef042eb60c65e[3]",
+      "criterion": "MERGE-GATED (the lead closes this): the guard port + CI + tests are merged to main, green in CI."
+    },
+    {
+      "doc": "task-837f1013efdf100f[2]",
+      "criterion": "MERGE-GATED (lead closes): merged to origin/main."
+    },
+    {
+      "doc": "task-8c0da07d5653b732[3]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to origin/main with all four required conte"
+    },
+    {
+      "doc": "task-8dd5aca4f4ac22bf[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main with all four required contexts green; tas"
+    },
+    {
+      "doc": "task-94a6ed8ced1fc547[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this), and ONLY IF code ships: merged with all four required contex"
+    },
+    {
+      "doc": "task-966de76b9dd92783[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir gate green, and the HIGH-FLI"
+    },
+    {
+      "doc": "task-9da6b9544b747bba[1]",
+      "criterion": "MERGE-GATED: the PR is merged to main with the four required contexts green."
+    },
+    {
+      "doc": "task-9e2c61a0979657ae[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR #9600 is merged to main with all four required contexts g"
+    },
+    {
+      "doc": "task-9fcf92e7a02fa5b8[3]",
+      "criterion": "MERGE-GATED (the lead closes this): closed on the SQUASH MERGE SHA of cch-w17-s-topbar-phone-ban"
+    },
+    {
+      "doc": "task-a097142c9df84d9f[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main; api/test/…/pds_published_artifact_door_te"
+    },
+    {
+      "doc": "task-a14a2f489452e95d[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged on the four required; the next real deploy.yml run after me"
+    },
+    {
+      "doc": "task-a21cac2c018f852e[2]",
+      "criterion": "MERGE-GATED: PR(s) merged with required contexts green; merge sha recorded."
+    },
+    {
+      "doc": "task-a512d8f733bed771[4]",
+      "criterion": "MERGE-GATED (the lead closes this): merged to origin/main with the four required contexts green;"
+    },
+    {
+      "doc": "task-a5636ad31304b23a[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged with all four required contexts green, and "
+    },
+    {
+      "doc": "task-ac3604e7bb1d8680[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged after the Elixir Test gate"
+    },
+    {
+      "doc": "task-b04364c216f877e6[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main with all four required contexts green."
+    },
+    {
+      "doc": "task-b17a3cb57cc129dc[7]",
+      "criterion": "MERGE-GATED: the lead confirms the census PR is merged."
+    },
+    {
+      "doc": "task-b2cd72e54f94251f[1]",
+      "criterion": "MERGE-GATED: merged to main with its required gates green; merge sha recorded"
+    },
+    {
+      "doc": "task-b454be88ca303524[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged with all required contexts green and the post-depl"
+    },
+    {
+      "doc": "task-b4d2d520bf621af9[5]",
+      "criterion": "MERGE-GATED (LEAD ONLY -- worker must not stamp this): the PR carries the Task: trailer, the 'go"
+    },
+    {
+      "doc": "task-b647a6bd2b844b7e[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged with all required contexts green, read live from ."
+    },
+    {
+      "doc": "task-b67277d231a7ff76[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this). If the checks above hold, close citing #12072 and record tha"
+    },
+    {
+      "doc": "task-bb0b8faf5a9a2a37[4]",
+      "criterion": "MERGE-GATED: merged to main with the Elixir gate green; evidence = PR number + merge sha."
+    },
+    {
+      "doc": "task-bc231288a50870de[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main with go build, vet, test and gofmt clean."
+    },
+    {
+      "doc": "task-c3c5b24d4724f95e[3]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main with all four required contexts green."
+    },
+    {
+      "doc": "task-c637c1e05c6afbda[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this). If the four checks above hold, close this row citing the com"
+    },
+    {
+      "doc": "task-c6da7e967ac9824b[1]",
+      "criterion": "MERGE-GATED: the first green Doc budgets + anchors run on main at or after the merge, run id quo"
+    },
+    {
+      "doc": "task-c7e10834d493da6f[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): PR merged to main."
+    },
+    {
+      "doc": "task-ce0684110c7373f9[3]",
+      "criterion": "MERGE-GATED - THE LEAD CLOSES THIS: PR merged to main, cited by merge sha."
+    },
+    {
+      "doc": "task-d1c1ec9311d1e42b[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main."
+    },
+    {
+      "doc": "task-d223068f55efbf47[4]",
+      "criterion": "MERGE-GATED (the lead closes this): the fix + test are merged to main, green in the Elixir gate."
+    },
+    {
+      "doc": "task-d3df607632f87fef[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main, and the first `doc-gates` run on main's tip "
+    },
+    {
+      "doc": "task-d68754135a6a9f66[5]",
+      "criterion": "MERGE-GATED (the lead closes this): PR merged to main with the required gates green on its head."
+    },
+    {
+      "doc": "task-db39f46df0b3ac21[1]",
+      "criterion": "MERGE-GATED (lead closes): PR merged with the required contexts green; merge sha recorded."
+    },
+    {
+      "doc": "task-dc323510e1f2a7ce[5]",
+      "criterion": "MERGE-GATED — RESERVED FOR THE LEAD. The PR carrying this fix is merged with every required chec"
+    },
+    {
+      "doc": "task-de195a70d989d324[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged; CGO_ENABLED=0 go build ./... && go test ./internal/cli/..."
+    },
+    {
+      "doc": "task-e3e04fb95a96f9a0[2]",
+      "criterion": "MERGE-GATED: PR merged with required contexts green; merge sha recorded."
+    },
+    {
+      "doc": "task-e5ea320d544e444f[2]",
+      "criterion": "MERGE-GATED: PR merged with the Elixir Test gate green on the head sha."
+    },
+    {
+      "doc": "task-e6bf5dfd3db4caa8[2]",
+      "criterion": "MERGE-GATED (lead closes): merged in the SAME PR as bp-doc-patch-file-flag-broken (W18 slice 5, "
+    },
+    {
+      "doc": "task-e7bd4b127aaee4fc[2]",
+      "criterion": "MERGE-GATED — THE LEAD CLOSES THIS. PR merged to main with the merge SHA recorded."
+    },
+    {
+      "doc": "task-e813eaa7de4a6ed2[1]",
+      "criterion": "MERGE-GATED (the LEAD closes this criterion): the Elixir gate is green on the head sha."
+    },
+    {
+      "doc": "task-ea81f51181a8e06f[2]",
+      "criterion": "MERGE-GATED: PR merged to main with all required checks green; merge sha recorded."
+    },
+    {
+      "doc": "task-f2a1a8429edd0d88[2]",
+      "criterion": "MERGE-GATED: PR merged to main with the required checks green; merge sha recorded."
+    },
+    {
+      "doc": "task-f416f96ef0860f47[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged with all four required contexts green, and the lead h"
+    },
+    {
+      "doc": "task-f4278bbc8133be7d[1]",
+      "criterion": "MERGE-GATED (the LEAD closes this criterion): merged to origin/main with the gates green and the"
+    },
+    {
+      "doc": "task-f56d553a70a4bba8[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the atomic PR is merged to main with all required contexts g"
+    },
+    {
+      "doc": "task-fb4cf8323a9795e5[2]",
+      "criterion": "MERGE-GATED: the PR merges to main with the required contexts green and the merge sha recorded"
+    },
+    {
+      "doc": "task-fcc819ae8323c377[4]",
+      "criterion": "MERGE-GATED (a lead closes this): merged to origin/main, merge sha in full 40 characters, ancest"
+    },
+    {
+      "doc": "task-fe32dc3fd5076ead[2]",
+      "criterion": "MERGE-GATED: the first Doc budgets + anchors run on main at or after the merge is green — run id"
+    },
+    {
+      "doc": "task-felix-w14-mediafile-fk-constraint[3]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir Test gate green."
+    },
+    {
+      "doc": "task-felix-w16-schemadef-fk-constraint[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main with the Elixir Test gate green and a Task trailer "
+    },
+    {
+      "doc": "task-felix-w17-document-fk-constraint[3]",
+      "criterion": "MERGE-GATED (LEAD closes on the dual-reviewer intersection): PR merged to origin/main with CI El"
+    },
+    {
+      "doc": "task-felix-w22-bl-webhook-body-rightsize[4]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to origin/main with the Elixir gate green."
+    },
+    {
+      "doc": "tgw-bl-adjudicate-d88-stale-pin[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and adjudicate.test.mjs is green on"
+    },
+    {
+      "doc": "tgw-bl-epic-cycle-minitems-comment[2]",
+      "criterion": "MERGE-GATED (lead closes): PR merged to main with the repo gates green"
+    },
+    {
+      "doc": "tgw-bl-merge-base-safe-read-overrefusal[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/a"
+    },
+    {
+      "doc": "tgw10-bl-record-mjs-untested[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): merged to main."
+    },
+    {
+      "doc": "tgw11-bl-cli-selftest-pipe-truncation[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the piped form is whole on main"
+    },
+    {
+      "doc": "tgw11-bl-screen-classifysafety-global-option-launder[4]",
+      "criterion": "MERGE-GATED and SR-1: an INDEPENDENT reviewer (not the author, not the wave reviewer) signs off "
+    },
+    {
+      "doc": "tgw12-s0-inloop-anchor-repin[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/i"
+    },
+    {
+      "doc": "tgw12-s1-screen-value-global-collision[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/s"
+    },
+    {
+      "doc": "tgw12-s2-bp-local-overpromotion[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/l"
+    },
+    {
+      "doc": "tgw12-s3-foldledger-injection-gap[5]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/f"
+    },
+    {
+      "doc": "tgw12-s4-record-baddeps-test[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and node --test tooling/grip/test/r"
+    },
+    {
+      "doc": "tgw13-s1-scaffy-subcommand-anchor[4]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the FRESH corrected PR — cut from clean origin/main, landing"
+    },
+    {
+      "doc": "tgw2-acceptance-suite[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the gate is green on main."
+    },
+    {
+      "doc": "tgw3-decide-stages-foreign-rows[3]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to origin/main"
+    },
+    {
+      "doc": "tgw3-write-verb[11]",
+      "criterion": "MERGE-GATED (lead closes): the PR is merged to origin/main and the ledger is non-empty there"
+    },
+    {
+      "doc": "tgw5-bl-level-mention-promotion[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and level.test.mjs is green on main"
+    },
+    {
+      "doc": "tgw5-mint-fixes[7]",
+      "criterion": "MERGE-GATED (the lead closes this one): PR merged to origin/main with repo gates green."
+    },
+    {
+      "doc": "tgw5-mint-key-era-split[4]",
+      "criterion": "MERGE-GATED (the lead closes this one): PR merged to origin/main."
+    },
+    {
+      "doc": "tgw5-write-path-docs[8]",
+      "criterion": "MERGE-GATED (the lead closes this one): PR merged to origin/main with repo gates green. Closing "
+    },
+    {
+      "doc": "tgw6-leads-subject-segment-noise[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): branch pushed, PR open, merged to origin/"
+    },
+    {
+      "doc": "tgw6-leads-vs-grep-remeasured[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): branch pushed, PR open, merged; Review ru"
+    },
+    {
+      "doc": "tgw6-screen-provenance-and-entry-guard[3]",
+      "criterion": "MERGE-GATED (the LEAD closes this): branch pushed, PR open, PR merged to origin/main"
+    },
+    {
+      "doc": "tgw6-self-provenance[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this, never the builder): the branch is pushed, its PR is open, and"
+    },
+    {
+      "doc": "tgw9-bl-epic-cycle-digest-demotion-prose[2]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main"
+    },
+    {
+      "doc": "tgw9-bl-uncontrolled-rejection-classes[8]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the new test file is green on m"
+    },
+    {
+      "doc": "tgw9-s1-ledger-commons-honest[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR is merged to main and the three files are green on ma"
+    },
+    {
+      "doc": "tgw9-s4-tail-disposition[9]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the ledger-row PR is merged to main and the gate command's n"
+    },
+    {
+      "doc": "tgw9-s5-prune-stale-branches[6]",
+      "criterion": "MERGE-GATED (the LEAD closes this): the PR carrying the guard ledger row is merged to main."
+    },
+    {
+      "doc": "tgw9-s7-wildbulk-provenance-gate[7]",
+      "criterion": "MERGE-GATED (the LEAD closes this, and ALSO stamps epic criterion 3 on this merge per D97): the "
+    },
+    {
+      "doc": "tier3-header-chrome-and-wide-scrim-abolished[7]",
+      "criterion": "MERGE-GATED (the lead closes this): the PR is merged to main with every required gate green, and"
+    }
+  ],
+  "must_not_flag": [
+    {
+      "doc": "bp-cloud-build-epic-wave-9-log[1]",
+      "criterion": "LEAD merge gate: the charter PR is merged to origin/main."
+    },
+    {
+      "doc": "bp-task-stamp-criterion-index-is-zero-based-footgun[2]",
+      "criterion": "--met on a criterion whose text contains MERGE-GATED is refused without an explicit override, so a builder cannot pre-flip the leads merge gate."
+    },
+    {
+      "doc": "bp-task-stamp-criterion-off-by-one[2]",
+      "criterion": "MANDATORY COMPANION IN THE SAME PR: close.ex's autostamp_merge_gate/6 threads the stored criterion text into its synthetic update (today `entry` is bound and discarded as `_entry`), and a test proves the #3039 merge-gate autostamp STILL WORKS after the guard tightens. Without this the fix silently breaks #3039 the day it ships."
+    },
+    {
+      "doc": "bpb-cloud-billing-raw-body-leak-fix[5]",
+      "criterion": "LEAD-owned merge gate: the PR is merged to origin/main with the required Cloud gate and Console gate green on the pull request."
+    },
+    {
+      "doc": "bpb-cloud-cloudflare-bind-body-leak[5]",
+      "criterion": "LEAD merge gate: the PR is merged to origin/main with the Cloud gate and Console gate green."
+    },
+    {
+      "doc": "cb-ledger-close[2]",
+      "criterion": "cb-live-smoke and cb-docs-card closed with merge-gated criteria flipped by the lead on merge"
+    },
+    {
+      "doc": "cch-bl-merge-gated-override-cannot-tell-a-lead-from-a-builder[0]",
+      "criterion": "A run demonstrates the CURRENT hole: a stamp is refused with merge_gated_criterion, then the identical command plus --merge-gated succeeds against a criterion whose carrier PR is NOT merged. Evidence: both commands and their outputs."
+    },
+    {
+      "doc": "cch-bl-merge-gated-override-cannot-tell-a-lead-from-a-builder[1]",
+      "criterion": "--merge-gated no longer succeeds on an unmerged or unverifiable carrier: the override requires evidence the server can check, or the server checks the carrier itself. Evidence: the guard code and the refusal output."
+    },
+    {
+      "doc": "cch-w16-s7-citation-anchors-e11-widening[10]",
+      "criterion": "THE ELEVENTH FALSE POSITIVE IS NAMED, AND IT IS THE ARGUMENT FOR THE TIGHT SEPARATOR (D215): the PR body records that the loose separator reds ELEVEN non-citations — the TEN `app.css <bytes> B` records in __preview__/cssom-heads.baseline (charter D201 says nine; count them) PLUS `app.css: 620` at __preview__/breakpoint-sweep.mjs:256, which is INSIDE a scanned file and would therefore red the gate — while the ruled alternation reds zero of them. Evidence: both counts from a run over all text files under cloud/priv/static. [AMENDED BY CHARTER D223 AND COUNTED, NOT QUOTED - cch-w19-s5, 2026-08-01, WITHOUT BUILDING THIS ROW. THE SIDECAR RECORDS ARE ELEVEN, NOT TEN, SO THE FALSE-POSITIVE TOTAL IS TWELVE, NOT ELEVEN. Measured on origin/main 29cb76e60: `grep -cE 'app\\.css [0-9]+ B' cloud/priv/static/__preview__/cssom-heads.baseline` returns 11. Eleven `app.css <bytes> B` records plus `app.css: 620` at __preview__/breakpoint-sweep.mjs:256 = TWELVE non-citations the loose separator would red. The progression of this same count is itself the evidence for the tight separator and against quoting: charter D201 said nine, this criterion said ten, today it is eleven - the sidecar gains a record on every wave that re-measures the baseline, so ANY committed figure rots by construction. The build commit must COUNT them at build time (that grep is the recipe) rather than inherit this number or the previous two. NUMBERING NOTE, so the amendment is not applied to the wrong row: this is STORED INDEX 10 (board criterion 11); the wave brief's 'criterion 10' is the stored index, not the board number - board criterion 10 is the merge gate and contains no such count. This row stays DEFERRED - nothing here was built.]"
+    },
+    {
+      "doc": "cch-w18-bl-wrap-recipe-fourth-host-extract[0]",
+      "criterion": "A charter ruling exists authorising ONE `--wrap` modifier head inside the GR25-quarantined status-pill family, argued as an ADD in the D157 shape, or the extraction is refused in writing with its reason. Evidence: the charter entry. —— AMENDED AND DISCHARGED 2026-08-02 by cch-w22-s6, BY AMENDMENT AND NEVER BY CANCEL, exactly as cch-w20-s7's merge-gate criterion (c) instructs. THIS CRITERION'S SECOND LIMB IS THE ONE THAT FIRES: it admits 'or the extraction is refused in writing with its reason', and charter D220 IS that written refusal. PROVEN ON origin/main, not on a local charter copy: `git show origin/main:.claude/workflows/bp-cloud-console-hardening-charter.md | grep -c '^| D220 '` returns 1. D220's title is 'D210's FOURTH-HOST TRIGGER FIRES ON A HOST THE EXTRACTED VARIANT WOULD MISFIX — SO THE EXTRACTION IS REFUSED AND THE TRIGGER IS REPLACED BY A DIVERGENCE INSTRUMENT (E14)', and its reason is DRIVEN rather than argued: Candidate D, the exact five-declaration wrap recipe this epic had copied three times, DOES NOT FIX `.op-gate` — 'every clipped cell stays clipped (320:53/36! … 768:53/49! … 800:53/51!); it removes only the paints-outside symptom, i.e. it makes the defect INVISIBLE while leaving the label unreadable'. The shipped remedy is instead one declaration, `.op-gate .status-pill { flex: 0 0 auto }`, 64/64 at every driven width x scenario x theme. D220 also replaced the fourth-host TRIGGER with E14, a static check in `cloud/priv/static/__css_check.mjs` asserting declaration parity across wrapper-scoped copies, which is live and reporting 4 copies with 0 errors on the merged tree. CONSEQUENCE FOR CRITERIA 1-3 OF THIS ROW: all three open with 'If extracted' or presuppose the extraction, so they are MOOT — not unmet, not waived, moot by the ruling this criterion itself authorised."
+    },
+    {
+      "doc": "cch-w19-bl-stamp-merge-gated-flag-undocumented[0]",
+      "criterion": "`bp capabilities -o json` lists --merge-gated under task stamp's flags, and `bp task stamp --help` prints it with a one-line description naming who may use it. Both outputs quoted."
+    },
+    {
+      "doc": "cch-w19-bl-stamp-merge-gated-flag-undocumented[1]",
+      "criterion": "The merge-gated marker check is shown to be textual and its false-positive rate is stated: a criterion that merely mentions 'merge-gated' in prose is either exempted, or the refusal message says out loud that the match is on the TEXT and may be a mention. Whichever is chosen, it is proven by stamping a mention-only criterion and quoting the result."
+    },
+    {
+      "doc": "cch-w19-s5-ledger-truth-and-w18-s3-close[4]",
+      "criterion": "cch-w14-bl-status-pill-label-overflows-rail and cch-w15-bl-fleet-support-detail-truncated-stacked-band are stamped on their merge-gated criteria with #8818 = 17ec78adc3b9c2abd6441c5fc0a4692914430888, and the evidence NAMES the single advisory red (`Required-check spec drift (advisory)`, red on main itself) rather than writing 'merges green' unqualified. Both then close at N/N, and cch-w16-s3 closes at 10/10."
+    },
+    {
+      "doc": "cch-w22-s6-law0-executes-the-23-row-repayment[1]",
+      "criterion": "THE ELEVEN MERGE-GATED ROWS ARE CLOSED, each against a SHA verified an ancestor of `origin/main`. Evidence: the `git merge-base --is-ancestor <sha> origin/main` loop output for all eleven, plus the eleven close receipts. Each needed `bp task claim` first (all read `claim.worker = null` with a lapsed `expired_at`) — record that you claimed before closing."
+    },
+    {
+      "doc": "cch-w24-law0-repayment-as-a-claimed-slice[3]",
+      "criterion": "Any merge-gated criterion closed with --merge-gated carries evidence naming who adjudicated it and on what proof, so the override is auditable rather than a silent bypass."
+    },
+    {
+      "doc": "cch-w26-s5-css-check-bp-lc-closed-alternation-paid[5]",
+      "criterion": "SCOPE HONESTY: the PR body states that this close moves the epic's live roster by exactly ONE, names `gr-backlog-css-check-missing-classes` as the row the LEAD closes on merge (its remaining criterion is compound and half of it is a merge gate no builder may stamp), and does NOT claim it as Law-0 progress beyond that integer."
+    },
+    {
+      "doc": "cch-w32-bl-roster-false-open-sweep[4]",
+      "criterion": "A standing instrument resolves every open MERGE-GATED criterion's PR number against GitHub, so this class stops accumulating."
+    },
+    {
+      "doc": "cch-w38-s3-spec-gate-packet-and-roster-disposition[5]",
+      "criterion": "The four false-open rows (cch-w23-bl-pat-deploy-grant-survives-demotion, cch-cloud-app-has-no-plug-errorhandler, cch-w11-s1-flip-behind-a-generator-that-cannot-lose, cch-w28-s1-empty-roster-control-asserts-clause-a) are closed with their receipts, each recording which criteria closed as merge-gated vs re-derived. Evidence: the four rows read back plus the re-derivation command for each receipt."
+    },
+    {
+      "doc": "cch-w41-bl-a-standing-instrument-resolves-open-merge-gated-criteria[0]",
+      "criterion": "A script resolves every open child's unmet MERGE-GATED criteria against GitHub and reports the payable ones, using per-check-run conclusions rather than a rollup. Evidence: the script and a run over the live epic."
+    },
+    {
+      "doc": "cch-w41-bl-six-merge-gated-rows-are-paid-and-await-a-lead-stamp[1]",
+      "criterion": "cch-w39-s4's criterion 9 is stamped from #10007's body text as well as its merge gate. Evidence: the stamp evidence quoting the body lines."
+    },
+    {
+      "doc": "cch-w48-bl-the-remaining-lapsed-claim-arrears-epic-wide[0]",
+      "criterion": "The epic-wide arrears population is re-derived by reading every open child and counting those whose only unmet criterion is MERGE-GATED — the number is stated, not quoted from a prior wave."
+    },
+    {
+      "doc": "cch-w49-bl-merge-gated-stamp-guard-fires-on-any-mention[0]",
+      "criterion": "A criterion whose text merely MENTIONS a merge-gated row stamps met WITHOUT --merge-gated. Evidence: the stamp command and its rc."
+    },
+    {
+      "doc": "cch-w49-bl-merge-gated-stamp-guard-fires-on-any-mention[1]",
+      "criterion": "A genuine MERGE-GATED criterion is STILL refused without --merge-gated — the guard is shown to lose in the fix direction, not just widened. Evidence: the refusal output."
+    },
+    {
+      "doc": "cch-w49-s5-the-epics-own-ledger-stops-reading-open-on-25-merged-rows[4]",
+      "criterion": "cch-w40-s4's merge-gated criterion is RE-WORDED to the real check names ('go vet + test', 'gofmt drift ceiling (blocking)') because no check named 'Go gate' exists in any rollup — shown by a query returning the actual Go-related check names."
+    },
+    {
+      "doc": "cch-w58-bl-charter-and-cli-carry-three-unsupportable-sentences-about-the-merge-gate[2]",
+      "criterion": "The four wave-55 claim notes prescribing `close --merge-gated` are corrected to the working recipe (claim -> stamp --merge-gated -> plain close). Evidence: the task ids and their patched notes."
+    },
+    {
+      "doc": "cch-w62-bl-the-law-0-repayment-pass-nineteen-located-rows[0]",
+      "criterion": "The 5 paid merge-gated rows are re-claimed (their claims are lapsed with claim.worker null, so a close on a stale worker fails the CAS silently) and CLOSED with the merge sha and its `ahead` status quoted per row."
+    },
+    {
+      "doc": "cch-w62-bl-the-law-0-repayment-pass-nineteen-located-rows[5]",
+      "criterion": "cch-w58-s2 is NOT closed on its merge gate, and the reason is recorded on the row itself rather than only here."
+    },
+    {
+      "doc": "cch-w64-bl-merge-gated-criteria-are-unpayable-without-override[0]",
+      "criterion": "The failure is reproduced on a fresh open row: bp task stamp on a merge-gated criterion of an lifecycle_status=open row returns not_in_progress:open, and bp task close --set criteria:= without criteria_override returns the not-met refusal. Paste both."
+    },
+    {
+      "doc": "cch-w64-bl-merge-gated-criteria-are-unpayable-without-override[1]",
+      "criterion": "One of the three options (stamp-on-open under --merge-gated, a distinct foreign-evidence key, or auto-return to in_progress) is chosen with the reason stated, and the OTHER two are named as rejected rather than omitted."
+    },
+    {
+      "doc": "cch-w66-s2-the-autostamp-records-what-it-actually-observed[0]",
+      "criterion": "THE FABRICATION IS REPRODUCED BEFORE IT IS FIXED: a test proves that today a close carrying an arbitrary `landed` map, from a worker that is not the lead and citing a PR unrelated to the task, stamps the merge-gated criterion met:true with evidence claiming 'lead-closed on merge' and mints NO close_override. Paste the fail-before."
+    },
+    {
+      "doc": "cch-w66-s4-law-0-nine-closes-and-three-integers[1]",
+      "criterion": "EVERY MERGE GATE IS RE-VERIFIED BY RUNNING, not inherited: for each of the seven PRs paste `gh api repos/:owner/:repo/compare/<merge-sha>...main --jq .status` returning `ahead` and the four required contexts at `?per_page=100`, naming any duplicated or cancelled sibling context (#11376 and #11134 both have one)."
+    },
+    {
+      "doc": "cch-w66-s4-law-0-nine-closes-and-three-integers[2]",
+      "criterion": "THE TWO HONEST MISSES CLOSE SHORT AND SAY SO: cch-w63-s7 c5 and cch-w63-s8 c10 remain met:false with the miss named in the close reason. Paste both rows' final criteria state. cch-w64-s6 c12 is handled as the flip-risk declaration it is, NOT as a merge gate."
+    },
+    {
+      "doc": "cchi-w46-bl-lapsed-claim-arrears-close-path[1]",
+      "criterion": "The twelve confirmed shipped-but-unstamped rows are closed ONE AT A TIME through the established path — claim (a lapsed claim is directly re-claimable; no release is needed), stamp --merge-gated with the criterion text verbatim, then close — with the handle being doc.doc_id (the SLUG); `bp task get <uuid>` returns not_found, which is how sweeps lose rows. Their PRs: #10295 #10296 #10297 #10298 #10252 #10251 #10250 #10201 #10199 #10156 #10153 #10200."
+    },
+    {
+      "doc": "cchi-w46-bl-lapsed-claim-arrears-close-path[2]",
+      "criterion": "NO BATCH CLOSE: each merge-gated criterion carries its own four-part verification — PR merged, the merge commit an ancestor of origin/main, the gate green on the PR head, and the artifact actually present on main — quoted per row. Record that both server refusals (`criteria_unmet:N` inside close, `merge_gated_criterion` without --merge-gated) are CORRECT and not breakage."
+    },
+    {
+      "doc": "ccpca-w1-pricing-spawn-latch[3]",
+      "criterion": "LEAD-OWNED, MERGE-GATED: the PR carrying this slice is merged to main with required gates green (the lead closes this criterion on merge)"
+    },
+    {
+      "doc": "cloud-console-hardening-epic[0]",
+      "criterion": "BAND 2 is routed: gr-blk-studio-presence-perf-flake is re-parented to Felix pristine (task-96a908af98698118), and for repo-git hygiene, CI/merge-gate governance and Cloud test-infra either an owning epic is filed or the absence is recorded as a standing finding with task-openapi-drift-chronic named as the same class."
+    },
+    {
+      "doc": "cloud-control-plane-correctness-audit-wave-1-log[1]",
+      "criterion": "LEAD-OWNED, MERGE-GATED: the charter PR is merged to main (the lead closes this on merge)"
+    },
+    {
+      "doc": "connectors-secrets-aad-binding[3]",
+      "criterion": "The cryptographic binding and its merge gate are on main."
+    },
+    {
+      "doc": "df-close-ledger-stamp[5]",
+      "criterion": "LEAD re-runs the read-back and closes this task (no PR — this criterion is the merge-gate equivalent)"
+    },
+    {
+      "doc": "dr-bl-w5-merge-gated-paperwork-is-unsatisfiable[0]",
+      "criterion": "The five pure merge-gate rows are closed by the lead with the merge sha as evidence."
+    },
+    {
+      "doc": "dr-bl-w8-stamp-sixteen-merged-and-unstamped-tasks[1]",
+      "criterion": "Every machine-checkable merge gate is verified with `gh pr view <n> --json statusCheckRollup` and `.mergeCommit.oid` ancestry, then stamped and closed on the CURRENT claim epoch. Evidence: the close output per task."
+    },
+    {
+      "doc": "dr-w12-bl-close-satisfied-merge-gated-children[0]",
+      "criterion": "The 31 outright-closable rows are closed, each re-CLAIMED first and closed on the NEW epoch, with the merge commit sha as the evidence on the merge-gated criterion"
+    },
+    {
+      "doc": "dr-w12-bl-close-satisfied-merge-gated-children[4]",
+      "criterion": "A sample of the closed rows non-merge-gated criteria is spot-checked against the merged diff, since a previously-stamped met:true that overstated would survive a bulk close undetected"
+    },
+    {
+      "doc": "dr-w14-bl-close-help-manifest-lies[0]",
+      "criterion": "api/lib/barkpark/plugins/tasks.ex:774's sentence states the real contract: unmet criteria BLOCK a done close (merge-gate autostamp and criteria override are the exceptions) and are a soft warning only for cancelled/blocked"
+    },
+    {
+      "doc": "dr-w16-s6-team-scoped-census-returns-200[7]",
+      "criterion": "THE THREE MERGE-GATE GUARDS MOVE IN THE SAME COMMIT: router_head_fence_census_test @baseline_total 65->66 and @baseline_session 46->47 with its reason line; a route-table row in router.ex's @moduledoc; and reachability_test:619 widened to admit BOTH arity 2 and arity 3. Paste the diff of all three and the mutation showing the widened :619 STILL fails when the walker is broken"
+    },
+    {
+      "doc": "dr-w19-bl-merge-gated-paperwork-is-unsatisfiable[2]",
+      "criterion": "The enumerated rows are resolved under that rule (stamped, reworded, or closed with the note), and dr-bl-w5-merge-gated-paperwork-is-unsatisfiable is closed or explicitly superseded by this row."
+    },
+    {
+      "doc": "dr-w23-s8-ledger-closes-the-closable[1]",
+      "criterion": "`dr-w2-s4-scrub-knows-our-own-token` and `dr-w2-s6-engine-one-extractor-health-slow-vs-broken` are closed on the live non-expiring claim they already hold (`dr-w6-s3-ledger-repair`, epoch 7), with #9731/#9733 merge evidence pasted, and `dr-w2-s6`'s unsatisfiable PR-body criterion is dispositioned by name under `dr-w19-bl-merge-gated-paperwork-is-unsatisfiable`'s rule."
+    },
+    {
+      "doc": "dr-w24-bl-merge-gate-marker-false-positives[2]",
+      "criterion": "The guard still REFUSES a builder stamping a genuinely merge-gated criterion; proven by mutation, not by reading."
+    },
+    {
+      "doc": "dr-w24-s6-roster-buys-back-seal-headroom[1]",
+      "criterion": "The never-started selection is stated as a rule and its count derived, not guessed; paste the selection criteria and the resulting row count, and paste the count of rows you deliberately EXCLUDED because they are merge-gated at N/N+1."
+    },
+    {
+      "doc": "dr-w35-s7-ledger-partition-execution[4]",
+      "criterion": "No row was closed on a MERGE-GATED label without its criterion's actual question being read — the record file states this and names the >=3 mislabelled human-judgement rows and the 7 open-PR-blocked rows left open. Evidence: the file's per-row table."
+    },
+    {
+      "doc": "gr-bl-close-convention-unmet-criteria[0]",
+      "criterion": "A convention is decided and written down: either the closing actor stamps the merge-gated criterion, or a superseded close rewrites the criteria to match its actual disposition. The choice is stated with its reasoning, not left implicit."
+    },
+    {
+      "doc": "gr-p5r9-disposition-pass[2]",
+      "criterion": "The three inherited merge-gate requests receive honest dispositions: the valid tablet-overflow stamp is applied, the already-stronger reshoot evidence is preserved, and the structurally unstampable done-row criterion is refused and forwarded as named residue rather than forced."
+    },
+    {
+      "doc": "jarl-flagship-epic-wave-1-log[1]",
+      "criterion": "PR merged by the lead (merge-gated; lead closes)."
+    },
+    {
+      "doc": "jarl-innleggene-wave-1-log[1]",
+      "criterion": "PR merged by lead (merge-gated — lead closes)"
+    },
+    {
+      "doc": "jf-w1-engine-narrow-dark-fixes[4]",
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit, and AMENDED 2026-09-23 because two sentences of that correction had themselves gone false. ORIGINAL WORDING, verbatim: \"PR merged into barkpark main (merge-gated; the lead closes this criterion).\". THAT CRITERION COULD NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that would never arrive. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on barkpark main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would.\n\nWHAT THE 2026-08-20 AUDIT ASSERTED AND WHAT IS TRUE NOW. It said \"the code they describe is NOT on origin/main (.bp-lineage__body carries no overflow-wrap; .bp-duel__table has no scroll containment)\". BOTH HALVES ARE REFUTED ON origin/main TODAY, re-measured 2026-09-23 rather than inherited: api/assets/paper-surface/paper-surface.css carries \".bp-paper-surface .bp-lineage__body { ... overflow-wrap: anywhere; }\" and \".bp-paper-surface .bp-duel__table { ... display: block; max-width: 100%; overflow-x: auto; }\". A negative control on an absent token returned 0 hits in the same file, so the positives are not an instrument artefact. The audit was almost certainly right WHEN IT RAN; what did not survive is the present tense.\n\nIT ALSO SAID \"This criterion remains NOT MET\" while the criterion reads met=true, so the row asserted both at once. The described work IS present on main, which is what this criterion asks for.\n\nTHIS AMENDMENT CORRECTS THE TEXT ONLY. It does not flip a lock, does not touch evidence, and does not adjudicate task-0e7a1a8ed32b5de5, which separately tracks whether criteria 1-4 were stamped on proof."
+    },
+    {
+      "doc": "jf-w1-media-cors-upstream[3]",
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit, and AMENDED 2026-09-23 because two sentences of that correction had themselves gone false. ORIGINAL WORDING, verbatim: \"PR merged into barkpark main AFTER an independent second security review of the ACAO:* decision (merge-gated; the lead closes this criterion and records the reviewer).\". THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on barkpark main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would.\n\nTHE SECURITY GATE SURVIVES THIS AMENDMENT UNCHANGED, and it was SATISFIED, not waived: the independent second review of the ACAO:* decision was required before this landed, and this criterion's own stored evidence records it — lead-security-r APPROVED on the PR (issuecomment-5510584617), confirming no session plug on either media pipeline, GET/HEAD only, allow-credentials asserted absent, each route URL-keyed; ruling main 2026-09-02, recorded by lead-studio-3 on 2026-09-03. Nothing here relaxes that requirement for any future change to this surface.\n\nWHAT THE 2026-08-20 AUDIT ASSERTED AND WHAT IS TRUE NOW. It said \"No PR was ever opened for this work in barkpark (gh pr list --state all finds none matching) and the stamped branch is absent from all 1,341 loop-epic/* heads on origin\". THAT IS REFUTED, re-measured 2026-09-23 rather than inherited: PR #15408 was opened and squash-merged as dc91635f56, which `git merge-base --is-ancestor` confirms is an ancestor of origin/main, and the work is readable on main today as `pipeline :media_public_cors do` in api/lib/barkpark_web/router.ex. A negative control on an absent token in the same file returned 0 hits, so the positive is not an instrument artefact. The audit was very likely right WHEN IT RAN against the branch names it searched; what did not survive is the present tense.\n\nIT ALSO SAID \"This criterion remains NOT MET\" while the criterion reads met=true, so the row asserted both at once. The work IS built and present on main, which is what this criterion asks for.\n\nTHIS AMENDMENT CORRECTS THE TEXT ONLY. It does not flip a lock, does not touch evidence, and does not re-adjudicate the security review it records."
+    },
+    {
+      "doc": "jf-w1-media-doctrine-paper[3]",
+      "criterion": "Lead review: doctrine accepted as epic law (merge-gated equivalent for a content slice; the lead closes this criterion)."
+    },
+    {
+      "doc": "jf-w1-og-four-routes[3]",
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. SCOPE HAS ALSO SHRUNK: /notater was DELETED from jarl-website on 2026-08-03, so the four-route scope is now THREE (/om, /kontakt, /prosjekter). The /notater quarter is impossible, not outstanding. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-revendor-honest-media[4]",
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "jf-w1-width-tokens-gate-rig[4]",
+      "criterion": "CORRECTED 2026-08-20 by the board-reconciliation audit. ORIGINAL WORDING, verbatim: \"PR merged into jarl-website main (merge-gated; the lead closes this criterion).\". THAT CRITERION CAN NEVER BE MET AS WRITTEN, so it was holding this row in a false state, readable as done-pending-merge while waiting for a signal that will never arrive. jarl-website has had exactly ONE pull request ever (#1, merged 2026-07-31, unrelated); 62 of its 63 commits went straight to main; the stamped branch is absent from origin. IMPORTANT: this row's WORK ALREADY LANDED, by direct push - scripts/check-measure.mjs, scripts/shoot.mjs, the playwright dep and the blocking ci.yml step are all present on jarl-website main. What did NOT land is criterion 1 as literally worded: the token is --figure: calc(var(--site-width) - 2*var(--space-5)), not --measure-figure: 67rem, and .shell/.storyShell were DELETED rather than bound. Re-scope or close criterion 1 on the design that actually shipped. THE CORRECT REQUIREMENT: the work must be BUILT and verifiably present on jarl-website main, confirmed by reading the tree (or the live surface), NOT by a merge notification. Landing by direct push satisfies this criterion just as a PR would. This criterion remains NOT MET, and this correction does not decide whether the work is done."
+    },
+    {
+      "doc": "ji-w1-judge-a[3]",
+      "criterion": "Lead-dom over doemmekvaliteten (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-kaaring-reconcile[3]",
+      "criterion": "Lead-dom (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-rig-pipeline-gates[5]",
+      "criterion": "PR merget til main (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "ji-w1-rubrikk-paper[3]",
+      "criterion": "Lead-dom: rubrikken akseptert som epic-lov (merge-gated — lead lukker)"
+    },
+    {
+      "doc": "jscc-s3-transport-bodyread-guard[5]",
+      "criterion": "PR merged (lead-owned merge gate)"
+    },
+    {
+      "doc": "onb-w5-close-by-evidence-dossier[3]",
+      "criterion": "All ten merge-gated child criteria closed via the close primitive with their merge shas (five D44 + five W6), each child read back done; backfill closes to 4/5 with its human gate met:false; relativeage-clock-injection closed wont-do; release-cache-unify stays open enumerated"
+    },
+    {
+      "doc": "pbw-w1-usefulness-review-paper[2]",
+      "criterion": "S-tier backlog filed: 8-15 S-tier candidates each exist as a PUBLISHED bp task pbw-stier-<name> parented under pd-block-wishlist-epic with wave_paper set and a merge-gated criterion (gate command output pasted)"
+    },
+    {
+      "doc": "pds-bl-merge-gated-criteria-carry-the-flag[0]",
+      "criterion": "An audit reports how many existing tasks carry a merge-gate-worded criterion WITHOUT merge_gate:true. Evidence: the count and the query that produced it."
+    },
+    {
+      "doc": "pds-bl-merge-gated-override-carries-no-reason[0]",
+      "criterion": "A bare `--merge-gated` with no reason is REFUSED with a usage-grade message naming what to supply; the flag now takes a non-empty reason string. Demonstrated with the before/after invocation and both exit codes."
+    },
+    {
+      "doc": "pds-bl-stale-open-rows-with-merged-prs[0]",
+      "criterion": "Each of the six merge-gated rows is closed against its merged PR, with the merge sha quoted and verified an ancestor of origin/main."
+    },
+    {
+      "doc": "pds-bl-stale-open-rows-with-merged-prs[2]",
+      "criterion": "The full-field audit is re-run and shows zero pds rows in the stale-open shape (merged PR, all non-merge-gated criteria met, lifecycle_status open), with the query quoted and NOT using --fields."
+    },
+    {
+      "doc": "pds-bl-w47-stamp-tripwire-false-positive[1]",
+      "criterion": "The predicate is narrowed to the marker's ANCHORED position and the change is mutation-proven BOTH ways: a genuine 'MERGE-GATED (the LEAD closes this):' row is STILL refused without --merge-gated, and the merely-mentioning row is now accepted without it. Both runs pasted."
+    },
+    {
+      "doc": "pds-bl-w47-stamp-tripwire-false-positive[3]",
+      "criterion": "CARRIED from duplicate pds-w27-bl-stamp-guard-substring-false-positive: the fix shape — the marker match is ANCHORED, replacing the bare strings.Contains over the whole criterion text (internal/cli/tasks_stamp_cmd.go:317-331 at filing), so a criterion that merely quotes the marker stamps cleanly; the only documented escape (--merge-gated) must no longer require falsely asserting lead identity."
+    },
+    {
+      "doc": "pds-w1-crown-proof[10]",
+      "criterion": "PR merged to main (LEAD closes this criterion on merge). MERGE-GATED — DO NOT STAMP EARLY (PDS-D163). Criteria 0-5 and 7-9 are already met from the wave-7 climb, so this criterion plus criterion 6 completes 11/11, and cmux_hook.go:193-237 then closes this task UNCONDITIONALLY on the next Stop event with nobody typing a close command — the PDS-D138 false close, which already fired once on this exact task, re-armed in a shape no human has to type. Therefore: this criterion is NOT to be stamped until rungs 3 and 4 are GREEN in the transcript of the wave that pays this criterion (rungs 3 and 4 read off the ONE full bundle, rungs 1/2/5/6 against a real booted target, every rung passing WITH its controls FIRING), and then only by the LEAD on an actual merge to main. A stamp taken before those two rungs are green in-transcript is a false close, not a completion; if any rung fails, name it in the transcript and leave this criterion unmet."
+    },
+    {
+      "doc": "pds-w14-peak-ledger-honesty[7]",
+      "criterion": "PR merged to main (LEAD closes this criterion on merge). MERGE-GATED — DO NOT STAMP AS A BUILDER."
+    },
+    {
+      "doc": "pds-w26-export-atomic-out[7]",
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)."
+    },
+    {
+      "doc": "pds-w26-mcp-stamp-bypasses-readback[3]",
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion)"
+    },
+    {
+      "doc": "pds-w27-bl-census-cannot-see-a-false-reason[2]",
+      "criterion": "THE CLAUSE IS HONEST ABOUT WHAT IT CANNOT SEE. The row records that three of the 30 wave-27 reasons are DELIBERATELY thin (unprobed runtime rows) and that pds-w25-backlog-merge-gate-split is an explicitly PARTIAL content check 'wearing the same dress' as the other 29 -- all honestly labelled inside the reason text. A clause that cannot tell thin-and-honest from wrong must not convert them into failures; say which of the two it is doing."
+    },
+    {
+      "doc": "pds-w27-bl-stamp-guard-substring-false-positive[0]",
+      "criterion": "stampMergeGateBlocked no longer trips on a criterion that merely QUOTES the MERGE-GATED marker mid-sentence — the anchor chosen (leading bracket, or an explicit criterion subfield) is named and justified"
+    },
+    {
+      "doc": "pds-w27-bl-stamp-guard-substring-false-positive[1]",
+      "criterion": "MUTATION-PROVEN BOTH WAYS: a genuinely [MERGE-GATED]-prefixed criterion still refuses a builder --met (test reds when the guard is removed), AND pds-w27-round-bare-30 criterion 6's exact stored wording stamps clean"
+    },
+    {
+      "doc": "pds-w27-hetzner-gate-file-blindness[9]",
+      "criterion": "HIGH-FLIP-RISK: the eject repair changes behaviour on a DESTRUCTIVE verb. [MERGE-GATED — THE LEAD CLOSES THIS] The lead independently re-derives that the deprovision status assertion cannot red an honest detach against the real control plane, and merges."
+    },
+    {
+      "doc": "pds-w27-round-bare-30[6]",
+      "criterion": "The four lead-gated rows are adjudicated `open` — NOT closed — each with a reason naming the specific outstanding [MERGE-GATED] lead act. pds-w25-round-bare's reason additionally records that its criterion 4's 'blocked, non-stageable' premise is now stale, citing transitions.ex:42 + legal?/2's from==to branch + stage.ex's `(to in @stageable or from == to)` guard."
+    },
+    {
+      "doc": "pds-w33-ledger-postread-core[8]",
+      "criterion": "PR merged to main (LEAD CLOSES THIS — a builder never closes a merge-gated criterion). HIGH-FLIP-RISK on the cascade-broadcast blast radius: an INDEPENDENT second reviewer is warranted before merge"
+    },
+    {
+      "doc": "pds-w38-ledger-hygiene-derived[0]",
+      "criterion": "The merged-but-open set is RE-DERIVED in-process from the live ledger with the stated predicate (every unmet criterion matches /MERGE-GATED|LEAD CLOSES/i, OR the unmet set is empty), not transcribed from this brief. Evidence: paste the command and its output list with met/total per row."
+    },
+    {
+      "doc": "pds-w38-ledger-hygiene-derived[3]",
+      "criterion": "The three NON-qualifying rows are explicitly NOT closed and the reason is recorded: pds-w29-pay-lb (unmet criterion 13 is real unshipped work) and pds-w25-round-parked / pds-w25-round-open (their MERGE-GATED marker is a lead re-derivation of a pinned shard; their own text says the slice has no PR). Evidence: paste the reasoning per row."
+    },
+    {
+      "doc": "pds-w40-bl-ledger-n1-free-closes[0]",
+      "criterion": "Every one of the six merged-PR N-1 rows is either CLOSED with its merge-gated criterion stamped under a live claim with `--merge-gated`, or carries a written reason why it is not. Evidence lists the row, the epoch it closed on, and the discharge."
+    },
+    {
+      "doc": "pds-w45-criterion-venue[4]",
+      "criterion": "The lead-owned merge-gated row at line 141 is EXPLICITLY EXEMPTED and is left byte-identical. Evidence quotes the exemption clause and a git diff confirming line 141 is unchanged."
+    },
+    {
+      "doc": "pds-w47-ledger-denominator-and-blind-spots[2]",
+      "criterion": "A BLIND-SPOT block prints a COUNT AND THE NAMES — `pds-bl-merge-gated-criteria-carry-the-flag` plus the two never-published drafts — derived from the corpus, never transcribed. Evidence quotes the block."
+    },
+    {
+      "doc": "pds-w47-n1-adjudication[5]",
+      "criterion": "THE FOUR MISFILED ROWS ARE RE-SCOPED IN PROSE with the measurement that shows why they are not merge-gated — including the `grep -n OPAQUE_CALLERS` run over origin/main's charter returning 8 hits of which 7 do not mark themselves pre-rename."
+    },
+    {
+      "doc": "ppr-host-tenancy-caddy-probe[3]",
+      "criterion": "LEAD-CLOSED merge gate: Review lead verifies the paper is cross-linked into the trio, folds its verdict into the readiness ledger, and closes this criterion at wave debrief."
+    },
+    {
+      "doc": "scaffy-backlog-ledger-currency-sweep[2]",
+      "criterion": "Only stale evidence or merge-gate fields are changed; lifecycle, substantive criteria, worklogs, and genuinely unsupported claims are preserved, with a post-write read-back for all eight records."
+    },
+    {
+      "doc": "scc-w6-plan-card[6]",
+      "criterion": "PR merged to main by the lead (merge-gated — the LEAD closes this criterion, not the builder)"
+    },
+    {
+      "doc": "spd-b39-seal-ledger-reconciliation[0]",
+      "criterion": "All 14 Family-A tasks: single MERGE-GATED criterion stamped with PR#+SHA and the task closed (lifecycle=closed). Show a before/after lifecycle count."
+    },
+    {
+      "doc": "spd-w8-default-georgia-ledger-close[3]",
+      "criterion": "The two merge-gated criteria stranded on done tasks are backfilled with their merge commits: spd-w7-instrument-occlusion-and-state-axis index 10 (#4736 = bb8d313f2) and spd-w5-measure-lever-moves index 9 (#4737 = df30ad4b2). Read-back pasted for each."
+    },
+    {
+      "doc": "ssw9-prebuilt-live-proof[4]",
+      "criterion": "LIVE WALK (lead-run, merge-gated): a real site deploys from an off-box build against guerrilla, the live URL serves the uploaded bytes with the bp-* markers by value, and `ps` on the box during that deploy shows NO npm — output pasted as evidence."
+    },
+    {
+      "doc": "stw12-ledger-honesty-pay[3]",
+      "criterion": "stw9-backlog-bpgraph-identity-tripwire idx 7 is LEFT untouched as a merge-gated lead close (its stored text says 'MERGE-GATED (lead closes)'), and this decision is recorded verbatim in this slice's stamped evidence."
+    },
+    {
+      "doc": "stw12-reconcile-close-batch[5]",
+      "criterion": "No row was closed on a lapsed claim or an honest-miss: for every close the CURRENT claim.worker+epoch was read immediately before close and re-claimed, and each unmet criterion was independently confirmed merge-gated/delivered per the console-w76 lesson; evidence names the per-row check."
+    },
+    {
+      "doc": "task-07a465f262bad05f[2]",
+      "criterion": "docs/cli/error-exit-table.md gains the wall refusal codes with their exit code and stream, and one scripts/pds-* consumer is shown reading error.code from the captured stdout. MERGE-GATED: the PR is merged"
+    },
+    {
+      "doc": "task-0ed428e843b83382[0]",
+      "criterion": "The create path sets merge_gate:true ONLY when the merge-gate marker OPENS the criterion, and leaves a buried marker alone. The threshold is stated and justified against the measured population, not chosen by feel."
+    },
+    {
+      "doc": "task-0fcec595765a7b00[5]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: task-0fcec595765a7b00`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "task-1f369f877ae7a774[0]",
+      "criterion": "Filing a task whose criterion text begins MERGE-GATED yields a row with merge_gate:true on that criterion (or the create receipt warns that it does not), proven by a CLI test."
+    },
+    {
+      "doc": "task-1f369f877ae7a774[1]",
+      "criterion": "A stamp refused for the merge-gate rule says which detector fired (criterion text vs merge_gate flag) and, when the flag is absent, how to patch the row."
+    },
+    {
+      "doc": "task-4dca6c8453fb1f7c[2]",
+      "criterion": "THE MERGE-GATE FENCE HOLDS: a criterion carrying merge_gate:true is NOT flipped by this verb, and a terminal (done/cancelled) row is not touched at all. Both asserted directly, because a met-flip after close rewrites the verdict the close sealed (PR #15602)."
+    },
+    {
+      "doc": "task-60703ce4dd41a5a0[3]",
+      "criterion": "All 42 criteria that are worded LEAD-closes but carry no merge_gate flag are classified BY HAND as GATE (a real lead-only gate missing its flag) or META (a row whose subject is the merge-gate machinery, matched by wording only), with both counts recorded and every id listed under its label. The regex's false-positive count is stated as a number. Nothing is stamped and no flag is set by this row - merge_gate backfill is the lead's, and the deliverable is the classified list. If the hand read finds fewer than 5 GATE rows, that is recorded as the finding and no backfill task is filed."
+    },
+    {
+      "doc": "task-616789a3afe59364[1]",
+      "criterion": "`scripts/merge-gate-autostamp-liveness.sh --days 30` exits 0 LIVE, i.e. a real merged PR carrying a Task: trailer for a merge_gate:true task produced a `merge_gate_autostamp.merge_event` record sourced `github_merge_event` on the ledger. Exit 2 INCONCLUSIVE does NOT satisfy this — the window must contain a real candidate merge."
+    },
+    {
+      "doc": "task-972d97ffd2e468d9[7]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: task-972d97ffd2e468d9`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "task-a7977b95b59a49ca[1]",
+      "criterion": "The two help strings still show a copyable --merge-gated example (a PR number that cannot parse as a hex colour, e.g. 5 digits) and their meaning is unchanged; `mix format --check-formatted` clean and the tasks controller/plugin test dirs green (summary quoted)."
+    },
+    {
+      "doc": "task-b40af0580ec7deb6[0]",
+      "criterion": "`bp task landed` with no --criterion selects an implicit candidate ONLY by the structural key (merge_gate == true), never by the prose fallback; a criterion carrying the MERGE-GATED wording and no merge_gate key is NOT volunteered, and the receipt says why it was skipped. FAILURE DIRECTION: narrowing the wide reader in criteria.ex (it stays wide for the stamp refusal)."
+    },
+    {
+      "doc": "task-b69106868a235768[5]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: task-b69106868a235768`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "task-be75355db649326c[0]",
+      "criterion": "The backfill (via pds-w25-backlog-merge-gate-split) consumes THIS census as its scoped count: 669 combined rows (544 leading-marker + 125 LEAD-closes-on-merge family), and the family phrasing is included in scope or its exclusion is ruled in writing."
+    },
+    {
+      "doc": "task-d5e8b90e08bd4d4e[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: task-d5e8b90e08bd4d4e`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "task-d70c118c80c1d0df[5]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: task-d70c118c80c1d0df`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "task-d882039cf1247134[5]",
+      "criterion": "PR merged (MERGE GATE - the lead closes this one, not the builder)."
+    },
+    {
+      "doc": "task-e4eb12c95ddee588[5]",
+      "criterion": "PR opened referencing the task, merge-gated (task stays open, not closed)"
+    },
+    {
+      "doc": "task-ec8f65c6ef2fe984[2]",
+      "criterion": "docs/api-v1.md §9 lists halted at 409 only and storage_unavailable at 503 (media, dedup outage), under its 14000 B cap; errors_doc_coverage green. MERGE-GATED (lead closes): PR merged on the four required."
+    },
+    {
+      "doc": "task-felix-close-merge-gate-autostamp[0]",
+      "criterion": "An explicit merge_gate:true marker on an acceptance_criteria entry is what close.ex uses to identify the merge-gate criterion — NO text/last-entry/index heuristic anywhere in the path."
+    },
+    {
+      "doc": "task-felix-w18-registry-staleability-hardening[2]",
+      "criterion": "cd cloud && CC=clang mix test on the touched test files -> 0 failures; PR merged (lead closes merge gate)."
+    },
+    {
+      "doc": "ve-w1-strategy-paper[4]",
+      "criterion": "LEAD closes: reader (guerrilla /papers/viable-everywhere-strategy), Studio, and TUI renders verified at the Kinsta/Vercel bar — merge-gate analog for this content-only slice"
+    },
+    {
+      "doc": "wb-api-capabilities-undeclared-verbs[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-capabilities-undeclared-verbs`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-chat-observed-telemetry-readout[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-chat-observed-telemetry-readout`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-media-list-files-limit[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-media-list-files-limit`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-media-transform-params-400[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-media-transform-params-400`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-order-spec-fail-loud[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-order-spec-fail-loud`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-plugin-token-bucket-write-gate[5]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-plugin-token-bucket-write-gate`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-search-hasmore-echo[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-search-hasmore-echo`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-studio-action-handler-crash-guard[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-studio-action-handler-crash-guard`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-sync-push-halt-visibility[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-sync-push-halt-visibility`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-tester-unverified-badge[6]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-tester-unverified-badge`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wb-api-validation-registry-dead-check[5]",
+      "criterion": "PR merged to main by the lead — MERGE-GATED, the builder must NOT flip this. The PR body's first line reads `Task: wb-api-validation-registry-dead-check`, CI is green apart from the pre-existing repo-wide 'Required-check spec gate', and the gate command above passes on the merge commit."
+    },
+    {
+      "doc": "wbqs-api-sobelow-rebaseline[2]",
+      "criterion": "This cancelled row owns no remaining implementation or merge gate and remains only as provenance."
+    },
+    {
+      "doc": "wbt-go-explicit-scope-drop[7]",
+      "criterion": "PR merged (MERGE GATE — the lead closes this one, not the builder)."
+    },
+    {
+      "doc": "web-seed-route-prose-drift[4]",
+      "criterion": "PR merged to main (lead-owned merge gate)"
+    },
+    {
+      "doc": "wtc-w1-s1-byid-notfound-swallow[4]",
+      "criterion": "LEAD-OWNED (merge-gated): PR merged to main; the lead confirms a genuinely independent second reviewer signed off on the HIGH-FLIP 404-vs-500 boundary judgment before merge."
+    },
+    {
+      "doc": "wtc-w1-s2-webhook-lazy-init[4]",
+      "criterion": "LEAD-OWNED (merge-gated): PR merged; lead confirms an independent second reviewer signed off on the HIGH-FLIP fail-closed-vs-build-break judgment before merge."
+    },
+    {
+      "doc": "wtc-w1-s4-render-date-page-hydrate[5]",
+      "criterion": "LEAD-OWNED (merge-gated): PR merged to main."
+    },
+    {
+      "doc": "zero-criteria-is-a-legal-bypass-of-the-close-gate[13]",
+      "criterion": "The author-visibility asymmetry is documented with both call sites side by side: the merge-gate nag calls `Logger.warning` AND `Barkpark.Content.Warnings.put/3`, the zero-criteria arm calls only `Logger.warning`, and the in-repo comment explaining why the second call was added (669 rows accumulated in silence) is quoted."
+    }
+  ]
+}

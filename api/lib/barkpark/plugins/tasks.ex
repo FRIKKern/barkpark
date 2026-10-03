@@ -111,7 +111,8 @@ defmodule Barkpark.Plugins.Tasks do
       silently — measured 2026-08-22: 2870 worded criteria, 35 flagged.
       Deliberately narrow (leading position only) and deliberately advisory;
       see `warn_unflagged_merge_gates/1` for why widening it or promoting it
-      to a halt is unsafe.
+      to a halt is unsafe. On a task's BIRTH the writer sets the flag itself
+      (task-0ed428e843b83382), so this nag is left with the edit path.
 
   Non-task documents pass untouched.
   """
@@ -493,7 +494,14 @@ defmodule Barkpark.Plugins.Tasks do
   # catch the 105 non-leading cases — widening it would nag ~54 authors whose
   # criterion was never a gate. The flag stays the ONLY machine signal:
   # `autostamp_merge_gate` must NOT be taught to read this wording.
-  @merge_gate_lead ~r/^\s*[\[\(]?\s*\*{0,2}\s*MERGE[-\s]GATED\b/i
+  #
+  # AT BIRTH THE SERVER NOW ACTS (task-0ed428e843b83382): `Content.Writer`
+  # sets `merge_gate: true` on a leading-marker criterion with no key before
+  # this hook runs, so a create never reaches the nag for that case. What is
+  # left for the nag is the EDIT that adds such a criterion to an existing
+  # row, which the birth flag deliberately does not touch (no backfill).
+  # The pattern lives in `Barkpark.Tasks.Criteria.leading_merge_gate_marker?/1`,
+  # one home for the nag and the birth flag.
 
   defp warn_unflagged_merge_gates(list) do
     unflagged =
@@ -508,7 +516,8 @@ defmodule Barkpark.Plugins.Tasks do
       message =
         "acceptance_criteria #{inspect(unflagged)} open with the MERGE-GATED " <>
           "marker but carry no `merge_gate: true` — the close-time autostamp keys on the FLAG, not " <>
-          "the wording, so a lead merge will not flip them. Add \"merge_gate\": true to each " <>
+          "the wording, so a lead merge will not flip them. The server sets the flag itself " <>
+          "only when a task is BORN; on this edit, add \"merge_gate\": true to each " <>
           "gate entry — or \"merge_gate\": false if the criterion merely MENTIONS merge-gating " <>
           "and is not one (either explicit value silences this) (soft warning, save proceeds)"
 
@@ -528,7 +537,7 @@ defmodule Barkpark.Plugins.Tasks do
 
   defp merge_gate_worded?(entry) do
     case Map.get(entry, "criterion") do
-      text when is_binary(text) -> Regex.match?(@merge_gate_lead, text)
+      text when is_binary(text) -> Barkpark.Tasks.Criteria.leading_merge_gate_marker?(text)
       _ -> false
     end
   end
