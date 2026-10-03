@@ -229,8 +229,8 @@ defmodule BarkparkWeb.WebhookController do
   # only if auto-dispatch could have SELECTED it for that event. The dataset
   # must match, and a workspace-scoped event additionally requires the webhook
   # to live in the same workspace (and same project, when the event carries
-  # one); an unscoped (legacy/global) event may replay to any webhook in its
-  # dataset, exactly as dispatch fans it out. The dataset STRING alone is NOT a
+  # one); an unscoped (legacy) event replays only to a shared-layer webhook,
+  # exactly as dispatch selects it. The dataset STRING alone is NOT a
   # tenant boundary — "production" exists in every workspace and event ids are
   # global sequential integers, so without the workspace clause a wsB admin
   # could point a wsB webhook at their own URL and replay wsA's event ids into
@@ -243,10 +243,12 @@ defmodule BarkparkWeb.WebhookController do
   # agree, or an admin can hand-deliver what no automatic path would send.
   defp event_in_scope?(%MutationEvent{type: "listener"}, _wh), do: false
 
+  # A workspace-less event replays only to a shared-layer (NULL-workspace)
+  # webhook, the same fail-closed rule dispatch applies (owner ruling #51, RQ2).
   defp event_in_scope?(ev, wh) do
     ev.dataset == wh.dataset and
-      (is_nil(ev.workspace_id) or
-         (ev.workspace_id == wh.workspace_id and
+      ((is_nil(ev.workspace_id) and is_nil(wh.workspace_id)) or
+         (is_binary(ev.workspace_id) and ev.workspace_id == wh.workspace_id and
             (is_nil(ev.project_id) or is_nil(wh.project_id) or ev.project_id == wh.project_id)))
   end
 

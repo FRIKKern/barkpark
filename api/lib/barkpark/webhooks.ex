@@ -209,8 +209,16 @@ defmodule Barkpark.Webhooks do
   `Content.Scope.scope_to_workspace/3` so a content change in workspace B never
   selects workspace A's webhooks — the cross-tenant delivery leak guard. The
   dataset + events + types filters are unchanged; this ADDS the workspace
-  envelope around them. A `nil`/absent `workspace_id` keeps the pre-tenancy
-  unscoped behaviour (matches every webhook in the dataset).
+  envelope around them.
+
+  A `nil`/absent `workspace_id` FAILS CLOSED (owner ruling #51, RQ2,
+  task-6132833921b7dc36): an event that names no workspace selects only the
+  shared-layer webhooks (`workspace_id IS NULL`), never every workspace's.
+  It used to match every webhook in the dataset, so a workspace-less event
+  reached every tenant's receivers. Every document write is stamped with a
+  workspace (`WriteScope` falls back to the seeded Default), so this path is
+  for legacy rows only; an operator can count them with
+  `SELECT count(*) FROM mutation_events WHERE workspace_id IS NULL`.
   """
   def active_webhooks_for(dataset, event, type, opts \\ []) do
     now = DateTime.utc_now()
@@ -227,7 +235,7 @@ defmodule Barkpark.Webhooks do
     |> where([w], is_nil(w.blocked_threshold_s))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.events, w.events, ^event))
     |> where([w], fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type))
-    |> scope(opts)
+    |> event_scope(opts)
     |> Repo.all()
     |> Enum.filter(&probe_due?(&1, now))
   end
@@ -344,6 +352,16 @@ defmodule Barkpark.Webhooks do
     |> where([w], w.workspace_id == ^workspace_id)
     |> where([w], not is_nil(w.blocked_threshold_s))
     |> Repo.all()
+  end
+
+  # The DISPATCH-side tenant boundary: a workspace-less event reaches only the
+  # shared-layer (NULL-workspace) webhooks. `scope/2` below keeps its nil-safe
+  # "no filter" reading for the internal list/get callers.
+  defp event_scope(query, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      ws when is_binary(ws) -> scope(query, opts)
+      _ -> where(query, [w], is_nil(w.workspace_id))
+    end
   end
 
   # Apply the workspace/project tenant boundary from `opts`. Nil-safe via
