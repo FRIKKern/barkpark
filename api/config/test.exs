@@ -398,3 +398,11 @@ config :barkpark, tenancy_default_scope_cache_ttl_ms: 0
 # sets it. See the module's moduledoc and
 # test/barkpark/dedup/scan_seam_inertness_test.exs.
 config :barkpark, dedup_scan_seam: true
+
+# Quiz room join rate (owner ruling #59, `Barkpark.Quiz.Room`). Production
+# defaults to a burst of 50 new players refilled at 5/s. The load and
+# crossover tests join hundreds of players in a tight loop to exercise the
+# cursor and heatmap paths, not the limiter, so the suite runs with the
+# limiter effectively open. test/barkpark/quiz/room_flood_test.exs sets real
+# values for its own (synchronous) duration.
+config :barkpark, Barkpark.Quiz.Room, join_burst: 1_000_000, join_rate_per_sec: 1_000_000

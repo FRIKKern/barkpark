@@ -11,6 +11,10 @@ defmodule BarkparkWeb.QuizHostLive do
   session (owner ruling #23); without one the room runs the default question.
   `/quiz/host/new` picks a fresh PIN and keeps the query.
 
+  Flood controls (owner ruling #59): the owner can lock the room to new
+  players and remove a player (who cannot rejoin under that identity); the
+  room itself rate-limits new joins (`Barkpark.Quiz.Room`).
+
   Host controls: the browser session that OWNS the pin (`Quiz.Bridge`, first
   host wins: `bind_as_host/4` with `?quiz=`, `claim_host/2` without) gets a
   toolbar that drives the room's phases: start the question (arms the
@@ -30,6 +34,10 @@ defmodule BarkparkWeb.QuizHostLive do
   # `/quiz/host/new` is the PIN-less entry the Studio "Host this quiz" link
   # opens: pick a fresh PIN and carry the quiz + host token along, so every
   # click of the same link opens its own room.
+
+  # Rows kept in the host's kick list (see `roster/1`).
+  @roster_limit 200
+
   @impl true
   def mount(%{"pin" => "new"} = params, _session, socket) do
     query = params |> Map.take(["quiz", "host"]) |> URI.encode_query()
@@ -122,6 +130,8 @@ defmodule BarkparkWeb.QuizHostLive do
         player_count: state.player_count,
         phase: state.phase,
         scores: state.scores,
+        locked: Map.get(state, :locked, false),
+        players: roster(state.players),
         answer: nil,
         error: nil,
         link_error: link_error
@@ -159,6 +169,8 @@ defmodule BarkparkWeb.QuizHostLive do
       player_count: 0,
       phase: nil,
       scores: [],
+      locked: false,
+      players: [],
       answer: nil,
       ends_at: nil,
       remaining: nil,
@@ -179,10 +191,20 @@ defmodule BarkparkWeb.QuizHostLive do
         "reveal" -> Quiz.reveal(pin)
         "scores" -> Quiz.leaderboard(pin)
         "end" -> Quiz.end_game(pin)
+        "lock" -> Quiz.lock(pin, true)
+        "unlock" -> Quiz.lock(pin, false)
         _ -> :ok
       end
     end
 
+    {:noreply, socket}
+  end
+
+  # Kick one player (owner ruling #59). Same server-side ownership re-check as
+  # every other host control.
+  def handle_event("kick", %{"player" => player_id}, socket) when is_binary(player_id) do
+    %{pin: pin, host_key: key} = socket.assigns
+    if Quiz.Bridge.host?(pin, key), do: Quiz.kick(pin, player_id)
     {:noreply, socket}
   end
 
@@ -202,11 +224,22 @@ defmodule BarkparkWeb.QuizHostLive do
 
   # Roster broadcasts carry the AUTHORITATIVE count — assign it directly rather
   # than accumulating +1/-1 deltas against a separately-read base (which drifts).
-  def handle_info({:quiz, _pin, {:player_joined, _player, count}}, socket),
-    do: {:noreply, assign(socket, player_count: count)}
+  def handle_info({:quiz, _pin, {:player_joined, player, count}}, socket) do
+    players =
+      if socket.assigns.host?,
+        do: roster([player | socket.assigns.players]),
+        else: socket.assigns.players
 
-  def handle_info({:quiz, _pin, {:player_left, _player_id, _slot, count}}, socket),
-    do: {:noreply, assign(socket, player_count: count)}
+    {:noreply, assign(socket, player_count: count, players: players)}
+  end
+
+  def handle_info({:quiz, _pin, {:player_left, player_id, _slot, count}}, socket) do
+    players = Enum.reject(socket.assigns.players, &(&1.id == player_id))
+    {:noreply, assign(socket, player_count: count, players: players)}
+  end
+
+  def handle_info({:quiz, _pin, {:locked, locked?}}, socket),
+    do: {:noreply, assign(socket, locked: locked?)}
 
   # Live-edit (P4): re-render the projector with the swapped question.
   def handle_info({:quiz, _pin, {:question_updated, question}}, socket),
@@ -255,7 +288,10 @@ defmodule BarkparkWeb.QuizHostLive do
 
   @impl true
   def render(assigns) do
-    assigns = assign(assigns, :total, assigns.tally |> Map.values() |> Enum.sum())
+    assigns =
+      assigns
+      |> assign(:total, assigns.tally |> Map.values() |> Enum.sum())
+      |> assign(:roster_limit, @roster_limit)
 
     ~H"""
     <div class="q-shell">
@@ -316,7 +352,39 @@ defmodule BarkparkWeb.QuizHostLive do
             >
               End game
             </button>
+            <button
+              type="button"
+              class="q-host-btn"
+              phx-click="host"
+              phx-value-action={if @locked, do: "unlock", else: "lock"}
+              aria-pressed={to_string(@locked)}
+            >
+              {if @locked, do: "Unlock room", else: "Lock room"}
+            </button>
           </div>
+          <p :if={@locked} class="q-status" role="status">
+            The room is locked: players already in can answer, nobody new can join.
+          </p>
+          <details :if={@host? and @players != []} class="q-host-players">
+            <summary>Players ({@player_count})</summary>
+            <ul>
+              <li :for={p <- Enum.take(@players, @roster_limit)}>
+                <span>{p.name}</span>
+                <button
+                  type="button"
+                  class="q-host-btn"
+                  phx-click="kick"
+                  phx-value-player={p.id}
+                  aria-label={"Remove " <> p.name}
+                >
+                  Remove
+                </button>
+              </li>
+            </ul>
+            <p :if={@player_count > @roster_limit} class="q-status">
+              Showing the newest {@roster_limit}. Lock the room to stop more joining.
+            </p>
+          </details>
 
           <%= if @phase in [:leaderboard, :ended] do %>
             <h1 class="q-question">{if @phase == :ended, do: "Game over", else: "Scores"}</h1>
@@ -383,6 +451,15 @@ defmodule BarkparkWeb.QuizHostLive do
 
   defp link_error_copy(_missing_or_invalid),
     do: "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
+
+  # The host's kick list: newest first, at most @roster_limit kept in assigns
+  # so a 2,000-player room does not re-render a 2,000-row list on every join.
+  defp roster(players) do
+    players
+    |> Enum.uniq_by(& &1.id)
+    |> Enum.sort_by(&Map.get(&1, :joined_at, 0), :desc)
+    |> Enum.take(@roster_limit)
+  end
 
   defp pct(_count, 0), do: 0
   defp pct(count, total), do: round(count / total * 100)
