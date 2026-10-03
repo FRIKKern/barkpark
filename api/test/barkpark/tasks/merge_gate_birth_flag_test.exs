@@ -101,8 +101,8 @@ defmodule Barkpark.Tasks.MergeGateBirthFlagTest do
       for %{"criterion" => text, "doc" => doc} <- fixture()["explicit_false_leading"] do
         e = Map.put(entry(text), "merge_gate", false)
 
-        assert {[^e], []} = Criteria.flag_leading_merge_gates([e]),
-               "overrode #{doc}'s explicit false"
+        result = Criteria.flag_leading_merge_gates([e])
+        assert result == {[e], []}, "overrode #{doc}'s explicit false"
       end
     end
 
