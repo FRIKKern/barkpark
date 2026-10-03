@@ -105,7 +105,8 @@ defmodule Barkpark.Content.AuthoringWall do
     # passes the WHOLE wall unchanged (D6), including E4. The ledger only
     # ever holds deploy-snapshot rows, so a FRESH doc (ingest-born paper,
     # new task) is never exempt — the wall is unconditional for births.
-    exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
+    exempt? =
+      type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset, type, opts)
 
     with {:ok, spine_passed?} <- label_gate(ref, type, pid, exempt?),
          :ok <- epic_quality_gate(ref, type),
@@ -205,7 +206,7 @@ defmodule Barkpark.Content.AuthoringWall do
 
   def recheck_dedup_under_scope_lock(ref, type, pid, dataset, opts)
       when type in @walled_types do
-    exempt? = is_binary(pid) and Exemptions.member?(pid, dataset)
+    exempt? = is_binary(pid) and Exemptions.member?(pid, dataset, type, opts)
 
     if exempt? do
       :ok
@@ -247,7 +248,8 @@ defmodule Barkpark.Content.AuthoringWall do
   @spec validate_all(Document.t() | map(), String.t(), String.t() | nil, String.t(), keyword()) ::
           [{atom(), term()}]
   def validate_all(ref, type, pid, dataset, opts \\ []) do
-    exempt? = type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset)
+    exempt? =
+      type in @walled_types and is_binary(pid) and Exemptions.member?(pid, dataset, type, opts)
 
     [
       case label_gate(ref, type, pid, exempt?) do
