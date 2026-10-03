@@ -184,18 +184,17 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       # ── default fallback (datetime → text fallback, no upgrade) ────────────
       assert html =~ ~s(name="doc[publishedAt]")
 
-      # ── text clause (rows=3 default, phx-debounce=500) ─────────────────────
-      assert html =~
-               ~r{<textarea[^>]*name="doc\[body\]"[^>]*class="form-input"[^>]*rows="3"[^>]*phx-debounce="500"}
-
+      # ── body of a blocks document (task-310e40394d3b83da) ────────────────
       # The `post` schema carries an explicit Expectation layout, so the
-      # document is stored via the portable-doc path: the plain `body` string
-      # lands in the body REGION as a free block with an `html` render — a
-      # semantic `<p>…</p>` since the gp-w3 email-view wave (paragraphs compose
-      # to PdParagraph in every style) — and the text-fallback textarea shows
-      # that HTML escaped. (The layout-less `page` schema below keeps the bare
-      # string — see "page editor mounts".)
-      assert html =~ ">&lt;p&gt;the quick brown fox&lt;/p&gt;</textarea>"
+      # document is stored via the portable-doc path: the body lives in FREE
+      # blocks, and a Classic save re-projects `content["body"]` from them, so
+      # a Classic body input would discard whatever was typed. The form says
+      # so and offers Beta instead of rendering an input. The text clause
+      # itself (rows=3, phx-debounce=500) is pinned by "page editor mounts"
+      # and "author editor mounts" below.
+      refute html =~ ~s(name="doc[body]")
+      assert html =~ ~s(data-test-id="classic-body-in-blocks")
+      assert html =~ ~s(phx-value-mode="beta")
 
       # ── richText clause: bp-rich-text-editor Web Component bridged via
       # hidden input + BarkparkFieldBridge hook (Task #11 WI4) ───────────────
