@@ -218,7 +218,38 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc false
-  def seed_new_doc_content("task"), do: %{"kind" => "task", "lifecycle_status" => "open"}
+  # A task is born with the brief `bp task create` composes at birth
+  # (`ensureTaskPortableBrief`, internal/cli/tasks_create_cmd.go): a Purpose
+  # heading and a `purpose-copy` paragraph holding the auto-stub. Without it a
+  # Studio-made task could never be published — the Tasks plugin refuses a
+  # first publish with no brief ("task brief is required before publish"),
+  # and Studio renders `brief` read-only. `Barkpark.Tasks.BriefMirror`
+  # re-derives `purpose-copy` from `description` (or the stub from the title)
+  # on every write, so the block follows what the editor types
+  # (task-122006e94c1980e1). The stub wording is BriefMirror's own.
+  def seed_new_doc_content("task") do
+    %{
+      "kind" => "task",
+      "lifecycle_status" => "open",
+      "brief" => %{
+        "version" => 1,
+        "blocks" => [
+          %{"id" => "purpose", "type" => "heading", "level" => 2, "text" => "Purpose"},
+          %{
+            "id" => "purpose-copy",
+            "type" => "paragraph",
+            "content" => [
+              %{
+                "type" => "text",
+                "value" =>
+                  "Complete the work described by “Untitled” and record verifiable evidence."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  end
 
   # A blocks-doc is born with an EXPLICIT EMPTY block list — not `%{}`, and not a
   # hand-rolled paragraph. The empty list is the signal
