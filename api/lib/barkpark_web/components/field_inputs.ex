@@ -312,7 +312,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <div id={"bp-mp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-mp-ref-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
@@ -344,7 +344,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     assigns = assign(assigns, n: name, v: val, ref_type: Enum.join(reference_types(f), ","))
 
     ~H"""
-    <div id={"bp-ref-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-ref-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-ref-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-reference-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
         value={@v}
@@ -376,7 +376,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       )
 
     ~H"""
-    <div id={"bp-mp-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-mp-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-mp-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-media-picker data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
         value={@v}
@@ -548,11 +548,25 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp rich_text_editor(assigns) do
     ~H"""
-    <div id={"bp-rt-wrap-#{@n}"} phx-update="ignore" phx-hook="BarkparkFieldBridge">
+    <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
       <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
     </div>
     """
+  end
+
+  # [doc-keyed-ignore-wrappers] The id of a `phx-update="ignore"` wrapper that
+  # owns a hidden input + web component (rich text, reference, image,
+  # mediaAsset reference). LiveView never patches the children of an ignored
+  # element, so with a field-name-only id (`bp-rt-wrap-body`) a doc→doc patch
+  # in the same pane kept the PREVIOUS document's hidden input and widget, and
+  # the next autosave wrote that document's body/author into the one now open
+  # (task-eda246dcab63dc3f). Keying by the document makes a switch remount the
+  # wrapper. The key is the PUBLISHED id: the first keystroke on a published
+  # document turns `p1` into `drafts.p1`, and remounting then would drop the
+  # caret mid-word.
+  defp doc_wrap_id(prefix, name, doc_key) do
+    "#{prefix}-#{name}-#{Barkpark.Content.DraftId.published_id(to_string(doc_key))}"
   end
 
   defp rich_text_readonly(assigns) do
