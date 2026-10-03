@@ -1178,6 +1178,26 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # A non-admin client write changed a field the schema marks `readOnly`
+  # (`Barkpark.Content.ReadOnlyFields`, owner ruling #35). The canonical
+  # `validation_failed` code and per-field `details` map, so clients keying on
+  # `validation_failed` need no new branch.
+  defp build({:error, {:read_only_fields, fields}}) when is_list(fields) do
+    %{
+      code: "validation_failed",
+      message: "document changes read-only field(s): " <> Enum.join(fields, ", "),
+      status: 422,
+      details:
+        Map.new(fields, fn field ->
+          {field,
+           [
+             "is read-only: the server sets this field. Leave it out or send its " <>
+               "stored value; only an admin can change it."
+           ]}
+        end)
+    }
+  end
+
   defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
     %{
       code: "validation_failed",

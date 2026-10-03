@@ -214,6 +214,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"changeset", {:error, changeset()}, "validation_failed", 422, [:details]},
       {"invalid_task_content", {:error, {:invalid_task_content, %{"kind" => ["is required"]}}},
        "validation_failed", 422, [:details]},
+      # A non-admin write changed a schema `readOnly` field (owner ruling #35).
+      {"read_only_fields", {:error, {:read_only_fields, ["key_id"]}}, "validation_failed", 422,
+       [:details]},
       # The mutate-path schema check's ENFORCE arm (task-41a740fd6701ec28).
       # Only reachable for a dataset that opted in; the DEFAULT advises and
       # never renders an envelope at all. Shares `validation_failed` + 422 +
