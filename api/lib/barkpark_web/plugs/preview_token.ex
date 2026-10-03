@@ -2,12 +2,30 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
   @moduledoc """
   Verifies a short-lived preview JWT from `Authorization: Preview <jwt>`
   or `?preview_token=<jwt>`. Forces perspective to drafts on success.
+
+  ## What a token may read (owner ruling #17, task-8bac87cd4b34aeb6)
+
+  * `doc_ids` — when the claim lists any ids, the token reads those documents
+    and nothing else: `GET …/doc/:dataset/:type/:doc_id` must name a listed id
+    (a `drafts.` prefix on either side is ignored), `GET …/query/:dataset/:type`
+    returns only listed documents (`ScopeHelpers` threads `:only_doc_ids`), and
+    the backlinks / related / tags reads and `?expand=` are refused, because
+    each returns documents the token does not name. An empty or absent list
+    keeps the dataset-wide behaviour existing integrations rely on.
+  * `workspace_id` (optional) — reads run in that workspace instead of the
+    Default workspace; `project_id` (optional) narrows to one of its projects.
+    A workspace or project the box does not have is refused.
+
+  Every refusal happens before the JTI is recorded, so a token aimed at the
+  wrong document is not burned. Refusals are 403 `forbidden` with reason
+  `preview_scope`.
   """
 
   import Plug.Conn
 
-  alias Barkpark.Content.Errors
+  alias Barkpark.Content.{DraftId, Errors}
   alias Barkpark.PreviewToken
+  alias Barkpark.Tenancy
 
   def init(opts), do: opts
 
@@ -18,14 +36,104 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
          true <- is_binary(secret) and byte_size(secret) > 0,
          {:ok, claims} <- PreviewToken.verify(raw, secret),
          :ok <- check_dataset_scope(conn, claims),
+         # A token without a dataset claim is structurally unusable (401 via
+         # record_jti's contract); refuse it before judging what it names.
+         true <- is_binary(Map.get(claims, "dataset")),
+         {:ok, doc_ids} <- check_doc_scope(conn, claims),
+         {:ok, conn} <- assign_claimed_scope(conn, claims),
          {:ok, _} <- PreviewToken.record_jti(claims) do
       conn
       |> assign(:preview_claims, claims)
       |> assign(:forced_perspective, "drafts")
+      |> maybe_assign_doc_ids(doc_ids)
     else
       {:error, :already_used} -> deny(conn, :replay)
       {:error, :dataset_mismatch} -> deny(conn, :forbidden)
+      {:error, :preview_scope} -> deny(conn, :preview_scope)
       _ -> deny(conn, :unauthorized)
+    end
+  end
+
+  # The token's document list, as published ids. `[]` = dataset-wide.
+  defp claimed_doc_ids(claims) do
+    case Map.get(claims, "doc_ids") do
+      ids when is_list(ids) ->
+        ids
+        |> Enum.filter(&(is_binary(&1) and &1 != ""))
+        |> Enum.map(&DraftId.published_id/1)
+        |> Enum.uniq()
+
+      _ ->
+        []
+    end
+  end
+
+  # A token that names documents reads only those (see the moduledoc).
+  defp check_doc_scope(conn, claims) do
+    case claimed_doc_ids(claims) do
+      [] ->
+        {:ok, []}
+
+      ids ->
+        params = conn.path_params
+        conn = fetch_query_params(conn)
+
+        cond do
+          Map.has_key?(conn.query_params, "expand") ->
+            {:error, :preview_scope}
+
+          is_binary(params["doc_id"]) ->
+            if DraftId.published_id(params["doc_id"]) in ids,
+              do: {:ok, ids},
+              else: {:error, :preview_scope}
+
+          is_binary(params["type"]) ->
+            {:ok, ids}
+
+          true ->
+            {:error, :preview_scope}
+        end
+    end
+  end
+
+  defp maybe_assign_doc_ids(conn, []), do: conn
+  defp maybe_assign_doc_ids(conn, ids), do: assign(conn, :preview_doc_ids, ids)
+
+  # Optional `workspace_id` / `project_id` claims seat the read in that tenant.
+  # `AssignDefaultScope` runs after this plug and leaves an existing assign
+  # alone, so a token without the claim keeps reading the Default workspace.
+  defp assign_claimed_scope(conn, claims) do
+    case Map.get(claims, "workspace_id") do
+      nil ->
+        {:ok, conn}
+
+      ws_id when is_binary(ws_id) ->
+        case Tenancy.get_workspace_by_id(ws_id) do
+          %{id: id} = ws ->
+            assign_claimed_project(assign(conn, :current_workspace, ws), id, claims)
+
+          nil ->
+            {:error, :preview_scope}
+        end
+
+      _ ->
+        {:error, :preview_scope}
+    end
+  end
+
+  defp assign_claimed_project(conn, ws_id, claims) do
+    case Map.get(claims, "project_id") do
+      nil ->
+        {:ok, conn}
+
+      p_id when is_binary(p_id) ->
+        case Tenancy.get_project_by_id(p_id) do
+          %{workspace_id: ^ws_id} = project -> {:ok, assign(conn, :current_project, project)}
+          _ -> {:error, :preview_scope}
+        end
+
+      _ ->
+        {:error, :preview_scope}
     end
   end
 
