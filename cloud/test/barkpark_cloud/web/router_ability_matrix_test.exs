@@ -132,7 +132,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     ]
   end
 
-  # The six WRITE-gated routes. A `deploy` PAT must be refused by every one of
+  # The seven WRITE-gated routes. A `deploy` PAT must be refused by every one of
   # them — that is the rejected `deploy ⊇ write` widening, tripwired.
   defp write_routes(%{site: site, deployment: dep}) do
     [
@@ -142,6 +142,8 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       {:post, "/v1/sites/#{site.id}/rollback", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/promote", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/artifact", %{}},
+      # task-4187bcf6d0424cfc: the operator cancel is a WRITE, never a deploy.
+      {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/cancel", %{}},
       # DELETE is driven LAST: on the admitted row it destroys the site, and every
       # later row would then answer 404 (admitted, but vacuously so).
       {:delete, "/v1/sites/#{site.id}", nil}
@@ -197,6 +199,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     {"post", "/v1/sites/:id/rollback"},
     {"post", "/v1/sites/:id/deployments/:dep_id/promote"},
     {"post", "/v1/sites/:id/deployments/:dep_id/artifact"},
+    {"post", "/v1/sites/:id/deployments/:dep_id/cancel"},
     {"delete", "/v1/sites/:id"},
     {"post", "/v1/go-live"}
   ]

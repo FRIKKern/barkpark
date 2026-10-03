@@ -141,6 +141,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "github_error",
              "host_taken",
              "illegal_transition",
+             "in_flight",
              "install_state_invalid",
              "installation_id_required",
              "installation_not_found",

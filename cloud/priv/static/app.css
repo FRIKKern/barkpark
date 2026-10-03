@@ -4928,7 +4928,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* -- deploy-row promote actions (rollback / redeploy) ---------------------- */
 .dep-side { display: flex; align-items: center; gap: 8px; flex: 0 0 auto; }
-.dep-promote { white-space: nowrap; }
+.dep-promote, .dep-cancel { white-space: nowrap; }
 .dep-current {
   display: inline-block;
   margin-left: 8px;

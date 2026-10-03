@@ -78,6 +78,11 @@ type siteCP struct {
 	getResp    fakeResp
 	rollResp   fakeResp
 	deleteResp fakeResp
+	// POST /v1/sites/:id/deployments/:dep/cancel — `bp cloud site cancel`
+	// (task-4187bcf6d0424cfc). cancelPath records the literal path so a test
+	// can prove WHICH deployment the verb addressed.
+	cancelResp fakeResp
+	cancelPath string
 	// GET /v1/sites/:id/deployments — the newest-first LIST `status` reads to
 	// learn whether the live pointer is also the last thing that happened.
 	// listQuery records the raw query so a test can prove the bound was sent.
@@ -167,6 +172,9 @@ func (cp *siteCP) serve() *httptest.Server {
 			cp.deployHits++
 			cp.deployBody, _ = io.ReadAll(r.Body)
 			cp.write(w, cp.deployResp)
+		case r.Method == "POST" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/") && strings.HasSuffix(path, "/cancel"):
+			cp.cancelPath = path
+			cp.write(w, cp.cancelResp)
 		case r.Method == "POST" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/") && strings.HasSuffix(path, "/artifact"):
 			cp.artifactHits++
 			cp.artifactPath = path

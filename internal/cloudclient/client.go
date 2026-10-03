@@ -3893,6 +3893,47 @@ func (c *Client) RollbackSpawnSite(ctx context.Context, id string) (SiteRollback
 	return res, nil
 }
 
+// DeploymentCancelResult is the envelope POST
+// /v1/sites/:id/deployments/:dep_id/cancel returns on 200. Status is
+// "cancelled" (this call cancelled it) or "already_cancelled" (idempotent, and
+// nothing was written). SlotFree is always true on a 200: cancel frees the
+// active slot, and Next says how to rebuild. Raw is the envelope verbatim so
+// `-o json` re-emits the contract.
+type DeploymentCancelResult struct {
+	Raw        []byte `json:"-"`
+	OK         bool   `json:"ok"`
+	Status     string `json:"status"`
+	SlotFree   bool   `json:"slot_free"`
+	Next       string `json:"next"`
+	Deployment struct {
+		ID            string `json:"id"`
+		Status        string `json:"status"`
+		FailureReason string `json:"failure_reason"`
+	} `json:"deployment"`
+}
+
+// CancelDeployment is the OPERATOR cancel (task-4187bcf6d0424cfc): POST
+// /v1/sites/:id/deployments/:dep_id/cancel (Bearer, write ability). A non-2xx
+// answer is a cloudError carrying the plane's code. The codes are 409
+// illegal_transition (the row is live/failed/deferred), 409 in_flight (the box
+// is driving it and a cancel cannot stop it), and 404 (no such deployment on
+// this site, or not your team's). The caller never prints a false "cancelled".
+func (c *Client) CancelDeployment(ctx context.Context, siteID, deploymentID string) (DeploymentCancelResult, error) {
+	path := "/v1/sites/" + esc(siteID) + "/deployments/" + esc(deploymentID) + "/cancel"
+	status, raw, err := c.do(ctx, "POST", path, true, map[string]any{})
+	if err != nil {
+		return DeploymentCancelResult{}, err
+	}
+	if !ok(status) {
+		return DeploymentCancelResult{}, cloudError(status, raw)
+	}
+	res := DeploymentCancelResult{Raw: raw}
+	if err := json.Unmarshal(raw, &res); err != nil {
+		return DeploymentCancelResult{}, fmt.Errorf("decode cancel envelope: %w", err)
+	}
+	return res, nil
+}
+
 // DeleteSpawnSite tears a site down on its box and deregisters it (DELETE
 // /v1/sites/:id). Non-2xx (e.g. a teardown the box refused) is a cloudError, so
 // the caller never prints a false "deleted".

@@ -15,12 +15,12 @@ defmodule BarkparkCloud.Web.DeploymentCancelFreesTest do
       `find_deployment_by_delivery_id/1` first), so GitHub retrying an event
       does not undo a cancel the fleet filed.
 
-  There is no operator cancel ROUTE on the control plane (registry.ex says so:
-  "There is no human cancel path"). The writers that land `cancelled` are the
-  builder/agent fenced transition routes, the unfenced
-  `Registry.transition_deployment/2` (AutoDeployWorker's refusal), and the
-  preview teardown/supersede/evict path — every one a machine, none a person
-  (charter D614(c)). The tests drive the first two.
+  The machine writers that land `cancelled` are the builder/agent fenced
+  transition routes, the unfenced `Registry.transition_deployment/2`
+  (AutoDeployWorker's refusal), and the preview teardown/supersede/evict path
+  (charter D614(c)). The tests here drive the first two. The one HUMAN writer,
+  the operator cancel route (task-4187bcf6d0424cfc), has its own file:
+  `deployment_operator_cancel_test.exs`.
   """
   use BarkparkCloud.DataCase, async: true
   import Plug.Test

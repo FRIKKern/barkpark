@@ -2091,7 +2091,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # `VerifyProbe` is in no `@pairs` entry, so no paired decoder/emit arm reads
   # it. MEASURED by the PIN CO-EDIT arm on this branch off origin/main
   # bd0fdf27b ("@go_tag_pinned 398 -> 399"), never by arithmetic.
-  @go_tag_pinned 399
+  # 399 -> 401 (task-4187bcf6d0424cfc): `DeploymentCancelResult`, the operator
+  # cancel envelope, brings TWO new NAMES, `slot_free` and `next`. Its other
+  # six sites ride existing names and move the SITE register instead
+  # (deployment, failure_reason, id, ok, status x2). It is in no `@pairs` entry.
+  # MEASURED by the PIN CO-EDIT arm on this branch off origin/main 850004359
+  # ("@go_tag_pinned 399 -> 401"), never by arithmetic.
+  @go_tag_pinned 401
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2275,7 +2281,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "db_size" => 2,
     "deferred" => 3,
     "delivered" => 2,
-    "deployment" => 3,
+    "deployment" => 4,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.DeploymentID`
     # joins the single existing declaration — the build-log route is
     # DEPLOYMENT-KEYED, so it echoes the id on every answer.
@@ -2321,7 +2327,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # deploy/sites-embed-failure-cause: same third declaration on `SiteDeploymentEmbed` — the humanized reason rides beside the class.
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 3 -> 4. `SiteBuildLogRecord.FailureReason` — the recorder's
     # own honest reason, capped at 4000 bytes by the serializer.
-    "failure_reason" => 4,
+    "failure_reason" => 5,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogRecord.FinishedAt`
     # joins the single existing declaration.
     "finished_at" => 2,
@@ -2338,7 +2344,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
     # tree rebased onto origin/main: internal/cloudclient/tokens.go (the
     # /v1/tokens PAT surface). `PAT.ID`, 14 -> 15.
-    "id" => 15,
+    "id" => 16,
     "image_tag" => 2,
     "in_flight" => 2,
     # ssw11-bl-no-pat-mint-verb-in-bp, RE-MEASURED 2026-09-16 by name on the
@@ -2391,7 +2397,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
-    "ok" => 10,
+    "ok" => 11,
     "oldest_pending_seconds" => 2,
     "p50" => 2,
     "p95" => 2,
@@ -2500,7 +2506,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the prebuilt receipt BRANCHES on: on the retry arm no driver was started by
     # this request, so claiming the bytes are about to be staged would date the
     # deploy to a request that did not cause it. Rides free on the NAME union.
-    "status" => 20,
+    "status" => 22,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,

@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 88 write call sites collapse to 76 route keys; 11 of those keys are
+// The 89 write call sites collapse to 77 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -100,21 +100,21 @@
 //     no-op for it". The check discriminates PATs, not people. Every console
 //     call site whose only guard above membership is `require_ability` (or
 //     `with_team_site(conn, {:ability, "write"}, …)`) is therefore PLAIN
-//     MEMBER here: 9 rows — loadSite (PATCH /v1/sites/:*), runPromote,
-//     runSiteRollback, runSiteDelete, createAndDeploy, runDeploy and the
-//     three form-inbox writes in wireSiteForms (N-08). Note who
+//     MEMBER here: 10 rows — loadSite (PATCH /v1/sites/:*), runPromote,
+//     runCancel, runSiteRollback, runSiteDelete, createAndDeploy, runDeploy and
+//     the three form-inbox writes in wireSiteForms (N-08). Note who
 //     is NOT among them: openSiteEnvModal's guard is `with_team_site(conn, fn)`,
 //     tenancy with no ability term at all, so promoting it would need a
 //     different mistake than this one. A builder who counts `require_ability`
-//     as elevated gets 60, not 50 — those 9 plus the 1 row whose whole
+//     as elevated gets 61, not 50 — those 10 plus the 1 row whose whole
 //     authority lives below the router in Accounts.pat_abilities_allowed?/2,
 //     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor cannot read 15 of the 88 — they build their path from a
+//     path extractor cannot read 16 of the 89 — they build their path from a
 //     variable or a helper — and a census that counted only what it read
 //     literally would call that 73-of-73 and go green over a hole. Two of those
-//     15 are the console's HIGHEST-privilege writes (fleetRolloutAction and
+//     16 are the console's HIGHEST-privilege writes (fleetRolloutAction and
 //     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
 //     does not drop at all: submitActivateDecision builds
 //     `"/v1/auth/device/" + decision` — a literal PREFIX with a variable last
@@ -322,7 +322,7 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 88 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 89 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
@@ -597,6 +597,7 @@ const PIN = [
   { fn: "loadSite", verb: "PATCH", route: "/v1/sites/:*", elevated: false, predicate: null, auth_fn: A_ABILITY, context_fn: H_TEAM_SITE, note: "ruling (a): a session carries [\"root\"]" },
   { fn: "openSiteEnvModal", verb: "POST", route: "/v1/sites/:*/env", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE_M, note: "team-scoped member action" },
   { fn: "runPromote", verb: "POST", route: "/v1/sites/:*/deployments/:*/promote", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a): the promote/rollback pair are plain-member for a session" },
+  { fn: "runCancel", verb: "POST", route: "/v1/sites/:*/deployments/:*/cancel", elevated: false, predicate: null, auth_fn: A_USER_OR_PAT + " + " + A_ABILITY, context_fn: null, note: "ruling (a), task-4187bcf6d0424cfc: the operator cancel is gated exactly like promote (user-or-PAT + write ability), with no role read" },
   { fn: "runSiteRollback", verb: "POST", route: "/v1/sites/:*/rollback", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "ruling (a)" },
   { fn: "wireSiteForms", verb: "PUT", route: "/v1/sites/:*/forms", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): turning a site's form endpoint on/off is with_team_site(conn, {:ability, \"write\"}); no role read on the path" },
   { fn: "wireSiteForms", verb: "PATCH", route: "/v1/sites/:*/forms/submissions/:*", elevated: false, predicate: null, auth_fn: null, context_fn: H_TEAM_SITE, note: "N-08 ruling (a): marking a submission seen/new/spam is the same team-scoped write tier" },
@@ -679,6 +680,7 @@ const RESOLVERS = [
   { fn: "deleteWebhook", verb: "DELETE", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id), ds)', route: "/v1/barkparks/:*/api/webhooks/:*", why: "whPath/3" },
   { fn: "replayDelivery", verb: "POST", expr: 'whPath(bp, "/" + encodeURIComponent(wh.id) + "/deliveries/" + encodeURIComponent(eventId) + "/replay", ds)', route: "/v1/barkparks/:*/api/webhooks/:*/deliveries/:*/replay", why: "whPath/3" },
   { fn: "runPromote", verb: "POST", expr: "promotePath(site.id, d.id)", route: "/v1/sites/:*/deployments/:*/promote", why: "promotePath/2, both ids encodeURIComponent'd" },
+  { fn: "runCancel", verb: "POST", expr: "cancelPath(site.id, d.id)", route: "/v1/sites/:*/deployments/:*/cancel", why: "cancelPath/2, both ids encodeURIComponent'd (task-4187bcf6d0424cfc)" },
   { fn: "runSiteRollback", verb: "POST", expr: "siteRollbackPath(site.id)", route: "/v1/sites/:*/rollback", why: "siteRollbackPath/1" },
   // THE TRAP. A literal PREFIX with a variable last segment. A naive extractor
   // accepts it and mis-routes to "/v1/auth/device/" — a route that does not
@@ -1767,7 +1769,10 @@ if (unresolved.length) {
 // ruling (a), the same judgement as PATCH /v1/sites/:* and DELETE /v1/sites/:*.
 // So total 85 -> 88 and nothing else moves. RE-DERIVED by RUNNING this census
 // on this tree and reading the `found` line it PRINTED, never by arithmetic.
-const EXPECT = { total: 88, elevated: 50, predicated: 49, unpredicated: 1 };
+// task-4187bcf6d0424cfc: ONE MEMBER ROW ADDED, no tier moved — runCancel,
+// POST /v1/sites/:*/deployments/:*/cancel, gated like runPromote (ruling (a)).
+// total 88 -> 89 and nothing else moves.
+const EXPECT = { total: 89, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

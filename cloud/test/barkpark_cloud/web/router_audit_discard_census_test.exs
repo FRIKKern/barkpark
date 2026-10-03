@@ -88,7 +88,9 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   # cch-w59-bl raised this 15 -> 16: `audit_suspended_refusal/4`, the ONE writer
   # every suspended refusal in the plane goes through. It is `case`-gated like
   # the other fifteen, so both assertions below still hold at the new number.
-  @router_call_sites 16
+  # task-4187bcf6d0424cfc raised it 16 -> 17: `cancel_deployment/2`'s
+  # `deployment.cancelled` row, case-gated like the rest.
+  @router_call_sites 17
 
   defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
 

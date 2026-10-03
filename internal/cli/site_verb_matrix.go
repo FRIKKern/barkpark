@@ -179,6 +179,12 @@ func init() {
 			KindNote: "static flips a symlink, node flips the Caddy upstream — the kind difference is the SERVER's, not the CLI's.",
 		},
 		{
+			Verb: "cancel", Scope: siteVerbShared,
+			Impl:     runCloudSiteCancel,
+			Summary:  "cancel one deployment and free the build slot (`cancel <site> <deployment-id>`)",
+			KindNote: "a queued row, or a container row still building; a box-driven build answers in_flight because nothing here can stop it.",
+		},
+		{
 			Verb: "delete", Aliases: []string{"rm"}, Scope: siteVerbShared,
 			Impl:    runCloudSiteDelete,
 			Summary: "tear the site down",

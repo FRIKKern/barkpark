@@ -8544,6 +8544,58 @@ test("trapTarget cycles Tab/Shift+Tab at the list edges and snaps escaped focus 
 
 // ── promote grammar: URL builder, action ladder, confirm copy, failure map ──
 
+// ── operator cancel (task-4187bcf6d0424cfc) ───────────────────────────────────
+
+test("the operator-cancel helpers are exported", () => {
+  for (const name of ["cancelPath", "cancelActionFor", "cancelConfirmCopy", "cancelFailure"]) {
+    assert.equal(typeof hooks[name], "function", name + " must be exported");
+  }
+});
+
+test("cancelPath percent-encodes both ids into their path segments", () => {
+  assert.equal(hooks.cancelPath("s1", "d1"), "/v1/sites/s1/deployments/d1/cancel");
+  assert.equal(hooks.cancelPath("a/b", "c d"), "/v1/sites/a%2Fb/deployments/c%20d/cancel");
+});
+
+test("cancelActionFor: queued and building offer Cancel; pushing and every terminal row offer nothing", () => {
+  for (const st of ["queued", "building"]) {
+    assert.equal(hooks.cancelActionFor({ id: "x", status: st }).label, "Cancel", st);
+  }
+  for (const st of ["pushing", "live", "failed", "cancelled", "deferred"]) {
+    assert.equal(hooks.cancelActionFor({ id: "x", status: st }), null, st);
+  }
+  assert.equal(hooks.cancelActionFor(null), null);
+});
+
+test("deployRow renders the Cancel button on a queued row and not on a live one", () => {
+  const queued = hooks.deployRow({ id: "dq", status: "queued", environment: "production", git_ref: "a".repeat(40) }, null);
+  assert.match(queued, /class="btn btn-ghost btn-sm dep-cancel" data-dep-id="dq">Cancel<\/button>/);
+  const live = hooks.deployRow({ id: "dl", status: "live", environment: "production", git_ref: "b".repeat(40) }, "dl");
+  assert.doesNotMatch(live, /dep-cancel/);
+});
+
+test("cancelConfirmCopy names the freed slot and the way back", () => {
+  const c = hooks.cancelConfirmCopy("4e7d0c9");
+  assert.match(c.title, /Cancel deployment 4e7d0c9\?/);
+  assert.match(c.consequence, /frees the build slot/);
+  assert.match(c.consequence, /deploy again to rebuild/);
+  assert.equal(c.confirmLabel, "Cancel deployment");
+});
+
+test("cancelFailure relays in_flight, names a terminal row, and keeps ONE recovery", () => {
+  const inflight = hooks.cancelFailure(409, { error: "in_flight", detail: "this deployment is pushing on the box" });
+  assert.equal(inflight.message, "this deployment is pushing on the box");
+  assert.equal(inflight.recovery, "refresh");
+  // No detail from the server → still a real sentence, never empty.
+  assert.match(hooks.cancelFailure(409, { error: "in_flight" }).message, /can't be stopped from here/);
+  const terminal = hooks.cancelFailure(409, { error: "illegal_transition", status: "live" });
+  assert.match(terminal.message, /already finished/);
+  assert.equal(terminal.recovery, "refresh");
+  assert.equal(hooks.cancelFailure(404, { error: "not_found" }).recovery, "refresh");
+  assert.equal(hooks.cancelFailure(500, {}).recovery, "retry");
+  assert.equal(hooks.cancelFailure(0, null).recovery, "retry");
+});
+
 test("promotePath percent-encodes both ids into their path segments", () => {
   assert.equal(hooks.promotePath("s1", "d1"), "/v1/sites/s1/deployments/d1/promote");
   assert.equal(

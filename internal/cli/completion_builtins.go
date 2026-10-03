@@ -58,13 +58,13 @@ var builtinCompletionPaths = map[string][]string{
 	// top-level `bp sites` dispatch through. The plural spelling is a dispatcher
 	// alias, so it carries the identical verb list.
 	"cloud site": {
-		"build", "create", "delete", "deploy", "deployments", "deploys",
+		"build", "cancel", "create", "delete", "deploy", "deployments", "deploys",
 		"doctor", "domain", "domains", "env", "get", "github", "list", "log",
 		"logs", "ls", "matrix", "open", "preflight", "rm", "rollback",
 		"settings", "show", "status",
 	},
 	"cloud sites": {
-		"build", "create", "delete", "deploy", "deployments", "deploys",
+		"build", "cancel", "create", "delete", "deploy", "deployments", "deploys",
 		"doctor", "domain", "domains", "env", "get", "github", "list", "log",
 		"logs", "ls", "matrix", "open", "preflight", "rm", "rollback",
 		"settings", "show", "status",
