@@ -20,9 +20,24 @@ defmodule Barkpark.Search.PublicIndex do
 
   alias Barkpark.Repo
 
-  @stale_where """
-  d.public_search_vector IS DISTINCT FROM
+  # Static SQL only: `$1` is the optional type (NULL = every type).
+  @census_sql """
+  SELECT d.type, count(*)
+  FROM documents d
+  WHERE ($1::text IS NULL OR d.type = $1)
+    AND d.public_search_vector IS DISTINCT FROM
+      bp_public_search_vector(d.type, d.dataset, d.dataset_id, d.title, d.content)
+  GROUP BY d.type
+  ORDER BY d.type
+  """
+
+  @reindex_sql """
+  UPDATE documents d
+  SET public_search_vector =
     bp_public_search_vector(d.type, d.dataset, d.dataset_id, d.title, d.content)
+  WHERE ($1::text IS NULL OR d.type = $1)
+    AND d.public_search_vector IS DISTINCT FROM
+      bp_public_search_vector(d.type, d.dataset, d.dataset_id, d.title, d.content)
   """
 
   @doc """
@@ -31,15 +46,7 @@ defmodule Barkpark.Search.PublicIndex do
   """
   @spec census(keyword()) :: [%{type: String.t(), stale: non_neg_integer()}]
   def census(opts \\ []) do
-    {type_sql, params} = type_filter(opts)
-
-    %{rows: rows} =
-      Repo.query!(
-        "SELECT d.type, count(*) FROM documents d WHERE #{@stale_where} #{type_sql} GROUP BY d.type ORDER BY d.type",
-        params,
-        timeout: :infinity
-      )
-
+    %{rows: rows} = Repo.query!(@census_sql, [type_param(opts)], timeout: :infinity)
     Enum.map(rows, fn [type, n] -> %{type: type, stale: n} end)
   end
 
@@ -49,27 +56,14 @@ defmodule Barkpark.Search.PublicIndex do
   """
   @spec reindex(keyword()) :: non_neg_integer()
   def reindex(opts \\ []) do
-    {type_sql, params} = type_filter(opts)
-
-    %{num_rows: n} =
-      Repo.query!(
-        """
-        UPDATE documents d
-        SET public_search_vector =
-          bp_public_search_vector(d.type, d.dataset, d.dataset_id, d.title, d.content)
-        WHERE #{@stale_where} #{type_sql}
-        """,
-        params,
-        timeout: :infinity
-      )
-
+    %{num_rows: n} = Repo.query!(@reindex_sql, [type_param(opts)], timeout: :infinity)
     n
   end
 
-  defp type_filter(opts) do
+  defp type_param(opts) do
     case Keyword.get(opts, :type) do
-      t when is_binary(t) and t != "" -> {"AND d.type = $1", [t]}
-      _ -> {"", []}
+      t when is_binary(t) and t != "" -> t
+      _ -> nil
     end
   end
 end
