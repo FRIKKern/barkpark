@@ -11,7 +11,8 @@ defmodule BarkparkCloud.Web.RouterSiteUrlTest do
       matching endpoint PUT with the real `<site>/api/barkpark/webhook` + active:true;
       the admin token rode as the bearer and NEVER leaks into the response
     * idempotent re-PUT converges (200 again, same wiring)
-    * member-gated (any team member); cross-team / unknown / malformed id → SAME 404
+    * team-admin gated (owner ruling #25): a plain member → 403 `required: "admin"` and
+      NOTHING reaches the instance; cross-team / unknown / malformed id → SAME 404
     * unauth → 401; missing/blank url → 422; non-http url → 422 invalid_url
     * not-live → 409; missing admin token → 404; no bootstrap → 404;
       no revalidation webhook on the instance → 409 no_webhook; instance failure → 502
@@ -111,8 +112,27 @@ defmodule BarkparkCloud.Web.RouterSiteUrlTest do
   end
 
   describe "POST /v1/barkparks/:id/site-url" do
-    test "member wires the site → 200; instance LISTed then PUT with real URL + active; token never leaks" do
+    test "a plain MEMBER is refused 403 required admin, and NOTHING reaches the instance" do
       {user, team} = user_with_team("member")
+      bp = bootstrapped_barkpark(team)
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      # Programmed anyway: a regressed gate would wire the webhook and this test
+      # would fail on the request list, not on a missing stub.
+      StudioLinkFakeHttpClient.program([
+        list_response(),
+        {:ok, %{status: 200, body: ~s({"webhook":{"id":"#{@webhook_id}","active":true}})}}
+      ])
+
+      conn = call(:post, "/v1/barkparks/#{bp.id}/site-url", %{url: @site}, token)
+
+      assert conn.status == 403
+      assert json_body(conn) == %{"error" => "forbidden", "required" => "admin", "scope" => "team"}
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "admin wires the site → 200; instance LISTed then PUT with real URL + active; token never leaks" do
+      {user, team} = user_with_team("admin")
       bp = bootstrapped_barkpark(team)
       {:ok, token} = Accounts.create_user_session_token(user)
 
