@@ -563,4 +563,66 @@ defmodule Barkpark.Content.ValueWritebackTest do
                ValueWriteback.writeback("m-canon", "launch_delay", "x", "", @dataset, opts)
     end
   end
+
+  # A non-member admitted on access grants is a plain `:user` principal, and
+  # the target resolves through the grant-narrowed READ (the union of every
+  # grant). A write grant on ONE doc must not carry edit-through onto another
+  # doc the caller can merely read.
+  describe "grant-only caller: the target must sit inside a WRITE grant" do
+    setup %{ws_a: ws_a, proj_a: proj_a} do
+      user =
+        Barkpark.AccountsFixtures.register_user(
+          "vw-grantee-#{System.unique_integer([:positive])}@example.com"
+        )
+
+      Barkpark.AccessFixtures.bind_grant!(ws_a, user, %{project_id: proj_a.id})
+
+      Barkpark.AccessFixtures.bind_grant!(ws_a, user, %{
+        capabilities: ["read", "write"],
+        project_id: proj_a.id,
+        dataset: @dataset,
+        type: "metric",
+        doc_id: "p-in-scope"
+      })
+
+      {:ok, ctx: CallerContext.from_user(user.id), user: user}
+    end
+
+    test "a doc outside the write grant is refused, inspect and confirm", %{
+      ws_a: ws_a,
+      proj_a: proj_a,
+      canon: canon,
+      ctx: ctx,
+      user: user
+    } do
+      opts = scope(ws_a, proj_a, ctx, user.id)
+
+      assert {:error, :unauthorized} =
+               ValueWriteback.inspect_target("m-canon", "launch_delay", @dataset, opts)
+
+      assert {:error, :unauthorized} =
+               ValueWriteback.writeback(
+                 "m-canon",
+                 "launch_delay",
+                 "0 days",
+                 canon.rev,
+                 @dataset,
+                 opts
+               )
+
+      assert canon_content(ws_a, proj_a)["launch_delay"] == "14 days"
+    end
+
+    test "the doc the write grant names stays editable", %{
+      ws_a: ws_a,
+      proj_a: proj_a,
+      ctx: ctx,
+      user: user
+    } do
+      opts = scope(ws_a, proj_a, ctx, user.id)
+
+      assert {:ok, %{doc_id: "p-in-scope"}} =
+               ValueWriteback.inspect_target("p-in-scope", "launch_delay", @dataset, opts)
+    end
+  end
 end
