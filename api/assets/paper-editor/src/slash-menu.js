@@ -288,12 +288,38 @@ export class SlashMenu {
       this._items = this._allItems;
       return;
     }
-    this._items = this._allItems.filter((it) => {
+    const matched = this._allItems.filter((it) => {
       const hay = `${it.label || ""} ${it.type || ""} ${it.desc || ""} ${
         it.group || ""
       }`.toLowerCase();
       return hay.includes(q);
     });
+    // Rank what matched so the block the author NAMED comes first: "/section" +
+    // Enter inserted a Heading, because Heading's description ("h1 — section
+    // title") matched and Heading sits above Section. Label prefix, then label,
+    // then type, then description/group. Groups stay contiguous (a group moves up
+    // by its best row), and the original order breaks ties.
+    const rank = (it) => {
+      const label = (it.label || "").toLowerCase();
+      if (label.startsWith(q)) return 0;
+      if (label.includes(q)) return 1;
+      if ((it.type || "").toLowerCase().includes(q)) return 2;
+      return 3;
+    };
+    const groups = [];
+    const byGroup = new Map();
+    matched.forEach((it, index) => {
+      if (!byGroup.has(it.group)) {
+        byGroup.set(it.group, []);
+        groups.push(it.group);
+      }
+      byGroup.get(it.group).push({ it, index, rank: rank(it) });
+    });
+    const ordered = (rows) => rows.slice().sort((a, b) => a.rank - b.rank || a.index - b.index);
+    this._items = groups
+      .map((group, order) => ({ order, rows: ordered(byGroup.get(group)) }))
+      .sort((a, b) => a.rows[0].rank - b.rows[0].rank || a.order - b.order)
+      .flatMap(({ rows }) => rows.map((row) => row.it));
   }
 
   close() {
