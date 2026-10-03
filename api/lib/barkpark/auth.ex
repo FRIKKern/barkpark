@@ -1078,7 +1078,11 @@ defmodule Barkpark.Auth do
         dataset: dataset,
         permissions: permissions,
         workspace_id: ws_id,
-        expires_at: expires_at
+        expires_at: expires_at,
+        # `:owner_user_id` — the user this credential is FOR (an app token
+        # minted for a person), so `Accounts.Privacy.erase_subject/1` revokes
+        # it with the rest of their access. nil (absent) for machine tokens.
+        owner_user_id: Keyword.get(opts, :owner_user_id)
       }
 
       insert = fn ->
