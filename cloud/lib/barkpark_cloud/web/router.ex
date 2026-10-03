@@ -7669,7 +7669,9 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/invitations/accept {token} → 200 {team_id}. Authed but NOT
   # team-scoped (the user is not yet a member). The email-match guard ensures the
-  # logged-in user's email equals the invited email.
+  # logged-in user's email equals the invited email (403 email_mismatch), and the
+  # account must have proven that address (403 email_unconfirmed — confirmed, or
+  # verified by a linked identity provider).
   post "/v1/invitations/accept" do
     conn = Auth.require_user(conn, [])
 
@@ -7706,6 +7708,17 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, :email_mismatch} ->
           json(conn, 403, %{error: "email_mismatch"})
+
+        # The right account, but the address is not proven yet. The invitation
+        # stays live: confirm the address, then accept again.
+        {:error, :email_unconfirmed} ->
+          json(conn, 403, %{
+            error: "email_unconfirmed",
+            detail:
+              "Confirm your email address before joining the team. " <>
+                "POST /v1/auth/resend-verification sends a new confirmation link.",
+            resend: "/v1/auth/resend-verification"
+          })
 
         {:error, _} ->
           json(conn, 422, %{error: "accept_failed"})

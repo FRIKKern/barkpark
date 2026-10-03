@@ -50,7 +50,7 @@
 // a live regression. Both arms name the arrival AND the departure by call site.
 //
 // KEYING BY CALL SITE IS THE WHOLE POINT, and it is not a style preference.
-// The 89 write call sites collapse to 77 route keys; 11 of those keys are
+// The 90 write call sites collapse to 78 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
 //   submitProviderCred()        — reached from the launch wizard's
@@ -111,9 +111,9 @@
 //     submitToken (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
-//     path extractor cannot read 16 of the 89 — they build their path from a
+//     path extractor cannot read 16 of the 90 — they build their path from a
 //     variable or a helper — and a census that counted only what it read
-//     literally would call that 73-of-73 and go green over a hole. Two of those
+//     literally would call that 74-of-74 and go green over a hole. Two of those
 //     16 are the console's HIGHEST-privilege writes (fleetRolloutAction and
 //     operatorConfirmBrake, the operator autoupdate brake). Worse, one of them
 //     does not drop at all: submitActivateDecision builds
@@ -322,7 +322,7 @@ const LABEL = APP === path.join(here, "app.js") ? "cloud/priv/static/app.js" : A
 const src = fs.readFileSync(APP, "utf8");
 
 // ═══════════════════════════════════════════════════════════════════════════
-// THE PIN — 89 write call sites, keyed by `fn|VERB route`.
+// THE PIN — 90 write call sites, keyed by `fn|VERB route`.
 //
 // A PIN ROW CARRIES NO LINE NUMBER, and adding one back is a regression. Every
 // `app.js:NNNN` this census prints is DERIVED from the live file at run time
@@ -615,6 +615,7 @@ const PIN = [
   { fn: "disconnectSiteGithub", verb: "DELETE", route: "/v1/sites/:*/github", elevated: true, predicate: INSTANCE_BAND, fence: F_INST("loadSite", "siteDetailHtml"), auth_fn: A_TADMIN, context_fn: null, note: "cch-w48-s2: same door, same fence — disconnect is reached only from the connected arm of #site-github" },
 
   { fn: "submitInviteAccept", verb: "POST", route: "/v1/invitations/accept", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the invitation token is the authority" },
+  { fn: "sendInviteConfirmation", verb: "POST", route: "/v1/auth/resend-verification", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "task-0cf611238d4ad597 CQ6: re-sends the caller's OWN confirmation mail; any signed-in user may, and the route always answers 200" },
   { fn: "resumeStudioLogin", verb: "POST", route: "/v1/auth/studio-signin", elevated: false, predicate: null, auth_fn: A_USER, context_fn: null, note: "the instance-INITIATED Studio entry: the console holds no id and no team here, only the public host the deep link arrived with, so the row is resolved server-side by host (custom_host OR the url origin) and the grant is read against the RESOLVED row's team — never conn.assigns.current_team, which falls back to the caller's primary team when no team header is sent. No client predicate is possible or wanted: the console cannot know whether a host is registered, and probing to find out would make the button an existence oracle. Replaced a second POST /v1/barkparks/:*/studio-link call site that matched the fleet client-side and was therefore wrong for a non-selected team and dead on every custom host" },
 
   // ── launch + billing
@@ -1772,7 +1773,10 @@ if (unresolved.length) {
 // task-4187bcf6d0424cfc: ONE MEMBER ROW ADDED, no tier moved — runCancel,
 // POST /v1/sites/:*/deployments/:*/cancel, gated like runPromote (ruling (a)).
 // total 88 -> 89 and nothing else moves.
-const EXPECT = { total: 89, elevated: 50, predicated: 49, unpredicated: 1 };
+// task-0cf611238d4ad597 CQ6: ONE USER ROW ADDED, no tier moved —
+// sendInviteConfirmation, POST /v1/auth/resend-verification, the invite
+// landing's "confirm your email first" action. total 89 -> 90.
+const EXPECT = { total: 90, elevated: 50, predicated: 49, unpredicated: 1 };
 if (PIN.length !== EXPECT.total ||
     pinnedElevated.length !== EXPECT.elevated ||
     pinnedPredicated.length !== EXPECT.predicated ||

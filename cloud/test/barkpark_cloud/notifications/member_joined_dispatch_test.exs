@@ -82,7 +82,11 @@ defmodule BarkparkCloud.Notifications.MemberJoinedDispatchTest do
 
   # A real invitation, really accepted, through the public context functions.
   defp invite_and_accept(team, owner, role) do
-    invitee = user_fixture()
+    # Confirmed: accepting needs a proven address (task-0cf611238d4ad597 CQ6).
+    invitee =
+      user_fixture()
+      |> BarkparkCloud.Accounts.User.confirm_changeset()
+      |> BarkparkCloud.Repo.update!()
 
     {:ok, %{token: raw}} = Accounts.invite_member(team, invitee.email, role, owner)
     flush_emails()
