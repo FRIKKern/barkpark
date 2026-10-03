@@ -1678,12 +1678,23 @@
           echo.requestId !== entry.requestId && echo.rev !== confirmedRevision);
         if (externalRevisionPending) return;
         const fieldForm = (source) => source?.matches?.("form[data-paper-field-flush]") === true;
+        // The canvas runs and the per-block editors split the paper's top-level
+        // blocks between them, each block owned by exactly one surface, so one
+        // surface's save cannot overlap a draft in another either. Without this,
+        // typing in a canvas paragraph and then (before that save landed) in a
+        // table cell sent the cell on the base the page's own canvas save had
+        // just superseded; the server refused it as a conflict, "Save failed"
+        // stayed up and the cell edit was never stored (dogfood 2026-10-03).
+        const blockSurface = (source) => source?.matches?.(
+          '[phx-hook="BarkparkPaperCanvas"], [phx-hook="BarkparkPaperEditor"]',
+        ) === true;
         for (const [source, record] of sources) {
           if (source === entry.source || !record.dirty ||
               record.documentKey !== entry.documentKey ||
               record.authoredRev !== entry.ifRev ||
               source.matches?.(".bp-paper-edit-form[phx-change]") ||
-              (!fieldForm(entry.source) && !fieldForm(source))) continue;
+              (!fieldForm(entry.source) && !fieldForm(source) &&
+                !(blockSurface(entry.source) && blockSurface(source)))) continue;
           record.authoredRev = confirmedRevision;
         }
       };
