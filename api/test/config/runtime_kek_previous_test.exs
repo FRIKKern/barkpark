@@ -16,16 +16,15 @@ defmodule Barkpark.Config.RuntimeKekPreviousTest do
   # boot.
   #
   # runtime.exs therefore AUDITS every set entry (base64 of exactly 32 raw
-  # bytes, the primary BARKPARK_KEK's own contract): one Logger.warning naming
-  # the 1-based positions, plus a machine-readable verdict under
-  # `Barkpark.Crypto.LocalKek`'s `:kek_previous_audit` that `Barkpark.Status`
+  # bytes, the primary BARKPARK_KEK's own contract) and REFUSES THE BOOT on a
+  # malformed one, naming the 1-based positions and never the entry
+  # (task-ef0c59e4fd3fc985). A clean verdict is recorded under
+  # `Barkpark.Crypto.LocalKek`'s `:kek_previous_audit`, which `Barkpark.Status`
   # republishes on /status.json.
   #
-  # It does NOT refuse the boot. Refusal was built (this branch's history, commit
-  # cb3bb6d58) and deliberately deferred to task-ef0c59e4fd3fc985: api/**
-  # auto-deploys on merge and a refusal would brick a prod boot on a live
-  # BARKPARK_KEK_PREVIOUS value nobody could read first. These tests pin the
-  # warn-and-surface behaviour AND pin that a malformed entry still boots.
+  # No-primary boundary, DECIDED: with no BARKPARK_KEK set nothing consumes the
+  # previous keys, so a malformed BARKPARK_KEK_PREVIOUS is deliberately IGNORED
+  # (checked: false) and does not refuse. Pinned below.
 
   @good Base.encode64(String.duplicate("k", 32))
   @older Base.encode64(String.duplicate("j", 32))
@@ -117,48 +116,54 @@ defmodule Barkpark.Config.RuntimeKekPreviousTest do
     assert read_previous_keys("  #{@good}  ") == [@good]
   end
 
-  # --- The defect: a malformed entry must not boot SILENT ------------------
+  # --- The defect: a malformed entry must REFUSE the boot ------------------
 
-  test "a non-base64 entry still boots, but warns and is recorded as discarded" do
-    {audit, log} = audit_and_log("not-base64!!")
+  defp refusal(value, env \\ :prod) do
+    System.put_env("BARKPARK_KEK_PREVIOUS", value)
 
-    assert audit == %{checked: true, discarded: 1, positions: [1]}
-    assert log =~ "[warning]"
-    assert log =~ "BARKPARK_KEK_PREVIOUS"
-    assert log =~ "position 1"
-    # D-style refusal is DEFERRED (task-ef0c59e4fd3fc985): the boot completes
-    # and the entry is still handed to LocalKek, which is today's behaviour.
-    assert do_read() == ["not-base64!!"]
+    error = assert_raise(RuntimeError, fn -> read_kek_config(env) end)
+    error.message
   end
 
-  test "a base64 entry of the wrong length is recorded as discarded" do
+  test "a non-base64 entry refuses the boot and names its position" do
+    msg = refusal("not-base64!!")
+
+    assert msg =~ "BARKPARK_KEK_PREVIOUS"
+    assert msg =~ "position 1"
+    assert msg =~ "32 raw bytes"
+  end
+
+  test "the refusal holds in every env, not just prod" do
+    for env <- [:dev, :test] do
+      assert refusal("typo", env) =~ "position 1"
+    end
+  end
+
+  test "a base64 entry of the wrong length refuses the boot" do
     short = Base.encode64(String.duplicate("k", 31))
     long = Base.encode64(String.duplicate("k", 33))
 
-    assert {%{checked: true, discarded: 1, positions: [1]}, _} = audit_and_log(short)
-    assert {%{checked: true, discarded: 1, positions: [1]}, _} = audit_and_log(long)
+    assert refusal(short) =~ "position 1"
+    assert refusal(long) =~ "position 1"
   end
 
   test "the positions name the offending entries, not the first one" do
-    {audit, log} = audit_and_log("#{@good},#{@older},typo")
+    msg = refusal("#{@good},#{@older},typo")
 
-    assert audit == %{checked: true, discarded: 1, positions: [3]}
-    assert log =~ "position 3"
-    refute log =~ "position 1"
+    assert msg =~ "position 3"
+    refute msg =~ "position 1"
   end
 
   test "several malformed entries are all counted and all named" do
-    {audit, log} = audit_and_log("typo,#{@good},also-typo")
+    msg = refusal("typo,#{@good},also-typo")
 
-    assert audit == %{checked: true, discarded: 2, positions: [1, 3]}
-    assert log =~ "2 entries"
-    assert log =~ "positions 1, 3"
+    assert msg =~ "2 entries"
+    assert msg =~ "positions 1, 3"
   end
 
-  test "the warning does not leak the key material" do
+  test "the refusal does not leak the key material" do
     secret = Base.encode64(String.duplicate("k", 31))
-    {_audit, log} = audit_and_log(secret)
-    refute log =~ secret
+    refute refusal(secret) =~ secret
   end
 
   # --- CONTROLS on the audit itself: clean must be DISTINCT from unchecked ---
@@ -181,7 +186,9 @@ defmodule Barkpark.Config.RuntimeKekPreviousTest do
     {audit, log} = audit_and_log("typo,also-typo", :dev)
 
     # SCOPE DECISION, pinned: with no primary KEK, runtime.exs configures no
-    # previous_keys at all, so nothing is consumed and nothing is discarded.
+    # previous_keys at all, so nothing is consumed and nothing is discarded —
+    # the malformed entries are deliberately IGNORED and the boot is NOT refused
+    # (reaching the assertions below proves no raise).
     # That is recorded as checked: false — distinguishable from "checked and
     # clean", so a reader can never confuse the two.
     assert audit == %{checked: false, discarded: 0, positions: []}
