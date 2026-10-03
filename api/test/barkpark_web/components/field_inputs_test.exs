@@ -646,6 +646,8 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       assert html =~ ~s(<input)
       assert html =~ ~s(type="datetime-local")
+      # Owner ruling #46: the named control is the hidden UTC-instant input.
+      assert html =~ ~s(type="hidden")
       assert html =~ ~s(name="doc[publishedAt]")
       assert html =~ ~s(class="form-input")
     end
