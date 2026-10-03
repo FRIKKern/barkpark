@@ -65,7 +65,6 @@ defmodule Barkpark.Content.DeletedPayloadRetention do
   import Ecto.Query
 
   alias Barkpark.Content.{Document, MutationEvent}
-  alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Repo
   alias Barkpark.Webhooks.Delivery
 
@@ -292,8 +291,14 @@ defmodule Barkpark.Content.DeletedPayloadRetention do
     live =
       if file_ids == [],
         do: MapSet.new(),
+        # Schemaless on purpose: content is a kernel concept and must not
+        # depend on the media feature's schema module (boundary gate); this
+        # asks only whether the row still exists.
         else:
-          from(m in MediaFile, where: m.id in ^file_ids, select: m.id)
+          from(m in "media_files",
+            where: m.id in type(^file_ids, {:array, Ecto.UUID}),
+            select: type(m.id, Ecto.UUID)
+          )
           |> Repo.all()
           |> MapSet.new()
 
