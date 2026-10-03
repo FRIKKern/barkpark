@@ -139,12 +139,14 @@ defmodule BarkparkWeb.SecretController do
 
   HOW TO WALK THE WHOLE TRAIL, stated here because the refusal above depends on
   it and a justification that cites an undocumented convention is not a
-  justification: this response carries no total and no continuation token, so a
-  caller reads the trail by paging forward — `?offset=` advanced by `?limit=`
-  each time — UNTIL A PAGE COMES BACK EMPTY. That empty page is the only
-  termination signal there is. It is why an over-large `offset` refuses instead
-  of clamping: a clamp would answer every offset at or above the ceiling with
-  the SAME non-empty page, the empty page would never arrive, and a caller
+  justification: the response carries `has_more` (task-de4df581f611d49a) —
+  `true` when at least one row exists past this page, decided by fetching ONE
+  extra row, never a COUNT — and the order is total (`inserted_at`, then `id`).
+  A caller pages forward, `?offset=` advanced by `?limit=`, WHILE `has_more` is
+  true; an empty page also terminates. There is no total and no cursor token:
+  the offset IS the continuation. An over-large `offset` refuses instead of
+  clamping because a clamp would answer every offset at or above the ceiling
+  with the SAME non-empty page (and the same `has_more: true`), so a caller
   walking to exhaustion would loop on one window while believing it had read
   everything. (The failure needs a trail longer than #{@max_audit_offset} rows
   for one name in one tier; a shorter trail returns an empty page at the
@@ -166,17 +168,27 @@ defmodule BarkparkWeb.SecretController do
   def audit(conn, %{"name" => name} = params) do
     with {:ok, scope} <- resolve_scope(conn),
          {:ok, {limit, offset}} <- page(params) do
-      rows =
+      # ONE row past the page decides `has_more` (the history read's technique,
+      # never a second COUNT), and the order is TOTAL — `id` breaks an
+      # `inserted_at` tie — so a page boundary can neither skip nor repeat a row.
+      fetched =
         SecretAudit
         |> where([a], a.name == ^name)
         |> scope_audit(scope)
-        |> order_by([a], desc: a.inserted_at)
-        |> limit(^limit)
+        |> order_by([a], desc: a.inserted_at, desc: a.id)
+        |> limit(^(limit + 1))
         |> offset(^offset)
         |> Repo.all()
-        |> Enum.map(&audit_view/1)
 
-      json(conn, %{name: name, audit: rows, limit: limit, offset: offset})
+      rows = fetched |> Enum.take(limit) |> Enum.map(&audit_view/1)
+
+      json(conn, %{
+        name: name,
+        audit: rows,
+        limit: limit,
+        offset: offset,
+        has_more: length(fetched) > limit
+      })
     else
       # REUSES the already-registered `malformed` code (400) rather than minting
       # a token: growing `Errors.known_codes/0` grows the served OpenAPI

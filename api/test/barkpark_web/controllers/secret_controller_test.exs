@@ -209,6 +209,39 @@ defmodule BarkparkWeb.SecretControllerTest do
       assert payload["limit"] == 2
       assert length(payload["audit"]) == 2
     end
+
+    # task-de4df581f611d49a: the page SAYS whether there is more, and walking it
+    # by `has_more` reads every row exactly once (the order is total).
+    test "has_more signals a truncated page and the walk reads every row once", %{conn: conn} do
+      body = Jason.encode!(%{value: "more-4444"})
+      # set + 4 reveals = 5 rows; pages of 2 -> 2, 2, 1
+      assert conn |> admin_conn() |> put("/v1/secrets/more_key", body) |> Map.get(:status) == 200
+      for _ <- 1..4, do: conn |> admin_conn() |> get("/v1/secrets/more_key")
+
+      page = fn offset ->
+        conn
+        |> admin_conn()
+        |> get("/v1/secrets/more_key/audit?limit=2&offset=#{offset}")
+        |> Map.fetch!(:resp_body)
+        |> Jason.decode!()
+      end
+
+      p0 = page.(0)
+      p2 = page.(2)
+      p4 = page.(4)
+
+      assert {p0["has_more"], p2["has_more"], p4["has_more"]} == {true, true, false}
+      assert Enum.map([p0, p2, p4], &length(&1["audit"])) == [2, 2, 1]
+
+      # exactly-full last page: has_more is false, not a false positive
+      assert page.(3)["has_more"] == false
+      assert length(page.(3)["audit"]) == 2
+
+      seen = Enum.flat_map([p0, p2, p4], & &1["audit"])
+      assert length(seen) == 5
+      assert Enum.frequencies(Enum.map(seen, & &1["action"])) == %{"set" => 1, "reveal" => 4}
+      assert page.(5)["audit"] == [] and page.(5)["has_more"] == false
+    end
   end
 
   # ── the offset ceiling (task-2fd4f84fb06c96bf) ─────────────────────────────
