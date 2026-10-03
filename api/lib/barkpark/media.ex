@@ -1305,10 +1305,23 @@ defmodule Barkpark.Media do
   defp maybe_put_scope_attr(attrs, key, value), do: Map.put(attrs, key, value)
 
   defp unique_filename(original_name) do
-    ext = Path.extname(original_name)
+    ext = safe_extname(original_name)
     base = Path.basename(original_name, ext)
     slug = base |> String.downcase() |> String.replace(~r/[^a-z0-9-]/, "-") |> String.trim("-")
     random = :crypto.strong_rand_bytes(4) |> Base.encode16(case: :lower)
     "#{slug}-#{random}#{ext}"
+  end
+
+  # The client's extension, kept only when it is `.` + 1–16 ASCII letters/digits
+  # (task-ce1105b1b95d421d). It used to ride verbatim: quotes, spaces, `?`, `#`, `%`,
+  # CR/LF and bidi overrides (U+202E) reached `media_files.path` and the public
+  # `/media/files/<path>` URL — breaking `@blob_segment` (so `put_blob/2` could
+  # never push the blob), truncating the handed-out URL at `?`/`#`, and letting
+  # a name render reversed. Anything else is DROPPED: the sniffed MIME, not the
+  # extension, types the blob. New uploads only — existing stored paths are
+  # untouched and keep resolving.
+  defp safe_extname(original_name) do
+    ext = Path.extname(original_name)
+    if ext =~ ~r/\A\.[A-Za-z0-9]{1,16}\z/, do: ext, else: ""
   end
 end
