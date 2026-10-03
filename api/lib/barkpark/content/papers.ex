@@ -1675,15 +1675,34 @@ defmodule Barkpark.Content.Papers do
   # for the doc's schema, fold the row `title` into the content map under
   # "title" (so a bound title block picks it up — `title` lives on the row, not
   # under content), and delegate to the pure Synthesis module.
+  #
+  # The schema is resolved in the DOCUMENT's own scope (task-8a0056c52a002633):
+  # its project, then its workspace, then the shared global layer, never another
+  # workspace. An unscoped read resolves the dataset to the Default workspace's,
+  # so a tenant's document was rebuilt from Default's layout and fields, and the
+  # first block op saved that shape.
   defp synthesize_blocks(%Document{} = doc, type, dataset) do
     {layout, fields} =
-      case Content.get_schema(type, dataset) do
+      case doc_scoped_schema(doc, type, dataset) do
         {:ok, schema} -> {Content.resolve_expectation(schema).layout, schema.fields || []}
         _ -> {SchemaDefinition.default_layout(%{}), []}
       end
 
     content_with_title = Map.put(doc.content || %{}, "title", doc.title)
     Synthesis.synthesize(layout, content_with_title, fields)
+  end
+
+  defp doc_scoped_schema(%Document{workspace_id: ws, project_id: proj}, type, dataset) do
+    case Enum.reject([workspace_id: ws, project_id: proj], fn {_k, v} -> is_nil(v) end) do
+      [] ->
+        Content.get_schema(type, dataset)
+
+      scope ->
+        case Content.resolve_schema(type, dataset, scope) do
+          {:ok, schema} -> {:ok, schema}
+          :error -> {:error, :not_found}
+        end
+    end
   end
 
   # ── EX1 — Expectation-aware slash menu (barkpark-q39y) ────────────────────
