@@ -89,7 +89,10 @@ defmodule BarkparkWeb.Studio.MediaLive do
   @impl true
   def handle_event("publish_scope_media", _params, socket) do
     cond do
-      not socket.assigns[:shares_admin?] ->
+      # Asked LIVE, not read from the mount-time `shares_admin?` assign: a
+      # scope admin demoted after mount kept the power to publish this scope's
+      # media anonymously until the socket reconnected (task-a0d8bdd7b5a518cc).
+      not BarkparkWeb.Studio.Caps.admin?(socket) ->
         {:noreply,
          put_flash(socket, :error, "Admin access required to publish this scope's media.")}
 
