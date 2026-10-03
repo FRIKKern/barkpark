@@ -243,19 +243,19 @@ echo "── §5 the edit re-fires the gate; the id has one home ─────
 # it can run against a MUTANT of the workflow and be seen to red.
 
 # 1. The edit prefers the dedicated token, and falls back to GITHUB_TOKEN.
-# shellcheck disable=SC2016,SC2329  # literal ${{ }} patterns; called via "$check"
+# shellcheck disable=SC2016,SC2317,SC2329  # literal ${{ }} patterns; called via "$check"
 wf_token_preferred() {
   grep -qF 'GH_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN || secrets.GITHUB_TOKEN }}' "$1"
 }
 # 2. On the fallback it says so, as a ::warning naming the cure.
-# shellcheck disable=SC2016,SC2329  # literal ${{ }} / $VAR patterns; called via "$check"
+# shellcheck disable=SC2016,SC2317,SC2329  # literal ${{ }} / $VAR patterns; called via "$check"
 wf_fallback_warns() {
   grep -qF 'HAS_TRAILER_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN != '"''"' }}' "$1" \
     && grep -qF 'if [ "$HAS_TRAILER_TOKEN" != "true" ]; then' "$1" \
     && grep -E '::warning title=' "$1" | grep -qF 'DEPENDABOT_TRAILER_TOKEN'
 }
 # 3. No task id on any executable (non-comment) line: the injector is its home.
-# shellcheck disable=SC2329  # called via "$check"
+# shellcheck disable=SC2317,SC2329  # called via "$check"
 wf_no_restated_id() {
   ! grep -vE '^[[:space:]]*#' "$1" | grep -qE 'task-[0-9a-f]{16}'
 }
