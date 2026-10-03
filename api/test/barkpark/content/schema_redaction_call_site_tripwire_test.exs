@@ -130,10 +130,12 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/controllers/query_controller.ex:fetch_schema",
                               "barkpark_web/controllers/legacy_controller.ex:fetch_schema",
                               # the fourteen that had no fallback at all
-                              # reader_source/3's body (task-f967486732a5a366
-                              # moved it verbatim; reader_source/3 and
-                              # reader_html/3 both call it)
-                              "barkpark/content/papers.ex:classify_reader_source",
+                              # the anonymous reader's schema: reader_source/3's
+                              # body (task-f967486732a5a366) resolves the paper
+                              # schema here, and the reader's side cards reuse it
+                              # or resolve the task schema here too
+                              # (task-e5c77251c2de9c81)
+                              "barkpark/content/papers.ex:reader_schema",
                               "barkpark_web/live/sheets_reader_live.ex:seal",
                               "barkpark/media/delivery/asset_response.ex:asset_schema",
                               "barkpark_web/controllers/share_link_controller.ex:serve",

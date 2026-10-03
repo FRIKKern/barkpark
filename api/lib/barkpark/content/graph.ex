@@ -202,7 +202,7 @@ defmodule Barkpark.Content.Graph do
 
   alias Barkpark.Repo
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, DraftId, Edge, Scope}
+  alias Barkpark.Content.{CallerContext, Document, DraftId, Edge, Envelope, Scope}
 
   # The INVERTED plugin edge-extractor seam. The kernel (`content`) must hold no
   # compile-time reference to a feature concept, and `Barkpark.Plugins.Registry`
@@ -1333,6 +1333,16 @@ defmodule Barkpark.Content.Graph do
   Resolves the slug to its `documents.id`, then reads `list_inbound_edges/2` and
   hydrates each referencing source with `via_field` (the `kind`) for the modal.
   Returns `[]` for an unresolvable id (nothing references a non-existent doc).
+
+  ## The public reader's card fields (task-e5c77251c2de9c81)
+
+  Under `published_only: true` (the anonymous `/papers/:slug` reader, its only
+  caller) `description` and `event_type` are read off the source rendered by
+  `Envelope.render/3` as the ANONYMOUS caller, under the schema
+  `opts[:card_schemas]` maps the source's type to. A type with no entry in that
+  map gets `nil` for both: the walk resolves no schema of its own (the reader's
+  statement budget), so a type it was not handed a schema for fails CLOSED.
+  Every other caller is unchanged and reads the raw content.
   """
   @spec reverse_referencers(binary(), keyword()) :: [map()]
   # @canonical capability:doc-backlinks aka:backlinks,references,referenced_by,who_references
@@ -1346,6 +1356,7 @@ defmodule Barkpark.Content.Graph do
 
         from_ids = Enum.map(inbound, & &1.from_id)
         docs_by_id = docs_by_id(from_ids, opts)
+        card_fields = referencer_card_fields(opts)
 
         # Fail-closed hydration (MEDIUM-5): a source that did NOT hydrate under
         # the caller's scope — owner_scoped + owned by another user (now dropped
@@ -1362,13 +1373,15 @@ defmodule Barkpark.Content.Graph do
               []
 
             src ->
+              fields = card_fields.(src)
+
               [
                 %{
                   from_id: e.from_id,
                   from_doc_id: src.doc_id,
                   title: src.title || e.from_id,
-                  description: Map.get(src.content || %{}, "description"),
-                  event_type: Map.get(src.content || %{}, "event_type"),
+                  description: Map.get(fields, "description"),
+                  event_type: Map.get(fields, "event_type"),
                   rev: src.rev,
                   updated_at: src.updated_at,
                   type: src.type,
@@ -1379,6 +1392,25 @@ defmodule Barkpark.Content.Graph do
               ]
           end
         end)
+    end
+  end
+
+  # The map `reverse_referencers/2` reads a source's card fields from. See its
+  # @doc: the public reader (`published_only: true`) gets the anonymous Envelope
+  # render under the handed schema, or nothing for a type it holds no schema
+  # for; every other caller keeps the raw content.
+  defp referencer_card_fields(opts) do
+    if Keyword.get(opts, :published_only) == true do
+      schemas = Keyword.get(opts, :card_schemas, %{})
+
+      fn src ->
+        case Map.fetch(schemas, src.type) do
+          {:ok, schema} -> Envelope.render(src, schema, CallerContext.anonymous())
+          :error -> %{}
+        end
+      end
+    else
+      fn src -> src.content || %{} end
     end
   end
 
