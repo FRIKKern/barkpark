@@ -505,15 +505,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
               new_title
             )
 
+          # The cross-field rules read the WHOLE form, not just the posted
+          # params: a grouped editor posts only the visible group, so a rule
+          # over a field on another group read it as absent (a new open task
+          # was warned "A finished task should record an outcome summary").
+          form = Map.merge(socket.assigns[:editor_form] || %{}, params)
+
           assign(socket,
             panes: panes,
             editor_doc: saved_doc,
             editor_is_draft: Content.draft?(saved_doc.doc_id),
-            editor_form: Map.merge(socket.assigns[:editor_form] || %{}, params),
+            editor_form: form,
             save_status: "Saved",
             validation_errors: findings.errors,
             validation_warnings: findings.warnings,
-            cross_violations: compute_cross_violations(schema, params)
+            cross_violations: compute_cross_violations(schema, form)
           )
           |> maybe_refresh_content_preview()
 
