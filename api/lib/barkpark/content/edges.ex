@@ -420,8 +420,9 @@ defmodule Barkpark.Content.Edges do
       nil ->
         []
 
-      %SchemaDefinition{fields: fields} ->
+      %SchemaDefinition{fields: fields} = schema ->
         fields
+        |> readable_fields(schema, Keyword.fetch(opts, :visible_to))
         |> Enum.flat_map(fn field -> extract_field_edges(field, content) end)
         |> Enum.map(fn {raw_target, field_name, ref_type} ->
           to_id = DraftId.published_id(raw_target)
@@ -511,6 +512,22 @@ defmodule Barkpark.Content.Edges do
   # typed arm and the type-agnostic arm return the same visibility.
   defp dangling_ref_type(field) do
     if field["refTypeTolerant"] == true, do: nil, else: field["refType"]
+  end
+
+  # `:visible_to` — a `%CallerContext{}` — narrows the walk to the reference
+  # fields that caller may READ (task-855e091e60d5c008). An edge's `kind` IS the source
+  # field's name and its target IS the field's value, so an edge over a field
+  # declared `private` / `owner_only` / `readable_by` told a public-read
+  # `/v1/graph` caller (and the anonymous `/finder`) what `/v1/data/doc` redacts
+  # from the same document. Same predicate as the filter/order gate
+  # (`Envelope.field_readable?/3`). ABSENT ⇒ every field: the EdgeProjector
+  # stores the full graph for internal reads and passes no caller.
+  defp readable_fields(fields, _schema, :error), do: fields
+
+  defp readable_fields(fields, schema, {:ok, ctx}) do
+    Enum.filter(fields, fn field ->
+      Barkpark.Content.Envelope.field_readable?(schema, field["name"] || "", ctx)
+    end)
   end
 
   # Scalar reference field → at most one {raw_target, field_name, ref_type}.
