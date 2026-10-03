@@ -395,7 +395,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
       true ->
         case fetch_job_doc(args, id, type, scope) do
           {:ok, doc} ->
-            upsert_doc(scope, id, doc, args)
+            upsert_doc(scope, id, public_only(doc, indexed_schema(scope, args, type)), args)
 
           {:error, :not_found} ->
             Logger.info(
@@ -564,14 +564,8 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   end
 
   defp indexed_types(scope, args) do
-    list_opts =
-      []
-      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
-      |> maybe_put(:project_id, Map.get(args, "project_id"))
-
     scope
-    |> content_mod(args).list_schemas(list_opts)
-    |> Enum.filter(&schema_public?/1)
+    |> public_schemas(args)
     |> Enum.map(&schema_name/1)
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.uniq()
@@ -585,6 +579,60 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         _ -> []
       end
   end
+
+  defp public_schemas(scope, args) do
+    list_opts =
+      []
+      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:project_id, Map.get(args, "project_id"))
+
+    scope
+    |> content_mod(args).list_schemas(list_opts)
+    |> Enum.filter(&schema_public?/1)
+  end
+
+  # name => schema for the public types, so each indexed document can be cut
+  # down to the fields an anonymous reader may see (owner ruling #20). On any
+  # failure the map is empty and every document indexes as `:unknown`.
+  defp indexed_schemas(scope, args) do
+    scope
+    |> public_schemas(args)
+    |> Enum.reduce(%{}, fn s, acc ->
+      case schema_name(s) do
+        n when is_binary(n) and n != "" -> Map.put_new(acc, n, s)
+        _ -> acc
+      end
+    end)
+  rescue
+    _ -> %{}
+  end
+
+  defp indexed_schema(scope, args, type),
+    do: Map.get(indexed_schemas(scope, args), type, :unknown)
+
+  # Owner ruling #20 (task-3c68de39a19285c4): the Indx corpus holds public
+  # fields only. Indx is the anonymous search engine (`engine=indx`), and its
+  # `body` field folds in every content string, so a private field's words
+  # used to match there exactly as they did in Postgres' full vector. The
+  # content is cut down by the same `Envelope.redact/4` an anonymous read gets.
+  # A type whose schema could not be resolved indexes its title only (fail
+  # closed) — the next successful rebuild restores its body.
+  defp public_only(%{content: content} = doc, :unknown) when is_map(content),
+    do: %{doc | content: %{}}
+
+  defp public_only(%{content: content} = doc, schema) when is_map(content) do
+    redacted =
+      Barkpark.Content.Envelope.redact(
+        content,
+        schema,
+        Barkpark.Content.CallerContext.anonymous(),
+        Map.get(doc, :owner_id)
+      )
+
+    %{doc | content: redacted}
+  end
+
+  defp public_only(doc, _schema), do: doc
 
   # A schema is public ONLY when it EXPLICITLY declares `visibility: "public"`
   # — ALLOWLIST, not denylist (search-template W10 / D62): unified with the
@@ -626,11 +674,13 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
     indexer = indexer_mod(args)
     content = content_mod(args)
 
+    schemas = indexed_schemas(scope, args)
+
     docs =
       Enum.flat_map(types, fn type ->
         listed = content.list_documents(type, scope, list_opts)
         warn_if_truncated(scope, type, listed, limit)
-        listed
+        Enum.map(listed, &public_only(&1, Map.get(schemas, type, :unknown)))
       end)
 
     case indexer.rebuild(index_key, docs) do

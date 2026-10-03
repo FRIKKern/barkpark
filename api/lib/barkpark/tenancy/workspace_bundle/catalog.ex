@@ -423,18 +423,29 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   @doc """
   The non-generated columns of a table, in ordinal order (charter D3).
 
-  Excludes `GENERATED ALWAYS` columns (today only `documents.search_vector`),
-  which Postgres re-generates on import. A `COPY (SELECT *)` would emit the
-  generated column and the re-import would fail "extra data after last expected
-  column"; a column-list COPY lets Postgres regenerate it.
+  Excludes `GENERATED ALWAYS` columns (today `documents.search_vector` and the
+  facet scalars), which Postgres re-generates on import. A `COPY (SELECT *)`
+  would emit the generated column and the re-import would fail "extra data
+  after last expected column"; a column-list COPY lets Postgres regenerate it.
+
+  Also excludes the trigger-derived columns in `@trigger_derived` —
+  `documents.public_search_vector` is recomputed by its BEFORE trigger on every
+  imported row (and by the schema trigger once the type's schema lands), so its
+  exported value is never the value the import ends with.
   """
+  @trigger_derived %{"documents" => ["public_search_vector"]}
+
   def non_generated_columns(repo, table) do
-    query_col(repo, """
+    derived = Map.get(@trigger_derived, table, [])
+
+    repo
+    |> query_col("""
     SELECT column_name FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = '#{sql_ident(table)}'
       AND is_generated <> 'ALWAYS'
     ORDER BY ordinal_position
     """)
+    |> Enum.reject(&(&1 in derived))
   end
 
   @doc """
