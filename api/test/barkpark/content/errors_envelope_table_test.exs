@@ -65,6 +65,11 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"replay", {:error, :replay}, "unauthorized", 401, [:reason]},
       {"forbidden", {:error, :forbidden}, "forbidden", 403, []},
       {"forbidden_membership", {:error, :forbidden_membership}, "forbidden", 403, [:reason]},
+      # The same membership refusal for an API TOKEN (task-7d4d405e0ee4bcbf):
+      # byte-identical code/status/reason, with the workspace named in the
+      # message and a hint on how to get a seated token.
+      {"token_not_a_member", {:error, {:token_not_a_member, "acme"}}, "forbidden", 403,
+       [:reason]},
       # The membership arm SIBLING (task-d63f91a7f817b4a3): same `forbidden`
       # code and same 403 - deliberately, so no client keying on either moves -
       # with `reason` the only discriminator between "you hold no seat here" and

@@ -404,6 +404,32 @@ defmodule Barkpark.Tenancy.Members do
 
   def token_member?(_, _), do: false
 
+  @doc """
+  Every workspace seat `token_id` holds, as `%{workspace_id, workspace_slug,
+  role}` maps ordered by slug — the answer to "where can this token go?"
+  (`GET /v1/tokens/current`, `bp whoami -o json`). A token reads only its own
+  seats through that route, so nothing here crosses tenants.
+  """
+  @spec token_memberships(binary()) :: [map()]
+  def token_memberships(token_id) when is_binary(token_id) do
+    case Repo.uuid_or_nil(token_id) do
+      nil ->
+        []
+
+      uuid ->
+        Repo.all(
+          from m in Membership,
+            join: w in Barkpark.Tenancy.Workspace,
+            on: w.id == m.workspace_id,
+            where: m.principal_type == "api_token" and m.principal_id == ^uuid,
+            order_by: w.slug,
+            select: %{workspace_id: m.workspace_id, workspace_slug: w.slug, role: m.role}
+        )
+    end
+  end
+
+  def token_memberships(_), do: []
+
   # ── internals ──────────────────────────────────────────────────────────────
 
   defp delete_membership(%Membership{} = membership) do

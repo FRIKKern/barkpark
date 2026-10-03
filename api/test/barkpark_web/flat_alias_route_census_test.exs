@@ -608,6 +608,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # TokenIdentityController.show (task-7d4d405e0ee4bcbf)
+    {"GET", "/v1/tokens/current"} =>
+      {:workspace_derived,
+       "the row's own binding: reads ONLY the bearer's own api_tokens row (conn.assigns.api_token) " <>
+         "and that token's own workspace_memberships rows; no id, slug or workspace comes from " <>
+         "the request, so no other tenant's row is reachable."},
     # TasksController.graph_show
     {"GET", "/v1/graph/:id"} =>
       {:workspace_derived,
