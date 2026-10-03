@@ -39,6 +39,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   alias Barkpark.PortableDoc.Render
   alias Barkpark.StudioChat
   alias Barkpark.StudioChat.AgentTaskJoin
+  alias Barkpark.StudioChat.ManagedSessionTarget
   alias Barkpark.StudioChat.Attachments
   alias Barkpark.StudioChat.ContextIdentity
   alias Barkpark.StudioChat.PlanPapers
@@ -259,6 +260,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
          # CLOSED, a manual toggle wins. Never broadcast, reset on session load
          # (rail_expanded precedent).
          agent_detail_expanded: %{},
+         agent_session_targets: %{},
          mode: List.first(Runtime.capabilities(enabled_provider).modes) || "default",
          provider: enabled_provider,
          execution_target: "managed",
@@ -964,8 +966,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # node's agentId, default CLOSED, a manual toggle is the per-tab override that
   # wins. Never broadcast (a co-viewer's collapse is their own). A stale id (the
   # session switched under an in-flight click) is a harmless no-op flip.
-  def handle_event("rail-agent-toggle", %{"id" => id}, socket) do
+  def handle_event("rail-agent-toggle", %{"id" => id} = params, socket) do
     current = agent_detail_open?(socket.assigns.agent_detail_expanded, id)
+
+    socket =
+      if current,
+        do: socket,
+        else: resolve_agent_session_target(socket, id, params["label"])
 
     {:noreply,
      assign(socket,
@@ -4110,6 +4117,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           rail={@rail}
           rail_expanded={@rail_expanded}
           agent_detail_expanded={@agent_detail_expanded}
+          agent_session_targets={@agent_session_targets}
         />
       </div>
       </div>
@@ -4236,6 +4244,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   attr :rail, :map, required: true
   attr :rail_expanded, :map, required: true
   attr :agent_detail_expanded, :map, required: true
+  attr :agent_session_targets, :map, default: %{}
 
   defp agents_rail(assigns) do
     ~H"""
@@ -4253,6 +4262,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         entry={entry}
         open={rail_open?(@rail_expanded, entry)}
         agent_detail_expanded={@agent_detail_expanded}
+        agent_session_targets={@agent_session_targets}
       />
     </div>
     """
@@ -4267,6 +4277,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   attr :entry, :map, required: true
   attr :open, :boolean, required: true
   attr :agent_detail_expanded, :map, required: true
+  attr :agent_session_targets, :map, default: %{}
 
   defp rail_entry(assigns) do
     journey = StudioChat.workflow_journey(assigns.entry)
@@ -4325,6 +4336,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           phase={phase}
           entry={@entry}
           agent_detail_expanded={@agent_detail_expanded}
+          agent_session_targets={@agent_session_targets}
         />
       </div>
     </div>
@@ -4336,6 +4348,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   attr :phase, :map, required: true
   attr :entry, :map, required: true
   attr :agent_detail_expanded, :map, required: true
+  attr :agent_session_targets, :map, default: %{}
 
   defp rail_phase(assigns) do
     ~H"""
@@ -4373,6 +4386,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           node={node}
           entry={@entry}
           agent_detail_expanded={@agent_detail_expanded}
+          agent_session_targets={@agent_session_targets}
         />
       </div>
     </div>
@@ -4425,6 +4439,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   attr :node, :map, required: true
   attr :entry, :map, required: true
   attr :agent_detail_expanded, :map, required: true
+  attr :agent_session_targets, :map, default: %{}
 
   defp rail_agent(assigns) do
     detail = StudioChat.workflow_agent_node_detail(assigns.node)
@@ -4439,7 +4454,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
         detail: detail,
         agent_id: agent_id,
         has_detail?: has_detail?,
-        detail_open?: has_detail? and agent_detail_open?(assigns.agent_detail_expanded, agent_id)
+        detail_open?: has_detail? and agent_detail_open?(assigns.agent_detail_expanded, agent_id),
+        # wsc-steer-open-session-managed: the managed-Codex session behind this
+        # agent's task, resolved once when the detail opens (see the
+        # "rail-agent-toggle" handler). Absent for every Claude-lane agent.
+        session_href: agent_session_href(assigns.agent_session_targets, agent_id)
       )
 
     ~H"""
@@ -4476,6 +4495,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           class="btn text-xs"
           phx-click="rail-agent-toggle"
           phx-value-id={@agent_id}
+          phx-value-label={@node["label"]}
           aria-expanded={to_string(@detail_open?)}
           style="flex: none; padding: 0 6px; opacity: 0.7;"
         >
@@ -4483,7 +4503,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </button>
       </div>
 
-      <.rail_agent_detail :if={@detail_open?} detail={@detail} />
+      <.rail_agent_detail :if={@detail_open?} detail={@detail} session_href={@session_href} />
     </div>
     """
   end
@@ -4496,6 +4516,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # NOTHING here is labeled "thinking" — the brief + tool line + result ARE the
   # honest window into what the agent is about.
   attr :detail, :map, required: true
+  attr :session_href, :string, default: nil
 
   defp rail_agent_detail(assigns) do
     ~H"""
@@ -4503,6 +4524,20 @@ defmodule BarkparkWeb.Studio.ChatLive do
       class="text-xs"
       style="padding: 1px 0 4px 20px; display: flex; flex-direction: column; gap: 3px;"
     >
+      <%!-- The managed-Codex session jump (wsc-steer-open-session-managed): a real
+            link, so a click and Enter take the same path. Rendered ONLY for a
+            resolved target; a Claude-lane agent has no session, so it gets no
+            control at all, never a disabled one. --%>
+      <div :if={@session_href}>
+        <.link
+          patch={@session_href}
+          data-role="chat-agent-open-session"
+          class="btn text-xs"
+          style="padding: 0 6px;"
+        >
+          open session
+        </.link>
+      </div>
       <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
         <span
           class="text-xs"
@@ -5168,6 +5203,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # Per-agent drill-down overrides reset on reopen (wsc-ad, rail_expanded
       # precedent): a replayed rail starts every agent detail collapsed.
       agent_detail_expanded: %{},
+      agent_session_targets: %{},
       # The reopened session's own sticky draft is restored above (charter D36c);
       # only the in-flight echo of the session we LEFT is stale here.
       pending_echo_id: nil,
@@ -5292,6 +5328,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       rail_sig: [],
       rail_expanded: %{},
       agent_detail_expanded: %{},
+      agent_session_targets: %{},
       composer_draft: "",
       pending_echo_id: nil,
       question_forms: %{}
@@ -7638,6 +7675,42 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # is no status-aware default — the drill-down is always opt-in, so a busy rail
   # never buries the fleet under exploded detail.
   defp agent_detail_open?(overrides, agent_id), do: Map.get(overrides, agent_id, false)
+
+  # wsc-steer-open-session-managed. Resolve, ONCE per agent per session view,
+  # the managed-Codex session behind the agent's task: the label joins to a task
+  # through the same AgentTaskJoin rows the Doing strip uses, then
+  # ManagedSessionTarget answers for that task, and the session must load in
+  # this socket's tenancy. Any miss (Claude lane, no join, stale, ambiguous,
+  # foreign) stores :none and the detail renders no session control.
+  defp resolve_agent_session_target(socket, agent_id, label) do
+    targets = socket.assigns.agent_session_targets
+
+    if Map.has_key?(targets, agent_id) do
+      socket
+    else
+      target =
+        with %{rows: rows} when map_size(rows) > 0 <- socket.assigns.hand_epic,
+             {:ok, %{row: %{doc_id: doc_id}}} <-
+               rows |> Map.values() |> AgentTaskJoin.index() |> AgentTaskJoin.join(label),
+             {:ok, %{session_id: session_id}} <- ManagedSessionTarget.resolve(doc_id),
+             %{} <- get_session_in_tenancy(socket, session_id) do
+          session_link_path(socket.assigns, session_id)
+        else
+          _ -> :none
+        end
+
+      assign(socket, agent_session_targets: Map.put(targets, agent_id, target))
+    end
+  end
+
+  defp agent_session_href(targets, agent_id) when is_map(targets) do
+    case Map.get(targets, agent_id) do
+      href when is_binary(href) -> href
+      _ -> nil
+    end
+  end
+
+  defp agent_session_href(_targets, _agent_id), do: nil
 
   # A sub-agent is running only while its task_status says so — a terminal (or
   # interrupted, D45) block shows its report, never a spinner.

@@ -574,6 +574,34 @@ func (c *Client) GetChatSession(id string, sinceSeq int) (ChatSession, error) {
 	return s, nil
 }
 
+// ManagedChatSession asks GET /v1/chat/managed-session for the managed-Codex
+// session behind taskID (wsc-steer-open-session-managed). ok is true only on a
+// 200 carrying a session id. Every miss — a Claude-lane task, a stale or
+// ambiguous attempt, a session outside the token's scope, an unknown task —
+// comes back as the same 404 and returns ("", false, nil): the caller renders
+// no session control, it does not show an error. Transport failures and other
+// statuses return err.
+func (c *Client) ManagedChatSession(taskID string) (sessionID string, ok bool, err error) {
+	endpoint := c.chatURL("/managed-session?task=" + url.QueryEscape(taskID))
+	status, body, err := c.chatSendRaw(http.MethodGet, endpoint, nil, http.StatusOK, http.StatusNotFound)
+	if err != nil {
+		return "", false, err
+	}
+	if status == http.StatusNotFound {
+		return "", false, nil
+	}
+	var out struct {
+		SessionID string `json:"session_id"`
+	}
+	if err := json.Unmarshal(body, &out); err != nil {
+		return "", false, fmt.Errorf("decode managed session: %w", err)
+	}
+	if out.SessionID == "" {
+		return "", false, nil
+	}
+	return out.SessionID, true, nil
+}
+
 // UpdateChatSession patches the writable session fields (draft/mode/
 // model_choice/effort_choice/title). Only the non-nil fields of patch are sent;
 // see ChatSessionPatch for the clear-vs-untouched pointer semantics.

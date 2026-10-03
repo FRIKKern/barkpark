@@ -202,6 +202,25 @@ defmodule BarkparkWeb.ChatController do
     json(conn, StudioChat.rollup(scope(conn)))
   end
 
+  # ── GET /v1/chat/managed-session?task=<doc_id> ─────────────────────────────
+
+  @doc """
+  The managed-Codex session behind a task (wsc-steer-open-session-managed): the
+  TUI's agent detail asks this for the task its agent↔task join resolved, and
+  offers "open session" only on a 200. `StudioChat.ManagedSessionTarget.resolve/2`
+  decides (exactly one live runtime attempt, session visible in the caller's
+  chat scope); every miss (Claude lane, stale, ambiguous, foreign, unknown)
+  answers the same 404, so the response never says why there is no session.
+  """
+  def managed_session(conn, %{"task" => task}) when is_binary(task) and task != "" do
+    case StudioChat.ManagedSessionTarget.resolve(task, scope: store_scope(scope(conn))) do
+      {:ok, target} -> json(conn, %{task_id: target.task_doc_id, session_id: target.session_id})
+      :none -> ErrorResponse.emit(conn, {:error, :not_found}, "no managed session for this task")
+    end
+  end
+
+  def managed_session(conn, _params), do: bad_request(conn, "task is required")
+
   # ── GET /v1/chat/sessions/:id ──────────────────────────────────────────────
 
   @doc """

@@ -162,6 +162,13 @@ type Model struct {
 	joinIndex      taskboard.AgentTaskIndex
 	joinTasksAsked bool
 
+	// The managed-Codex sessions behind joined tasks
+	// (wsc-steer-open-session-managed): managedSessions holds the server's yes
+	// answers (bare task id → session id); managedAsked marks every task id
+	// already asked about, answered or not, so each is asked once.
+	managedSessions map[string]string
+	managedAsked    map[string]bool
+
 	// D14 writable continuity set, hydrated from the full GET and PATCHed back.
 	mode         string
 	modelChoice  string
@@ -258,6 +265,18 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// re-collapse of the corpus at the 100ms tick.
 			m.joinTasks = msg.tasks
 			m.joinIndex = taskboard.NewAgentTaskIndex(msg.tasks)
+		}
+		// The selected agent's task is only knowable now, so this is the first
+		// moment its managed-session question can be asked.
+		return m, m.maybeLoadManagedSession()
+	case managedSessionMsg:
+		// A miss is remembered only as "asked" (maybeLoadManagedSession): the
+		// pane paints no session row, which is the whole of the degrade.
+		if msg.ok {
+			if m.managedSessions == nil {
+				m.managedSessions = map[string]string{}
+			}
+			m.managedSessions[msg.taskID] = msg.sessionID
 		}
 		return m, nil
 	case fleetErrMsg:

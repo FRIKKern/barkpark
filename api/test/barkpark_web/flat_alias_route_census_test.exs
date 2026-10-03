@@ -341,6 +341,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "chat token) and the StudioChat store confines every read to it — a foreign session " <>
          "is a 404, never a 403 oracle."},
     # ChatController.rollup
+    # ChatController.managed_session (wsc-steer-open-session-managed)
+    {"GET", "/v1/chat/managed-session"} =>
+      {:workspace_derived,
+       "chat_scope-derived: Plugs.RequireChatAccess resolves conn.assigns.chat_scope from " <>
+         "the token, and ManagedSessionTarget only answers with a session the StudioChat " <>
+         "store returns inside that scope — a foreign session is the same 404 as no session."},
     {"GET", "/v1/chat/rollup"} =>
       {:workspace_derived,
        "chat_scope-derived: Plugs.RequireChatAccess resolves conn.assigns.chat_scope from " <>

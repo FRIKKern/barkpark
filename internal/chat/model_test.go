@@ -39,15 +39,19 @@ type fakeTransport struct {
 	// joinTasks is the agent↔task join's candidate corpus; joinTaskCalls counts
 	// the fetches so the "once, lazily" contract is assertable rather than
 	// asserted-about.
-	joinTasks     []taskboard.Task
-	joinTasksErr  error
-	joinTaskCalls int
-	approveErr    error
-	uploads       []uploadCall
-	uploadRef     Attachment
-	uploadErr     error
-	listErr       error
-	getErr        error
+	joinTasks    []taskboard.Task
+	joinTasksErr error
+	// managedSessions answers ManagedSession (task id → session id);
+	// managedSessionCalls records every task id the shell asked about.
+	managedSessions     map[string]string
+	managedSessionCalls []string
+	joinTaskCalls       int
+	approveErr          error
+	uploads             []uploadCall
+	uploadRef           Attachment
+	uploadErr           error
+	listErr             error
+	getErr              error
 
 	archived     []string
 	unarchived   []string
@@ -127,6 +131,14 @@ func (f *fakeTransport) FleetEvents(ctx context.Context, lastEventID string, onF
 func (f *fakeTransport) JoinTasks() ([]taskboard.Task, error) {
 	f.joinTaskCalls++
 	return f.joinTasks, f.joinTasksErr
+}
+
+// ManagedSession answers from managedSessions (task id → session id); a task
+// absent from the map is the server's indistinct 404.
+func (f *fakeTransport) ManagedSession(taskID string) (string, bool, error) {
+	f.managedSessionCalls = append(f.managedSessionCalls, taskID)
+	sid, ok := f.managedSessions[taskID]
+	return sid, ok, nil
 }
 
 func newTestModel(f *fakeTransport) Model {

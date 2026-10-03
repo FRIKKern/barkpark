@@ -466,9 +466,17 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 					// The join's candidate rows are fetched HERE and nowhere else —
 					// the first drill into an agent is the first moment the answer
 					// can be shown, so it is the first moment worth a call.
-					return m, m.maybeLoadJoinTasks(), true
+					return m, tea.Batch(m.maybeLoadJoinTasks(), m.maybeLoadManagedSession()), true
 				}
 			}
+			return m, nil, true
+		}
+		// Enter inside the agent detail opens the selected agent's managed-Codex
+		// session (wsc-steer-open-session-managed) — and ONLY when the server
+		// named one. Every other agent keeps Enter as the honest no-op it was:
+		// there is no session to open, so there is nothing to offer.
+		if sid, ok := m.selectedManagedSession(); ok {
+			return m, m.resumeSessionCmd(sid), true
 		}
 		return m, nil, true
 	case tea.KeyEsc:
@@ -495,7 +503,7 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 			if m.wfAgent > 0 {
 				m.wfAgent--
 			}
-			return m, nil, true
+			return m, m.maybeLoadManagedSession(), true
 		}
 		if m.wfExpanded {
 			if m.wfPhase > 0 {
@@ -518,7 +526,7 @@ func (m Model) handleWorkflowKey(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 					m.wfAgent++
 				}
 			}
-			return m, nil, true
+			return m, m.maybeLoadManagedSession(), true
 		}
 		if m.wfExpanded {
 			if n := len(journeyOf(m.st.Workflow).Phases); m.wfPhase < n-1 {
