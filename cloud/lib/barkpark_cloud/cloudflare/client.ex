@@ -123,10 +123,6 @@ defmodule BarkparkCloud.Cloudflare.Client do
               {:ok, %{proxied: boolean()}} | {:error, term}
 
   @doc """
-  Mint a Cloudflare Origin CA certificate for `hostnames` from the PEM `csr`.
-  Returns `{:ok, %{id: id, certificate: pem}}` or `{:error, term}`.
-  """
-  @doc """
   What already answers for `name` in `zone_id`: the zone's own apex name and
   every DNS record whose name is `name` (`GET /zones/:zone` +
   `GET /zones/:zone/dns_records?name=`). The pre-write check of the cf-in-front
@@ -137,6 +133,10 @@ defmodule BarkparkCloud.Cloudflare.Client do
   @callback lookup_dns_name(token, zone_id, name :: String.t()) ::
               {:ok, %{zone_name: String.t(), records: [map()]}} | {:error, term}
 
+  @doc """
+  Mint a Cloudflare Origin CA certificate for `hostnames` from the PEM `csr`.
+  Returns `{:ok, %{id: id, certificate: pem}}` or `{:error, term}`.
+  """
   @callback create_origin_ca_cert(hostnames :: [String.t()], csr :: String.t()) ::
               {:ok, %{id: String.t(), certificate: String.t()}} | {:error, term}
 end
