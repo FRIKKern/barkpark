@@ -174,7 +174,10 @@ the legacy `render/1`.
 `owner_scoped` field types let a document carry an owner principal; a non-admin
 caller sees only rows they own on the surfaces threaded through the visibility
 chokepoint. Like everything above it is opt-in: declare nothing and ownership is
-inert.
+inert. Ruling #9 (2026-10-03): a token with `owner_user_id` (PAT) acts as that
+user (service tokens keep see-all), updates keep the stored owner, Studio
+account sockets act as the signed-in user, and history/restore follow the
+document's owner rule.
 
 ## HTTP surface & manifest
 
