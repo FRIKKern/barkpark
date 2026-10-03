@@ -546,7 +546,7 @@ defmodule Barkpark.Content do
   def list_schemas_for_sdk(dataset, opts \\ []) when is_binary(dataset),
     do: Schema.list_schemas_for_sdk(dataset, opts)
 
-  def schema_hash_for_all_datasets, do: Schema.schema_hash_for_all_datasets()
+  def schema_hash_for_all_datasets(opts \\ []), do: Schema.schema_hash_for_all_datasets(opts)
 
   # ── Analytics (extracted → Content.Analytics) ─────────────────────────────
 

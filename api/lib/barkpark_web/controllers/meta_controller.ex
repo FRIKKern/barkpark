@@ -8,7 +8,7 @@ defmodule BarkparkWeb.MetaController do
 
   use BarkparkWeb, :controller
 
-  alias Barkpark.Content
+  alias Barkpark.{Content, Tenancy}
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -31,7 +31,7 @@ defmodule BarkparkWeb.MetaController do
     hash =
       case Map.get(params, "dataset") do
         ds when is_binary(ds) -> Content.schema_hash_for_dataset(ds, scope_opts(conn))
-        _ -> Content.schema_hash_for_all_datasets()
+        _ -> default_tenant_dataset_hashes()
       end
 
     json(conn, %{
@@ -41,5 +41,26 @@ defmodule BarkparkWeb.MetaController do
       currentDatasetSchemaHash: hash,
       production: @production
     })
+  end
+
+  # THE DATASET MAP IS THE DEFAULT TENANT'S (task-ca20672312df9ce3). This route has no
+  # credential and no scope plug, so the all-datasets read used to run with no
+  # tenant at all and named every dataset of every workspace on the instance to
+  # anyone. It now covers what an anonymous flat read can address: the Default
+  # workspace plus the shared NULL-workspace (legacy) layer. The `?dataset=`
+  # arm above is already Default-confined through `scope_to_dataset`.
+  defp default_tenant_dataset_hashes do
+    case {Tenancy.get_default_workspace(), Tenancy.get_default_project()} do
+      {%{id: ws}, %{id: proj}} ->
+        Content.schema_hash_for_all_datasets(
+          workspace_id: ws,
+          project_id: proj,
+          include_global: true
+        )
+
+      # No Default tenant seeded: nothing an anonymous read could address.
+      _ ->
+        %{}
+    end
   end
 end

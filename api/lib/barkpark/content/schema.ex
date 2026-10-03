@@ -908,11 +908,19 @@ defmodule Barkpark.Content.Schema do
   defp stringify_keys(list) when is_list(list), do: Enum.map(list, &stringify_keys/1)
   defp stringify_keys(other), do: other
 
-  def schema_hash_for_all_datasets do
+  # `opts` carries the tenant (`:workspace_id` / `:project_id`) through the same
+  # confinement selector `schema_hash_for_dataset/2` uses. The anonymous
+  # `/v1/meta` handshake passes the Default tenant (task-ca20672312df9ce3): unscoped, this
+  # map named every dataset of every workspace on the instance. `[]` keeps the
+  # explicit unscoped read for in-process callers.
+  def schema_hash_for_all_datasets(opts \\ []) do
+    scope_fun = workspace_scope_fun(opts)
+
     from(s in SchemaDefinition,
       group_by: s.dataset,
       select: {s.dataset, count(s.id), max(s.updated_at)}
     )
+    |> scope_fun.(Keyword.get(opts, :workspace_id), Keyword.get(opts, :project_id))
     |> Repo.all()
     |> Map.new(fn {ds, n, t} -> {ds, hash_schema_tuple({n, t})} end)
   end
