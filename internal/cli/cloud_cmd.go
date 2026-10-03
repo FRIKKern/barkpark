@@ -35,6 +35,9 @@ var cloudClock = func() time.Time { return time.Now().UTC() }
 // session, or with `--kind local|cloud`, it renders KnownServers and makes no
 // network call. Both paths are read-only.
 func runBarkparks(out *writer, args []string) int {
+	if len(args) > 0 && args[0] == "adopt" {
+		return runBarkparksAdopt(out, args[1:])
+	}
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printBarkparksHelp(out)
@@ -508,6 +511,8 @@ func printBarkparksHelp(out *writer) {
 
 USAGE
   bp barkparks [--all | --kind local|cloud] [-o json|yaml]
+  bp barkparks adopt --url https://<box> --host <public-ip> --name <name>
+                     [--slug <slug>] (--token-file <path> | --token-from-config)
 
 WHAT IT SHOWS
   with a saved Cloud session, bare bp barkparks queries the current team's
@@ -519,6 +524,14 @@ FLAGS
   --all                list Barkparks across every authorized Cloud team; requires login and cannot be combined with --kind
   --kind local|cloud   filter the local-config view; cannot combine with --all
   -o json|yaml         emit one machine-readable object on stdout
+
+ADOPT
+  attaches an already-running box to the current Cloud team. Your admin token
+  on the box proves control (it must read as auth_tier admin at --url, and --url
+  must resolve to --host). Cloud then mints its OWN admin token on the box,
+  labelled "barkpark cloud admin", stores that one, and arms self-update the way
+  it does for boxes it provisioned. Your token is never stored and never rides
+  argv. A box without /v1/tokens/elevated is refused: update it first.
 
 RELATED
   bp register ssh root@<host> --name <name>   add a self-hosted Barkpark
