@@ -279,4 +279,109 @@ defmodule BarkparkCloud.Web.SiteCfDeployTest do
       assert CfFake.proxied() == []
     end
   end
+
+  defp member_session(team, role) do
+    user = user_fixture()
+    {:ok, _} = Accounts.add_member(team, user, role)
+    login_token(user)
+  end
+
+  defp connect_cf(team) do
+    {:ok, _} =
+      Registry.connect_provider(
+        team,
+        "cloudflare",
+        Jason.encode!(%{"api_token" => "cf_live_token", "zone_id" => "zone_acme"})
+      )
+
+    CfFake.put_zone_name("zone_acme", "example.com")
+  end
+
+  defp cf_deploy(site, domain, token),
+    do: call(:post, "/v1/sites/#{site.id}/deploy", %{via: "cloudflare", domain: domain}, token)
+
+  # Owner ruling #27 (2026-10-03): DNS on deploy stays MEMBER-level, but a member
+  # points FRESH names only — never the zone apex, never a name already pointing
+  # somewhere else. A team admin is not narrowed.
+  describe "POST /v1/sites/:id/deploy via=cloudflare — the member's DNS fence" do
+    test "a MEMBER deploying to a FRESH hostname still binds (201)" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+      connect_cf(team)
+
+      conn = cf_deploy(site, "blog.example.com", member_session(team, "member"))
+
+      assert conn.status == 201, conn.resp_body
+      assert [%{name: "blog.example.com", type: "A", content: @origin}] = CfFake.records()
+    end
+
+    test "a MEMBER asking for the zone APEX is refused 403 — no DNS write, no proxy flip" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+      connect_cf(team)
+
+      conn = cf_deploy(site, "Example.com.", member_session(team, "member"))
+
+      assert conn.status == 403
+      body = json_body(conn)
+      assert body["error"] == "cloudflare_apex_refused"
+      assert body["required"] == "admin"
+      assert CfFake.records() == []
+      assert CfFake.proxied() == []
+    end
+
+    test "a MEMBER asking for a name that already points ELSEWHERE is refused 409 — the record is untouched" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+      connect_cf(team)
+      CfFake.seed_record("zone_acme", %{name: "shop.example.com", type: "CNAME", content: "shops.myshopify.com"})
+
+      conn = cf_deploy(site, "shop.example.com", member_session(team, "member"))
+
+      assert conn.status == 409
+      assert json_body(conn)["error"] == "cloudflare_name_taken"
+      assert [%{name: "shop.example.com", content: "shops.myshopify.com"}] = CfFake.records()
+      assert CfFake.proxied() == []
+    end
+
+    test "a MEMBER re-deploying a name that already points at THIS box is not refused" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+      connect_cf(team)
+      CfFake.seed_record("zone_acme", %{name: "blog.example.com", type: "A", content: @origin})
+
+      conn = cf_deploy(site, "blog.example.com", member_session(team, "member"))
+
+      assert conn.status == 201, conn.resp_body
+    end
+
+    test "a zone the control plane cannot READ refuses a member 502 and writes nothing (fail closed)" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+
+      {:ok, _} =
+        Registry.connect_provider(
+          team,
+          "cloudflare",
+          Jason.encode!(%{"api_token" => "cf_live_token", "zone_id" => "fail-zone"})
+        )
+
+      conn = cf_deploy(site, "blog.example.com", member_session(team, "member"))
+
+      assert conn.status == 502
+      assert json_body(conn)["error"] == "cloudflare_lookup_failed"
+      assert CfFake.records() == []
+    end
+
+    test "a team ADMIN may still point the apex (201)" do
+      {_owner, team} = user_with_team()
+      site = team |> live_barkpark() |> static_site()
+      connect_cf(team)
+
+      conn = cf_deploy(site, "example.com", member_session(team, "admin"))
+
+      assert conn.status == 201, conn.resp_body
+      assert [%{name: "example.com", type: "A", proxied: true}] = CfFake.records()
+    end
+  end
 end
