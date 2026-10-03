@@ -122,13 +122,19 @@
         pins to the bottom on every Studio + admin surface. The vitals slot
         carries live host stats (Barkpark.HostVitals.Sampler): an embedded
         sticky LiveView in a live context, a static snapshot on dead views
-        (controller-rendered admin pages have no @socket). --%>
+        (controller-rendered admin pages have no @socket). Host vitals are
+        INSTANCE-ADMIN only (owner ruling #30 Q5, 2026-10-03): the same
+        instance_admin? flag as the self-update bar and the same audience as
+        /v1/instance/metrics. Anyone else gets no vitals markup and no child
+        LiveView at all. --%>
   <BarkparkWeb.StudioComponents.Nav.studio_footer>
     <:vitals>
-      <%= if assigns[:socket] do %>
-        <%= live_render(@socket, BarkparkWeb.ServerVitalsLive, id: "server-vitals", sticky: true) %>
-      <% else %>
-        <BarkparkWeb.ServerVitalsLive.line vitals={Barkpark.HostVitals.Sampler.snapshot()} />
+      <%= cond do %>
+        <% assigns[:instance_admin?] != true -> %>
+        <% assigns[:socket] -> %>
+          <%= live_render(@socket, BarkparkWeb.ServerVitalsLive, id: "server-vitals", sticky: true) %>
+        <% true -> %>
+          <BarkparkWeb.ServerVitalsLive.line vitals={Barkpark.HostVitals.Sampler.snapshot()} />
       <% end %>
     </:vitals>
   </BarkparkWeb.StudioComponents.Nav.studio_footer>
