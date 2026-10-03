@@ -4068,6 +4068,41 @@ defmodule Barkpark.StudioChatTest do
       assert StudioChat.epic_goal("claude", ctx.session.id) == nil
     end
 
+    test "the epic is STABLE when a builder's claim moves on — the rail carries the relation",
+         ctx do
+      builder_slice!(ctx.ws, "task-launch-s1", "Wire the export door", "task-launch-epic")
+      builder_slice!(ctx.ws, "task-launch-s3", "Pin the import door", "task-launch-epic", "open")
+      put_rail!(ctx.session, ["build:wire-the-export-door"])
+      assert %{id: "task-launch-epic"} = StudioChat.epic_goal("claude", ctx.session.id)
+
+      # the builder finishes s1 and claims a DIFFERENT task: the relation is the
+      # rail label, not the claim, so the line does not flicker or vanish
+      Barkpark.Repo.update_all(
+        Ecto.Query.from(d in Barkpark.Content.Document, where: d.doc_id == "task-launch-s1"),
+        set: [
+          content: %{
+            "lifecycle_status" => "done",
+            "parent_id" => "task-launch-epic",
+            "claim" => %{"worker" => "epic-builder-somewhere-else"}
+          }
+        ]
+      )
+
+      Barkpark.Repo.update_all(
+        Ecto.Query.from(d in Barkpark.Content.Document, where: d.doc_id == "task-launch-s3"),
+        set: [
+          content: %{
+            "lifecycle_status" => "in_progress",
+            "parent_id" => "task-launch-epic",
+            "claim" => %{"worker" => "epic-builder-task-launch-s1"}
+          }
+        ]
+      )
+
+      assert %{id: "task-launch-epic", slices_done: 1, slices_total: 2} =
+               StudioChat.epic_goal("claude", ctx.session.id)
+    end
+
     test "the session's OWN held claim still wins over its rail", ctx do
       insert_task!(
         "task-launch-own",
