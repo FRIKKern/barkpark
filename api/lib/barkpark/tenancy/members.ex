@@ -178,11 +178,12 @@ defmodule Barkpark.Tenancy.Members do
   existing seat — changing a role is `update_role/3`, and an "add" that quietly
   overwrote a role would be a privilege change disguised as a no-op.
   """
-  @spec add_user_member(binary(), String.t(), String.t()) ::
+  @spec add_user_member(binary(), String.t(), String.t(), keyword()) ::
           {:ok, member_row()} | {:error, atom() | Ecto.Changeset.t()}
-  def add_user_member(workspace_id, email, role)
+  def add_user_member(workspace_id, email, role, opts \\ [])
       when is_binary(workspace_id) and is_binary(email) and is_binary(role) do
-    with {:ok, email} <- normalize_email(email),
+    with :ok <- role_ceiling(opts[:actor], workspace_id, nil, role),
+         {:ok, email} <- normalize_email(email),
          %User{} = user <- Sso.find_or_create_user(email),
          nil <- TenancyAuth.membership(user.id, workspace_id, :user),
          {:ok, user} <- Accounts.Privacy.reclaim_unconfirmed(user) do
@@ -208,31 +209,44 @@ defmodule Barkpark.Tenancy.Members do
   validated by the membership changeset, which accepts the built-ins plus this
   workspace's custom roles — so a typo is a changeset error, not a silent
   no-role seat.
+
+  With `actor:` (every HTTP door passes one) the role ceiling applies: only an
+  owner moves a seat onto or off `owner` (`{:error, :owner_required}`), and a
+  token seat is never given admin authority its token's permissions lack
+  (`{:error, :role_exceeds_token}`). See the ceiling section below.
   """
-  @spec update_role(binary(), principal_ref(), String.t()) ::
+  @spec update_role(binary(), principal_ref(), String.t(), keyword()) ::
           {:ok, member_row()} | {:error, atom() | Ecto.Changeset.t()}
-  def update_role(workspace_id, %{type: type, id: principal_id}, role)
+  def update_role(workspace_id, %{type: type, id: principal_id}, role, opts \\ [])
       when is_binary(workspace_id) and is_binary(role) do
     case TenancyAuth.membership(principal_id, workspace_id, type) do
       nil ->
         {:error, :not_found}
 
       %Membership{} = membership ->
-        if demotes_last_owner?(membership, role) do
-          {:error, :last_owner}
-        else
-          membership
-          |> Membership.changeset(%{role: role}, valid_role_names(workspace_id))
-          |> Repo.update()
-          |> case do
-            {:ok, updated} ->
-              announce_seats_changed(updated.workspace_id)
-              {:ok, decorate_one(updated)}
-
-            {:error, changeset} ->
-              {:error, changeset}
-          end
+        with :ok <- role_ceiling(opts[:actor], workspace_id, membership.role, role),
+             {:ok, updated} <- apply_role(membership, workspace_id, role, type) do
+          announce_seats_changed(updated.workspace_id)
+          {:ok, decorate_one(updated)}
         end
+    end
+  end
+
+  defp apply_role(membership, workspace_id, role, type) do
+    if demotes_last_owner?(membership, role) do
+      {:error, :last_owner}
+    else
+      Repo.transaction(fn ->
+        with {:ok, updated} <-
+               membership
+               |> Membership.changeset(%{role: role}, valid_role_names(workspace_id))
+               |> Repo.update(),
+             :ok <- token_ceiling(type, updated) do
+          updated
+        else
+          {:error, reason} -> Repo.rollback(reason)
+        end
+      end)
     end
   end
 
@@ -245,25 +259,73 @@ defmodule Barkpark.Tenancy.Members do
   per-workspace roster operation. Killing the credential itself is
   `Barkpark.Auth.revoke_token/1`.
   """
-  @spec remove_member(binary(), principal_ref()) ::
+  @spec remove_member(binary(), principal_ref(), keyword()) ::
           {:ok, member_row()} | {:error, atom()}
-  def remove_member(workspace_id, %{type: type, id: principal_id})
+  def remove_member(workspace_id, %{type: type, id: principal_id}, opts \\ [])
       when is_binary(workspace_id) do
     case TenancyAuth.membership(principal_id, workspace_id, type) do
       nil ->
         {:error, :not_found}
 
       %Membership{role: @owner_role} = membership ->
-        if last_owner?(membership) do
-          {:error, :last_owner}
-        else
-          delete_membership(membership)
+        cond do
+          role_ceiling(opts[:actor], workspace_id, @owner_role, nil) != :ok ->
+            {:error, :owner_required}
+
+          last_owner?(membership) ->
+            {:error, :last_owner}
+
+          true ->
+            delete_membership(membership)
         end
 
       %Membership{} = membership ->
         delete_membership(membership)
     end
   end
+
+  # ── The role ceiling (OWNER RULING 2026-10-03 #5) ─────────────────────────
+  #
+  # Only an OWNER grants, changes or removes the `owner` role: an admin who
+  # could do it would promote itself and then demote or remove the real
+  # owners, which the last-owner rail cannot stop (the attacker is an owner
+  # by then) and which unlocks owner-only ceremonies (chat-host enrolment).
+  # `actor` is the caller's principal (`%ApiToken{}` or `%User{}`); no actor
+  # means an internal caller (seeds, tests, provisioning code), which this
+  # ceiling does not govern — every HTTP door passes one.
+  defp role_ceiling(nil, _workspace_id, _from, _to), do: :ok
+
+  defp role_ceiling(actor, workspace_id, from, to) do
+    if @owner_role in [from, to] and not TenancyAuth.workspace_owner?(actor, workspace_id),
+      do: {:error, :owner_required},
+      else: :ok
+  end
+
+  # A re-role never lifts a TOKEN seat above the token's own permissions: the
+  # scoped admin gate reads the membership ROLE (`workspace_admin?/2`), so an
+  # admin/owner seat on a read-only or public-read token would hand it roster,
+  # schema and token-mint authority its permissions never carried. A role that
+  # confers admin authority needs a token holding `admin`. User seats have no
+  # permission list and are not affected.
+  #
+  # Judged on the STORED row inside the update's transaction, through the one
+  # admin-authority predicate (`workspace_admin?/3`), so a custom role carrying
+  # the `admin` action is caught exactly as the scoped gate would read it.
+  defp token_ceiling(:api_token, %Membership{principal_id: token_id, workspace_id: ws_id}) do
+    if TenancyAuth.workspace_admin?(token_id, ws_id, :api_token) do
+      case Repo.get(ApiToken, token_id) do
+        %ApiToken{permissions: perms} when is_list(perms) ->
+          if "admin" in perms, do: :ok, else: {:error, :role_exceeds_token}
+
+        _ ->
+          {:error, :role_exceeds_token}
+      end
+    else
+      :ok
+    end
+  end
+
+  defp token_ceiling(_type, _membership), do: :ok
 
   @doc """
   Resolve a caller-supplied principal reference.

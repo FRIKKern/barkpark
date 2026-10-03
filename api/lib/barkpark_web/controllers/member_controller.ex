@@ -63,7 +63,7 @@ defmodule BarkparkWeb.MemberController do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, email} <- fetch_string(params, "email", :missing_email),
          role <- Map.get(params, "role", @default_role) do
-      case Members.add_user_member(ws_id, email, to_string(role)) do
+      case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
         {:ok, member} ->
           conn |> put_status(:created) |> json(%{member: member})
 
@@ -90,7 +90,7 @@ defmodule BarkparkWeb.MemberController do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, role} <- fetch_string(params, "role", :missing_role),
          {:ok, principal} <- Members.resolve_principal(ref, principal_type(params)) do
-      case Members.update_role(ws_id, principal, role) do
+      case Members.update_role(ws_id, principal, role, actor: caller(conn)) do
         {:ok, member} -> json(conn, %{member: member})
         {:error, reason} -> deny(conn, reason)
       end
@@ -125,7 +125,7 @@ defmodule BarkparkWeb.MemberController do
   def delete(conn, %{"principal_ref" => ref} = params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          {:ok, principal} <- Members.resolve_principal(ref, principal_type(params)) do
-      case Members.remove_member(ws_id, principal) do
+      case Members.remove_member(ws_id, principal, actor: caller(conn)) do
         {:ok, member} -> json(conn, %{removed: member})
         {:error, reason} -> deny(conn, reason)
       end
@@ -485,6 +485,24 @@ defmodule BarkparkWeb.MemberController do
           "otherwise the workspace would be left with nobody who can administer it"
       )
 
+  # Owner ruling #5 (2026-10-03): the role ceiling.
+  defp deny(conn, :owner_required),
+    do:
+      forbidden(
+        conn,
+        "owner_required",
+        "only an owner of this workspace can grant, change or remove the owner role"
+      )
+
+  defp deny(conn, :role_exceeds_token),
+    do:
+      forbidden(
+        conn,
+        "role_exceeds_token",
+        "this token lacks the admin permission, so its seat cannot hold a role with admin " <>
+          "authority — mint a token with admin instead"
+      )
+
   defp deny(conn, :invalid_principal),
     do: unprocessable(conn, "principal must be an e-mail address or a principal id")
 
@@ -510,6 +528,14 @@ defmodule BarkparkWeb.MemberController do
     conn
     |> ErrorResponse.emit_fields(:not_found, %{code: "not_found", message: message})
   end
+
+  defp forbidden(conn, code, message) do
+    conn
+    |> ErrorResponse.emit_fields(:forbidden, %{code: code, message: message})
+  end
+
+  # The roster's caller: the bearer `:scoped_admin` proved holds an admin seat.
+  defp caller(conn), do: conn.assigns[:api_token]
 
   defp conflict(conn, code, message) do
     conn
