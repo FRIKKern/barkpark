@@ -4088,7 +4088,7 @@ defmodule PDS.Census do
     #
     # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
     # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
-    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # writing caller as if it were THE caller. tickets_controller.ex's render_ticket/3
     # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
     # genuinely write, so the printed name was one arbitrary member of a set — stable
     # today only because `callers/2`'s order is, which nothing specifies and no
