@@ -48,7 +48,9 @@ defmodule BarkparkCloud.Registry.DomainVerification do
     |> cast(attrs, [:team_id, :domain, :token, :verified_at])
     |> validate_required([:team_id, :domain, :token])
     |> foreign_key_constraint(:team_id, name: :domain_verifications_team_id_fkey)
-    |> unique_constraint([:team_id, :domain])
+    # Keyed on :domain (the field a caller can fix), naming the composite index
+    # the migration creates — never a constraint that opens with team_id.
+    |> unique_constraint(:domain, name: :domain_verifications_team_id_domain_index)
   end
 
   @doc "The challenge a client shows a person: where to put what."
