@@ -13,7 +13,13 @@ defmodule BarkparkWeb.LiveSocketClientIpTest do
   apart unnoticed. The literal expected address is there only to keep the
   comparison from being vacuous.
   """
-  use ExUnit.Case, async: true
+  # `async: false` + the reset: this file names Barkpark.RateLimiter, and
+  # RateLimiterAsyncIsolationTest holds every such file to the named-table rule
+  # even though these assertions only call the pure `client_ip/1` resolver.
+  use ExUnit.Case, async: false
+
+  import Barkpark.RateLimiterSandbox
+  setup :reset_rate_limiter!
 
   alias Barkpark.Quiz.SpawnBudget
   alias Barkpark.RateLimiter
