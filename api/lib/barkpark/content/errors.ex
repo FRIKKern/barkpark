@@ -1154,6 +1154,17 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # Owner ruling #47: publish refuses a scalar or reference list holding an
+  # empty row. `details` names each field with one message per empty row.
+  defp build({:error, {:empty_list_members, errors}}) when is_map(errors) do
+    %{
+      code: "validation_failed",
+      message: "publish refused: a list field has an empty row; fill it in or remove it",
+      status: 422,
+      details: errors
+    }
+  end
+
   defp build({:error, {:invalid_task_content, errors}}) when is_map(errors) do
     %{
       code: "validation_failed",
