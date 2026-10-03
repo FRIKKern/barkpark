@@ -274,6 +274,107 @@ defmodule BarkparkCloud.AccountsInvitationsTest do
     end
   end
 
+  # task-0cf611238d4ad597 CQ4 (owner ruling #36): an open invitation is a grant
+  # its sender is still making. Removing the sender, or demoting them below the
+  # role the invite grants, withdraws it — the invitee can no longer join on
+  # the word of someone who has lost that authority.
+  describe "an inviter's open invitations follow their authority" do
+    defp invite!(team, inviter, role) do
+      email = "inv-#{System.unique_integer([:positive])}@example.com"
+      {:ok, %{invitation: inv, token: raw}} = Accounts.invite_member(team, email, role, inviter)
+      %{inv: inv, raw: raw, email: email}
+    end
+
+    defp pending?(%{inv: inv}), do: Repo.get(TeamInvitation, inv.id) != nil
+
+    test "removing the inviter withdraws their open invites; the token no longer joins" do
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      sent = invite!(team, admin, "member")
+      invitee = user_fixture(email: sent.email)
+
+      assert {:ok, :removed} = Accounts.remove_member_as("owner", team, admin)
+
+      refute pending?(sent)
+      assert {:error, :invalid_token} = Accounts.accept_invitation(sent.raw, invitee)
+      assert Accounts.get_membership(team, invitee) == nil
+      # The owner's own authority is untouched.
+      assert Accounts.team_role(owner, team) == "owner"
+    end
+
+    test "removal leaves other inviters' invites, accepted rows, and other teams alone" do
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      {_other_owner, other_team} = owned_team()
+      {:ok, _} = Accounts.add_member(other_team, admin, "admin")
+
+      owners_invite = invite!(team, owner, "member")
+      elsewhere = invite!(other_team, admin, "member")
+      accepted = invite!(team, admin, "member")
+      joined = user_fixture(email: accepted.email)
+      {:ok, _} = Accounts.accept_invitation(accepted.raw, joined)
+
+      assert {:ok, :removed} = Accounts.remove_member(team, admin)
+
+      assert pending?(owners_invite)
+      assert pending?(elsewhere)
+      assert Repo.get!(TeamInvitation, accepted.inv.id).accepted_at != nil
+      assert Accounts.team_role(joined, team) == "member"
+    end
+
+    test "demoting an admin to member withdraws every invite they sent" do
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      as_member = invite!(team, admin, "member")
+      as_admin = invite!(team, admin, "admin")
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role_as(owner, team, admin, "member")
+
+      refute pending?(as_member)
+      refute pending?(as_admin)
+      invitee = user_fixture(email: as_member.email)
+      assert {:error, :invalid_token} = Accounts.accept_invitation(as_member.raw, invitee)
+    end
+
+    test "an owner stepping down to admin withdraws only their owner-role invites" do
+      {_owner, team} = owned_team()
+      co_owner = user_fixture()
+      {:ok, _} = Accounts.add_member(team, co_owner, "owner")
+      owner_grant = invite!(team, co_owner, "owner")
+      admin_grant = invite!(team, co_owner, "admin")
+      member_grant = invite!(team, co_owner, "member")
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role_as(co_owner, team, co_owner, "admin")
+
+      refute pending?(owner_grant)
+      assert pending?(admin_grant)
+      assert pending?(member_grant)
+
+      # The surviving invite still works end to end.
+      invitee = user_fixture(email: admin_grant.email)
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.accept_invitation(admin_grant.raw, invitee)
+    end
+
+    test "a promotion or a same-rank change withdraws nothing" do
+      {owner, team} = owned_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      sent = invite!(team, admin, "admin")
+
+      assert {:ok, %TeamMembership{role: "owner"}} =
+               Accounts.update_member_role_as(owner, team, admin, "owner")
+
+      assert pending?(sent)
+    end
+  end
+
   describe "update_member_role/3" do
     test "demoting the sole owner → :last_owner" do
       {owner, team} = owned_team()
