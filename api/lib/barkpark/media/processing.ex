@@ -17,7 +17,7 @@ defmodule Barkpark.Media.Processing do
     do: Barkpark.ManagedRuntime.WriteAdmission.Door.admit(fn -> admitted_process(file) end)
 
   defp admitted_process(%MediaFile{} = file) do
-    case Assets.find_by_media_file_id(file.id, file.dataset) do
+    case Assets.find_by_media_file_id(file.id, file.dataset, MediaFile.scope_opts(file)) do
       nil ->
         :ok
 
