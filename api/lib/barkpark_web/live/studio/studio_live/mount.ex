@@ -29,16 +29,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     stored_name = connect_params["user_name"]
     stored_color = connect_params["user_color"]
 
-    # A signed-in account is named by its account, not by the browser's
-    # localStorage handle: the avatar, its "— open your profile" label and the
-    # presence pill other editors see used to read "User islf" for every
-    # signed-in user, so two collaborators could not tell each other apart.
-    # Anonymous / token-only sockets keep the stored or generated handle.
     user_name =
+      if stored_name && stored_name != "",
+        do: stored_name,
+        else: "User #{String.slice(user_id, 0..3)}"
+
+    # SELF-ONLY account label (task-28aea4a555586ce6). The signed-in account's
+    # email names the viewer's OWN avatar ("<email> — open your profile")
+    # instead of "User islf". It is deliberately NOT the presence `name`:
+    # presence meta reaches every socket on the workspace topic, including
+    # share-link / edit-share grant holders, and an email must not travel
+    # there. Presence keeps the handle above.
+    account_label =
       case socket.assigns[:current_user] do
         %{email: email} when is_binary(email) and email != "" -> email
-        _ when is_binary(stored_name) and stored_name != "" -> stored_name
-        _ -> "User #{String.slice(user_id, 0..3)}"
+        _ -> nil
       end
 
     user_color =
@@ -141,6 +146,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       unpublish_refs: [],
       user_id: user_id,
       user_name: user_name,
+      account_label: account_label,
       user_color: user_color,
       presences: [],
       show_profile: false,
