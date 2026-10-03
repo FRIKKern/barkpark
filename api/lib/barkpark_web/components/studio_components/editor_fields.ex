@@ -316,6 +316,9 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   """
   attr :user_id, :string, required: true
   attr :user_name, :string, required: true
+  # The signed-in account (its email), shown ONLY on the viewer's own avatar —
+  # never in presence meta (task-28aea4a555586ce6). nil for anonymous/token.
+  attr :account_label, :string, default: nil
   attr :user_color, :string, required: true
   attr :presences, :list, default: []
   attr :editor_doc, :map, default: nil
@@ -365,14 +368,15 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           </div>
         <% end %>
       <% end %>
+      <% me = @account_label || @user_name %>
       <button type="button" class="presence-me-group" phx-click="show-profile"
-              title={"#{@user_name} — profile"} aria-label={@user_name <> " — open your profile"}>
+              title={"#{me} — profile"} aria-label={me <> " — open your profile"}>
         <div class="presence-me-info">
-          <span class="presence-me-name"><%= @user_name %></span>
+          <span class="presence-me-name"><%= me %></span>
           <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || "Untitled", else: "browsing"), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
-          <%= String.first(@user_name) %>
+          <%= String.first(me) %>
         </div>
       </button>
     </div>
