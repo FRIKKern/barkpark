@@ -2097,7 +2097,13 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # (deployment, failure_reason, id, ok, status x2). It is in no `@pairs` entry.
   # MEASURED by the PIN CO-EDIT arm on this branch off origin/main 850004359
   # ("@go_tag_pinned 399 -> 401"), never by arithmetic.
-  @go_tag_pinned 401
+  # 401 -> 405 (task-5283ad9f9238f7fe): internal/cloudclient/adopt.go, the
+  # POST /v1/barkparks/adopt envelope, brings FOUR new NAMES (`adopted`,
+  # `armed`, `credential_id`, `credential_label`). Its other sites ride
+  # existing names and move the SITE register instead. MEASURED by the PIN
+  # CO-EDIT arm on this branch off origin/main bd3a30233
+  # ("@go_tag_pinned 401 -> 405"), never by arithmetic.
+  @go_tag_pinned 405
 
   # ---------------------------------------------------------------------------
   # THE SITE ARM (dr-w26-bl-go-tag-arm-is-36-percent-blind)
@@ -2171,12 +2177,23 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # `MintPATRequest.Abilities` — a name the package did not have, declared at
     # TWO sites, so it enters this register at 2.
     "abilities" => 2,
+    # task-5283ad9f9238f7fe (bp barkparks adopt), MEASURED 2026-10-03 by the SITE arm on
+    # this branch off origin/main bd3a30233: internal/cloudclient/adopt.go (AdoptRequest /
+    # AdoptResult / AdoptStep, the POST /v1/barkparks/adopt envelope).
+    # NEWLY DUPLICATED, 1 -> 2: `AdoptRequest.AdminToken` (the box token the
+    # caller sends; Credentials.AdminToken is the other site).
+    "admin_token" => 2,
     "artifact_sha256" => 2,
     "artifact_url" => 2,
     "as_of" => 5,
     "at" => 2,
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go: NEWLY DUPLICATED, 1 -> 2. `SiteBuildLogBytes.Available` joins the single existing declaration — whether the box still holds the bytes at all.
     "available" => 2,
+    # task-5283ad9f9238f7fe (bp barkparks adopt), MEASURED 2026-10-03 by the SITE arm on
+    # this branch off origin/main bd3a30233: internal/cloudclient/adopt.go (AdoptRequest /
+    # AdoptResult / AdoptStep, the POST /v1/barkparks/adopt envelope).
+    # NEWLY DUPLICATED, 1 -> 2: `AdoptResult.Barkpark`, the adopted row.
+    "barkpark" => 2,
     "barkpark_id" => 4,
     # 6 -> 7 (dr-w22-s5): `DeployBoxDoor.Basis`.
     "basis" => 7,
@@ -2294,7 +2311,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 9 -> 10. `SiteBuildLogRecord.Detail` — the plane's human
     # sentence on a 409/410/502 build-log refusal.
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 11 -> 12. `SiteBuildLogBytesRefusal.Detail`.
-    "detail" => 12,
+    # task-5283ad9f9238f7fe: 12 -> 13, `AdoptStep.Detail` (internal/cloudclient/adopt.go).
+    "detail" => 13,
     # 2026-09-10 #17479: ADD => 2, retry.go added. NEWLY DUPLICATED, 1 -> 2: the
     # retry envelope's `details` object joins the single declaration in client.go.
     "details" => 2,
@@ -2335,7 +2353,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "from" => 2,
     "git_ref" => 2,
     "headroom" => 2,
-    "host" => 6,
+    # task-5283ad9f9238f7fe: 6 -> 7, `AdoptRequest.Host` (internal/cloudclient/adopt.go).
+    "host" => 7,
     # cli/sites-logs-box-error (task-3468f99ad5a4e9b8), MEASURED 2026-09-18:
     # NEWLY DUPLICATED, 1 -> 2. `boxErrorEnvelope.Hint` joins the single existing
     # declaration — the box's own "retry shortly" advice, relayed rather than
@@ -2393,7 +2412,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # 16"): `DeployDeliverySite.Name`, the same identity pair
     # `DeployCoverageSite` carries. `@go_tag_pinned` HOLDS at 395 — the name
     # already existed package-wide, so it rides free on the union.
-    "name" => 16,
+    # task-5283ad9f9238f7fe: 16 -> 17, `AdoptRequest.Name` (internal/cloudclient/adopt.go).
+    "name" => 17,
     "never_covered" => 3,
     "next_cursor" => 2,
     # isu-backlog-cloud-update-trigger-verb: +1 in selfupdate.go — `SelfUpdateResult.OK` — the 202 relay envelope's own flag.
@@ -2480,7 +2500,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # cli/sites-log-bytes (task-801c6c33769ca01d), MEASURED 2026-09-12 on this branch rebased onto origin/main: site_build_log_bytes.go, 9 -> 10. `SiteBuildLogBytes.Slug`.
     # dr-w33-bl-delivery-sites-node-is-anonymous, MEASURED by the SITE arm on the
     # same tree ("slug: 10 site(s) -> 11"): `DeployDeliverySite.Slug`.
-    "slug" => 11,
+    # task-5283ad9f9238f7fe: 11 -> 12, `AdoptRequest.Slug` (internal/cloudclient/adopt.go).
+    "slug" => 12,
     "source" => 3,
     "stage" => 3,
     # cli/sites-logs (task-6fde506907675a07): internal/cloudclient/site_build_log.go: 2 -> 3. `SiteBuildLogRecord.Stages` — the recorded stage
@@ -2506,7 +2527,8 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     # the prebuilt receipt BRANCHES on: on the retry arm no driver was started by
     # this request, so claiming the bytes are about to be staged would date the
     # deploy to a request that did not cause it. Rides free on the NAME union.
-    "status" => 22,
+    # task-5283ad9f9238f7fe: 22 -> 23, `AdoptStep.Status` (internal/cloudclient/adopt.go).
+    "status" => 23,
     "team" => 4,
     "team_id" => 6,
     "template" => 2,
@@ -2543,14 +2565,16 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
     "unreadable" => 3,
     "unresolved" => 2,
     "updated_at" => 5,
-    "url" => 5,
+    # task-5283ad9f9238f7fe: 5 -> 6, `AdoptRequest.URL` (internal/cloudclient/adopt.go).
+    "url" => 6,
     "usage" => 2,
     "value" => 5,
     "volume" => 2,
     # 2 -> 3 (dr-w10-s1): `BoxDeployRate.Window` — the pinned window travels WITH
     # the number it denominates, so it is declared a third time.
     "window" => 3,
-    "workspace" => 2
+    # task-5283ad9f9238f7fe: 2 -> 3, `AdoptResult.Adopted.Workspace` (internal/cloudclient/adopt.go).
+    "workspace" => 3
   }
 
   # The SITE arm's corpus, pinned. `Go.source/1` globs `*.go` and drops
@@ -2587,7 +2611,7 @@ defmodule BarkparkCloud.PayloadKeySetCensusTest do
   # 6 that bump an existing register row, and 8 that were declared exactly once
   # and are now duplicated. The 14 ride free on the NAME union — the class
   # `@go_tag_pinned` structurally cannot see, which is why the register moves.
-  @cloudclient_sources ~w(box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
+  @cloudclient_sources ~w(adopt.go box_error.go client.go deliveries.go retry.go selfupdate.go site_build_log.go site_build_log_bytes.go site_doctor.go tokens.go)
   # ---------------------------------------------------------------------------
 
   # The barkpark_json family specifically, because it is where blind spot (1) was
