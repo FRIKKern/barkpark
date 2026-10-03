@@ -129,8 +129,7 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
 
   for {label, verb} <- [
         {"createOrReplace", "createOrReplace"},
-        {"create", "create"},
-        {"createIfNotExists", "createIfNotExists"}
+        {"create", "create"}
       ] do
     # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers
     @tag :requires_plugins
@@ -160,6 +159,24 @@ defmodule Barkpark.Content.CreateFamilyPublishedForkTest do
       assert pub.content["claim"]["worker"] == "cf-worker-a"
       assert pub.content["lifecycle_status"] == "in_progress"
     end
+  end
+
+  # Owner ruling #41 (task-e27126ee5e796e47): a published row occupies its id,
+  # so `createIfNotExists` on a published task is a no-op, claimed or not. It
+  # never reaches the fork fence because there is nothing to fork.
+  @tag :requires_plugins
+  test "createIfNotExists naming a published task with a LIVE claim is a noop and mints no twin",
+       %{scope: scope} do
+    id = uniq("cf-live-cine")
+    publish_task!(id, scope)
+    claim!(id, scope, "cf-worker-cine")
+
+    assert {:ok, {_tx, [%{operation: "noop", id: ^id}]}} =
+             mutate([%{"createIfNotExists" => attrs_for(id)}], scope)
+
+    refute twin?(id, scope)
+    assert {:ok, pub} = Content.get_document(id, "task", @dataset, scope)
+    assert pub.content["claim"]["worker"] == "cf-worker-cine"
   end
 
   # Plugins-off: the tasks plugin owns the task-content fences, lifecycle/claim/stage rules and task resolvers

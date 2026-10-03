@@ -21,13 +21,13 @@ Base URL: `http://<host>:4000`. Private endpoints need `Authorization: Bearer <t
 
 Markers: **[public]** = no token (schema visibility) · **[token]** = any · **[admin]** = admin.
 
-**Discovery.** OpenAPI 3.1: `GET /v1/openapi.json` (public, manifest-generated).
+**Discovery.** OpenAPI 3.1: `GET /v1/openapi.json` (public).
 
 ## 3. Document Envelope
 
 Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header DIFFERS: a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
-**Read-envelope `syncTags` are metadata-only IN THIS REPO** (nothing here caches on them; webhook `sync_tags` do; pin: `js/packages/core/tests/synctags-read-envelope-pin.test.ts`).
+**Read-envelope `syncTags` are metadata-only here** (webhook `sync_tags` are not; pin: `js/packages/core/tests/synctags-read-envelope-pin.test.ts`).
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
@@ -49,7 +49,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `fields` | — | CSV content-field projection (`title,slug`); system fields kept |
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
-| `filter[<field>]` | — | Exact-match shorthand: `filter[title]=Alpha` |
+| `filter[<field>]` | — | Exact match: `filter[title]=Alpha` |
 | `filter[<field>][<op>]` | — | Ops: `eq`, `neq`, `in`, `nin` (`A,B`), `has`, `hasStrong` (`tag:min`, weighted `strength >= min`; flat never matches), `contains`, `startsWith`, `endsWith`, `gt`/`gte`/`lt`/`lte`, `is` (`null`/`notnull`). `neq`/`nin` exclude NULL. |
 | `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each element parses like a lone `filter=`, clauses are **ANDed** (no OR form); different ops on one field compose, the **same field+op twice → 400 `invalid_filter`** (use `in`), and **one unparseable element fails the whole request** (400, never a silent unfiltered 200) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs). |
@@ -58,7 +58,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 ## 5. `GET /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id` [public]
 
-Fetch one document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so a bare `_publishedId` reaches an unpublished doc under both, as `patch`/`publish`/`discardDraft`/`delete` do.
+One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so a bare `_publishedId` reaches an unpublished doc under both, as `patch`/`publish`/`discardDraft`/`delete` do.
 
 **Read-after-write is immediate.** Responses use `cache-control: max-age=0, private, must-revalidate`; ETags include row `_id:_rev`. Check the **draft/published split** before polling: writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row. `published` and `bp task get` read the exact ID (the published row until publish); diagnose a missing write with one drafts read.
 
@@ -72,7 +72,7 @@ Fetch one document; 404 if missing or schema `"private"`. Takes `?fields=`/`?exp
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-A batch of mutations, applied atomically (any failure rolls back the batch). Body: `{"mutations":[…]}`.
+A batch of mutations, applied atomically (one failure rolls back all). Body: `{"mutations":[…]}`.
 
 **Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
@@ -84,11 +84,11 @@ A batch of mutations, applied atomically (any failure rolls back the batch). Bod
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
-**`createOrReplace`** — upsert (creates or overwrites the draft); **`createIfNotExists`** — creates only if no draft exists, else returns it with `operation: "noop"`. Both shaped as `create`.
+**`createOrReplace`** — upsert (creates or overwrites the draft); **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-All three create kinds write the **draft** row. On a **published `task`** id that forks a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`, `details._id` names the verbs), else a `create.forked_published` warning. Use `patch` to edit a published task in place.
+All three create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`, `details._id` names the verbs), else a `create.forked_published` warning. `patch` edits a published task in place.
 
 **`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
 
