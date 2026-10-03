@@ -12,6 +12,10 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.CSS ||= { escape: String };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
+// jsdom has no Range layout. ProseMirror 1.42 measures a text Range when
+// focus() scrolls the caret into view, so give it empty rects.
+window.Range.prototype.getClientRects ||= () => [];
+window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
 await import("../index.js");
 const paragraph = (id, text) => ({ id, type: "paragraph", content: [{ type: "text", value: text }] });
 const original = [paragraph("one", "Original target."), paragraph("two", "Untouched sibling.")];

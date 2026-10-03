@@ -54,7 +54,7 @@
     in the DOM when the bundle's customElements.define() runs, so the element
     upgrades and connectedCallback mounts it EMPTY, synchronously, during that
     script — bp-ready fires BEFORE any inline listener below can attach. The
-    later `el.blocks = …` re-projects through setContent(…, false) and does not
+    later `el.blocks = …` re-projects through setContent(…, { emitUpdate: false }) and does not
     re-fire it. So readiness here is: el._editor is live AND our blocks were
     assigned AND the document round-trips. __harnessReady flips only then.
   -->

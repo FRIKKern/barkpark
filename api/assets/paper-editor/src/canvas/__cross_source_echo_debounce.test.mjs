@@ -23,6 +23,10 @@ globalThis.requestAnimationFrame = window.requestAnimationFrame.bind(window);
 globalThis.cancelAnimationFrame = window.cancelAnimationFrame.bind(window);
 globalThis.CSS ||= { escape: (value) => String(value) };
 window.BP_PAPER_EDITOR_NO_INJECT = true;
+// jsdom has no Range layout. ProseMirror 1.42 measures a text Range when
+// focus() scrolls the caret into view, so give it empty rects.
+window.Range.prototype.getClientRects ||= () => [];
+window.Range.prototype.getBoundingClientRect ||= () => ({ top: 0, left: 0, right: 0, bottom: 0, width: 0, height: 0 });
 
 await import("./index.js");
 const { DEBOUNCE_MS } = await import("../contract.js");
@@ -33,6 +37,16 @@ const paragraph = (id, value) => ({
   type: "paragraph",
   content: [{ type: "text", value }],
 });
+
+// focus() and blur() act in a requestAnimationFrame. Wait for the editor to
+// report the new state instead of a fixed delay, so a loaded machine cannot
+// check the canvas before it has noticed the focus change.
+async function settleFocus(editor, focused) {
+  for (let waited = 0; editor.isFocused !== focused && waited < 2000; waited += 10) {
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+  await new Promise((resolve) => setTimeout(resolve, 50));
+}
 
 const original = paragraph("left-column", "Old left text");
 const localPatch = { op: "patch-block", id: original.id,
@@ -310,7 +324,7 @@ try {
   try {
     await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
     focused._editor.commands.focus("end");
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settleFocus(focused._editor, true);
     assert.equal(focused._editor.isFocused, true);
     const remote = [paragraph("title", "Title from another tab"), paragraph("lead", "Original lead")];
     focused.applyServerBlocks(remote, { mode: "external", requestId: null });
@@ -342,7 +356,7 @@ try {
     const finalThird = [remote[0], paragraph("lead", "Original lead local again third")];
     focused.applyServerBlocks(finalThird, { mode: "own", requestId: "request-focused-3" });
     focused._editor.commands.blur();
-    await new Promise((resolve) => setTimeout(resolve, 50));
+    await settleFocus(focused._editor, false);
     assert.deepEqual(focused._blocks, finalThird);
     assert.equal(focused._editor.state.doc.firstChild.textContent, "Title from another tab");
     assert.equal(focused.hasPendingChanges(), false);
@@ -415,7 +429,7 @@ try {
     try {
       await new Promise((resolve) => setTimeout(resolve, DEBOUNCE_MS + 50));
       structure._editor.commands.focus("start");
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await settleFocus(structure._editor, true);
       structure.applyServerBlocks(remote);
       const leadPosition = initial[0].id === "lead" ? 1 : structure._editor.state.doc.firstChild.nodeSize + 1;
       structure._editor.view.dispatch(structure._editor.state.tr.insertText("Local ", leadPosition));
@@ -428,7 +442,7 @@ try {
       structure.applyServerBlocks(merged, { mode: "own", requestId: `request-${kind}` });
       structure.acknowledgeOps(emitted[0].seq, true);
       structure._editor.commands.blur();
-      await new Promise((resolve) => setTimeout(resolve, 50));
+      await settleFocus(structure._editor, false);
       assert.deepEqual(structure._blocks, merged);
       assert.equal(structure.hasPendingChanges(), false);
       assert.equal(structure._pendingServerBlocks, null);

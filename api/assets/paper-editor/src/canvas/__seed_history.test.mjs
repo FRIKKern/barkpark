@@ -48,11 +48,19 @@ document.body.appendChild(canvas);
 
 try {
   await new Promise((resolve) => setTimeout(resolve, 350));
+  // The seed is not an edit, so it must not emit an editor update: an update
+  // schedules a save. tiptap 3 made setContent emit by default, so the seed
+  // passes { emitUpdate: false } explicitly.
+  let seedUpdates = 0;
+  const countUpdate = () => { seedUpdates += 1; };
+  canvas._editor.on("update", countUpdate);
   canvas.blocks = [
     { id: "p-1", type: "paragraph", content: [{ type: "text", value: "Seeded one." }] },
     { id: "p-2", type: "paragraph", content: [{ type: "text", value: "Seeded two." }] },
   ];
   await new Promise((resolve) => setTimeout(resolve, 50));
+  canvas._editor.off("update", countUpdate);
+  assert.equal(seedUpdates, 0, "the post-mount seed emits no editor update");
 
   const editor = canvas._editor;
   assert.ok(editor?.view?.dom?.isConnected, "the real TipTap editor is mounted");
