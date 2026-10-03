@@ -42,14 +42,13 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 
 ## Phase 0 / Phase 1+ boundary
 
-**Phase 0 ships:**
-- Four v2 field types in `SchemaDefinition` + `parse/2` + `flat?/1`
-- Recursive validator with permanent `flat_mode` branch
-- Codelist registry tables + `Barkpark.Content.Codelists`
-- LiveView HEEx field components for all four v2 types
-- Cross-field rule evaluator infrastructure (`Barkpark.Content.Validation.Rules`, `Evaluator`) — deployed; the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
+Phase 0 shipped the four v2 types (`parse/2`, `flat?/1`), the recursive validator with its permanent `flat_mode` branch, the codelist registry, the LiveView field components, and the cross-field rule evaluator (`Barkpark.Content.Validation.Rules`, `Evaluator`); the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
 
 **Phase 1+ (deferred — `docs/decisions/deferred.md`):** Oban + cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder.
+
+## Stored value shapes
+
+A reference is stored as `{"_ref": id, "_type": "reference"}` (ruling #42) and a slug as `{"_type": "slug", "current": text}` (ruling #43). With flag `canonical_shape_writes` on (default off), Studio writes these, except for plugin-owned types, and rewrites old values on their next save; readers accept both. `mix barkpark.shape.{bare_references,string_slugs}` counts the rest; `--apply` converts.
 
 ## `required` lives under `validation`
 
@@ -63,9 +62,9 @@ Write `validation: {required: true}` (ruling #48). Schema apply refuses a bare f
 
 ## The sidebar test — per-field `surface` (pd-doctrine t7, rule 4)
 
-Each field MAY carry `surface: "body" | "sidebar"` — the schema-fact codification of the PortableDoc doctrine's rule 4 ("does it read as part of the article?"). `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies/labels, relations/references, dates, trade metadata, settings (the WordPress-style right rail). Parsed by `parse_field/2` onto `Field.surface`; recurses into `composite` subfields and `arrayOf` `of` descriptors. Valid values are EXACTLY those two strings; **absent ⇒ `nil` (unclassified)**, byte-compatible with every existing schema (D3-additive — a schema without `surface` parses and round-trips unchanged, and `surface` never flips `flat?/1`). Any other value ⇒ `{:error, :field_surface_invalid}`. Pure metadata: no editor consumes it this wave (D1 — sidebar-v2 reads it later).
+Each field MAY carry `surface: "body" | "sidebar"` — PortableDoc doctrine rule 4 ("does it read as part of the article?"). `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies, references, dates, trade metadata, settings. Parsed by `parse_field/2` onto `Field.surface`; recurses into `composite` subfields and `arrayOf` `of` descriptors. **Absent ⇒ `nil` (unclassified)**, so a schema without `surface` round-trips unchanged and `surface` never flips `flat?/1`. Any other value ⇒ `{:error, :field_surface_invalid}`. Pure metadata: no editor consumes it yet (D1 — sidebar-v2 reads it later).
 
-**Audit boundary:** the paper-canvas frame is stamped — the 8 seed schemas (`seeds/demo.ex`) + the `paper` schema (`paper.json`). Non-paper editors (task/ticket Studio forms, sheet grid, ONIX book form, FRT game types) render outside the article/sidebar frame, so their fields stay `surface: nil` (valid, unclassified) pending owner review / sidebar-v2 adoption.
+**Audit boundary:** stamped are the 8 seed schemas (`seeds/demo.ex`) and `paper.json`. Non-paper editors (task/ticket forms, sheet grid, ONIX book form, FRT game types) render outside the article/sidebar frame, so their fields stay `surface: nil`.
 
 ## TUI constraint (D12)
 

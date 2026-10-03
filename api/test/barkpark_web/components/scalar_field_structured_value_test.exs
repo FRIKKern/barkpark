@@ -23,8 +23,9 @@ defmodule BarkparkWeb.Components.ScalarFieldStructuredValueTest do
     })
   end
 
+  # A `slug` field is no longer in this list: `{current}` is its canonical
+  # shape (owner ruling #43) and the slug input edits it as text (below).
   for {type, extra} <- [
-        {"slug", %{}},
         {"string", %{}},
         {"text", %{}},
         {"number", %{}},
@@ -49,6 +50,15 @@ defmodule BarkparkWeb.Components.ScalarFieldStructuredValueTest do
     html = render(%{"type" => "string", "name" => "f"}, ["a", "b"])
     assert html =~ ~s(data-readonly-field="f")
     refute html =~ ~s(name="doc[f]")
+  end
+
+  test "a {current} slug is edited as its text (owner ruling #43)" do
+    html =
+      render(%{"type" => "slug", "name" => "f"}, %{"_type" => "slug", "current" => "sanity-slug"})
+
+    assert html =~ ~s(name="doc[f]")
+    assert html =~ ~s(value="sanity-slug")
+    refute html =~ ~s(data-readonly-field="f")
   end
 
   test "scalar values keep their normal inputs" do

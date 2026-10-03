@@ -416,7 +416,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
     content = Map.get(doc, :content) || %{}
 
     candidates = [
-      if(is_map(content), do: Map.get(content, "slug")),
+      if(is_map(content), do: Barkpark.Content.SlugValue.text(Map.get(content, "slug"))),
       Map.get(doc, :slug_text)
     ]
 
