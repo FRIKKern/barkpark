@@ -49,6 +49,7 @@
     { "verb": "barkpark.domain_attached", "label": "attached a domain to a Barkpark" },
     { "verb": "barkpark.vercel_deploy_triggered", "label": "triggered a Vercel deploy" },
     { "verb": "barkpark.resurrected", "label": "resurrected a Barkpark" },
+    { "verb": "barkpark.adopted", "label": "attached an existing Barkpark" },
     { "verb": "barkpark.push_relay_provisioned", "label": "provisioned a git push relay" },
     {
       "verb": "barkpark.credentials_refused",
