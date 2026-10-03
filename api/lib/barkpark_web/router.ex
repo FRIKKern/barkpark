@@ -887,13 +887,6 @@ defmodule BarkparkWeb.Router do
   # register flood neither starves the other anonymous writes from that IP nor
   # turns the API-shaped 60/min ceiling into a 3600-mail/hour amplifier against a
   # third party. Only `POST /v1/auth/register` rides this.
-  # Per-IP write meter for the four browser auth form POSTs (owner ruling #31).
-  # The method class makes a POST a `:write`: 60 a minute, keyed on the client
-  # IP because a browser form carries no bearer. See the scope that mounts it.
-  pipeline :browser_auth_write_meter do
-    plug(BarkparkWeb.Plugs.RateLimit)
-  end
-
   pipeline :auth_register_throttle do
     plug(BarkparkWeb.Plugs.AuthWriteRateLimit, class: :register)
   end
@@ -1293,6 +1286,14 @@ defmodule BarkparkWeb.Router do
     # session api_token (no paste), redirect to /studio. Minted by
     # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.
     get("/login/ticket/:ticket", SessionController, :ticket)
+  end
+
+  # Per-IP write meter for the four browser auth form POSTs (owner ruling #31).
+  # The method class makes a POST a `:write`: 60 a minute, keyed on the client
+  # IP because a browser form carries no bearer. Declared here, below every
+  # pipeline .sobelow-skips pins by line, so adding it moves none of them.
+  pipeline :browser_auth_write_meter do
+    plug(BarkparkWeb.Plugs.RateLimit)
   end
 
   # The four browser auth form POSTs carry the per-IP write meter (owner ruling
