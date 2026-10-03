@@ -109,7 +109,7 @@ One PortableDoc block op on any document type (Studio's block editor op). Body `
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
-SSE mutation stream: a `/w/:ws/p/:proj` URL carries that project only; a flat URL the whole workspace.
+SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
 
 **Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
 
