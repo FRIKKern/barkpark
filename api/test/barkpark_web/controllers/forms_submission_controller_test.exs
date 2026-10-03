@@ -342,4 +342,25 @@ defmodule BarkparkWeb.FormsSubmissionControllerTest do
     assert conn.status == 204
     assert [] == submissions()
   end
+
+  # Found dogfooding 2026-10-03: every submission was titled
+  # "Form submission — blog", so the Studio inbox showed identical rows.
+  describe "inbox titles" do
+    test "a submission is titled by its sender, so inbox rows tell posts apart", ctx do
+      enable!(ctx.ws_a, ctx.proj_a)
+      path = form_path(ctx.ws_a, ctx.proj_a)
+
+      post_form(path, %{"name" => "Kari", "message" => "Hei"}) |> json_response(201)
+      post_form(path, %{"email" => "ola@example.com", "message" => "Hello"}) |> json_response(201)
+      post_form(path, %{"name" => "  \n ", "message" => "anonymous"}) |> json_response(201)
+
+      titles = submissions() |> Enum.map(& &1.title) |> Enum.sort()
+
+      assert titles == [
+               "Form submission — #{@site}",
+               "Kari — #{@site}",
+               "ola@example.com — #{@site}"
+             ]
+    end
+  end
 end

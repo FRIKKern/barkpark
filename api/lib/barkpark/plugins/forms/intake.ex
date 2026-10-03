@@ -100,12 +100,43 @@ defmodule Barkpark.Plugins.Forms.Intake do
 
     Content.create_document(
       Contract.submission_type(),
-      %{"title" => "Form submission — #{binding.site}", "content" => content},
+      %{"title" => submission_title(binding.site, fields), "content" => content},
       binding.dataset,
       workspace_id: binding.workspace_id,
       project_id: binding.project_id
     )
   end
+
+  # The inbox row title. Every submission used to be titled
+  # "Form submission — <site>", so the Studio inbox listed N identical rows and
+  # an operator had to open each one to find a sender. The title now leads
+  # with who sent it — the first non-blank of name, email, subject — and keeps
+  # the site; with none of those fields it stays the old wording. The value is
+  # the poster's own text, so it is flattened to one line and capped.
+  @title_fields ~w(name email subject)
+  @title_max 60
+
+  @doc false
+  @spec submission_title(String.t(), map()) :: String.t()
+  def submission_title(site, fields) when is_map(fields) do
+    sender =
+      Enum.find_value(@title_fields, fn key ->
+        case fields[key] do
+          v when is_binary(v) ->
+            case v |> String.replace(~r/\s+/u, " ") |> String.trim() do
+              "" -> nil
+              s -> String.slice(s, 0, @title_max)
+            end
+
+          _ ->
+            nil
+        end
+      end)
+
+    if sender, do: "#{sender} — #{site}", else: "Form submission — #{site}"
+  end
+
+  def submission_title(site, _fields), do: "Form submission — #{site}"
 
   # A crude, explainable spam signal: link density. Link-stuffed posts are the
   # common bot shape on contact forms. A hit is STORED as `suspected`, not
