@@ -46,8 +46,11 @@ defmodule BarkparkWeb.SamlController do
 
     with %Barkpark.Sso.SamlConnection{} <- c || :no_conn,
          {:ok, xml} <- Base.decode64(encoded),
-         {:ok, %{email: email} = subject} <- Saml.consume(c, xml, slug) do
-      user = Sso.find_or_create_user(email)
+         {:ok, %{email: email} = subject} <- Saml.consume(c, xml, slug),
+         # An EXISTING account is adopted only when this org can vouch for it
+         # (a seat in the org, or a verified org domain): the IdP is tenant-
+         # controlled and may assert any email (task-6f7cd94ab61cc688).
+         {:ok, user} <- Sso.org_login_user(c.organization_id, email) do
       Sso.jit_provision(c.organization_id, user)
 
       # era-w8-sso-mfa-binding: org-require-MFA binds at session-mint time —

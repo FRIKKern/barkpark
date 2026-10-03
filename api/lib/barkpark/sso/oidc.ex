@@ -141,7 +141,7 @@ defmodule Barkpark.Sso.Oidc do
     with {:ok, %{"id_token" => id_token}} <- exchange_code(c, code, redirect_uri, verifier),
          {:ok, claims} <- verify_id_token(c, id_token),
          :ok <- validate_claims(c, claims, expected_nonce),
-         {:ok, user} <- find_or_create_user(claims["email"]) do
+         {:ok, user} <- find_or_create_user(c.organization_id, claims["email"]) do
       # JIT: first SSO login gains a membership in the connection's org
       # (era-w3-jit). When the id_token's groups resolve through the
       # admin-configured group→role mappings (era-w7), that role wins — for
@@ -225,10 +225,16 @@ defmodule Barkpark.Sso.Oidc do
 
   # Find-or-create the authenticated User (unusable local password — they sign
   # in via the IdP). Confirmed on creation (the IdP vouched for the identity).
-  defp find_or_create_user(email) do
+  # An EXISTING account is adopted only when the connection's org can vouch
+  # for it (`Sso.org_may_adopt?/3`: a seat in the org, or a verified org
+  # domain). The IdP is tenant-controlled and may assert any email, so without
+  # this an org could sign in as another org's user (task-6f7cd94ab61cc688).
+  defp find_or_create_user(org_id, email) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
-        {:ok, user}
+        if Barkpark.Sso.org_may_adopt?(org_id, user, email),
+          do: {:ok, user},
+          else: {:error, :email_not_owned_by_org}
 
       _ ->
         random = Base.encode16(:crypto.strong_rand_bytes(32))

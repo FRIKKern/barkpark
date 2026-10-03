@@ -104,7 +104,8 @@ defmodule Barkpark.Sso.OidcTest do
     end
 
     test "an existing user logs in without duplication" do
-      {_org, c} = connection()
+      {org, c} = connection()
+      verify_domain!(org, "oidcorg.com")
 
       {:ok, existing} =
         Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
@@ -114,6 +115,45 @@ defmodule Barkpark.Sso.OidcTest do
       assert {:ok, user, _} = callback(c)
       assert user.id == existing.id
     end
+  end
+
+  # task-6f7cd94ab61cc688: the org's IdP is tenant-controlled and may assert
+  # ANY email. An existing account is adopted only when the org can vouch for
+  # it: a seat in one of the org's workspaces, or a verified org domain.
+  describe "handle_callback — an existing account the org cannot vouch for" do
+    test "another org's user (unverified domain, no seat) is refused, no session subject" do
+      {_org, c} = connection()
+
+      {:ok, _victim} =
+        Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
+
+      mock_op(claims())
+
+      assert {:error, :email_not_owned_by_org} = callback(c)
+    end
+
+    test "an existing user already seated in the org's workspace is adopted" do
+      {org, c} = connection()
+      {:ok, ws} = Tenancy.create_workspace(%{slug: "oidcorg-ws", name: "WS"})
+      {:ok, ws} = Tenancy.assign_workspace_to_organization(ws, org.id)
+
+      {:ok, existing} =
+        Accounts.register_user(%{email: "sso@oidcorg.com", password: "correct horse ok"})
+
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, existing.id, "member", "user")
+      mock_op(claims())
+
+      assert {:ok, user, _} = callback(c)
+      assert user.id == existing.id
+    end
+  end
+
+  defp verify_domain!(org, domain) do
+    {:ok, d} = Barkpark.Sso.Domains.request_verification(org, domain)
+
+    d
+    |> Barkpark.Sso.OrgDomain.changeset(%{verified_at: DateTime.utc_now()})
+    |> Barkpark.Repo.update!()
   end
 
   describe "handle_callback — security validations reject bad tokens" do

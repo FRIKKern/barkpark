@@ -81,6 +81,59 @@ defmodule Barkpark.Sso do
     end
   end
 
+  @doc """
+  The user an ENTERPRISE (org-bound SAML/OIDC) login signs in as.
+
+  An org's IdP is tenant-controlled, so the email it asserts is a claim, not a
+  proof. A brand-new email is created (JIT) exactly as before. An email that
+  already has an account is adopted only when the org can vouch for it: the
+  user already holds a seat in one of the org's workspaces, or the email's
+  domain is a VERIFIED domain of this org. Otherwise
+  `{:error, :email_not_owned_by_org}`: without this check any org's IdP could
+  assert another org's (or an operator's) email and receive their session.
+  """
+  @spec org_login_user(binary(), String.t()) ::
+          {:ok, User.t()} | {:error, :email_not_owned_by_org}
+  def org_login_user(org_id, email) when is_binary(org_id) and is_binary(email) do
+    case Accounts.get_user_by_email(email) do
+      %User{} = user ->
+        if org_may_adopt?(org_id, user, email),
+          do: {:ok, user},
+          else: {:error, :email_not_owned_by_org}
+
+      _ ->
+        {:ok, jit_create_user(email)}
+    end
+  end
+
+  @doc """
+  True when org `org_id` may sign in as the EXISTING `user` asserted by its
+  IdP: the user is already seated in one of the org's workspaces, or `email`'s
+  domain is a verified domain of this org. See `org_login_user/2`.
+  """
+  @spec org_may_adopt?(binary(), User.t(), String.t()) :: boolean()
+  def org_may_adopt?(org_id, %User{id: uid}, email) when is_binary(org_id) do
+    org_member?(org_id, uid) or org_owns_email_domain?(org_id, email)
+  end
+
+  defp org_member?(org_id, uid) do
+    Repo.exists?(
+      from m in Tenancy.Membership,
+        join: w in Workspace,
+        on: w.id == m.workspace_id,
+        where:
+          w.organization_id == ^org_id and m.principal_type == "user" and
+            m.principal_id == ^uid
+    )
+  end
+
+  defp org_owns_email_domain?(org_id, email) do
+    case Barkpark.Sso.Domains.verified_for_email(email) do
+      %{organization_id: ^org_id} -> true
+      _ -> false
+    end
+  end
+
   # Public @doc false seam so the D5 race test can drive the "checked nil, then
   # somebody else inserted" leg DETERMINISTICALLY (the controller-seam testing
   # convention). Not part of the SSO API — callers go through

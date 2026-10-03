@@ -138,6 +138,31 @@ defmodule BarkparkWeb.SamlControllerTest do
            )
   end
 
+  # task-6f7cd94ab61cc688: an org's IdP is tenant-controlled and can assert
+  # ANY email. Before this, the ACS signed the caller in as whatever existing
+  # account held that email: another org's user, or an instance operator.
+  describe "an existing account the org cannot vouch for" do
+    test "is refused and gets no session or seat", %{conn: conn} do
+      i = idp()
+      {_org, ws} = setup_conn(i.cert_pem)
+
+      {:ok, victim} =
+        Accounts.register_user(%{
+          email: "victim@elsewhere.example",
+          password: "correct-horse-battery"
+        })
+
+      resp =
+        post(conn, "/v1/auth/saml/#{@slug}/acs", %{
+          "SAMLResponse" => signed_response("victim@elsewhere.example", i.key, i.cert_der)
+        })
+
+      assert resp.status == 401
+      refute Repo.exists?(from s in Barkpark.Accounts.UserSession, where: s.user_id == ^victim.id)
+      refute Tenancy.Auth.membership(victim, ws.id)
+    end
+  end
+
   describe "org-require-MFA at the ACS mint (era-w8-sso-mfa-binding)" do
     test "a governed factor-less user is refused a session (JSON caller)", %{conn: conn} do
       i = idp()
@@ -184,11 +209,15 @@ defmodule BarkparkWeb.SamlControllerTest do
 
     test "a governed user WITH a factor mints unchanged (zero-tax)", %{conn: conn} do
       i = idp()
-      {org, _ws} = setup_conn(i.cert_pem)
+      {org, ws} = setup_conn(i.cert_pem)
       {:ok, _} = Tenancy.set_organization_require_mfa(org.id, true)
 
       {:ok, user} =
         Accounts.register_user(%{email: "armed@samlctrl.com", password: "correct-horse-battery"})
+
+      # An existing account must already be seated in the org (or carry a
+      # verified org domain) for the org's IdP to sign in as it.
+      {:ok, _} = Tenancy.Auth.create_membership(ws.id, user.id, "member", "user")
 
       secret = NimbleTOTP.secret()
 
