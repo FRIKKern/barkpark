@@ -1342,6 +1342,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
 
     same_doc? = same_editor_doc?(socket.assigns[:editor_doc], editor_doc)
 
+    form_gen =
+      next_form_gen(
+        socket,
+        same_doc? and widget_values_changed?(new_schema, socket.assigns[:editor_form], new_form)
+      )
+
     # spd-w19 — the third seam. When the walk produced NO editor, the shell used
     # to shrug ("Select a document to edit") no matter which of the nine
     # nil-editor producers fired. They are indistinguishable at the shell's
@@ -1367,6 +1373,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         editor_is_draft: is_draft,
         editor_has_published: has_published,
         editor_form: new_form,
+        editor_form_gen: form_gen,
         editor_mode: editor_mode,
         editor_blocks: editor_blocks,
         editor_table_target_ids: editor_table_target_ids,
@@ -1850,6 +1857,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     do: Content.published_id(a) == Content.published_id(b)
 
   def same_editor_doc?(_, _), do: false
+
+  # [server-replaced-widget-values] task-c7b0565a482b9d21. Rich text, reference
+  # and image inputs render inside `phx-update="ignore"` wrappers that LiveView
+  # never re-renders, so when the SERVER replaces one of their values in the
+  # open document's form (another tab's save, Reload after a conflict, a
+  # revision restore) the widget kept the old value — and this tab's next
+  # autosave wrote it back over the other edit. `editor_form_gen` is part of
+  # those wrapper ids (`FieldInputs.doc_wrap_id/4`): moving it remounts them
+  # with the new value. It moves ONLY when a widget-owned value actually
+  # changed, so a reload that leaves them alone (and the tab's own autosave,
+  # which never comes through here) keeps the caret where it is.
+  @widget_field_types ~w(richText reference image)
+
+  @doc false
+  def widget_values_changed?(schema, old_form, new_form) do
+    names =
+      case schema do
+        %{fields: fields} when is_list(fields) ->
+          for %{"type" => t, "name" => n} <- fields, t in @widget_field_types, do: n
+
+        _ ->
+          []
+      end
+
+    Map.take(old_form || %{}, names) != Map.take(new_form || %{}, names)
+  end
+
+  @doc false
+  def next_form_gen(socket, true), do: (socket.assigns[:editor_form_gen] || 0) + 1
+  def next_form_gen(socket, false), do: socket.assigns[:editor_form_gen] || 0
 
   @doc false
   def beta_editable?(socket) do

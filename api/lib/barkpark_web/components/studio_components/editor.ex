@@ -370,6 +370,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   attr :doc_key, :string, default: "doc"
   attr :doc_type, :string, default: "document"
   attr :document_rev, :string, default: nil
+  # Shared.next_form_gen/2 — remounts the ignored widget wrappers when the
+  # server replaced one of their values (task-c7b0565a482b9d21).
+  attr :form_gen, :integer, default: 0
 
   def studio_field_renderer(assigns) do
     ~H"""
@@ -398,6 +401,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
+            form_gen={@form_gen}
           />
         <% end %>
         <%= if onix = onix_element(@field) do %>
@@ -436,6 +440,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_key={@doc_key}
             doc_type={@doc_type}
             document_rev={@document_rev}
+            form_gen={@form_gen}
           />
         <% end %>
       </.editor_field>
@@ -496,6 +501,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # instead of silently overwriting the buffer; the button posts
   # "reload-remote-doc", which reloads the doc from the DB.
   attr :doc_conflict, :boolean, default: false
+  attr :editor_form_gen, :integer, default: 0
 
   # ── Server-owned save halt mirror (p-hollow-studio-mirror) ─────────
   # The verbatim reason string from a `{:error, {:halted, reason}}` write
@@ -762,6 +768,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     doc_key={@editor_doc.doc_id}
                     doc_type={@editor_doc.type}
                     document_rev={@editor_doc.rev}
+                    form_gen={@editor_form_gen}
                   />
                 <% end %>
               <% end %>
