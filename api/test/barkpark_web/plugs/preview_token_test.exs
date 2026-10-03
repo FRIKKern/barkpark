@@ -24,8 +24,13 @@ defmodule BarkparkWeb.Plugs.PreviewTokenTest do
 
   defp run_plug(conn), do: PreviewTokenPlug.call(conn, PreviewTokenPlug.init([]))
 
+  # The path params the router would set for this path, so a token that names
+  # `p1` in `doc_ids` is judged against the document the route reads.
   defp conn_for(jwt) do
-    build_conn(:get, "/v1/data/doc/production/post/p1")
+    %{
+      build_conn(:get, "/v1/preview/doc/production/post/p1")
+      | path_params: %{"dataset" => "production", "type" => "post", "doc_id" => "p1"}
+    }
     |> put_req_header("authorization", "Preview " <> jwt)
   end
 
