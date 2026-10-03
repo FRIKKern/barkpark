@@ -1644,6 +1644,15 @@ class BpPaperCanvas extends HTMLElement {
 
     this._debounceBaselineBlocks = null;
     const ops = runToOps(diffBaseline, stableDoc, { preserveNewIds: true });
+    if (!ops || !ops.length) {
+      // Nothing to save: the edits since the last batch cancelled out (typed,
+      // then undone inside one debounce). Say so. The page's exit guard marked
+      // this run dirty on the native input, and without this signal no save
+      // ever arrives to clear it, so leaving the page warned about unsaved
+      // changes that were never there.
+      this.dispatchEvent(new CustomEvent("bp-noop", { bubbles: true, composed: true }));
+      return false;
+    }
     return this._dispatchOps(ops, nextBlocks, diffBaseline);
   }
 
