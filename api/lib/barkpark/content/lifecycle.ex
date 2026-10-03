@@ -135,7 +135,9 @@ defmodule Barkpark.Content.Lifecycle do
        when is_map(content) do
     scope = Keyword.take(opts, [:workspace_id, :project_id])
 
-    with {:ok, schema} <- Content.get_schema(type, dataset, scope),
+    # `resolve_schema/3` (tenant → workspace → global), so a globally declared
+    # type is checked in every workspace, as the status-field door does.
+    with {:ok, schema} <- Content.resolve_schema(type, dataset, scope),
          [_ | _] = findings <- EmptyListMembers.findings(content, schema) do
       {:error, {:empty_list_members, EmptyListMembers.error_map(findings)}}
     else

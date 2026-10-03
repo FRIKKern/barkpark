@@ -105,6 +105,10 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"searchable_text_too_large/unlocated",
        {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
        [:details]},
+      # Owner ruling #47: publish refuses an empty list row.
+      {"empty_list_members",
+       {:error, {:empty_list_members, %{"keywords" => ["Keywords row 3 is empty"]}}},
+       "validation_failed", 422, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},
