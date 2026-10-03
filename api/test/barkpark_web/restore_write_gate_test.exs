@@ -73,6 +73,29 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
 
       assert Jason.decode!(resp.resp_body)["restored"] == true
     end
+
+    # task-1f6aff0371027b5c: the restore wrote `drafts.<rev.doc_id>` under the
+    # CALLER's type, never compared with the revision's own type, so a `post`
+    # revision restored with `type: author` minted an `author` draft holding
+    # the post's content.
+    test "a revision restored under another type is refused, nothing written", %{
+      conn: conn,
+      rev_id: rev_id
+    } do
+      Content.upsert_schema(
+        %{"name" => "author", "title" => "Author", "visibility" => "public", "fields" => []},
+        "test"
+      )
+
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer barkpark-dev-token")
+        |> put_req_header("content-type", "application/json")
+        |> post("/v1/data/revision/test/#{rev_id}/restore", Jason.encode!(%{type: "author"}))
+
+      assert resp.status == 404, "a post revision restored as author: #{resp.status}"
+      assert {:error, :not_found} = Content.get_document("drafts.wg1", "author", "test")
+    end
   end
 
   # ── Scoped restore (/w/:ws/p/:project/...) ────────────────────────────────

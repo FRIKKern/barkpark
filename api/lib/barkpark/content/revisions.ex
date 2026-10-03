@@ -247,7 +247,8 @@ defmodule Barkpark.Content.Revisions do
   """
   def restore_revision(revision_id, type, dataset, opts \\ []) do
     with {:ok, rev} <- get_revision(revision_id, dataset, opts),
-         :ok <- assert_revision_dataset(rev, dataset) do
+         :ok <- assert_revision_dataset(rev, dataset),
+         :ok <- assert_revision_type(rev, type) do
       attrs = %{
         "doc_id" => Content.draft_id(rev.doc_id),
         "title" => rev.title,
@@ -266,6 +267,14 @@ defmodule Barkpark.Content.Revisions do
        do: :ok
 
   defp assert_revision_dataset(_rev, _dataset), do: {:error, :not_found}
+
+  # The restore writes `drafts.<rev.doc_id>` under the CALLER's `type`. A
+  # revision of one type restored under another created or overwrote a draft
+  # of the wrong type with that snapshot's content, skipping the type's own
+  # create path (task-1f6aff0371027b5c). Studio already refuses this
+  # (`revision_of_open_doc?`); the REST door now does too.
+  defp assert_revision_type(%Revision{type: rev_type}, type) when rev_type == type, do: :ok
+  defp assert_revision_type(_rev, _type), do: {:error, :not_found}
 
   # Mirrors `Barkpark.Content`'s private `scope_to_dataset/3` (concern K, still
   # on the facade). Resolves the read dataset_id through the facade's public
