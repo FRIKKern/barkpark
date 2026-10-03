@@ -558,9 +558,14 @@ defmodule BarkparkWeb.ShareController do
   defp workspace_admin?(conn, workspace_id),
     do: TenancyAuth.workspace_admin?(conn.assigns[:api_token], workspace_id)
 
-  # A token id is revocable when its row exists AND the caller is a workspace
-  # admin of the ROW's workspace. A row with no workspace_id is not revocable
-  # through this surface (nil is a denial, never a pass).
+  # A token id is revocable when its row exists, IS A SHARE-EDIT TOKEN
+  # (`share_scope` set), AND the caller is a workspace admin of the ROW's
+  # workspace. A row with no workspace_id is not revocable through this surface
+  # (nil is a denial, never a pass). The share-token clause is owner ruling #34
+  # item 3 (2026-10-03): API tokens minted before tenancy carry a backfilled
+  # Default workspace_id, so without it a Default admin could revoke other
+  # tenants' ordinary tokens through this door. Ordinary tokens are revoked
+  # through their own doors (`DELETE /v1/tokens/:id`, the members surface).
   #
   # THE `Repo.uuid_or_nil/1` BELOW STAYS — it is NOT the redundant wrapper the
   # sibling helper just shed, and it does not guard `Tenancy.Auth` at all. It
@@ -575,7 +580,8 @@ defmodule BarkparkWeb.ShareController do
   # (non-UUID) token id is a clean 404" test goes RED with a CastError.
   defp revocable_by?(conn, token_id) do
     with id when is_binary(id) <- Repo.uuid_or_nil(token_id),
-         %ApiToken{workspace_id: ws_id} <- Repo.get(ApiToken, id) do
+         %ApiToken{workspace_id: ws_id, share_scope: scope} when is_binary(scope) <-
+           Repo.get(ApiToken, id) do
       workspace_admin?(conn, ws_id)
     else
       _ -> false
