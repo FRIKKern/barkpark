@@ -839,6 +839,59 @@ defmodule BarkparkWeb.ChatControllerTest do
       assert json_conn(a1) |> get("/v1/chat/sessions/#{sid}?since=1.5") |> json_response(400)
     end
 
+    # ── epic on the show read (wsc-bl-epic-on-session-json, half 2) ─────────
+
+    test "the epic rides the SHOW read for a workflow session, same map as the list",
+         %{admin: a1, sid: sid} do
+      # a plain session: no workflow, so no epic key (absent, never null)
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      refute Map.has_key?(body, "epic")
+
+      # a LAUNCHER rail: its builder claims as epic-builder-*, the session holds
+      # nothing — the epic is reached through the rail label (half 1)
+      rail =
+        put_in(workflow_rail(), ["wf", "workflow"], [
+          %{"type" => "workflow_phase", "index" => 1, "title" => "Build"},
+          %{
+            "type" => "workflow_agent",
+            "phaseIndex" => 1,
+            "label" => "build:show-read-slice",
+            "state" => "progress",
+            "startedAt" => 100
+          }
+        ])
+
+      {:ok, _} = StudioChat.set_rail_snapshot(sid, rail)
+
+      # workflow present but nothing in the ledger: still no epic key
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+      refute Map.has_key?(body, "epic")
+
+      insert_ledger_task!("task-show-epic", "Show Epic", %{
+        "lifecycle_status" => "in_progress",
+        "wave_status" => "wave 2 complete — grade A-"
+      })
+
+      insert_ledger_task!("task-show-slice", "Show read slice", %{
+        "lifecycle_status" => "in_progress",
+        "parent_id" => "task-show-epic",
+        "claim" => %{"worker" => "epic-builder-show-read-slice"}
+      })
+
+      body = json_conn(a1) |> get("/v1/chat/sessions/#{sid}") |> json_response(200)
+
+      assert body["epic"] == %{
+               "id" => "task-show-epic",
+               "title" => "Show Epic",
+               "slices_done" => 0,
+               "slices_total" => 1,
+               "wave_status" => "wave 2 complete — grade A-"
+             }
+
+      # one projection, two wires: the list row carries the identical map
+      assert sidebar_entry(a1, sid)["epic"] == body["epic"]
+    end
+
     # ── herd show-widen (herd charter D65h) ──────────────────────────────────
 
     test "carries agent_state/agent_state_at — a single-session poller needs no sidebar (D65h)",

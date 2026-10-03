@@ -56,7 +56,7 @@ defmodule Barkpark.StudioChat do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.StudioChat.{McpChip, Message, Session}
+  alias Barkpark.StudioChat.{AgentTaskJoin, McpChip, Message, Session}
   alias Barkpark.StudioChat.Runtime
 
   # Longest sidebar preview we keep denormalised on the session row.
@@ -1935,6 +1935,11 @@ defmodule Barkpark.StudioChat do
   deliberately ABSENT (D8 — no data source exists anywhere). Rides existing
   plumbing only: plain Repo reads, zero new PubSub topics.
 
+  A LAUNCHER session holds no claim of its own (its builders claim as
+  `epic-builder-<slug>`), so when the held-claim hop finds nothing the epic is
+  reached through the session's own rail instead: builder label → agent↔task
+  join → task → `parent_id` (see `epic_parent_id/3`).
+
   `slices_done` counts terminal children (`done` + `cancelled` — the
   compactor's terminal set): a cancelled slice no longer blocks the wave, so
   the line converges to n/n instead of sticking forever short.
@@ -1982,8 +1987,7 @@ defmodule Barkpark.StudioChat do
   def epic_goal(provider, session_id) do
     ws = epic_read_workspace_id(session_id)
 
-    with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
-         parent_id when is_binary(parent_id) <- held_task_parent_id(worker, ws),
+    with parent_id when is_binary(parent_id) <- epic_parent_id(provider, session_id, ws),
          %Document{} = epic <- published_task_doc(parent_id, ws) do
       {done, total} = epic_slice_counts(parent_id, ws)
       content = epic.content || %{}
@@ -2057,6 +2061,110 @@ defmodule Barkpark.StudioChat do
   end
 
   defp epic_read_workspace_id(_), do: nil
+
+  # ── which epic: two paths, one degrade rule (wsc-bl-epic-on-session-json) ──
+  #
+  # PATH 1, the session's OWN claim: the newest parented in_progress slice its
+  # provider-scoped worker holds. This is the only path that existed, and it
+  # can never fire for the session people actually watch: a bp-epic-cycle or
+  # wild-bulk LAUNCHER spawns its builders as Task-tool subagents that claim
+  # under their own `epic-builder-<slug>` workers, so the launcher holds no
+  # slice at all (measured at filing: 0/4 live workflow sessions carried epic).
+  #
+  # PATH 2, the launcher's RAIL (ruled by the D46 steer paper
+  # wsc-steer-fleet-design §4: this row "RIDES the join"): the session's own
+  # rail_snapshot names its builders by label, the agent↔task join resolves each
+  # label to the ONE task it names, and those tasks' `parent_id` is the epic.
+  # Same helper as the Doing strip (`StudioChat.AgentTaskJoin`), same
+  # degrade-on-ambiguity: a label that names zero or several rows contributes
+  # nothing, and builders that resolve to MORE THAN ONE parent resolve no epic
+  # at all — a wrong epic line is worse than none.
+  defp epic_parent_id(provider, session_id, ws) do
+    with worker when is_binary(worker) <- Runtime.worker_id(provider, session_id),
+         parent_id when is_binary(parent_id) <- held_task_parent_id(worker, ws) do
+      parent_id
+    else
+      _ -> launcher_epic_parent_id(session_id, ws)
+    end
+  end
+
+  defp launcher_epic_parent_id(session_id, ws) do
+    labels = session_id |> session_rail_snapshot() |> AgentTaskJoin.rail_agent_labels()
+
+    keys =
+      labels
+      |> Enum.flat_map(fn label ->
+        case AgentTaskJoin.label_key(label) do
+          {:ok, key} -> [key]
+          :error -> []
+        end
+      end)
+      |> Enum.uniq()
+
+    with [_ | _] <- keys,
+         index = keys |> launcher_candidate_rows(ws) |> AgentTaskJoin.index(),
+         [parent_id] <- joined_parent_ids(labels, index) do
+      parent_id
+    else
+      _ -> nil
+    end
+  end
+
+  defp joined_parent_ids(labels, index) do
+    labels
+    |> Enum.flat_map(fn label ->
+      case AgentTaskJoin.join(index, label) do
+        {:ok, %{row: %{parent_id: parent_id}}} when is_binary(parent_id) -> [parent_id]
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp session_rail_snapshot(session_id) when is_binary(session_id) do
+    case Ecto.UUID.cast(session_id) do
+      {:ok, id} ->
+        from(s in Session, where: s.id == ^id, select: s.rail_snapshot) |> Repo.one()
+
+      :error ->
+        nil
+    end
+  end
+
+  defp session_rail_snapshot(_), do: nil
+
+  # Every task row whose title slugs to one of `keys` — in ANY lifecycle and
+  # draft or not, because the join must see every row a label could name (a
+  # done sibling whose 40-character emitter slug collides with a live one is
+  # what makes a label AMBIGUOUS; dropping it would turn that into a confident
+  # wrong match). The SQL is a PREFILTER only: it reproduces the emitter slug
+  # (lowercase, non-[a-z0-9] runs to one '-', trim, 40-char slice) and the
+  # uncapped slug so the candidate set stays small, and
+  # `AgentTaskJoin.index/1` then recomputes both in Elixir and decides.
+  defp launcher_candidate_rows(keys, ws) do
+    from(d in Document,
+      where: d.type == "task",
+      where:
+        fragment(
+          "trim(both '-' from regexp_replace(lower(coalesce(?, ?->>'title', '')), '[^a-z0-9]+', '-', 'g')) = ANY(?::text[]) OR left(trim(both '-' from regexp_replace(lower(coalesce(?, ?->>'title', '')), '[^a-z0-9]+', '-', 'g')), 40) = ANY(?::text[])",
+          d.title,
+          d.content,
+          ^keys,
+          d.title,
+          d.content,
+          ^keys
+        ),
+      order_by: [asc: d.doc_id],
+      limit: 500,
+      select: %{
+        doc_id: d.doc_id,
+        title: fragment("coalesce(?, ?->>'title')", d.title, d.content),
+        parent_id: fragment("?->>'parent_id'", d.content)
+      }
+    )
+    |> scope_tasks_to_workspace(ws)
+    |> Repo.all()
+  end
 
   # The newest published in_progress claim this worker holds that carries a
   # parent hop. Draft twins never count (the claim lives on the published row).

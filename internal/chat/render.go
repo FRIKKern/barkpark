@@ -1016,8 +1016,8 @@ func (m Model) workflowPanelLines() []string {
 // failures (j.Failed otherwise renders nowhere at summary level — a 'completed'
 // entry can carry failed agents), and the epic grade line ONLY when the cached
 // picker Epic's wave_status heartbeat carries 'complete — grade' (task-spine
-// truth already on the list wire — ZERO new wire; the richer epic-on-session
-// ride is backlog wsc-bl-epic-on-session-json). An interrupted wave is stated
+// truth: the SHOW read's epic first, the picker cache as fallback — see
+// cachedEpic). An interrupted wave is stated
 // plainly and NEVER dressed with a resultPreview snippet. nil while live.
 func (m Model) workflowResultBox(j WorkflowJourney) []string {
 	if j.EntryStatus == "live" {
@@ -1046,11 +1046,15 @@ func (m Model) workflowResultBox(j WorkflowJourney) []string {
 	return out
 }
 
-// cachedEpic resolves the open session's epic-goal line from the PICKER cache —
-// the list wire already carries Epic per session row (wsc D9/D12), so the grade
-// line costs zero new wire. nil when the cache has no row (or no epic) for the
-// open session — the box then simply omits the grade line, never fabricates one.
+// cachedEpic resolves the open session's epic-goal line. The SHOW read's epic
+// (State.Epic, refreshed at every full refetch — wsc-bl-epic-on-session-json)
+// wins; the PICKER cache (the list wire's per-row Epic, wsc D9/D12) is the
+// fallback for an older server that does not emit it. nil when neither has one
+// — the box then simply omits the grade line, never fabricates one.
 func (m Model) cachedEpic() *EpicGoal {
+	if m.st.Epic != nil {
+		return m.st.Epic
+	}
 	for _, s := range m.sessions {
 		if s.ID == m.st.SessionID {
 			return s.Epic
