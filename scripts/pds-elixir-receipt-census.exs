@@ -1920,9 +1920,9 @@ defmodule PDS.Census do
       note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs `the group vanishes between the read and the delete → 404, never 204` deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067", callee_fp: "58639899",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067", callee_fp: "1045515",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
-      note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+      note: "RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1): the ONE-HOP callee Scim.deprovision_user/3 now degrades a hard delete to the org-scoped soft path when the user still holds a seat outside the org — callee_fp 58639899 -> 1045515, def_fp unchanged. The 204 still means `this org's deprovision took`: the transaction drops the org's seats and PATs either way, and `HARD (DELETE) from org A of a user seated in org B degrades to SOFT (ruling #1)` reads the stored rows back (org B seat and PAT alive, org A PAT dead, org A GET 404). Verdict stands. Original note: the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
     # ------------------------------------------------------------------ THE SIX SCIM
     # WRITE ROUTES (pds-w39-status-only-receipts). They sat in @routed_excluded as
     # :status_only_receipt — the wave-38 population hole, named by the wish as "the
@@ -1939,11 +1939,11 @@ defmodule PDS.Census do
     # search_controller.ex correction/2 row above, which removed two).
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "case Scim.provision_user(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "70214860", callee_fp: "90246701",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "42182949", callee_fp: "106034506",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
                  "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
-      note: "THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
+      note: "RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1, SCIM adopts only accounts the org can vouch for): create/2 gained ONE error arm, `{:error, :email_not_owned_by_org}` -> a SCIM 409 scimType uniqueness, and its callee Scim.provision_user/2 now routes an existing account through Sso.org_adopt/3. That moved def_fp 70214860 -> 42182949 and callee_fp 90246701 -> 106034506. The 201 arm is byte-identical and still renders the `user` the write returned; the new arm is a SCIM error, so the 201 stays unreachable without a provisioned (or vouched-for adopted) row. scim_users_controller_test.exs re-runs GREEN (35 tests), including `org A's SCIM token cannot adopt org B's existing user (409, no seat)`. THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
       anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131", callee_fp: "22175733",

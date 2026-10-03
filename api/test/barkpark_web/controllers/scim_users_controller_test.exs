@@ -85,6 +85,9 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
 
       # audited
       assert Repo.exists?(from e in Event, where: e.action == "user_deprovisioned")
+
+      # a user seated only in this org is HARD-deleted, as before (ruling #1)
+      refute Accounts.get_user(id)
     end
 
     test "PATCH active:false deprovisions (soft: revokes access, keeps the row)" do
@@ -220,6 +223,84 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       assert scim(token_b) |> delete("/scim/v2/Users/#{user.id}") |> json_response(404)
       # A still can
       assert scim(token_a) |> get("/scim/v2/Users/#{user.id}") |> json_response(200)
+    end
+  end
+
+  # OWNER RULING 2026-10-03 #1 (task-9c0862560b65fc8b, task-ea5057595a64255e):
+  # SCIM adopts an EXISTING account only under the #21297 SSO rule — already
+  # seated in the org, or on one of its verified domains — and a hard delete
+  # of a user seated outside the org only drops this org's seats.
+  describe "adoption of existing accounts (ruling #1)" do
+    defp verify_domain!(org, domain) do
+      {:ok, d} = Barkpark.Sso.Domains.request_verification(org, domain)
+
+      d
+      |> Barkpark.Sso.OrgDomain.changeset(%{verified_at: DateTime.utc_now()})
+      |> Repo.update!()
+    end
+
+    test "org A's SCIM token cannot adopt org B's existing user (409, no seat)" do
+      a = org_with_ws("adopt-a")
+      b = org_with_ws("adopt-b")
+      provision(b.token, "ceo@othercorp.example") |> json_response(201)
+      victim = Accounts.get_user_by_email("ceo@othercorp.example")
+
+      resp = provision(a.token, "ceo@othercorp.example") |> json_response(409)
+      assert resp["scimType"] == "uniqueness"
+
+      refute Repo.exists?(
+               from m in Membership,
+                 where: m.principal_id == ^victim.id and m.workspace_id == ^a.ws.id
+             )
+
+      # …so org A can neither see nor delete them, and the account survives.
+      assert scim(a.token) |> delete("/scim/v2/Users/#{victim.id}") |> json_response(404)
+      assert Accounts.get_user(victim.id)
+    end
+
+    test "an account registered outside any org is not adopted either" do
+      a = org_with_ws("adopt-solo")
+
+      {:ok, _} =
+        Accounts.register_user(%{
+          email: "operator@instance.example",
+          password: "correct-horse-ok"
+        })
+
+      assert provision(a.token, "operator@instance.example") |> json_response(409)
+    end
+
+    test "an existing account on the org's VERIFIED domain is adopted" do
+      a = org_with_ws("adopt-domain")
+      verify_domain!(a.org, "adopt-domain.example")
+
+      {:ok, existing} =
+        Accounts.register_user(%{email: "dev@adopt-domain.example", password: "correct-horse-ok"})
+
+      body = provision(a.token, "dev@adopt-domain.example") |> json_response(201)
+      assert body["id"] == existing.id
+    end
+
+    test "re-provisioning a user already seated in the org stays idempotent" do
+      a = org_with_ws("adopt-again")
+      first = provision(a.token, "again@adopt-again.example") |> json_response(201)
+      second = provision(a.token, "again@adopt-again.example") |> json_response(201)
+      assert first["id"] == second["id"]
+    end
+
+    test "an existing account seated in the org by invitation is adopted" do
+      a = org_with_ws("adopt-seated")
+
+      {:ok, existing} =
+        Accounts.register_user(%{
+          email: "contractor@elsewhere.example",
+          password: "correct-horse-ok"
+        })
+
+      {:ok, _} = Tenancy.Auth.create_membership(a.ws.id, existing.id, "member", "user")
+
+      body = provision(a.token, "contractor@elsewhere.example") |> json_response(201)
+      assert body["id"] == existing.id
     end
   end
 
@@ -424,8 +505,11 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
   # UserSession is an identity bearer no org kill can partially revoke,
   # fail-closed); owner PATs are org-scoped on SOFT deprovision (org B's
   # workspace-bound PATs survive; NULL-workspace tokens die, fail-closed) and
-  # global on HARD (the FK nilify would orphan any survivor). Every assertion
-  # below is a DIRECT Repo/verify read, never a second endpoint.
+  # global on HARD (the FK nilify would orphan any survivor). OWNER RULING
+  # 2026-10-03 #1 amends the HARD arm: a user still seated outside the org is
+  # never hard-deleted — the DELETE degrades to SOFT, so the account, org B's
+  # seat and org B's PAT survive. Every assertion below is a DIRECT
+  # Repo/verify read, never a second endpoint.
   describe "cross-org deprovision blast radius (the differential)" do
     alias Barkpark.Accounts.UserSession
 
@@ -434,8 +518,12 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
       b = org_with_ws("#{tag}-b")
       email = "shared@#{tag}.com"
       provision(a.token, email) |> json_response(201)
-      provision(b.token, email) |> json_response(201)
       user = Accounts.get_user_by_email(email)
+      # Ruling #1: org B cannot ADOPT org A's user over SCIM; the legitimate
+      # two-org shape is a seat the user holds in B (an accepted invitation),
+      # after which B's SCIM provision adopts the seated account.
+      {:ok, _} = Tenancy.Auth.create_membership(b.ws.id, user.id, "member", "user")
+      provision(b.token, email) |> json_response(201)
 
       {:ok, session} = Accounts.create_user_session_token(user)
 
@@ -502,15 +590,57 @@ defmodule BarkparkWeb.ScimUsersControllerTest do
              )
     end
 
-    test "HARD (DELETE) from org A: everything dies — the FK nilify would orphan any survivor" do
-      %{a: a, user: user, pat_a: {raw_a, _}, pat_b: {raw_b, pat_b}} = two_org_user("hard-blast")
+    test "HARD (DELETE) from org A of a user seated in org B degrades to SOFT (ruling #1)" do
+      %{a: a, b: b, user: user, pat_a: {raw_a, _}, pat_b: {raw_b, pat_b}} =
+        two_org_user("hard-blast")
 
       assert scim(a.token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
 
-      # Global on hard, ruled: org B's PAT is revoked too (never orphaned live).
-      assert %ApiToken{revoked_at: %DateTime{}} = Repo.get(ApiToken, pat_b.id)
+      # The account survives, with its org-B seat and org-B PAT.
+      assert Accounts.get_user(user.id)
+      assert %ApiToken{revoked_at: nil} = Repo.get(ApiToken, pat_b.id)
+      assert {:ok, %ApiToken{}} = Auth.verify_token(raw_b)
+
+      assert Repo.exists?(
+               from m in Membership,
+                 where:
+                   m.principal_type == "user" and m.principal_id == ^user.id and
+                     m.workspace_id == ^b.ws.id
+             )
+
+      # Org A's PAT and seat are gone, and org A no longer sees the user.
       assert {:error, :unauthorized} = Auth.verify_token(raw_a)
-      assert {:error, :unauthorized} = Auth.verify_token(raw_b)
+      assert scim(a.token) |> get("/scim/v2/Users/#{user.id}") |> json_response(404)
+
+      ev =
+        Repo.one(
+          from e in Event,
+            where: e.action == "user_deprovisioned" and e.subject == ^user.id,
+            order_by: [desc: e.occurred_at],
+            limit: 1
+        )
+
+      assert ev.metadata["hard_requested"] == true
+      assert ev.metadata["hard"] == false
+    end
+
+    test "HARD (DELETE) of a user seated only in this org: the account and every PAT die" do
+      a = org_with_ws("hard-only")
+      provision(a.token, "only@hard-only.example") |> json_response(201)
+      user = Accounts.get_user_by_email("only@hard-only.example")
+
+      {:ok, {raw, pat}} =
+        Auth.create_personal_access_token("loose", ["read"],
+          role: "member",
+          workspace_id: nil,
+          owner_user_id: user.id
+        )
+
+      assert scim(a.token) |> delete("/scim/v2/Users/#{user.id}") |> response(204)
+
+      refute Accounts.get_user(user.id)
+      assert %ApiToken{revoked_at: %DateTime{}} = Repo.get(ApiToken, pat.id)
+      assert {:error, :unauthorized} = Auth.verify_token(raw)
     end
   end
 end
