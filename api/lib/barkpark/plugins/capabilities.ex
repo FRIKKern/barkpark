@@ -2390,7 +2390,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "token.ls",
         "token",
         "ls",
-        "The token inventory for this workspace — label, permissions, revoked/expiry state.",
+        "The token inventory for this workspace — label, permissions, revoked/expiry state, age, last use and rotation due date.",
         "GET",
         "/v1/tokens",
         "scoped_admin",
@@ -2427,9 +2427,16 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("id", true, "string", "Token id (from token ls).")],
         flags: [
           flag(
+            "grace",
+            "string",
+            "How long the old token keeps working: 90s, 30m, 24h or 7d (max 7d; default 24h).",
+            default: "24h"
+          ),
+          flag("now", "bool", "Revoke the old token immediately (grace 0).", default: false),
+          flag(
             "grace_seconds",
             "int",
-            "Seconds the old token keeps working (0 = revoke now; max 604800).",
+            "Seconds the old token keeps working (0 = revoke now; max 604800). Prefer --grace.",
             default: 86_400
           )
         ],
