@@ -90,6 +90,26 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
     |> get("/v1/capabilities" <> query)
   end
 
+  # task-46f2aa67086062b7: doc.patch declared --file twice (two merges each
+  # added it) and `bp doc patch --help` listed it twice. Nothing refused the
+  # class, so this walks EVERY command of the admin manifest, plugins
+  # included.
+  describe "no command declares a flag or argument name twice" do
+    test "every command's flag names and arg names are unique", %{conn: conn} do
+      cmds = capabilities(conn)["commands"]
+      assert length(cmds) > 50, "the walk saw only #{length(cmds)} commands"
+
+      dups =
+        for c <- cmds,
+            {kind, items} <- [{"flag", c["flags"] || []}, {"arg", c["args"] || []}],
+            names = Enum.map(items, & &1["name"]),
+            dup <- Enum.uniq(names -- Enum.uniq(names)),
+            do: "#{c["id"]} #{kind} #{dup}"
+
+      assert dups == [], "commands declare a name twice: #{Enum.join(dups, "; ")}"
+    end
+  end
+
   describe "doc.query manifest contract (BUG 1)" do
     test "doc.query flag is named 'filter', not 'query'", %{conn: conn} do
       manifest = capabilities(conn)
