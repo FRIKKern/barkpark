@@ -1,13 +1,18 @@
 // Live regression for @barkpark/core SDK against prod API.
 //
 // Proves defect #16 (query) and defect #18 (doc) are fixed.
-// Run: node scripts/live-regression.mjs  (from js/packages/core)
+// Run: BARKPARK_API_URL=https://<box> node scripts/live-regression.mjs  (from js/packages/core)
+// No default target: the old default box (89.167.28.206) was deleted 2026-10-03.
 //
 // Imports the freshly built package from ./dist — if you change src, run `pnpm build` first.
 
 import { createClient } from '../dist/index.mjs'
 
-const PROJECT_URL = process.env.BARKPARK_API_URL ?? 'http://89.167.28.206:4000'
+const PROJECT_URL = process.env.BARKPARK_API_URL
+if (!PROJECT_URL) {
+  console.error('live-regression: set BARKPARK_API_URL to the box to test (no default target)')
+  process.exit(2)
+}
 const DATASET = 'production'
 const TOKEN = process.env.BARKPARK_TOKEN ?? 'barkpark-dev-token'
 

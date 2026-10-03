@@ -5,7 +5,7 @@ Status: accepted 2026-09-16 · closes `ssw11-bl-capabilities-version-is-a-placeh
 
 ## The measurement
 
-Prod, `89.167.28.206`, 2026-09-16:
+Prod, `89.167.28.206` (the old prod box, deleted 2026-10-03), 2026-09-16:
 
 | Source | Field | Value |
 |---|---|---|

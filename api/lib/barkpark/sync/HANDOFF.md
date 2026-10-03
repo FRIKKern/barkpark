@@ -91,7 +91,7 @@ export BARKPARK_SYNC_DATASET=production
 export BARKPARK_SYNC_ENABLED=1
 # restart the dev server so application.ex splices the worker; watch logs tail from cursor 4179
 ```
-Live access is via `ssh root@89.167.28.206` (key `~/.ssh/id_ed25519_frikkern`); a read token can be minted on the box (see `Barkpark.Auth.create_token/4` / `PublicRead`). Do prod work read-only.
+Live access was via SSH to the old prod box, deleted 2026-10-03; mint a read token on the box that now serves the workspace (see `Barkpark.Auth.create_token/4` / `PublicRead`). Do prod work read-only.
 
 ## Next phases (from the paper)
 

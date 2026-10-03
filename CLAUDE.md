@@ -49,9 +49,9 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 | Meta | core vs plugin / shapes / product era / process freeze | `docs/contracts/product-era.md` |
 | Meta | "is X deferred?" / anything else | `docs/decisions/deferred.md` / `docs/INDEX.md` |
 
-## Prod micro-block
+## Prod hosts
 
-`89.167.28.206` · `/opt/barkpark` · systemd `barkpark.service` · deploy = `git pull` ON THE BOX (post-merge hook rebuilds) — canonical: `docs/ops/PROD_OPS.md`. **Not a `deploy.yml` target** (its only SSH hosts are `CP_HOST`/`GUERRILLA_HOST`), so a merge is not live until pulled.
+Content instance: guerrilla `157.180.90.121` · control plane: barkpark-cp `178.105.92.191`. `deploy.yml` deploys the affected host on merge — canonical: `docs/ops/PROD_OPS.md`. The old box `89.167.28.206` was deleted 2026-10-03; mentions of it are history.
 
 ## Quick commands
 
@@ -60,7 +60,7 @@ Load exactly ONE card, read it fully, follow its Code anchors. Do not load a sec
 Smoke test. A 200 proves the box ANSWERS, never that your merge shipped — ask which commit:
 
 ```bash
-curl -s http://89.167.28.206/status.json | jq -r .commit  # what the box RUNS
+curl -s https://guerrilla.barkpark.cloud/status.json | jq -r .commit  # what guerrilla RUNS
 curl -s https://barkpark.cloud/health | jq -r .git_sha    # deploy.yml's check: IDENTITY, not liveness
 ```
 

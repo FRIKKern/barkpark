@@ -1,6 +1,8 @@
 .PHONY: deploy rebuild restart status logs seed seed-check setup dev update doctor reap-test-dbs test clean tui api domain-cutover precheck web web-build hooks format format-check cli-build cli-install cli-release cli-checksums cli-assets-sync cli-assets-check provisioner-catalog-sync cloud-preview cloud-shots cloud-format-check wasm wasm-siblings-check
 
-SSH_HOST ?= root@89.167.28.206
+# No default host: the old prod box (barkpark-cms) was deleted on 2026-10-03.
+# `make domain-cutover` needs SSH_HOST=root@<box> on its command line.
+SSH_HOST ?=
 PROD_APP_DIR ?= /opt/barkpark
 
 # `make deploy`'s own post-rebuild liveness poll. Defaults are the prod values;
@@ -379,8 +381,13 @@ deploy: ## Deploy: pull main — the .githooks/post-merge hook does the clean re
 domain-cutover: ## Update prod PHX_HOST=<DOMAIN> + PHX_SCHEME=https, restart, verify
 	@if [ -z "$(DOMAIN)" ]; then \
 	  echo "ERROR: DOMAIN is required."; \
-	  echo "  Usage: make domain-cutover DOMAIN=api.barkpark.cloud"; \
+	  echo "  Usage: make domain-cutover DOMAIN=<domain> SSH_HOST=root@<box>"; \
 	  echo "  See docs/ops/studio-nav-bug-2026-04-19.md (task #11)."; \
+	  exit 2; \
+	fi
+	@if [ -z "$(SSH_HOST)" ]; then \
+	  echo "ERROR: SSH_HOST is required (no default since the old prod box was deleted)."; \
+	  echo "  Usage: make domain-cutover DOMAIN=<domain> SSH_HOST=root@<box>"; \
 	  exit 2; \
 	fi
 	@echo ">> Updating $(SSH_HOST):$(PROD_APP_DIR)/.env — PHX_HOST=$(DOMAIN) PHX_SCHEME=https"
