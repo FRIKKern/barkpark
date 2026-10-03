@@ -517,4 +517,66 @@ defmodule BarkparkWeb.TokenRotateTest do
       assert row["rotation_overdue"] == false
     end
   end
+
+  # ── task-7d4d405e0ee4bcbf criterion 2: rotate must not break Cloud ───────────
+
+  describe "the admin credential Barkpark Cloud stores" do
+    defp cloud_held!(ws) do
+      raw = "cloud-#{System.unique_integer([:positive])}"
+
+      {:ok, t} =
+        Auth.create_token(raw, Auth.cloud_admin_label(), @dataset, ["read", "write", "admin"])
+
+      {:ok, _} = TenancyAuth.create_membership(ws.id, t.id, "admin", "api_token")
+      {raw, t}
+    end
+
+    test "is refused by default with a 409 naming bp instance admin-token, and nothing changes",
+         ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {cloud_raw, cloud} = cloud_held!(ws)
+
+      resp = rotate(admin_raw, ws, project, cloud.id, %{"grace" => "1h"})
+
+      assert resp.status == 409
+      err = Jason.decode!(resp.resp_body)["error"]
+      assert err["reason"] == "cloud_held_credential"
+      assert err["message"] =~ "Barkpark Cloud"
+      assert err["hint"] =~ "bp instance admin-token"
+      assert err["hint"] =~ "--force"
+
+      # Untouched: no successor, no shortened expiry, Cloud's secret still works.
+      assert tokens_labelled(Auth.cloud_admin_label()) == 1
+      assert Repo.get!(ApiToken, cloud.id).expires_at == nil
+      assert read_status(cloud_raw, ws, project) not in @denials
+    end
+
+    test "--force rotates it, relabels the successor and records the override", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_cloud_raw, cloud} = cloud_held!(ws)
+
+      body = rotate(admin_raw, ws, project, cloud.id, %{"force" => "true"}) |> json_response(201)
+
+      # Cloud keeps the OLD secret, so the successor must not claim to be Cloud's.
+      assert body["label"] == Auth.cloud_admin_label() <> " (rotated)"
+      assert read_status(body["token"], ws, project) not in @denials
+
+      event =
+        Repo.one!(
+          from e in Barkpark.Audit.Event,
+            where: e.action == "token_rotated" and e.subject == ^cloud.id
+        )
+
+      assert event.metadata["forced_cloud_held"] == true
+    end
+
+    test "a token with the label but without admin is not treated as Cloud's", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      raw = "lookalike-#{System.unique_integer([:positive])}"
+      {:ok, t} = Auth.create_token(raw, Auth.cloud_admin_label(), @dataset, ["read"])
+      {:ok, _} = TenancyAuth.create_membership(ws.id, t.id, "member", "api_token")
+
+      assert rotate(admin_raw, ws, project, t.id).status == 201
+    end
+  end
 end

@@ -2434,6 +2434,12 @@ defmodule Barkpark.Plugins.Capabilities do
           ),
           flag("now", "bool", "Revoke the old token immediately (grace 0).", default: false),
           flag(
+            "force",
+            "bool",
+            "Rotate even the admin credential Barkpark Cloud stores (Cloud loses access when the grace ends).",
+            default: false
+          ),
+          flag(
             "grace_seconds",
             "int",
             "Seconds the old token keeps working (0 = revoke now; max 604800). Prefer --grace.",

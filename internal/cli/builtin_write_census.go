@@ -249,6 +249,14 @@ var builtinWriteCensus = []builtinWriteReceipt{
 			"`permissions` and a non-empty `workspace`) — the receipt's whole claim is which TIER landed in which " +
 			"WORKSPACE, so a body that names neither must not be able to print it.",
 	},
+	{
+		File: "internal/cli/instance_admin_token_cmd.go", Func: "runInstanceAdminToken", Sites: 1,
+		Endpoint: "POST /w/:ws/p/:project/v1/tokens/elevated (bearer: Cloud's stored instance credential)", Class: machineRendered,
+		Disposition: dispScreened,
+		Why: "the 2xx runs through screenBuiltinWriteReceipt, then parseTokenMintReceipt REQUIRES the server's `token`, " +
+			"`permissions` and `workspace` before anything is written to a sink or the config — a body that names " +
+			"none of them cannot install a credential or print a receipt.",
+	},
 	// ---- task create -----------------------------------------------------
 	{
 		File: "internal/cli/tasks_create_cmd.go", Func: "sendTaskMutations", Sites: 1,

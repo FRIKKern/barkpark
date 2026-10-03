@@ -400,12 +400,13 @@ func Execute(args []string) int {
 	case "instance":
 		// `bp instance credentials <id>` — retrieve the per-instance admin token the
 		// platform minted at provision time (instance-admin-token), team-admin-gated.
+		// `bp instance admin-token <id>` — use it only to mint a NEW admin token.
 		// Requires `bp login`.
 		if g.help {
 			printInstanceHelp(out)
 			return exitOK
 		}
-		return runInstance(out, rest[1:])
+		return runInstance(out, g, rest[1:])
 	case "sites":
 		// `bp sites <verb> …` — the P6 hosted-site surface (create / list /
 		// deployments / env / domain / logs). Requires `bp login`.

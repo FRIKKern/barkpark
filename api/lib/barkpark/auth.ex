@@ -459,6 +459,28 @@ defmodule Barkpark.Auth do
   @rotation_default_grace 24 * 3600
   @rotation_max_grace 7 * 24 * 3600
 
+  # The label the Cloud provisioner gives the instance admin credential it then
+  # stores encrypted as the instance's admin token (internal/cli/cloud/warmpool.go
+  # `adminTokenStep`; `GET /v1/barkparks/:id/credentials` hands it back). The
+  # instance cannot see Cloud's copy, so this provision-time label is the signal
+  # that a token is the one Cloud holds (task-7d4d405e0ee4bcbf). An adopted box
+  # whose credential was minted by hand does not carry it.
+  @cloud_admin_label "barkpark cloud admin"
+
+  @doc false
+  def cloud_admin_label, do: @cloud_admin_label
+
+  @doc """
+  True when `token` is the instance admin credential Barkpark Cloud stores:
+  the provision-time label `#{inspect(@cloud_admin_label)}` on a token holding
+  `admin`. Rotating or revoking it leaves Cloud holding a dead secret.
+  """
+  @spec cloud_held_admin?(term()) :: boolean()
+  def cloud_held_admin?(%ApiToken{label: @cloud_admin_label} = token),
+    do: has_permission?(token, "admin")
+
+  def cloud_held_admin?(_token), do: false
+
   @doc false
   def rotation_default_grace, do: @rotation_default_grace
   @doc false
@@ -508,6 +530,17 @@ defmodule Barkpark.Auth do
 
   `{:error, :not_rotatable}` — revoked, expired, or not an `api`-kind token.
   `{:error, :invalid_grace}` — not an integer in `0..#{@rotation_max_grace}`.
+
+  ## The Cloud-held credential
+
+  `{:error, :cloud_held_credential}` — the token is the instance admin
+  credential Barkpark Cloud stores (`cloud_held_admin?/1`). Rotating it would
+  leave Cloud with a secret that dies at the end of the grace window, which is
+  how the guerrilla box lost Cloud's access. `force: true` rotates it anyway;
+  the successor is then labelled `"#{@cloud_admin_label} (rotated)"`, because
+  Cloud does not hold it, and the audit row records `"forced_cloud_held"`. The
+  way to get a second admin token without touching Cloud's is the
+  admin-to-admin mint (`mint_delegated_token/3`, `bp instance admin-token`).
   """
   @spec rotate_token(binary(), ApiToken.t(), keyword()) ::
           {:ok, {binary(), ApiToken.t(), ApiToken.t()}}
@@ -515,6 +548,7 @@ defmodule Barkpark.Auth do
   def rotate_token(token_id, %ApiToken{} = actor, opts \\ []) when is_binary(token_id) do
     grace = Keyword.get(opts, :grace_seconds, @rotation_default_grace)
     workspace_id = Keyword.get(opts, :workspace_id)
+    force? = Keyword.get(opts, :force, false) == true
 
     with :ok <- validate_grace(grace),
          uuid when is_binary(uuid) <- Repo.uuid_or_nil(token_id) || {:error, :not_found} do
@@ -534,13 +568,17 @@ defmodule Barkpark.Auth do
         with %ApiToken{} <- old || {:error, :not_found},
              :ok <- rotatable(old, now),
              :ok <- within_ceiling(old, seats, actor),
+             forced_cloud? = cloud_held_admin?(old),
+             :ok <-
+               if(forced_cloud? and not force?, do: {:error, :cloud_held_credential}, else: :ok),
              raw = mint_raw(old),
-             {:ok, successor} <- insert_successor(old, raw),
+             {:ok, successor} <- insert_successor(old, raw, forced_cloud?),
              :ok <- copy_seats(seats, successor.id),
              retire_at = retire_at(old, now, grace),
              {:ok, old} <- old |> Ecto.Changeset.change(expires_at: retire_at) |> Repo.update(),
              {:ok, _job} <- enqueue_retire(old.id, retire_at),
-             {:ok, _event} <- audit_rotation(old, successor, actor, workspace_id, retire_at) do
+             {:ok, _event} <-
+               audit_rotation(old, successor, actor, workspace_id, retire_at, forced_cloud?) do
           {raw, successor, old}
         else
           {:error, reason} -> Repo.rollback(reason)
@@ -623,11 +661,15 @@ defmodule Barkpark.Auth do
     if is_nil(name), do: body, else: pat_token_prefix() <> body
   end
 
-  defp insert_successor(%ApiToken{} = old, raw) do
+  # A forced rotation of the Cloud-held credential gives the successor a label
+  # that no longer claims Cloud holds it — Cloud keeps the OLD secret.
+  defp insert_successor(%ApiToken{} = old, raw, forced_cloud?) do
+    label = if forced_cloud?, do: @cloud_admin_label <> " (rotated)", else: old.label
+
     %ApiToken{dataset_id: old.dataset_id}
     |> ApiToken.changeset(%{
       token_hash: ApiToken.hash_token(raw),
-      label: old.label,
+      label: label,
       name: old.name,
       kind: old.kind,
       dataset: old.dataset,
@@ -666,7 +708,7 @@ defmodule Barkpark.Auth do
   end
 
   # Ids and the window only — never a secret, never a hash.
-  defp audit_rotation(old, successor, actor, workspace_id, retire_at) do
+  defp audit_rotation(old, successor, actor, workspace_id, retire_at, forced_cloud?) do
     Audit.emit(%{
       category: "token",
       action: "token_rotated",
@@ -677,7 +719,8 @@ defmodule Barkpark.Auth do
       metadata: %{
         "old_token_id" => old.id,
         "new_token_id" => successor.id,
-        "old_token_expires_at" => DateTime.to_iso8601(retire_at)
+        "old_token_expires_at" => DateTime.to_iso8601(retire_at),
+        "forced_cloud_held" => forced_cloud?
       }
     })
   end

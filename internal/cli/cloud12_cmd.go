@@ -1699,7 +1699,7 @@ FLAGS
 // dance just to administer your own instance. The route is team-admin-gated and
 // team-scoped, so only an owner/admin of the owning team can read it. Requires
 // `bp login`.
-func runInstance(out *writer, args []string) int {
+func runInstance(out *writer, g globals, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printInstanceHelp(out)
@@ -1708,14 +1708,16 @@ func runInstance(out *writer, args []string) int {
 	}
 
 	if len(args) == 0 {
-		return useError(out, "usage", "bp instance credentials <id>", exitUsage)
+		return useError(out, "usage", "bp instance credentials <id> | bp instance admin-token <id>", exitUsage)
 	}
 
 	switch args[0] {
 	case "credentials", "creds":
 		return runInstanceCredentials(out, args[1:])
+	case "admin-token":
+		return runInstanceAdminToken(out, g, args[1:])
 	default:
-		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id>", args[0]), exitUsage)
+		return useError(out, "usage", fmt.Sprintf("unknown instance verb %q — try: bp instance credentials <id> or bp instance admin-token <id>", args[0]), exitUsage)
 	}
 }
 
@@ -1756,44 +1758,9 @@ func runInstanceCredentials(out *writer, args []string) int {
 		return exitAuth
 	}
 
-	// Team context resolution: an explicit --team (slug or UUID) wins, else the
-	// active team persisted by `bp team use` (cfg.CloudTeam). A slug is resolved
-	// to its UUID against the caller's membership list (GET /v1/me) because the
-	// control plane's get_team/1 is UUID-only — a slug can't be resolved
-	// server-side. An empty context is the plain, primary-team behaviour.
-	//
-	// CAVEAT (auth model): the X-Barkpark-Team header this sends is honoured only
-	// for SESSION-token auth — the `bp login` device flow mints a session token,
-	// so this switch works there. A personal access token (PAT) is hard-bound to
-	// its own pat.team_id server-side (auth.ex require_user_or_pat) and IGNORES
-	// the header, so `--team` has no effect under a PAT: use `bp login` for
-	// cross-team credential reads.
-	teamID := strings.TrimSpace(cfg.CloudTeam)
-	if t := strings.TrimSpace(teamArg); t != "" {
-		me, merr := cfg.CloudClient().Me(cloudCtx())
-		if merr != nil {
-			return cloudFail(out, "resolve team", merr)
-		}
-		match, found := resolveTeam(me.Teams, t)
-		if !found {
-			msg := fmt.Sprintf("not a member of team %q", t)
-			if names := teamHandles(me.Teams); names != "" {
-				msg += " — you can use: " + names
-			}
-			return useError(out, "failed", msg, exitGeneric)
-		}
-		teamID = match.ID
-	}
-
-	creds, err := cfg.CloudClient().GetCredentialsForTeam(cloudCtx(), id, teamID)
-	if err != nil {
-		// no_admin_token (404) is an expected, actionable state — surface it plainly.
-		if strings.Contains(err.Error(), "no_admin_token") {
-			return useError(out, "failed",
-				"no admin token stored for this instance yet (captured at provision time — a pre-existing instance may need a re-provision)",
-				exitGeneric)
-		}
-		return cloudFail(out, "instance credentials", err)
+	creds, code, ok := fetchInstanceCredentials(out, cfg, id, teamArg)
+	if !ok {
+		return code
 	}
 
 	if out.emitStructured(map[string]any{
@@ -1818,7 +1785,56 @@ func runInstanceCredentials(out *writer, args []string) int {
 	out.outf("Store this safely — it grants read/write/admin on this instance. Use it as the")
 	out.outf("bearer token for `bp` against this server (e.g. BARKPARK_API_TOKEN), or paste it into")
 	out.outf("Studio. It is shown here on demand; treat it like a password.")
+	out.outf("")
+	out.outf("This is the credential Cloud itself uses. Do not rotate it or keep it as your own")
+	out.outf("login: mint a separate admin token with `bp instance admin-token %s --install`.", id)
 	return exitOK
+}
+
+// fetchInstanceCredentials reads one instance's Cloud-stored admin credential
+// in the right team context. On failure it has already rendered the error and
+// returns the exit code with ok=false.
+func fetchInstanceCredentials(out *writer, cfg *Config, id, teamArg string) (cloudclient.Credentials, int, bool) {
+	// Team context resolution: an explicit --team (slug or UUID) wins, else the
+	// active team persisted by `bp team use` (cfg.CloudTeam). A slug is resolved
+	// to its UUID against the caller's membership list (GET /v1/me) because the
+	// control plane's get_team/1 is UUID-only — a slug can't be resolved
+	// server-side. An empty context is the plain, primary-team behaviour.
+	//
+	// CAVEAT (auth model): the X-Barkpark-Team header this sends is honoured only
+	// for SESSION-token auth — the `bp login` device flow mints a session token,
+	// so this switch works there. A personal access token (PAT) is hard-bound to
+	// its own pat.team_id server-side (auth.ex require_user_or_pat) and IGNORES
+	// the header, so `--team` has no effect under a PAT: use `bp login` for
+	// cross-team credential reads.
+	teamID := strings.TrimSpace(cfg.CloudTeam)
+	if t := strings.TrimSpace(teamArg); t != "" {
+		me, merr := cfg.CloudClient().Me(cloudCtx())
+		if merr != nil {
+			return cloudclient.Credentials{}, cloudFail(out, "resolve team", merr), false
+		}
+		match, found := resolveTeam(me.Teams, t)
+		if !found {
+			msg := fmt.Sprintf("not a member of team %q", t)
+			if names := teamHandles(me.Teams); names != "" {
+				msg += " — you can use: " + names
+			}
+			return cloudclient.Credentials{}, useError(out, "failed", msg, exitGeneric), false
+		}
+		teamID = match.ID
+	}
+
+	creds, err := cfg.CloudClient().GetCredentialsForTeam(cloudCtx(), id, teamID)
+	if err != nil {
+		// no_admin_token (404) is an expected, actionable state — surface it plainly.
+		if strings.Contains(err.Error(), "no_admin_token") {
+			return creds, useError(out, "failed",
+				"no admin token stored for this instance yet (captured at provision time — a pre-existing instance may need a re-provision)",
+				exitGeneric), false
+		}
+		return creds, cloudFail(out, "instance credentials", err), false
+	}
+	return creds, exitOK, true
 }
 
 func printInstanceHelp(out *writer) {
@@ -1826,20 +1842,36 @@ func printInstanceHelp(out *writer) {
 
 USAGE
   bp instance credentials <id> [--team <slug|id>]
+  bp instance admin-token <id> [--label <l>] [--expires-in <d> | --no-expiry]
+                               (--install | --out <path> | --reveal) [--team <t>]
 
 WHAT IT DOES
   credentials  retrieve the per-instance ADMIN TOKEN the platform minted on the
                box at provision time, decrypted for you (the owner). Use it to
                administer the instance (content, ingest) without SSH. Only an
                owner/admin of the owning team can read it. The <id> is the
-               instance id from 'bp barkparks' (-o json shows 'id').
+               instance id from 'bp barkparks' (-o json shows 'id'). This is the
+               credential Cloud itself uses: never rotate it or keep it as yours.
+  admin-token  recover admin access with no admin token locally. Reads Cloud's
+               stored credential ONLY to mint a NEW, separate admin token on the
+               instance (POST /v1/tokens/elevated). Cloud's credential is never
+               printed, saved or rotated. The new secret goes to exactly the sinks
+               you name: --install saves it as this server's token in your bp
+               config (as 'bp login' does), --out writes a new 0600 file, --reveal
+               prints it. With none of them nothing is requested.
 
 FLAGS
   --team <t>   read credentials in an explicit team context (a team slug or id
                from 'bp teams'); defaults to your active team ('bp team use').
                An instance owned by a non-active team 404s without this. Honoured
                for session-token auth ('bp login'); a PAT ignores it.
-  -o json      emit one machine-readable JSON object on stdout`
+  --label <l>      admin-token: the new token's label (default: bp admin-token (<host>))
+  --expires-in <d> admin-token: 90s, 30m, 24h or 90d (max 365d)
+  --no-expiry      admin-token: never expires (audited opt-out)
+  -w / -p          admin-token: workspace / project to mint in (default: the
+                   workspace Cloud's credential belongs to, project "default")
+  -o json      emit one machine-readable JSON object on stdout (admin-token: the
+               secret only with --reveal)`
 	out.outf("%s", help)
 }
 

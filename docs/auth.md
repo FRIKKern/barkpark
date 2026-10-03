@@ -51,7 +51,7 @@ member? AND the token's GLOBAL `permissions`. `workspace_admin?/2`: the
 membership ROLE alone.
 A global-`admin` token with zero memberships passes `RequireAdmin` yet fails
 every `Tenancy.Auth` predicate; a plain `member` in B passes
-`authorize(_, B, :admin)` and correctly FAILS `workspace_admin?(_, B)` — never
+`authorize(_, B, :admin)` and FAILS `workspace_admin?(_, B)` — never
 unify (`StudioLiveSharesTest` pins it).
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
@@ -66,15 +66,16 @@ the assign); acting per-workspace needs a slug-resolving route proving
 resolves it to `:global`, stamping `owner_workspace_id = NULL`
 (`ChatTokenController`).
 
-**Tier 0 — instance operator** (`RequirePlatformOperator`): an env allowlist
-over the seven instance-global route groups; `admin` NECESSARY, allowlist
-INSUFFICIENT. See [instance-operator-tier.md](contracts/instance-operator-tier.md).
+**Tier 0 — instance operator** (`RequirePlatformOperator`): `admin` plus an
+env allowlist; see [instance-operator-tier.md](contracts/instance-operator-tier.md).
 
 ## Minting `write`/`admin`
 
 Only `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`) mints them:
 caller has flat `admin` AND an admin seat, gets at most its own set; seated,
-audited `token_minted`. `bp token create --label X --permissions read,write,admin`.
+audited `token_minted`. `bp token create --permissions read,write,admin`.
+`bp token rotate` refuses Cloud's credential (label `barkpark cloud admin`)
+without `--force`.
 
 ## LiveView `on_mount` hooks
 
