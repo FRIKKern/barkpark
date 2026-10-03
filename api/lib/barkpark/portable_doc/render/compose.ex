@@ -2076,11 +2076,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp api_endpoint_required?(_), do: false
 
-  # Clamp a heading level to 1..3; default to 2 when absent/out of range.
-  defp heading_level(l) when l in [1, 2, 3], do: l
-  defp heading_level("1"), do: 1
-  defp heading_level("2"), do: 2
-  defp heading_level("3"), do: 3
+  # A heading level 1..6 renders as itself (owner ruling 2026-10-03 #63 — six
+  # levels; it used to fold 4..6 to 2). Absent / out of range stays 2.
+  defp heading_level(l) when l in 1..6, do: l
+
+  defp heading_level(l) when l in ~w(1 2 3 4 5 6), do: String.to_integer(l)
   defp heading_level(_), do: 2
 
   # Inline source for text-bearing prose blocks (paragraph / ingress / pullquote):

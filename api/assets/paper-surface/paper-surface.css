@@ -436,6 +436,14 @@ html[data-theme="dark"] .bp-paper-body {
    and text-wrap across all three files. */
 .bp-paper-surface h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
+/* h4–h6 (owner ruling 2026-10-03 #63: six heading levels). They step down from
+   the h3 by size on the existing reading tokens, with no new token: h4 sits
+   halfway between h3 and body, h5 is the body size, h6 a tenth smaller. All
+   keep the shared heading weight, so each still reads as a heading. Both editor
+   twins carry the same declarations (view_edit_parity_test). */
+.bp-paper-surface h4 { font-size: calc((var(--bp-h3-size) + var(--bp-body-size)) / 2); line-height: var(--bp-h3-lh); margin: 1.4em 0 0; }
+.bp-paper-surface h5 { font-size: var(--bp-body-size); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; }
+.bp-paper-surface h6 { font-size: calc(var(--bp-body-size) * 0.9); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; }
 /* ── THE SECTION HEAD (space.section → the --bp-section-* bridge above) ───────
    A TOP-LEVEL level-2 heading is a section boundary, and gets both halves of the
    artifact's device on one element: `--bp-section-beat` of air above the rule
