@@ -2142,6 +2142,10 @@ defmodule Barkpark.Tenancy do
         {:error, :not_found}
 
       %Workspace{} = archived ->
+        # Open Studio sockets re-run their admission on this topic, and
+        # LiveScope refuses an archived workspace, so an open tab stops
+        # writing into it (task-cce7b1940bca8241).
+        Barkpark.Tenancy.Members.announce_seats_changed(archived.id)
         {:ok, archived}
     end
   end

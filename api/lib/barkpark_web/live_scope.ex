@@ -117,7 +117,8 @@ defmodule BarkparkWeb.LiveScope do
        when is_binary(ws_slug) and is_binary(proj_slug) do
     with %{} = ws <- Tenancy.get_workspace_by_slug(ws_slug),
          %{} = proj <- Tenancy.get_project(ws_slug, proj_slug),
-         {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]) do
+         {:ok, grade} <- authorize_read(socket, ws, proj, params["dataset"]),
+         :ok <- refuse_if_archived(ws) do
       socket =
         socket
         |> assign(
@@ -131,11 +132,28 @@ defmodule BarkparkWeb.LiveScope do
 
       {:ok, maybe_attach_readonly_gate(socket, grade)}
     else
+      :archived -> deny_archived(socket)
       _ -> deny(socket)
     end
   end
 
   defp resolve_and_authorize(socket, _params), do: deny(socket)
+
+  # The socket twin of ResolveWorkspace's `refuse_if_archived` (task-55474a106554e65a).
+  # That plug runs only on the HTTP request, so a push_navigate into an
+  # archived workspace (StudioChrome `scope-open`), a websocket reconnect, or a
+  # tab left open across the archive kept writing into a frozen workspace
+  # (task-cce7b1940bca8241). Checked AFTER admission, like the plug, so only an
+  # admitted caller learns the workspace is archived.
+  defp refuse_if_archived(ws),
+    do: if(Tenancy.Workspace.archived?(ws), do: :archived, else: :ok)
+
+  defp deny_archived(socket) do
+    {:halt,
+     socket
+     |> put_flash(:error, "That workspace is archived")
+     |> redirect(to: "/studio")}
+  end
 
   # ── Seat changes reach an OPEN socket (r4a realtime authz sweep) ───────────
   #
