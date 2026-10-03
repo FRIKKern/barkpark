@@ -32,6 +32,9 @@ defmodule Barkpark.Auth.LoginTicket do
     # consuming it JIT-provisions this email (Default-workspace owner) and
     # mints a user_session. Only an admin-permission bearer may mint one.
     field :user_email, :string
+    # Owner ruling #26: the Cloud team role the handoff carries ("owner" |
+    # "admin" | "member"). NULL = a pre-ruling ticket (older control plane).
+    field :user_role, :string
     field :expires_at, :utc_datetime_usec
     field :used_at, :utc_datetime_usec
 
@@ -59,8 +62,9 @@ defmodule Barkpark.Auth.LoginTicket do
   """
   def changeset(ticket, attrs) do
     ticket
-    |> cast(attrs, [:ticket_hash, :api_token, :user_email, :expires_at, :used_at])
+    |> cast(attrs, [:ticket_hash, :api_token, :user_email, :user_role, :expires_at, :used_at])
     |> validate_required([:ticket_hash, :api_token, :expires_at])
+    |> validate_inclusion(:user_role, ~w(owner admin member))
     |> validate_format(:user_email, @email_format, message: "must have the @ sign and no spaces")
     |> unique_constraint(:ticket_hash)
   end

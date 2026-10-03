@@ -100,6 +100,13 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # state WHY — "no verb yet" is not a reason, it is the defect this guard
   # exists to find, and such a route belongs in @filed_gaps instead.
   @not_a_cli_surface %{
+    # ── Cloud member removal (owner ruling #26, 2026-10-03) ─────────────────
+    # The control plane calls this with the stored instance admin token when a
+    # person leaves the owning team: sessions revoked, seats dropped, owned
+    # tokens revoked. Its caller is Cloud's InstanceMemberDeprovisionWorker; a
+    # human removes a member with `bp cloud members`, never against the box.
+    {"POST", "/v1/auth/cloud-users/deprovision"} =>
+      "Cloud's member-removal door (ruling #26) — the control plane calls it, not a CLI verb",
     # ── The chat shell's open-session probe (wsc-steer-open-session-managed) ──
     # The TUI's agent detail asks this, for the task its agent↔task join already
     # resolved, before it offers "open session"; the answer is a session id the

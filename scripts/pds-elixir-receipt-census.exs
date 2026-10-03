@@ -1094,6 +1094,7 @@ defmodule PDS.Census do
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
+    {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
     {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login, :status_only_receipt},

@@ -136,6 +136,7 @@ defmodule Barkpark.Auth do
 
   def mint_login_ticket(raw_api_token, opts) when is_binary(raw_api_token) do
     user_email = presence(opts[:user_email])
+    user_role = ticket_role(presence(opts[:user_role]))
 
     case verify_token(raw_api_token) do
       {:ok, token} ->
@@ -151,6 +152,7 @@ defmodule Barkpark.Auth do
             ticket_hash: hash_ticket(raw_ticket),
             api_token: raw_api_token,
             user_email: user_email,
+            user_role: user_email && user_role,
             expires_at: DateTime.add(now, @login_ticket_ttl_seconds)
           }
 
@@ -166,6 +168,14 @@ defmodule Barkpark.Auth do
   end
 
   def mint_login_ticket(_, _), do: {:error, :unauthorized}
+
+  # Owner ruling #26: the role a user-shaped ticket seats its consumer at. A
+  # recognised Cloud team role passes through; any other PRESENT value is read
+  # as the least privilege ("member") — fail closed, never an owner by typo.
+  # ABSENT stays nil: the pre-ruling shape an older control plane mints.
+  defp ticket_role(nil), do: nil
+  defp ticket_role(role) when role in ["owner", "admin", "member"], do: role
+  defp ticket_role(_other), do: "member"
 
   defp presence(value) when is_binary(value) do
     case String.trim(value) do
@@ -205,7 +215,8 @@ defmodule Barkpark.Auth do
   `{:error, :invalid}` — no oracle distinguishes the failure kinds, and
   deleting the row collapses no distinction that was ever exposed.
   """
-  @spec consume_login_ticket(binary()) :: {:ok, binary()} | {:error, :invalid}
+  @spec consume_login_ticket(binary()) ::
+          {:ok, binary() | {:user, binary(), binary(), binary() | nil}} | {:error, :invalid}
   def consume_login_ticket(raw_ticket) when is_binary(raw_ticket) do
     hash = hash_ticket(raw_ticket)
     now = DateTime.utc_now()
@@ -221,15 +232,16 @@ defmodule Barkpark.Auth do
     query =
       from t in LoginTicket,
         where: t.ticket_hash == ^hash and is_nil(t.used_at) and t.expires_at > ^now,
-        select: {t.api_token, t.user_email}
+        select: {t.api_token, t.user_email, t.user_role}
 
     case Repo.delete_all(query) do
       # user-shaped (cloud-identity handoff): the consumer mints a
-      # user_session for this email instead of dropping the token in.
-      {1, [{raw_api_token, user_email}]} when is_binary(user_email) ->
-        {:ok, {:user, user_email, raw_api_token}}
+      # user_session for this email instead of dropping the token in. The
+      # fourth element is the carried Cloud team role (nil = pre-ruling #26).
+      {1, [{raw_api_token, user_email, user_role}]} when is_binary(user_email) ->
+        {:ok, {:user, user_email, raw_api_token, user_role}}
 
-      {1, [{raw_api_token, nil}]} ->
+      {1, [{raw_api_token, nil, _role}]} ->
         {:ok, raw_api_token}
 
       _ ->
@@ -809,6 +821,69 @@ defmodule Barkpark.Auth do
         _ -> acc
       end
     end)
+  end
+
+  @doc """
+  Owner ruling #26 (2026-10-03, "Match role, revoke"): take a Cloud user OFF
+  this instance when they are removed from the team that owns it. Called by the
+  control plane with the stored instance admin token
+  (`POST /v1/auth/cloud-users/deprovision`).
+
+  For the account with `email`:
+
+    * every live user session is revoked (Studio signs them out now);
+    * every workspace seat the account holds is dropped (no Studio re-entry);
+    * every live api token it OWNS (`owner_user_id`) is revoked — the tokens
+      it minted for itself in Studio, admin-grade ones included, which is the
+      escalation the ruling closes;
+    * every live `app:<email>` app token is revoked (the mobile exchange's
+      label), except an `admin`-permissioned one, which that path never mints.
+
+  The account row itself is KEPT (soft deprovision, like SCIM's default): its
+  documents keep their author, and a later re-invite re-seats it. Unknown email
+  is a no-op answer, never an error. Returns the counts it changed.
+  """
+  @spec deprovision_cloud_user(String.t()) :: {:ok, map()}
+  def deprovision_cloud_user(email) when is_binary(email) do
+    email = String.trim(email)
+
+    case Barkpark.Accounts.get_user_by_email(email) do
+      nil ->
+        {:ok, %{found: false, sessions_revoked: 0, memberships_dropped: 0, tokens_revoked: 0}}
+
+      %{id: user_id} = user ->
+        # No wrapping transaction, on purpose: each step is idempotent and the
+        # control plane retries a box until it answers, so a partial run
+        # converges on the next call. The receipt carries the counts each step
+        # actually measured.
+        {:ok, sessions} = Barkpark.Accounts.revoke_all_user_sessions(user)
+
+        {dropped, _} =
+          Repo.delete_all(
+            from m in Barkpark.Tenancy.Membership,
+              where: m.principal_type == "user" and m.principal_id == ^user_id
+          )
+
+        label = "app:" <> email
+
+        tokens =
+          from(t in ApiToken,
+            where: is_nil(t.revoked_at) and t.kind == "api",
+            where:
+              t.owner_user_id == ^user_id or
+                (t.label == ^label and not fragment("'admin' = ANY(?)", t.permissions))
+          )
+          |> Repo.all()
+          |> Enum.count(fn token -> match?({:ok, _}, revoke_token(token)) end)
+
+        {:ok,
+         %{
+           found: true,
+           sessions_revoked: sessions,
+           memberships_dropped: dropped,
+           tokens_revoked: tokens
+         }}
+    end
   end
 
   # The ONE tenancy predicate both app-token revoke selectors share, so the

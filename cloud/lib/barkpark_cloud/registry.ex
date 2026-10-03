@@ -4866,11 +4866,17 @@ defmodule BarkparkCloud.Registry do
   admin-token session — the "your cloud account works on your instance"
   handoff. An older instance ignores the extra field and mints the legacy
   token-shaped ticket: graceful degradation, never an error.
+
+  Owner ruling #26 (2026-10-03, "Match role, revoke"): the ticket also carries
+  `role` — the caller's Cloud TEAM role (`"owner" | "admin" | "member"`) — so
+  the instance seats a team member as a member, not as the Default-workspace
+  owner. An instance that predates the ruling ignores the field. A role outside
+  the three is sent as `"member"` (fail closed).
   """
-  @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
+  @spec mint_studio_link(Barkpark.t(), String.t() | nil, String.t() | nil) ::
           {:ok, String.t()}
           | {:error, :suspended | :not_live | :no_admin_token | :decrypt_failed | :instance_error}
-  def mint_studio_link(bp, user_email \\ nil)
+  def mint_studio_link(bp, user_email \\ nil, role \\ nil)
 
   # cch-w54-s2 — a SUSPENDED box mints nothing. `billing.ex`'s own
   # cancel_subscription/1 calls suspension "data retained, access revoked"; until
@@ -4882,9 +4888,9 @@ defmodule BarkparkCloud.Registry do
   # clause deliberately: the refusal fires BEFORE reveal_admin_token/1, so the
   # stored admin credential is never decrypted and no byte leaves the control
   # plane for a suspended box.
-  def mint_studio_link(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
+  def mint_studio_link(%Barkpark{suspended: true}, _user_email, _role), do: {:error, :suspended}
 
-  def mint_studio_link(%Barkpark{url: url} = bp, user_email)
+  def mint_studio_link(%Barkpark{url: url} = bp, user_email, role)
       when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
@@ -4898,8 +4904,11 @@ defmodule BarkparkCloud.Registry do
 
         body =
           case user_email do
-            email when is_binary(email) and email != "" -> Jason.encode!(%{email: email})
-            _ -> "{}"
+            email when is_binary(email) and email != "" ->
+              Jason.encode!(%{email: email, role: ticket_role(role)})
+
+            _ ->
+              "{}"
           end
 
         request = %{
@@ -4933,7 +4942,12 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  def mint_studio_link(_, _), do: {:error, :not_live}
+  def mint_studio_link(_, _, _), do: {:error, :not_live}
+
+  # The team role a user-shaped ticket carries (ruling #26). Fail closed: no
+  # role, or one outside the three built-ins, is a member.
+  defp ticket_role(role) when role in ["owner", "admin", "member"], do: role
+  defp ticket_role(_), do: "member"
 
   defp public_base(%Barkpark{custom_host: ch}) when is_binary(ch) and ch != "",
     do: "https://" <> ch
@@ -5184,6 +5198,85 @@ defmodule BarkparkCloud.Registry do
   end
 
   def revoke_app_token(_, _, _), do: {:error, :not_live}
+
+  @doc """
+  Owner ruling #26 (2026-10-03): take `email` OFF the instance `bp` after its
+  removal from the owning team — sessions revoked, workspace seats dropped,
+  owned tokens revoked (`POST /v1/auth/cloud-users/deprovision` with the stored
+  admin token, which never leaves this function).
+
+  Answers:
+    * `{:ok, %{"found" => _, "sessions_revoked" => _, …}}` — the box did it;
+    * `{:ok, %{"fallback" => "app_tokens_only", …}}` — the box predates the
+      route (a no-route 404), so only its `app:<email>` tokens were revoked;
+    * `{:error, :operator_required}` — the box's operator allowlist is armed
+      and does not name the stored token (a standing answer, not an outage);
+    * `{:error, :not_live | :no_admin_token | :decrypt_failed}`;
+    * `{:error, :instance_error}` — the box did not answer; retry.
+  """
+  @spec deprovision_instance_user(Barkpark.t(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def deprovision_instance_user(%Barkpark{url: url} = bp, email)
+      when is_binary(url) and url != "" and is_binary(email) and email != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        request = %{
+          method: :post,
+          url: String.trim_trailing(url, "/") <> "/v1/auth/cloud-users/deprovision",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: Jason.encode!(%{email: email})
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 200, body: resp}} ->
+            case Jason.decode(resp) do
+              {:ok, decoded} when is_map(decoded) ->
+                {:ok,
+                 Map.take(decoded, [
+                   "found",
+                   "sessions_revoked",
+                   "memberships_dropped",
+                   "tokens_revoked"
+                 ])}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          {:ok, %{status: 404}} ->
+            case revoke_app_token(bp, {:email, email}) do
+              {:ok, counts} ->
+                {:ok, Map.put(counts, "fallback", "app_tokens_only")}
+
+              {:error, :not_found} ->
+                {:ok, %{"fallback" => "app_tokens_only", "revoked_count" => 0}}
+
+              {:error, :revoke_unsupported} ->
+                {:ok, %{"fallback" => "unsupported"}}
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          {:ok, %{status: 403}} ->
+            {:error, :operator_required}
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def deprovision_instance_user(_, _), do: {:error, :not_live}
 
   # Relay the ORIGINAL caller's address so the instance's `{:app_token_revoke,
   # ip}` bucket keys per phone. Without it every cloud-proxied revoke arrives
