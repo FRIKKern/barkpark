@@ -85,7 +85,6 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     "barkpark/media.ex:patch_asset_metadata" => "unscoped 2-arity existence check",
     "barkpark/tenancy.ex:pulled_schema_row" => "unscoped 2-arity provenance guard",
     "barkpark/tasks/board.ex:field_visibility_gate" => "explicit [] — unscoped global read",
-    "barkpark/tasks/query.ex:row_field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/tickets.ex:ticket_schema_present?" => "unscoped 2-arity presence probe",
     "barkpark/plugins/quiz.ex:schema_present?" =>
@@ -94,9 +93,11 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "unscoped 2-arity presence probe (desk item gate)",
     "barkpark/plugins/tasks/web/board_live.ex:peek_schema" =>
       "explicit [] — unscoped global read",
-    "barkpark/content/edges.ex:disconnect_one_source" => "unscoped 2-arity, edge write path",
+    "barkpark/content/edges.ex:doc_scoped_schema" =>
+      "unscoped arm only (document carries no scope), edge write path",
     "barkpark/content/encryption.ex:encrypt_marked" => "unscoped 2-arity, WRITE-path cipher",
-    "barkpark/content/papers.ex:synthesize_blocks" => "unscoped 2-arity, block synthesis",
+    "barkpark/content/papers.ex:doc_scoped_schema" =>
+      "unscoped arm only (document carries no scope), block synthesis",
     "barkpark/content/writer.ex:validate_document" => "unscoped 2-arity, write validation",
     "barkpark/content/writer.ex:apply_initial_values" => "unscoped 2-arity, write scaffold",
     "barkpark/content/writer.ex:scaffold_or_initial_values" => "unscoped 2-arity, write scaffold",
@@ -145,6 +146,7 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark/content/export.ex:fetch_schema",
                               "barkpark/content/mutations.ex:echo_schema",
                               "barkpark/tasks/query.ex:load_task_schema",
+                              "barkpark/tasks/query.ex:row_field_visibility_gate",
                               # search facets: the schema feeds
                               # Envelope.field_readable?/3 to drop an author /
                               # category bucket the caller may not read

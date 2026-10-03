@@ -296,6 +296,39 @@ defmodule Barkpark.Tasks.QueryRowsTest do
       assert row["phase"] == "7"
     end
   end
+
+  # task-d4c88fde8b53ae34: the row gate read the `task` schema with NO scope,
+  # which resolves `production` to the DEFAULT workspace's dataset. A workspace
+  # that seals its own task fields private got Default's unsealed schema, so
+  # its private assignee/claim/labels rendered to anonymous paper readers.
+  describe "rows_for_query/3 field-visibility seal in a non-Default workspace" do
+    test "the workspace's own seal applies, not the Default workspace's schema" do
+      ws = TenancyFixtures.create_workspace!()
+      project = TenancyFixtures.create_project!(ws)
+      scope = [workspace_id: ws.id, project_id: project.id]
+      register_schemas!(scope)
+      seal_task_schema!(scope, ["assignee", "claim", "labels"])
+
+      epic = "epic-#{System.unique_integer([:positive])}"
+
+      mk_task!("ws-sealed-#{System.unique_integer([:positive])}", scope, %{
+        "parent_id" => epic,
+        "lifecycle_status" => "in_progress",
+        "priority" => 1,
+        "assignee" => "SECRET-ASSIGNEE",
+        "claim" => %{"worker" => "SECRET-CLAIM-WORKER"},
+        "labels" => ["SECRET-LABEL", "wave:7"]
+      })
+
+      [row] = TaskQuery.rows_for_query(%{"parent_id" => epic}, scope, dataset: @dataset)
+
+      refute Map.has_key?(row, "worker"),
+             "workspace's private claim/assignee rendered as #{inspect(row["worker"])}"
+
+      refute Map.has_key?(row, "phase")
+      assert row["priority"] == "1"
+    end
+  end
 end
 
 defmodule Barkpark.Content.PapersTaskResolveTest do
