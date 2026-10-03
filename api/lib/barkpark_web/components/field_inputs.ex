@@ -558,6 +558,31 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  @doc """
+  The id a field's `<label for=…>` can point at when `input/1` renders it
+  with `id_prefix`, or `nil` when the clause renders no single labelable
+  control carrying that id: the web-component widgets (rich text, reference,
+  image), radio groups, read-only structured values and the v2 composites.
+
+  Mirrors the clause order of `input/1`; a label whose `for` names no element
+  is ignored by the browser, so a miss here costs a name, never a crash.
+  """
+  @spec label_target(map(), map(), String.t()) :: String.t() | nil
+  def label_target(%{"type" => t, "name" => name} = field, form, prefix)
+      when is_binary(name) and is_binary(prefix) and prefix != "" do
+    value = Map.get(form || %{}, name)
+
+    cond do
+      t not in @structured_value_types and (is_map(value) or is_list(value)) -> nil
+      t in ~w(richText reference image source array object) -> nil
+      t in ~w(arrayOf composite codelist localizedText) -> nil
+      t == "select" and Barkpark.Content.SelectOptions.radio?(field) -> nil
+      true -> prefix <> name
+    end
+  end
+
+  def label_target(_field, _form, _prefix), do: nil
+
   # [doc-keyed-ignore-wrappers] The id of a `phx-update="ignore"` wrapper that
   # owns a hidden input + web component (rich text, reference, image,
   # mediaAsset reference). LiveView never patches the children of an ignored

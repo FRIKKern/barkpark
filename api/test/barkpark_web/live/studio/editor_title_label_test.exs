@@ -75,9 +75,11 @@ defmodule BarkparkWeb.Studio.EditorTitleLabelTest do
       live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/publication/pub-1")
 
     assert html =~ ~s(name="doc[title]")
-    assert html =~ ~r/<label class="editor-field-label">\s*Tittel/, "the label should read Tittel"
 
-    refute html =~ ~r/<label class="editor-field-label">\s*Title\b/,
+    assert html =~ ~r/<label class="editor-field-label"(?: for="[^"]*")?>\s*Tittel/,
+           "the label should read Tittel"
+
+    refute html =~ ~r/<label class="editor-field-label"(?: for="[^"]*")?>\s*Title\b/,
            "the hard-coded Title label survived"
   end
 end
