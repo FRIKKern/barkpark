@@ -28,6 +28,16 @@ export function lockedNodeId(node) {
   return a.bpId != null ? a.bpId : null;
 }
 
+// True when a top-level node is the template's locked TITLE heading — the block
+// Enter in the title skips past (owner ruling 2026-10-03 #54, charter D6 amendment)
+// and the one that shows the "Title" placeholder while empty.
+export function isLockedTitle(node) {
+  const a = node && node.attrs;
+  if (!a || a.locked !== true) return false;
+  const typeName = node.type && node.type.name;
+  return typeName === "heading" && (a.role == null || a.role === "title");
+}
+
 // Map every locked top-level node's bpId → its index among the doc's children.
 export function lockedIndexMap(doc) {
   const map = new Map();
