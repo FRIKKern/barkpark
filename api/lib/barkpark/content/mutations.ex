@@ -449,8 +449,10 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
-             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
-             do: {:ok, doc, "create"}
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+          warn_create_over_published("create", type, id, dataset, opts, doc)
+          {:ok, doc, "create"}
+        end
     end
   end
 
@@ -494,8 +496,10 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
-             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts),
-             do: {:ok, doc, "create"}
+             {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
+          warn_create_over_published("createIfNotExists", type, id, dataset, opts, doc)
+          {:ok, doc, "create"}
+        end
     end
   end
 
@@ -1463,4 +1467,49 @@ defmodule Barkpark.Content.Mutations do
 
   defp ensure_rev(%{rev: actual}, expected),
     do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
+
+  # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create` and
+  # `createIfNotExists` conflict only with an existing DRAFT (docs/api-v1.md),
+  # so over an id whose PUBLISHED row exists they mint an EMPTY draft. It is
+  # not seeded from the published row, so the next publish replaces the
+  # document with only the fields this create set. That is silent field loss
+  # through two documented verbs used in their obvious order (found by
+  # dogfooding bp: create, publish, create again, publish, and pages + genre
+  # were gone). The contract is unchanged; the response now SAYS so on the
+  # advisory channel and names the fields a publish would drop.
+  defp warn_create_over_published(op, type, id, dataset, opts, %_{} = draft)
+       when is_binary(id) and is_binary(type) do
+    published_id = DraftId.published_id(id)
+
+    with true <- published_id != draft.doc_id,
+         {:ok, %{} = published} <- Content.get_document(published_id, type, dataset, opts) do
+      dropped = (field_names(published) -- field_names(draft)) |> Enum.sort()
+
+      Warnings.put(
+        "create_over_published",
+        "#{op} minted an EMPTY draft over the PUBLISHED #{type} #{inspect(published_id)}: " <>
+          "the draft is not seeded from it, so publishing it replaces the document with only " <>
+          "the fields this #{op} set" <>
+          if(dropped == [],
+            do: ".",
+            else: " and DROPS #{Enum.join(dropped, ", ")}."
+          ) <>
+          " To edit the published document, patch it instead (`bp doc patch #{type} #{published_id} --set …`).",
+        "warning"
+      )
+    end
+
+    :ok
+  end
+
+  defp warn_create_over_published(_op, _type, _id, _dataset, _opts, _doc), do: :ok
+
+  # The user-visible field names of a stored document: its content keys plus a
+  # non-blank title (a column, not a content key).
+  defp field_names(%{content: content} = doc) do
+    keys = if is_map(content), do: Map.keys(content), else: []
+    title = Map.get(doc, :title)
+    keys = if is_binary(title) and title != "", do: ["title" | keys], else: keys
+    keys |> Enum.map(&to_string/1) |> Enum.reject(&String.starts_with?(&1, "_")) |> Enum.uniq()
+  end
 end
