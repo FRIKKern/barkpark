@@ -62,7 +62,9 @@ defmodule BarkparkWeb.AuthGdprTest do
       token = session_token("erase-pat@example.com")
 
       %{"token" => pat} =
-        authed(token) |> post_json("/v1/auth/tokens", %{name: "cli"}) |> json_response(201)
+        authed(token)
+        |> post_json("/v1/auth/tokens", %{name: "cli", current_password: @password})
+        |> json_response(201)
 
       # the PAT authenticates AS the user before erasure (owner-resolving route)
       assert %{} = authed(pat) |> get("/v1/access/mine") |> json_response(200)

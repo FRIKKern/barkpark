@@ -130,7 +130,11 @@ defmodule BarkparkWeb.TokenExpiryMintTest do
     {:ok, session_raw} =
       Accounts.create_user_session_token(user, ip_address: "127.0.0.1", user_agent: "test")
 
-    bearer(session_raw) |> post("/v1/auth/tokens", Jason.encode!(%{name: uniq("cli")}))
+    bearer(session_raw)
+    |> post(
+      "/v1/auth/tokens",
+      Jason.encode!(%{name: uniq("cli"), current_password: "correct-horse-battery"})
+    )
   end
 
   defp mint_share(raw, body_extra \\ %{}) do

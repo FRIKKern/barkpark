@@ -492,19 +492,61 @@ defmodule Barkpark.Accounts.Privacy do
     end
   end
 
+  @doc """
+  Remove the credentials a session thief could have ADDED to an account:
+  every passkey, every social login link, and every live personal API token
+  the user owns (`kind: "api"`, `owner_user_id` = the user). Runs inside the
+  caller's transaction; a failed token revoke rolls it back. Returns the
+  revoked token ids so the caller can tear their sockets down AFTER commit
+  (`Auth.broadcast_socket_teardown/1`).
+
+  Owner ruling #13 (task-f4cfc3e2ab4bd6b8): a forgot-password reset calls this,
+  so a passkey or personal token an attacker added with a stolen session does
+  not survive the owner's recovery. Tokens nobody owns (machine tokens, the
+  credential Barkpark Cloud holds for the instance) are never touched, and
+  ticket keys stay with the outsiders they were issued to.
+  """
+  @spec strip_added_credentials!(User.t()) :: %{
+          passkeys: non_neg_integer(),
+          social_links: non_neg_integer(),
+          revoked_token_ids: [binary()]
+        }
+  def strip_added_credentials!(%User{id: user_id} = user) do
+    {passkeys, _} = Repo.delete_all(from c in WebauthnCredential, where: c.user_id == ^user_id)
+    {links, _} = Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user_id)
+
+    %{
+      passkeys: passkeys,
+      social_links: links,
+      revoked_token_ids: revoke_owned_tokens!(user, kind: "api")
+    }
+  end
+
   # The subject's credentials: tokens they own, plus LEGACY app tokens minted
   # for them before the mint stamped `owner_user_id` (owner ruling #32 item 3,
   # 2026-10-03) — recognised by the mint's own default label, `app:<email>`,
   # with no owner. A custom-labelled legacy token cannot be told apart from a
-  # workspace credential and is left alone.
-  defp revoke_owned_tokens!(%User{id: user_id, email: email}) do
+  # workspace credential and is left alone. `kind:` narrows the set (the reset
+  # path of ruling #13 revokes personal `api` tokens only).
+  defp revoke_owned_tokens!(user, opts \\ [])
+
+  defp revoke_owned_tokens!(%User{id: user_id, email: email}, opts) do
     app_label = "app:" <> email
 
-    from(t in ApiToken,
-      where:
-        is_nil(t.revoked_at) and
-          (t.owner_user_id == ^user_id or (is_nil(t.owner_user_id) and t.label == ^app_label))
-    )
+    base =
+      from(t in ApiToken,
+        where:
+          is_nil(t.revoked_at) and
+            (t.owner_user_id == ^user_id or (is_nil(t.owner_user_id) and t.label == ^app_label))
+      )
+
+    query =
+      case Keyword.get(opts, :kind) do
+        nil -> base
+        kind -> from(t in base, where: t.kind == ^kind)
+      end
+
+    query
     |> Repo.all()
     |> Enum.map(fn token ->
       case Auth.revoke_token(token) do

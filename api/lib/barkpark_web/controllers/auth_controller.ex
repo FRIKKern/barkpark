@@ -337,6 +337,34 @@ defmodule BarkparkWeb.AuthController do
   pipeline; the token path relies on this issuance gate.)
   """
   def create_token(conn, params) do
+    if recently_authenticated?(conn, params) do
+      mint_token(conn, params)
+    else
+      error(
+        conn,
+        401,
+        "reauth_required",
+        "minting a personal token needs your current password or a recent MFA verification",
+        "send current_password in the body, or call POST /v1/auth/mfa/step-up (or the passkey step-up) and retry"
+      )
+    end
+  end
+
+  # Owner ruling #13 (task-f4cfc3e2ab4bd6b8): a personal token outlives the
+  # session that minted it, so minting one is a re-auth action. A stolen
+  # session alone used to mint a standing credential that survived the owner's
+  # password reset. Either the current password in the body or a session that
+  # presented an MFA factor within the step-up window (a login with a factor
+  # counts) is accepted.
+  defp recently_authenticated?(conn, params) do
+    reauthed?(conn.assigns.current_user, params["current_password"]) or
+      session_mfa_fresh?(conn.assigns[:current_user_session])
+  end
+
+  defp session_mfa_fresh?(%UserSession{} = session), do: UserSession.mfa_fresh?(session)
+  defp session_mfa_fresh?(_), do: false
+
+  defp mint_token(conn, params) do
     user = conn.assigns.current_user
     name = token_name(params)
     {workspace_id, role} = resolve_caller_workspace(user)

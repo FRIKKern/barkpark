@@ -23,6 +23,13 @@ reset also revokes every live session of that user, and the JSON door reports
 the count: `POST /v1/auth/reset` answers `{ok: true, sessionsRevoked: n}`
 (`AuthController`, PDS-D503) — a receipt, not a promise; `n` is what the revoke
 actually stamped.
+The reset also deletes the user's passkeys and social links and revokes every
+personal API token they own (`Privacy.strip_added_credentials!/1`, owner ruling
+#13), so nothing a session thief added survives recovery. Tokens nobody owns,
+such as the credential Barkpark Cloud holds, are untouched. Minting a personal
+token (`POST /v1/auth/tokens`) needs `current_password` in the body or a
+session that presented an MFA factor within the step-up window; otherwise it
+answers 401 `reauth_required`.
 
 ## Sessions
 
