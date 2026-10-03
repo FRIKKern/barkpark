@@ -660,6 +660,30 @@ case System.get_env("BARKPARK_PAPER_ACCESS_LOG_TTL_DAYS") do
     :ok
 end
 
+# Deleted-payload retention (owner ruling #33). Off unless switched on here;
+# the window keeps config.exs's 90 days unless overridden. Same
+# positive-int-or-warn shape as the access-log window above.
+if System.get_env("BARKPARK_DELETED_PAYLOAD_RETENTION") in ~w(1 true yes on) do
+  config :barkpark, :deleted_payload_retention, enabled: true
+end
+
+case System.get_env("BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS") do
+  raw when is_binary(raw) and raw != "" ->
+    case Integer.parse(raw) do
+      {days, ""} when days > 0 ->
+        config :barkpark, :deleted_payload_retention, days: days
+
+      _ ->
+        IO.warn(
+          "BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS=#{inspect(raw)} is not a positive integer — " <>
+            "keeping the compiled default"
+        )
+    end
+
+  _ ->
+    :ok
+end
+
 # Pulse (Shared Storm) public event channels. DEFAULT-OFF: unset/empty/invalid
 # env means %{} — every pulse route 404s and nothing on the instance is
 # anonymously writable. Value is a JSON object keyed by channel name; see
