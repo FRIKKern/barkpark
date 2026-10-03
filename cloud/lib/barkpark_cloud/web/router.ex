@@ -9401,12 +9401,11 @@ defmodule BarkparkCloud.Web.Router do
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
+          # Binding a site to content MINTS a public-read token on the box, and
+          # minting a box credential needs a team admin (owner ruling #27). The
+          # standard evidence keys only: the console's reason arms read them.
           {:error, :mint_requires_admin} ->
-            detail =
-              "binding a site to content MINTS a public-read token on the box, and minting " <>
-                "a box credential needs a team admin. Ask an admin to create this site."
-
-            Auth.forbidden(conn, required: "admin", scope: "team", detail: detail)
+            Auth.forbidden(conn, required: "admin", scope: "team")
 
           # site-spawner W8 (charter D73): the binding was READ and it is empty —
           # the site's OWN token sees nothing at workspace/project/dataset/type.
@@ -9570,12 +9569,7 @@ defmodule BarkparkCloud.Web.Router do
         # ability check alone let every member mint in any scope on the box.
         rebinding? and may_grant? and
             not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-          detail =
-            "repointing a site's content binding MINTS a public-read token on the box, and " <>
-              "minting a box credential needs a team admin. theme, doc_type and " <>
-              "prebuilt_enabled stay open to members."
-
-          Auth.forbidden(conn, required: "admin", scope: "team", detail: detail)
+          Auth.forbidden(conn, required: "admin", scope: "team")
 
         rebinding? and not may_grant? ->
           json(conn, 403, %{
