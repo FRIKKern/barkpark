@@ -406,3 +406,8 @@ config :barkpark, dedup_scan_seam: true
 # limiter effectively open. test/barkpark/quiz/room_flood_test.exs sets real
 # values for its own (synchronous) duration.
 config :barkpark, Barkpark.Quiz.Room, join_burst: 1_000_000, join_rate_per_sec: 1_000_000
+
+# The canonical value-shape writes (#42/#43/#44) are ON in tests so the shape
+# suites exercise them; the flag-off behaviour is pinned by synchronous tests
+# that switch it off for their own duration (canonical_shape_writes_flag_test).
+config :barkpark, canonical_shape_writes: true

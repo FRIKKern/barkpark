@@ -96,6 +96,9 @@ services:
       # Per-document size cap in bytes (owner ruling #39; read in api/config/runtime.exs).
       # Unset = 10 MB; 0 turns the cap off.
       - BARKPARK_MAX_DOCUMENT_BYTES
+      # Canonical value-shape writes (owner rulings #42/#43/#44; read in
+      # api/config/runtime.exs). Unset = off: Studio keeps each field's stored shape.
+      - BARKPARK_CANONICAL_SHAPE_WRITES
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST

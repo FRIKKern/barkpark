@@ -55,7 +55,13 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
   }
 
   @refs ["pub-10038688", "pub-10039433", "pub-10039087"]
+  # Owner ruling #42: with the instance flag `:canonical_shape_writes` ON (as
+  # test.exs sets it), a Studio save rewrites bare-id references as `{_ref}`,
+  # touched or not, and keeps them a list. OFF (the shipped default) it keeps
+  # them bare — the last describe block pins that for this Forside fixture.
+  @refs_saved Enum.map(@refs, &%{"_ref" => &1, "_type" => "reference"})
   @news ["article-a", "article-b"]
+  @news_saved Enum.map(@news, &%{"_ref" => &1, "_type" => "reference"})
 
   @banners [
     %{
@@ -321,10 +327,10 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
 
       content = stored_content(scope)
 
-      assert content["featuredPublications"] == @refs,
+      assert content["featuredPublications"] == @refs_saved,
              "reference array came back as: " <> inspect(content["featuredPublications"])
 
-      assert content["featuredNews"] == @news,
+      assert content["featuredNews"] == @news_saved,
              "featuredNews came back as: " <> inspect(content["featuredNews"])
 
       assert content["heroImage"] == @hero,
@@ -360,7 +366,7 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
 
       content = stored_content(scope)
 
-      assert content["featuredPublications"] == @refs,
+      assert content["featuredPublications"] == @refs_saved,
              "reference array came back as: " <> inspect(content["featuredPublications"])
 
       assert content["heroImage"] == @hero,
@@ -369,6 +375,37 @@ defmodule BarkparkWeb.Studio.EditorFormRoundtripTest do
       assert is_list(content["banners"]) and
                Enum.all?(content["banners"], &(&1["backgroundImage"] == @card_image)),
              "banners came back as: " <> inspect(content["banners"])
+    end
+  end
+
+  describe "with canonical shape writes OFF (the shipped default)" do
+    setup do
+      before = Application.get_env(:barkpark, :canonical_shape_writes)
+      Application.put_env(:barkpark, :canonical_shape_writes, false)
+      on_exit(fn -> Application.put_env(:barkpark, :canonical_shape_writes, before) end)
+      :ok
+    end
+
+    test "a title change keeps the Forside's bare-id reference lists bare", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      doc: doc,
+      scope: scope
+    } do
+      {view, _html} = open!(conn, ws, proj, doc)
+
+      view
+      |> form("#editor-form", %{"doc" => %{"title" => "Forside (flagg av)"}})
+      |> render_submit()
+
+      content = stored_content(scope)
+
+      assert content["featuredPublications"] == @refs,
+             "reference array came back as: " <> inspect(content["featuredPublications"])
+
+      assert content["featuredNews"] == @news,
+             "featuredNews came back as: " <> inspect(content["featuredNews"])
     end
   end
 end

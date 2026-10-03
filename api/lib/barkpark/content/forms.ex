@@ -20,8 +20,12 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{Document, DraftId, Labels}
+  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels}
   alias Barkpark.PortableDoc.{Projection, Synthesis}
+
+  # Set on a field of a plugin-owned type: keep the value's stored shape
+  # (owner rulings #42/#43 exempt them; `CanonicalShapes`).
+  @keep_shape "__keep_stored_shape"
 
   @doc """
   Build a form map from a document and its schema. Returns a map keyed
@@ -160,12 +164,11 @@ defmodule Barkpark.Content.Forms do
       # back. The save stored that bare string, so editing ONLY the title of a
       # seeded post rewrote `author: {"_ref": "seed-author-3"}` to
       # `"seed-author-3"` and every `post.author?._ref` reader dropped the post.
-      # Same rule as the clauses around it, and NO new value contract
-      # (task-fcb752b43e11df9b stays the owner's): an untouched reference keeps
-      # its stored value byte-identical; an EDITED one is written in the shape
-      # it was stored in (the object, `_ref` replaced, sibling keys kept). A
-      # bare-string or empty stored value, and a cleared ("") post, are left
-      # exactly as before.
+      # An untouched `{_ref}` reference keeps its stored value byte-identical;
+      # an EDITED one keeps its object (`_ref` replaced, sibling keys kept).
+      # A bare-id stored value is rewritten as `{_ref}` on this save (owner
+      # ruling #42: `coerce_field_value/2` + `restore_untouched/3`); a cleared
+      # ("") post is left exactly as before.
       %{"type" => "reference", "name" => key}, acc when is_binary(key) ->
         case {Map.fetch(acc, key), Map.get(base_content, key)} do
           {{:ok, posted}, %{"_ref" => ref} = stored} when is_binary(posted) and posted != "" ->
@@ -255,6 +258,20 @@ defmodule Barkpark.Content.Forms do
       coerced === stored ->
         stored
 
+      # A reference stored as a bare id is rewritten in the canonical
+      # `{_ref}` shape on its next save, touched or not (owner ruling #42).
+      field["type"] == "reference" and is_binary(stored) and is_map(coerced) ->
+        coerced
+
+      # The same rule row by row for a reference list, so a `{_ref}` row keeps
+      # its sibling keys (`_key`) while a bare-id row is rewritten.
+      field["type"] == "arrayOf" and reference_descriptor?(field["of"]) and is_list(coerced) and
+        is_list(stored) and length(coerced) == length(stored) and
+          Enum.any?(stored, &is_binary/1) ->
+        coerced
+        |> Enum.zip(stored)
+        |> Enum.map(fn {p, s} -> restore_untouched(field["of"], p, s) end)
+
       coerced === coerce_field_value(field, form_image(field, stored)) ->
         stored
 
@@ -273,6 +290,9 @@ defmodule Barkpark.Content.Forms do
         coerced
     end
   end
+
+  defp reference_descriptor?(%{"type" => "reference"}), do: true
+  defp reference_descriptor?(_), do: false
 
   defp restore_composite(field, coerced, stored) do
     subs =
@@ -392,6 +412,8 @@ defmodule Barkpark.Content.Forms do
   def build_content(_params, nil), do: %{}
 
   def build_content(params, schema) do
+    schema = CanonicalShapes.for_type(schema, nil)
+
     Enum.reduce(schema.fields, %{}, fn field, acc ->
       key = field["name"]
       val = Map.get(params, key, "")
@@ -499,6 +521,21 @@ defmodule Barkpark.Content.Forms do
     end)
   end
 
+  # A reference is stored as `{"_ref": id, "_type": "reference"}` (owner
+  # ruling #42, task-fcb752b43e11df9b). The Studio picker posts the bare id;
+  # this is the one place it becomes the canonical object, for a top-level
+  # field, an `arrayOf` row and a composite subfield alike. Readers still
+  # accept a bare id (`Edges.reference_target/1`, `FieldInputs.reference_id/1`,
+  # `?expand`). A plugin-owned type keeps its stored shape
+  # (`CanonicalShapes.exempt_types/0`; the field carries `@keep_shape`).
+  defp coerce_field_value(%{"type" => "reference"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    case String.trim(val) do
+      "" -> val
+      id -> %{"_ref" => id, "_type" => "reference"}
+    end
+  end
+
   defp coerce_field_value(_field, val), do: val
 
   # `%{"0" => a, "2" => c, "1" => b}` → `[a, b, c]`. Only a map whose EVERY key
@@ -551,6 +588,8 @@ defmodule Barkpark.Content.Forms do
   def coerce_params(params, nil), do: params
 
   def coerce_params(params, schema) when is_map(params) do
+    schema = CanonicalShapes.for_type(schema, nil)
+
     Enum.reduce(schema.fields || [], params, fn field, acc ->
       key = field["name"]
 
@@ -873,7 +912,7 @@ defmodule Barkpark.Content.Forms do
              base_doc,
              current,
              params,
-             schema,
+             CanonicalShapes.for_type(schema, type),
              dataset,
              Keyword.take(opts, [:workspace_id, :project_id])
            ) do

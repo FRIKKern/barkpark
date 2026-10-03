@@ -630,4 +630,12 @@ config :barkpark, Barkpark.Content.Validation, enforce_datasets: []
 
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
+# Canonical value-shape WRITES (owner rulings #42 {_ref}, #43 {current},
+# #44 Portable Text). OFF by default: a Studio save keeps each field's stored
+# shape and the shape convert tasks refuse --apply. The owner turns it on per
+# box (BARKPARK_CANONICAL_SHAPE_WRITES=true, runtime.exs) once that box's
+# consumers read both shapes. Readers accept both shapes either way.
+# `Barkpark.Content.CanonicalShapes`.
+config :barkpark, canonical_shape_writes: false
+
 import_config "#{config_env()}.exs"
