@@ -40,8 +40,10 @@ func TestSearchRequestShapeAndDecode(t *testing.T) {
 	if q.Get("limit") != "10" {
 		t.Errorf("limit = %q, want 10", q.Get("limit"))
 	}
-	if q.Get("perspective") != "drafts" {
-		t.Errorf("perspective = %q, want drafts", q.Get("perspective"))
+	// A drafts client asks search for raw and overlays the twins itself:
+	// search's own `drafts` is drafts-only (task-14bded0bdeacb661).
+	if q.Get("perspective") != "raw" {
+		t.Errorf("perspective = %q, want raw for a drafts client", q.Get("perspective"))
 	}
 	if len(docs) != 2 {
 		t.Errorf("decoded %d docs, want 2", len(docs))

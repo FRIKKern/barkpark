@@ -299,8 +299,11 @@ func TestSearchHitsScopedPathWithParams(t *testing.T) {
 	if gotQuery.Get("q") != "hello" || gotQuery.Get("limit") != "20" {
 		t.Errorf("search params = %v, want q=hello limit=20", gotQuery)
 	}
-	if gotQuery.Get("perspective") != "drafts" {
-		t.Errorf("perspective = %q, want drafts (the TUI's client perspective)", gotQuery.Get("perspective"))
+	// The TUI's drafts client asks search for raw and overlays the twins:
+	// search's own `drafts` is drafts-only, so it never found published
+	// content (task-14bded0bdeacb661).
+	if gotQuery.Get("perspective") != "raw" {
+		t.Errorf("perspective = %q, want raw (the drafts client's overlay source)", gotQuery.Get("perspective"))
 	}
 	if !m.searchOpen || len(m.searchHits) != 1 {
 		t.Fatalf("results modal must open with 1 hit, got open=%v hits=%d", m.searchOpen, len(m.searchHits))

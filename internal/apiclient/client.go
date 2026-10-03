@@ -865,7 +865,16 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 	if limit > 0 {
 		params.Set("limit", strconv.Itoa(limit))
 	}
-	if c.Perspective != "" {
+	// On /v1/data/search `drafts` means DRAFT ROWS ONLY, unlike the query/doc
+	// endpoints, where it means "the drafts. twin, else the published row" —
+	// the meaning every TUI list uses. Forwarding it made the TUI search blind
+	// to published content (task-14bded0bdeacb661). A drafts client therefore
+	// asks for raw and overlays the twins below.
+	overlayDrafts := c.Perspective == "drafts"
+	switch {
+	case overlayDrafts:
+		params.Set("perspective", "raw")
+	case c.Perspective != "":
 		params.Set("perspective", c.Perspective)
 	}
 	endpoint += "?" + params.Encode()
@@ -887,7 +896,30 @@ func (c *Client) Search(query string, limit int) ([]Doc, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 		return nil, fmt.Errorf("parse search response: %w", err)
 	}
+	if overlayDrafts {
+		return overlayDraftTwins(out.Documents), nil
+	}
 	return out.Documents, nil
+}
+
+// overlayDraftTwins collapses raw search hits to the drafts perspective: one
+// hit per document, the drafts. twin winning over its published row and taking
+// the rank slot of whichever of the two ranked higher.
+func overlayDraftTwins(hits []Doc) []Doc {
+	slot := map[string]int{}
+	out := make([]Doc, 0, len(hits))
+	for _, d := range hits {
+		key := strings.TrimPrefix(d.ID, "drafts.")
+		if i, seen := slot[key]; seen {
+			if strings.HasPrefix(d.ID, "drafts.") {
+				out[i] = d
+			}
+			continue
+		}
+		slot[key] = len(out)
+		out = append(out, d)
+	}
+	return out
 }
 
 // Get fetches a single document by type and ID.
