@@ -393,7 +393,7 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
         {:cancel, :non_public_type}
 
       true ->
-        case content_mod(args).get_document(id, type, scope) do
+        case fetch_job_doc(args, id, type, scope) do
           {:ok, doc} ->
             upsert_doc(scope, id, doc, args)
 
@@ -545,6 +545,24 @@ defmodule Barkpark.Plugins.Indx.IndexerWorker do
   # type a public reader can't fetch — no new search-leak surface). The enqueued
   # `"types"` arg is intentionally NOT consulted: it names the single mutated
   # type, which is the wrong scope for a whole-dataset swap.
+  # The upsert's document read carries the job's workspace/project, like the
+  # schema gate below and the index key (task-56910177b7e359ca). With no opts
+  # the dataset resolved to the Default workspace's: a non-Default workspace's
+  # edit either indexed Default's same-id document into its own index or was
+  # cancelled as :doc_gone. A job with no workspace keeps the 3-arity read.
+  defp fetch_job_doc(args, id, type, scope) do
+    case job_read_opts(args) do
+      [] -> content_mod(args).get_document(id, type, scope)
+      opts -> content_mod(args).get_document(id, type, scope, opts)
+    end
+  end
+
+  defp job_read_opts(args) do
+    []
+    |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+    |> maybe_put(:project_id, Map.get(args, "project_id"))
+  end
+
   defp indexed_types(scope, args) do
     list_opts =
       []

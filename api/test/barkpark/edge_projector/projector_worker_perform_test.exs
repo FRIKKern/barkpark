@@ -30,6 +30,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
   defmodule FakeContentNotFound do
     @moduledoc false
     def get_document(_id, _type, _scope), do: {:error, :not_found}
+    # A job carrying workspace_id reads with scope opts (task-56910177b7e359ca).
+    def get_document(id, type, scope, _opts), do: get_document(id, type, scope)
     def collect_all_documents(_type, _scope, _opts), do: {[], nil}
   end
 
@@ -38,6 +40,8 @@ defmodule Barkpark.EdgeProjector.ProjectorWorkerPerformTest do
     @moduledoc false
     def get_document(id, _type, _scope),
       do: {:ok, %{"doc_id" => id, "dataset" => "test", "_type" => "post"}}
+
+    def get_document(id, type, scope, _opts), do: get_document(id, type, scope)
 
     def collect_all_documents(_type, _scope, _opts), do: {[], nil}
   end
