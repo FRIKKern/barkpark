@@ -178,7 +178,7 @@ defmodule BarkparkWeb.SessionControllerTest do
       # but the receipt no longer claims a session was killed, and the already
       # revoked row is untouched.
       second =
-        build_conn()
+        scoped_conn()
         |> init_test_session(%{"user_session" => token})
         |> post("/logout")
 
@@ -208,7 +208,7 @@ defmodule BarkparkWeb.SessionControllerTest do
     # Seed the pending marker the way `complete_sign_in/3` does, but with an
     # explicit anchor — no sleeping, no barriers, no timing flake.
     defp post_mfa(user, at, recovery) do
-      build_conn()
+      scoped_conn()
       |> init_test_session(%{"studio_mfa_user" => user.id, "studio_mfa_at" => at})
       |> post("/login/mfa", %{"recovery_code" => recovery})
     end

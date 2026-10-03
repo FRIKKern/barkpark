@@ -62,7 +62,10 @@ Brute-force defense lives in the router, not the controller. The `:user_auth`
 pipeline (`api/lib/barkpark_web/router.ex`) runs `BarkparkWeb.Plugs.RateLimit`
 keyed on the client **IP** before any `/v1/auth/*` handler — anonymous by
 design, since login is pre-auth. No per-account counter; the IP key is the
-chokepoint.
+chokepoint. The four browser auth form POSTs (`/login/account`, `/login/mfa`,
+`/login/reset`, `/login/magic`) draw on the same per-IP write budget (60 a
+minute) through `:browser_auth_write_meter`; the sign-in pages themselves stay
+unmetered.
 
 ## MFA (TOTP)
 
