@@ -111,8 +111,17 @@ defmodule Barkpark.Content.EventLog do
       order_by: e.id,
       limit: ^batch
     )
+    |> narrow_project(Keyword.get(opts, :project_id))
     |> keyset_stream(since, batch)
   end
+
+  # `opts[:project_id]` narrows the replay to one project (owner ruling #50:
+  # a listen stream opened on a project URL). Absent keeps the workspace-wide
+  # replay.
+  defp narrow_project(query, project_id) when is_binary(project_id),
+    do: where(query, [e], e.project_id == ^project_id)
+
+  defp narrow_project(query, _), do: query
 
   def replay_since(_dataset, _since, _workspace_id, _opts), do: []
 

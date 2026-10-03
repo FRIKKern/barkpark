@@ -38,12 +38,16 @@ defmodule BarkparkWeb.ListenFilter do
 
   @perspectives ["published", "drafts", "raw"]
 
-  defstruct types: nil, perspective: nil, filter: %{}
+  # `project_id` is not a query param: the controller sets it from the URL
+  # (`narrow_to_project/2`) when the stream was opened on a
+  # `/w/:ws/p/:proj/...` path (owner ruling #50, task-d60479a7749b0ca5).
+  defstruct types: nil, perspective: nil, filter: %{}, project_id: nil
 
   @type t :: %__MODULE__{
           types: MapSet.t(String.t()) | nil,
           perspective: String.t() | nil,
-          filter: %{optional(String.t()) => [String.t()]}
+          filter: %{optional(String.t()) => [String.t()]},
+          project_id: String.t() | nil
         }
 
   @doc "The `?perspective` values the listen route honours."
@@ -113,9 +117,28 @@ defmodule BarkparkWeb.ListenFilter do
   `perspective`. Cheap, and runs before the per-subscriber re-render.
   """
   @spec pass_meta?(t(), %{type: term(), doc_id: term()}) :: boolean()
-  def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id}) do
-    type_ok?(f.types, type) and perspective_ok?(f.perspective, doc_id)
+  def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id} = event) do
+    type_ok?(f.types, type) and perspective_ok?(f.perspective, doc_id) and
+      project_ok?(f.project_id, event)
   end
+
+  @doc """
+  Narrow the stream to one project (owner ruling #50). Every project's
+  dataset is usually named `production`, so a stream keyed by workspace and
+  dataset name carried sibling projects' changes. A stream opened on a
+  `/w/:ws/p/:proj/...` URL now carries only that project's events; a flat
+  `/v1/...` stream is left workspace-wide (`nil`).
+  """
+  @spec narrow_to_project(t(), String.t() | nil) :: t()
+  def narrow_to_project(%__MODULE__{} = f, project_id) when is_binary(project_id),
+    do: %{f | project_id: project_id}
+
+  def narrow_to_project(%__MODULE__{} = f, _), do: f
+
+  # An event with no project (a shared-layer or pre-tenancy row) is not this
+  # project's business either.
+  defp project_ok?(nil, _event), do: true
+  defp project_ok?(project_id, event), do: Map.get(event, :project_id) == project_id
 
   defp type_ok?(nil, _type), do: true
   defp type_ok?(types, type), do: MapSet.member?(types, type)
