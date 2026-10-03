@@ -107,7 +107,13 @@ defmodule BarkparkWeb.TokenRotateTest do
           owner_user_id: owner.id
         )
 
-      conn = rotate(admin_raw, ws, project, old.id)
+      # Owner ruling #7: a user-owned token is rotated only by a token of the
+      # same owner, so this copy test rotates as the OWNER (an admin-seated
+      # token the owner holds); the admin refusal is pinned below.
+      _ = admin_raw
+      owner_raw = owner_admin_token!(ws, owner)
+
+      conn = rotate(owner_raw, ws, project, old.id)
       body = json_response(conn, 201)
       new_raw = body["token"]
 
@@ -305,6 +311,72 @@ defmodule BarkparkWeb.TokenRotateTest do
   end
 
   # ── criterion 3 ─────────────────────────────────────────────────────────────
+
+  # OWNER RULING 2026-10-03 #7 (task-a08da65bc33083d0): only a token's owner
+  # rotates a user-owned token; an admin revokes it instead.
+  describe "a user-owned token is rotated only by its owner (ruling #7)" do
+    setup %{ws: ws} do
+      {:ok, member} =
+        Barkpark.Accounts.register_user(%{
+          email: "rot-member-#{Ecto.UUID.generate()}@example.com",
+          password: "correct horse battery"
+        })
+
+      {:ok, _} = TenancyAuth.create_membership(ws.id, member.id, "member", "user")
+
+      {:ok, {pat_raw, pat}} =
+        Auth.create_personal_access_token("member laptop", ["read"],
+          workspace_id: ws.id,
+          owner_user_id: member.id
+        )
+
+      %{member: member, pat_raw: pat_raw, pat: pat}
+    end
+
+    test "a workspace admin cannot rotate a member's PAT, and the PAT keeps working",
+         %{ws: ws, project: project, admin_raw: admin_raw, pat: pat, pat_raw: pat_raw} do
+      before = tokens_labelled(pat.label)
+      resp = rotate(admin_raw, ws, project, pat.id)
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "owner_only"
+      assert tokens_labelled(pat.label) == before, "no successor was minted"
+      assert {:ok, _} = Auth.verify_token(pat_raw)
+    end
+
+    test "the admin can still revoke it", %{
+      ws: ws,
+      project: project,
+      admin_raw: admin_raw,
+      pat: pat
+    } do
+      assert req(admin_raw)
+             |> delete("#{base(ws, project)}/tokens/#{pat.id}")
+             |> json_response(200)
+    end
+
+    test "the owner rotates it with a token of their own",
+         %{ws: ws, project: project, member: member, pat: pat} do
+      owner_raw = owner_admin_token!(ws, member)
+      assert rotate(owner_raw, ws, project, pat.id).status == 201
+    end
+
+    test "a machine token (no owner) is still rotated by an admin",
+         %{ws: ws, project: project, admin_raw: admin_raw} do
+      {_raw, machine} = victim!(ws)
+      assert rotate(admin_raw, ws, project, machine.id).status == 201
+    end
+  end
+
+  # An admin-seated token held BY `user` — the shape an owner needs to reach the
+  # scoped rotate route for their own PAT.
+  defp owner_admin_token!(ws, user) do
+    raw = "rot-owner-admin-#{System.unique_integer([:positive])}"
+    {:ok, t} = Auth.create_token(raw, "rot-owner-admin", @dataset, ["read", "write", "admin"])
+    {:ok, _} = TenancyAuth.create_membership(ws.id, t.id, "admin", "api_token")
+    t |> Ecto.Changeset.change(owner_user_id: user.id) |> Repo.update!()
+    raw
+  end
 
   describe "criterion 3 — revoke's authority, no widening, audited without secrets" do
     test "an admin of A cannot rotate B's token — 404, B untouched", ctx do
