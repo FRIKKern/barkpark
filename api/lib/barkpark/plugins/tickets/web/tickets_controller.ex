@@ -13,7 +13,8 @@ defmodule BarkparkWeb.TicketsController do
         GET  /v1/tickets/:id             :show_own   read the thread (stamps seen)
         POST /v1/tickets/:id/messages    :reply      reply (auto-reopens)
 
-    * **Operator** — normal bearer-token auth (the `:token_root` bucket).
+    * **Operator** — normal bearer-token auth (the `:token_root` bucket), write
+      tier for reads too (owner ruling #24).
 
         GET  /v1/tickets/inbox           :inbox          triage feed
         GET  /v1/tickets/inbox/:id       :show_operator  read one thread
@@ -46,6 +47,14 @@ defmodule BarkparkWeb.TicketsController do
   alias Barkpark.Plugins.Tickets.{Thread, Triage}
 
   @default_dataset "production"
+
+  # Owner ruling #24 (2026-10-03, task-eec10eeab544e619 Q1): the operator inbox
+  # holds outside submitters' personal data, so READING it needs the same write
+  # tier as answering a ticket. `:answer` / `:close` are POSTs and already pass
+  # the bucket's `RequireWriteForMutation`; the two GET reads did not, so a
+  # read-only token or a viewer-role member read every thread. Same plug, same
+  # 403 `forbidden` envelope, same grant/account arms as the write routes.
+  plug BarkparkWeb.Plugs.RequireWritePermission when action in [:inbox, :show_operator]
 
   # ── Submitter surface (auth: conn.assigns[:ticket_key]) ──────────────────
 
