@@ -13,7 +13,7 @@ defmodule Barkpark.Search.DocumentsRetrieverPerspectiveTest do
     assert length(q.wheres) == 1
   end
 
-  test ":drafts applies exactly one (drafts-only) where clause" do
+  test ":drafts applies exactly one (draft-over-published overlay) where clause" do
     q = DocumentsRetriever.perspective_filter(base(), :drafts)
     assert length(q.wheres) == 1
   end
