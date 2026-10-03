@@ -64,6 +64,12 @@ see `docs/api-v1.md` §1a.
 | `POST …/search/:dataset/synonyms` | admin | Create synonym |
 | `DELETE …/search/:dataset/synonyms/:id` | admin | Delete synonym |
 
+`?perspective=` on document search means what it means on the query and doc
+reads (`docs/api-v1.md` §4): `published` (default; anonymous and public-read
+callers are pinned to it), `drafts` (the draft-over-published overlay — each
+document once, its `drafts.` twin when one exists, else the published row;
+owner ruling 2026-10-03), `raw` (every row). Any other value is a 400.
+
 **Media surface:** the same six routes exist under
 `/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search[…]` with identical
 auth. Flat aliases for both surfaces

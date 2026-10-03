@@ -104,7 +104,7 @@ defmodule Barkpark.Plugins.Indx.Retriever do
       # wide pool never costs 200 authoritative re-reads per keystroke.
       ranked =
         indx_docs
-        |> keep_perspective(Keyword.get(opts, :perspective, :published))
+        |> keep_perspective(Keyword.get(opts, :perspective, :published), scope, opts)
         |> reject_excluded(parsed)
         |> rerank_by_title(parsed)
 
@@ -377,11 +377,41 @@ defmodule Barkpark.Plugins.Indx.Retriever do
   # anonymous `?engine=indx` search returned and counted unpublished drafts.
   #
   # Same rule, same fallback as `perspective_filter/2`, keyed on the same
-  # `drafts.` id prefix: `:raw` keeps all, `:drafts` keeps drafts, and anything
-  # else — `:published`, a stray string, nil — keeps published only.
-  defp keep_perspective(indx_docs, :raw), do: indx_docs
-  defp keep_perspective(indx_docs, :drafts), do: Enum.filter(indx_docs, &draft_hit?/1)
-  defp keep_perspective(indx_docs, _published), do: Enum.reject(indx_docs, &draft_hit?/1)
+  # `drafts.` id prefix: `:raw` keeps all, `:drafts` is the draft-over-published
+  # overlay (owner ruling #52: a draft hit stays, a published hit stays only when
+  # Postgres holds no `drafts.` twin for it), and anything else — `:published`,
+  # a stray string, nil — keeps published only.
+  defp keep_perspective(indx_docs, :raw, _scope, _opts), do: indx_docs
+
+  defp keep_perspective(indx_docs, :drafts, scope, opts) do
+    twin_ids =
+      indx_docs
+      |> Enum.map(&id_type_pair/1)
+      |> Enum.flat_map(fn
+        {"drafts." <> _, _type} -> []
+        {id, _type} -> ["drafts." <> id]
+        nil -> []
+      end)
+      |> Enum.uniq()
+
+    # The twin probe goes through the same tenant-scoped batch read hydration
+    # uses, so a co-tenant's draft can never hide this caller's published hit.
+    twins =
+      if twin_ids == [],
+        do: %{},
+        else: Content.get_documents_by_ids(twin_ids, scope, scope_opts(opts))
+
+    Enum.filter(indx_docs, fn indx_doc ->
+      case id_type_pair(indx_doc) do
+        {"drafts." <> _, _type} -> true
+        {id, type} -> not match?(%{type: ^type}, Map.get(twins, "drafts." <> id))
+        nil -> false
+      end
+    end)
+  end
+
+  defp keep_perspective(indx_docs, _published, _scope, _opts),
+    do: Enum.reject(indx_docs, &draft_hit?/1)
 
   defp draft_hit?(indx_doc) do
     case id_type_pair(indx_doc) do
