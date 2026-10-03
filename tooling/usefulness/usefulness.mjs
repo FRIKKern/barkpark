@@ -17,6 +17,7 @@ import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync, existsSync, readdirSync, mkdirSync, rmSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
+import { platformReach, resolveProfile, scanElixir, readConfigs } from "../lib/platform-reach.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = execFileSync("git", ["rev-parse", "--show-toplevel"], { cwd: HERE }).toString().trim();
@@ -26,15 +27,16 @@ const BATCH = 10;
 const nodes = JSON.parse(readFileSync(join(ROOT, "tooling/barkpark-sync/nodes.json"), "utf8")).nodes;
 const risk = (existsSync(join(ROOT, "tooling/risk/risk-report.json")) ? JSON.parse(readFileSync(join(ROOT, "tooling/risk/risk-report.json"), "utf8")).files : {});
 
-// reverse the file-level dependency graph → dependents
+// transitive reach = how many files (transitively) depend on this one, FOR
+// THE DECLARED PLATFORM PROFILE (task-403fe20b2a7f2743). An edge from an
+// :os.type() backend selector to a backend the profile never selects carries
+// no reach. The edge stays in the graph, and the report names the discount.
+// Profile: --platform <p> > CODY_PLATFORM > "linux" (the deployed fleet).
+const platformArg = (() => { const i = process.argv.indexOf("--platform"); return i > 0 ? process.argv[i + 1] : null; })();
+const PROFILE = resolveProfile(platformArg);
+const PR = platformReach(nodes, { ...scanElixir(ROOT), configSrcs: readConfigs(ROOT), profile: PROFILE.profile });
 const byId = Object.fromEntries(nodes.map(n => [n.id, n]));
-const dependents = {}; for (const n of nodes) for (const d of n.deps) (dependents[d] ||= []).push(n.id);
-// transitive reach = how many files (transitively) depend on this one
-function reach(id) {
-  const seen = new Set(); const q = [...(dependents[id] || [])];
-  while (q.length) { const x = q.shift(); if (seen.has(x)) continue; seen.add(x); for (const up of dependents[x] || []) if (!seen.has(up)) q.push(up); }
-  return seen.size;
-}
+function reach(id) { return PR.files[byId[id].path]?.reach ?? 0; }
 
 function prior(n) {
   const r = reach(n.id), f = n.fields, rk = risk[n.path] || {};
@@ -72,12 +74,23 @@ if (cmd === "merge") {
   for (const n of nodes) { const r = reach(n.id); reachByPath[n.path] = r; if (r > maxReach) maxReach = r; }
   const denom = Math.log2(1 + maxReach) || 1;
   const reachScore = (r) => Math.round((Math.log2(1 + r) / denom) * 100);
-  const report = { at: new Date().toISOString(), files: {} };
+  const report = {
+    at: new Date().toISOString(),
+    // Every report DECLARES the platform its reach was scored for.
+    platform: { profile: PROFILE.profile, source: PROFILE.source },
+    platformVerdicts: PR.verdicts,
+    files: {},
+  };
   for (const n of nodes) {
     const a = out[n.path]; const r = reachByPath[n.path]; const score = reachScore(r);
     const why = a?.why_useful || "";
     report.files[n.path] = {
       reach: r, reachScore: score, why,
+      // The platform discount, spelled out: the raw count and each selector
+      // edge that did not count, with why. Absent when nothing was discounted.
+      ...(PR.files[n.path]?.discounted
+        ? { reachRaw: PR.files[n.path].raw, platformDiscount: PR.files[n.path].edges.filter(e => e.state === "inactive").map(e => ({ selector: e.selector, state: e.state, why: e.why })) }
+        : {}),
       // legacy mirrors so older readers keep working; treat the score as reach.
       usefulness: score, why_useful: why,
     };
@@ -85,4 +98,7 @@ if (cmd === "merge") {
   writeFileSync(join(HERE, "usefulness-report.json"), JSON.stringify(report, null, 2));
   const n = Object.values(report.files).filter(x => x.why).length;
   process.stderr.write(`[reach] computed reach for ${nodes.length} files (normalized 0-100) · ${n} carry a 'why' description → usefulness-report.json\n`);
+  const disc = Object.entries(PR.files).filter(([, f]) => f.discounted);
+  process.stderr.write(`[reach] platform profile ${PROFILE.profile} (${PROFILE.source}) · ${PR.verdicts.length} selector edge(s), ${disc.length} file(s) discounted\n`);
+  for (const [p, f] of disc) process.stderr.write(`  ${p}: reach ${f.raw} → ${f.reach} — ${f.edges.filter(e => e.state === "inactive").map(e => e.why).join("; ")}\n`);
 }

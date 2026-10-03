@@ -27,7 +27,7 @@ twice**.
 
 | Root | Measures | Measured by (the one pass that owns it) |
 |---|---|---|
-| **reach** | transitive dependents — how many files (transitively) depend on this one; dependency/import-graph centrality | `tooling/blast-radius/` builds the file graph; `tooling/barkpark-sync/generate.mjs` derives `dependentCount`; `tooling/usefulness/usefulness.mjs` computes transitive `reach` (promoted to the surfaced value — see below) |
+| **reach** | transitive dependents — how many files (transitively) depend on this one; dependency/import-graph centrality | `tooling/blast-radius/` builds the file graph; `tooling/barkpark-sync/generate.mjs` derives `dependentCount`; `tooling/usefulness/usefulness.mjs` computes transitive `reach` (promoted to the surfaced value — see below), for a DECLARED platform profile (`--platform` > `CODY_PLATFORM` > `linux`): an edge from an `:os.type()` backend selector to a backend that profile never selects carries no reach, and the report names the discount (`tooling/lib/platform-reach.mjs`) |
 | **churn** | git change frequency | `tooling/file-importance/` (`file-signals.json` → `churn`) |
 | **complexity** | size / cognitive load — tokens, defs (ergonomics) | `tooling/ergonomics/` (`tokens`, `defs`, `sizeClass`, `bloat`) |
 | **defects** | fix/revert commit density — where bugs actually land (risk) | `tooling/risk/risk.mjs` (`bugFixes`, `defectDensity`) |
