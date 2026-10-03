@@ -33,7 +33,9 @@ defmodule BarkparkWeb.SchemaUpsertEchoTest do
       "name" => "upsert_echo_widget",
       "title" => "Upsert Echo Widget",
       "visibility" => "public",
-      "fields" => [%{"name" => "title", "type" => "string", "required" => true}]
+      "fields" => [
+        %{"name" => "title", "type" => "string", "validation" => %{"required" => true}}
+      ]
     }
 
     resp =

@@ -111,6 +111,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_required([:name, :title])
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
+    |> validate_no_bare_required()
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
@@ -139,6 +140,104 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> foreign_key_constraint(:workspace_id)
     |> foreign_key_constraint(:project_id)
     |> foreign_key_constraint(:dataset_id)
+  end
+
+  # THE BARE `required` SPELLING IS REFUSED (owner ruling #48,
+  # task-09b145e53c43fd58). `{name, type, required: true}` is the Sanity habit,
+  # but `Barkpark.Content.Validation` reads the rule only from
+  # `validation: {required: true}`, so the bare key was stored, echoed back as
+  # required, and never checked: documents published with the field empty.
+  # Refusing it at schema apply ends that silent trap. A census found no stored
+  # schema using the bare key on three servers. Only a CHANGED `fields` list
+  # is checked, so an unrelated update to an old row is never blocked.
+  defp validate_no_bare_required(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        case bare_required_paths(fields, []) do
+          [] ->
+            changeset
+
+          paths ->
+            add_error(
+              changeset,
+              :fields,
+              "#{Enum.map_join(paths, ", ", &~s("#{&1}"))}: top-level `required` is not a " <>
+                "supported rule and is never checked; write it as " <>
+                "`\"validation\": {\"required\": true}` (validation.required)"
+            )
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  @doc false
+  # Field paths (`seo.title`, `rows[].label`) whose definition carries the bare
+  # `required` key, depth-first in declaration order.
+  def bare_required_paths(fields, prefix) when is_list(fields) do
+    Enum.flat_map(fields, fn
+      field when is_map(field) ->
+        name = to_string(fget(field, "name") || "?")
+        path = Enum.join(prefix ++ [name], ".")
+
+        own =
+          if Map.has_key?(field, "required") or Map.has_key?(field, :required),
+            do: [path],
+            else: []
+
+        kids =
+          case fget(field, "fields") do
+            list when is_list(list) -> bare_required_paths(list, prefix ++ [name])
+            _ -> []
+          end
+
+        of =
+          case fget(field, "of") do
+            %{} = descriptor ->
+              descriptor_paths(descriptor, prefix ++ [name <> "[]"])
+
+            list when is_list(list) ->
+              Enum.flat_map(list, fn
+                %{} = d -> descriptor_paths(d, prefix ++ [name <> "[]"])
+                _ -> []
+              end)
+
+            _ ->
+              []
+          end
+
+        own ++ kids ++ of
+
+      _ ->
+        []
+    end)
+  end
+
+  def bare_required_paths(_fields, _prefix), do: []
+
+  # An `of` descriptor is a field without a name of its own: its bare
+  # `required` is reported at the list path, its subfields under it.
+  defp descriptor_paths(descriptor, prefix) do
+    own =
+      if Map.has_key?(descriptor, "required") or Map.has_key?(descriptor, :required),
+        do: [Enum.join(prefix, ".")],
+        else: []
+
+    kids =
+      case fget(descriptor, "fields") do
+        list when is_list(list) -> bare_required_paths(list, prefix)
+        _ -> []
+      end
+
+    own ++ kids
+  end
+
+  defp fget(map, key) when is_binary(key) do
+    case Map.fetch(map, key) do
+      {:ok, v} -> v
+      :error -> Map.get(map, String.to_existing_atom(key))
+    end
   end
 
   # `desk_groups` is a bare `{:array, :map}` — until this guard, NOTHING checked
