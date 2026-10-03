@@ -54,7 +54,8 @@ import TaskItem from "@tiptap/extension-task-item";
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
-import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
+import { TextSelection, NodeSelection, Plugin, Selection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { prepareHTMLTablePaste } from "./html-table-paste.js";
 import { normalizeWordListHTML } from "./word-paste.js";
@@ -298,7 +299,7 @@ import {
 // never be deleted or moved live (the FELT half of the server backstop). Split into
 // its own DOM-free module so it unit-tests in plain Node (this file can't be
 // imported DOM-free — it calls customElements.define at load).
-import { transactionVetoesLock } from "./locks.js";
+import { transactionVetoesLock, isLockedTitle } from "./locks.js";
 // pdd-t20c: the PURE constraint-vocabulary veto — the calm lock veto GENERALIZED to
 // cardinality (a remove dropping a required/min-N kind below its floor) + relative
 // order (a move misplacing a positioned kind against its before/after relation).
@@ -865,11 +866,38 @@ class BpPaperCanvas extends HTMLElement {
           includeChildren: false,
           showOnlyWhenEditable: true,
           placeholder: ({ node }) => {
+            if (isLockedTitle(node)) return PLACEHOLDER.title;
             if (node.type.name === "heading") {
               return PLACEHOLDER.heading(node.attrs && node.attrs.level);
             }
             return PLACEHOLDER[node.type.name] || PLACEHOLDER.paragraph;
           },
+        }),
+        // The empty locked title reads "Title" wherever the caret is (owner ruling
+        // 2026-10-03 #54). The Placeholder extension above marks only the caret's
+        // node; this keeps the title's ghost text up at rest. Same `is-empty` +
+        // data-placeholder pair, so the existing placeholder CSS paints it.
+        Extension.create({
+          name: "bpTitlePlaceholder",
+          addProseMirrorPlugins: () => [
+            new Plugin({
+              props: {
+                decorations: (state) => {
+                  if (!host._editable) return null;
+                  const decorations = [];
+                  state.doc.forEach((node, pos) => {
+                    if (isLockedTitle(node) && node.content.size === 0) {
+                      decorations.push(Decoration.node(pos, pos + node.nodeSize, {
+                        class: "is-empty",
+                        "data-placeholder": PLACEHOLDER.title,
+                      }));
+                    }
+                  });
+                  return decorations.length ? DecorationSet.create(state.doc, decorations) : null;
+                },
+              },
+            }),
+          ],
         }),
         // Smart typography — parity with ../index.js. A prose run holds no code
         // block, so nothing to exclude.
@@ -2021,6 +2049,23 @@ class BpPaperCanvas extends HTMLElement {
         default:
           return false;
       }
+    }
+
+    // Enter in the locked title (owner ruling 2026-10-03 #54, charter D6 amended):
+    // still no split, no new block and no op — the caret moves to the first body
+    // block, so the author keeps writing in the body instead of the title.
+    if (
+      this._editable &&
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.isComposing &&
+      this._enterFromLockedTitle()
+    ) {
+      event.preventDefault();
+      return true;
     }
 
     if (
@@ -3768,6 +3813,69 @@ class BpPaperCanvas extends HTMLElement {
     }
     view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
     view.focus();
+    return true;
+  }
+
+  // Enter with the caret in the locked title. Returns false when the caret is not
+  // in it (Enter keeps its normal meaning). Otherwise the caret goes to the first
+  // unlocked block after the title in this run; with none, to the next run's first
+  // body block, else the first ghost slot or the "+ Add block" control. Selection
+  // only: no doc change, no op, no history entry. Returns true either way, so the
+  // Enter stays a no-op on the document (the D6 guarantee).
+  _enterFromLockedTitle() {
+    const editor = this._editor;
+    if (!editor) return false;
+    const { selection } = editor.state;
+    const $from = selection.$from;
+    if ($from.depth !== 1 || !isLockedTitle($from.parent)) return false;
+    if (!selection.$to.sameParent($from)) return false;
+    if (this._focusBodyFrom($from.index(0) + 1)) return true;
+    this._focusBodyAfterRun();
+    return true;
+  }
+
+  // Put the caret in the first unlocked top-level block at or after `startIndex`.
+  _focusBodyFrom(startIndex = 0) {
+    const editor = this._editor;
+    if (!editor || !this._editable) return false;
+    const { state, view } = editor;
+    let target = null;
+    state.doc.forEach((node, offset, index) => {
+      if (target == null && index >= startIndex && node.attrs?.locked !== true) target = offset;
+    });
+    if (target == null) return false;
+    let next;
+    try {
+      next = Selection.near(state.doc.resolve(target), 1);
+    } catch (_e) {
+      return false;
+    }
+    if (!next || next.from < target) return false;
+    view.dispatch(state.tr.setSelection(next).setMeta("addToHistory", false).scrollIntoView());
+    view.focus();
+    return true;
+  }
+
+  // Public seam for a neighbouring run: focus this run's first body block.
+  focusFirstBodyBlock() {
+    return this._focusBodyFrom(0);
+  }
+
+  // The title run holds no body block: try the following canvas runs in document
+  // order, then the first ghost slot (Ingress / Featured), then "+ Add block".
+  _focusBodyAfterRun() {
+    const root = this.closest(".bp-paper-editor") || this.ownerDocument?.body;
+    if (!root) return false;
+    const canvases = [...root.querySelectorAll("bp-paper-canvas")];
+    for (const canvas of canvases.slice(canvases.indexOf(this) + 1)) {
+      if (typeof canvas.focusFirstBodyBlock === "function" && canvas.focusFirstBodyBlock()) return true;
+    }
+    const affordance =
+      root.querySelector('[data-test-id="paper-ghost-slots"] button:not([disabled])') ||
+      root.querySelector('[data-test-id="paper-add-block"] select, [data-test-id="paper-add-block"] button');
+    if (!affordance) return false;
+    this._editor?.commands.blur();
+    affordance.focus();
     return true;
   }
 

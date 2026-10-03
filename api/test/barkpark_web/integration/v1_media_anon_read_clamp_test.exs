@@ -61,6 +61,15 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
   defp admin(conn), do: put_req_header(conn, "authorization", "Bearer anon-clamp-admin")
   defp read_token(conn), do: put_req_header(conn, "authorization", "Bearer anon-clamp-read")
 
+  defp declare_collections_public! do
+    import Ecto.Query, only: [from: 2]
+
+    Barkpark.Repo.update_all(
+      from(s in Barkpark.Content.SchemaDefinition, where: s.name == "mediaCollection"),
+      set: [visibility: "public"]
+    )
+  end
+
   defp png_upload do
     path = Path.join(System.tmp_dir!(), "anonclamp-#{System.unique_integer([:positive])}.png")
     File.write!(path, Base.decode64!(@png_b64))
@@ -532,6 +541,12 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
         })
         |> json_response(200)
       end
+
+      # Owner ruling #22: an anonymous caller reaches a collection only when the
+      # collection type is public. This test is about the ASSET ceiling behind
+      # an open folder, so it declares the type public, as an install that
+      # wants open folders does.
+      declare_collections_public!()
 
       path = "/v1/media/#{@ds}/collections/#{collection.doc_id}/assets"
 

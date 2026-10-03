@@ -478,8 +478,10 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
   # merely commented: a boundary nobody can see is a boundary that moves by
   # accident.
   describe "the deliberately-unclamped halves" do
-    test "BOUNDARY (product question, task-b4a4b33bfb6e2954): an ANONYMOUS caller is NOT clamped",
-         ctx do
+    # RULED (owner ruling #22, 2026-10-03, task-76ddf1b3b0587fe6): the product
+    # question this boundary used to hold open is settled — anonymous callers
+    # follow the public-read rule. This test changed on purpose with that PR.
+    test "RULED (#22): an ANONYMOUS caller is clamped like the public-read tier", ctx do
       titles =
         ctx.scope
         |> Keyword.put(:caller_context, CallerContext.anonymous())
@@ -487,13 +489,10 @@ defmodule Barkpark.Media.ScopedMediaPublicReadTierAuditTest do
         |> Enum.map(& &1.title)
         |> Enum.filter(&(is_binary(&1) and String.contains?(&1, ctx.probe)))
 
-      assert titles != [],
-             "ANONYMOUS COLLECTIONS INDEX CHANGED. The flat /v1/media/:ds/collections route " <>
-               "is anonymous-reachable; clamping it flips that index from 'every collection' " <>
-               "to 'none' whenever mediaCollection is not a public-visibility schema. That is " <>
-               "a PRODUCT decision about the public demo surface and was left open on " <>
-               "task-b4a4b33bfb6e2954, NOT smuggled in with this security fix. If you meant " <>
-               "to rule on it, change this test on purpose and say so in the PR."
+      assert titles == []
+
+      anon_scope = Keyword.put(ctx.scope, :caller_context, CallerContext.anonymous())
+      assert {:error, :not_found} = Collections.get(ctx.coll_id, @ds, anon_scope)
     end
 
     test "a live SHARE link onto a private-typed collection still resolves", ctx do

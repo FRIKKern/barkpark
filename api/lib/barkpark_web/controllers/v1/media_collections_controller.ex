@@ -32,9 +32,10 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
 
     docs = Collections.list(dataset, list_opts)
     pending = Collections.pending_drafts(docs, dataset, list_opts)
+    visibility = Collections.redaction_visibility(dataset, list_opts)
 
     collections =
-      Enum.map(docs, &Collections.render(&1, MapSet.member?(pending, &1.doc_id)))
+      Enum.map(docs, &Collections.render(&1, MapSet.member?(pending, &1.doc_id), visibility))
 
     # `count` here has always meant the PAGE ROWS, while `count` on the
     # `/v1/media/:ds` sibling has always meant the GRAND TOTAL. Both readings
@@ -67,9 +68,12 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
   end
 
   def show(conn, %{"dataset" => dataset, "id" => id}) do
-    with {:ok, collection} <- Collections.get(id, dataset, scope_opts(conn)) do
+    opts = scope_opts(conn)
+
+    with {:ok, collection} <- Collections.get(id, dataset, opts) do
       json(conn, %{
-        result: Collections.render(collection),
+        result:
+          Collections.render(collection, false, Collections.redaction_visibility(dataset, opts)),
         syncTags: ["bp:ds:#{dataset}:media:collections:#{id}"]
       })
     end
@@ -196,9 +200,17 @@ defmodule BarkparkWeb.V1.MediaCollectionsController do
       returned = length(hits)
       has_more = (opts[:offset] || 0) + returned < total
 
+      # The share token is the principal, not a member: the collection's own
+      # fields are rendered for the anonymous reader (owner ruling #22).
+      visibility =
+        Collections.redaction_visibility(
+          dataset,
+          [caller_context: Barkpark.Content.CallerContext.anonymous()] ++ share_scope
+        )
+
       result =
         %{
-          collection: Collections.render(collection),
+          collection: Collections.render(collection, false, visibility),
           hits: hits,
           total: total,
           hasMore: has_more,

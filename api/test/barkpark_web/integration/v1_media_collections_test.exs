@@ -110,6 +110,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
 
       assets =
         conn
+        |> authed()
         |> get(~p"/v1/media/production/collections/#{collection.doc_id}/assets")
         |> json_response(200)
 
@@ -138,6 +139,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
 
       assets =
         conn
+        |> authed()
         |> get(~p"/v1/media/production/collections/#{collection.doc_id}/assets")
         |> json_response(200)
 
@@ -365,6 +367,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
       # rejected call must not have mutated workspace-A's asset doc.
       assets =
         conn
+        |> authed()
         |> get(~p"/v1/media/production/collections/#{collection.doc_id}/assets")
         |> json_response(200)
 

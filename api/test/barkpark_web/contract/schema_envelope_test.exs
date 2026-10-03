@@ -13,8 +13,8 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
         "title" => "Post",
         "visibility" => "public",
         "fields" => [
-          %{"name" => "title", "type" => "string", "required" => true},
-          %{"name" => "slug", "type" => "slug", "required" => true},
+          %{"name" => "title", "type" => "string", "validation" => %{"required" => true}},
+          %{"name" => "slug", "type" => "slug", "validation" => %{"required" => true}},
           %{"name" => "body", "type" => "richText"},
           %{
             "name" => "tags",
@@ -37,7 +37,7 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
         "title" => "Page",
         "visibility" => "public",
         "fields" => [
-          %{"name" => "title", "type" => "string", "required" => true},
+          %{"name" => "title", "type" => "string", "validation" => %{"required" => true}},
           %{"name" => "body", "type" => "richText"}
         ]
       },

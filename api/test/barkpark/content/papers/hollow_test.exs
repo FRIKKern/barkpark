@@ -149,7 +149,14 @@ defmodule Barkpark.Content.Papers.HollowTest do
                "This paper has a title but no content yet — add at least one body block."
 
       assert Hollow.ratchet_message() ==
-               "This edit would remove the last content block — a published paper cannot be hollowed out to title-only."
+               "This edit would remove the last content block. A paper cannot be emptied back to a title alone — keep at least one content block."
+    end
+
+    # Owner ruling #55 (2026-10-03): the ratchet refuses EVERY paper that had
+    # content — papers publish in place, so there is no unpublished state it
+    # could exempt — and the copy must not promise a published-only rule.
+    test "the ratchet copy does not claim the rule is for published papers only" do
+      refute Hollow.ratchet_message() =~ "published"
     end
   end
 

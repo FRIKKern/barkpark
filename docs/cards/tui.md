@@ -8,7 +8,7 @@ Editing (D12): v1 scalar/ref/array inline; v2 read-only→docs/contracts/schema-
 ## Papers / Bulldocs
 - Viewer `paper.go`; blocks via `internal/pdrender` (`Decode`→`DefaultRegistry(theme)`→`Render`); `bp paper` shares it.
 - **Parity:** new blocks ship in HTML, CSS + pdrender → docs/contracts/tui-render-doctrine.md
-- **Go:** `go.mod` pins 1.25.0 (#726); don't bump.
+- **Go:** `go.mod` pins 1.26; bump WASM_GO_VERSION too
 
 ## `bp tasks` — live portrait task board
 Pane `internal/taskboard`. REFRESH `events.go`: SSE→keyset poll `/v1/tasks/events`, re-list on delta only; 2s→30s adaptive, 5s heavy floor; `r` forces. NAV (D11): `enter` descends board→task→paper→children…; `esc` up. **Mouse**: wheel; click selects+activates; hover previews; `M` toggles; `↑N`/`↓N` markers scroll, never enter (D119/D121). Divider drags; `DetailsPaneRatio` in `taskboard-preferences.json`. Tasks read at a centered 80-col measure. ACTS `c`/`x`/`o`/`r`. `spine.go spineRows`=sole paint+cursor producer; `compose.go Compose`=`View()`. `bp tasks`≠`bp task …`. Hermetic gate: `taskboard-drive/drive.sh DRIVE_MODE=hermetic`, `hermetic-proof.sh`.

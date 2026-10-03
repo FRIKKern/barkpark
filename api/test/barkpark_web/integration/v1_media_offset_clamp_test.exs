@@ -73,12 +73,14 @@ defmodule BarkparkWeb.Integration.V1MediaOffsetClampTest do
 
     {:ok, _published} = Content.publish_document(id, "mediaCollection", "production")
 
-    # Tokenless, like the sibling `V1MediaCollectionsTest` assets case: an
-    # api_token principal hits `restrict_public_read_tier?/1` and 404s on a
-    # `mediaCollection` (not a public type), so the anonymous conn is the one
-    # that actually reaches the passthrough.
+    # A read token: since owner ruling #22 an anonymous (or public-read)
+    # caller 404s on a `mediaCollection`, which is not a public type, so a
+    # member-tier principal is the one that reaches the passthrough.
+    Barkpark.Auth.create_token("offset-clamp-read", "offset clamp", "test", ["read"])
+
     body =
       conn
+      |> put_req_header("authorization", "Bearer offset-clamp-read")
       |> get("/v1/media/production/collections/#{id}/assets", %{
         "offset" => @absurd,
         "limit" => "5"

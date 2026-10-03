@@ -68,8 +68,8 @@ cron mailer. Investigate before the next deploy.
 ## Leg 0 — the version pin (guards legs 1 & 2)
 
 The pinned CLI version lives in exactly ONE place:
-`scripts/claude-pinned-version.txt` (currently **2.1.206**, proven green live —
-5/0 real-binary run). Three consumers read it:
+`scripts/claude-pinned-version.txt` (currently **2.1.207**, proven green live
+2026-10-03 — 8/8 real-binary run, owner-approved spend). Three consumers read it:
 
 - `scripts/claude-chat-e2e.sh` — asserts `"$CLAUDE_BIN" --version` matches and
   **REFUSES** on mismatch (never silent-skips),
@@ -81,6 +81,21 @@ PATH decoys are real and this is why the refusal is loud: the **cmux wrapper is
 first on PATH** and a **stale npm-global 2.1.84** can shadow the intended binary.
 A green run against the wrong version would be a lie about the wire contract.
 Upgrading is a deliberate act: bump the pin file, then re-run the smoke.
+
+**Running the pinned version on a host whose default `claude` is newer** (the
+native installer auto-updates; the dev Mac was on 2.1.288 when 2.1.207 was
+pinned). Install the exact version beside it and point `CLAUDE_BIN` at it —
+never edit the pin to match whatever happens to be installed:
+
+```bash
+npm install --prefix /tmp/claude-pin @anthropic-ai/claude-code@"$(cat scripts/claude-pinned-version.txt)"
+CLAUDE_BIN=/tmp/claude-pin/node_modules/@anthropic-ai/claude-code/bin/claude.exe scripts/claude-chat-e2e.sh
+```
+
+If that version is no longer published, `npm install` fails and nothing runs —
+the loud failure the pin exists for. **Rollback:** revert the pin file to the
+previous version (`git log -p scripts/claude-pinned-version.txt`) and re-run
+the suite against a binary of that version.
 
 ## Kill-signal — when to abandon the raw wire
 

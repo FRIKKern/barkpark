@@ -38,6 +38,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         end
 
       errs = number_type_errors(errs, socket.assigns[:editor_schema], content)
+      errs = empty_row_errors(errs, socket.assigns[:editor_schema], content)
 
       # The workspace's language, once, before any render site (E7, #87).
       errs = BarkparkWeb.StudioLocale.localize_findings(errs)
@@ -96,6 +97,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   end
 
   defp number_type_errors(errs, _schema, _content), do: errs
+
+  # [empty-list-rows] owner ruling #47. Publish refuses an empty row in a
+  # scalar or reference list (`Lifecycle` enforces it for every door); here
+  # the same finding lands under the row itself, before anything is sent.
+  defp empty_row_errors(errs, schema, content) when is_map(schema) and is_map(content) do
+    content
+    |> Barkpark.Content.EmptyListMembers.findings(schema)
+    |> Enum.reduce(errs, fn %{field: field, index: idx, message: msg}, acc ->
+      node =
+        case Map.get(acc, field) do
+          nil -> %{}
+          list when is_list(list) -> %{__self__: list}
+          map when is_map(map) -> map
+        end
+
+      Map.put(acc, field, Map.update(node, idx, [msg], &row_append(&1, msg)))
+    end)
+  end
+
+  defp empty_row_errors(errs, _schema, _content), do: errs
+
+  defp row_append(list, msg) when is_list(list), do: list ++ [msg]
+  defp row_append(%{} = map, msg), do: Map.update(map, :__self__, [msg], &(&1 ++ [msg]))
 
   defp publish_open_doc(socket) do
     opts = Shared.hook_opts(socket)
