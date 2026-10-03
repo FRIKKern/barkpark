@@ -687,6 +687,40 @@
     return replies.length === results.length && replies.length === 1 ? replies[0] : null;
   }
 
+  // The canvas's mediaUploader: the same upload the media picker makes, scoped by
+  // the attributes the hook seeds on <bp-paper-canvas> (data-dataset, data-token,
+  // data-scope-prefix), read at upload time. A bearer token when the page has one;
+  // otherwise the session cookie, which the scoped media pipeline accepts only with
+  // an x-requested-with header. Resolves { src }; throws a short
+  // message the image node shows on failure.
+  function bpPaperCanvasMediaUploader(canvas) {
+    return async (file) => {
+      const dataset = canvas.getAttribute("data-dataset") || "production";
+      const prefix = canvas.getAttribute("data-scope-prefix") || "";
+      const token = canvas.getAttribute("data-token") || "";
+      const body = new FormData();
+      body.append("file", file);
+      body.append("dataset", dataset);
+      const headers = { Accept: "application/json" };
+      if (token) headers.Authorization = "Bearer " + token;
+      else headers["x-requested-with"] = "bp-paper-canvas";
+      const url = prefix
+        ? prefix + "/v1/media/" + encodeURIComponent(dataset) + "/upload"
+        : "/media/upload";
+      let response;
+      try {
+        response = await fetch(url, { method: "POST", headers, body, credentials: "same-origin" });
+      } catch (_) {
+        throw new Error("check your connection and try again");
+      }
+      if (!response.ok) throw new Error("the server refused the upload (" + response.status + ")");
+      const json = await response.json().catch(() => null);
+      const data = (json && (json.result || json)) || {};
+      if (!data.url) throw new Error("the server returned no url");
+      return { src: data.url };
+    };
+  }
+
   function bpPaperMutation(hook, source, event, payload, options = {}) {
     const coordinator = hook._exitCoordinator;
     const send = options.target == null
@@ -3537,6 +3571,10 @@
         if (wc) wc.acknowledgedSaves = true;
         seedScope(wc);
         seedBlocks(wc);
+        // A picture pasted or dropped on the canvas uploads through the host's
+        // mediaUploader. Studio never connected one, so every such picture failed
+        // with "no media uploader is connected" and stored an image with no src.
+        if (wc && !wc.mediaUploader) wc.mediaUploader = bpPaperCanvasMediaUploader(wc);
 
         // P4 [[ wikilink + # tag autocomplete: inject the SAME async candidate
         // sources the per-block BarkparkPaperEditor hook injects (copied verbatim).
