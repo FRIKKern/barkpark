@@ -91,6 +91,46 @@ defmodule BarkparkWeb.Contract.SchemaEnvelopeTest do
     assert body_field["required?"] == false
   end
 
+  # task-b1939624d0120aca: `bp make schema` scaffolds required fields the v2
+  # way — `"validation": {"required": true}` — and Content.Validation enforces
+  # that. `required?` was derived from the top-level `required` key ONLY, so
+  # the envelope (and every codegen type built from it) called those fields
+  # optional. Error-level validation counts; a warning-level rule never blocks,
+  # so it does not.
+  test "required? follows error-level validation.required (map and list forms)",
+       %{conn: conn} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "recipe",
+          "title" => "Recipe",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string", "validation" => %{"required" => true}},
+            %{
+              "name" => "slug",
+              "type" => "slug",
+              "validation" => [%{"required" => true}, %{"max" => 80, "level" => "warning"}]
+            },
+            %{
+              "name" => "intro",
+              "type" => "text",
+              "validation" => %{"required" => true, "level" => "warning"}
+            },
+            %{"name" => "body", "type" => "text"}
+          ]
+        },
+        "test"
+      )
+
+    body = get_json(conn, "/v1/schemas/test")
+    recipe = Enum.find(body["schemas"], &(&1["name"] == "recipe"))
+    req = Map.new(recipe["fields"], &{&1["name"], &1["required?"]})
+
+    assert req == %{"title" => true, "slug" => true, "intro" => false, "body" => false},
+           "required? must follow error-level validation.required; got #{inspect(req)}"
+  end
+
   test "array-typed fields emit an `of` list of element specs", %{conn: conn} do
     body = get_json(conn, "/v1/schemas/test")
     post = Enum.find(body["schemas"], &(&1["name"] == "post"))
