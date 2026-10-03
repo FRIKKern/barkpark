@@ -90,7 +90,16 @@ defmodule BarkparkWeb.ScopeHelpers do
     |> put_scope(:project_id, Map.get(assigns, :current_project))
     |> Keyword.put(:caller_context, CallerContext.from_conn(%{assigns: assigns}))
     |> maybe_grant_scoped(assigns)
+    |> maybe_only_doc_ids(assigns)
   end
+
+  # A preview JWT that names documents (owner ruling #17): list and count reads
+  # (`Content.Query.base_query/4`) return only those documents. Set only by
+  # `BarkparkWeb.Plugs.PreviewToken`; absent, every read is unchanged.
+  defp maybe_only_doc_ids(opts, %{preview_doc_ids: [_ | _] = ids}),
+    do: Keyword.put(opts, :only_doc_ids, ids)
+
+  defp maybe_only_doc_ids(opts, _assigns), do: opts
 
   # Grant row-narrowing flag (airdrop-grants ag-enforcement, Layer 2). Set ONLY
   # when `ResolveWorkspace` admitted a GRANT-DERIVED caller (never for a member),
