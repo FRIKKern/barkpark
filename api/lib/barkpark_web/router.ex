@@ -1180,6 +1180,17 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # The per-workspace quota gate for the FLAT document write doors
+  # (/v1/data/mutate, /v1/data/doc/.../ops), the twin of the plug inside
+  # `:scoped_mutate`. Without it a workspace-bound token kept writing after its
+  # workspace was suspended, past its quota, and above the 1000-mutation batch
+  # cap (task-29d335e489b8cf0b). `:api` derives `:current_workspace` from the
+  # token first, so this meters the token's OWN workspace. Placed after
+  # `:require_token`, before `:require_write`, as in `:scoped_mutate`.
+  pipeline :flat_within_quota do
+    plug(BarkparkWeb.Plugs.RequireWithinQuota)
+  end
+
   # THE INSTANCE-OPERATOR gate (task-c7e2b87f1bbca815). Layered ON TOP of
   # `:require_admin`, never instead of it: `pipe_through([:api, :require_admin,
   # :require_platform_operator])` keeps the `admin` bit NECESSARY (and keeps an
@@ -2547,7 +2558,7 @@ defmodule BarkparkWeb.Router do
 
   # ── Mutations — token + idempotency dedup ──────────────────────────────
   scope "/v1/data", BarkparkWeb do
-    pipe_through([:api, :require_token, :require_write, :idempotent])
+    pipe_through([:api, :require_token, :flat_within_quota, :require_write, :idempotent])
 
     post("/mutate/:dataset", MutateController, :mutate)
     # One PortableDoc block op on any document type: the HTTP twin of the call

@@ -8,9 +8,10 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   ## Placement
 
   Runs AFTER the workspace scope is resolved (so `conn.assigns[:current_workspace]`
-  is set) and BEFORE `RequireWritePermission`, in all THREE mutate pipelines —
+  is set) and BEFORE `RequireWritePermission`, in all FOUR mutate pipelines —
   `:scoped_mutate` (docs) AND `:scoped_media_mutate` (scoped media) AND the flat
-  `:media_mutate` (legacy media). This is the ONLY seam that covers both content
+  `:media_mutate` (legacy media) AND `:flat_within_quota` (the flat
+  `/v1/data/mutate` and `/v1/data/doc/.../ops` doc doors, task-29d335e489b8cf0b). This is the ONLY seam that covers both content
   and media: media writes go straight to `Barkpark.Media.upload/3` (a raw
   `Repo.insert`), never through `Content.apply_mutations`, so a Content-context
   hook can't gate them (charter D11, REFUTED).
