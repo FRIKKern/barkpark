@@ -190,6 +190,22 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   defp secondary_format_value(v) when is_binary(v), do: v
   defp secondary_format_value(v) when is_boolean(v), do: to_string(v)
   defp secondary_format_value(v) when is_number(v), do: to_string(v)
+  # Structured values read the way a person (and the API) would read them, not
+  # as Elixir source: an image or file is its URL, a {_ref} reference its id,
+  # anything else compact JSON capped to the pane. `inspect/2` printed
+  # `%{"assetId" => …, "lqip" => "data:image/jpeg;base64,…"}` — a screenful of
+  # base64 in a 360px read-only pane.
+  defp secondary_format_value(%{"url" => url}) when is_binary(url) and url != "", do: url
+  defp secondary_format_value(%{"_ref" => ref}) when is_binary(ref) and ref != "", do: ref
+
+  defp secondary_format_value(v) when is_map(v) or is_list(v) do
+    case Jason.encode(v) do
+      {:ok, json} when byte_size(json) > 300 -> String.slice(json, 0, 300) <> "…"
+      {:ok, json} -> json
+      _ -> "—"
+    end
+  end
+
   defp secondary_format_value(v), do: inspect(v, limit: 50)
 
   @doc """
