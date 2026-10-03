@@ -14,12 +14,16 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
   # that proves none of those edits leaked into the `:email` path.
   #
   # The golden is a CHARACTERISATION fixture: whatever walk.ex emits TODAY is
-  # correct by definition. `email_golden.html` was generated from
+  # correct by definition. `email_golden.html` is generated from
   # `ParityFixture.tree/0` via `Render.render_html(_, render_opts(:email))` and
   # committed verbatim. To legitimately change email output (rare — it should
-  # almost never move), regenerate the file in the SAME diff and justify why in
-  # review. A diff here on an `:article`-only slice means the slice broke the
-  # palette seam.
+  # almost never move), regenerate it with
+  #
+  #     mix barkpark.portable_doc.gen_golden_email
+  #
+  # in the SAME diff and justify why in review. On an unchanged tree the task
+  # rewrites the same bytes (pinned below). A diff here on an `:article`-only
+  # slice means the slice broke the palette seam.
   #
   # Whitespace is NOT normalised: the assertion is raw byte identity. The golden
   # file carries NO trailing newline (it is the exact render output).
@@ -129,6 +133,24 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
         assert String.contains?(golden, needle),
                "golden is missing coverage for: #{inspect(needle)}"
       end
+    end
+
+    @tag :tmp_dir
+    test "the regen mix task writes the committed golden byte-for-byte", %{tmp_dir: tmp_dir} do
+      task = Mix.Tasks.Barkpark.PortableDoc.GenGoldenEmail
+      assert task.golden_path() == @golden_path
+
+      out = Path.join(tmp_dir, "email_golden.html")
+      Mix.shell(Mix.Shell.Process)
+
+      try do
+        task.run(["--out", out])
+      after
+        Mix.shell(Mix.Shell.IO)
+      end
+
+      assert File.read!(out) == File.read!(@golden_path),
+             "mix barkpark.portable_doc.gen_golden_email no longer reproduces the golden"
     end
   end
 
