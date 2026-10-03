@@ -84,6 +84,15 @@ defmodule BarkparkWeb.SessionControllerTest do
       assert get_session(conn, "api_token") == @valid_token
     end
 
+    # task-5ab7e3e4d678ec4c: browsers read `\` as `/` and drop tab/CR/LF, so
+    # these all became the protocol-relative `//evil.com`.
+    for evil <- ["/\\evil.com", "/\\/evil.com", "/\t/evil.com", "/\n/evil.com"] do
+      test "open-redirect attempt is rejected (#{inspect(evil)})", %{conn: conn} do
+        conn = post(conn, "/login", %{"token" => @valid_token, "return_to" => unquote(evil)})
+        assert redirected_to(conn, 302) == "/studio"
+      end
+    end
+
     test "external https return_to is rejected", %{conn: conn} do
       conn = post(conn, "/login", %{"token" => @valid_token, "return_to" => "https://evil.com/x"})
 
