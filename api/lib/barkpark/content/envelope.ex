@@ -294,11 +294,111 @@ defmodule Barkpark.Content.Envelope do
     Enum.reduce(envelope, %{}, fn {key, value}, acc ->
       cond do
         # Reserved system keys (_id, _type, …) are never user data — always kept.
-        key in @reserved -> Map.put(acc, key, value)
-        drop_field?(key, value, fields, ctx, owner_id) -> acc
-        true -> Map.put(acc, key, value)
+        key in @reserved ->
+          Map.put(acc, key, value)
+
+        drop_field?(key, value, fields, ctx, owner_id) ->
+          acc
+
+        true ->
+          Map.put(acc, key, redact_nested(value, find_raw_field(fields, key), ctx, owner_id, 1))
       end
     end)
+  end
+
+  # ── NESTED declarations (task-777b7903d79fb32e) ───────────────────────────
+  #
+  # A schema can declare visibility on a field INSIDE another field: a
+  # `composite`/object field's `fields` kids (parsed by
+  # `SchemaDefinition.parse_field/2`, which copies `private` onto every kid),
+  # or the item shape of an `arrayOf`/array field (`of`). This chokepoint used
+  # to look at TOP-level keys only, so a visible parent passed every private,
+  # owner_only or readable_by kid straight through to an anonymous reader —
+  # and `field_readable?/3` judged a dotted filter path by its first segment
+  # alone, so the same kid was a filter/order value oracle.
+  #
+  # The walk follows the DECLARED shape only: a value with no declared kids is
+  # left exactly as it was (undeclared ⇒ public, the legacy rule at every
+  # depth). It is bounded at `@max_nested_depth` levels so a self-referencing
+  # or pathologically deep schema cannot recurse without end; below the bound
+  # nothing more is walked, which only ever matters for a schema nested more
+  # than 32 levels deep.
+  @max_nested_depth 32
+
+  defp redact_nested(value, _field, _ctx, _owner_id, depth) when depth > @max_nested_depth,
+    do: value
+
+  defp redact_nested(value, field, ctx, owner_id, depth) when is_map(value) do
+    case nested_kids(field) do
+      [] ->
+        value
+
+      kids ->
+        Enum.reduce(value, %{}, fn {key, v}, acc ->
+          if drop_field?(key, v, kids, ctx, owner_id) do
+            acc
+          else
+            Map.put(
+              acc,
+              key,
+              redact_nested(v, find_raw_field(kids, key), ctx, owner_id, depth + 1)
+            )
+          end
+        end)
+    end
+  end
+
+  defp redact_nested(value, field, ctx, owner_id, depth) when is_list(value) do
+    case item_field(field) do
+      nil -> value
+      item -> Enum.map(value, &redact_nested(&1, item, ctx, owner_id, depth + 1))
+    end
+  end
+
+  defp redact_nested(value, _field, _ctx, _owner_id, _depth), do: value
+
+  # Does this declaration carry ANY visibility restriction? Used to put the
+  # restrictive twin first when two array member shapes declare the same kid.
+  defp restricted?(field) do
+    truthy?(get_attr(field, "private")) or
+      get_attr(field, "visibility") in ["private", "owner_only"] or
+      list_attr(get_attr(field, "readable_by")) != []
+  end
+
+  # The declared kids of an object/composite field (its `fields`), or of the
+  # item shape when the field is an array whose items are objects.
+  defp nested_kids(nil), do: []
+
+  defp nested_kids(field) do
+    case get_attr(field, "fields") do
+      kids when is_list(kids) -> kids
+      _ -> []
+    end
+  end
+
+  # The item shape of an array field: `arrayOf`'s single `of` map, or a
+  # Sanity-style `of` LIST of member shapes, folded into one pseudo-field whose
+  # kids are the union of every member's kids (a kid private in ANY member
+  # shape is redacted — the conservative reading of an ambiguous item).
+  defp item_field(nil), do: nil
+
+  defp item_field(field) do
+    case get_attr(field, "of") do
+      %{} = of ->
+        of
+
+      members when is_list(members) ->
+        kids =
+          members
+          |> Enum.filter(&is_map/1)
+          |> Enum.flat_map(&nested_kids/1)
+          |> Enum.sort_by(&if(restricted?(&1), do: 0, else: 1))
+
+        if kids == [], do: nil, else: %{"fields" => kids}
+
+      _ ->
+        nil
+    end
   end
 
   defp drop_field?(key, value, fields, ctx, owner_id) do
@@ -380,16 +480,52 @@ defmodule Barkpark.Content.Envelope do
         true
 
       true ->
-        case find_raw_field(raw_fields(schema), top) do
-          nil -> true
-          field -> field_visible?(field, ctx, nil)
-        end
+        path_readable?(field_segments(field_name), raw_fields(schema), ctx, 1)
     end
   end
 
   # Any other caller shape => FAIL CLOSED (mirrors `render/3`'s redaction default
   # — an unrecognized principal is the most restrictive, never a bypass).
   def field_readable?(_schema, _field_name, _ctx), do: false
+
+  # Walk EVERY segment of a dotted filter/order path against the declared shape
+  # (task-777b7903d79fb32e). The first undeclared segment ends the walk as
+  # public (legacy parity); any declared segment the caller cannot see makes
+  # the whole path unreadable — `meta.secret` is judged by `secret`, not only by
+  # `meta`. A numeric segment (`items.0.name`) addresses an array element and
+  # is skipped onto the item shape. Bounded like the redaction walk.
+  defp path_readable?(_segments, _fields, _ctx, depth) when depth > @max_nested_depth, do: true
+  defp path_readable?([], _fields, _ctx, _depth), do: true
+
+  defp path_readable?([seg | rest], fields, ctx, depth) do
+    case find_raw_field(fields, seg) do
+      nil ->
+        true
+
+      field ->
+        field_visible?(field, ctx, nil) and
+          path_readable?(drop_index_segment(rest), kids_for_path(field, rest), ctx, depth + 1)
+    end
+  end
+
+  # The kids the NEXT segment is judged against: an array field's item kids,
+  # otherwise the field's own declared kids.
+  defp kids_for_path(field, _rest) do
+    case item_field(field) do
+      nil -> nested_kids(field)
+      item -> nested_kids(item)
+    end
+  end
+
+  defp drop_index_segment([seg | rest]) do
+    if seg =~ ~r/\A\d+\z/, do: rest, else: [seg | rest]
+  end
+
+  defp drop_index_segment([]), do: []
+
+  defp field_segments(field) do
+    field |> String.replace_prefix("content.", "") |> String.split(".")
+  end
 
   # Top-level segment of a (possibly nested / `content.`-prefixed) filter path —
   # `content.meta.seo` and `meta.seo` both resolve their visibility against the
@@ -456,6 +592,8 @@ defmodule Barkpark.Content.Envelope do
   defp atomize("visibility"), do: :visibility
   defp atomize("readable_by"), do: :readable_by
   defp atomize("name"), do: :name
+  defp atomize("fields"), do: :fields
+  defp atomize("of"), do: :of
   defp atomize(_), do: :__unknown__
 
   defp truthy?(true), do: true
