@@ -12,6 +12,16 @@ defmodule Barkpark.Accounts.Privacy do
   append-only, tamper-evident audit trail (`Barkpark.Audit`) stays intact — the
   balance GDPR strikes between erasure of personal data and the integrity of a
   security log. Every erasure emits an audit event.
+
+  ## The security-log exemption
+
+  `audit_events` is append-only and its hash chain covers `metadata`, so a row
+  cannot be rewritten or redacted at read without breaking external
+  verification. Since owner ruling #32 item 2 (2026-10-03) no emitter writes a
+  raw email into `metadata` — users are named by id (`grant.minted`,
+  SCIM `user_provisioned`, `app_token_minted`). Rows written BEFORE that may
+  still hold the subject's email; they are kept as written, under this
+  exemption, as the integrity record of a security log.
   """
   import Ecto.Query, warn: false
 
