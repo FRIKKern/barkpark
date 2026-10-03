@@ -5465,11 +5465,27 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # task-787766c0cf6604f1, ONLY a token can produce it. A NULL-owned row is
   # legacy / pre-tenancy and stays reachable, which is why this is not a
   # wholesale narrowing to the principal's workspace.
+  #
+  # Owner ruling #30 Q3 (2026-10-03): a NULL-owned row is no longer open to
+  # every bound principal — only to the instance operator (see
+  # `instance_operator?/1`). A bound principal reaches its own workspace's rows.
   defp principal_permits_owner?(socket, owner) do
     case acting_workspace_id(socket) do
       nil -> true
-      ws_id -> is_nil(owner) or owner == ws_id
+      ws_id -> owner == ws_id or (is_nil(owner) and instance_operator?(socket))
     end
+  end
+
+  # THE OPERATOR, for owner-less (pre-tenancy) chat rows. The unbound token is
+  # handled by the `nil` arm above; this is the bound principal the platform
+  # operator allowlist admits — the same `RequirePlatformOperator.permits?/1`
+  # rule the plugin admin views use (Q4). With the allowlist UNSET the plug's
+  # own rule is "a single-tenant instance's admins are its operators", so the
+  # flat surface keeps its legacy rows there; once a multi-tenant host arms the
+  # allowlist, only the named operator does.
+  defp instance_operator?(socket) do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+    BarkparkWeb.Plugs.RequirePlatformOperator.permits?(principal)
   end
 
   # ── The acting tenant for a READ, and the permitted set it may see ────────
@@ -5519,10 +5535,15 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # one from `Auth.create_token/5`'s since-removed Default fallback — so that
   # vanishing would be the common case, not the edge. The store has no "mine-or-unowned" scope to
   # ask for, so the clamp is made HERE.
+  #
+  # Owner ruling #30 Q3 (2026-10-03) narrowed the scoped arm to the acting
+  # workspace's OWN rows: a NULL-owned row is not any one workspace's, and a
+  # workspace admin is not the instance operator. Legacy rows stay reachable
+  # from the FLAT mount for the operator (`principal_permits_owner?/2`).
   defp owner_in_tenancy?(socket, owner) do
     case read_workspace_id(socket) do
       nil -> true
-      ws_id -> is_nil(owner) or owner == ws_id
+      ws_id -> owner == ws_id
     end
   end
 
@@ -5610,12 +5631,25 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # (the rows themselves cannot answer, per the select trap above). The flat
   # mount short-circuits to an EMPTY map, which is correct rather than merely
   # cheap: nothing downstream may read an owner it did not measure.
+  #
+  # Owner ruling #30 Q2 (2026-10-03): the list is clamped by the SAME predicate
+  # the load seam uses (`load_permits?/2`), on both mounts. Before, the flat
+  # mount skipped the clamp, so a Default-workspace admin user saw every
+  # tenant's chat titles while its loads were already confined to Default.
+  # Only the genuinely unbound superuser token keeps the instance-wide list,
+  # and it pays no extra query.
   defp clamp_list_to_tenancy(sessions, socket) do
-    if is_nil(read_workspace_id(socket)) do
+    if is_nil(read_workspace_id(socket)) and is_nil(acting_workspace_id(socket)) do
       {sessions, %{}}
     else
       owners = session_owners(Enum.map(sessions, & &1.id))
-      {Enum.filter(sessions, &owner_in_tenancy?(socket, Map.get(owners, &1.id))), owners}
+
+      permitted =
+        Enum.filter(sessions, fn s ->
+          load_permits?(socket, %{owner_workspace_id: Map.get(owners, s.id)})
+        end)
+
+      {permitted, owners}
     end
   end
 
