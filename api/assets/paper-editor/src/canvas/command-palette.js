@@ -190,7 +190,27 @@ function insertNodesAtSelection(editor, nodes, caretTarget) {
         tr = tr.setSelection(NodeSelection.create(tr.doc, pos));
       }
     } else if (CANVAS_SLASH_TEXTABLE_NODES.has(node.type)) {
-      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caretAnchor + 1)));
+      const landed = newNodes[0];
+      if (landed.isTextblock && landed.content.size > 0) {
+        // A textblock that lands with default text (a heading's "New heading") selects
+        // it, so the next keystroke overtypes it. A collapsed caret at its start made
+        // typing PREPEND, storing "My titleNew heading".
+        tr = tr.setSelection(
+          TextSelection.create(tr.doc, caretAnchor + 1, caretAnchor + 1 + landed.content.size),
+        );
+      } else {
+        tr = tr.setSelection(TextSelection.near(tr.doc.resolve(caretAnchor + 1)));
+      }
+    } else if (newNodes.length === 1 && newNode.type.name === "divider") {
+      // A divider has nothing to type into, and typing over its NodeSelection
+      // would replace it. Land the caret on the line below, as the --- shorthand
+      // does: an empty paragraph already there, or a new one.
+      const after = caretAnchor + newNode.nodeSize;
+      const next = tr.doc.resolve(after).nodeAfter;
+      if (!(next && next.type.name === "paragraph" && next.content.size === 0)) {
+        tr = tr.insert(after, state.schema.nodes.paragraph.create());
+      }
+      tr = tr.setSelection(TextSelection.near(tr.doc.resolve(after + 1)));
     } else {
       tr = tr.setSelection(NodeSelection.create(tr.doc, caretAnchor));
     }
@@ -212,7 +232,51 @@ function insertNodesAtSelection(editor, nodes, caretTarget) {
   }
   view.dispatch(tr);
   editor.commands.focus();
+  if (!caretTarget && newNodes.length === 1) focusInsertedIsland(editor);
   return true;
+}
+
+// An atom whose node-view edits in its own control island lands NodeSelection-ed.
+// Typing over a NodeSelection REPLACES the node, so the author's first keystroke
+// deleted the block they had just picked and left the text in a plain paragraph.
+// Hand the caret to the block's main control instead, as the ``` fence already did
+// for code: the code body (not the language box), the diagram source, the action
+// href, the sheet picker's search. Only blocks the canvas KEEPS are listed: an
+// image, equation or video inserted here
+// is re-rendered by the server as a boundary editor moments later, so a caret in
+// its transient island would lose what the author types.
+const ISLAND_PRIMARY_CONTROL =
+  ".bp-canvas-code-area, .bp-canvas-diagram-area, .bp-canvas-action-href, " +
+  '[data-test-id="paper-sheet-retarget"] .bp-ref-search-input';
+
+function focusInsertedIsland(editor) {
+  const focusControl = () => {
+    if (!editor || editor.isDestroyed) return true;
+    const { selection } = editor.state;
+    if (!(selection instanceof NodeSelection)) return true;
+    const dom = editor.view.nodeDOM(selection.from);
+    if (!dom || !dom.querySelectorAll) return false;
+    // Skip a control that is hidden. A
+    // collapsed <details> editor (the diagram source) is opened: a fresh block's
+    // source is exactly what the author is about to write.
+    const shown = (el) => {
+      for (let node = el; node && node !== dom.parentNode; node = node.parentElement) {
+        if (node.hidden || getComputedStyle(node).display === "none") return false;
+      }
+      return true;
+    };
+    const control = [...dom.querySelectorAll(ISLAND_PRIMARY_CONTROL)].find(shown);
+    if (!control) return false;
+    for (let node = control.parentElement; node && node !== dom.parentNode; node = node.parentElement) {
+      if (node.tagName === "DETAILS" && !node.open) node.open = true;
+    }
+    control.focus();
+    return true;
+  };
+  focusControl();
+  // TipTap's focus() re-focuses the editor view on the next animation frame when the
+  // view was not focused yet; take the caret back after it.
+  if (typeof requestAnimationFrame === "function") requestAnimationFrame(focusControl);
 }
 
 // ── the command registry ─────────────────────────────────────────────────────
