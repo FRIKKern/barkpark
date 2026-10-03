@@ -155,6 +155,7 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
       oldest = List.last(revisions)
 
       {:ok,
+       ws: ws,
        base: base,
        rev_id: oldest["id"],
        write_raw: write_raw,
@@ -185,6 +186,35 @@ defmodule BarkparkWeb.RestoreWriteGateTest do
              "legitimate writer over-denied on scoped restore — status #{resp.status}"
 
       assert Jason.decode!(resp.resp_body)["restored"] == true
+    end
+
+    # task-09009a90725e89ee: restore is a write, but neither restore door ran
+    # RequireWithinQuota, so a suspended workspace kept restoring revisions.
+    test "a suspended workspace refuses scoped restore 403 workspace_suspended", ctx do
+      {:ok, _} = Barkpark.Tenancy.Quota.suspend(ctx.ws, "restore test")
+
+      resp = scoped_restore(ctx.base, ctx.write_raw, ctx.rev_id)
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "workspace_suspended"
+    end
+
+    test "a suspended workspace refuses FLAT restore by its own bound token", ctx do
+      bound_raw = "restore-wg-bound-#{System.unique_integer([:positive])}"
+      {:ok, _} = Auth.create_token(bound_raw, "bound", @dataset, ["read", "write"], ctx.ws.id)
+      {:ok, _} = Barkpark.Tenancy.Quota.suspend(ctx.ws, "flat restore test")
+
+      resp =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer " <> bound_raw)
+        |> put_req_header("content-type", "application/json")
+        |> post(
+          "/v1/data/revision/#{@dataset}/#{ctx.rev_id}/restore",
+          Jason.encode!(%{type: "post"})
+        )
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "workspace_suspended"
     end
 
     test "non-member write token cannot restore in this workspace (scope respected)", ctx do
