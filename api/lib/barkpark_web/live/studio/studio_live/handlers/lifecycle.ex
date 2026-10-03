@@ -146,13 +146,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
         # block to the per-block WCs, exactly as legacy Edit mode did. The
         # flag-OFF opt-out keeps the old shape: only Edit mode syncs; the
         # read-only View rides `apply_paper_delta` alone.
+        #
+        # The canvas runs are phx-update="ignore": the re-rendered
+        # data-canvas-blocks never reaches the editor, so they get the confirmed
+        # runs as a `bp:canvas-update` with no request id (an external echo).
+        # Without it the table echo advanced this tab's confirmed revision while
+        # its canvas kept the old text, and the tab's next canvas save overwrote
+        # the other tab's edit without a conflict.
         socket =
-          if socket.assigns[:paper_edit_mode] or PaperCanvas.paper_canvas_enabled?() do
-            socket
-            |> Shared.sync_paper_edit_doc()
-            |> Shared.push_block_to_wc(frame.block_id)
-          else
-            socket
+          cond do
+            PaperCanvas.paper_canvas_enabled?() ->
+              socket
+              |> Shared.sync_paper_edit_doc()
+              |> Shared.push_block_to_wc(frame.block_id)
+              |> Paper.push_canvas_echo()
+
+            socket.assigns[:paper_edit_mode] ->
+              socket
+              |> Shared.sync_paper_edit_doc()
+              |> Shared.push_block_to_wc(frame.block_id)
+
+            true ->
+              socket
           end
 
         {:noreply, socket}
