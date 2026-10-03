@@ -1300,7 +1300,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc """
   The reply for a canvas batch the server REFUSED with a lifecycle halt (the
-  hollow ratchet: "a published paper cannot be hollowed out").
+  hollow ratchet: "a paper cannot be emptied back to a title alone").
 
   A bare `%{saved: false}` left the canvas showing the refused state — an
   author who undid all their prose saw an empty paper while storage kept the
