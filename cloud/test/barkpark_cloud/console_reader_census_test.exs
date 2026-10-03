@@ -722,6 +722,23 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "the slug in its own dialect. Flip: a console site-domain form ships."
     },
     %{
+      code: "domain_verification_required",
+      site: "router.ex POST /v1/sites/:id/domains + POST /v1/sites (owner ruling #29)",
+      reason:
+        "CLI-only: the sites-domains route has zero app.js callers, and no console " <>
+          "create body sends `domains`. The 409 carries a `detail` sentence (the TXT " <>
+          "record to publish) that the CLI prints verbatim. Flip: a console site-domain " <>
+          "form ships, or the console create starts sending domains."
+    },
+    %{
+      code: "domain_taken",
+      site: "router.ex POST /v1/sites/:id/domains (ruling #29 reclaim refused)",
+      reason:
+        "CLI-only, the reclaim arm: a proven owner whose TXT record ALSO carries the " <>
+          "holder team's token, or a name held as a barkpark custom_host, keeps the same " <>
+          "409 slug. Zero console callers. Flip: a console site-domain form ships."
+    },
+    %{
       code: "no_cloudflare_provider",
       site: "router.ex bind_cloudflare",
       reason:

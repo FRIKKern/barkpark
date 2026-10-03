@@ -129,6 +129,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "domain_not_pointed",
              "domain_required",
              "domain_taken",
+             "domain_verification_required",
              "email_invalid",
              "email_mismatch",
              "email_required",

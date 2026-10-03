@@ -41,6 +41,7 @@ defmodule BarkparkCloud.Registry do
     AgentToken,
     Barkpark,
     Deployment,
+    DomainVerification,
     FleetSettings,
     HostnameClaim,
     Provider,
@@ -8675,6 +8676,177 @@ defmodule BarkparkCloud.Registry do
       end
     end)
   end
+
+  # ── Owner ruling #29 (2026-10-03, "DNS TXT check"): domain proof ────────────
+
+  @doc """
+  The team's verification row for `domain` (normalized), created with a fresh
+  token on first ask. Its challenge (`DomainVerification.challenge/1`) is what a
+  person publishes: `_barkpark-verify.<domain> TXT "barkpark-verify=<token>"`.
+  """
+  @spec domain_verification(Ecto.UUID.t(), String.t()) :: {:ok, DomainVerification.t()}
+  def domain_verification(team_id, domain) when is_binary(team_id) and is_binary(domain) do
+    norm = normalize_domain(domain)
+
+    case Repo.get_by(DomainVerification, team_id: team_id, domain: norm) do
+      %DomainVerification{} = row ->
+        {:ok, row}
+
+      nil ->
+        %DomainVerification{}
+        |> DomainVerification.changeset(%{
+          team_id: team_id,
+          domain: norm,
+          token: DomainVerification.new_token()
+        })
+        |> Repo.insert(on_conflict: :nothing, conflict_target: [:team_id, :domain])
+        |> case do
+          # A racing insert won: read the winner's row back.
+          {:ok, %DomainVerification{id: nil}} ->
+            {:ok, Repo.get_by!(DomainVerification, team_id: team_id, domain: norm)}
+
+          {:ok, row} ->
+            {:ok, row}
+        end
+    end
+  end
+
+  @doc """
+  Has `team_id` proven it controls `domain`? A row already `verified_at` answers
+  `:ok` from the record; otherwise the TXT record is read NOW and, when it
+  carries this team's token, the row is stamped. Unproven answers
+  `{:error, {:unverified, challenge, observed_txt_values}}` — never a claim.
+  """
+  @spec prove_team_domain(Ecto.UUID.t(), String.t(), keyword()) ::
+          :ok | {:error, {:unverified, map(), [String.t()]}}
+  def prove_team_domain(team_id, domain, opts \\ []) do
+    {:ok, row} = domain_verification(team_id, domain)
+
+    cond do
+      row.verified_at != nil ->
+        :ok
+
+      true ->
+        case BarkparkCloud.DomainOwnership.txt_proven?(
+               row.domain,
+               DomainVerification.record_value(row.token),
+               opts
+             ) do
+          :ok ->
+            {:ok, _} =
+              row
+              |> DomainVerification.changeset(%{verified_at: DateTime.utc_now()})
+              |> Repo.update()
+
+            :ok
+
+          {:error, observed} ->
+            {:error, {:unverified, DomainVerification.challenge(row), observed}}
+        end
+    end
+  end
+
+  @doc """
+  `add_site_domain/2` behind the ruling-#29 proof. A domain the site ALREADY
+  holds stays idempotent (pre-ruling claims keep working untouched). Otherwise
+  the site's team must have proven the domain (`prove_team_domain/3`).
+
+  THE RECLAIM PATH: when the proven domain is held by a site of ANOTHER team,
+  DNS decides. If the TXT record carries the claimant's token right now and NOT
+  the holder team's, the holder's claim is released and the claimant's lands —
+  the real owner takes back a name squatted before the ruling. A name held as a
+  barkpark `custom_host` or a provisioning FQDN is not reclaimable here (those
+  claims have their own A-record proof), and stays `:domain_taken`.
+  """
+  def add_site_domain_verified(%Site{domains: existing} = site, domain, opts \\ [])
+      when is_binary(domain) do
+    norm = normalize_domain(domain)
+
+    cond do
+      norm in existing ->
+        {:ok, site}
+
+      true ->
+        with :ok <- prove_team_domain(site.team_id, norm, opts) do
+          case add_site_domain(site, norm) do
+            {:error, :domain_taken} -> maybe_reclaim_site_domain(site, norm, opts)
+            other -> other
+          end
+        end
+    end
+  end
+
+  defp maybe_reclaim_site_domain(site, norm, opts) do
+    holder =
+      Repo.one(
+        from c in HostnameClaim,
+          join: s in Site,
+          on: s.id == c.site_id,
+          where: c.host == ^norm and c.kind == "site_domain",
+          select: s
+      )
+
+    with %Site{} = holder <- holder,
+         true <- holder.team_id != site.team_id,
+         {:ok, mine} <- domain_verification(site.team_id, norm),
+         :ok <-
+           BarkparkCloud.DomainOwnership.txt_proven?(
+             norm,
+             DomainVerification.record_value(mine.token),
+             opts
+           ),
+         false <- holder_still_proves?(holder.team_id, norm, opts),
+         {:ok, _released} <- remove_site_domain(holder, norm) do
+      Logger.warning(
+        "domain reclaim: #{norm} released from site #{holder.id} (team #{holder.team_id}) " <>
+          "to site #{site.id} (team #{site.team_id}) on a fresh _barkpark-verify TXT proof"
+      )
+
+      add_site_domain(get_site(site.id) || site, norm)
+    else
+      _ -> {:error, :domain_taken}
+    end
+  end
+
+  # Does the HOLDER's team's token sit in the TXT answer too? If both teams'
+  # records are published, DNS has not decided between them — no reclaim.
+  defp holder_still_proves?(holder_team_id, norm, opts) do
+    case Repo.get_by(DomainVerification, team_id: holder_team_id, domain: norm) do
+      nil ->
+        false
+
+      %DomainVerification{token: token} ->
+        BarkparkCloud.DomainOwnership.txt_proven?(
+          norm,
+          DomainVerification.record_value(token),
+          opts
+        ) == :ok
+    end
+  end
+
+  @doc "Does `site` already hold `domain` (normalized)? Pre-ruling claims count."
+  def site_holds_domain?(%Site{domains: existing}, domain) when is_binary(domain),
+    do: normalize_domain(domain) in (existing || [])
+
+  @doc """
+  Ruling #29 on the CREATE door: every domain a new site names must already be
+  proven by `team_id`. Answers `:ok` or `{:error, {:unverified_domains,
+  [challenge]}}` naming each unproven one.
+  """
+  def require_proven_domains(team_id, domains, opts \\ [])
+
+  def require_proven_domains(team_id, domains, opts) when is_list(domains) do
+    challenges =
+      for d <- domains,
+          is_binary(d),
+          d != "",
+          {:error, {:unverified, challenge, _}} <- [prove_team_domain(team_id, d, opts)],
+          do: challenge
+
+    if challenges == [], do: :ok, else: {:error, {:unverified_domains, challenges}}
+  end
+
+  def require_proven_domains(_team_id, _domains, _opts), do: :ok
 
   # Case-folded, trimmed, trailing-dot-stripped — the ONE normalization used for
   # BOTH the cross-site uniqueness guard and the ask-gate lookup, so `Example.com`

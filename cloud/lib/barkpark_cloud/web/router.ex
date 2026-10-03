@@ -214,7 +214,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    admin     replace the encrypted env blob (admin-or-owner; task-9dfa4854b5e22e94)
-      POST    /v1/sites/:id/domains user     add a domain to a site
+      POST    /v1/sites/:id/domains user     add a domain to a site (ruling #29: the team proves it first via a _barkpark-verify TXT record; 409 domain_verification_required names the record)
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
       POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
@@ -9314,6 +9314,9 @@ defmodule BarkparkCloud.Web.Router do
              # A static site IS its content binding — refuse an unbound one AT THE
              # DOOR rather than writing a row the deploy path can never build.
              :ok <- require_content_binding(kind, attrs),
+             # Owner ruling #29: the CREATE door claims `domains` too, so each one
+             # must already be proven by this team (_barkpark-verify TXT).
+             :ok <- Registry.require_proven_domains(team.id, attrs.domains),
              # ssw8-bl-accepted-frameworks-no-implementation: a framework with no
              # shipped builder (hugo/nuxt/sveltekit) or a scale_mode with no
              # runtime (zero) is refused HERE, with the shipped menu for this
@@ -9434,6 +9437,17 @@ defmodule BarkparkCloud.Web.Router do
           # honour for two owners.
           {:error, :domain_taken} ->
             json(conn, 409, %{error: "domain_taken"})
+
+          # Ruling #29: one or more named domains are not proven by this team.
+          # Nothing was minted or written; the body names every record to publish.
+          {:error, {:unverified_domains, challenges}} ->
+            json(conn, 409, %{
+              error: "domain_verification_required",
+              verifications: challenges,
+              detail:
+                "prove you control each domain first: add the DNS TXT record listed for it, " <>
+                  "or create the site without domains and add them with POST /v1/sites/:id/domains."
+            })
 
           # Same envelope and status the changeset error below produces — the
           # only difference is that nothing was minted first.
@@ -10546,13 +10560,32 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/sites/:id/domains {domain} → 200 {site}. Adds the domain to the
   # site's array; the domain becomes acceptable to the on-demand-TLS ask-gate.
+  #
+  # Owner ruling #29 (2026-10-03, "DNS TXT check"): the team must first PROVE it
+  # controls the domain. Until `_barkpark-verify.<domain>` carries the team's
+  # token this answers 409 `domain_verification_required` with the record to
+  # publish (the token is minted on that first ask and kept, so a re-run checks
+  # the same value). A domain the site already holds stays idempotent. A proven
+  # domain that another team's site squatted is RECLAIMED when DNS backs the
+  # claimant and not the holder (`Registry.add_site_domain_verified/3`).
   post "/v1/sites/:id/domains" do
     with_team_site(conn, fn conn, site ->
       domain = conn.body_params["domain"]
 
+      proof =
+        if is_binary(domain) and domain != "" and not Registry.site_holds_domain?(site, domain),
+          do: Registry.prove_team_domain(site.team_id, domain),
+          else: :ok
+
       cond do
         not is_binary(domain) or domain == "" ->
           json(conn, 422, %{error: "domain_required"})
+
+        # Proven OUTSIDE the audited transaction below: an unproven answer must
+        # keep the minted token, which a rolled-back transaction would discard.
+        match?({:error, {:unverified, _, _}}, proof) ->
+          {:error, {:unverified, challenge, observed}} = proof
+          json(conn, 409, domain_verification_body(challenge, observed))
 
         true ->
           # activity-audit-log: the domain-array update + a `site.domain_added`
@@ -10568,13 +10601,16 @@ defmodule BarkparkCloud.Web.Router do
                 target_id: site.id,
                 metadata: %{site_id: site.id, domain: domain}
               },
-              fn -> Registry.add_site_domain(site, domain) end
+              fn -> Registry.add_site_domain_verified(site, domain) end
             )
 
           case audited do
             {:ok, site} ->
               push_event(site.team_id, "audit")
               json(conn, 200, %{site: site_json(site)})
+
+            {:error, {:unverified, challenge, observed}} ->
+              json(conn, 409, domain_verification_body(challenge, observed))
 
             # Cross-team collision guard: a domain owned by another site is a
             # conflict, not a validation error — 409, never a 200 the ask-gate
@@ -10587,6 +10623,20 @@ defmodule BarkparkCloud.Web.Router do
           end
       end
     end)
+  end
+
+  # The 409 body for an unproven domain (ruling #29): the record to publish, the
+  # TXT values DNS answered with right now, and the one sentence a CLI prints.
+  defp domain_verification_body(challenge, observed) do
+    %{
+      error: "domain_verification_required",
+      verification: challenge,
+      observed_txt: observed,
+      detail:
+        "prove you control #{challenge.domain}: add a DNS TXT record " <>
+          "#{challenge.txt_name} with the value #{challenge.txt_value}, wait for it " <>
+          "to resolve, then add the domain again."
+    }
   end
 
   # DELETE /v1/sites/:id/domains {domain} → 200 {site}. The inverse of the POST
