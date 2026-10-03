@@ -2329,10 +2329,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   ARMED ONLY FOR GRANT-DERIVED WRITE. A membership-derived socket carries no
   `caller_context` and no `write_gate?`, so `grant_graded?/1` is false and that
   arm returns `false` without looking at anything.
+
+  ## AND THE TARGET WALK READS FRESH GRANTS HERE (owner ruling #30 Q11)
+
+  The walk below used the grants CAPTURED in `caller_context` at mount. With a
+  second write grant still live, `write_capable_now?/1` stays true, so a grant
+  revoked mid-session on THIS sheet kept admitting writes until the socket
+  remounted. This seam is not a render, so it loads the grantee's active
+  grants (`Access.list_active_grants_for_grantee/1`) — only for a grant-graded
+  user socket; everything else pays nothing. The render snapshot below keeps
+  the captured list.
   """
   @spec sheet_write_capable?(map()) :: boolean
   def sheet_write_capable?(assigns) when is_map(assigns) do
-    Caps.write_capable_now?(assigns) and not sheet_grant_target_denied?(assigns)
+    Caps.write_capable_now?(assigns) and
+      not sheet_grant_target_denied?(assigns, fresh_sheet_grants(assigns))
   end
 
   @doc """
@@ -2362,7 +2373,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @spec sheet_write_capable_snapshot?(map()) :: boolean
   def sheet_write_capable_snapshot?(assigns) when is_map(assigns) do
     Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{}) and
-      not sheet_grant_target_denied?(assigns)
+      not sheet_grant_target_denied?(assigns, grant_ctx_grants(assigns))
   end
 
   @doc """
@@ -2398,10 +2409,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   #   * the leaf comes from the `:sheet_doc` assign, read totally by
   #     `Caps.doc_leaf/1`, so a sheet doc with no type or doc_id resolves to an
   #     unresolvable target and FAILS CLOSED for a grant-graded socket.
-  defp sheet_grant_target_denied?(assigns) do
+  defp sheet_grant_target_denied?(assigns, grants) do
     {type, doc_id} = Caps.doc_leaf(Map.get(assigns, :sheet_doc))
 
-    Caps.grant_target_denied?(assigns, grant_ctx_grants(assigns), type, doc_id)
+    Caps.grant_target_denied?(assigns, grants, type, doc_id)
+  end
+
+  # The write seam's grant list: a fresh active-grant load for a grant-graded
+  # user socket (the only socket whose walk reads grants at all), the captured
+  # list otherwise — no query for a membership-derived socket.
+  defp fresh_sheet_grants(assigns) do
+    case {grant_ctx_grants(assigns), Map.get(assigns, :current_user)} do
+      {[_ | _], %{id: uid}} when is_binary(uid) ->
+        Barkpark.Access.list_active_grants_for_grantee(uid)
+
+      {captured, _} ->
+        captured
+    end
   end
 
   defp grant_ctx_grants(assigns) do
