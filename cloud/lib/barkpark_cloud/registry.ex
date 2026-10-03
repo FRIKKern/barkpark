@@ -2050,20 +2050,6 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  @doc """
-  PDF-D83 (Personal Dev Fleet MVP-0): enqueue a `pending` PROVISION_SUPPORT job
-  for `barkpark` — the CP-side inversion of add-support. The support row is
-  written FIRST (host nil), then this enqueues the job the Go provisioner drains
-  to stand up the box server-side (no local Hetzner token). The support's parent
-  main and the parent's admin token travel in the CLAIM payload, not on this row.
-
-  Same one-active-per-kind guard as provision/deprovision/resurrect: an ACTIVE
-  (pending/claimed) `provision_support` job already in flight for this barkpark
-  returns `{:error, :already_provisioning}` rather than enqueuing a second box
-  (the partial unique index is the atomic race backstop, as elsewhere).
-  """
-  @spec enqueue_support_provision_job(Barkpark.t() | binary()) ::
-          {:ok, ProvisionJob.t()} | {:error, :already_provisioning | Ecto.Changeset.t()}
   @support_box_cap_default 3
 
   @doc """
@@ -2131,6 +2117,20 @@ defmodule BarkparkCloud.Registry do
     team |> Team.support_cap_changeset(%{support_box_cap: cap}) |> Repo.update()
   end
 
+  @doc """
+  PDF-D83 (Personal Dev Fleet MVP-0): enqueue a `pending` PROVISION_SUPPORT job
+  for `barkpark` — the CP-side inversion of add-support. The support row is
+  written FIRST (host nil), then this enqueues the job the Go provisioner drains
+  to stand up the box server-side (no local Hetzner token). The support's parent
+  main and the parent's admin token travel in the CLAIM payload, not on this row.
+
+  Same one-active-per-kind guard as provision/deprovision/resurrect: an ACTIVE
+  (pending/claimed) `provision_support` job already in flight for this barkpark
+  returns `{:error, :already_provisioning}` rather than enqueuing a second box
+  (the partial unique index is the atomic race backstop, as elsewhere).
+  """
+  @spec enqueue_support_provision_job(Barkpark.t() | binary()) ::
+          {:ok, ProvisionJob.t()} | {:error, :already_provisioning | Ecto.Changeset.t()}
   def enqueue_support_provision_job(barkpark) do
     bp_id = barkpark_id(barkpark)
 
