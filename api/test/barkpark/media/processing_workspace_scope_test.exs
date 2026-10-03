@@ -103,6 +103,42 @@ defmodule Barkpark.Media.ProcessingWorkspaceScopeTest do
     end
   end
 
+  test "a non-Default asset can be removed from its folder collection, not only added" do
+    {ws, project} = tenant()
+    {file, _doc} = upload_in(ws, project)
+    scope = [workspace_id: ws.id, project_id: project.id]
+
+    {:ok, col} =
+      Barkpark.Content.create_document(
+        "mediaCollection",
+        %{
+          "doc_id" => "col-#{System.unique_integer([:positive])}",
+          "title" => "F",
+          "content" => %{"kind" => "folder"}
+        },
+        @ds,
+        scope
+      )
+
+    alias Barkpark.Media.Storage.Collections
+    assert {:ok, _} = Collections.add_member(col.doc_id, file, @ds, scope)
+
+    # remove_member used to read the asset doc without the blob's scope and
+    # answer {:error, :not_found} for an asset add_member had just added.
+    assert {:ok, %Document{}} = Collections.remove_member(col.doc_id, file, @ds, scope)
+  end
+
+  test "deleting a non-Default blob removes its asset doc instead of orphaning it" do
+    {ws, project} = tenant()
+    {file, doc} = upload_in(ws, project)
+
+    assert {:ok, _} =
+             Barkpark.Media.delete_file(file.id, workspace_id: ws.id, where_used: :cascade)
+
+    refute Repo.get(Document, doc.id),
+           "the blob row is gone but its mediaAsset doc survived — an orphan in the asset library"
+  end
+
   test "CONTROL: a Default-workspace blob processes as before" do
     ws = Tenancy.get_default_workspace()
     project = Tenancy.get_default_project()

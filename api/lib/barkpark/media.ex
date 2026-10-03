@@ -737,7 +737,7 @@ defmodule Barkpark.Media do
         # Resolve the webhook payload BEFORE deleting so the DB delete is the
         # FIRST side effect: on failure the row survives intact (still
         # pointing at a live blob) and no phantom media.deleted fires.
-        doc = asset_doc_for_file(file, file.dataset)
+        doc = asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))
 
         case delete_row_with_asset_doc(file) do
           {:ok, deleted} ->
@@ -894,11 +894,14 @@ defmodule Barkpark.Media do
   end
 
   # Remove the blob's companion `mediaAsset` document(s) inside the caller's
-  # transaction. Scoped EXACTLY as `asset_doc_for_file/2` resolved the webhook
-  # payload a few lines above (dataset + blob id, no workspace narrowing), so
-  # the delete can never miss a document the resolve just found.
+  # transaction. Scoped EXACTLY as `asset_doc_for_file/3` resolved the webhook
+  # payload a few lines above — dataset + blob id + the BLOB'S OWN scope
+  # (`MediaFile.scope_opts/1`) — so the delete can never miss a document the
+  # resolve just found. Unscoped, both resolved the dataset inside the Default
+  # project and left a non-Default workspace's asset doc behind as an orphan
+  # (task-b9bca4e256a79387).
   defp delete_asset_doc(%MediaFile{} = file) do
-    Assets.delete_for_blob(file.id, file.dataset)
+    Assets.delete_for_blob(file.id, file.dataset, MediaFile.scope_opts(file))
   end
 
   # ── Deferred media-delete effects (felix-phantom-media-atomicity) ──────────

@@ -229,7 +229,12 @@ defmodule Barkpark.Plugins.Media.MediaDeleteAtomicityTest do
     test "asset_doc_for_file/2 still runs before the delete transaction opens" do
       body = delete_file_source!()
 
-      resolve_at = index_of!(body, "doc = asset_doc_for_file(file, file.dataset)")
+      resolve_at =
+        index_of!(
+          body,
+          "doc = asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file))"
+        )
+
       txn_at = index_of!(body, "Repo.transaction(")
       doc_delete_at = index_of!(body, "delete_asset_doc(file)")
       row_delete_at = index_of!(body, "Repo.delete(file, stale_error_field: :id)")
