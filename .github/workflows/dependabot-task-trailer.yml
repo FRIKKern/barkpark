@@ -10,8 +10,9 @@ name: dependabot-task-trailer
 # way for a BOT to reference a ledger row.
 #
 # This workflow supplies the reference and nothing else: it appends
-# `Task: task-3e5d6364196a7cda` — ONE standing row for dependency bumps — to a
-# dependabot PR's body. The gate then evaluates that PR exactly like any other.
+# `Task: <id>` to a dependabot PR's body. The id names ONE standing row for
+# dependency bumps, and it lives in exactly one place: DEFAULT_TASK_ID in
+# scripts/dependabot-task-trailer.sh. The gate then evaluates that PR exactly like any other.
 # NOBODY IS EXEMPTED. A human PR with no trailer still reds; that is the
 # positive control in scripts/dependabot-task-trailer.test.sh §3, and it is the
 # reason remedy (a) ("if: github.actor != 'dependabot[bot]'" on the enforcing
@@ -35,12 +36,32 @@ name: dependabot-task-trailer
 # interpolated into a shell body, where a crafted branch name would be code):
 # the actor, the head ref, and the body.
 #
-# ── WHY THE GATE RE-EVALUATES AFTER THE EDIT ────────────────────────────────
+# ── WHY THE EDIT NEEDS ITS OWN TOKEN (task-9747f19f13f83368) ────────────────
 # Editing a PR body emits a `pull_request` event of type `edited`, and
-# pr-task-gate.yml ALREADY lists `edited` in its `types:` (it is documented
-# there as load-bearing, for the sticky-red case). So this file does not edit
-# pr-task-gate.yml at all, and neither of that file's two escape hatches is
-# touched by this PR: not its cutoff step, and not its `hotfix!`
+# pr-task-gate.yml lists `edited` in its `types:`. BUT GitHub starts NO
+# workflow run for an event caused by GITHUB_TOKEN (workflow_dispatch and
+# repository_dispatch excepted). An edit made with secrets.GITHUB_TOKEN
+# therefore never reaches the gate. The gate's opened/synchronize run reads
+# `github.event.pull_request.body` from ITS OWN payload, which predates the
+# edit, so it reds "no task reference found on the PR" and stays red. A
+# re-run replays that same pre-edit payload and cannot clear it.
+# MEASURED on #16717, 2026-10-02: dependabot force-pushed and rewrote the body
+# at 05:14:04Z. This job (run 36968022991) appended the trailer. Gate runs
+# 36968024990 and 36968025437 started at 05:14:09Z on the old body and both
+# FAILED "no task reference found". No gate run followed the edit.
+# The standing row being `done` is NOT the cause: the gate passes a done row
+# with claim.closed_by (CI job 109473768968 on #20424: "PASS: task
+# 'task-3e5d6364196a7cda' is task-backed — done, closed by 'lead-gates'").
+#
+# THE FIX is the token. When secrets.DEPENDABOT_TRAILER_TOKEN is set (a
+# fine-grained PAT or GitHub App token with Pull requests: write on this repo),
+# the edit uses it. Its `edited` event DOES start pr-task-gate.yml, which then
+# reads the trailer. pull_request_target from a base-repo branch receives Actions
+# secrets, so this is an ordinary repo secret. When it is unset, the edit falls back
+# to GITHUB_TOKEN: the trailer still lands, and a ::warning says the gate will
+# not re-fire and names the cure.
+# This file still does not edit pr-task-gate.yml. Neither of that file's two
+# escape hatches is touched: not its cutoff step, and not its `hotfix!`
 # labeled/unlabeled pair.
 
 on:
@@ -129,13 +150,25 @@ jobs:
       - name: Append the standing trailer
         if: steps.decide.outputs.append == '1'
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The dedicated token first: only an edit made by a token that is
+          # NOT GITHUB_TOKEN starts the gate's `edited` run (see the header).
+          GH_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN || secrets.GITHUB_TOKEN }}
+          HAS_TRAILER_TOKEN: ${{ secrets.DEPENDABOT_TRAILER_TOKEN != '' }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -euo pipefail
-          gh pr edit "${{ github.event.pull_request.number }}" \
+          gh pr edit "$PR_NUMBER" \
             --repo "${{ github.repository }}" \
             --body-file new-body.txt
-          echo "Appended Task: task-3e5d6364196a7cda to PR #${{ github.event.pull_request.number }}." >> "$GITHUB_STEP_SUMMARY"
+          # The id is NOT restated here: scripts/dependabot-task-trailer.sh
+          # (DEFAULT_TASK_ID) is its one home, and new-body.txt ends with the
+          # trailer that script wrote.
+          trailer="$(tail -n 1 new-body.txt)"
+          echo "Appended '${trailer}' to PR #${PR_NUMBER}." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$HAS_TRAILER_TOKEN" != "true" ]; then
+            echo "::warning title=Task gate will NOT re-evaluate this PR::The trailer was written with GITHUB_TOKEN, and GitHub starts no workflow run for an event GITHUB_TOKEN causes. 'PR references an active task' keeps the verdict it reached on the pre-edit body. Cure: set the repo secret DEPENDABOT_TRAILER_TOKEN (fine-grained PAT or GitHub App token, Pull requests: write). Until then, any human edit of the PR body re-fires the gate."
+            echo "WARNING: written with GITHUB_TOKEN, so the task gate will not re-fire on this edit. Set DEPENDABOT_TRAILER_TOKEN." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
   selftest:
     name: Dependabot trailer injector self-test
