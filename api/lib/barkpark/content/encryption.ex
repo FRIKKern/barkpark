@@ -47,14 +47,25 @@ defmodule Barkpark.Content.Encryption do
       `{:error, {:encryption_failed, …}}` the moment one cannot be processed.
       A marked field is NEVER persisted as plaintext.
   """
+  # `scope` is the document's workspace id (binary | nil) or a keyword list
+  # `[workspace_id: …, project_id: …]`. It picks BOTH the DEK and the schema:
+  # a scoped write resolves the type in its own workspace, then the shared
+  # global layer, never another workspace (task-f2a1a8429edd0d88). Before this
+  # the lookup ran with no scope, which resolves `dataset` to the Default
+  # workspace's dataset: a non-Default workspace's `encrypted: true` field was
+  # stored as plaintext, or Default's same-named type decided what to encrypt.
+  #
   # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
-  @spec encrypt_marked(map(), String.t(), String.t(), binary() | nil) ::
+  @spec encrypt_marked(map(), String.t(), String.t(), binary() | keyword() | nil) ::
           {:ok, map()} | {:error, {:encryption_failed, term()}}
-  def encrypt_marked(content, type, dataset, workspace_id \\ nil)
+  def encrypt_marked(content, type, dataset, scope \\ nil)
 
-  def encrypt_marked(content, type, dataset, workspace_id)
+  def encrypt_marked(content, type, dataset, scope)
       when is_map(content) and is_binary(type) and is_binary(dataset) do
-    case Content.get_schema(type, dataset) do
+    scope_opts = scope_opts(scope)
+    workspace_id = Keyword.get(scope_opts, :workspace_id)
+
+    case schema_for_write(type, dataset, scope_opts) do
       {:ok, %SchemaDefinition{fields: raw}} when is_list(raw) ->
         encrypt_against_schema(content, raw, scope(dataset), workspace_id)
 
@@ -75,7 +86,29 @@ defmodule Barkpark.Content.Encryption do
     end
   end
 
-  def encrypt_marked(content, _type, _dataset, _workspace_id), do: {:ok, content}
+  def encrypt_marked(content, _type, _dataset, _scope), do: {:ok, content}
+
+  defp scope_opts(ws) when is_binary(ws), do: [workspace_id: ws]
+
+  defp scope_opts(opts) when is_list(opts) do
+    opts
+    |> Keyword.take([:workspace_id, :project_id])
+    |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+  end
+
+  defp scope_opts(_), do: []
+
+  # An unscoped write keeps the historical global read. A scoped write walks
+  # its own scope, its workspace, then the shared global layer
+  # (`Content.resolve_schema/3`), so a global plugin schema still encrypts.
+  defp schema_for_write(type, dataset, []), do: Content.get_schema(type, dataset)
+
+  defp schema_for_write(type, dataset, scope_opts) do
+    case Content.resolve_schema(type, dataset, scope_opts) do
+      {:ok, schema} -> {:ok, schema}
+      :error -> {:error, :not_found}
+    end
+  end
 
   # HIGH-3 (red-team): FAIL CLOSED. The pre-hardening code returned `content`
   # verbatim whenever the schema failed to STRICT-parse — persisting an

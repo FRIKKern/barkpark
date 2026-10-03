@@ -612,7 +612,7 @@ defmodule Barkpark.Content.Writer do
   defp apply_initial_values(attrs, type, dataset)
        when is_binary(type) and is_binary(dataset) do
     initial =
-      case Content.get_schema(type, dataset) do
+      case schema_for_create(type, dataset, attrs) do
         {:ok, %SchemaDefinition{initial_values: iv}} when is_map(iv) and map_size(iv) > 0 ->
           resolve_dynamics(iv)
 
@@ -689,9 +689,29 @@ defmodule Barkpark.Content.Writer do
 
   defp maybe_apply_paper_template(attrs, _type), do: attrs
 
+  # The schema a CREATE fills defaults and layout from. A scoped write (attrs
+  # already stamped by `WriteScope.put_scope_attrs`) resolves the type in its
+  # own scope, then its workspace, then the shared global layer, never another
+  # workspace. With no stamp it keeps the historical global read. Before this,
+  # every create read with no scope, which resolves `dataset` to the Default
+  # workspace's dataset, so a tenant's document got Default's initial values
+  # and layout.
+  defp schema_for_create(type, dataset, attrs) do
+    case stamped_scope(attrs) do
+      [] ->
+        Content.get_schema(type, dataset)
+
+      scope ->
+        case Content.resolve_schema(type, dataset, scope) do
+          {:ok, schema} -> {:ok, schema}
+          :error -> {:error, :not_found}
+        end
+    end
+  end
+
   defp scaffold_or_initial_values(attrs, type, dataset)
        when is_binary(type) and is_binary(dataset) do
-    case Content.get_schema(type, dataset) do
+    case schema_for_create(type, dataset, attrs) do
       {:ok, %SchemaDefinition{layout: layout} = schema}
       when is_list(layout) and layout != [] ->
         scaffold_expectation(attrs, schema, dataset)
@@ -1466,9 +1486,9 @@ defmodule Barkpark.Content.Writer do
         # persist, so the encrypt-time workspace equals the stored one — a later
         # `reveal_fields` resolves the same (workspace_id, scope) DEK. `nil` (an
         # unscoped write) → the NULL-workspace DEK.
-        workspace_id = Map.get(attrs, "workspace_id")
-
-        case Encryption.encrypt_marked(content, type, dataset, workspace_id) do
+        # The same stamped scope also picks the SCHEMA, so the type resolves
+        # in the document's own workspace, never Default's.
+        case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs)) do
           {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
           {:error, _} = err -> err
         end
