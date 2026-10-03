@@ -223,7 +223,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   # heading and a `purpose-copy` paragraph holding the auto-stub. Without it a
   # Studio-made task could never be published — the Tasks plugin refuses a
   # first publish with no brief ("task brief is required before publish"),
-  # and Studio renders `brief` read-only. `Barkpark.Tasks.BriefMirror`
+  # and Studio renders `brief` read-only. The Tasks plugin's BriefMirror
   # re-derives `purpose-copy` from `description` (or the stub from the title)
   # on every write, so the block follows what the editor types
   # (task-122006e94c1980e1). The stub wording is BriefMirror's own.
