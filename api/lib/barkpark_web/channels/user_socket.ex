@@ -178,6 +178,16 @@ defmodule BarkparkWeb.UserSocket do
   def disconnect_topic(token_id) when is_binary(token_id),
     do: "user_socket:api_token:" <> token_id
 
+  @doc """
+  The topic a revoked ACCOUNT session (`user_sessions` row) is torn down on.
+  `Barkpark.Accounts`' session revokers broadcast `"disconnect"` here and
+  `BarkparkWeb.LiveAuth` subscribes an open LiveView to it
+  (task-807307d827255d7e).
+  """
+  @spec session_disconnect_topic(binary()) :: binary()
+  def session_disconnect_topic(session_id) when is_binary(session_id),
+    do: "user_socket:user_session:" <> session_id
+
   # A real, token-derived socket id: the handle Phoenix's own
   # `Endpoint.disconnect` mechanism needs. See the moduledoc — while this
   # returned nil, a revoked credential's open socket could not be reached by

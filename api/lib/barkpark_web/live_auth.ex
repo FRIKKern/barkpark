@@ -147,6 +147,7 @@ defmodule BarkparkWeb.LiveAuth do
       socket
       |> assign(:current_user, user_from_session(session))
       |> assign(:api_token_credential_present?, token_credential_present?)
+      |> arm_session_teardown(session)
 
     case raw do
       nil ->
@@ -266,13 +267,57 @@ defmodule BarkparkWeb.LiveAuth do
 
       socket
       |> assign(:revocation_teardown_armed?, true)
-      |> attach_hook(:live_auth_revocation, :handle_info, &revocation_teardown/2)
+      |> ensure_teardown_hook()
     else
       socket
     end
   end
 
   defp arm_revocation_teardown(socket, _token), do: socket
+
+  # The ACCOUNT-session twin (task-807307d827255d7e): logout, "sign out
+  # everywhere" and SAML single logout revoke `user_sessions` rows, and
+  # `Barkpark.Accounts` broadcasts "disconnect" on each revoked row's topic.
+  # Subscribe a connected socket that was mounted on a live account session,
+  # and route the broadcast through the same teardown hook. Idempotent.
+  defp arm_session_teardown(socket, session) do
+    with true <- connected?(socket),
+         false <- Map.get(socket.assigns, :session_teardown_armed?, false),
+         raw when is_binary(raw) and raw != "" <- session["user_session"],
+         sid when is_binary(sid) <- Barkpark.Accounts.live_session_id(raw) do
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        BarkparkWeb.UserSocket.session_disconnect_topic(sid)
+      )
+
+      socket
+      |> assign(:session_teardown_armed?, true)
+      |> ensure_teardown_hook()
+    else
+      _ -> socket
+    end
+  end
+
+  # One handle_info hook serves both the token and the session topics.
+  defp ensure_teardown_hook(socket) do
+    if Map.get(socket.assigns, :teardown_hook_attached?, false) do
+      socket
+    else
+      socket
+      |> assign(:teardown_hook_attached?, true)
+      |> attach_hook(:live_auth_revocation, :handle_info, &revocation_teardown/2)
+    end
+  end
+
+  defp revocation_teardown(
+         %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:user_session:" <> _},
+         socket
+       ) do
+    {:halt,
+     socket
+     |> put_flash(:error, "You were signed out — sign in again")
+     |> redirect(to: "/login")}
+  end
 
   defp revocation_teardown(
          %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:" <> _},
@@ -297,7 +342,7 @@ defmodule BarkparkWeb.LiveAuth do
     with %Barkpark.Accounts.User{} = user <- user_from_session(session),
          %{id: ws_id} <- Barkpark.Tenancy.get_default_workspace(),
          :ok <- Barkpark.Tenancy.Auth.authorize(user, ws_id, :admin) do
-      {:cont, assign(socket, :current_user, user)}
+      {:cont, socket |> assign(:current_user, user) |> arm_session_teardown(session)}
     else
       _ ->
         {:halt,
@@ -395,7 +440,7 @@ defmodule BarkparkWeb.LiveAuth do
   defp scoped_admin_authorize_user(socket, session, ws) do
     with %Barkpark.Accounts.User{} = user <- user_from_session(session),
          true <- Barkpark.Tenancy.Auth.workspace_admin?(user, ws.id) do
-      {:cont, assign(socket, :current_user, user)}
+      {:cont, socket |> assign(:current_user, user) |> arm_session_teardown(session)}
     else
       _ -> scoped_admin_deny(socket)
     end

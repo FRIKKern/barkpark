@@ -347,11 +347,55 @@ defmodule Barkpark.Accounts do
     hash = UserSession.hash_token(plaintext)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    {revoked, _} =
-      from(t in UserSession, where: t.token_hash == ^hash and is_nil(t.revoked_at))
+    {revoked, ids} =
+      from(t in UserSession,
+        where: t.token_hash == ^hash and is_nil(t.revoked_at),
+        select: t.id
+      )
       |> Repo.update_all(set: [revoked_at: now])
 
+    broadcast_session_teardown(ids)
     {:ok, revoked}
+  end
+
+  @doc """
+  The id of the live (unrevoked) session row behind a session-token plaintext,
+  or nil. A pure read (no `last_used_at` stamp), used by `BarkparkWeb.LiveAuth`
+  to subscribe an open LiveView to that session's teardown topic.
+  """
+  @spec live_session_id(binary()) :: binary() | nil
+  def live_session_id(plaintext) when is_binary(plaintext) do
+    hash = UserSession.hash_token(String.trim(plaintext))
+
+    Repo.one(
+      from t in UserSession,
+        where: t.token_hash == ^hash and is_nil(t.revoked_at),
+        select: t.id
+    )
+  end
+
+  def live_session_id(_), do: nil
+
+  # A revoked session must also close the LiveViews it opened
+  # (task-807307d827255d7e). Before this only API-token revocation reached an
+  # open socket; logout, "sign out everywhere" and SAML single logout left
+  # every open Studio tab reading and writing until it reconnected.
+  # `BarkparkWeb.LiveAuth` subscribes each mounted LiveView to its session's
+  # topic. Best-effort: a broadcast failure never fails the revoke.
+  defp broadcast_session_teardown(ids) when is_list(ids) do
+    Enum.each(ids, fn id ->
+      try do
+        BarkparkWeb.Endpoint.broadcast(
+          BarkparkWeb.UserSocket.session_disconnect_topic(id),
+          "disconnect",
+          %{}
+        )
+      rescue
+        _ -> :ok
+      catch
+        _, _ -> :ok
+      end
+    end)
   end
 
   @doc """
@@ -367,10 +411,14 @@ defmodule Barkpark.Accounts do
   def revoke_all_user_sessions(%User{id: uid}) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    {revoked, _} =
-      from(t in UserSession, where: t.user_id == ^uid and is_nil(t.revoked_at))
+    {revoked, ids} =
+      from(t in UserSession,
+        where: t.user_id == ^uid and is_nil(t.revoked_at),
+        select: t.id
+      )
       |> Repo.update_all(set: [revoked_at: now])
 
+    broadcast_session_teardown(ids)
     {:ok, revoked}
   end
 
@@ -403,6 +451,7 @@ defmodule Barkpark.Accounts do
       if is_nil(session.revoked_at) do
         now = DateTime.truncate(DateTime.utc_now(), :microsecond)
         {:ok, _} = session |> UserSession.changeset(%{revoked_at: now}) |> Repo.update()
+        broadcast_session_teardown([session.id])
       end
 
       :ok
@@ -436,7 +485,8 @@ defmodule Barkpark.Accounts do
         _ -> query
       end
 
-    {count, _} = Repo.update_all(query, set: [revoked_at: now])
+    {count, ids} = Repo.update_all(select(query, [t], t.id), set: [revoked_at: now])
+    broadcast_session_teardown(ids)
     count
   end
 
