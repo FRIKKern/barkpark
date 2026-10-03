@@ -13316,6 +13316,13 @@ defmodule PDS.Census do
     # refusals this row names are properties of api/lib code — BlockOps — and no synthetic
     # heredoc can carry them honestly: a fixture written to be refused proves the printer
     # works, not that the predicate found anything.
+    #
+    # Re-anchored 2026-10-03 (task-611bb9e5de85b949). Both refused shapes still exist in
+    # block_ops.ex; the specimens moved under them. #20425 (1f95949bd, write-admission
+    # doors) wrapped apply_paper_block_op/4 in a door, so the body that binds `saved` is
+    # now admitted_apply_paper_block_op/4. #20843 (1c9f68b01, rev-less ops serialize via
+    # compare-and-set) added a rev-less CAS arm to fenced_or_plain_paper_update/3, so the
+    # fenced write is reached on 2 of its 4 arms instead of 1 of 3.
     %{
       name: "SELECT-REACH-REFUSES-BLOCK-OPS",
       corpus: :repo,
@@ -13324,7 +13331,7 @@ defmodule PDS.Census do
       exit: 0,
       expect: [
         "WRITER  Barkpark.Content.Papers.BlockOps.fenced_paper_update/4",
-        "REFUSED (B)  Barkpark.Content.Papers.BlockOps.apply_paper_block_op/4",
+        "REFUSED (B)  Barkpark.Content.Papers.BlockOps.admitted_apply_paper_block_op/4",
         "BINDS `saved` AND RENDERS NONE OF IT"
       ],
       proves: "the reach predicate REFUSES to certify the one caller this row names: it binds `saved` out of the select:-carrying write, spends it on side effects, and renders a pre-write rev instead — a correctly-scoped select: proves the query carried it, never that the row reached the printed value"
@@ -13337,9 +13344,9 @@ defmodule PDS.Census do
       exit: 0,
       expect: [
         "REFUSED (C)  Barkpark.Content.Papers.BlockOps.fenced_or_plain_paper_update/3",
-        "CONDITIONAL ON opts[:if_rev] — reached on 1 of 3 arm(s)"
+        "CONDITIONAL ON opts[:if_rev] — reached on 2 of 4 arm(s)"
       ],
-      proves: "conditionally-taken evidence no longer certifies unconditionally: the fenced write is reached on one arm of a `case Keyword.get(opts, :if_rev)` and a call that omits :if_rev takes a plain Repo.update/1 with no select: at all, so the static route's certificate is refused by name"
+      proves: "conditionally-taken evidence no longer certifies unconditionally: the fenced write is reached on two of four arms of a `case Keyword.get(opts, :if_rev)`, and the other two (no rev to fence on, or a rev-less call outside the compare-and-set retry) take a plain Repo.update/1 with no select: at all, so the static route's certificate is refused by name"
     },
     %{
       name: "PRECEDENCE-RULE-PRINTED",
