@@ -187,6 +187,11 @@ defmodule BarkparkWeb.MemberController do
   def revoke_token(conn, %{"id" => token_id}) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
          true <- Members.token_member?(ws_id, token_id),
+         :ok <-
+           Auth.revoke_within_ceiling(
+             token_id,
+             conn.assigns[:api_token] || conn.assigns[:current_user]
+           ),
          {:ok, token} <- Auth.revoke_token(token_id) do
       json(conn, %{revoked: %{id: token.id, label: token.label, revoked_at: token.revoked_at}})
     else
@@ -195,6 +200,15 @@ defmodule BarkparkWeb.MemberController do
 
       {:error, :not_found} ->
         not_found(conn, "no token with that id holds a seat in this workspace")
+
+      {:error, :forbidden} ->
+        conn
+        |> ErrorResponse.emit_fields(:forbidden, %{
+          code: "forbidden",
+          message:
+            "this token also holds a seat in a workspace you do not administer, and a " <>
+              "revoke kills it everywhere; remove its seat here instead"
+        })
 
       {:error, _} ->
         unprocessable(conn, "could not revoke token")

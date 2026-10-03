@@ -586,6 +586,31 @@ defmodule Barkpark.Auth do
       else: {:error, :forbidden}
   end
 
+  @doc """
+  `:ok` when `actor` may revoke `token_id`: it administers the token's home
+  workspace and every workspace the token holds a seat in. A revoke kills the
+  token in ALL of them, so a seat in the caller's own workspace is not enough
+  (task-9987bbd86dbed475). This is the workspace half of `rotate_token/3`'s
+  ceiling; the permission half does not apply, because a revoke hands the
+  caller nothing. `{:error, :not_found}` for an id that names no token.
+  """
+  @spec revoke_within_ceiling(binary(), term()) :: :ok | {:error, :forbidden | :not_found}
+  def revoke_within_ceiling(token_id, actor) when is_binary(token_id) do
+    with uuid when is_binary(uuid) <- Repo.uuid_or_nil(token_id),
+         %ApiToken{} = token <- Repo.get(ApiToken, uuid) do
+      workspaces =
+        [token.workspace_id | Enum.map(token_seats(uuid), & &1.workspace_id)]
+        |> Enum.reject(&is_nil/1)
+        |> Enum.uniq()
+
+      if not is_nil(actor) and Enum.all?(workspaces, &TenancyAuth.workspace_admin?(actor, &1)),
+        do: :ok,
+        else: {:error, :forbidden}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
   defp token_seats(token_id) do
     Barkpark.Tenancy.Membership
     |> where([m], m.principal_type == "api_token" and m.principal_id == ^token_id)
