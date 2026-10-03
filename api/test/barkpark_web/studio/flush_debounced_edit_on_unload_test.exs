@@ -58,6 +58,49 @@ defmodule BarkparkWeb.Studio.FlushDebouncedEditOnUnloadTest do
     assert listener =~ "blur()"
   end
 
+  @hooks Path.expand("../../../priv/static/assets/bp-paper-editor-hooks.js", __DIR__)
+
+  # The rich-text widget mirrors into a hidden, debounced input that never takes
+  # focus, so LiveView never saw the blur that flushes it: opening another
+  # document within 500 ms of the last keystroke dropped it (headless Chrome,
+  # page pg1 body). The bridge must hand LiveView that blur when focus leaves.
+  test "the field bridge flushes its hidden input when focus leaves the widget" do
+    src = File.read!(@hooks)
+    found = Regex.run(~r/this\._onFocusOut = \(e\) => \{.*?\n        \};/s, src)
+
+    assert match?([_], found), "BarkparkFieldBridge must define a focusout flush"
+
+    [handler] = found
+    assert handler =~ ~s|dispatchEvent(new Event("blur"))|
+    assert handler =~ "this._bridgeInput"
+    assert src =~ ~s|this.el.addEventListener("focusout", this._onFocusOut)|
+    assert src =~ ~s|this.el.removeEventListener("focusout", this._onFocusOut)|
+  end
+
+  test "the Classic rich text field mirrors into a debounced hidden input", %{conn: conn} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "article",
+          "title" => "Article",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "body", "title" => "Body", "type" => "richText"}
+          ]
+        },
+        @dataset
+      )
+
+    {:ok, _} = Content.create_document("article", %{"doc_id" => "a1", "title" => "A"}, @dataset)
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/article/a1"))
+
+    assert html =~ ~s|phx-hook="BarkparkFieldBridge"|
+
+    assert html =~
+             ~r/<input[^>]*type="hidden"[^>]*name="doc\[body\]"[^>]*phx-debounce="\d+"|<input[^>]*phx-debounce="\d+"[^>]*name="doc\[body\]"/
+  end
+
   test "the Classic editor is the debounced phx-change form the listener targets", %{conn: conn} do
     {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/note/n1"))
 

@@ -5167,6 +5167,18 @@
           input.dispatchEvent(new Event("input", { bubbles: true }));
         };
         this.el.addEventListener("bp-change", this._on);
+        // task-63aed3de024fc151: the mirrored hidden input never takes focus,
+        // so LiveView's phx-debounce on it never gets the blur that flushes
+        // it. Opening another document within the debounce window dropped
+        // the last rich-text keystrokes. When focus leaves the bridged widget,
+        // hand LiveView that blur. A PaperFieldBlock form owns its own save.
+        this._onFocusOut = (e) => {
+          if (this._paperForm) return;
+          if (e.relatedTarget && this.el.contains(e.relatedTarget)) return;
+          const input = this._bridgeInput;
+          if (input && input.isConnected) input.dispatchEvent(new Event("blur"));
+        };
+        this.el.addEventListener("focusout", this._onFocusOut);
         this._onFlushPending = (event) => {
           // A nested picker bridge mirrors its hidden input; the hook mounted
           // on the surrounding PaperFieldBlock form owns the correlated save.
@@ -5193,6 +5205,7 @@
         this._autosaveTimer = null;
         bpReleasePaperExitCoordinator(this);
         this.el.removeEventListener("bp-change", this._on);
+        this.el.removeEventListener("focusout", this._onFocusOut);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         if (this._onFormInput) this.el.removeEventListener("input", this._onFormInput);
         if (this._onFormChange) this.el.removeEventListener("change", this._onFormChange);
