@@ -194,6 +194,14 @@ defmodule Barkpark.Scim do
     hard_requested = Keyword.get(opts, :hard, false)
     ws_ids = org |> workspace_ids()
 
+    # The session teardown goes out after the revoke commits, so a client that
+    # reconnects on it meets a revoked row (owner ruling #35, item 8).
+    Accounts.with_session_teardown_after_commit(fn ->
+      deprovision_in_transaction(org, user, ws_ids, hard_requested)
+    end)
+  end
+
+  defp deprovision_in_transaction(org, user, ws_ids, hard_requested) do
     Repo.transaction(fn ->
       {:ok, sessions_revoked} = Accounts.revoke_all_user_sessions(user)
 
