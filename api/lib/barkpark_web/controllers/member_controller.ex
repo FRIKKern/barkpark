@@ -240,7 +240,8 @@ defmodule BarkparkWeb.MemberController do
          {:ok, {raw, successor, old}} <-
            Auth.rotate_token(token_id, conn.assigns.api_token,
              grace_seconds: grace,
-             workspace_id: ws_id
+             workspace_id: ws_id,
+             force: Map.get(params, "force") in [true, "true", "1"]
            ) do
       conn
       |> put_status(:created)
@@ -273,6 +274,20 @@ defmodule BarkparkWeb.MemberController do
 
       {:error, :not_rotatable} ->
         conflict(conn, "conflict", "token is revoked, expired, or not an api token")
+
+      {:error, :cloud_held_credential} ->
+        ErrorResponse.emit_fields(conn, :conflict, %{
+          code: "conflict",
+          reason: "cloud_held_credential",
+          message:
+            "this token is the admin credential Barkpark Cloud stores for this instance " <>
+              "(label \"#{Auth.cloud_admin_label()}\"); rotating it leaves Cloud with a " <>
+              "secret that stops working when the grace window ends",
+          hint:
+            "Mint a separate admin token instead: `bp instance admin-token <instance-id> " <>
+              "--install` (or `bp token create --permissions read,write,admin` with an admin " <>
+              "token). To rotate this one anyway, pass --force."
+        })
 
       {:error, :forbidden} ->
         conn
