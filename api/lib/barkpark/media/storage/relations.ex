@@ -8,6 +8,7 @@ defmodule Barkpark.Media.Storage.Relations do
   alias Barkpark.Content.Document
   alias Barkpark.Media
   alias Barkpark.Media.Delivery.AssetResponse
+  alias Barkpark.Media.Storage.Access
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Plugins.Media.Assets
   alias Barkpark.Repo
@@ -48,7 +49,7 @@ defmodule Barkpark.Media.Storage.Relations do
     |> Enum.map(&normalize_edge/1)
     |> Enum.reject(&is_nil(&1.target))
     |> Enum.map(fn edge ->
-      case resolve_target(edge.target, dataset, scope_opts) do
+      case resolve_viewable_target(edge.target, dataset, scope_opts, render_opts) do
         {file, target_doc} ->
           %{
             relation: edge.relation,
@@ -88,6 +89,7 @@ defmodule Barkpark.Media.Storage.Relations do
       )
     )
     |> Repo.all()
+    |> Enum.filter(&viewable_doc?(&1, dataset, scope_opts, render_opts))
     |> Enum.flat_map(fn source_doc ->
       source_doc.content
       |> Map.get("relatedAssets", [])
@@ -108,6 +110,47 @@ defmodule Barkpark.Media.Storage.Relations do
         }
       end)
     end)
+  end
+
+  # THE RELATED ASSET IS GATED, NOT ONLY THE ONE ASKED ABOUT.
+  #
+  # The controller checks `Access.allowed?/4` on the source asset; every asset
+  # one hop out used to render unchecked. A public asset's graph therefore gave
+  # an anonymous caller the filename / path / url / renditions of a private or
+  # token asset it points at, and of every private asset pointing at it.
+  #
+  # An outbound target the caller may not view renders exactly like a target
+  # that does not resolve (`asset: nil`) — the edge itself is the viewable
+  # source's own `relatedAssets` content. An inbound source the caller may not
+  # view is dropped entirely: its doc id is the hidden asset's identity.
+  #
+  # No `:conn` in the opts means an in-process caller with no request principal
+  # (the relation-tenancy suite, internal tooling) — it keeps the full graph.
+  defp resolve_viewable_target(asset_doc_id, dataset, scope_opts, render_opts) do
+    case resolve_target(asset_doc_id, dataset, scope_opts) do
+      {file, doc} = hit -> if viewable?(file, doc, render_opts), do: hit
+      nil -> nil
+    end
+  end
+
+  defp viewable_doc?(doc, dataset, scope_opts, render_opts) do
+    case Keyword.get(render_opts, :conn) do
+      nil ->
+        true
+
+      _conn ->
+        case file_for_doc(doc, dataset, scope_opts) do
+          nil -> false
+          file -> viewable?(file, doc, render_opts)
+        end
+    end
+  end
+
+  defp viewable?(file, doc, render_opts) do
+    case Keyword.get(render_opts, :conn) do
+      nil -> true
+      conn -> Access.allowed?(conn, file, doc, :view)
+    end
   end
 
   defp resolve_target(asset_doc_id, dataset, scope_opts) do

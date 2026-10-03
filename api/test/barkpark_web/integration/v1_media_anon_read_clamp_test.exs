@@ -338,6 +338,69 @@ defmodule BarkparkWeb.Integration.V1MediaAnonReadClampTest do
     end
   end
 
+  # task-12ac9aaf2bcb925c — the relation graph gated only the asset it was asked
+  # about. Every RELATED asset, both directions, rode `AssetResponse.render/3`
+  # with no `Access.allowed?/4` check, so a PUBLIC asset's relations handed an
+  # anonymous caller the filename / path / url / renditions of a private or
+  # token asset it points at (outbound), and of every private asset pointing at
+  # it (inbound) — the W14 metadata leak again, one hop out.
+  describe "the relation graph clamps every RELATED asset, not just the source" do
+    setup %{conn: conn} do
+      hub = asset_with_visibility(conn, "public")
+      hidden_target = asset_with_visibility(conn, "private")
+      hidden_source = asset_with_visibility(conn, "private")
+
+      conn
+      |> admin()
+      |> patch(~p"/v1/media/#{@ds}/#{hub["id"]}", %{
+        "relatedAssets" => [%{"relation" => "variant", "target" => hidden_target["assetDocId"]}]
+      })
+      |> json_response(200)
+
+      conn
+      |> admin()
+      |> patch(~p"/v1/media/#{@ds}/#{hidden_source["id"]}", %{
+        "relatedAssets" => [%{"relation" => "crop", "target" => hub["assetDocId"]}]
+      })
+      |> json_response(200)
+
+      %{hub: hub, hidden_target: hidden_target, hidden_source: hidden_source}
+    end
+
+    test "ANONYMOUS: a private outbound target is not rendered", %{hub: hub, hidden_target: t} do
+      graph =
+        scoped_conn() |> get("/v1/media/#{@ds}/#{hub["id"]}/relations") |> json_response(200)
+
+      # The edge (`assetDocId`) is the public hub's own `relatedAssets` content
+      # and stays; what must not ride it is the hidden asset's RENDER — its
+      # storage path, url and renditions.
+      body = Jason.encode!(graph)
+      refute body =~ t["path"]
+      assert Enum.all?(graph["result"]["outbound"], &is_nil(&1["asset"]))
+    end
+
+    test "ANONYMOUS: a private inbound source is not listed", %{hub: hub, hidden_source: src} do
+      graph =
+        scoped_conn() |> get("/v1/media/#{@ds}/#{hub["id"]}/relations") |> json_response(200)
+
+      assert graph["result"]["inbound"] == []
+      refute Jason.encode!(graph) =~ src["assetDocId"]
+    end
+
+    test "CONTROL: an admin still sees both related assets", %{conn: conn} = ctx do
+      graph =
+        conn
+        |> admin()
+        |> get("/v1/media/#{@ds}/#{ctx.hub["id"]}/relations")
+        |> json_response(200)
+
+      assert [%{"asset" => %{"id" => out_id}}] = graph["result"]["outbound"]
+      assert out_id == ctx.hidden_target["id"]
+      assert [%{"assetDocId" => in_doc}] = graph["result"]["inbound"]
+      assert in_doc == ctx.hidden_source["assetDocId"]
+    end
+  end
+
   describe "the listing doors clamp instead of refusing" do
     setup %{conn: conn} do
       public = asset_with_visibility(conn, "public")
