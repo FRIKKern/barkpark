@@ -425,15 +425,37 @@ defmodule BarkparkWeb.StudioComponents.Editor do
            label any more ("Kort-layout select" read as a label leak); Sanity
            never surfaces a field's type to the author. --%>
       <% label_prefix = "doc-field-" <> Barkpark.Content.DraftId.published_id(to_string(@doc_key)) <> "-" %>
+      <% body_in_blocks? = classic_body_in_blocks?(@field, @parent_assigns) %>
       <.editor_field
         label={@field["title"] || field_name}
-        for={FieldInputs.label_target(@field, @editor_form, label_prefix)}
+        for={if body_in_blocks?, do: nil, else: FieldInputs.label_target(@field, @editor_form, label_prefix)}
         required={required?}
         errors={errors}
         warnings={warnings}
         onix_element={onix_element(@field)}
         description={field_description(@field)}
       >
+        <%= if body_in_blocks? do %>
+          <div class="bp-classic-body-blocks" data-test-id="classic-body-in-blocks" role="note">
+            <% preview = classic_body_preview(@parent_assigns) %>
+            <div
+              :if={preview != ""}
+              class="bp-classic-body-preview"
+              data-test-id="classic-body-preview"
+              style="margin:0 0 8px;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;white-space:pre-wrap;"
+            ><%= preview %></div>
+            <p style="margin:0 0 8px;">
+              <%= gettext("This body is written in blocks, which the Classic form cannot save. Edit it in Beta.") %>
+            </p>
+            <button
+              type="button"
+              class="btn btn-sm"
+              phx-click="editor-set-mode"
+              phx-value-mode="beta"
+              data-test-id="classic-body-edit-in-beta"
+            ><%= gettext("Edit the body in Beta") %></button>
+          </div>
+        <% else %>
         <%= if PluginAdapter.v2?(@field) do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
@@ -450,9 +472,52 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             id_prefix={label_prefix}
           />
         <% end %>
+        <% end %>
       </.editor_field>
     <% end %>
     """
+  end
+
+  # [classic-body-is-blocks] task-310e40394d3b83da. A document that carries a
+  # top-level `content["blocks"]` list (every post Studio creates from a layout
+  # schema, and any document once opened in Beta) keeps its body in FREE
+  # blocks, and `Content.Forms.classic_save_content` re-projects
+  # `content["body"]` from those blocks on every Classic save — on purpose, so
+  # a Classic save never clobbers Beta-authored blocks. A Classic `body` input
+  # on such a document therefore accepted typing and threw it away: the draft
+  # saved with an empty body. Show what is true instead, and a way to edit it.
+  defp classic_body_in_blocks?(%{"name" => "body"}, parent_assigns) when is_map(parent_assigns) do
+    case Map.get(parent_assigns, :editor_doc) do
+      %{content: %{"blocks" => blocks}} when is_list(blocks) -> Enum.all?(blocks, &is_map/1)
+      _ -> false
+    end
+  end
+
+  defp classic_body_in_blocks?(_field, _parent_assigns), do: false
+
+  # A read-only, TEXT-only preview of the projected body (tags stripped, never
+  # injected as HTML), so the author still sees what the blocks say.
+  defp classic_body_preview(parent_assigns) do
+    html =
+      case Map.get(parent_assigns, :editor_doc) do
+        %{content: %{"body" => %{"html" => html}}} when is_binary(html) -> html
+        _ -> ""
+      end
+
+    html
+    |> String.replace(~r/<(br|\/p|\/h[1-6]|\/li|\/div)[^>]*>/i, "\n")
+    |> String.replace(~r/<[^>]*>/, "")
+    |> String.replace(["&lt;", "&gt;", "&quot;", "&#39;", "&nbsp;"], fn
+      "&lt;" -> "<"
+      "&gt;" -> ">"
+      "&quot;" -> "\""
+      "&#39;" -> "'"
+      "&nbsp;" -> " "
+    end)
+    |> String.replace("&amp;", "&")
+    |> String.replace(~r/\n{3,}/, "\n\n")
+    |> String.trim()
+    |> String.slice(0, 600)
   end
 
   # v2 structural field types own their own title via <fieldset><legend>.
