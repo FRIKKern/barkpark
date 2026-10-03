@@ -57,7 +57,9 @@ defmodule Barkpark.Content.Encryption do
   #
   # @canonical capability:field-encryption-chokepoint aka:encrypt-marked,reveal-fields,decrypt-document
   @spec encrypt_marked(map(), String.t(), String.t(), binary() | keyword() | nil) ::
-          {:ok, map()} | {:error, {:encryption_failed, term()}}
+          {:ok, map()}
+          | {:error, {:encryption_failed, term()}}
+          | {:error, {:validation_failed, String.t(), map(), String.t()}}
   def encrypt_marked(content, type, dataset, scope \\ nil)
 
   def encrypt_marked(content, type, dataset, scope)
@@ -161,6 +163,65 @@ defmodule Barkpark.Content.Encryption do
   end
 
   defp encrypt_with_fields(content, fields, scope, ws) do
+    case unsealed_paths(content, fields, scope, ws) do
+      [] -> seal_with_fields(content, fields, scope, ws)
+      paths -> {:error, unsealed_error(paths)}
+    end
+  end
+
+  # Owner ruling #18 (task-f462de9e4c1c4621): the server accepts an envelope in
+  # an `encrypted: true` field only when it decrypts under this document's own
+  # (workspace, dataset) key — i.e. it is one this server sealed. A
+  # caller-built `{"_bpenc": 1, "k": 1, "v": "<plaintext>"}` used to pass
+  # `FieldCipher.encrypt/3` untouched and land as plain text at rest; a real
+  # envelope from another workspace landed undecryptable. Both now refuse the
+  # write with a 422 that names the field. (Copying a real envelope between
+  # documents of the SAME workspace and dataset still decrypts; binding seals
+  # to the document and field is the follow-up the ruling names.)
+  defp unsealed_paths(content, fields, scope, ws) do
+    top =
+      for %Field{name: n} = f <- fields,
+          is_binary(n),
+          is_map(content),
+          Map.has_key?(content, n),
+          transform_value(Map.get(content, n), f, scope, ws, :verify) == :error,
+          do: n
+
+    top ++ unsealed_block_paths(content, fields, scope, ws)
+  end
+
+  defp unsealed_block_paths(%{"blocks" => blocks}, fields, scope, ws) when is_list(blocks) do
+    by_name =
+      for %Field{name: n} = f <- fields, is_binary(n) and n != "", into: %{}, do: {n, f}
+
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {%{"fieldName" => name, "value" => value}, i} when is_binary(name) ->
+        case Map.get(by_name, name) do
+          %Field{} = f ->
+            if transform_value(value, f, scope, ws, :verify) == :error,
+              do: ["blocks[#{i}].value (#{name})"],
+              else: []
+
+          _ ->
+            []
+        end
+
+      _ ->
+        []
+    end)
+  end
+
+  defp unsealed_block_paths(_content, _fields, _scope, _ws), do: []
+
+  defp unsealed_error(paths) do
+    {:validation_failed, "encrypted field",
+     Map.new(paths, &{&1, ["is not a value this server encrypted for this field"]}),
+     "Send the plain value of an encrypted field; the server encrypts it. Keep an encrypted value only by sending back exactly what this document returned for that field, or by leaving the field out of the write."}
+  end
+
+  defp seal_with_fields(content, fields, scope, ws) do
     case transform_map(content, fields, scope, ws, :encrypt) do
       # Encrypt the PROJECTED keys (content[fieldName]) AND the bound block
       # values they are projected from — see encrypt_bound_blocks/4.
@@ -359,5 +420,19 @@ defmodule Barkpark.Content.Encryption do
   end
 
   defp apply_cipher(value, scope, ws, :encrypt), do: {:ok, FieldCipher.encrypt(value, scope, ws)}
+
+  # A plain value is fine (the encrypt pass seals it); an envelope must be one
+  # this server sealed under the same key.
+  defp apply_cipher(value, scope, ws, :verify) do
+    if FieldCipher.encrypted?(value) do
+      case FieldCipher.verify(value, scope, ws) do
+        :ok -> {:ok, value}
+        :error -> :error
+      end
+    else
+      {:ok, value}
+    end
+  end
+
   defp apply_cipher(value, scope, ws, :decrypt), do: FieldCipher.decrypt(value, scope, ws)
 end
