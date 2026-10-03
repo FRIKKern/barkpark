@@ -945,6 +945,11 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 	// schema probe on an empty doc ls/query page or a doc create. stderr only.
 	emitDocUnknownType(out, g, ctx, m, cmd, tail, status, respBody)
 
+	// Every new document starts as a draft, and doc ls reads published: an
+	// empty page of a type whose documents are all drafts says so
+	// (doc_ls_drafts_only.go). stderr only; exit code unchanged.
+	emitDocLsDraftsOnly(out, g, ctx, m, cmd, tail, status, respBody)
+
 	// A Sanity-shaped `array` / `object` field applies cleanly and is then
 	// read-only in Studio (schema_readonly_field_note.go). stderr only.
 	emitSchemaReadonlyFieldNote(out, cmd, status, respBody)
