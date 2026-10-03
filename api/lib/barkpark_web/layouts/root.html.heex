@@ -6692,6 +6692,18 @@
       }
     });
     liveSocket.connect();
+
+    // Flush a pending debounced edit before the page goes away
+    // (task-63aed3de024fc151). Classic inputs post `phx-change` behind a
+    // 300–500 ms `phx-debounce`, which LiveView flushes on blur. A click
+    // inside the page blurs first, but a reload, Back, a typed URL or a
+    // closed tab never does, so the last half-second of typing was dropped.
+    // Blurring the focused form control on beforeunload hands that pending
+    // change to the still-open socket.
+    window.addEventListener("beforeunload", () => {
+      const el = document.activeElement;
+      if (el && el.form && el.form.hasAttribute("phx-change") && el.blur) el.blur();
+    });
   </script>
 </body>
 </html>
