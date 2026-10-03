@@ -9,7 +9,7 @@ All four types appear only in plugin-authored schemas. The eight legacy seed sch
 
 ### `composite` — nested object with named subfields
 
-Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.Validation`) walks composites with paths shaped `/<parent>/<child>` and folds path information into the v1-shaped error envelope so existing clients keep working.
+Composites nest to any depth. `Barkpark.Content.Validation` walks them with paths `/<parent>/<child>`, folded into the v1-shaped error envelope.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
