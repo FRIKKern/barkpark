@@ -119,5 +119,10 @@ export async function getDocBySlug<T>(type: string, slug: string): Promise<T | n
     )
     if (hit) return hit
   }
-  return null
+  // A document with NO slug is linked by its _id (every list page renders
+  // `slugOf(doc.slug) ?? doc._id`), so resolve that key by id. A slugged
+  // document is NOT resolved this way: it keeps exactly one URL, and an id can
+  // never shadow another document's slug (task-4446ac10d3e23182).
+  const byId = await getDoc<T>(type, slug)
+  return byId && slugOf((byId as { slug?: SlugValue }).slug) === undefined ? byId : null
 }
