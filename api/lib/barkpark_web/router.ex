@@ -1180,6 +1180,17 @@ defmodule BarkparkWeb.Router do
   # pipeline's own documented contract -- read its comments. Sweeps: move
   # this comment only whole, on its own lines. MARK:zone-router-pipelines
 
+  # The grant fold WITHOUT `:api_grant_read`'s PublicRead clamp, for the flat
+  # federated search route (task-e6939d27b7e0b3aa). `ResolveTokenOwner` maps an
+  # owned token to its user and `AssignGrantScope` flags `:grant_scoped_read`
+  # for a non-member grantee, so `ScopeHelpers.scope_opts/1` narrows the search
+  # to the grant. Members and unowned/service tokens are unchanged (both plugs
+  # no-op). Read routes only: never on a write.
+  pipeline :grant_fold do
+    plug(BarkparkWeb.Plugs.ResolveTokenOwner)
+    plug(BarkparkWeb.Plugs.AssignGrantScope)
+  end
+
   # The per-workspace quota gate for the FLAT document write doors
   # (/v1/data/mutate, /v1/data/doc/.../ops), the twin of the plug inside
   # `:scoped_mutate`. Without it a workspace-bound token kept writing after its
@@ -2281,7 +2292,7 @@ defmodule BarkparkWeb.Router do
   # `test/barkpark_web/contract/federated_search_decayed_bearer_tenant_swap_test.exs`
   # is the regression.
   scope "/v1", BarkparkWeb do
-    pipe_through([:api, :api_strict_bearer])
+    pipe_through([:api, :api_strict_bearer, :grant_fold])
 
     get("/search/:dataset", FederatedSearchController, :search)
   end
