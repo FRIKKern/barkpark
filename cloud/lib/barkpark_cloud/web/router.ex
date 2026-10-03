@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/fleet   operator  fleet snapshot for the session-gated operator console
       GET     /v1/operator/autoupdate operator  fleet-autoupdate policy snapshot (console read)
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
+      POST    /v1/operator/barkparks/:id/enable-apply operator  re-run the enable-apply job on one ARMED box (re-arms + restores box-side go.mod/go.sum churn; consent-gated on autoupdate_enabled)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
@@ -5266,6 +5267,53 @@ defmodule BarkparkCloud.Web.Router do
     else
       {:ok, _} = Registry.set_autoupdate_halted(true)
       json(conn, 200, rollout_state_json(true))
+    end
+  end
+
+  # POST /v1/operator/barkparks/:id/enable-apply → 202 {job_id} — re-run the
+  # enable-apply SSH job on ONE box (task-90f256a8c5e27cd2). The job is how the
+  # control plane reaches a box with the LATEST worker code: besides arming
+  # BARKPARK_SELF_UPDATE_APPLY it restores the box-side go.mod/go.sum churn an
+  # older deploy-rebuild's `go mod tidy` left, which jammed every self-update
+  # on the fleet. The automatic paths only enqueue it for an UNARMED box, and
+  # those boxes are armed — hence this operator door. Same consent gate as the
+  # automatic path (`maybe_enqueue_enable_apply_job/1`): autoupdate enabled, not
+  # suspended, has a host. A job already in flight answers 200 already_arming.
+  post "/v1/operator/barkparks/:id/enable-apply" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      true ->
+        case Registry.get_barkpark(id) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Barkpark{suspended: true} ->
+            json(conn, 409, %{error: "suspended"})
+
+          %Barkpark{} = bp ->
+            case Registry.maybe_enqueue_enable_apply_job(bp) do
+              {:ok, :already_arming} ->
+                json(conn, 200, %{status: "already_arming"})
+
+              {:ok, :skipped} ->
+                json(conn, 409, %{
+                  error: "not_live",
+                  detail:
+                    "enable-apply needs a box with a host and autoupdate enabled (the team's " <>
+                      "consent); this one has neither or one of them off"
+                })
+
+              {:ok, job} ->
+                json(conn, 202, %{status: "queued", job_id: job.id})
+
+              {:error, cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+        end
     end
   end
 
