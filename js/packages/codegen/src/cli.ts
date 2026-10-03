@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 
-import { readFile, writeFile } from 'node:fs/promises'
+import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { pathToFileURL } from 'node:url'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
 import { cac } from 'cac'
 import { assertScopedPair, buildSchemaPath } from './schema-url'
 import { fetchSchema } from './fetch-schema'
@@ -193,8 +193,18 @@ async function runFromFile(options: GenerateCliOptions): Promise<string> {
 
   const out = resolve(process.cwd(), output)
   const code = await generateTypes(parsed.data, { dataset, outputPath: out })
-  await writeFile(out, code, 'utf8')
+  await writeOutput(out, code)
   return out
+}
+
+/**
+ * Write the generated file, creating its parent directory first. A first run
+ * into `src/generated/barkpark.types.ts` used to fail with a bare ENOENT after
+ * the fetch and the generation had both succeeded (task-739cdc9e3937f883).
+ */
+async function writeOutput(out: string, code: string): Promise<void> {
+  await mkdir(dirname(out), { recursive: true })
+  await writeFile(out, code, 'utf8')
 }
 
 /** Fetch → generate → write once. Returns the absolute output path. */
@@ -211,7 +221,7 @@ async function runOnce(config: BarkparkCodegenConfig): Promise<string> {
   const envelope = await fetchSchema(fetchArgs)
   const out = resolve(process.cwd(), config.output)
   const code = await generateTypes(envelope, { dataset: config.dataset, outputPath: out })
-  await writeFile(out, code, 'utf8')
+  await writeOutput(out, code)
   return out
 }
 

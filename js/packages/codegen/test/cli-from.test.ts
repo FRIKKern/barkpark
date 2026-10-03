@@ -47,6 +47,28 @@ describe('generate --from <file> (network-free)', () => {
     expect(read(out, 'utf8')).toBe(expected)
   })
 
+  // task-739cdc9e3937f883: an --output whose parent directory does not exist
+  // yet failed with a bare ENOENT after a successful generate.
+  it('creates a missing output parent directory', async () => {
+    const out = join(
+      mkdtempSync(join(tmpdir(), 'bp-codegen-')),
+      'src',
+      'generated',
+      'barkpark.types.ts',
+    )
+    await exec('node', [
+      cliPath,
+      'generate',
+      '--from',
+      fixturePath,
+      '--dataset',
+      'production',
+      '--output',
+      out,
+    ])
+    expect(read(out, 'utf8')).toBe(expected)
+  })
+
   it('reads output + dataset from --config when the flags are omitted', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'bp-codegen-'))
     const out = join(dir, 'barkpark.types.ts')
