@@ -528,7 +528,13 @@ defmodule BarkparkWeb.FinderLive do
     # `corpus_edges/3` all read through the unchanged `:resolve` default and
     # must keep resolving — a default flip would silently EMPTY the dangling
     # report, which filters on `& &1.dangling` where `nil` is falsy.
-    edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+    # `:visible_to` — no edge over a reference field this caller may not read
+    # (task-855e091e60d5c008); the anonymous /finder is the public face of this graph.
+    edge_opts =
+      opts
+      |> Keyword.put(:schemas, schemas)
+      |> Keyword.put(:dangling, :skip)
+      |> Keyword.put(:visible_to, caller_context)
 
     raw_edges =
       doc_lists

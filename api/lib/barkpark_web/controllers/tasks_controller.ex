@@ -2887,7 +2887,13 @@ defmodule BarkparkWeb.TasksController do
         # prefetch: `extract_edges/2` used to re-read this same invariant list
         # once PER DOCUMENT — 4096 identical queries on the live corpus, the
         # dominant cost behind a measured 34s first paint.
-        edge_opts = opts |> Keyword.put(:schemas, schemas) |> Keyword.put(:dangling, :skip)
+        # `:visible_to` — no edge over a reference field this caller may not
+        # read (task-855e091e60d5c008).
+        edge_opts =
+          opts
+          |> Keyword.put(:schemas, schemas)
+          |> Keyword.put(:dangling, :skip)
+          |> Keyword.put(:visible_to, Barkpark.Content.CallerContext.from_conn(conn))
 
         page_size = graph_corpus_page_size()
 
