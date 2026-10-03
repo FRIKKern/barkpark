@@ -2332,6 +2332,14 @@ func assembleBody(cmd manifest.Command, flags map[string][]string, args map[stri
 		// named it (BP-ONB-17). Parsing here routes the arg through the
 		// body-arg seeding loop below, where the user-given value lands.
 		if cmd.MutationOp == "" && !commandHasSetBodyFlags(cmd, flags) && !commandHasSuppliedBodyArgs(cmd, args) {
+			// Verbatim, but still JSON: it ships as application/json, so a file
+			// that does not parse is refused HERE, naming the file and the parse
+			// error. Shipping it earned only the server's "invalid request body …
+			// check Content-Type", which names neither (task-224f60146d9ff2a7).
+			var probe any
+			if err := json.Unmarshal(raw, &probe); err != nil {
+				return nil, nil, "", fmt.Errorf("read --file %q: --file body is not valid JSON: %w", path, err)
+			}
 			return raw, nil, "application/json", nil
 		}
 		bodyKind := "mutation body"
