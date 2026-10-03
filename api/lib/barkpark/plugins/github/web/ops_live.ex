@@ -33,7 +33,15 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   @conflict_kinds ~w(out_of_band_edit detached dedup_refused)
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    # Owner ruling #4: operator-gated flat mount, workspace-clamped scoped mount.
+    case BarkparkWeb.OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_console(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_console(socket) do
     connected = connected?(socket)
 
     if connected, do: Process.send_after(self(), :refresh, @refresh_ms)
@@ -48,7 +56,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
     # Guard it behind `connected?/1` (the board_live.ex/#2402 precedent): paint a
     # DB-free loading skeleton on the dead render (`blank_health/0`), and read the
     # real snapshot ONCE, on connect. The 5s `:refresh` poll is untouched.
-    health = if connected, do: Health.snapshot(), else: blank_health()
+    health = if connected, do: snapshot(socket), else: blank_health()
 
     {:ok,
      socket
@@ -60,7 +68,17 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   @impl true
   def handle_info(:refresh, socket) do
     Process.send_after(self(), :refresh, @refresh_ms)
-    {:noreply, assign(socket, :health, Health.snapshot())}
+    {:noreply, assign(socket, :health, snapshot(socket))}
+  end
+
+  # Owner ruling #4: on a SCOPED mount every read is fenced to the mounted
+  # workspace (the same `workspace_ids:` fence the HTTP twin passes); the flat
+  # mount is the operator's instance-wide view.
+  defp snapshot(socket) do
+    case BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket) do
+      nil -> Health.snapshot()
+      ws_id -> Health.snapshot(workspace_ids: [ws_id])
+    end
   end
 
   # The ONLY control on the page: clear one open quarantine row, then re-read so
@@ -72,11 +90,26 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
   @impl true
   def handle_event("resolve", %{"id" => id}, socket) do
     case parse_id(id) do
-      {:ok, n} -> _ = Conflicts.resolve(n)
+      {:ok, n} -> _ = resolve_in_scope(n, socket)
       :error -> :noop
     end
 
-    {:noreply, assign(socket, :health, Health.snapshot())}
+    {:noreply, assign(socket, :health, snapshot(socket))}
+  end
+
+  # A scoped mount resolves only its own workspace's conflict; another
+  # workspace's id is the same silent no-op as a missing one.
+  defp resolve_in_scope(id, socket) do
+    case BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket) do
+      nil ->
+        Conflicts.resolve(id)
+
+      ws_id ->
+        case Barkpark.Repo.get(Barkpark.Plugins.Github.Conflict, id) do
+          %{workspace_id: ^ws_id} -> Conflicts.resolve(id)
+          _ -> {:error, :not_found}
+        end
+    end
   end
 
   # Dead-render skeleton: the disconnected mount no longer runs

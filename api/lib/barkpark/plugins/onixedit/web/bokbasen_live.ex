@@ -58,7 +58,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   @page_limit 200
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    # Owner ruling #4: operator-gated flat mount, workspace-clamped scoped mount.
+    case BarkparkWeb.OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_console(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_console(socket) do
     # d07 F2 mount gate: mount/3 runs TWICE — once for the discarded
     # disconnected HTTP render, once for the live WebSocket mount. Running
     # `load_submissions/1` unconditionally doubled the DB projection per console
@@ -67,7 +75,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     # subscribe to the loaded rows there; the dead render carries an empty page.
     {submissions, has_next?, subscribed} =
       if connected?(socket) do
-        {subs, has_next?} = load_submissions(0)
+        {subs, has_next?} = load_submissions(0, scope(socket))
         subscribed = resubscribe(MapSet.new(), subs)
         {subs, has_next?, subscribed}
       else
@@ -376,10 +384,15 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
   # pages. `has_next_page?` is derived from the RAW row count (before the nil-state
   # reject) so a page whose last rows lack an export status still advertises the
   # next page correctly — never an unbounded `Repo.all`.
-  defp load_submissions(page) when is_integer(page) and page >= 0 do
+  #
+  # Owner ruling #4: `ws_id` is the mounted workspace on a SCOPED mount (the
+  # listing — and so every retry, which reads its row from this listing — is
+  # clamped to it); nil on the operator's flat mount.
+  defp load_submissions(page, ws_id) when is_integer(page) and page >= 0 do
     docs =
       Document
       |> where([d], d.type == ^@type_default and d.dataset == ^@dataset_default)
+      |> clamp_workspace(ws_id)
       |> order_by([d], desc: d.updated_at)
       |> limit(^@page_limit)
       |> offset(^(page * @page_limit))
@@ -393,13 +406,18 @@ defmodule Barkpark.Plugins.OnixEdit.Web.BokbasenLive do
     {rows, length(docs) == @page_limit}
   end
 
+  defp clamp_workspace(query, nil), do: query
+  defp clamp_workspace(query, ws_id), do: where(query, [d], d.workspace_id == ^ws_id)
+
+  defp scope(socket), do: BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket)
+
   # Move to `new_page`: re-project at the new OFFSET, hand the subscription
   # ledger to `resubscribe/2` (which unsubscribes the outgoing page's doc topics
   # and subscribes the incoming page's — no per-socket leak), and reset the
   # per-row expanded-error UI state, which is keyed on doc_ids that no longer
   # exist on the new page.
   defp change_page(socket, new_page) do
-    {rows, has_next?} = load_submissions(new_page)
+    {rows, has_next?} = load_submissions(new_page, scope(socket))
     subscribed = resubscribe(socket.assigns.subscribed, rows)
 
     assign(socket,
