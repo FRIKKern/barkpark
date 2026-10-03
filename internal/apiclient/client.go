@@ -590,7 +590,7 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 	if !ok {
 		return "", fmt.Errorf("duplicate: source document %s not found", id)
 	}
-	if blocks := bytes.TrimSpace(doc.Blocks); len(blocks) > 0 && string(blocks) != "null" {
+	if hasPersistedBlocks(doc.Blocks) {
 		return "", fmt.Errorf("papers cannot be duplicated here — use Studio")
 	}
 
@@ -617,6 +617,33 @@ func (c *Client) Duplicate(typeName, id string) (string, error) {
 		return "", fmt.Errorf("duplicate: server returned no document id")
 	}
 	return results[0].ID, nil
+}
+
+// hasPersistedBlocks reports whether a document's top-level `blocks` holds a
+// STORED block tree, the one thing the generic mutate path cannot carry. The
+// doc-show endpoint also SYNTHESIZES an in-memory list for any document whose
+// schema has a body region (Barkpark.PortableDoc.Synthesis, ids
+// `synth-<prefix>-<name>-<idx>`, nothing persisted); that list is a view of the
+// content fields Duplicate copies, so it does not count. Treating it as stored
+// refused every post as a paper (task-df4d07f6c88de78a). Fails closed: a list
+// that does not parse, or any block without a synth- id, counts as stored.
+func hasPersistedBlocks(raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	if len(trimmed) == 0 || string(trimmed) == "null" {
+		return false
+	}
+	var blocks []struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(trimmed, &blocks); err != nil {
+		return true
+	}
+	for _, b := range blocks {
+		if !strings.HasPrefix(b.ID, "synth-") {
+			return true
+		}
+	}
+	return false
 }
 
 // Query fetches documents from the API by type, with optional filter.
