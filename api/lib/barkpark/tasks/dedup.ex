@@ -404,11 +404,10 @@ defmodule Barkpark.Tasks.Dedup do
 
         base <>
           " · NOTE: #{length(drafts)} of these match(es) exist only as an UNPUBLISHED DRAFT " <>
-          "(#{named}) — `bp task get` will 404 on those ids and they are not on the ready " <>
-          "queue, so there is nothing there to claim or extend. A create that failed AFTER " <>
-          "writing its draft is the usual cause, and the retry then matches its own debris. " <>
-          "Inspect with `bp doc ls task --perspective drafts`, then publish the draft " <>
-          "(`bp doc publish task <id>`) or discard it and retry."
+          "(#{named}) — no board shows a row until it is published. A create that failed " <>
+          "AFTER writing its draft is the usual cause, and the retry then matches its own " <>
+          "debris. Inspect it with `bp task get <id>` (the task read door resolves the draft), " <>
+          "then publish the draft (`bp doc publish task <id>`) or discard it and retry."
     end
   end
 
