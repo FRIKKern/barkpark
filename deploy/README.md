@@ -595,6 +595,22 @@ deploys fully automatic.
    (The CLAUDE.md prod box `89.167.28.206` is a candidate once the deploy key is
    added to its `authorized_keys`.)
 
+## Attaching a running box to Cloud (`bp barkparks adopt`)
+
+    bp barkparks adopt --url https://<box> --host <public-ip> --name <n> --token-file <path>
+
+`POST /v1/barkparks/adopt` (team admin; a PAT needs `root`) —
+`cloud/lib/barkpark_cloud/registry/adoption.ex`. Cloud proves control before it
+writes anything: the url must be https, pass `SafeUrl`, and resolve to `--host`;
+your token must read `auth_tier: admin` there. It then mints its OWN admin token
+on the box (`/v1/tokens/elevated`, label `barkpark cloud admin`, so
+`bp token rotate` refuses it), stores that one, never yours, and runs the hourly
+self-update measurement, which queues `enable_apply` on an unarmed box. A box
+without `/v1/tokens/current` + `/v1/tokens/elevated` (before #21467/#21468) is
+refused 409 `box_too_old`: update it first. Two gaps remain: no job installs
+`barkpark-agent` on a box Cloud did not provision (health stays `unknown`), and
+`enable_apply` needs the provisioner worker's SSH key on the box.
+
 ## Staging channel — prove a Barkpark build before the fleet gets it
 
 `staging.barkpark.cloud` is one disposable box that runs Barkpark **itself**, so a
@@ -965,7 +981,7 @@ that stops the run today.
    control plane refuses to leak existence across a team boundary. The default
    dev session's team (`azh-w6-smoke-*`) owns **zero** barkparks; guerrilla's row
    belongs to team `guerrilla`. Use a session in the owning team, or adopt the
-   box via the worker-token-gated `POST /v1/internal/barkparks`. **Adoption is a
+   box (`bp barkparks adopt`, below). **Adoption is a
    human gate** — it re-parents a live production box, so it is not something a
    build script should do on its own.
 

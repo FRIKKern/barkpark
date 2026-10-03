@@ -768,6 +768,60 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "remove-support control ships and this needs a reader ruling."
     },
 
+    # ------------------------------------------------------------------ adopt arm
+    # task-5283ad9f9238f7fe: POST /v1/barkparks/adopt is driven by
+    # `bp barkparks adopt` only. The console has no attach-existing-box control,
+    # so every code here is CLI-only and the CLI prints the server's `detail`.
+    %{
+      code: "box_too_old",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the box lacks /v1/tokens/current or /v1/tokens/elevated; the detail says update the box first. " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "box_unreachable",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: Cloud could not reach the box at the url (TLS, DNS or connection). " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "host_mismatch",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the url's SafeUrl-approved address is not the host the caller gave. " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "mint_refused",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the box refused the elevated mint of Cloud's own credential. " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "minted_token_not_admin",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the credential the box minted for Cloud did not read as admin and was revoked. " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "not_box_admin",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the caller's token is not admin on the box, so control is not proven. " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+    %{
+      code: "unsafe_url",
+      site: "router.ex POST /v1/barkparks/adopt (adopt_refusal/2)",
+      reason:
+        "CLI-only: the url failed SafeUrl.pin/1 (internal address, unresolvable, or malformed). " <>
+          "Flip: the console gains an attach-existing-box control and needs a reader ruling."
+    },
+
     # ------------------------------------------------------------------ worker-agent mass
     # Machine tiers: require_worker matches the shared WORKER_TOKEN, require_agent
     # an agent credential, the builder token its own secret, and the webhook

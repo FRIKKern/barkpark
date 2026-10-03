@@ -90,7 +90,9 @@ defmodule BarkparkCloud.Web.RouterAuditDiscardCensusTest do
   # the other fifteen, so both assertions below still hold at the new number.
   # task-4187bcf6d0424cfc raised it 16 -> 17: `cancel_deployment/2`'s
   # `deployment.cancelled` row, case-gated like the rest.
-  @router_call_sites 17
+  # task-5283ad9f9238f7fe raised it 17 -> 18: `POST /v1/barkparks/adopt`'s
+  # `barkpark.adopted` row, case-gated like the rest.
+  @router_call_sites 18
 
   defp lib_files, do: Path.wildcard(Path.join(@lib_root, "**/*.ex"))
 

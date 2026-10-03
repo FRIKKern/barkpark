@@ -72,6 +72,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
+      POST    /v1/barkparks/adopt admin    attach an already-running box: proof of admin control, Cloud mints + stores its own `barkpark cloud admin` token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
@@ -316,6 +317,7 @@ defmodule BarkparkCloud.Web.Router do
 
   alias BarkparkCloud.Accounts.{Authz, Erasure, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
+  alias BarkparkCloud.Registry.Adoption
   alias BarkparkCloud.Registry.AgentKeyStash
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
@@ -3844,6 +3846,163 @@ defmodule BarkparkCloud.Web.Router do
         end
     end
   end
+
+  # POST /v1/barkparks/adopt {name, slug, url, host, admin_token} → 201
+  # {barkpark, adopted: {workspace, credential_id, credential_label, armed}} —
+  # attach an ALREADY-RUNNING box to the caller's team (`bp barkparks adopt`).
+  # The team-facing twin of the worker-only `POST /v1/internal/barkparks`; the
+  # whole flow (url→host binding behind SafeUrl, proof of admin control with the
+  # caller's token, Cloud minting and storing its OWN `barkpark cloud admin`
+  # credential, the self-update arm) lives in `Registry.Adoption`.
+  #
+  # GATED like `/credentials` above, because it writes the strongest credential
+  # Cloud holds: team admin (owner/admin) on either credential kind, and a PAT
+  # must also hold `root`. The caller's admin_token is never stored or echoed.
+  #
+  # Refusals: 422 invalid (body), 409 already_attached (any team holds this url
+  # or host), 403 limit_reached, 422 unsafe_url / host_mismatch, 502
+  # box_unreachable, 403 not_box_admin (the token is not admin on that box),
+  # 409 box_too_old (no /v1/tokens/current or /v1/tokens/elevated — update the
+  # box first), 502 mint_refused, 502 minted_token_not_admin. Nothing is stored
+  # on any refusal.
+  post "/v1/barkparks/adopt" do
+    conn = Auth.require_user_or_pat(conn, [])
+
+    conn =
+      cond do
+        conn.halted ->
+          conn
+
+        is_nil(conn.assigns[:current_team]) ->
+          Auth.forbidden(conn, reason: "no_team", scope: "team")
+
+        not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          Auth.forbidden(conn, required: "admin", scope: "team")
+
+        conn.assigns[:current_token] ->
+          Auth.require_ability(conn, "root")
+
+        true ->
+          conn
+      end
+
+    if conn.halted do
+      conn
+    else
+      team = conn.assigns.current_team
+
+      case Adoption.adopt(team, conn.body_params) do
+        {:ok, bp, report} ->
+          case Accounts.record_audit(%{
+                 team_id: team.id,
+                 actor_user_id: conn.assigns.current_user.id,
+                 action: "barkpark.adopted",
+                 target_type: "barkpark",
+                 target_id: bp.id,
+                 metadata: %{
+                   name: bp.name,
+                   url: bp.url,
+                   host: bp.host,
+                   box_workspace: report.workspace,
+                   credential_id: report.credential_id
+                 }
+               }) do
+            {:ok, _} ->
+              :ok
+
+            {:error, reason} ->
+              Logger.warning("adopt: audit row for #{bp.id} failed: #{inspect(reason)}")
+          end
+
+          push_event(team.id, "fleet")
+          push_event(team.id, "audit")
+          json(conn, 201, %{ok: true, barkpark: barkpark_json(bp), adopted: report})
+
+        {:error, refusal} ->
+          adopt_refusal(conn, refusal)
+      end
+    end
+  end
+
+  defp adopt_refusal(conn, {:invalid, %Ecto.Changeset{} = cs}),
+    do: json(conn, 422, %{error: "invalid", details: errors(cs)})
+
+  defp adopt_refusal(conn, {:invalid_field, field, message}),
+    do: json(conn, 422, %{error: "invalid", field: to_string(field), detail: message})
+
+  defp adopt_refusal(conn, :already_attached),
+    do:
+      json(conn, 409, %{
+        error: "already_attached",
+        detail: "A Barkpark with this url or host is already attached to Barkpark Cloud."
+      })
+
+  defp adopt_refusal(conn, :limit_reached), do: json(conn, 403, %{error: "limit_reached"})
+
+  defp adopt_refusal(conn, {:unsafe_url, reason}),
+    do:
+      json(conn, 422, %{
+        error: "unsafe_url",
+        reason: to_string(reason),
+        detail: "The url must be a public https:// address Cloud can resolve."
+      })
+
+  defp adopt_refusal(conn, {:host_mismatch, resolved}),
+    do:
+      json(conn, 422, %{
+        error: "host_mismatch",
+        resolved: resolved,
+        detail: "The url does not resolve to the host you gave. Pass the box's public IP as host."
+      })
+
+  defp adopt_refusal(conn, :unreachable),
+    do:
+      json(conn, 502, %{
+        error: "box_unreachable",
+        detail:
+          "Cloud could not reach the box at that url (TLS, DNS or connection). Nothing was stored."
+      })
+
+  defp adopt_refusal(conn, {:not_admin, tier, status}),
+    do:
+      json(conn, 403, %{
+        error: "not_box_admin",
+        auth_tier: tier,
+        box_status: status,
+        detail:
+          "The token you gave is not an admin token on that box, so it cannot prove control."
+      })
+
+  defp adopt_refusal(conn, {:box_too_old, route}),
+    do:
+      json(conn, 409, %{
+        error: "box_too_old",
+        missing: route,
+        detail:
+          "The box has no #{route}. Update the box to current main first, then adopt it. " <>
+            "Cloud does not store your own token in its place."
+      })
+
+  defp adopt_refusal(conn, {:mint_refused, status, reason}),
+    do:
+      json(conn, 502, %{
+        error: "mint_refused",
+        box_status: status,
+        reason: reason,
+        detail: "The box refused to mint Cloud's admin credential. Nothing was stored."
+      })
+
+  defp adopt_refusal(conn, :minted_token_not_admin),
+    do:
+      json(conn, 502, %{
+        error: "minted_token_not_admin",
+        detail: "The credential the box minted for Cloud did not read as admin; it was revoked."
+      })
+
+  defp adopt_refusal(conn, {:row, :limit_reached}), do: json(conn, 403, %{error: "limit_reached"})
+
+  defp adopt_refusal(conn, {:row, %Ecto.Changeset{} = cs}),
+    do: json(conn, 422, %{error: "invalid", details: errors(cs)})
 
   # POST /v1/barkparks/:id/studio-link → 200 {url} — one-click Studio entry
   # (dwb-7). The control plane uses the STORED per-instance admin token
