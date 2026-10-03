@@ -94,7 +94,11 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
   # Register a passkey via the real endpoints; returns the credential handle.
   defp register!(token) do
-    ch = authed(token) |> post("/v1/auth/webauthn/register/challenge", "{}") |> json_response(200)
+    ch =
+      authed(token)
+      |> post("/v1/auth/webauthn/register/challenge", Jason.encode!(%{password: @password}))
+      |> json_response(200)
+
     cred = make_credential(ch["challenge"])
 
     authed(token)
@@ -280,7 +284,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     # delete removes it — DIRECT Repo readback, not the list endpoint: a bug
     # present in both delete and list would sail through an HTTP-list check
     # (pds-bl-w36-groupc-remainder criterion 1).
-    assert authed(token) |> delete("/v1/auth/webauthn/credentials/#{id}") |> json_response(200)
+    assert authed(token)
+           |> delete("/v1/auth/webauthn/credentials/#{id}", Jason.encode!(%{password: @password}))
+           |> json_response(200)
+
     assert Repo.get(Barkpark.Accounts.WebauthnCredential, id) == nil
   end
 
@@ -319,7 +326,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     user: user
   } do
     assert authed(token)
-           |> delete("/v1/auth/webauthn/credentials/not-a-uuid")
+           |> delete(
+             "/v1/auth/webauthn/credentials/not-a-uuid",
+             Jason.encode!(%{password: @password})
+           )
            |> json_response(404)
 
     # context guard short-circuits before any Postgres cast
@@ -341,7 +351,9 @@ defmodule BarkparkWeb.WebauthnControllerTest do
       user: user
     } do
       ch =
-        authed(token) |> post("/v1/auth/webauthn/register/challenge", "{}") |> json_response(200)
+        authed(token)
+        |> post("/v1/auth/webauthn/register/challenge", Jason.encode!(%{password: @password}))
+        |> json_response(200)
 
       cred = make_credential(ch["challenge"])
 
@@ -441,7 +453,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
         |> Map.fetch!("token")
 
       assert authed(other_token)
-             |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+             |> delete(
+               "/v1/auth/webauthn/credentials/#{cred_id}",
+               Jason.encode!(%{password: @password})
+             )
              |> json_response(404)
 
       # The row SURVIVED the cross-user attempt — direct read, not a list.
@@ -449,7 +464,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
       # The owner's delete removes it — the receipt's claim is the ABSENCE.
       assert authed(token)
-             |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+             |> delete(
+               "/v1/auth/webauthn/credentials/#{cred_id}",
+               Jason.encode!(%{password: @password})
+             )
              |> json_response(200)
 
       assert Repo.get(WebauthnCredential, cred_id) == nil
@@ -478,7 +496,10 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
       body =
         authed(token)
-        |> delete("/v1/auth/webauthn/credentials/#{cred_id}")
+        |> delete(
+          "/v1/auth/webauthn/credentials/#{cred_id}",
+          Jason.encode!(%{password: @password})
+        )
         |> json_response(200)
 
       # The proof fields. Revert the receipt to `%{ok: true}` and both are nil.
@@ -497,6 +518,79 @@ defmodule BarkparkWeb.WebauthnControllerTest do
 
       # …and the claim the receipt makes is true: the row is gone.
       assert Repo.get(WebauthnCredential, cred_id) == nil
+    end
+  end
+
+  # task-3d64b961fca33036: a session alone (stolen cookie or bearer) could add a
+  # passkey (a standing login that skips password and TOTP and survives a
+  # reset) or strip the owner's passkeys. Both now demand the password.
+  describe "passkey changes need the current password" do
+    test "a registration challenge without the password is refused", %{token: token} do
+      body =
+        authed(token)
+        |> post("/v1/auth/webauthn/register/challenge", "{}")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "reauth_required"
+    end
+
+    test "a challenge minted by ANOTHER account cannot register into this session", %{
+      token: token,
+      user: user
+    } do
+      scoped_conn()
+      |> json_conn()
+      |> post(
+        "/v1/auth/register",
+        Jason.encode!(%{email: "pk-other@example.com", password: @password})
+      )
+
+      other_token =
+        scoped_conn()
+        |> json_conn()
+        |> post(
+          "/v1/auth/login",
+          Jason.encode!(%{email: "pk-other@example.com", password: @password})
+        )
+        |> json_response(201)
+        |> Map.fetch!("token")
+
+      ch =
+        authed(other_token)
+        |> post("/v1/auth/webauthn/register/challenge", Jason.encode!(%{password: @password}))
+        |> json_response(200)
+
+      cred = make_credential(ch["challenge"])
+
+      resp =
+        authed(token)
+        |> post(
+          "/v1/auth/webauthn/register",
+          Jason.encode!(Map.put(cred.body, :challenge_token, ch["challenge_token"]))
+        )
+
+      refute resp.status == 201
+      assert Barkpark.Accounts.Webauthn.list_credentials(user) == []
+    end
+
+    test "deleting a passkey without the password is refused and the row survives", %{
+      token: token
+    } do
+      register!(token)
+
+      [%{"id" => id}] =
+        authed(token)
+        |> get("/v1/auth/webauthn/credentials")
+        |> json_response(200)
+        |> Map.fetch!("credentials")
+
+      body =
+        authed(token)
+        |> delete("/v1/auth/webauthn/credentials/#{id}")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "reauth_required"
+      assert Repo.get(Barkpark.Accounts.WebauthnCredential, id)
     end
   end
 end

@@ -26,16 +26,27 @@ defmodule BarkparkWeb.WebauthnController do
 
   # ── Registration (session-gated: enrol a passkey for the logged-in user) ─────
 
-  def register_challenge(conn, _params) do
+  # A passkey is a standing login that skips both the password and TOTP and
+  # survives a password reset, so adding one demands the current password,
+  # exactly as TOTP enrolment does (task-3d64b961fca33036). A session alone (a
+  # stolen cookie or bearer) could otherwise plant persistent access. The
+  # challenge token is bound to the user, so a challenge minted by another
+  # account (with its own password) cannot be replayed into this session.
+  def register_challenge(conn, params) do
     user = conn.assigns.current_user
-    challenge = Webauthn.registration_challenge()
 
-    json(conn, %{
-      challenge: b64(challenge.bytes),
-      challenge_token: sign(@reg_salt, challenge.bytes),
-      rp_id: Webauthn.rp_id(),
-      user: %{id: b64(user.id), name: user.email, display_name: user.email}
-    })
+    if reauthed?(user, params["password"]) do
+      challenge = Webauthn.registration_challenge()
+
+      json(conn, %{
+        challenge: b64(challenge.bytes),
+        challenge_token: sign(@reg_salt, {user.id, challenge.bytes}),
+        rp_id: Webauthn.rp_id(),
+        user: %{id: b64(user.id), name: user.email, display_name: user.email}
+      })
+    else
+      error(conn, 403, "reauth_required", "the current password is required")
+    end
   end
 
   def register(conn, %{
@@ -45,7 +56,9 @@ defmodule BarkparkWeb.WebauthnController do
       }) do
     user = conn.assigns.current_user
 
-    with {:ok, bytes} <- verify_token(@reg_salt, token),
+    user_id = user.id
+
+    with {:ok, {^user_id, bytes}} <- verify_token(@reg_salt, token),
          {:ok, att} <- decode64(att_b64),
          {:ok, cdj} <- decode64(cdj_b64),
          {:ok, cred} <-
@@ -216,8 +229,8 @@ defmodule BarkparkWeb.WebauthnController do
     json(conn, %{credentials: creds})
   end
 
-  def delete(conn, %{"id" => id}) do
-    case Webauthn.delete_credential(conn.assigns.current_user, id) do
+  def delete(conn, %{"id" => id} = params) do
+    case delete_reauthed(conn.assigns.current_user, id, params["password"]) do
       # RECEIPT LAW (pds wave 39 residue): `Webauthn.delete_credential/2` was
       # WIDENED to hand back the row `Repo.delete/2` removed, so this receipt
       # names what actually left the store instead of asserting a bare literal
@@ -238,10 +251,26 @@ defmodule BarkparkWeb.WebauthnController do
 
       {:error, :not_found} ->
         error(conn, 404, "not_found", "no such passkey")
+
+      {:error, :reauth_required} ->
+        error(conn, 403, "reauth_required", "the current password is required")
     end
   end
 
   # ── helpers ──────────────────────────────────────────────────────────────────
+
+  # Removing a passkey is an MFA change too: a session alone could strip the
+  # owner's factors (task-3d64b961fca33036).
+  defp delete_reauthed(user, id, password) do
+    if reauthed?(user, password),
+      do: Webauthn.delete_credential(user, id),
+      else: {:error, :reauth_required}
+  end
+
+  defp reauthed?(user, password) when is_binary(password),
+    do: Barkpark.Accounts.User.valid_password?(user, password)
+
+  defp reauthed?(_user, _), do: false
 
   defp sign(salt, bytes), do: Phoenix.Token.sign(BarkparkWeb.Endpoint, salt, bytes)
 
