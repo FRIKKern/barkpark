@@ -2065,8 +2065,16 @@ defmodule Barkpark.Tenancy do
       end)
 
     case result do
-      {:ok, _} -> Media.flush_deferred_media_effects()
-      _ -> Media.clear_deferred_media_effects()
+      {:ok, _} ->
+        Media.flush_deferred_media_effects()
+        # The teardown deleted this workspace's `shares` rows with raw SQL,
+        # but the live registry is rebuilt from them only by `refresh/0`.
+        # Without it the share stayed live in memory, and a workspace created
+        # under the freed slug was anonymously readable (task-e7cd09d1fb989834).
+        Barkpark.Sharing.refresh()
+
+      _ ->
+        Media.clear_deferred_media_effects()
     end
 
     # AFTER the transaction, never inside it: a mid-transaction clear lets a
