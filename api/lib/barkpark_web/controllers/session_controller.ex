@@ -487,8 +487,13 @@ defmodule BarkparkWeb.SessionController do
   defp sanitize_return_to(nil), do: @default_return_to
   defp sanitize_return_to(""), do: @default_return_to
 
+  # Same-origin absolute paths only. Browsers treat `\` like `/` and drop
+  # tab/CR/LF inside a URL, so `/\evil.com` or `/<TAB>/evil.com` became the
+  # protocol-relative `//evil.com`: an open redirect after login
+  # (task-5ab7e3e4d678ec4c). Any backslash or control character is refused.
   defp sanitize_return_to(path) when is_binary(path) do
-    if String.starts_with?(path, "/") and not String.starts_with?(path, "//") do
+    if String.starts_with?(path, "/") and not String.starts_with?(path, "//") and
+         not String.contains?(path, "\\") and not String.match?(path, ~r/[\x00-\x1f\x7f]/) do
       path
     else
       @default_return_to
