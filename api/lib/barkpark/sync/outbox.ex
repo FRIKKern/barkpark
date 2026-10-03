@@ -27,8 +27,15 @@ defmodule Barkpark.Sync.Outbox do
   `dataset`, with `id > after_id`, in `id ASC` order. `after_id` is the push
   cursor; `limit` is `push_batch_size`.
   """
-  @spec fetch(String.t(), non_neg_integer(), pos_integer()) :: [MutationEvent.t()]
-  def fetch(dataset, after_id, limit)
+  #
+  # `workspace_id` is the configured LOCAL workspace the push serves
+  # (`Sync.push_context/1`). Every workspace owns a dataset with the same
+  # string, so without it the outbox read every workspace's events and the
+  # push sent other tenants' document bodies to this workspace's remote
+  # (task-43b484660f68075d). A nil workspace keeps the old dataset-only read.
+  @spec fetch(String.t(), non_neg_integer(), pos_integer(), binary() | nil) ::
+          [MutationEvent.t()]
+  def fetch(dataset, after_id, limit, workspace_id \\ nil)
       when is_binary(dataset) and is_integer(after_id) and after_id >= 0 and is_integer(limit) and
              limit > 0 do
     from(e in MutationEvent,
@@ -39,6 +46,12 @@ defmodule Barkpark.Sync.Outbox do
       order_by: [asc: e.id],
       limit: ^limit
     )
+    |> maybe_scope_workspace(workspace_id)
     |> Repo.all()
   end
+
+  defp maybe_scope_workspace(query, ws) when is_binary(ws) and ws != "",
+    do: where(query, [e], e.workspace_id == ^ws)
+
+  defp maybe_scope_workspace(query, _ws), do: query
 end
