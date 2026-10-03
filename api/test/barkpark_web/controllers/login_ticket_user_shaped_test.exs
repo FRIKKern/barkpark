@@ -111,4 +111,82 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     assert get_session(consume, "api_token") == @admin_token
     refute get_session(consume, "user_session")
   end
+
+  # ── Owner ruling #26 (2026-10-03, "Match role, revoke") ─────────────────
+  # The ticket carries the Cloud TEAM role; the consume seats it. A team member
+  # lands as a member — never as the Default-workspace owner.
+
+  defp consume_role!(conn, body) do
+    ticket = json_response(mint!(conn, @admin_token, body), 201)["ticket"]
+    consume = scoped_conn() |> get("/login/ticket/#{ticket}")
+    assert redirected_to(consume) == "/studio"
+    user = Accounts.get_user_by_email(@cloud_email)
+    %{id: ws_id} = Tenancy.get_default_workspace()
+    {user, ws_id}
+  end
+
+  test "a team MEMBER's ticket seats a fresh account as member, not owner", %{conn: conn} do
+    {user, ws_id} = consume_role!(conn, %{email: @cloud_email, role: "member"})
+    assert %{role: "member"} = TenancyAuth.membership(user, ws_id)
+  end
+
+  test "a team ADMIN's ticket seats admin; an OWNER's seats owner", %{conn: conn} do
+    {user, ws_id} = consume_role!(conn, %{email: @cloud_email, role: "admin"})
+    assert %{role: "admin"} = TenancyAuth.membership(user, ws_id)
+
+    {:ok, _} =
+      Auth.create_token("handoff-admin-2-abcdef", "a2", "production", ["read", "write", "admin"])
+
+    t2 =
+      json_response(
+        mint!(conn, "handoff-admin-2-abcdef", %{email: "boss@cloud.example", role: "owner"}),
+        201
+      )["ticket"]
+
+    assert redirected_to(scoped_conn() |> get("/login/ticket/#{t2}")) == "/studio"
+    boss = Accounts.get_user_by_email("boss@cloud.example")
+    assert %{role: "owner"} = TenancyAuth.membership(boss, ws_id)
+  end
+
+  test "an unknown role value is read as member (fail closed)", %{conn: conn} do
+    {user, ws_id} = consume_role!(conn, %{email: @cloud_email, role: "superuser"})
+    assert %{role: "member"} = TenancyAuth.membership(user, ws_id)
+  end
+
+  test "an existing OWNER seat is synced DOWN to member when the team says member", %{conn: conn} do
+    {:ok, user} =
+      Accounts.register_user(%{email: @cloud_email, password: "correct-horse-battery"})
+
+    %{id: ws_id} = Tenancy.get_default_workspace()
+    # Another owner exists, so this is not the last owner.
+    {:ok, other} =
+      Accounts.register_user(%{
+        email: "other-owner@cloud.example",
+        password: "correct-horse-battery"
+      })
+
+    {:ok, _} = TenancyAuth.create_membership(ws_id, other.id, "owner", "user")
+    {:ok, _} = TenancyAuth.create_membership(ws_id, user.id, "owner", "user")
+
+    consume_role!(conn, %{email: @cloud_email, role: "member"})
+    assert %{role: "member"} = TenancyAuth.membership(user, ws_id)
+  end
+
+  test "the LAST owner is never demoted by a handoff", %{conn: conn} do
+    {:ok, user} =
+      Accounts.register_user(%{email: @cloud_email, password: "correct-horse-battery"})
+
+    %{id: ws_id} = Tenancy.get_default_workspace()
+    {:ok, _} = TenancyAuth.create_membership(ws_id, user.id, "owner", "user")
+
+    consume_role!(conn, %{email: @cloud_email, role: "member"})
+    assert %{role: "owner"} = TenancyAuth.membership(user, ws_id)
+  end
+
+  test "a ticket WITHOUT a role (an older control plane) keeps the legacy owner grant", %{
+    conn: conn
+  } do
+    {user, ws_id} = consume_role!(conn, %{email: @cloud_email})
+    assert %{role: "owner"} = TenancyAuth.membership(user, ws_id)
+  end
 end

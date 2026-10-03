@@ -2385,6 +2385,14 @@ defmodule BarkparkCloud.Accounts do
       # open invite is a grant the inviter is still making; once they are off
       # the team, nobody should be able to join on their word.
       {_revoked, _} = revoke_invitations_sent_by(team, user, nil)
+      # Owner ruling #26: …and their access to the team's INSTANCES ends too —
+      # Studio sessions, workspace seats and the tokens they minted there. The
+      # job commits with the removal (same transaction) and does the box calls
+      # outside it, retrying a box that did not answer.
+      {:ok, _} =
+        %{team_id: team.id, email: user.email}
+        |> BarkparkCloud.Workers.InstanceMemberDeprovisionWorker.new()
+        |> Oban.insert()
       :removed
     end)
   end

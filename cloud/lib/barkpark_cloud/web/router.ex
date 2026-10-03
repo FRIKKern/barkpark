@@ -73,7 +73,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/adopt admin    attach an already-running box: proof of admin control, Cloud mints + stores its own `barkpark cloud admin` token (team-admin; a PAT must also hold `root`)
-      POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket; seats the caller at their TEAM role, ruling #26)
       POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
@@ -4036,10 +4036,13 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             # cloud-identity handoff: pass the cloud account's email so the
-            # instance signs the browser in AS this user (JIT-provisioned
-            # owner) rather than an anonymous admin-token session. Older
-            # instances ignore the field — legacy ticket, still one-click.
-            case Registry.mint_studio_link(bp, conn.assigns.current_user.email) do
+            # instance signs the browser in AS this user rather than an
+            # anonymous admin-token session, and (owner ruling #26) the TEAM
+            # role, so a member lands as a member, not as the workspace owner.
+            # Older instances ignore both fields — legacy ticket, one-click.
+            role = Accounts.team_role(conn.assigns.current_user, team)
+
+            case Registry.mint_studio_link(bp, conn.assigns.current_user.email, role) do
               {:ok, url} ->
                 # OC24: audit THAT a link was minted — never the URL (it embeds
                 # the single-use login ticket) and never the admin token.
@@ -4157,8 +4160,8 @@ defmodule BarkparkCloud.Web.Router do
       # resolve, one step before the grant question is even asked.
       with %Barkpark{} = bp <- Registry.get_barkpark_by_public_host(host || ""),
            %Team{} = team <- Accounts.get_team(bp.team_id),
-           %{} <- Accounts.get_membership(team, user.id) do
-        case Registry.mint_studio_link(bp, user.email) do
+           %{role: role} <- Accounts.get_membership(team, user.id) do
+        case Registry.mint_studio_link(bp, user.email, role) do
           {:ok, url} ->
             audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
               name: bp.name,

@@ -145,7 +145,7 @@ defmodule Barkpark.AuthTest do
       assert String.starts_with?(ticket, "bplt_")
 
       assert Auth.consume_login_ticket(ticket) ==
-               {:ok, {:user, "someone@example.com", raw}}
+               {:ok, {:user, "someone@example.com", raw, nil}}
 
       # single-use still holds
       assert Auth.consume_login_ticket(ticket) == {:error, :invalid}

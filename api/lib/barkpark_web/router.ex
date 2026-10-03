@@ -1320,6 +1320,11 @@ defmodule BarkparkWeb.Router do
 
     post("/login-tickets", LoginTicketController, :create)
 
+    # Owner ruling #26 — the control plane takes a removed team member OFF this
+    # instance: sessions revoked, seats dropped, owned tokens revoked. Admin
+    # bearer + operator allowlist, like the email form of /login-tickets.
+    post("/cloud-users/deprovision", CloudUserController, :deprovision)
+
     # ── Mobile app-token exchange, instance half (mobile charter D4) ──────
     # POST /v1/auth/app-tokens — admin-bearer-gated in the controller (the
     # mint_login_ticket idiom): the Cloud control plane proves possession of
