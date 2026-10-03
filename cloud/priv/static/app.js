@@ -12228,6 +12228,12 @@
     if (code === "limit_reached") {
       return "You're at your plan's support-server limit.";
     }
+    // Owner ruling #37: the per-team cap on provisioned support servers (403).
+    if (code === "support_cap_reached") {
+      var cap = data && typeof data.cap === "number" ? data.cap : null;
+      return (cap === null ? "Your team is at its support-server cap." : "Your team is at its cap of " + cap + " support server" + (cap === 1 ? "" : "s") + ".") +
+        " Remove one, or ask Barkpark support to raise the cap.";
+    }
     return friendly(data, "Couldn't add the support server — please try again.");
   }
 
