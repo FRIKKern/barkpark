@@ -404,6 +404,29 @@ defmodule BarkparkWeb.MemberControllerTest do
       refute body |> Jason.encode!() |> String.contains?(b_raw)
     end
 
+    # task-9987bbd86dbed475: revoke is instance-wide (the token dies in every
+    # workspace), but the only gate was a seat HERE. Rotation already demands
+    # admin of every workspace the token sits in; revoke now demands the same.
+    test "revoking a token that also sits in a workspace you do not administer is refused", %{
+      ws: ws,
+      project: project,
+      other_ws: other_ws,
+      admin_raw: admin_raw
+    } do
+      shared_raw = "shared-#{System.unique_integer([:positive])}"
+      {:ok, shared} = Auth.create_token(shared_raw, "shared", @dataset, ["read"])
+      {:ok, _} = TenancyAuth.create_membership(ws.id, shared.id, "member", "api_token")
+      {:ok, _} = TenancyAuth.create_membership(other_ws.id, shared.id, "owner", "api_token")
+
+      body =
+        req(admin_raw)
+        |> delete("#{base(ws, project)}/tokens/#{shared.id}")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "forbidden"
+      refute Repo.get(Barkpark.Auth.ApiToken, shared.id).revoked_at
+    end
+
     test "revoking a token that holds a seat here stamps revoked_at", %{
       ws: ws,
       project: project,
