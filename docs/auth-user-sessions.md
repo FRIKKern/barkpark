@@ -146,6 +146,11 @@ governed, factor-less user still logs in (the body adds
 `403 mfa_enrolment_required` except `/me`, `/logout`, and the TOTP/passkey
 enrolment endpoints (`RequireOrgMfaEnrolment` in the `:require_user` pipeline).
 Enrolling any factor opens the gate. Flag unset everywhere → byte-identical.
+An enrolled governed user must PRESENT the factor at sign-in (owner ruling
+#14, `SessionIssuer.org_factor_required?/2`): password and magic-link
+sign-ins need the TOTP code, a passkey-only member signs in at the passkey
+door, and a social sign-in (which carries no factor) is refused with 401
+`mfa_required` naming those doors.
 
 ## Field encryption (at rest)
 

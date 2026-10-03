@@ -67,6 +67,12 @@ defmodule BarkparkWeb.SocialController do
               SessionIssuer.auth_method_blocked?(user, "social") ->
                 SessionIssuer.deny_auth_method(conn, user, "social", "social:#{name}")
 
+              # Owner ruling #14: a social sign-in carries no second factor, so
+              # in a require-MFA org it is refused for every member who has one
+              # (TOTP or passkey) and pointed at a door that presents it.
+              SessionIssuer.org_factor_required?(user, :no_code_door) ->
+                SessionIssuer.deny_org_factor_required(conn, user, "social:#{name}")
+
               true ->
                 Sso.record_login(user, "social:#{name}", nil)
 

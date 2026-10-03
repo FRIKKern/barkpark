@@ -254,6 +254,17 @@ defmodule BarkparkWeb.SessionController do
         |> put_session("studio_mfa_at", System.system_time(:second))
         |> render(:mfa, return_to: return_to, page_title: "Two-step verification")
 
+      # A passkey-only member presents the passkey at its own door (owner
+      # ruling #14); a member with no factor enrols first.
+      BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+        conn
+        |> put_flash(
+          :error,
+          "Your organization requires a second factor: " <>
+            BarkparkWeb.SessionIssuer.org_factor_hint(user) <> "."
+        )
+        |> render(:new, new_assigns(return_to))
+
       Barkpark.Tenancy.org_requires_mfa_for_user?(user.id) ->
         conn
         |> put_flash(

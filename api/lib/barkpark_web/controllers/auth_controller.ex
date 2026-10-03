@@ -110,6 +110,12 @@ defmodule BarkparkWeb.AuthController do
           user.totp_enabled ->
             login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
 
+          # Owner ruling #14: a passkey-only member of a require-MFA org used to
+          # sign in with the password alone (the org check asked "enrolled?",
+          # not "presented?"). They present the passkey at its own door.
+          BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+            BarkparkWeb.SessionIssuer.deny_org_factor_required(conn, user, "password")
+
           true ->
             issue_session(conn, user)
         end
@@ -658,6 +664,9 @@ defmodule BarkparkWeb.AuthController do
 
           user.totp_enabled ->
             login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+
+          BarkparkWeb.SessionIssuer.org_factor_required?(user, :code_door) ->
+            BarkparkWeb.SessionIssuer.deny_org_factor_required(conn, user, "magic_link")
 
           true ->
             issue_session(conn, user)
