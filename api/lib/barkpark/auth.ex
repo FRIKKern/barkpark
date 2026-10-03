@@ -579,6 +579,7 @@ defmodule Barkpark.Auth do
 
         with %ApiToken{} <- old || {:error, :not_found},
              :ok <- rotatable(old, now),
+             :ok <- owner_may_rotate(old, actor),
              :ok <- within_ceiling(old, seats, actor),
              forced_cloud? = cloud_held_admin?(old),
              :ok <-
@@ -622,6 +623,20 @@ defmodule Barkpark.Auth do
   end
 
   defp rotatable(_token, _now), do: {:error, :not_rotatable}
+
+  # OWNER RULING 2026-10-03 #7: rotation HANDS OVER a live secret whose
+  # successor keeps `owner_user_id`, so a workspace admin rotating a member's
+  # PAT received a working copy of the member's credential (and acted AS the
+  # member wherever `ResolveTokenOwner` maps it) while killing the member's
+  # own. A user-owned token is rotated only by a token of the SAME owner;
+  # admins revoke it instead. Machine tokens (no owner) are unchanged.
+  defp owner_may_rotate(%ApiToken{owner_user_id: nil}, _actor), do: :ok
+
+  defp owner_may_rotate(%ApiToken{owner_user_id: uid}, %ApiToken{owner_user_id: uid})
+       when is_binary(uid),
+       do: :ok
+
+  defp owner_may_rotate(_old, _actor), do: {:error, :owner_only}
 
   defp within_ceiling(%ApiToken{} = old, seats, %ApiToken{} = actor) do
     perms_ok? = Enum.all?(old.permissions || [], &(&1 in (actor.permissions || [])))

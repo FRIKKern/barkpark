@@ -316,6 +316,15 @@ defmodule BarkparkWeb.MemberController do
               "token). To rotate this one anyway, pass --force."
         })
 
+      # Owner ruling #7: a user-owned token is rotated only by its owner.
+      {:error, :owner_only} ->
+        ErrorResponse.emit_fields(conn, :forbidden, %{
+          code: "owner_only",
+          message:
+            "this token belongs to a user; only that user can rotate it. Revoke it instead " <>
+              "(DELETE …/v1/tokens/:id) and ask the owner to mint a new one"
+        })
+
       {:error, :forbidden} ->
         conn
         |> ErrorResponse.emit_fields(:forbidden, %{
