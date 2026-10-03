@@ -28,6 +28,7 @@ import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 import {
   CANVAS_SLASH_TYPES,
+  CANVAS_SERVER_INSERT_TYPES,
   slashTypeToNode,
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
@@ -425,7 +426,11 @@ export function buildCommandRegistry(editor, opts) {
       hint: meta.hint,
       // Insert the default node EXACTLY like the slash pick. Honors the same top-
       // level-prose guard (degrades safely inside a callout body / list item).
-      run: (ed) => insertSlashTypeAtSelection(ed, type),
+      // Terminal and Stage are built by the SERVER (CANVAS_SERVER_INSERT_TYPES): the
+      // canvas passes `opts.onServerInsert`, which hands the pick to the host.
+      run: CANVAS_SERVER_INSERT_TYPES.has(type) && opts && typeof opts.onServerInsert === "function"
+        ? () => opts.onServerInsert(type)
+        : (ed) => insertSlashTypeAtSelection(ed, type),
     });
   }
 

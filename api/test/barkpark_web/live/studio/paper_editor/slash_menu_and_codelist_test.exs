@@ -96,6 +96,54 @@ defmodule BarkparkWeb.Studio.PaperEditor.SlashMenuAndCodelistTest do
     assert render(view) =~ ~s(data-edit-block-id="#{last["id"]}")
   end
 
+  # task-f3c8acd1e09a0eda (owner ruling 2026-10-03 #56): a canvas pick of Terminal
+  # or Stage no longer inserts a canvas node (the canvas fence refuses a batch that
+  # introduces one, outdated_terminal_canvas / outdated_stage_canvas). The canvas
+  # hook sends `paper-slash-insert` {type, afterId} instead, and the server stores
+  # the default block where the author asked for it.
+  test "a canvas Terminal or Stage pick is stored through paper-slash-insert",
+       %{conn: conn} do
+    {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@slug}"))
+    open_editor(view)
+
+    for type <- ~w(terminal stage) do
+      before_ids = Content.paper_blocks(@slug, @dataset) |> Enum.map(& &1["id"])
+
+      reply =
+        render_hook(
+          view,
+          "paper-slash-insert",
+          wire_params(view, %{"type" => type, "afterId" => "p-intro"})
+        )
+
+      refute reply =~ "Edit failed"
+
+      blocks = Content.paper_blocks(@slug, @dataset)
+      ids = Enum.map(blocks, & &1["id"])
+      assert length(ids) == length(before_ids) + 1
+
+      new_id = Enum.at(ids, Enum.find_index(ids, &(&1 == "p-intro")) + 1)
+      refute new_id in before_ids
+      new = Enum.find(blocks, &(&1["id"] == new_id))
+      assert new["type"] == type
+    end
+
+    # The canvas batch the old path sent is still refused by the fence: the
+    # route above is how these two widgets enter a paper from the canvas.
+    assert BarkparkWeb.Studio.StudioLive.Blocks.canvas_run_context(
+             %{
+               "ops" => [
+                 %{
+                   "op" => "insert-after",
+                   "afterId" => "p-intro",
+                   "block" => %{"id" => "t-new", "type" => "terminal", "children" => []}
+                 }
+               ]
+             },
+             Content.paper_blocks(@slug, @dataset)
+           ) == {:error, :outdated_terminal_canvas}
+  end
+
   # ── Polish-2 (barkpark-5srz): codelist field block fully usable ─────────────
   # Two halves:
   #   A) FLAT codelist — View resolves the selected CODE → its human LABEL via
