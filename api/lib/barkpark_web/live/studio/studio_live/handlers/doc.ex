@@ -110,9 +110,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
           opts
         )
       end,
-      "Published"
+      publish_success_message(socket.assigns[:editor_type])
     )
   end
+
+  # Owner ruling #58 (2026-10-03): a published sheet is public — the
+  # `/sheets/:slug` reader serves it to anyone, whatever the schema's
+  # visibility (docs/contracts/plugin-http-api.md). The success flash says so.
+  @doc false
+  def publish_success_message("sheet"),
+    do: "Published. Published sheets are public, so anyone can now read this one."
+
+  def publish_success_message(_type), do: "Published"
 
   # ── [studio-tag-name-is-the-id] task-655768f4fa3c9fed ─────────────────────
   #
