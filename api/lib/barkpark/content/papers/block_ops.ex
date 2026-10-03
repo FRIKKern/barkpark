@@ -34,6 +34,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     DraftId,
     Encryption,
     Labels,
+    Mutations,
     Sheets,
     Writer
   }
@@ -2592,6 +2593,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
         do: Keyword.put(opts, :if_rev, doc.rev),
         else: opts
 
+    # Owner ruling #35 item 4: a bound block can set any content field, so the
+    # op answers to the mutate door's guards (claim, close, plugin fences)
+    # before it writes. See `Content.Mutations.ensure_content_write_guards/5`.
+    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts) do
+      upsert_document_block_op(type, attrs, op, affected, dataset, opts)
+    end
+  end
+
+  defp upsert_document_block_op(type, attrs, op, affected, dataset, opts) do
     case Content.upsert_document(type, attrs, dataset, opts) do
       {:ok, saved} ->
         {:ok,
