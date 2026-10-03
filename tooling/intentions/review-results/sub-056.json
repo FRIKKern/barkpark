@@ -4,7 +4,7 @@
     {
       "title": "Enforce Workspace as the hard multi-tenant boundary with a single total authorization chokepoint",
       "scale": "invariant",
-      "evidence": "Barkpark.Tenancy.Auth.authorize/3 is documented as THE entry point router/controllers call; it is total (unknown action/non-member/unrecognised principal → {:error, :forbidden} rather than raising); cross-tenant isolation guaranteed by membership lookup keyed on (principal_id, workspace_id, principal_type) in membership/2 clauses in auth.ex."
+      "evidence": "Barkpark.Tenancy.Auth.authorize/3 is the workspace authorization entry point router/controllers call. Its totality is pinned by api/test/barkpark/tenancy/auth_totality_test.exs (landed with PR #12616, c8cb3e35e): nil, empty-string and non-UUID workspace or principal ids, and unrecognised principals, DENY through the membership/2 normalisation seam instead of raising Ecto.Query.CastError or FunctionClauseError, each malformed row its own test beside green controls. Cross-tenant isolation rests on the membership lookup keyed on (principal_id, workspace_id, principal_type) in membership/2 and membership/3 in auth.ex."
     },
     {
       "title": "Unify API-token and logged-in-user principals under one membership+role authorization model",
