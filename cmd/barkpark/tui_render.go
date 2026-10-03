@@ -291,6 +291,12 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 				sub += " · " + item.Meta
 			}
 		}
+		// Truncated like the title. The selected and cursor rows render through
+		// a Width(width) style, which WORD-WRAPS an over-wide subtitle into a
+		// multi-line string and shifts every row below (task-76d8adc13225bc4e).
+		// A no-op for any subtitle that already fits, so an undeclared row stays
+		// byte-identical.
+		sub = truncate(sub, width-5)
 		titleMax := width - 6
 		badge := ""
 		if item.Badge != "" {
