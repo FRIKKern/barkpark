@@ -87,6 +87,7 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
          :ok <- validate_target(target),
          {:ok, caller} <- write_capable_caller(opts),
          {:ok, doc} <- resolve_target(target, dataset, opts),
+         :ok <- grant_permits_write?(caller, doc),
          {:ok, schema} <- target_schema(doc.type, dataset, opts),
          :ok <- ensure_declared(schema, field),
          {:ok, current} <- readable_value(doc, schema, caller, field) do
@@ -190,6 +191,38 @@ defmodule Barkpark.Content.Papers.ValueWriteback do
   # write to the caller's OWN scope.
   defp write_capable?(%CallerContext{principal_type: :user}), do: true
   defp write_capable?(_), do: false
+
+  # A GRANT-carrying user (a non-member admitted on access grants) passed
+  # `write_capable?/1` as a plain `:user`, and the target resolved through the
+  # grant-narrowed READ, which unions every grant of any capability. So a
+  # write grant on doc X plus a read grant on the project let the caller
+  # patch and publish ANY readable doc Y (task-678afec9ead360f7). The target
+  # must sit inside a WRITE grant's ladder (`Access.validate/3`), unless the
+  # caller is a member with write in the target's workspace. Callers with no
+  # grants (members, tokens, admins) are unchanged.
+  defp grant_permits_write?(%CallerContext{grants: [_ | _] = grants} = caller, %Document{} = doc) do
+    target = %{
+      workspace_id: doc.workspace_id,
+      project_id: doc.project_id,
+      dataset: doc.dataset,
+      type: doc.type,
+      doc_id: DraftId.published_id(doc.doc_id)
+    }
+
+    cond do
+      is_binary(doc.workspace_id) and
+          Barkpark.Tenancy.Auth.authorize(caller, doc.workspace_id, :write) == :ok ->
+        :ok
+
+      Enum.any?(grants, &(Barkpark.Access.validate(&1, :write, target) == :ok)) ->
+        :ok
+
+      true ->
+        {:error, :unauthorized}
+    end
+  end
+
+  defp grant_permits_write?(_caller, _doc), do: :ok
 
   # Resolve the target doc under the CALLER's scope opts (workspace/project/
   # dataset tenancy + unconditional owner scoping ride `resolve_docs_by_ids`,
