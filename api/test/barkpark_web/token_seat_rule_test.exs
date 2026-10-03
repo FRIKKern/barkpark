@@ -104,6 +104,21 @@ defmodule BarkparkWeb.TokenSeatRuleTest do
     end
   end
 
+  describe "flat admin LiveViews follow the bound token's seat (LiveAuth :admin)" do
+    import Phoenix.LiveViewTest
+
+    test "an admin seat opens /studio/styleguide; demoted to member it is turned away" do
+      ws = create_workspace!("seat-lv-#{System.unique_integer([:positive])}")
+      %{raw: raw, token: token} = bound_token(ws, ["read", "write", "admin"])
+      conn = fn -> build_conn() |> init_test_session(%{"api_token" => raw}) end
+
+      assert {:ok, _view, _html} = live(conn.(), "/studio/styleguide")
+
+      {:ok, _} = Members.update_role(ws.id, token_ref(token), "member")
+      assert {:error, {:redirect, _}} = live(conn.(), "/studio/styleguide")
+    end
+  end
+
   describe "a workspace-less user-owned admin token follows its owner's Default seat (RQ3)" do
     setup do
       %{id: default_id} = Tenancy.get_default_workspace()
