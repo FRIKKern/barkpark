@@ -70,7 +70,12 @@ defmodule Barkpark.Tasks.MergeGateUnflaggedTest do
           }
         },
         @dataset,
-        scope
+        # `source: :sync` seeds the row VERBATIM. Since task-0ed428e843b83382 a
+        # genuine birth flags a leading MERGE-GATED criterion itself, so the
+        # unflagged-but-worded rows this file is about can no longer be BORN
+        # through the API — they are the ~1311 rows that predate the birth
+        # flag, and replication is the door that writes such a row unchanged.
+        scope ++ [source: :sync]
       )
 
     doc

@@ -27,8 +27,11 @@ defmodule Barkpark.Content.Writer do
     SchemaDefinition,
     Sheets,
     TitleDerivation,
+    Warnings,
     WriteScope
   }
+
+  alias Barkpark.Tasks.Criteria
 
   alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
@@ -454,6 +457,11 @@ defmodule Barkpark.Content.Writer do
     # `:before_save` payload below already carries it. See
     # `stamp_task_creator/6`.
     attrs = stamp_task_creator(type, attrs, prev_doc, doc_id, dataset, opts)
+
+    # THE BIRTH FLAG (task-0ed428e843b83382). Also server-set, here, so the
+    # `:before_save` nag below already sees the flag and stays quiet about
+    # what was handled. See `flag_merge_gates_at_birth/6`.
+    attrs = flag_merge_gates_at_birth(type, attrs, prev_doc, doc_id, dataset, opts)
 
     # XSS hardening: the raw mutate/Writer path stores content verbatim, so an
     # attacker-supplied content["body_html"] would persist and later be emitted
@@ -1008,6 +1016,9 @@ defmodule Barkpark.Content.Writer do
     # too, or `POST /api/documents/task` would file an unattributable row.
     attrs = stamp_task_creator(type, attrs, prev_doc, doc_id, dataset, opts)
 
+    # The birth flag rides this door's INSERT branch for the same reason.
+    attrs = flag_merge_gates_at_birth(type, attrs, prev_doc, doc_id, dataset, opts)
+
     # The UPDATE half of the mutate-path schema check (task-41a740fd6701ec28).
     # One call covers both branches below: `attrs` reaching here is already the
     # FINAL whole-document content (patch merging, projection and block-id fill
@@ -1189,6 +1200,56 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp stamp_task_creator(_type, attrs, _prev_doc, _doc_id, _dataset, _opts), do: attrs
+
+  # THE MERGE-GATE BIRTH FLAG (task-0ed428e843b83382, part 3 of the
+  # task-d1654bf0d20d5009 ruling). A criterion that OPENS with the MERGE-GATED
+  # marker and carries no `merge_gate` key is born with `merge_gate: true`, so
+  # the flag (the only signal `Tasks.Close`'s autostamp reads) and the prose
+  # never disagree from the row's first moment. The predicate, the measured
+  # population behind it and the explicit-intent rule are in
+  # `Barkpark.Tasks.Criteria.flag_leading_merge_gates/1`.
+  #
+  # BIRTH ONLY, on the same definition the creator stamp uses: no drafts-exact
+  # `prev_doc` AND no published counterpart. An edit of a published-only row
+  # mints a draft twin that `prev_doc` cannot see, and flagging there would
+  # be a backfill riding an edit, which this row rules out. `Sync.Applier`
+  # (`source: :sync`) is exempt: replication mirrors the upstream row verbatim.
+  #
+  # The author is TOLD, on the advisory channel, which indices the server
+  # flagged and how to opt out. A silent server-side edit to what someone
+  # just wrote is the wrong kind of helpful.
+  defp flag_merge_gates_at_birth("task", attrs, nil = _prev_doc, doc_id, dataset, opts) do
+    with false <- Keyword.get(opts, :source, :api) == :sync,
+         {key, content} when is_binary(key) or is_atom(key) <- content_entry(attrs),
+         list when is_list(list) <- Map.get(content, "acceptance_criteria"),
+         {flagged_list, [_ | _] = flagged} <- Criteria.flag_leading_merge_gates(list),
+         nil <- published_counterpart(doc_id, dataset, opts) do
+      Warnings.put(
+        "merge_gate_flagged_at_birth",
+        "acceptance_criteria #{inspect(flagged)} open with the MERGE-GATED marker, so the " <>
+          "server set \"merge_gate\": true on them: the close-time autostamp keys on the " <>
+          "FLAG, and a lead merge now flips them. If one only MENTIONS merge-gating, write " <>
+          "\"merge_gate\": false on it; an explicit value is never overridden.",
+        "advisory"
+      )
+
+      Map.put(attrs, key, Map.put(content, "acceptance_criteria", flagged_list))
+    else
+      _ -> attrs
+    end
+  end
+
+  defp flag_merge_gates_at_birth(_type, attrs, _prev_doc, _doc_id, _dataset, _opts), do: attrs
+
+  defp content_entry(attrs) when is_map(attrs) do
+    cond do
+      is_map(Map.get(attrs, "content")) -> {"content", Map.get(attrs, "content")}
+      is_map(Map.get(attrs, :content)) -> {:content, Map.get(attrs, :content)}
+      true -> nil
+    end
+  end
+
+  defp content_entry(_), do: nil
 
   # An UPDATE (a drafts-exact `prev_doc`) restores whatever the stored row
   # carried, which is `nil` for every row born before this shipped. The
