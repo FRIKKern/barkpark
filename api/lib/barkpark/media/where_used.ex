@@ -111,8 +111,10 @@ defmodule Barkpark.Media.WhereUsed do
   # delete of its own blob. The census now covers the blob's own workspace plus
   # the shared NULL-workspace layer (`scope_to_workspace_including_global/3`, the
   # canonical clause; a nil workspace keeps the legacy all-tenant read).
-  defp scope_to_owner_tenant(query, workspace_id),
-    do: Barkpark.Content.Scope.scope_to_workspace_including_global(query, workspace_id, nil)
+  defp scope_to_owner_tenant(query, workspace_id) do
+    # global-read: a delete GUARD, not a content read. A blob with a workspace is narrowed to it; a legacy NULL-workspace blob keeps the pre-existing all-tenant census so it can never become LESS guarded than before.
+    Barkpark.Content.Scope.scope_to_workspace_including_global(query, workspace_id, nil)
+  end
 
   defp scan(url, workspace_id) do
     # `content::text LIKE '%<url>%'` — a containment test against the rendered
