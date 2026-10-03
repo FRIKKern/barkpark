@@ -46,7 +46,12 @@ defmodule BarkparkWeb.HistoryController do
       count: length(revisions),
       limit: limit,
       offset: offset,
-      has_more: has_more
+      has_more: has_more,
+      # The continuation, minted from the SAME `has_more` that promises it
+      # (task-de4df581f611d49a): the `?offset=` that reads the next page, or
+      # nil on the last one. Before this the caller had to compute it, and
+      # the pagination guard could not tell "signals more" from "can reach it".
+      next_offset: if(has_more, do: offset + length(revisions))
     })
   end
 

@@ -200,7 +200,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       # ── richText clause: bp-rich-text-editor Web Component bridged via
       # hidden input + BarkparkFieldBridge hook (Task #11 WI4) ───────────────
       assert html =~
-               ~r{<div[^>]*id="bp-rt-wrap-summary"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-rt-wrap-summary-p1"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       assert html =~
                ~r{<input type="hidden"[^>]*id="bp-rt-hidden-summary"[^>]*name="doc\[summary\]"[^>]*phx-debounce="500"}
@@ -251,7 +251,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       # ── reference clause (empty value): bp-reference-picker WC + bridge ────
       # Task #12 WI2 replaced the server modal flow with a client-owned WC.
       assert html =~
-               ~r{<div[^>]*id="bp-ref-wrap-author"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-ref-wrap-author-p1"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       assert html =~
                ~r{<input type="hidden"[^>]*id="bp-ref-hidden-author"[^>]*name="doc\[author\]"[^>]*phx-debounce="500"}
@@ -262,7 +262,7 @@ defmodule BarkparkWeb.Studio.StudioLiveEditorTest do
       # ── image clause (Task #12 WI1): bp-media-picker Web Component
       # bridged via hidden input + BarkparkFieldBridge hook ────────────────
       assert html =~
-               ~r{<div[^>]*id="bp-mp-wrap-cover"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-mp-wrap-cover-p1"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       assert html =~
                ~r{<input type="hidden"[^>]*id="bp-mp-hidden-cover"[^>]*name="doc\[cover\]"[^>]*phx-debounce="500"}

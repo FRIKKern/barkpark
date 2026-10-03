@@ -92,13 +92,33 @@ defmodule Barkpark.Plugins.Quiz do
   # already hold documents, and the generic Content group rejects plugin-owned
   # types. Gated on the schema existing in the dataset (tickets.ex precedent).
   @impl Barkpark.Plugin
-  def desk_items(dataset) do
-    if schema_present?("quiz", dataset) do
-      [%{type: :document_list, label: "Quizzes", doc_type: "quiz", icon: "help-circle"}]
-    else
-      []
-    end
+  def desk_items(dataset), do: desk_items_for(schema_present?("quiz", dataset))
+
+  # A workspace-scoped desk build skips the unscoped presence probe, which
+  # asks whether ANY workspace has a `quiz` schema in the dataset. The host
+  # gate (`Structure.scope_plugin_nodes/4`) decides `quiz` against the
+  # caller's own catalog. Same rule as `Barkpark.Plugins.Tasks`
+  # (task-90c3a512181b8537). With no scope this is exactly `desk_items/1`.
+  @impl Barkpark.Plugin
+  def resolve_desk_items(prev, ctx) do
+    items =
+      if workspace_scoped?(ctx),
+        do: desk_items_for(true),
+        else: desk_items(Map.get(ctx, :dataset, "production"))
+
+    prev ++ items
   end
+
+  # Same truthiness test as the host gate (`Keyword.get(opts, :workspace_id)`).
+  defp workspace_scoped?(%{scope: scope}) when is_list(scope),
+    do: Keyword.get(scope, :workspace_id) not in [nil, false]
+
+  defp workspace_scoped?(_ctx), do: false
+
+  defp desk_items_for(true),
+    do: [%{type: :document_list, label: "Quizzes", doc_type: "quiz", icon: "help-circle"}]
+
+  defp desk_items_for(false), do: []
 
   # Failure-safe probe: no DB sandbox / no Repo (boot, registration-time
   # fingerprint) must never crash the desk — no schema reachable, no entry.

@@ -58,6 +58,12 @@ type Builder struct {
 	CacheDir   string
 	LogDir     string
 
+	// ArtifactRoot is the only directory a file:// artifact_url may name
+	// (task-a21cac2c018f852e). Empty refuses every file:// artifact: the
+	// control plane no longer accepts one from a client, and a path outside a
+	// known root would let a deploy build any directory on this box.
+	ArtifactRoot string
+
 	// RetainImages bounds how many image tarballs CacheDir keeps PER SITE.
 	// Zero (unset) takes DefaultRetainImages; RetainImagesUnlimited (-1)
 	// restores the historical never-delete behaviour. See image_retention.go.
@@ -475,14 +481,41 @@ func platformOrDefault(p string) string {
 func (b *Builder) resolveArtifact(url string) (string, error) {
 	switch {
 	case strings.HasPrefix(url, "file://"):
-		// file:///abs/path → /abs/path. The builder trusts the path: this is
-		// a fleet-internal URL only the trusted upload path produces.
-		return strings.TrimPrefix(url, "file://"), nil
+		// file:///abs/path → /abs/path, but only inside ArtifactRoot
+		// (task-a21cac2c018f852e). The path came from a deployment row, and a
+		// row once took any client string, so it is not trusted.
+		return b.artifactPathInRoot(strings.TrimPrefix(url, "file://"))
 	case url == "":
 		return "", fmt.Errorf("artifact_url is empty (P6 bp deploy must populate it)")
 	default:
 		return "", fmt.Errorf("unsupported artifact scheme: %q (only file:// is implemented)", url)
 	}
+}
+
+// artifactPathInRoot returns p when it is an absolute path inside
+// ArtifactRoot, after cleaning `..` and, when the path exists, resolving
+// symlinks on both sides. Anything else is refused.
+func (b *Builder) artifactPathInRoot(p string) (string, error) {
+	root := strings.TrimSpace(b.ArtifactRoot)
+	if root == "" {
+		return "", fmt.Errorf("file:// artifacts are refused: this builder has no --artifact-root")
+	}
+	if !filepath.IsAbs(p) {
+		return "", fmt.Errorf("file:// artifact path %q is not absolute", p)
+	}
+	clean := filepath.Clean(p)
+	cleanRoot := filepath.Clean(root)
+	if real, err := filepath.EvalSymlinks(clean); err == nil {
+		clean = real
+		if realRoot, err := filepath.EvalSymlinks(cleanRoot); err == nil {
+			cleanRoot = realRoot
+		}
+	}
+	rel, err := filepath.Rel(cleanRoot, clean)
+	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
+		return "", fmt.Errorf("file:// artifact path %q is outside the artifact root %q", p, root)
+	}
+	return filepath.Clean(p), nil
 }
 
 // resolveSource walks the source ladder for a claimed deployment and returns

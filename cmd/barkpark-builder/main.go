@@ -49,6 +49,8 @@ func run(args []string) int {
 			"directory for docker-saved image tarballs (consumed by the box agent)")
 		logDir = fs.String("log-dir", "/var/lib/barkpark-builder/logs",
 			"directory for per-deployment build logs on THIS host (narrated to the build console as a location; not stamped as build_log_url, which only ever carries a URL a reader can fetch)")
+		artifactRoot = fs.String("artifact-root", "",
+			"the only directory a file:// artifact_url may name; empty refuses every file:// artifact")
 		platform = fs.String("platform", "",
 			"nixpacks --platform value (e.g. linux/arm64); defaults to nixpacks' own default")
 		interval = fs.Duration("interval", builder.DefaultInterval,
@@ -92,6 +94,8 @@ func run(args []string) int {
 		CacheDir:    *cacheDir,
 		LogDir:      *logDir,
 		Interval:    *interval,
+
+		ArtifactRoot: *artifactRoot,
 	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)

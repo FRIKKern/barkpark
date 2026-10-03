@@ -825,6 +825,34 @@ func TestTailRefetchRehydratesWorkflow(t *testing.T) {
 	}
 }
 
+// TestTailRefetchCarriesEpic (wsc-bl-epic-on-session-json): the turn-boundary
+// GET refreshes State.Epic at the same site as the workflow — the line stays
+// while the server keeps resolving it, and a nil (no authoritative relation any
+// more) clears it rather than leaving a stale epic painted.
+func TestTailRefetchCarriesEpic(t *testing.T) {
+	raw, err := os.ReadFile("testdata/rail_workflow_live.json")
+	if err != nil {
+		t.Fatalf("read fixture: %v", err)
+	}
+	epic := &EpicGoal{ID: "task-e", Title: "Epic", WaveStatus: "wave 1"}
+	st, _ := Reduce(State{SessionID: "s1"}, TailFetchedEvent{
+		Session: Session{ID: "s1", RailSnapshot: raw, Epic: epic},
+	}, time.Now())
+	if st.Epic == nil || st.Epic.ID != "task-e" {
+		t.Fatalf("the refetch must carry the show-read epic, got %+v", st.Epic)
+	}
+
+	st, _ = Reduce(st, TailFetchedEvent{Session: Session{ID: "s1", RailSnapshot: raw, Epic: epic}}, time.Now())
+	if st.Epic == nil || st.Epic.ID != "task-e" {
+		t.Fatalf("a second refetch resolving the same epic must keep it, got %+v", st.Epic)
+	}
+
+	st, _ = Reduce(st, TailFetchedEvent{Session: Session{ID: "s1", RailSnapshot: raw}}, time.Now())
+	if st.Epic != nil {
+		t.Fatalf("a refetch with no epic must clear it, got %+v", st.Epic)
+	}
+}
+
 // TestWorkflowExpandRefetchOnce is the D42 proof: the collapse→expand Enter
 // edge fires exactly ONE FetchTailEffect (since=LastSeq) through execEffect —
 // the drill and collapse edges fire none, and no polling/cadence exists (D13

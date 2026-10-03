@@ -3232,3 +3232,13 @@ artifact; it does not authorise new coverage.*
   so the `@supports` fallback is inert in the engine it targets. That correction is console's
   and is already written. `spd-b36-cross-browser-surface-measure-coverage` is **cancelled** and
   folded into spd-b30; its slug stays resolvable as a provenance record and points here.
+
+## Reading-measure formula — correction of record (2026-10-03, task-0eaa6ed3a87117f9)
+
+D126 states the measure as `min(panel_px, surface cap 720) - gutter - 55 x px/ch`, and readers built against two different pairs of numbers (720/40 and 660/24). Both pairs exist in `api/lib/barkpark_web/layouts/root.html.heex`. Neither describes the floor gate. Read from the sheet, the three numbers have three different jobs:
+
+- **The floor gate is 720px container min-width / 55ch / 40px gutter.** The rule is `.editor-panel .bp-paper-surface { min-inline-size: calc(55ch + 2 * var(--paper-gutter)) }` inside `@container content (min-width: 720px)`, with `--paper-gutter: 40px` unconditioned. The floor crosses the gate at an advance of **(720 - 2*40)/55 = 11.63636 px/ch**. A reading face wider than that overflows the panel just above 720px.
+- **`max-width: 660px` is a cap, not the floor.** It is the UPPER half of the 55-70ch measure band on `.bp-paper-surface`, and it does not cap the floor. D126's "surface cap 720" predates it.
+- **`--paper-gutter: 24px` is the narrow-viewport override** behind `@media (max-width: 767px)`. The content container cannot reach 720px on a viewport that narrow, so it never applies inside the gate's band.
+
+Mechanical source, never retyped: `node -e "import('./design/reading-measure.mjs').then(m=>console.log(JSON.stringify(m.parseGate(require('fs').readFileSync('api/lib/barkpark_web/layouts/root.html.heex','utf8')))))"` prints `{"containerMinPx":720,"chCount":55,"gutterPx":40}` on origin/main 9fabafddb. `parseGate` strips max-width bands so it cannot pick up the 24px gutter. The code was right; only this charter's text was stale. This correction amends D126's arithmetic only, not its ruling.

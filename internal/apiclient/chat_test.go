@@ -327,6 +327,40 @@ func TestGetChatSessionSinceTail(t *testing.T) {
 	}
 }
 
+// The SHOW read carries the epic-goal map (wsc-bl-epic-on-session-json): it
+// decodes onto ChatSession.Epic, and a session without one decodes to nil —
+// the key is absent on the wire, never null.
+func TestGetChatSessionDecodesEpic(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasSuffix(r.URL.Path, "/plain") {
+			_, _ = io.WriteString(w, `{"id":"plain","messages":[]}`)
+			return
+		}
+		_, _ = io.WriteString(w, `{"id":"wf","rail_snapshot":{},"epic":{"id":"task-e","title":"Epic",`+
+			`"slices_done":3,"slices_total":5,"wave_status":"wave 2 complete — grade A-"},"messages":[]}`)
+	}))
+	defer srv.Close()
+
+	c := newChatClient(srv.URL)
+	s, err := c.GetChatSession("wf", 0)
+	if err != nil {
+		t.Fatalf("GetChatSession: %v", err)
+	}
+	want := ChatEpicGoal{ID: "task-e", Title: "Epic", SlicesDone: 3, SlicesTotal: 5,
+		WaveStatus: "wave 2 complete — grade A-"}
+	if s.Epic == nil || *s.Epic != want {
+		t.Fatalf("epic = %+v, want %+v", s.Epic, want)
+	}
+
+	p, err := c.GetChatSession("plain", 0)
+	if err != nil {
+		t.Fatalf("GetChatSession plain: %v", err)
+	}
+	if p.Epic != nil {
+		t.Fatalf("a session without an epic must decode Epic=nil, got %+v", p.Epic)
+	}
+}
+
 func TestUpdateChatSession(t *testing.T) {
 	var gotBody map[string]interface{}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

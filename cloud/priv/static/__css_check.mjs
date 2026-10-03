@@ -1370,16 +1370,16 @@ const CITATION_RULED_ALTERNATION = /\b(?:app\.js[:~ ]+~?|(?:app\.css|[\w.-]+\.(?
 // sitting on it is DISCARDED. The consumer sees a clean, well-formed,
 // SHORTER-THAN-TRUE report and cannot tell it apart from a real one.
 //
-// MEASURED, NOT ASSUMED. The pipe's buffer here is 8192 bytes: a child that
-// emits 9000+ bytes and then calls process.exit(0) delivers exactly 8192 to a
-// spawnSync parent, 8 runs out of 8, at every size from 9000 up to 660000.
-// Below the buffer size nothing is ever lost. The inventory sub-mode emits 9624
-// bytes over this tree — 1432 bytes MORE than the buffer — so it survives only
-// while the parent keeps draining mid-stream. It usually does, which is why 280
-// isolated spawns found nothing; under the full harness, where the parent is
-// busy, the observed rate was 1 red in 14 runs. The captured stdout of that red
-// stopped at 8154 bytes — the last whole row that fits under 8192. The cut is
-// the buffer boundary, not a scan that ended early.
+// How much survives depends on the pipe's capacity and on how fast the parent
+// drains it, and both vary by platform and load, so no byte count here is a
+// safe ceiling. (A later probe on one host, spawnSync of a child that writes N
+// bytes then calls process.exit(0), lost nothing up to 65536 bytes and cut
+// every larger write at exactly 65536: task-074800b959a0ef13. An earlier
+// version of this comment claimed a smaller cut that the probe did not
+// reproduce.) What is observed is the failure: under the full harness, with
+// the parent busy, the inventory sub-mode came back short 1 run in 14, a
+// well-formed but truncated report, while 280 isolated spawns found nothing.
+// The fix below does not depend on any size.
 //
 // WHY THIS DRAINS RATHER THAN RACES. `fs.writeSync` hands the bytes to the
 // KERNEL before it returns, so when the loop finishes there is nothing left on
@@ -3679,8 +3679,8 @@ if (errors.length) {
   for (const e of errors) console.error("FAIL  " + e);
   // NOT process.exit(1) — THE FIFTH INSTANCE of the sub-mode defect documented
   // beside the emitSync helper above, found by this row's own stability arm.
-  // This body prints ~9.5KB, well past the 8192-byte pipe buffer, and the
-  // mirror harness in __app.test.mjs reads it through a spawnSync. On the GREEN
+  // This body prints ~9.5KB, and the mirror harness in __app.test.mjs reads it
+  // through a spawnSync, so bytes still queued at exit can be lost. On the GREEN
   // path the gate simply falls off the end, so Node drains stdout before the
   // process dies and nothing is ever lost — which is why the clean leg has
   // never flaked. On THIS path the old `process.exit(1)` tore the process down

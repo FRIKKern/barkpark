@@ -223,7 +223,7 @@ defmodule BarkparkCloud.Web.RouterPatTest do
         call(
           :post,
           "/v1/sites/#{site.id}/deploy",
-          %{artifact_url: "file:///tmp/a.tar.gz"},
+          %{artifact_url: "https://artifacts.example.com/a.tar.gz"},
           write_token
         )
 
@@ -246,7 +246,7 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       assert call(
                :post,
                "/v1/sites/#{site.id}/deploy",
-               %{artifact_url: "file:///tmp/a.tar.gz"},
+               %{artifact_url: "https://artifacts.example.com/a.tar.gz"},
                root_token
              ).status == 201
     end

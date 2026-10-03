@@ -406,4 +406,115 @@ defmodule BarkparkWeb.TokenRotateTest do
       end
     end
   end
+
+  # ── task-eaaf13ab768f34f6 criterion 1: `bp token rotate --grace / --now`, and
+  # `bp token ls` showing age, last use and rotation due ──────────────────────
+
+  describe "the --grace duration and --now spellings (bp token rotate)" do
+    test "grace takes a duration with a unit", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+
+      for {spelling, seconds} <- [{"2h", 7_200}, {"30m", 1_800}, {"90s", 90}, {"1d", 86_400}] do
+        {_raw, victim} = victim!(ws)
+        rotate(admin_raw, ws, project, victim.id, %{grace: spelling}) |> json_response(201)
+
+        assert secs_from_now(Repo.get!(ApiToken, victim.id).expires_at) in (seconds - 5)..seconds,
+               "--grace #{spelling} must put the old token on a #{seconds}s clock"
+      end
+    end
+
+    test "now=true revokes the old token immediately", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {old_raw, victim} = victim!(ws)
+
+      body = rotate(admin_raw, ws, project, victim.id, %{now: "true"}) |> json_response(201)
+
+      assert {:error, :unauthorized} = Auth.verify_token(old_raw)
+      assert body["rotated_from"]["revoked_at"]
+    end
+
+    test "two spellings at once, a bad unit, or a grace past the max is a 422 and mints nothing",
+         ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, victim} = victim!(ws)
+
+      for bad <- [
+            %{now: "true", grace: "24h"},
+            %{grace: "24h", grace_seconds: 60},
+            %{grace: "2x"},
+            %{grace: "-1h"},
+            %{grace: "8d"}
+          ] do
+        assert rotate(admin_raw, ws, project, victim.id, bad) |> json_response(422),
+               "#{inspect(bad)} must be refused"
+      end
+
+      assert tokens_labelled(victim.label) == 1
+      assert is_nil(Repo.get!(ApiToken, victim.id).expires_at)
+    end
+
+    test "the manifest declares --grace and --now on token.rotate" do
+      %{"flags" => flags} =
+        Barkpark.Plugins.Capabilities.manifest("admin", project: false)
+        |> Map.fetch!("commands")
+        |> Enum.find(&(&1["id"] == "token.rotate"))
+        |> Jason.encode!()
+        |> Jason.decode!()
+
+      names = Enum.map(flags, & &1["name"])
+      assert "grace" in names
+      assert "now" in names
+      assert Enum.find(flags, &(&1["name"] == "now"))["type"] == "bool"
+    end
+  end
+
+  describe "token ls carries age, last use and rotation due" do
+    test "a never-expiring api token is due 365 days after mint; an expiring one at its expiry",
+         ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, old} = victim!(ws)
+      {_raw, expiring} = victim!(ws)
+
+      minted = DateTime.utc_now() |> DateTime.add(-400 * 86_400, :second)
+      exp = DateTime.utc_now() |> DateTime.add(10 * 86_400, :second) |> DateTime.truncate(:second)
+      Repo.update_all(from(t in ApiToken, where: t.id == ^old.id), set: [inserted_at: minted])
+      Repo.update_all(from(t in ApiToken, where: t.id == ^expiring.id), set: [expires_at: exp])
+
+      rows =
+        req(admin_raw)
+        |> get("#{base(ws, project)}/tokens")
+        |> json_response(200)
+        |> Map.fetch!("tokens")
+        |> Map.new(&{&1["id"], &1})
+
+      o = rows[old.id]
+      assert o["age_days"] == 400
+      assert Map.has_key?(o, "last_used_at")
+      {:ok, due, 0} = DateTime.from_iso8601(o["rotation_due_at"])
+      assert DateTime.diff(due, minted, :second) in (365 * 86_400 - 2)..(365 * 86_400 + 2)
+      assert o["rotation_overdue"] == true
+
+      e = rows[expiring.id]
+      assert e["age_days"] == 0
+      {:ok, edue, 0} = DateTime.from_iso8601(e["rotation_due_at"])
+      assert DateTime.compare(edue, exp) == :eq
+      assert e["rotation_overdue"] == false
+    end
+
+    test "a revoked token is due for nothing", ctx do
+      %{ws: ws, project: project, admin_raw: admin_raw} = ctx
+      {_raw, victim} = victim!(ws)
+      {:ok, _} = Auth.revoke_token(victim)
+
+      row =
+        req(admin_raw)
+        |> get("#{base(ws, project)}/tokens")
+        |> json_response(200)
+        |> Map.fetch!("tokens")
+        |> Enum.find(&(&1["id"] == victim.id))
+
+      assert row["rotation_due_at"] == nil
+      assert row["rotation_overdue"] == false
+    end
+  end
 end

@@ -473,7 +473,7 @@ defmodule Barkpark.Tasks.Query do
     # the query-map `dataset`, then "production" — the same cascade
     # `load_task_schema/3` and the agg path use.
     dataset = Keyword.get(opts, :dataset) || Map.get(query, "dataset") || "production"
-    readable? = row_field_visibility_gate(dataset)
+    readable? = row_field_visibility_gate(dataset, scope)
 
     Enum.map(docs, fn doc ->
       doc
@@ -491,9 +491,15 @@ defmodule Barkpark.Tasks.Query do
   # struct that hits the checking clause and `raw_fields(nil) -> []`. Mirrors the
   # measure-visibility cross-check (`measure_field_readable?/2`) — one indexed
   # `Content.get_schema/3` bounds the cost.
-  defp row_field_visibility_gate(dataset) do
+  #
+  # The schema is resolved under the caller's `scope` through the redaction
+  # chokepoint, the same lookup `load_task_schema/3` uses (task-d4c88fde8b53ae34).
+  # It used to run with NO scope, which resolves the dataset to the Default
+  # workspace's: another workspace's own private task fields were then judged
+  # by Default's schema and rendered to anonymous readers.
+  defp row_field_visibility_gate(dataset, scope) do
     schema =
-      case Barkpark.Content.get_schema("task", dataset, []) do
+      case Barkpark.Content.Schema.get_schema_for_redaction("task", dataset, scope) do
         {:ok, schema} -> schema
         _ -> nil
       end

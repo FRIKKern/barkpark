@@ -92,6 +92,13 @@ type ChatSession struct {
 	InsertedAt   string `json:"inserted_at,omitempty"`
 	UpdatedAt    string `json:"updated_at,omitempty"`
 
+	// Epic is the epic-goal line on the SHOW read (wsc-bl-epic-on-session-json):
+	// the same map the sessions list carries per workflow row, so the open
+	// session's result box reads it fresh from every full GET / turn-boundary
+	// refetch instead of from the picker cache. Absent (nil) for a plain chat and
+	// whenever the ledger resolves no epic — never synthesised.
+	Epic *ChatEpicGoal `json:"epic,omitempty"`
+
 	// Messages is the seq-ascending transcript tail. On a ?since= refetch it
 	// holds only rows newer than the supplied seq.
 	Messages []ChatMessage `json:"messages,omitempty"`

@@ -254,10 +254,11 @@ func TestRunOnce_QueueEmpty(t *testing.T) {
 	defer srv.Close()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		HTTPClient: srv.Client(),
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		HTTPClient:   srv.Client(),
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -289,14 +290,15 @@ func TestRunOnce_HappyPath_NixpacksThenTransitionPushing(t *testing.T) {
 
 	runner := &scriptedRunner{t: t}
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		Platform:   "linux/arm64",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     runner,
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		Platform:     "linux/arm64",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       runner,
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -402,12 +404,13 @@ func TestRunOnce_BuildFailure_TransitionsFailed(t *testing.T) {
 	}
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     runner,
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       runner,
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -452,12 +455,13 @@ func TestRunOnce_UnsupportedArtifactScheme_FailsCleanly(t *testing.T) {
 	defer restore()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     &scriptedRunner{t: t},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       &scriptedRunner{t: t},
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -479,14 +483,22 @@ func TestRunOnce_UnsupportedArtifactScheme_FailsCleanly(t *testing.T) {
 }
 
 func TestResolveArtifact(t *testing.T) {
-	b := &Builder{}
+	b := &Builder{ArtifactRoot: "/tmp"}
 	cases := []struct {
 		in      string
 		want    string
 		wantErr bool
 	}{
-		{"file:///abs/path", "/abs/path", false},
 		{"file:///tmp/p2-fixture", "/tmp/p2-fixture", false},
+		{"file:///tmp/a/../p2-fixture", "/tmp/p2-fixture", false},
+		// task-a21cac2c018f852e: a file:// path outside the artifact root is
+		// refused; the row's artifact_url once took any client string.
+		{"file:///abs/path", "", true},
+		{"file:///etc", "", true},
+		{"file:///opt/barkpark", "", true},
+		{"file:///tmp/../etc", "", true},
+		{"file:///tmpfoo", "", true},
+		{"file://localhost/etc", "", true},
 		{"", "", true},
 		{"https://example.com/bundle.tgz", "", true},
 	}
@@ -505,6 +517,32 @@ func TestResolveArtifact(t *testing.T) {
 		if got != c.want {
 			t.Errorf("resolveArtifact(%q) = %q, want %q", c.in, got, c.want)
 		}
+	}
+}
+
+// task-a21cac2c018f852e: with no --artifact-root every file:// artifact is
+// refused, and a symlink inside the root that points outside it is refused.
+func TestResolveArtifactRootGuard(t *testing.T) {
+	if _, err := (&Builder{}).resolveArtifact("file:///tmp/p2-fixture"); err == nil {
+		t.Fatal("no ArtifactRoot: file:// artifact must be refused")
+	}
+
+	root := t.TempDir()
+	outside := t.TempDir()
+	inside := filepath.Join(root, "site")
+	if err := os.Mkdir(inside, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	link := filepath.Join(root, "escape")
+	if err := os.Symlink(outside, link); err != nil {
+		t.Fatal(err)
+	}
+	b := &Builder{ArtifactRoot: root}
+	if got, err := b.resolveArtifact("file://" + inside); err != nil || got != inside {
+		t.Errorf("in-root dir: got %q, %v; want %q", got, err, inside)
+	}
+	if got, err := b.resolveArtifact("file://" + link); err == nil {
+		t.Errorf("symlink out of the root must be refused, got %q", got)
 	}
 }
 
@@ -600,13 +638,14 @@ func TestRunOnce_GitSource_ShaFirstCloneFeedsNixpacks(t *testing.T) {
 		}
 	}}
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     runner,
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       runner,
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -666,12 +705,13 @@ func TestRunOnce_GitSource_UnreachableSha_TerminalSourceGone(t *testing.T) {
 	defer restore()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     &scriptedRunner{t: t},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       &scriptedRunner{t: t},
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -772,7 +812,7 @@ func TestResolveSource_Ladder(t *testing.T) {
 	srv := httptest.NewServer(cp.handler())
 	defer srv.Close()
 
-	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client(), ArtifactRoot: "/tmp"}
 	con := b.newBuildConsole(context.Background(), "d-ladder")
 
 	cases := []struct {
@@ -859,14 +899,15 @@ func TestRunOnce_NarratesBuildPhasesToConsole(t *testing.T) {
 	defer restore()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		Platform:   "linux/arm64",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     &scriptedRunner{t: t},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		Platform:     "linux/arm64",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       &scriptedRunner{t: t},
 	}
 
 	if _, err := b.RunOnce(context.Background()); err != nil {
@@ -931,14 +972,15 @@ func TestRunOnce_EmitsLiveCaptionsToDetail(t *testing.T) {
 	defer restore()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		Platform:   "linux/arm64",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     &scriptedRunner{t: t},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		Platform:     "linux/arm64",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       &scriptedRunner{t: t},
 	}
 
 	if _, err := b.RunOnce(context.Background()); err != nil {
@@ -985,13 +1027,14 @@ func TestRunOnce_ConsoleEndpointDown_NeverFailsBuild(t *testing.T) {
 	defer restore()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     &scriptedRunner{t: t},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       &scriptedRunner{t: t},
 	}
 
 	had, err := b.RunOnce(context.Background())
@@ -1208,13 +1251,14 @@ func (r *quietRunner) Run(ctx context.Context, w io.Writer, name string, args ..
 
 func envBuilder(srv *httptest.Server, runner CommandRunner) *Builder {
 	return &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		CacheDir:   "/tmp/p2-cache",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     runner,
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		CacheDir:     "/tmp/p2-cache",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       runner,
 	}
 }
 
@@ -1405,10 +1449,11 @@ func TestRunOnceTimesOutAgainstHangingServer(t *testing.T) {
 	defer srv.Close()
 
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		HTTPClient: &http.Client{Timeout: clientTimeout},
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		HTTPClient:   &http.Client{Timeout: clientTimeout},
 	}
 
 	start := time.Now()
@@ -1577,12 +1622,13 @@ func runGitBuild(t *testing.T, tmp string, src *BuildSource, failOn string) (cp 
 			}
 		}}
 	b := &Builder{
-		ControlURL: srv.URL,
-		Token:      "test-token",
-		WorkerID:   "w-1",
-		LogDir:     "/tmp/p2-logs",
-		HTTPClient: srv.Client(),
-		Runner:     runner,
+		ControlURL:   srv.URL,
+		Token:        "test-token",
+		WorkerID:     "w-1",
+		ArtifactRoot: "/tmp",
+		LogDir:       "/tmp/p2-logs",
+		HTTPClient:   srv.Client(),
+		Runner:       runner,
 	}
 	had, err := b.RunOnce(context.Background())
 	if err != nil || !had {
@@ -1669,7 +1715,7 @@ func TestRunOnce_Artifact_SourceDirIsNotRemoved(t *testing.T) {
 	defer restore()
 
 	b := &Builder{ControlURL: srv.URL, Token: "test-token", WorkerID: "w-1", LogDir: "/tmp/p2-logs",
-		HTTPClient: srv.Client(), Runner: &scriptedRunner{t: t}}
+		ArtifactRoot: filepath.Dir(art), HTTPClient: srv.Client(), Runner: &scriptedRunner{t: t}}
 	if had, err := b.RunOnce(context.Background()); err != nil || !had {
 		t.Fatalf("RunOnce = (%v, %v), want (true, nil)", had, err)
 	}
