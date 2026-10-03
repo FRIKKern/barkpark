@@ -200,7 +200,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     pulse_counters pulse_events pulse_meters saml_assertion_replays saml_connections schema_migrations
     scim_groups scim_tokens social_identities
     social_providers status_incidents user_email_tokens user_sessions users
-    webauthn_credentials
+    webauthn_challenge_replays webauthn_credentials
   )
 
   # E2 extraction specs: a parent-join from the child (`t`) to the nearest
