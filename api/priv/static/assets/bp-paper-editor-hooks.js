@@ -1194,6 +1194,12 @@
           }
           if (!record.dirty && record.active === 0) sources.delete(token.source);
         },
+        // The token of the newest dirty mark on `source` (null when clean). A
+        // caller that has just proven the source holds nothing to save settles
+        // with it; a newer input mints a new token, so it can never clear that.
+        dirtyTokenFor(source) {
+          return sources.get(source)?.dirtyToken ?? null;
+        },
         settleNoop(source, expectedToken) {
           const record = sources.get(source);
           if (!record || record.dirty !== true || record.active !== 0 ||
@@ -3906,6 +3912,20 @@
           sendNextOps();
         };
         this.el.addEventListener("bp-canvas-ops", this._onCanvasOps);
+        // The canvas proved its edits cancelled out (bp-noop from _emitOps).
+        // Typing marks this run dirty on the native input event; a save is the
+        // only other thing that clears it, and a cancelled edit sends none. So
+        // settle here, but only when this run truly holds nothing: no queued or
+        // sending batch, no pending canvas state. settleNoop itself refuses an
+        // in-flight mutation, and the token is the newest, so later input stays.
+        this._onCanvasNoop = (e) => {
+          const canvas = this.el.querySelector("bp-paper-canvas");
+          if (e.target !== canvas || this._opsQueue.length || this._sendingOps ||
+              canvas?.hasPendingChanges?.() === true) return;
+          const token = this._exitCoordinator?.dirtyTokenFor?.(this.el);
+          if (token) this._exitCoordinator.settleNoop(this.el, token);
+        };
+        this.el.addEventListener("bp-noop", this._onCanvasNoop);
         // Paper masters (task-3b6e562e916c8ce4). A slash-menu master pick rides
         // the SAME ordered queue as the canvas batches (after the "/query"
         // removal the canvas flushed just before dispatching it).
@@ -4187,6 +4207,7 @@
         delete this.el[PAPER_CANVAS_LEASE_PENDING];
         delete this.el[PAPER_CANVAS_LEASE_OVERFLOW];
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
+        this.el.removeEventListener("bp-noop", this._onCanvasNoop);
         if (this._onMasterInsert) this.el.removeEventListener("bp-master-insert", this._onMasterInsert);
         if (this._onSaveMaster) this.el.removeEventListener("bp-save-master", this._onSaveMaster);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
