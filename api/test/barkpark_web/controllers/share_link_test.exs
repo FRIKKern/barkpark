@@ -289,6 +289,56 @@ defmodule BarkparkWeb.ShareLinkTest do
     assert resp.resp_body =~ ~s(name="twitter:card" content="summary_large_image")
   end
 
+  # task-11acb383532d6169: the static fallback's og/twitter/JSON-LD head was
+  # built from RAW paper.content, so a description the link scope's paper
+  # schema declares private reached anyone holding the link. It now reads the
+  # paper as the anonymous caller sees it, under the schema the body used.
+  test "a PAPER link static fallback head prints no private field",
+       %{conn: conn, scope_str: scope, ws: ws, proj: proj} do
+    tenant = [workspace_id: ws.id, project_id: proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "paper",
+          "title" => "Papers",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "description", "type" => "text", "private" => true}
+          ]
+        },
+        @dataset,
+        tenant
+      )
+
+    %{"token" => token} =
+      mint(conn, %{scope: scope, kind: "doc", ref_type: "paper", ref_id: "demo-paper"})
+
+    {:ok, paper} = Content.get_document("demo-paper", "paper", @dataset, tenant)
+
+    secret = "Share link secret description zq15"
+
+    content =
+      paper.content
+      |> Map.put("description", secret)
+      |> Map.put("preview", %{"title" => "Demo Paper", "description" => secret})
+
+    paper
+    |> Document.changeset(%{"content" => content})
+    |> Repo.update!()
+
+    resp =
+      scoped_conn()
+      |> Plug.Conn.put_private(:share_link_tenancy, MissingRedirectTenancy)
+      |> get("/s/#{token}")
+
+    # Control: the static render and its head are there.
+    assert resp.status == 200
+    assert resp.resp_body =~ ~s(property="og:title" content="Demo Paper")
+    refute resp.resp_body =~ secret, "the share head printed the private description"
+  end
+
   test "JSON-API errors use the canonical envelope (code + request_id)", %{conn: conn} do
     # Missing scope/kind on mint → 422. Was a bare `%{"error" => "…required"}`;
     # now a keyable code + the human message + a request_id.

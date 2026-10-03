@@ -170,6 +170,32 @@ defmodule Barkpark.Content.Papers do
 
   def reader_schema(_paper, _type, _dataset, _scope_opts), do: nil
 
+  @doc """
+  `paper.content` as the ANONYMOUS caller may see it: the content keys that
+  survive `Envelope.render/3` under `schema` (the `paper` schema
+  `reader_source_with_schema/3` or `reader_schema/4` resolved), with the values
+  the envelope gives them. Same shape as raw content (no envelope `_` keys, no
+  promoted `title`/`blocks` the raw map did not carry), so a consumer that read
+  raw content reads this unchanged; only what the schema hides is gone. `%{}`
+  for a non-document.
+
+  Every copy the public reader derives from a paper's own fields (the
+  og/twitter/JSON-LD head, the BPML source's description and tags, the goal
+  rail's `goal_id`) reads from this map, never from raw `content`, so a field
+  the tenant's schema declares private, owner_only or readable_by stays out of
+  it (task-11acb383532d6169). Pure: no statement.
+  """
+  @spec anonymous_content(term(), term()) :: map()
+  def anonymous_content(%Document{} = paper, schema) do
+    raw = paper.content || %{}
+
+    paper
+    |> Envelope.render(schema, CallerContext.anonymous())
+    |> Map.take(Map.keys(raw))
+  end
+
+  def anonymous_content(_paper, _schema), do: %{}
+
   # `reader_source/3`'s body. A `:blocks` verdict also carries the render
   # `cache_provenance/4` already paid for (or nil when it rendered nothing),
   # so `reader_html/3` can serve it instead of rendering the same blocks twice.
@@ -594,14 +620,23 @@ defmodule Barkpark.Content.Papers do
   just persisted) — the label spine is the part that must not vary.
   """
   @spec bpml_paper_map(Document.t(), list()) :: map()
-  def bpml_paper_map(%Document{} = paper, blocks) when is_list(blocks) do
-    content = paper.content || %{}
+  def bpml_paper_map(%Document{} = paper, blocks) when is_list(blocks),
+    do: bpml_paper_map(paper, blocks, paper.content || %{})
 
+  @doc """
+  `bpml_paper_map/2` with the label spine read from `fields` instead of raw
+  `content`. The public source route passes `anonymous_content/2` here, the same
+  redaction its blocks already went through (task-11acb383532d6169); the ingest
+  echo, an authenticated author's own write, keeps `bpml_paper_map/2`.
+  """
+  @spec bpml_paper_map(Document.t(), list(), map()) :: map()
+  def bpml_paper_map(%Document{} = paper, blocks, fields)
+      when is_list(blocks) and is_map(fields) do
     %{
       "slug" => paper.doc_id,
       "title" => paper.title,
-      "description" => Map.get(content, "description"),
-      "tags" => Map.get(content, "tags", []),
+      "description" => Map.get(fields, "description"),
+      "tags" => Map.get(fields, "tags", []),
       "blocks" => blocks
     }
   end

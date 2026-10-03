@@ -43,8 +43,12 @@ defmodule BarkparkWeb.BulldocsSourceController do
         send_resp(conn, 404, "not found")
 
       paper ->
+        # The schema the blocks were redacted under also redacts the BPML
+        # label spine (description, tags) — no second lookup.
+        {reader_source, schema} = Content.Papers.reader_source_with_schema(paper, dataset, scope)
+
         source =
-          case Content.Papers.reader_source(paper, dataset, scope) do
+          case reader_source do
             {:blocks, blocks} ->
               resolved =
                 Content.Papers.resolve_tasks_in_blocks(
@@ -71,7 +75,7 @@ defmodule BarkparkWeb.BulldocsSourceController do
           # BPML is a VIEW of blocks only — an html-source paper has no block
           # truth to print, so the isomorphic format honestly refuses.
           {%{"kind" => "blocks", "blocks" => blocks}, "bpml"} ->
-            send_bpml(conn, paper, blocks)
+            send_bpml(conn, paper, blocks, Content.Papers.anonymous_content(paper, schema))
 
           {%{"kind" => "html"}, "bpml"} ->
             conn
@@ -101,13 +105,13 @@ defmodule BarkparkWeb.BulldocsSourceController do
   # The header carries the PAPER-LEVEL integer rev (content["rev"]) — the value
   # the ops path's if_rev guard compares against — NOT the row's _rev hash
   # (which the JSON envelope already exposes as "_rev").
-  defp send_bpml(conn, paper, blocks) do
+  defp send_bpml(conn, paper, blocks, fields) do
     case Content.Papers.op_rev(paper) do
       {:error, {:unreadable_rev, field}} ->
         rev_unreadable(conn, paper, field)
 
       {:ok, rev} ->
-        bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks))
+        bpml = Bpml.print_paper(Content.Papers.bpml_paper_map(paper, blocks, fields))
 
         conn
         |> put_resp_content_type("text/bpml")
