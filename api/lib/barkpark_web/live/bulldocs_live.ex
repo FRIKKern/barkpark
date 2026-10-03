@@ -198,7 +198,12 @@ defmodule BarkparkWeb.BulldocsLive do
     # to the write-time `content["preview"]`, else the pc-w1 read-time
     # projection, else a degraded core manifest (ShareMeta.manifest/4). The
     # layout reads `:preview` + `:page_title`.
-    preview = paper_preview(paper, slug)
+    #
+    # Built from the paper as the ANONYMOUS caller sees it (task-11acb383532d6169):
+    # the body's own schema, so a private description / excerpt / tag never
+    # reaches the head. The goal rail below keys off the same view.
+    anonymous_content = Content.Papers.anonymous_content(paper, paper_schema)
+    preview = paper_preview(paper, anonymous_content, slug)
 
     socket =
       socket
@@ -267,7 +272,7 @@ defmodule BarkparkWeb.BulldocsLive do
       # the two topics apart reds instead of silently reopening the leak.
     end
 
-    rail_events = load_rail_events(paper)
+    rail_events = load_rail_events(paper, anonymous_content)
 
     socket =
       socket
@@ -579,8 +584,12 @@ defmodule BarkparkWeb.BulldocsLive do
   # W1.5-C: SCOPE the rail to the paper's OWN workspace/project so the rail
   # never surfaces another workspace's events for a same-named goal. An
   # unscoped paper (NULL workspace_id, pre-tenancy) reads unscoped — back-compat.
-  defp load_rail_events(%{content: content} = paper) when is_map(content) do
-    case Map.get(content, "goal_id") do
+  #
+  # `goal_id` is read off the anonymous content (`Papers.anonymous_content/2`), not
+  # raw content: a goal_id the schema declares private keys no rail
+  # (task-11acb383532d6169), and with no rail `open-diff` has nothing to open.
+  defp load_rail_events(paper, anonymous_content) do
+    case Map.get(anonymous_content, "goal_id") do
       goal_id when is_binary(goal_id) and goal_id != "" ->
         Events.list_for_goal(goal_id, paper_scope_opts(paper))
 
@@ -588,8 +597,6 @@ defmodule BarkparkWeb.BulldocsLive do
         []
     end
   end
-
-  defp load_rail_events(_), do: []
 
   # W1.5-C: the paper's OWN tenancy scope as Events query opts. NULL
   # workspace_id (a pre-tenancy paper) yields [] → an unscoped read (the
@@ -1107,12 +1114,16 @@ defmodule BarkparkWeb.BulldocsLive do
   # canonical url is the RELATIVE `/papers/:slug` (ShareMeta absolutizes it at
   # emission, D3). A missing paper still yields a valid degraded manifest, so
   # the not-found reader unfurls as a branded default card rather than blank.
-  defp paper_preview(%{content: content} = paper, slug) when is_map(content),
+  # From the anonymous content (`Papers.anonymous_content/2`), never raw
+  # content; the row title stays the last title fallback, as before.
+  defp paper_preview(paper, anonymous_content, slug),
     do:
-      BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
-
-  defp paper_preview(_paper, slug),
-    do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
+      BarkparkWeb.ShareMeta.manifest(
+        anonymous_content,
+        "/papers/#{slug}",
+        "paper",
+        Map.get(paper, :title)
+      )
 
   defp source_blocks({:blocks, blocks}), do: blocks
   defp source_blocks(_), do: nil

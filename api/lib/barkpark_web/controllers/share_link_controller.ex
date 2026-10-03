@@ -231,14 +231,25 @@ defmodule BarkparkWeb.ShareLinkController do
 
   defp serve(conn, %ShareLink{} = link, _raw_token), do: serve(conn, link)
 
+  # The body render and the head both need the paper schema; the memo lets
+  # them share one lookup and ends with this render.
   defp serve_paper_static(conn, %ShareLink{} = link) do
+    Barkpark.Content.WriteScope.with_process_memo(fn -> do_serve_paper_static(conn, link) end)
+  end
+
+  defp do_serve_paper_static(conn, %ShareLink{} = link) do
     with %Content.Document{} = paper <-
            Content.get_paper(link.ref_id, link.dataset, scope(link)),
          {:ok, body_html} <- paper_body_html(paper, link) do
       # Social-share head (preview-contract pc-w2): a share link IS the sharing
       # flow, so this static render must carry the og/twitter/JSON-LD too. The
-      # `:bulldocs` root layout reads `:preview` + `:page_title`.
-      preview = paper_preview(paper, link.ref_id)
+      # `:bulldocs` root layout reads `:preview` + `:page_title`. Built from the
+      # paper as the anonymous caller sees it, under the schema the body render
+      # used (task-11acb383532d6169).
+      schema = Content.Papers.reader_schema(paper, "paper", link.dataset, scope(link))
+
+      preview =
+        paper_preview(paper, Content.Papers.anonymous_content(paper, schema), link.ref_id)
 
       conn
       |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
@@ -267,13 +278,11 @@ defmodule BarkparkWeb.ShareLinkController do
     end
   end
 
-  # Preview manifest for the share-link static render (preview-contract pc-w2).
-  defp paper_preview(%{content: content} = paper, slug) when is_map(content),
+  # Preview manifest for the share-link static render (preview-contract pc-w2),
+  # from the anonymous content (`Papers.anonymous_content/2`), never raw content.
+  defp paper_preview(paper, content, slug),
     do:
       BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
-
-  defp paper_preview(_paper, slug),
-    do: BarkparkWeb.ShareMeta.manifest(%{}, "/papers/#{slug}", "paper", slug)
 
   defp serve(conn, %ShareLink{kind: "doc"} = link) do
     case Content.get_document(link.ref_id, link.ref_type, link.dataset, scope(link)) do
