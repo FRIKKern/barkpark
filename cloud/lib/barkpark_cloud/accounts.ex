@@ -1582,6 +1582,10 @@ defmodule BarkparkCloud.Accounts do
     * `:invalid_token`  — no matching unexpired/unaccepted row (covers replay of
       an already-accepted token and an expired one).
     * `:email_mismatch` — the logged-in user's email is not the invited email.
+    * `:email_unconfirmed` — the email matches, but the account has not proven
+      it owns the address: `confirmed_at` is unset and no linked identity
+      provider verified it. The invitation stays live; confirming the address
+      and accepting again succeeds.
 
   An already-member invitee (raced a prior accept / manual add) is treated as
   success: the existing membership is returned and the invite is still stamped.
@@ -1629,6 +1633,14 @@ defmodule BarkparkCloud.Accounts do
 
         String.downcase(user.email) != inv.email ->
           Repo.rollback(:email_mismatch)
+
+        # task-0cf611238d4ad597 CQ6 (owner ruling #36). A password signup is
+        # logged in before it proves the address, so the email match above
+        # only says the account CLAIMS the invited address. Joining needs the
+        # proof: a confirmed address, or an identity provider that verified
+        # it (`address_proven?/2`, the same test the OAuth reclaim uses).
+        not address_proven?(user, inv.email) ->
+          Repo.rollback(:email_unconfirmed)
 
         true ->
           membership =

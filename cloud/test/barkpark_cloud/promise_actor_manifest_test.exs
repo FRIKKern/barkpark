@@ -1187,6 +1187,9 @@ defmodule BarkparkCloud.PromiseActorManifestTest do
     n = System.unique_integer([:positive])
     email = "invitee-#{n}@example.com"
     {:ok, invitee} = Accounts.register_user(%{email: email, password: @password})
+    # Confirmed: accepting needs a proven address (task-0cf611238d4ad597 CQ6).
+    invitee =
+      invitee |> BarkparkCloud.Accounts.User.confirm_changeset() |> BarkparkCloud.Repo.update!()
 
     {live_team, live_owner} = team_and_owner()
     {:ok, %{token: live_raw}} = Accounts.invite_member(live_team, email, "member", live_owner)
