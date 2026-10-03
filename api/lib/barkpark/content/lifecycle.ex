@@ -991,7 +991,15 @@ defmodule Barkpark.Content.Lifecycle do
     end
   end
 
-  @doc "Discard a draft without publishing. Published version (if any) remains."
+  @doc """
+  Discard a draft without publishing. Published version (if any) remains.
+
+  When the discarded draft was the document's ONLY row (no published twin
+  after the commit), the document is gone, so `:after_delete` fires post-commit
+  exactly as `delete_document/4` fires it — that is how Indx and the edge
+  projector hear about a draft-only document leaving (owner ruling #32, item 5).
+  With a published twin remaining the document still exists: no `:after_delete`.
+  """
   def discard_draft(published_doc_id, type, dataset, opts \\ []),
     do:
       span_write(:discard_draft, opts, fn ->
@@ -1012,29 +1020,57 @@ defmodule Barkpark.Content.Lifecycle do
         # The delete and its `mutation_events` row share one boundary (see the
         # unpublish note): a fault on the event insert no longer leaves a
         # discarded draft that no consumer ever hears about.
-        Broadcast.write_atomically(fn ->
-          case fenced_delete(draft) do
-            {:error, reason} ->
-              {:error, reason}
+        result =
+          Broadcast.write_atomically(fn ->
+            case fenced_delete(draft) do
+              {:error, reason} ->
+                {:error, reason}
 
-            :ok ->
-              Broadcast.tap_broadcast(
-                {:ok, draft},
-                dataset,
-                type,
-                "discardDraft",
-                prev_rev,
-                Keyword.get(opts, :source, :api),
-                Keyword.get(opts, :user_id),
-                caller_context: Keyword.get(opts, :caller_context)
-              )
-          end
-        end)
+              :ok ->
+                Broadcast.tap_broadcast(
+                  {:ok, draft},
+                  dataset,
+                  type,
+                  "discardDraft",
+                  prev_rev,
+                  Keyword.get(opts, :source, :api),
+                  Keyword.get(opts, :user_id),
+                  caller_context: Keyword.get(opts, :caller_context)
+                )
+            end
+          end)
+
+        fire_after_delete_if_gone(result, published_doc_id, type, dataset, opts)
 
       error ->
         error
     end
   end
+
+  # Post-commit, like `delete_document/4`. Inside an outer transaction (a
+  # `/mutate` batch) this runs before that batch commits — the same timing
+  # every other `fire_after` in a batch already has.
+  defp fire_after_delete_if_gone({:ok, draft} = result, published_doc_id, type, dataset, opts) do
+    pid = DraftId.published_id(published_doc_id)
+
+    case Content.get_document(pid, type, dataset, opts) do
+      {:ok, _published_twin} ->
+        result
+
+      _gone ->
+        payload = %{
+          event: :after_delete,
+          doc: draft,
+          dataset: dataset,
+          prev_doc: draft,
+          ctx: WriteScope.build_ctx(opts)
+        }
+
+        WriteScope.fire_after(result, :after_delete, payload)
+    end
+  end
+
+  defp fire_after_delete_if_gone(other, _published_doc_id, _type, _dataset, _opts), do: other
 
   @doc """
   Delete both the published and draft variants of a document.
