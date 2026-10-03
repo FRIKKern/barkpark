@@ -75,7 +75,7 @@ defmodule Barkpark.Tasks.Expectations do
   require Logger
 
   alias Barkpark.Content
-  alias Barkpark.Content.Graph
+  alias Barkpark.Content.{CallerContext, Envelope, Graph}
   alias Barkpark.Tasks.Criteria
 
   @typedoc """
@@ -125,11 +125,19 @@ defmodule Barkpark.Tasks.Expectations do
   off the same paper) runs the walk ONCE and hands the list to both; `opts`
   must be the SAME scope keywords the walk itself ran under (they still scope
   the per-task hydration here). Non-task referencers are ignored.
+
+  `:anonymous_task_schema` (the public paper reader, task-e5c77251c2de9c81):
+  when the key is present, each task's `lifecycle_status` and
+  `acceptance_criteria` are read off `Envelope.render/3` of the task as the
+  ANONYMOUS caller under that schema (`nil` = no schema resolved), so a field
+  the task schema declares private, owner_only or readable_by renders as
+  absent. Without the key the raw content is read, as before.
   """
   @spec driven_tasks_from_referencers([map()], keyword()) ::
           %{tasks: [driven_task()], truncated: boolean(), unhydrated: [String.t()]}
   def driven_tasks_from_referencers(referencers, opts \\ []) when is_list(referencers) do
     referencers = Enum.filter(referencers, &(&1.type == "task"))
+    {card_fields, opts} = task_card_fields(opts)
 
     # A task may cite the paper via more than one field (design_doc AND the
     # papers list) — one entry per task, `via` carrying every edge kind, first
@@ -147,7 +155,7 @@ defmodule Barkpark.Tasks.Expectations do
     {tasks, unhydrated} =
       doc_ids
       |> Enum.take(budget)
-      |> entries(kinds_by_doc, opts)
+      |> entries(kinds_by_doc, card_fields, opts)
 
     warn_unhydrated(unhydrated)
 
@@ -178,17 +186,20 @@ defmodule Barkpark.Tasks.Expectations do
   # post-fetch filter here.
   # Returns `{entries, unhydrated_doc_ids}` — the miss is RETURNED, not
   # swallowed, so `driven_tasks_from_referencers/2` can report it.
-  defp entries([], _kinds_by_doc, _opts), do: {[], []}
+  defp entries([], _kinds_by_doc, _card_fields, _opts), do: {[], []}
 
-  defp entries(doc_ids, kinds_by_doc, opts) do
+  defp entries(doc_ids, kinds_by_doc, card_fields, opts) do
     dataset = Keyword.get(opts, :dataset, "production")
     docs_by_id = Content.get_documents_by_ids(doc_ids, dataset, opts)
 
     doc_ids
     |> Enum.reduce({[], []}, fn doc_id, {kept, missed} ->
       case resolve_task(docs_by_id, doc_id, dataset, opts) do
-        %{type: "task"} = doc -> {[entry(doc, Map.fetch!(kinds_by_doc, doc_id)) | kept], missed}
-        nil -> {kept, [doc_id | missed]}
+        %{type: "task"} = doc ->
+          {[entry(doc, card_fields.(doc), Map.fetch!(kinds_by_doc, doc_id)) | kept], missed}
+
+        nil ->
+          {kept, [doc_id | missed]}
       end
     end)
     |> then(fn {kept, missed} -> {Enum.reverse(kept), Enum.reverse(missed)} end)
@@ -220,9 +231,22 @@ defmodule Barkpark.Tasks.Expectations do
     end
   end
 
-  # One hydrated task entry.
-  defp entry(doc, kinds) do
-    content = doc.content || %{}
+  # Where an entry reads its task fields from: the anonymous Envelope render
+  # under `:anonymous_task_schema` when the caller handed one (the key is
+  # popped so it never reaches the hydration read), else the raw content.
+  defp task_card_fields(opts) do
+    case Keyword.pop(opts, :anonymous_task_schema, :absent) do
+      {:absent, opts} ->
+        {fn doc -> doc.content || %{} end, opts}
+
+      {schema, opts} ->
+        {fn doc -> Envelope.render(doc, schema, CallerContext.anonymous()) end, opts}
+    end
+  end
+
+  # One hydrated task entry. `content` is the field map `task_card_fields/1`
+  # chose: the raw content, or the anonymous Envelope render.
+  defp entry(doc, content, kinds) do
     progress = Criteria.progress(content)
 
     %{

@@ -120,6 +120,46 @@ defmodule BarkparkWeb.ReadMemoLifetimeTest do
              "a Studio dead render's opt-in leaked into the next request on the process"
     end
 
+    # The paper reader's mount runs inside `with_process_memo/1`
+    # (task-e5c77251c2de9c81). The memo must end with the mount, on success or
+    # raise, and must not switch off a process that was opted in already.
+    test "with_process_memo/1 memoizes inside the bracket and leaves nothing behind" do
+      Process.put({:barkpark_request_memo, :pre_bracket}, :stale)
+
+      inside =
+        WriteScope.with_process_memo(fn ->
+          stale_seen = Process.get({:barkpark_request_memo, :pre_bracket})
+          first = WriteScope.request_memo([], :bracket_probe, fn -> make_ref() end)
+          second = WriteScope.request_memo([], :bracket_probe, fn -> make_ref() end)
+          {stale_seen, first == second}
+        end)
+
+      assert inside == {nil, true},
+             "inside the bracket the memo must start empty and answer repeats: #{inspect(inside)}"
+
+      refute Process.get(:barkpark_process_memo), "the opt-in outlived the bracket"
+
+      refute Process.get({:barkpark_request_memo, :bracket_probe}),
+             "a memo entry outlived the bracket"
+
+      assert_raise RuntimeError, fn ->
+        WriteScope.with_process_memo(fn ->
+          WriteScope.request_memo([], :bracket_probe, fn -> :x end)
+          raise "mount blew up"
+        end)
+      end
+
+      refute Process.get(:barkpark_process_memo), "a raise left the opt-in behind"
+
+      refute Process.get({:barkpark_request_memo, :bracket_probe}),
+             "a raise left a memo entry behind"
+
+      WriteScope.enable_process_memo()
+      WriteScope.with_process_memo(fn -> :ok end)
+      assert Process.get(:barkpark_process_memo), "the bracket switched off a caller's own opt-in"
+      Process.delete(:barkpark_process_memo)
+    end
+
     test "a Studio socket sees a schema edited between two of its callbacks", %{conn: conn} do
       schema!("memolive", "Before Title")
       path = scoped_studio("/d/#{@dataset}/studio/content-types/memolive")

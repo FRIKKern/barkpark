@@ -125,24 +125,64 @@ defmodule Barkpark.Content.Papers do
 
   @doc "Return one visibility-safe canonical source for any historical Paper shape."
   def reader_source(paper, dataset, scope_opts \\ []) do
+    paper |> reader_source_with_schema(dataset, scope_opts) |> elem(0)
+  end
+
+  @doc """
+  `reader_source/3` plus the `paper` schema it redacted the body with.
+
+  The reader's side cards (backlinks, `paper-links`) render OTHER papers of the
+  same tenant and must redact them under that same schema
+  (task-e5c77251c2de9c81). Handing it back here lets the reader reuse the
+  lookup this read already paid for instead of resolving it again; the
+  anonymous reader's statement budget is pinned by
+  `reader_query_baseline_test.exs`. The schema is `nil` when none resolved
+  (the same value the body render used) or when `paper` is not a document.
+  """
+  @spec reader_source_with_schema(term(), String.t(), keyword()) :: {term(), term()}
+  def reader_source_with_schema(paper, dataset, scope_opts \\ []) do
     case classify_reader_source(paper, dataset, scope_opts) do
-      {:blocks, blocks, _provenance_render} -> {:blocks, blocks}
-      other -> other
+      {{:blocks, blocks, _provenance_render}, schema} -> {{:blocks, blocks}, schema}
+      {other, schema} -> {other, schema}
     end
   end
+
+  @doc """
+  The schema the ANONYMOUS reader redacts a `type` document with, resolved
+  inside `paper`'s own tenant (`scope_opts` first, the paper's workspace and
+  project filling any gap: the scope the body render uses).
+
+  `nil` when no schema resolves, which is exactly what the body render hands
+  `Envelope.render/3` in that case. The public reader's side cards read their
+  fields off `Envelope.render(doc, reader_schema(...), CallerContext.anonymous())`.
+  """
+  @spec reader_schema(term(), String.t(), String.t(), keyword()) :: term()
+  def reader_schema(paper, type, dataset, scope_opts \\ [])
+
+  def reader_schema(%Document{} = paper, type, dataset, scope_opts) do
+    scope_opts = reader_schema_scope(paper, scope_opts || [])
+
+    case Content.Schema.get_schema_for_redaction(type, dataset, scope_opts) do
+      {:ok, value} -> value
+      :error -> nil
+    end
+  end
+
+  def reader_schema(_paper, _type, _dataset, _scope_opts), do: nil
 
   # `reader_source/3`'s body. A `:blocks` verdict also carries the render
   # `cache_provenance/4` already paid for (or nil when it rendered nothing),
   # so `reader_html/3` can serve it instead of rendering the same blocks twice.
+  # Returns `{verdict, schema}`: the schema rides out for the side cards.
   defp classify_reader_source(%Document{} = paper, dataset, scope_opts) do
-    scope_opts = reader_schema_scope(paper, scope_opts || [])
-    had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
+    schema = reader_schema(paper, @paper_type, dataset, scope_opts)
+    {classify_with_schema(paper, schema, dataset), schema}
+  end
 
-    schema =
-      case Content.Schema.get_schema_for_redaction(@paper_type, dataset, scope_opts) do
-        {:ok, value} -> value
-        :error -> nil
-      end
+  defp classify_reader_source(_, _dataset, _scope_opts), do: {{:error, :not_found}, nil}
+
+  defp classify_with_schema(paper, schema, dataset) do
+    had_structured_source? = is_list(Projection.read_blocks(paper.content || %{}))
 
     envelope = Envelope.render(paper, schema, CallerContext.anonymous())
 
@@ -174,8 +214,6 @@ defmodule Barkpark.Content.Papers do
     end
   end
 
-  defp classify_reader_source(_, _dataset, _scope_opts), do: {:error, :not_found}
-
   @doc """
   The reader HTML for `paper`, rendered from its blocks on this read.
 
@@ -191,7 +229,7 @@ defmodule Barkpark.Content.Papers do
   """
   @spec reader_html(term(), String.t(), keyword()) :: {:ok, String.t()} | {:error, atom()}
   def reader_html(paper, dataset, scope_opts \\ []) do
-    case classify_reader_source(paper, dataset, scope_opts) do
+    case classify_reader_source(paper, dataset, scope_opts) |> elem(0) do
       {:blocks, blocks, provenance_render} ->
         {:ok, reader_render(paper, blocks, dataset, scope_opts, provenance_render)}
 
@@ -923,12 +961,14 @@ defmodule Barkpark.Content.Papers do
         |> Keyword.take([:workspace_id, :project_id])
         |> Keyword.put(:published_only, true)
 
+      card_fields = paper_link_card_fields(opts)
+
       blocks
       |> paper_link_refs()
       |> Content.resolve_docs_by_ids(dataset, scope)
       |> Enum.filter(&(&1.type == @paper_type))
       |> Map.new(fn paper ->
-        content = paper.content || %{}
+        content = card_fields.(paper)
 
         {paper.doc_id,
          %{
@@ -941,6 +981,25 @@ defmodule Barkpark.Content.Papers do
       end)
     else
       %{}
+    end
+  end
+
+  # Where a paper-links card reads `description` / `event_type` from.
+  #
+  # `:paper_schema` in opts (the public reader, task-e5c77251c2de9c81): off the
+  # linked paper rendered by `Envelope.render/3` as the ANONYMOUS caller under
+  # that schema, so a field the schema declares private, owner_only or
+  # readable_by never reaches the card. The reader hands the schema its body
+  # render already resolved, so this costs no statement.
+  #
+  # No `:paper_schema` (Studio's authoring canvas): the raw content, unchanged.
+  defp paper_link_card_fields(opts) do
+    case Keyword.fetch(opts, :paper_schema) do
+      {:ok, schema} ->
+        fn paper -> Envelope.render(paper, schema, CallerContext.anonymous()) end
+
+      :error ->
+        fn paper -> paper.content || %{} end
     end
   end
 

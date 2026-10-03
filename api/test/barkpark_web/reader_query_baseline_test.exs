@@ -117,8 +117,22 @@ defmodule BarkparkWeb.ReaderQueryBaselineTest do
   # sibling N+1 slope test is UNCHANGED at 0.0 statements per additional citing
   # task per leg (dead 18->18, both 35->35). A priced security capability, and
   # the next unexplained +1 still reds.
-  @dead_leg_budget 18
-  @both_legs_budget 35
+  #
+  # RATCHET 18→14 dead / 35→27 both (task-e5c77251c2de9c81). Main measured 17 /
+  # 33 (datasets 4, schema_definitions 3 on the dead leg). Two changes, priced
+  # separately:
+  #   * the side cards read through Envelope (the private-field fix) need the
+  #     `task` schema when a task cites the paper: +1 schema_definitions, +1
+  #     datasets — the `paper` schema is the body render's own, reused (0);
+  #   * the mount runs inside `WriteScope.with_process_memo/1`, so the same
+  #     dataset id resolved by the body render, the backlink walk, the
+  #     driven-task hydration and the live task block is read ONCE (datasets
+  #     5 -> 1), and the task block's `task` schema lookup reuses the side
+  #     cards' (schema_definitions 4 -> 3).
+  # Measured: dead 14 (documents 6, schema_definitions 3, workspaces 2,
+  # content_edges 1, datasets 1, task_edges 1); both 27; slope still 0.0.
+  @dead_leg_budget 14
+  @both_legs_budget 27
   @max_n_plus_one_slope 1.0
 
   setup do

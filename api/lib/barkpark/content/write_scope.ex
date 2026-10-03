@@ -740,6 +740,33 @@ defmodule Barkpark.Content.WriteScope do
   end
 
   @doc """
+  Run `fun` with this process opted into `request_memo/3`, for exactly as long
+  as `fun` runs.
+
+  For a unit of work with no per-callback hook to reset the memo, such as one
+  LiveView `mount/3` that may run in the HTTP request process. A process that
+  was not already opted in starts with an empty memo and, when `fun` returns or
+  raises, is put back: the opt-in dropped and the memo emptied, so nothing
+  memoized here answers a later read. A process that was already opted in (a
+  Studio callback) is left exactly as it is.
+  """
+  def with_process_memo(fun) when is_function(fun, 0) do
+    if Process.get(@process_memo_flag, false) do
+      fun.()
+    else
+      reset_request_memo()
+      Process.put(@process_memo_flag, true)
+
+      try do
+        fun.()
+      after
+        Process.delete(@process_memo_flag)
+        reset_request_memo()
+      end
+    end
+  end
+
+  @doc """
   Start a fresh HTTP request: empty the memo AND drop a process opt-in. The
   Studio dead render opts its request process in; the next request served by
   the same keep-alive process must start as an ordinary request.

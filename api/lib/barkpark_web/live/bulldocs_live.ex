@@ -76,8 +76,23 @@ defmodule BarkparkWeb.BulldocsLive do
     defexception [:message, plug_status: 422]
   end
 
+  # The mount resolves the same dataset id, project and schema rows several
+  # times over (the body render, the backlink walk, the driven-task hydration,
+  # the live task blocks). It runs inside a read memo that lives exactly as
+  # long as this mount: `WriteScope.with_process_memo/1` switches it on here and
+  # off again before mount returns, on success or raise, so neither the request
+  # process (the dead render) nor the connected LiveView process carries a
+  # memoized row into anything that follows. Handlers (`refetch/1` and the
+  # rest) read fresh, exactly as before. The memo holds only schema and tenancy
+  # rows; a write to either resets it.
   @impl true
-  def mount(%{"slug" => slug} = params, _session, socket) do
+  def mount(params, session, socket) do
+    Barkpark.Content.WriteScope.with_process_memo(fn ->
+      mount_reader(params, session, socket)
+    end)
+  end
+
+  defp mount_reader(%{"slug" => slug} = params, _session, socket) do
     # Optional dataset path param (present only on /d/:dataset/papers/:slug).
     # Absent on the flat /papers/:slug + scoped /w/:ws/p/:proj/papers/:slug
     # surfaces → default dataset (back-compat: identical behaviour as today).
@@ -148,14 +163,18 @@ defmodule BarkparkWeb.BulldocsLive do
       )
       |> assign(:paper_presence, PaperPresence.empty())
 
-    reader_source =
-      case Content.Papers.reader_source(paper, dataset, reader_scope) do
-        {:error, reason} ->
+    # The `paper` schema the body render redacted with rides out alongside
+    # the source (task-e5c77251c2de9c81): the backlink and paper-links cards
+    # render other papers of this tenant under the SAME schema, as the
+    # anonymous caller, without paying for a second lookup.
+    {reader_source, paper_schema} =
+      case Content.Papers.reader_source_with_schema(paper, dataset, reader_scope) do
+        {{:error, reason}, _schema} ->
           raise InvalidSource,
             message: "paper #{inspect(slug)} has invalid reader source: #{reason}"
 
-        source ->
-          source
+        {source, schema} ->
+          {source, schema}
       end
 
     socket =
@@ -314,14 +333,14 @@ defmodule BarkparkWeb.BulldocsLive do
       # `reverse_referencers/2` call (am-w1-s3). See `assign_linked_sections/3`
       # for the scope + engine posture; each assign is `""` when its section
       # has nothing to show → the template omits it.
-      |> assign_linked_sections(paper, dataset)
+      |> assign_linked_sections(paper, dataset, paper_schema)
       # Theme identity (ts-w4e): resolve the paper's workspace theme so
       # bulldocs.html.heex stamps `data-bp-theme` server-side (no flash). The
       # reader ALWAYS mode-swaps via prefers-color-scheme — this attribute only
       # selects WHICH theme, never light/dark. No setting → default → the layout
       # omits the attribute → byte-identical to before.
       |> assign(:bp_theme, reader_theme(paper, reader_scope, paper_workspace))
-      |> assign_block_mode(paper, reader_source)
+      |> assign_block_mode(paper, reader_source, paper_schema)
       # Slice 4: join the paper's presence room and record the view. LAST,
       # because it reads `:slug` and `:dataset` off the socket — the access row
       # names the paper, so it must be assigned before the row is built.
@@ -448,31 +467,63 @@ defmodule BarkparkWeb.BulldocsLive do
   # citing tasks via `Expectations.driven_tasks_from_referencers/2` — the same
   # fail-closed posture as before (a source the scope can't see was already
   # dropped inside the walk), one `reverse_referencers/2` instead of two.
-  defp assign_linked_sections(socket, %{doc_id: doc_id} = paper, dataset)
+  #
+  # Both sections print fields of OTHER documents, so both read them as the
+  # anonymous caller through `Envelope.render/3` (task-e5c77251c2de9c81): a
+  # backlink card's description / event_type under the `paper` schema
+  # (`paper_schema`, the one the body render already resolved, or `:resolve`
+  # to look it up fresh), a driven task's status and criteria under the `task`
+  # schema — resolved only when a task actually cites the paper.
+  defp assign_linked_sections(socket, paper, dataset, paper_schema \\ :resolve)
+
+  defp assign_linked_sections(socket, %{doc_id: doc_id} = paper, dataset, paper_schema)
        when is_binary(doc_id) do
     opts =
       [dataset: dataset]
       |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
       |> maybe_scope(:project_id, Map.get(paper, :project_id))
 
+    reader_scope = socket.assigns[:reader_scope]
+
+    paper_schema =
+      if paper_schema == :resolve,
+        do: Content.Papers.reader_schema(paper, "paper", dataset, reader_scope),
+        else: paper_schema
+
     # `published_only`: this is the anonymous public reader — an unpublished
     # citing paper must not surface its title/description here (task-1005db05b44e2c39).
+    # `card_schemas`: the walk reads card fields through the Envelope under
+    # these; a citing type with no entry shows no description at all.
     referencers =
       doc_id
       |> Content.published_id()
-      |> Content.Graph.reverse_referencers(Keyword.put(opts, :published_only, true))
+      |> Content.Graph.reverse_referencers(
+        opts
+        |> Keyword.put(:published_only, true)
+        |> Keyword.put(:card_schemas, %{"paper" => paper_schema})
+      )
+
+    task_opts =
+      if Enum.any?(referencers, &(&1.type == "task")),
+        do:
+          Keyword.put(
+            opts,
+            :anonymous_task_schema,
+            Content.Papers.reader_schema(paper, "task", dataset, reader_scope)
+          ),
+        else: opts
 
     socket
     |> assign(:backlinks_html, BarkparkWeb.PaperBacklinks.section_html(referencers))
     |> assign(
       :driven_tasks_html,
       referencers
-      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(opts)
+      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(task_opts)
       |> BarkparkWeb.PaperTasks.section_html()
     )
   end
 
-  defp assign_linked_sections(socket, _paper, _dataset) do
+  defp assign_linked_sections(socket, _paper, _dataset, _paper_schema) do
     socket
     |> assign(:backlinks_html, "")
     |> assign(:driven_tasks_html, "")
@@ -1109,11 +1160,11 @@ defmodule BarkparkWeb.BulldocsLive do
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
-  defp assign_block_mode(socket, paper, reader_source) do
+  defp assign_block_mode(socket, paper, reader_source, paper_schema) do
     case source_blocks(reader_source) do
       blocks when is_list(blocks) ->
         resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
-        resolvers = reader_resolvers(resolved, socket.assigns[:dataset], paper)
+        resolvers = reader_resolvers(resolved, socket.assigns[:dataset], paper, paper_schema)
 
         socket
         |> assign(:block_mode, true)
@@ -1161,7 +1212,11 @@ defmodule BarkparkWeb.BulldocsLive do
   # published_only (a draft-only target degrades to the raw id, never leaking a
   # draft title), and `codelist_label` is a global (plugin, list_id) registry
   # lookup carrying no per-tenant user data, so it is safe to resolve here.
-  defp reader_resolvers(blocks, dataset, paper) do
+  #
+  # `paper_schema` is the `paper` schema the body render redacted with: the
+  # paper-links cards read the linked papers' description / event_type through
+  # `Envelope.render/3` under it, as the anonymous caller (task-e5c77251c2de9c81).
+  defp reader_resolvers(blocks, dataset, paper, paper_schema) do
     workspace_id =
       (paper && paper.workspace_id) ||
         case Barkpark.Tenancy.get_default_workspace() do
@@ -1181,7 +1236,12 @@ defmodule BarkparkWeb.BulldocsLive do
       %{
         wikilinks: Content.resolve_wikilinks_in_blocks(blocks, dataset, scope),
         values: Content.resolve_values_in_blocks(blocks, dataset, scope),
-        paper_links: resolve_paper_link_details(blocks, dataset, scope),
+        paper_links:
+          resolve_paper_link_details(
+            blocks,
+            dataset,
+            Keyword.put(scope, :paper_schema, paper_schema)
+          ),
         # Linked master instances (task-59f078a2fd248698): resolved per page
         # load inside the paper's own tenant, PUBLISHED master rows only (the
         # same D5 gate as the rest of this map); a paper with no instance
@@ -1501,8 +1561,8 @@ defmodule BarkparkWeb.BulldocsLive do
       paper ->
         article? = paper_article?(paper)
 
-        reader_source =
-          Content.Papers.reader_source(
+        {reader_source, paper_schema} =
+          Content.Papers.reader_source_with_schema(
             paper,
             socket.assigns[:dataset],
             socket.assigns[:reader_scope]
@@ -1512,7 +1572,9 @@ defmodule BarkparkWeb.BulldocsLive do
           {:blocks, blocks} ->
             resolved = with_live_tasks(blocks, paper, socket.assigns.dataset)
             refs = paper_link_refs(resolved)
-            resolvers = reader_resolvers(resolved, socket.assigns[:dataset], paper)
+
+            resolvers =
+              reader_resolvers(resolved, socket.assigns[:dataset], paper, paper_schema)
 
             socket
             |> ensure_document_changes_subscription(paper, refs)
@@ -1533,7 +1595,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:source_error, nil)
             |> assign(:paper_link_refs, refs)
             |> assign(:paper_link_details, Map.get(resolvers, :paper_links, %{}))
-            |> assign_linked_sections(paper, socket.assigns[:dataset])
+            |> assign_linked_sections(paper, socket.assigns[:dataset], paper_schema)
 
           {:html, html} ->
             # Refetched a paper that has reverted to HTML-only — fall back.
@@ -1547,7 +1609,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:source_error, nil)
             |> assign(:paper_link_refs, [])
             |> assign(:paper_link_details, %{})
-            |> assign_linked_sections(paper, socket.assigns[:dataset])
+            |> assign_linked_sections(paper, socket.assigns[:dataset], paper_schema)
 
           {:error, reason} ->
             socket
@@ -1561,7 +1623,7 @@ defmodule BarkparkWeb.BulldocsLive do
             |> assign(:source_error, reason)
             |> assign(:paper_link_refs, [])
             |> assign(:paper_link_details, %{})
-            |> assign_linked_sections(paper, socket.assigns[:dataset])
+            |> assign_linked_sections(paper, socket.assigns[:dataset], paper_schema)
         end
     end
   end

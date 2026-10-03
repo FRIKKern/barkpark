@@ -187,7 +187,10 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     |> assign(:edit_blocks, blocks_of(paper))
     |> assign(:paper_doc, paper)
     |> assign(:paper_rev, rev_of(paper))
-    |> assign(:paper_link_details, paper_link_details(socket, paper))
+    # Empty here on purpose: the SAME mount's `assign_block_mode/4` always
+    # assigns this map (the resolved cards in block mode, `%{}` otherwise), so
+    # resolving it here was a read whose result was always thrown away.
+    |> assign(:paper_link_details, %{})
     |> assign(:save_status, "")
     |> assign(:last_save_ok?, true)
     |> assign(:paper_halt, nil)
@@ -757,17 +760,26 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
           _ -> nil
         end
 
+    dataset = socket.assigns[:dataset] || Content.paper_default_dataset()
+    blocks = blocks_of(paper)
+
+    # The cards print the linked papers' description / event_type, so they
+    # read them as the anonymous reader does: through `Envelope.render/3`
+    # under the paper schema (task-e5c77251c2de9c81). Looked up only when the
+    # buffer actually carries a paper-links ref.
+    paper_schema =
+      if Content.Papers.paper_link_refs(blocks) == [],
+        do: nil,
+        else: Content.Papers.reader_schema(paper, "paper", dataset, reader_scope)
+
     scope = [
       workspace_id: workspace_id,
       project_id: (paper && paper.project_id) || Keyword.get(reader_scope, :project_id),
-      published_only: true
+      published_only: true,
+      paper_schema: paper_schema
     ]
 
-    Content.Papers.resolve_paper_link_details(
-      blocks_of(paper),
-      socket.assigns[:dataset] || Content.paper_default_dataset(),
-      scope
-    )
+    Content.Papers.resolve_paper_link_details(blocks, dataset, scope)
   end
 
   # ── internals ───────────────────────────────────────────────────────────────
