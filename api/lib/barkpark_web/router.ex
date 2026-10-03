@@ -237,6 +237,9 @@ defmodule BarkparkWeb.Router do
   # (the co-located caller passes workspace_id/project_id explicitly if needed).
   # Shaves the per-keystroke Phoenix floor from ~1–5 ms to the router minimum.
   pipeline :api_local do
+    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
+    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireLoopback)
   end
@@ -941,6 +944,9 @@ defmodule BarkparkWeb.Router do
   # token-auth. protect_from_forgery cannot apply (no Phoenix CSRF token on API /
   # Web-Component uploads).
   pipeline :media_mutate do
+    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
+    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     # Flat /v1 routes with a /w/:ws/p/:proj mirror answer Deprecation: true + a
     # successor Link (no Sunset yet). First, so a halt below still carries it.
     plug(BarkparkWeb.Plugs.FlatTreeDeprecation)
@@ -980,6 +986,9 @@ defmodule BarkparkWeb.Router do
   # table). Used by the Bulldocs paper-ingest API and any plugin that ships an
   # `auth: :ingest` route via the plugin highway.
   pipeline :ingest do
+    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
+    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.RequireIngestToken)
     # Resolve ONE tenant for the whole bucket (task-ef3eb91bf7f87d4c). This
@@ -1023,6 +1032,9 @@ defmodule BarkparkWeb.Router do
   # body is already parsed at the endpoint, so this pipeline only asserts JSON +
   # verifies the signature.
   pipeline :github_webhook do
+    # nosniff + referrer-policy, FIRST so a halted refusal carries them too
+    # (task-4a882dcfb3cd44bc; every other API pipeline already mounts it).
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.GithubWebhookSignature)
   end
