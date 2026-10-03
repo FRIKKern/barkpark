@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: schema-v2-field-types | budget: 1800tok -->
 # Schema Definition v2 — contract
 
-Source: `api/lib/barkpark/content/schema_definition.ex` (the canonical reference — the former SCHEMA_V2.md doc was removed; recover from git history). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
+Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
 
 ## Four v2 field types
 
@@ -13,7 +13,9 @@ Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
-Members are typed by a single `of` **shape descriptor** (required — a missing or non-object `of` is rejected as `array_missing_of`). `ordered: true` → up/down reorder buttons in the LiveView field component; `ordered: false` → unordered set. Drag reorder (Sortable.js + LiveView JS hook) deferred to Phase 1+.
+Members are typed by a single `of` **shape descriptor** (required — a missing or non-object `of` is rejected as `array_missing_of`). `ordered: true` → up/down reorder buttons in the LiveView field component; `ordered: false` → unordered set.
+
+**Empty rows do not publish** (ruling #47): a scalar or reference list holding `null`, a blank string or a ref without `_ref` refuses publish: 422 `validation_failed`, `details.<field>` names the row. Drafts keep it.
 
 ### `codelist` — registry-backed enum pinned to an issue
 
