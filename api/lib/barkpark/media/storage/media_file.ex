@@ -169,8 +169,16 @@ defmodule Barkpark.Media.Storage.MediaFile do
   True when `mime` is a browser-executable type (svg/html/xml/js). The base type
   is compared case-insensitively with any `; charset=…` parameter stripped.
   """
+  # THE WHOLE XML FAMILY (task-22c9cb88ff4f6076). The WHATWG MIME Sniffing standard
+  # defines an XML MIME type as any type whose subtype ends in `+xml` (plus
+  # `text/xml` / `application/xml`), and a browser renders every one of them as
+  # an XML document in which an XHTML-namespace `<script>` executes. The fixed
+  # list above named only svg/xhtml among them, so a `.rss` / `.atom` upload was
+  # served INLINE as `application/rss+xml` from the app origin — stored XSS.
+  # `text/xsl` is the legacy XSLT type a browser also applies as a stylesheet.
   def dangerous_mime?(mime) when is_binary(mime) do
-    base_mime(mime) in @dangerous_mimes
+    base = base_mime(mime)
+    base in @dangerous_mimes or String.ends_with?(base, "+xml") or base == "text/xsl"
   end
 
   def dangerous_mime?(_), do: false
