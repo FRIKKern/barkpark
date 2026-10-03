@@ -81,6 +81,16 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
       conn.assigns[:grant_scoped_read] == true ->
         grant_write?(conn)
 
+      # MIXED PRINCIPAL (task-90f53226cec546d5). A request carrying BOTH a
+      # bearer token and a signed-in user was admitted to this workspace by
+      # `ResolveWorkspace` on EITHER principal. When the token is not itself
+      # allowed into this workspace, the user is the one who got the request
+      # in, so the user's role must decide the write. Otherwise a read-only
+      # member plus a write token from ANY other workspace wrote here: the
+      # token arm below is workspace-blind.
+      foreign_token_with_user?(conn) ->
+        account_write?(conn)
+
       true ->
         with %{api_token: token} <- conn.assigns,
              true <- TenancyAuth.permits?(token, :write) do
@@ -88,6 +98,16 @@ defmodule BarkparkWeb.Plugs.RequireWritePermission do
         else
           _ -> account_write?(conn)
         end
+    end
+  end
+
+  defp foreign_token_with_user?(conn) do
+    with %{} = token <- conn.assigns[:api_token],
+         %Barkpark.Accounts.User{} <- conn.assigns[:current_user],
+         %{id: ws_id} when is_binary(ws_id) <- conn.assigns[:current_workspace] do
+      TenancyAuth.authorize(token, ws_id, :read) != :ok
+    else
+      _ -> false
     end
   end
 
