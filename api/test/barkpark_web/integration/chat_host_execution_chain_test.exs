@@ -45,7 +45,15 @@ defmodule BarkparkWeb.Integration.ChatHostExecutionChainTest do
     prev_emails = Application.get_env(:barkpark, :operator_emails)
     prev_ids = Application.get_env(:barkpark, :operator_token_ids)
 
-    Application.put_env(:barkpark, :claude_chat, enabled: true, binary: stub)
+    # Explicit global :self_hosted: since owner ruling #3 a multi-tenant
+    # instance defaults tenant sessions to the sandbox, so the host backstop
+    # this file pins is only reachable when the operator CHOSE the host profile.
+    Application.put_env(:barkpark, :claude_chat,
+      enabled: true,
+      binary: stub,
+      execution_profile: :self_hosted
+    )
+
     Application.put_env(:barkpark, :public_demo_studio, false)
     Application.put_env(:barkpark, :operator_emails, [])
     Application.put_env(:barkpark, :operator_token_ids, [])
