@@ -294,4 +294,33 @@ defmodule BarkparkWeb.Studio.OrgAdminLiveTest do
       assert html =~ ~s(href="/status")
     end
   end
+
+  # task-a0d8bdd7b5a518cc: the admin bar was checked only at mount, and the
+  # per-event operator check admits everyone while the allowlist is unset.
+  describe "an admin demoted after mount" do
+    test "can no longer mint a SCIM token", %{conn: conn} do
+      {org, _ws} = org_with_ws("demoteco")
+      default_ws = Tenancy.get_default_workspace()
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{
+          email: "org-admin-#{System.unique_integer([:positive])}@example.com",
+          password: "correct-horse-battery"
+        })
+
+      {:ok, _} = Tenancy.Auth.create_membership(default_ws.id, user.id, "admin", "user")
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+
+      {:ok, view, _html} =
+        live(init_test_session(conn, %{"user_session" => raw}), "/studio/org-admin")
+
+      {:ok, _} =
+        Tenancy.Members.update_role(default_ws.id, %{type: :user, id: user.id}, "member")
+
+      view |> element(~s([data-mint-scim="demoteco"])) |> render_click()
+
+      assert Repo.aggregate(from(t in Token, where: t.organization_id == ^org.id), :count) == 0,
+             "a demoted admin minted a SCIM token"
+    end
+  end
 end

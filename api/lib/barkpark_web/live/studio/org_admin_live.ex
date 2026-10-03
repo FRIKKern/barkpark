@@ -76,9 +76,31 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   # allowlist was armed must not keep minting).
   @impl true
   def handle_event(event, params, socket) do
-    if operator?(socket),
+    if operator?(socket) and still_admin?(socket),
       do: do_event(event, params, socket),
       else: {:noreply, put_flash(socket, :error, @operator_only)}
+  end
+
+  # The mount gate (`LiveAuth :admin`) is the only admin check, and
+  # `RequirePlatformOperator.permits?/1` admits everyone while the operator
+  # allowlist is unset (the single-tenant default). So a Default-workspace
+  # admin demoted after mount kept minting SCIM tokens and changing org MFA,
+  # session and auth-method policy until the socket reconnected
+  # (task-a0d8bdd7b5a518cc). Re-ask the same :admin bar on every event.
+  defp still_admin?(socket) do
+    case {socket.assigns[:current_user], socket.assigns[:api_token]} do
+      {%Barkpark.Accounts.User{} = user, nil} ->
+        case Barkpark.Tenancy.get_default_workspace() do
+          %{id: ws_id} -> Barkpark.Tenancy.Auth.authorize(user, ws_id, :admin) == :ok
+          _ -> false
+        end
+
+      {_, %Barkpark.Auth.ApiToken{} = token} ->
+        Barkpark.Tenancy.Auth.permits?(token, :admin)
+
+      _ ->
+        false
+    end
   end
 
   defp operator?(socket),
