@@ -176,7 +176,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
           }
         }
 
-        violations = paper_wall_violations(conn, ref) ++ paper_structure_violations(blocks)
+        violations =
+          paper_wall_violations(conn, ref, paper_scope_opts(conn, params)) ++
+            paper_structure_violations(blocks)
+
         json(conn, %{valid: violations == [], violations: violations})
     end
   end
@@ -186,8 +189,8 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # (status dropped: these are data inside a reply, not the reply's transport).
   # SHARED by the validate dry-run and the create-on-push arm below so the two
   # doors cannot drift: what the dry-run reports IS what a create enforces.
-  defp paper_wall_violations(conn, ref) do
-    ref |> paper_wall_tuples() |> Enum.map(&wall_violation(conn, &1))
+  defp paper_wall_violations(conn, ref, scope) do
+    ref |> paper_wall_tuples(scope) |> Enum.map(&wall_violation(conn, &1))
   end
 
   # The raw tuple list, BEFORE it is flattened into violation maps. The create
@@ -196,8 +199,22 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # run), and `validate_all/5` — correctly, for a dry-run that always answers
   # 200 — collects it beside the author's own refusals. Flatten first and that
   # distinction is gone; see `sync_create/5`.
-  defp paper_wall_tuples(ref) do
-    Barkpark.Content.AuthoringWall.validate_all(ref, "paper", ref.doc_id, ref.dataset)
+  #
+  # The gates run in the caller's scope, as the real write's wall does
+  # (`BlockOps` passes `workspace_id`/`project_id` to `AuthoringWall.enforce`).
+  # With no opts the tag registry and the duplicate scan read EVERY workspace:
+  # a workspace-B token's dry-run named workspace A's papers as duplicates and
+  # A's tags as suggestions (task-5322b07a9f2e7416).
+  defp paper_wall_tuples(ref, scope) do
+    opts = Keyword.take(scope, [:workspace_id, :project_id])
+
+    ref = %{
+      ref
+      | workspace_id: Keyword.get(opts, :workspace_id),
+        project_id: Keyword.get(opts, :project_id)
+    }
+
+    Barkpark.Content.AuthoringWall.validate_all(ref, "paper", ref.doc_id, ref.dataset, opts)
   end
 
   defp wall_violation(conn, tuple) do
@@ -490,7 +507,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
         }
       }
 
-      wall_tuples = paper_wall_tuples(ref)
+      wall_tuples = paper_wall_tuples(ref, scope)
 
       # THE OUTAGE IS NOT A VIOLATION. `validate_all/5` returns one flat list,
       # and exactly one member of it describes the WALL failing rather than the
