@@ -69,6 +69,33 @@ defmodule BarkparkWeb.TokenSeatRuleTest do
       assert flat_webhooks(raw).status == 403
     end
 
+    test "a bound service token with NO owner_user_id is judged on its own seat alone" do
+      ws = create_workspace!("seat-svc-#{System.unique_integer([:positive])}")
+      %{raw: raw, token: token} = bound_token(ws, ["read", "write", "admin"])
+      assert is_nil(token.owner_user_id)
+
+      assert flat_webhooks(raw).status == 200
+      assert TenancyAuth.authorize(token, ws.id, :admin) == :ok
+      assert TenancyAuth.authorize(token, ws.id, :write) == :ok
+    end
+
+    test "a provisioner-shaped Cloud credential (workspace-less, no owner, admin) is unaffected" do
+      raw = "seat-cloud-#{System.unique_integer([:positive])}"
+
+      {:ok, token} =
+        Repo.insert(
+          Auth.ApiToken.changeset(%Auth.ApiToken{}, %{
+            token_hash: Auth.ApiToken.hash_token(raw),
+            label: Auth.cloud_admin_label(),
+            dataset: "production",
+            permissions: ["read", "write", "admin"]
+          })
+        )
+
+      assert is_nil(token.workspace_id) and is_nil(token.owner_user_id)
+      assert flat_webhooks(raw).status == 200
+    end
+
     test "a workspace-less machine admin token (instance credential) still passes" do
       raw = "seat-machine-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(raw, "machine", "production", ["read", "write", "admin"])
