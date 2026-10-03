@@ -271,6 +271,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "stale_epoch",
              "steps_incomplete",
              "subscription_unpaid",
+             "support_cap_reached",
              "suspended",
              "taken",
              "team_id_required",

@@ -2064,6 +2064,73 @@ defmodule BarkparkCloud.Registry do
   """
   @spec enqueue_support_provision_job(Barkpark.t() | binary()) ::
           {:ok, ProvisionJob.t()} | {:error, :already_provisioning | Ecto.Changeset.t()}
+  @support_box_cap_default 3
+
+  @doc """
+  Owner ruling #37 (2026-10-03): how many CP-PROVISIONED support boxes `team`
+  may hold — its operator-set `support_box_cap`, else the platform default
+  (`config :barkpark_cloud, :support_box_cap_default`, #{@support_box_cap_default}
+  when unset). Register-only supports (the team's own boxes) never count.
+  """
+  @spec support_box_cap(map()) :: non_neg_integer()
+  def support_box_cap(%{support_box_cap: cap}) when is_integer(cap) and cap >= 0, do: cap
+
+  def support_box_cap(_team),
+    do: Application.get_env(:barkpark_cloud, :support_box_cap_default, @support_box_cap_default)
+
+  @doc """
+  The team's CP-provisioned support boxes: support rows that carry a
+  `provision_support` job (pending, claimed, done or failed — a failed one may
+  still hold a box until it tears down, so it counts). Register-only supports
+  have no such job and are not counted.
+  """
+  @spec count_provisioned_supports(Ecto.UUID.t()) :: non_neg_integer()
+  def count_provisioned_supports(team_id) do
+    Repo.one(
+      from b in Barkpark,
+        as: :bp,
+        where: b.team_id == ^team_id and b.fleet_role == "support",
+        where:
+          exists(
+            from j in ProvisionJob,
+              where: j.barkpark_id == parent_as(:bp).id and j.kind == "provision_support"
+          ),
+        select: count(b.id)
+    )
+  end
+
+  @doc """
+  Register a support row AND enqueue its `provision_support` job under the
+  team's support-box cap (owner ruling #37), in ONE transaction that holds the
+  team row lock — so two concurrent requests cannot both pass a cap of N with N
+  boxes held. `{:error, {:support_cap_reached, cap, count}}` names the ceiling.
+  """
+  def provision_support_capped(team, attrs) do
+    Repo.transaction(fn ->
+      locked = Repo.one!(from t in Team, where: t.id == ^team.id, lock: "FOR UPDATE")
+      cap = support_box_cap(locked)
+      held = count_provisioned_supports(team.id)
+
+      cond do
+        held >= cap ->
+          Repo.rollback({:support_cap_reached, cap, held})
+
+        true ->
+          with {:ok, support} <- register_support_barkpark(team, attrs),
+               {:ok, job} <- enqueue_support_provision_job(support) do
+            {support, job}
+          else
+            {:error, reason} -> Repo.rollback(reason)
+          end
+      end
+    end)
+  end
+
+  @doc "Operator-only: set (or with `nil`, clear) a team's support-box cap."
+  def set_support_box_cap(%Team{} = team, cap) when is_nil(cap) or is_integer(cap) do
+    team |> Team.support_cap_changeset(%{support_box_cap: cap}) |> Repo.update()
+  end
+
   def enqueue_support_provision_job(barkpark) do
     bp_id = barkpark_id(barkpark)
 
