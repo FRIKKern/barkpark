@@ -647,6 +647,74 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
       [docked] = blocks!(".bp-doc-sidebar.is-open") |> Enum.filter(&String.contains?(&1, "flex:"))
       assert value!(docked, ".bp-doc-sidebar.is-open (docked)", "flex") == "0 0 300px"
     end
+
+    test "the STANDARD bucket's closed strip is out of flow, and only there" do
+      # task-6e1fc2a473b8ea6a (owner ruling #57, 2026-10-03). At viewport 1024
+      # the pane is exactly 720px, the width the protected floor's
+      # `@container content (min-width: 720px)` gate asks of the reading
+      # column. Any IN-FLOW strip keeps that gate shut — its 1px border alone
+      # holds the column at 719px — so the closed strip leaves the flex row
+      # and sits in the column's top-right corner instead. Measured on the
+      # deployed desk with this rule injected: column 679px -> 720px, forced
+      # Georgia 580px = 52.50ch -> 607.625px = 55.00ch visible, overflow 0px.
+      #
+      # This is a lock WIDENING with a reason, not boilerplate: `position` and
+      # `inset` are outside `@geometry_props`, so the census above cannot see
+      # this rule, and deleting it would silently put the 1024 shortfall back.
+      [strip] =
+        blocks!(
+          ~S|html[data-width-bucket="standard"] .editor-with-preview > .bp-doc-sidebar:not([data-user-opened])|
+        )
+
+      assert value!(strip, "the standard-bucket closed strip", "position") == "absolute",
+             """
+             The standard-bucket closed strip is back in the flex row.
+
+             At viewport 1024 that costs the reading column the strip's 41px,
+             the column drops to 679px, the 720px content gate closes, and
+             forced Georgia falls from 55.00ch back to 52.50ch.
+             """
+
+      # Top-right corner, head height. `bottom: auto` is load-bearing: the
+      # `@container panel (max-width: 860px)` overlay rule declares
+      # `inset: 0 0 0 auto` on `.is-open`, and at 1024 the 720px pane matches
+      # it, so without the reset the strip would stretch to full height over
+      # the column's right edge (and over its scrollbar).
+      assert value!(strip, "the standard-bucket closed strip", "inset") == "0 0 auto auto"
+
+      # The containing block. Without it the absolute strip anchors to
+      # `.editor-panel` and lands on the document header's actions.
+      [cb] =
+        blocks!(
+          ~S|html[data-width-bucket="standard"] .editor-with-preview:has(> .bp-doc-sidebar:not([data-user-opened]))|
+        )
+
+      assert value!(cb, "the closed strip's containing block", "position") == "relative"
+
+      # SOURCE ORDER IS LOAD-BEARING. This selector and the painted-closed
+      # rule (`html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened])`,
+      # which declares `position: static`) are both (0,4,1), so the later rule
+      # wins. If this one moves above it, the strip silently returns to the flow.
+      src = decommented(css())
+
+      painted_at =
+        :binary.match(
+          src,
+          ~S|html:not([data-width-bucket="wide"]) .bp-doc-sidebar.is-open:not([data-user-opened]),|
+        )
+
+      strip_at =
+        :binary.match(
+          src,
+          ~S|html[data-width-bucket="standard"] .editor-with-preview > .bp-doc-sidebar:not([data-user-opened]) {|
+        )
+
+      assert {p, _} = painted_at
+      assert {s, _} = strip_at
+
+      assert s > p,
+             "the out-of-flow strip rule must come AFTER the painted-closed rule; equal specificity, so order decides"
+    end
   end
 
   describe "the reading measure's own cap — the binder at viewport 1280 (spd-b42)" do

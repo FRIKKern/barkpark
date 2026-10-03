@@ -112,15 +112,24 @@ defmodule Barkpark.Scim do
   @doc """
   Provision a user into `org` from SCIM attrs (`userName` = email). Creates a
   confirmed User (unusable password — they sign in via SSO / magic-link) and a
-  membership in every workspace of the org. Idempotent on email: an existing
-  user is re-used and (re)attached. Emits a `user_provisioned` audit event.
+  membership in every workspace of the org. Emits a `user_provisioned` audit
+  event.
+
+  An EXISTING account is adopted only under the enterprise-SSO rule
+  (`Sso.org_adopt/3`, #21297; OWNER RULING 2026-10-03 #1): the user already
+  holds a seat in one of the org's workspaces (re-provision stays idempotent),
+  or the email's domain is a VERIFIED domain of the org (an unconfirmed
+  account is reclaimed first). Any other existing account is refused with
+  `{:error, :email_not_owned_by_org}`; the org seats it by invitation instead.
+  Without this an org's SCIM token could seat any account, then sign in as it
+  through the org's SSO or hard-delete it.
   """
   @spec provision_user(Organization.t(), map()) :: {:ok, User.t()} | {:error, term()}
   def provision_user(%Organization{} = org, attrs) do
     email = attrs["userName"]
 
     with true <- is_binary(email) and email != "",
-         {:ok, user} <- upsert_user(email) do
+         {:ok, user} <- upsert_user(org, email) do
       attach_to_org(user, org)
       audit(org, user, "user_provisioned", %{"email" => email})
       {:ok, user}
@@ -172,10 +181,15 @@ defmodule Barkpark.Scim do
       keeps the global kill: the identity row is destroyed and the FK nilifies
       `owner_user_id`, so any surviving token would become an orphaned live
       credential nobody could ever find again.
+    * **HARD of a user seated outside the org degrades to SOFT** (OWNER RULING
+      2026-10-03 #1). The row is deleted only when, after this org's seats are
+      dropped, the user holds no seat anywhere else; otherwise the org-scoped
+      soft path above runs and the audit records `hard_requested: true,
+      hard: false`.
   """
   @spec deprovision_user(Organization.t(), User.t(), keyword()) :: {:ok, map()}
   def deprovision_user(%Organization{} = org, %User{} = user, opts \\ []) do
-    hard = Keyword.get(opts, :hard, false)
+    hard_requested = Keyword.get(opts, :hard, false)
     ws_ids = org |> workspace_ids()
 
     Repo.transaction(fn ->
@@ -189,6 +203,12 @@ defmodule Barkpark.Scim do
                 m.workspace_id in ^ws_ids
         )
 
+      # OWNER RULING 2026-10-03 #1: a HARD delete of a user still seated
+      # OUTSIDE this org (another org's workspace, or one in no org) degrades
+      # to SOFT. This org's seats and PATs go; the account and its other seats
+      # stay. One org's IdP never destroys an identity it does not own outright.
+      hard = hard_requested and not seated_outside?(user, ws_ids)
+
       # BEFORE the hard-delete nilifies owner_user_id (FK on_delete: :nilify_all).
       # Soft: org-scoped (+ NULL-workspace fail-closed). Hard: global — see
       # the blast-radius ruling in the @doc above.
@@ -196,6 +216,7 @@ defmodule Barkpark.Scim do
 
       audit(org, user, "user_deprovisioned", %{
         "hard" => hard,
+        "hard_requested" => hard_requested,
         "sessions_revoked" => sessions_revoked,
         "memberships_dropped" => dropped,
         "tokens_revoked" => tokens_revoked
@@ -207,9 +228,20 @@ defmodule Barkpark.Scim do
         sessions_revoked: sessions_revoked,
         memberships_dropped: dropped,
         tokens_revoked: tokens_revoked,
-        hard: hard
+        hard: hard,
+        hard_requested: hard_requested
       }
     end)
+  end
+
+  # Any user seat in a workspace that is not one of the deprovisioning org's.
+  defp seated_outside?(%User{id: user_id}, ws_ids) do
+    Repo.exists?(
+      from m in Membership,
+        where:
+          m.principal_type == "user" and m.principal_id == ^user_id and
+            m.workspace_id not in ^ws_ids
+    )
   end
 
   @doc """
@@ -354,10 +386,10 @@ defmodule Barkpark.Scim do
 
   # ── internals ──────────────────────────────────────────────────────────────
 
-  defp upsert_user(email) do
+  defp upsert_user(%Organization{id: org_id}, email) do
     case Accounts.get_user_by_email(email) do
       %User{} = user ->
-        {:ok, user}
+        Barkpark.Sso.org_adopt(org_id, user, email)
 
       _ ->
         # Unusable password — SCIM users authenticate via SSO / magic-link.

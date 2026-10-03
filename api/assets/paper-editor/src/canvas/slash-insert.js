@@ -88,6 +88,18 @@ export const CANVAS_SLASH_TYPES = new Set([
   "sheet",
 ]);
 
+// The insertable types the SERVER builds, like "+ Add block" does. The server's
+// canvas fence (Blocks.canvas_run_context/2) refuses any canvas batch that introduces
+// or patches a top-level terminal or stage block (outdated_terminal_canvas /
+// outdated_stage_canvas): both are boundary blocks with their own contextual editors,
+// not canvas-run nodes. A canvas pick of one of these therefore removes the "/query"
+// line and dispatches `bp-server-insert` {type, after_id}; the BarkparkPaperCanvas
+// hook forwards it as `paper-slash-insert` (default_block/2 + insert-after), and the
+// re-partitioned run renders the new block with its own editor. They stay members of
+// CANVAS_SLASH_TYPES so the slash menu and the palette keep offering them
+// (task-f3c8acd1e09a0eda, owner ruling 2026-10-03 #56).
+export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage"]);
+
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
 // MIRRORING blocks.ex default_block/2 (the server clause a per-block bp-slash-insert
 // would build). The canvas inserts the NODE for this block directly, so the block

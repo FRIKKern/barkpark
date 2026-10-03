@@ -2382,7 +2382,8 @@
       /* The overlay block also raises `z-index: 5`, and z-index applies to
          flex items whatever their `position` — so without this the strip
          would keep an overlay-tier stacking context it no longer earns.
-         Inert today (a 41px in-flow strip overlaps nothing), reset anyway:
+         Inert at `narrow` and `phone` (an in-flow strip overlaps nothing; at
+         `standard` the out-of-flow rule below sets its own), reset anyway:
          the contract of this rule is `.is-collapsed`'s geometry exactly, and
          a leftover from the state being overridden is how that contract
          quietly stops being true. */
@@ -2393,6 +2394,52 @@
     html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__title,
     html[data-inspector-pref="closed"] .bp-doc-sidebar.is-open:not([data-user-opened]) .bp-doc-sidebar__body {
       display: none;
+    }
+
+    /* ── At `standard` the closed strip is OUT OF FLOW (owner ruling #57,
+       2026-10-03; task-6e1fc2a473b8ea6a) ─────────────────────────────────
+       At viewport 1024 the paper editor's pane is exactly 720px, the width the
+       protected floor's `@container content (min-width: 720px)` gate asks of
+       the reading column. With the 41px strip in the flex row the column was
+       679px, the gate stayed shut, and the 660px cap left forced Georgia at
+       580px = 52.50ch. A narrower strip cannot fix that: its 1px border alone
+       holds the column at 719px. So at `standard` the strip leaves the flow
+       and sits in the reading column's top-right corner, at head height.
+
+       Measured on deployed guerrilla (1050e9903) with this rule injected,
+       forced Georgia 18px, 11.0469 px/ch probe: column 679px -> 720px, content
+       580px = 52.50ch -> 607.625px = 55.00ch, hit-test visible width the same
+       607.625px (the strip covers 0px of the content box and 24.8px of the
+       surface's own gutter), horizontal overflow 0px. Native face unchanged at
+       580px = 58.00ch. Viewport 1440 unchanged, inspector box still 300px.
+
+       BOTH CLOSED STATES. At `standard`, `:not([data-user-opened])` is the
+       painted-closed `.is-open` strip above AND the user's own `.is-collapsed`
+       strip (the toggle clears `sidebar_user_opened` when it collapses), so the
+       two keep one geometry, which is what D91 asks of the painted-closed rule.
+
+       `inset: 0 0 auto auto`, not a bare top/right: at 1024 the pane is under
+       860px, so the overlay block's `inset: 0 0 0 auto` also matches `.is-open`
+       and would stretch the strip down the column's right edge and over its
+       scrollbar. The containing block is `.editor-with-preview`, so the strip
+       sits below the document header rather than on its actions.
+
+       SOURCE ORDER IS LOAD-BEARING: the strip selector and the painted-closed
+       rule above are both (0,4,1), so this one must stay below it or that
+       rule's `position: static` wins. wide_geometry_lock_test.exs pins the order.
+
+       SCOPE: positive equality on `standard`. `wide` cannot match, so D149's
+       300px dock and the 1280/1440 rows do not move; `narrow` keeps its in-flow
+       strip. Known limit: with classic, space-taking scrollbars the column's
+       content box loses the scrollbar width, so the gate can stay shut there
+       whatever the strip does, and the strip covers the top of the track. */
+    html[data-width-bucket="standard"] .editor-with-preview:has(> .bp-doc-sidebar:not([data-user-opened])) {
+      position: relative;
+    }
+    html[data-width-bucket="standard"] .editor-with-preview > .bp-doc-sidebar:not([data-user-opened]) {
+      position: absolute;
+      inset: 0 0 auto auto;
+      z-index: 1;
     }
 
     /* ── The summoned destination (charter D155; D113 arithmetic, D127 Part 2) ──
@@ -2542,7 +2589,13 @@
        is inert there by construction. Recorded as an OWNED shortfall here
        rather than silently left to the next reader of the ladder; the lever
        that could move it is spd-b42's 1024 lever (the 41px strip against a
-       ~32px ceiling), or the shell itself. */
+       ~32px ceiling), or the shell itself.
+
+       UPDATE (owner ruling #57, 2026-10-03): the strip-width ceiling was wrong
+       — the strip's 1px border alone holds the column at 719px — and the 1024
+       default state is now FIXED by taking the closed strip out of flow at
+       `standard` (the rule after the painted-closed suppressors above).
+       Measured: viewport 1024 forced Georgia 607.625px = 55.00ch. */
     html[data-width-bucket="standard"] .bp-doc-sidebar.is-open[data-user-opened] {
       flex-basis: 260px;
     }
