@@ -298,7 +298,7 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
         {:cancel, :no_type_for_upsert}
 
       true ->
-        case content_mod(args).get_document(id, type, scope) do
+        case fetch_job_doc(args, id, type, scope) do
           {:ok, doc} ->
             do_upsert(scope, id, hydrate_task_edges(doc), args)
 
@@ -607,6 +607,23 @@ defmodule Barkpark.EdgeProjector.ProjectorWorker do
   defp doc_workspace_id(%{workspace_id: ws}) when is_binary(ws), do: ws
   defp doc_workspace_id(%{"workspace_id" => ws}) when is_binary(ws), do: ws
   defp doc_workspace_id(_), do: nil
+
+  # The upsert's document read carries the job's workspace/project, the same
+  # scope `do_upsert` writes the edges under (task-56910177b7e359ca). With no
+  # opts the dataset resolved to the Default workspace's, so a same-id Default
+  # document's references were written as this workspace's edges, or the job
+  # cancelled as :doc_gone. A job with no workspace keeps the 3-arity read.
+  defp fetch_job_doc(args, id, type, scope) do
+    opts =
+      []
+      |> maybe_put(:workspace_id, Map.get(args, "workspace_id"))
+      |> maybe_put(:project_id, Map.get(args, "project_id"))
+
+    case opts do
+      [] -> content_mod(args).get_document(id, type, scope)
+      opts -> content_mod(args).get_document(id, type, scope, opts)
+    end
+  end
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
