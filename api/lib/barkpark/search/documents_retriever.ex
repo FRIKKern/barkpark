@@ -105,7 +105,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
       # (the "filed separately" this comment used to name is now discharged).
       |> restrict_anonymous_to_public_types(scope, opts)
 
-    base = if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed)
+    # Which full-text index this caller matches against (owner ruling #20,
+    # task-3c68de39a19285c4). Only an admin (or the internal sentinel) may
+    # match words inside private fields; everyone else matches the public
+    # index, so a word that occurs only in a field they cannot read neither
+    # matches nor moves the count.
+    index = text_index(Keyword.get(opts, :caller_context))
+
+    base =
+      if browse?, do: base, else: where_match(base, parsed, terms, config, relaxed, index)
+
     base = if type, do: where(base, [d], d.type == ^type), else: base
     # Optional type allowlist (the finder's content types) — applied to `base`
     # so results, count, AND facets are all consistent over the same set.
@@ -140,7 +149,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
     docs =
       ranking_input
-      |> order_rank(parsed, config)
+      |> order_rank(parsed, config, index)
       |> limit(^limit)
       |> offset(^offset)
       |> maybe_light_select(Keyword.get(opts, :fields))
@@ -509,9 +518,58 @@ defmodule Barkpark.Search.DocumentsRetriever do
     |> Enum.uniq()
   end
 
-  defp where_match(queryable, parsed, terms, config, relaxed) do
-    include_dyn = include_dynamic(terms, parsed, config, relaxed)
-    exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed)
+  # `:full` — `search_vector`, every content string. `:public` —
+  # `coalesce(public_search_vector, search_vector)`: the trigger-maintained
+  # vector over the content with every restricted field removed, NULL (so the
+  # full vector stands in) when the document carries nothing restricted. See
+  # migration 20261003200000_add_documents_public_search_vector.
+  defp text_index(%Barkpark.Content.CallerContext{is_admin: true}), do: :full
+  defp text_index(:internal), do: :full
+  defp text_index(_ctx), do: :public
+
+  defp ts_match(:full, term),
+    do: dynamic([d], fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term))
+
+  defp ts_match(:public, term),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(?.public_search_vector, ?.search_vector) @@ plainto_tsquery('english', ?)",
+          d,
+          d,
+          ^term
+        )
+      )
+
+  defp ts_phrase_match(:full, phrase),
+    do: dynamic([d], fragment("?.search_vector @@ phraseto_tsquery('english', ?)", d, ^phrase))
+
+  defp ts_phrase_match(:public, phrase),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(?.public_search_vector, ?.search_vector) @@ phraseto_tsquery('english', ?)",
+          d,
+          d,
+          ^phrase
+        )
+      )
+
+  # The slug substring arm reads `slug_text`, a copy of `content.slug` that is
+  # not schema-aware. For the public index it only runs on documents with no
+  # restricted field (public vector NULL); elsewhere a public slug still matches
+  # word-for-word through the public vector's slug component.
+  defp slug_match(:full, pattern), do: dynamic([d], ilike(d.slug_text, ^pattern))
+
+  defp slug_match(:public, pattern),
+    do:
+      dynamic([d], fragment("?.public_search_vector IS NULL", d) and ilike(d.slug_text, ^pattern))
+
+  defp where_match(queryable, parsed, terms, config, relaxed, index) do
+    include_dyn = include_dynamic(terms, parsed, config, relaxed, index)
+    exclude_dyn = exclude_dynamic(Map.get(parsed, :excludes, []), relaxed, index)
 
     queryable =
       if include_dyn,
@@ -525,7 +583,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end
   end
 
-  defp include_dynamic(terms, parsed, config, relaxed) do
+  defp include_dynamic(terms, parsed, config, relaxed, index) do
     threshold = TypoPolicy.threshold(config, relaxed)
 
     term_dyn =
@@ -536,9 +594,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
         clause =
           dynamic(
             [d],
-            fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
+            ^ts_match(index, term) or
               ilike(d.title, ^pattern) or
-              ilike(d.slug_text, ^pattern)
+              ^slug_match(index, pattern)
           )
 
         # Fuzzy title arm only for tokens long enough to be meaningful.
@@ -588,17 +646,13 @@ defmodule Barkpark.Search.DocumentsRetriever do
     # also still matches its words individually via the term arms above, since
     # each phrase is folded into `terms` by search_terms/1).
     Enum.reduce(Map.get(parsed, :phrases, []), term_dyn, fn phrase, dyn ->
-      clause =
-        dynamic(
-          [d],
-          fragment("?.search_vector @@ phraseto_tsquery('english', ?)", d, ^phrase)
-        )
+      clause = ts_phrase_match(index, phrase)
 
       if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
     end)
   end
 
-  defp exclude_dynamic(excludes, relaxed) do
+  defp exclude_dynamic(excludes, relaxed, index) do
     # NOTE the empty config: the exclude arm has never read the surface config's
     # thresholds, so it keeps the code defaults here. Routed through the shared
     # reader anyway so the defaults cannot drift from the include arm's.
@@ -620,9 +674,9 @@ defmodule Barkpark.Search.DocumentsRetriever do
       clause =
         dynamic(
           [d],
-          fragment("?.search_vector @@ plainto_tsquery('english', ?)", d, ^term) or
+          ^ts_match(index, term) or
             ilike(d.title, ^pattern) or
-            ilike(d.slug_text, ^pattern) or
+            ^slug_match(index, pattern) or
             fragment("similarity(?, ?) > ?", d.title, ^term, ^threshold)
         )
 
@@ -630,7 +684,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
     end)
   end
 
-  defp order_rank(queryable, parsed, config) do
+  defp order_rank(queryable, parsed, config, index) do
     # Rank on the WHOLE positive query (every term + phrase), not just the first
     # token. plainto_tsquery AND-chains the words, so a multi-word query ranks
     # on ALL of them; for a single term this is identical to the old hd(terms).
@@ -666,7 +720,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
           {:desc, exact_title_key(positive_query)},
           # 2) Relevance: GREATEST(full-text rank, weighted per-field similarity)
           #    + the weighted-tag boost.
-          {:desc, relevance_key(positive_query, tag_terms, config)},
+          {:desc, relevance_key(positive_query, tag_terms, config, index)},
           # 3) Recency tiebreak.
           {:desc, dynamic([d], d.updated_at)},
           # 4) id PK — final unique tiebreaker so the whole rank order is TOTAL
@@ -705,12 +759,30 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # scan, and this is a GREATEST of scalar signals, not a single-column
   # distance. The pool is already bounded to 500 rows upstream, so the per-row
   # cost is negligible; leave it. See D49(d).
-  defp relevance_key(positive_query, tag_terms, config) do
+  defp relevance_key(positive_query, tag_terms, config, index) do
     ts_rank =
-      dynamic(
-        [d],
-        fragment("ts_rank(?.search_vector, plainto_tsquery('english', ?))", d, ^positive_query)
-      )
+      case index do
+        :full ->
+          dynamic(
+            [d],
+            fragment(
+              "ts_rank(?.search_vector, plainto_tsquery('english', ?))",
+              d,
+              ^positive_query
+            )
+          )
+
+        :public ->
+          dynamic(
+            [d],
+            fragment(
+              "ts_rank(coalesce(?.public_search_vector, ?.search_vector), plainto_tsquery('english', ?))",
+              d,
+              d,
+              ^positive_query
+            )
+          )
+      end
 
     field_sim = weighted_field_similarity(positive_query, config)
     boost = tag_boost_key(tag_terms)
