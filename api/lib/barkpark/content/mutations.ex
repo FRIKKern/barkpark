@@ -510,18 +510,6 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
-  defp create_if_not_exists_existing(id, type, dataset, opts) do
-    case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
-      {:ok, _} = found ->
-        found
-
-      _ ->
-        if DraftId.draft?(id),
-          do: {:error, :not_found},
-          else: Content.get_document(DraftId.published_id(id), type, dataset, opts)
-    end
-  end
-
   defp apply_one(%{"publish" => %{"id" => id, "type" => type}}, dataset, opts) do
     case Content.publish_document(id, type, dataset, opts) do
       {:ok, doc} ->
@@ -767,6 +755,18 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  defp create_if_not_exists_existing(id, type, dataset, opts) do
+    case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
+      {:ok, _} = found ->
+        found
+
+      _ ->
+        if DraftId.draft?(id),
+          do: {:error, :not_found},
+          else: Content.get_document(DraftId.published_id(id), type, dataset, opts)
+    end
+  end
 
   # The first @id_type_verbs key present with a MAP payload that omits `id` or
   # `type`, as `{verb, missing_keys}`. `nil` means "not this defect" — either no
