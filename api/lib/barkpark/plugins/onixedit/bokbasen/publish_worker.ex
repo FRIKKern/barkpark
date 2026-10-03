@@ -88,8 +88,10 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
   use Oban.Worker,
     queue: :bokbasen,
     max_attempts: 5,
+    # `workspace_id` / `project_id` join the key (owner ruling #51, RQ6): a
+    # same-id book in another tenant is a different job, not a duplicate.
     unique: [
-      keys: [:document_id],
+      keys: [:document_id, :workspace_id, :project_id],
       states: [:available, :scheduled, :executing],
       period: 60
     ]
