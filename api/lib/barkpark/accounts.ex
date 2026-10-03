@@ -635,7 +635,7 @@ defmodule Barkpark.Accounts do
       # never a 500. Mirrors confirm_user/1 above.
       txn =
         Repo.transaction(fn ->
-          case do_reset_password(user, attrs, reset_mfa: true) do
+          case do_reset_password(user, attrs, reset_mfa: true, keep_token_id: tok.id) do
             {:ok, reset_user, revoked} ->
               case Repo.delete(tok, stale_error_field: :id) do
                 {:ok, _} -> {reset_user, revoked}
@@ -682,11 +682,29 @@ defmodule Barkpark.Accounts do
     case Repo.update(changeset) do
       {:ok, user} ->
         {:ok, revoked} = revoke_all_user_sessions(user)
+        retire_credential_links(user, Keyword.get(opts, :keep_token_id))
         {:ok, user, revoked}
 
       err ->
         err
     end
+  end
+
+  # A reset or change consumed only the ONE reset link it was handed; every
+  # other outstanding reset link and magic-login link kept working, so whoever
+  # once read the mailbox could reset again (wiping TOTP) or sign in after the
+  # owner recovered the account (task-07f85a21a3119c40). The link being consumed
+  # (`keep_token_id`) is left for the caller's own stale-guarded delete.
+  defp retire_credential_links(%User{id: uid}, keep_token_id) do
+    query =
+      from t in UserEmailToken, where: t.user_id == ^uid and t.context in ["reset", "login"]
+
+    query =
+      if is_binary(keep_token_id),
+        do: from(t in query, where: t.id != ^keep_token_id),
+        else: query
+
+    Repo.delete_all(query)
   end
 
   defp fetch_email_token(plaintext, context) do
