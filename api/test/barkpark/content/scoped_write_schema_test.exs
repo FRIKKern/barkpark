@@ -19,7 +19,7 @@ defmodule Barkpark.Content.ScopedWriteSchemaTest do
   import Barkpark.TenancyFixtures
 
   alias Barkpark.Content
-  alias Barkpark.Content.Document
+  alias Barkpark.Content.{CallerContext, Document}
   alias Barkpark.Crypto.FieldCipher
   alias Barkpark.Repo
 
@@ -100,6 +100,47 @@ defmodule Barkpark.Content.ScopedWriteSchemaTest do
         )
 
       assert FieldCipher.encrypted?(raw_content(doc)["secret"])
+    end
+
+    # Rows written before this fix hold the marked field in PLAINTEXT. Reads
+    # must keep working on them (no crash, no 500), an admin reveal passes the
+    # plaintext through, and the next save seals it.
+    test "a legacy plaintext row still reads, reveals, and is sealed on its next save",
+         %{scope: scope} do
+      type = unique_type("vault")
+      plain = [%{"name" => "secret", "type" => "string"}]
+      marked = [%{"name" => "secret", "type" => "string", "encrypted" => true}]
+
+      # The legacy row: written while nothing marked the field.
+      register!(type, plain, %{}, scope)
+
+      {:ok, legacy} =
+        Content.upsert_document(
+          type,
+          %{"doc_id" => "legacy", "title" => "vault", "content" => %{"secret" => "old-plain"}},
+          @dataset,
+          scope
+        )
+
+      register!(type, marked, %{}, scope)
+
+      {:ok, read} = Content.get_document(legacy.doc_id, type, @dataset, scope)
+      assert read.content["secret"] == "old-plain"
+
+      {:ok, schema} = Content.resolve_schema(type, @dataset, scope)
+      admin = %CallerContext{principal_type: :api_token, is_admin: true}
+      assert {:ok, revealed} = Content.reveal_fields(read, schema, @dataset, admin)
+      assert revealed.content["secret"] == "old-plain"
+
+      {:ok, saved} =
+        Content.upsert_document(
+          type,
+          %{"doc_id" => "legacy", "title" => "vault", "content" => %{"secret" => "old-plain"}},
+          @dataset,
+          scope
+        )
+
+      assert FieldCipher.encrypted?(raw_content(saved)["secret"])
     end
   end
 
