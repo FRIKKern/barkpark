@@ -66,7 +66,7 @@ defmodule BarkparkWeb.Contract.CapabilitiesTokenPublicReadTest do
 
   test "the key feeds the etag: public-read and read bodies do not share one", %{conn: conn} do
     pr = caps(conn, mint(["public-read"]), "?token=1")
-    rd = caps(build_conn(), mint(["read"]), "?token=1")
+    rd = caps(scoped_conn(), mint(["read"]), "?token=1")
     refute pr["etag"] == rd["etag"]
   end
 end
