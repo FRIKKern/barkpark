@@ -95,12 +95,13 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "explicit [] — unscoped global read",
     "barkpark/content/edges.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), edge write path",
-    "barkpark/content/encryption.ex:encrypt_marked" => "unscoped 2-arity, WRITE-path cipher",
+    "barkpark/content/encryption.ex:schema_for_write" =>
+      "unscoped arm only (no stamped scope), WRITE-path cipher",
     "barkpark/content/papers.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), block synthesis",
     "barkpark/content/writer.ex:validate_document" => "unscoped 2-arity, write validation",
-    "barkpark/content/writer.ex:apply_initial_values" => "unscoped 2-arity, write scaffold",
-    "barkpark/content/writer.ex:scaffold_or_initial_values" => "unscoped 2-arity, write scaffold",
+    "barkpark/content/writer.ex:schema_for_create" =>
+      "unscoped arm only (no stamped scope), write scaffold",
 
     # -- scoped, but the result never reaches an Envelope redaction function.
     "barkpark/content/expand.ex:load_schemas" =>
