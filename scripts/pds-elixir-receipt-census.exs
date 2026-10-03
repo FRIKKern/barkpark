@@ -1282,7 +1282,7 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete} => {"BarkparkWeb.MemberController.delete/2", 1, "29471808"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token} => {"BarkparkWeb.MemberController.revoke_token/2", 1, "53244686"},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete} => {"BarkparkWeb.LegacyController.delete/2", 1, "95326188"},
-    {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "96936068"},
+    {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete} => {"BarkparkWeb.WorkspaceController.delete/2", 1, "75946866"},
     {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete} => {"BarkparkWeb.MediaController.delete/2", 1, "17508246"},
     {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke} => {"BarkparkWeb.AccessController.revoke/2", 1, "9419452"},
     {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete} => {"BarkparkWeb.AppTokenController.delete/2", 1, "7533378"},
