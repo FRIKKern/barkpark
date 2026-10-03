@@ -43,7 +43,7 @@ defmodule Barkpark.Content.Errors do
       "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document — or, if this publish REPLACES it, declare content.supersedes with that id and republish.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
     "schema_has_documents" =>
-      "Delete the documents of this type first, or repeat the request with ?force=true to remove the schema and orphan them.",
+      "Delete the documents of this type first, or repeat the delete with force to remove the schema and orphan them: `bp schema delete <name> --force`, or ?force=true over HTTP.",
     "invalid_filter" =>
       "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
     "forbidden_field" =>
@@ -1167,7 +1167,8 @@ defmodule Barkpark.Content.Errors do
       code: "schema_has_documents",
       message:
         "schema still has #{count} document(s) of this type; " <>
-          "delete them or pass ?force=true to remove the schema and orphan them",
+          "delete them, or force it to remove the schema and orphan them " <>
+          "(bp: --force; HTTP: ?force=true)",
       status: 409,
       details: %{count: count}
     }

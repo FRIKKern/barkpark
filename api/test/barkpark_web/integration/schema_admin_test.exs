@@ -224,6 +224,13 @@ defmodule BarkparkWeb.Integration.SchemaAdminTest do
       assert body["error"]["code"] == "schema_has_documents"
       assert body["error"]["details"]["count"] == 2
 
+      # task-7da3daaa9db83d3f: the remedy names BOTH spellings. A bp user cannot
+      # type `?force=true`; the verb's flag is --force.
+      for text <- [body["error"]["message"], body["error"]["hint"]] do
+        assert text =~ "--force", "the refusal must name the CLI flag: #{text}"
+        assert text =~ "?force=true", "the refusal must keep the HTTP spelling: #{text}"
+      end
+
       # The refusal must be real — the schema is still there.
       assert {:ok, _} = Content.get_schema("populated", "test")
     end
