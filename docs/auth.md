@@ -1,8 +1,8 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer tokens backed by `api_tokens` (SHA256 hash + permission list);
-LiveViews read `session["api_token"]` via `LiveAuth` `on_mount` hooks.
+Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
+(SHA256 hash + permission list); LiveViews read `session["api_token"]` via `LiveAuth` `on_mount` hooks.
 
 > Accounts, sessions, MFA, login tickets, field visibility, row ownership:
 > [auth-user-sessions.md](auth-user-sessions.md).
@@ -32,7 +32,7 @@ lacking `write` gets `403`; reads stay available.
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
 | `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
-| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` |
+| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
@@ -44,7 +44,7 @@ Orthogonal axes: `admin` is a superset on the PERMISSION axis ONLY (`admin` ⊃
 `ops` ⊃ `read`+`write`; `:ops` stays separate so Bokbasen operators never see the
 encrypted `client_secret`) and confers **no membership anywhere**.
 
-Three tiers, never interchangeable:
+Three tiers:
 `RequireAdmin`: `permissions` ONLY, no membership. `Tenancy.Auth.authorize/3`:
 member? AND the token's GLOBAL `permissions`. `workspace_admin?/2`: the
 membership ROLE alone.
@@ -72,10 +72,9 @@ INSUFFICIENT. See [instance-operator-tier.md](contracts/instance-operator-tier.m
 
 ## Minting `write`/`admin`
 
-`POST …/v1/tokens` mints `public-read`/`read` only. `…/v1/tokens/elevated`
-(`Auth.mint_delegated_token/3`) needs flat `admin` AND an admin seat, mints at
-most the caller's set, seats it, audits `token_minted`:
-`bp token create --label X --permissions read,write,admin`.
+Only `POST …/v1/tokens/elevated` (`Auth.mint_delegated_token/3`) mints them:
+caller has flat `admin` AND an admin seat, gets at most its own set; seated,
+audited `token_minted`. `bp token create --label X --permissions read,write,admin`.
 
 ## LiveView `on_mount` hooks
 
