@@ -887,6 +887,13 @@ defmodule BarkparkWeb.Router do
   # register flood neither starves the other anonymous writes from that IP nor
   # turns the API-shaped 60/min ceiling into a 3600-mail/hour amplifier against a
   # third party. Only `POST /v1/auth/register` rides this.
+  # Per-IP write meter for the four browser auth form POSTs (owner ruling #31).
+  # The method class makes a POST a `:write`: 60 a minute, keyed on the client
+  # IP because a browser form carries no bearer. See the scope that mounts it.
+  pipeline :browser_auth_write_meter do
+    plug(BarkparkWeb.Plugs.RateLimit)
+  end
+
   pipeline :auth_register_throttle do
     plug(BarkparkWeb.Plugs.AuthWriteRateLimit, class: :register)
   end
@@ -1265,8 +1272,6 @@ defmodule BarkparkWeb.Router do
     post("/login", SessionController, :create)
     # Account sign-in (studio-user-login): email+password against the core
     # auth system, with the TOTP/recovery second step. Mints `user_session`.
-    post("/login/account", SessionController, :account)
-    post("/login/mfa", SessionController, :mfa)
     post("/logout", SessionController, :delete)
 
     # Browser password-reset (login-brand-ux): "Forgot password?" page + the
@@ -1274,7 +1279,6 @@ defmodule BarkparkWeb.Router do
     # request-reset flow was already sending — it 404'd in a browser before
     # these routes). Anti-enumeration mirrors POST /v1/auth/request-reset.
     get("/login/reset", SessionController, :reset_request_form)
-    post("/login/reset", SessionController, :reset_request)
     get("/auth/reset/:token", SessionController, :reset_form)
     post("/auth/reset/:token", SessionController, :reset_submit)
 
@@ -1283,13 +1287,26 @@ defmodule BarkparkWeb.Router do
     # only the JSON POST /magic-login existed). Consume routes through the same
     # second-factor step as password login (no 2FA bypass).
     get("/login/magic", SessionController, :magic_request_form)
-    post("/login/magic", SessionController, :magic_request)
     get("/auth/magic/:token", SessionController, :magic)
 
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
     # session api_token (no paste), redirect to /studio. Minted by
     # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.
     get("/login/ticket/:ticket", SessionController, :ticket)
+  end
+
+  # The four browser auth form POSTs carry the per-IP write meter (owner ruling
+  # #31, 2026-10-03): 60 a minute per address, shared with every other
+  # anonymous write from that address, so one address cannot try passwords
+  # across every account. The pages above stay unmetered. Pinned by
+  # BarkparkWeb.BrowserAuthPostRateLimitTest.
+  scope "/", BarkparkWeb do
+    pipe_through([:browser, :browser_auth_write_meter])
+
+    post("/login/account", SessionController, :account)
+    post("/login/mfa", SessionController, :mfa)
+    post("/login/reset", SessionController, :reset_request)
+    post("/login/magic", SessionController, :magic_request)
   end
 
   # ── dwb-7: login-ticket mint (api_token bearer) ─────────────────────────
