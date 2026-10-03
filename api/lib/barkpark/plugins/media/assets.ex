@@ -20,7 +20,7 @@ defmodule Barkpark.Plugins.Media.Assets do
   """
   @spec ensure_for_upload(%MediaFile{}) :: {:ok, Document.t()} | {:error, term()}
   def ensure_for_upload(%MediaFile{} = file) do
-    case find_by_media_file_id(file.id, file.dataset) do
+    case find_by_media_file_id(file.id, file.dataset, MediaFile.scope_opts(file)) do
       %Document{} = doc ->
         {:ok, doc}
 
@@ -251,7 +251,7 @@ defmodule Barkpark.Plugins.Media.Assets do
       dataset
       |> Barkpark.Media.list_files()
       |> Enum.reduce({0, 0, []}, fn file, {c, s, errs} ->
-        case find_by_media_file_id(file.id, dataset) do
+        case find_by_media_file_id(file.id, dataset, MediaFile.scope_opts(file)) do
           %Document{} ->
             {c, s + 1, errs}
 

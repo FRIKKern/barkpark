@@ -258,16 +258,19 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
       refute conn.status == 500,
              "a token-less principal raised instead of being answered: #{conn.status} #{conn.resp_body}"
 
-      # WHICH GATE: the NOT-FOUND oracle — 404 `not_found`, not a 403. A
-      # cross-tenant caller must not learn the resource exists, so the refusal is
-      # indistinguishable from a route miss BY DESIGN. Pinning it is what stops
-      # the assertion from also passing on a genuine 403 (which would leak
-      # existence) or on an authentication failure.
-      assert conn.status == 404,
-             "expected an honest refusal or not-found, got #{conn.status} #{conn.resp_body}"
+      # WHICH ANSWER. This used to pin a 404 `not_found`, but that 404 was not a
+      # gate. It was the bug task-b9bca4e256a79387 fixed: `Checkout` read the
+      # asset doc WITHOUT the blob's scope, resolved the dataset inside the
+      # Default project, and so could never find an asset living in this
+      # (non-Default) workspace. The caller is a MEMBER of the workspace, not a
+      # cross-tenant visitor, so there is nothing to hide from them. With the read
+      # scoped, the member reaches `admin?/1` (the raise this test exists for),
+      # is answered `false`, and the holder-only release of an asset nobody
+      # holds succeeds: 200, with this file's id in the body.
+      assert conn.status == 200,
+             "expected the member's undo-checkout to be answered, got #{conn.status} #{conn.resp_body}"
 
-      err = Jason.decode!(conn.resp_body)["error"]
-      assert err["code"] == "not_found"
+      assert Jason.decode!(conn.resp_body)["result"]["id"] == file_id
     end
   end
 end

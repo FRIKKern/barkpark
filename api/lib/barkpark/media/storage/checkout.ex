@@ -38,7 +38,11 @@ defmodule Barkpark.Media.Storage.Checkout do
   end
 
   defp fetch_doc(%MediaFile{} = file, dataset) do
-    case Barkpark.Plugins.Media.Assets.find_by_media_file_id(file.id, dataset) do
+    case Barkpark.Plugins.Media.Assets.find_by_media_file_id(
+           file.id,
+           dataset,
+           MediaFile.scope_opts(file)
+         ) do
       %Document{} = doc -> doc
       nil -> {:error, :not_found}
     end

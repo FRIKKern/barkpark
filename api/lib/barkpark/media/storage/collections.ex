@@ -283,7 +283,7 @@ defmodule Barkpark.Media.Storage.Collections do
           {:ok, Document.t()} | {:error, term()}
   def remove_member(collection_id, %MediaFile{} = file, dataset, opts \\ []) do
     with {:ok, _collection} <- get(collection_id, dataset, opts),
-         %Document{} = doc <- Media.asset_doc_for_file(file, dataset) do
+         %Document{} = doc <- Media.asset_doc_for_file(file, dataset, MediaFile.scope_opts(file)) do
       patch_membership(doc, file, dataset, collection_id, :remove)
     else
       nil -> {:error, :not_found}
