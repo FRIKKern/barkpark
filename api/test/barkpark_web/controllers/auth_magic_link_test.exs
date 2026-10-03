@@ -75,4 +75,38 @@ defmodule BarkparkWeb.AuthMagicLinkTest do
       assert json_response(resp, 400)
     end
   end
+
+  # task-205e7058f725bef7: the JSON door minted a session from the emailed token
+  # alone, while its browser twin sends a TOTP user to the second step. A
+  # mailbox holder therefore bypassed the account's TOTP.
+  describe "POST /v1/auth/magic-login for a TOTP user" do
+    import Barkpark.TotpTestHelper
+
+    setup do
+      u = user("totp-magic@example.com")
+      secret = NimbleTOTP.secret()
+      {:ok, u, _codes} = Accounts.enable_totp(u, secret, totp_code_stable!(secret))
+      %{user: u, secret: secret}
+    end
+
+    test "the token alone is refused with mfa_required and no session", %{conn: conn} do
+      token = issue_link("totp-magic@example.com")
+      resp = post_json(conn, "/v1/auth/magic-login", %{token: token})
+
+      assert resp.status == 401, "a TOTP account signed in on the link alone: #{resp.resp_body}"
+      assert json_response(resp, 401)["error"]["code"] == "mfa_required"
+    end
+
+    test "the token plus a valid TOTP code signs in", %{conn: conn, secret: secret} do
+      token = issue_link("totp-magic@example.com")
+
+      resp =
+        post_json(conn, "/v1/auth/magic-login", %{
+          token: token,
+          totp_code: totp_code_stable!(secret)
+        })
+
+      assert json_response(resp, 201)["token"]
+    end
+  end
 end

@@ -594,17 +594,28 @@ defmodule BarkparkWeb.AuthController do
   and issues a session. Unknown, already-used, and expired tokens all return
   the same generic `invalid_token` error (no oracle).
   """
-  def magic_login(conn, %{"token" => token}) do
+  def magic_login(conn, %{"token" => token} = params) do
     case Accounts.consume_login_token(token) do
       {:ok, user} ->
         # era-bl-allowed-auth-methods: a magic link must not be the side door
         # around an SSO-only policy. The token is already consumed (single-use
         # is the anti-replay contract and holds regardless), so a refusal here
         # costs the link, not the policy.
-        if BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "magic_link") do
-          BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "magic_link")
-        else
-          issue_session(conn, user)
+        #
+        # Nor around the user's own TOTP (task-205e7058f725bef7): the browser
+        # twin (`SessionController` -> `complete_sign_in/4`) sends a TOTP user
+        # to the second step, and this JSON door used to mint the session from
+        # the emailed token alone. A TOTP user must send `totp_code` or
+        # `recovery_code` with the token, the same contract as `login/2`.
+        cond do
+          BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "magic_link") ->
+            BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "magic_link")
+
+          user.totp_enabled ->
+            login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
+
+          true ->
+            issue_session(conn, user)
         end
 
       :error ->
