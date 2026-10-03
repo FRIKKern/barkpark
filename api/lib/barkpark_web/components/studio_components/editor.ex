@@ -149,12 +149,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # Gyldendal parity E1.5 — the schema field's `description`, rendered as
   # Sanity does: muted helper text directly under the title, above the input.
   attr :description, :string, default: nil
+  # The id of the control this label names (`<label for>`), so a screen reader
+  # announces the field title on focus. nil when the field has no single
+  # labelable control (`FieldInputs.label_target/3`).
+  attr :for, :string, default: nil
   slot :inner_block, required: true
 
   def editor_field(assigns) do
     ~H"""
     <div class={"editor-field #{if @errors != [], do: "has-error"} #{if @warnings != [], do: "has-warning"}"}>
-      <label class="editor-field-label">
+      <label class="editor-field-label" for={@for}>
         <%= @label %>
         <%= if @required do %><span class="field-required">*</span><% end %>
         <%= if @type do %><span class="editor-field-type"><%= @type %></span><% end %>
@@ -420,8 +424,10 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <%!-- Gyldendal parity E1.5: the type name is NOT shown next to the
            label any more ("Kort-layout select" read as a label leak); Sanity
            never surfaces a field's type to the author. --%>
+      <% label_prefix = "doc-field-" <> Barkpark.Content.DraftId.published_id(to_string(@doc_key)) <> "-" %>
       <.editor_field
         label={@field["title"] || field_name}
+        for={FieldInputs.label_target(@field, @editor_form, label_prefix)}
         required={required?}
         errors={errors}
         warnings={warnings}
@@ -441,6 +447,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_type={@doc_type}
             document_rev={@document_rev}
             form_gen={@form_gen}
+            id_prefix={label_prefix}
           />
         <% end %>
       </.editor_field>
@@ -752,8 +759,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 required={(get_title_validation(@editor_schema) || %{})["required"] == true}
                 errors={Map.get(@validation_errors, "title", [])}
                 warnings={Map.get(@validation_warnings, "title", [])}
+                for={"doc-field-" <> Barkpark.Content.DraftId.published_id(@editor_doc.doc_id) <> "-title"}
               >
-                <input type="text" name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
+                <input type="text" id={"doc-field-" <> Barkpark.Content.DraftId.published_id(@editor_doc.doc_id) <> "-title"} name="doc[title]" value={@editor_form["title"]} class="form-input" phx-debounce="300" />
               </.editor_field>
               <%= if @editor_schema do %>
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
