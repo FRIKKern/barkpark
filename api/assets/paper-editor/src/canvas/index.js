@@ -1852,6 +1852,13 @@ class BpPaperCanvas extends HTMLElement {
           this._editor.commands.setNode("paragraph");
           return true;
         }
+        // A plain quote turns back into text the same way, keeping its id
+        // (owner ruling 2026-10-03 #62), instead of joining the block above.
+        if ($from.depth === 1 && $from.parent.type.name === "blockquote") {
+          event.preventDefault();
+          turnTopLevelInto(this._editor, $from.index(0), "paragraph");
+          return true;
+        }
       }
     }
     // P5 MARKDOWN SOURCE-MODE — Mod-Shift-m (Cmd-Shift-M on mac / Ctrl-Shift-M
