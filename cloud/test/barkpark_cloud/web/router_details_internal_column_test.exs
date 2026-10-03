@@ -102,7 +102,11 @@ defmodule BarkparkCloud.Web.RouterDetailsInternalColumnTest do
   # `state` and `spam` (PATCH …/forms/submissions/:sub_id), `ids` and `format`
   # (POST …/forms/export). Each is a key the caller typed; `forms_enabled` is
   # the column and is never named.
-  @router_details_maps 16
+  # 16 -> 17 (task-a21cac2c018f852e, 2026-10-03): POST /v1/sites/:id/deploy
+  # refuses a non-https `artifact_url` with `details: %{artifact_url: [...]}`.
+  # It is the REQUEST BODY field the caller typed. `deployments.artifact_url`
+  # shares the name but is user-supplied data, not an internal column.
+  @router_details_maps 17
 
   ## ────────────────────────────────────────────────────────────────────
   ## PART 1 — the driven reachability table

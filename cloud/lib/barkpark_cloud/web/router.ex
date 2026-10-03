@@ -9767,6 +9767,26 @@ defmodule BarkparkCloud.Web.Router do
           site.kind in ["static", "node"] ->
             deploy_static_site(conn, site)
 
+          # task-a21cac2c018f852e: the builder on the team's box reads a
+          # `file://` artifact_url as a local directory and builds it, so a
+          # client naming `file:///opt/barkpark` or `file:///etc` bakes box
+          # files into an image: a plain member reaching box-admin reads. No
+          # producer mints a `file://` artifact any more (the tarball upload
+          # route is gone), so a CLIENT-supplied artifact_url must be https.
+          # Promote and redeploy copy a STORED value through `Registry`, not
+          # this door, so they are unaffected.
+          not client_artifact_url_allowed?(conn.body_params["artifact_url"]) ->
+            # The same `invalid` + per-field `details` shape a changeset
+            # refusal on this route answers, so no new wire code is minted.
+            json(conn, 422, %{
+              error: "invalid",
+              details: %{
+                artifact_url: [
+                  "must be an https:// URL; file:// and other schemes are refused"
+                ]
+              }
+            })
+
           # dwb-webhook-deploy-artifact-gap: a deploy with NO artifact AND NO
           # connected repo can never build regardless of fleet — the row would sit
           # "queued" forever as an eternal dashboard spinner. Refuse it up front so
@@ -16122,6 +16142,20 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp parse_dt(_), do: nil
+
+  # task-a21cac2c018f852e: the only artifact_url a client may hand POST
+  # /v1/sites/:id/deploy. Absent (nil) is allowed; the route then needs a
+  # connected repo. Anything else must parse as https with a host.
+  defp client_artifact_url_allowed?(nil), do: true
+
+  defp client_artifact_url_allowed?(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{scheme: "https", host: host} when is_binary(host) and host != "" -> true
+      _ -> false
+    end
+  end
+
+  defp client_artifact_url_allowed?(_), do: false
 
   # Resolve + role-gate the path team, then run `fun.(conn, team)`. 401/403/404
   # are handled inside Auth.require_team_role (halts the conn); we only invoke

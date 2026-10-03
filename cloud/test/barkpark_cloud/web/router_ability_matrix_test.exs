@@ -137,7 +137,8 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
   defp write_routes(%{site: site, deployment: dep}) do
     [
       {:patch, "/v1/sites/#{site.id}", %{name: "Renamed"}},
-      {:post, "/v1/sites/#{site.id}/deploy", %{artifact_url: "file:///tmp/a.tar.gz"}},
+      {:post, "/v1/sites/#{site.id}/deploy",
+       %{artifact_url: "https://artifacts.example.com/a.tar.gz"}},
       {:post, "/v1/sites/#{site.id}/rollback", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/promote", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/artifact", %{}},
