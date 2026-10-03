@@ -482,7 +482,14 @@
           this._push("nav", { key: e.shiftKey ? "ArrowLeft" : "ArrowRight", shift: false });
         } else if (e.key === "Enter" || e.key === "F2") {
           e.preventDefault();
-          this._push("edit-start", {});
+          // [type-ahead-seed] Enter typed while the seeded editor is still on
+          // its way commits the typed keys once it lands; an `edit-start {}`
+          // here would reopen the cell with its OLD content instead.
+          if (e.key === "Enter" && this._pendingSeed()) {
+            this._seedCommit = e.shiftKey ? "up" : "down";
+          } else {
+            this._push("edit-start", {});
+          }
         } else if (e.key === "Delete" || e.key === "Backspace") {
           e.preventDefault();
           this._push("clear-selection", {});
@@ -495,12 +502,12 @@
           if (active && active.classList.contains("sheet-checkbox")) {
             this._push("cell-toggle", { ref: active.dataset.ref });
           } else {
-            this._push("edit-start", { seed: " " });
+            this._seedEdit(" ");
           }
         } else if (e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
           // Typing replaces the cell content — the seed becomes the prefill.
           e.preventDefault();
-          this._push("edit-start", { seed: e.key });
+          this._seedEdit(e.key);
         }
       };
 
@@ -1013,14 +1020,20 @@
       }
       const inp = this.el.querySelector(".sheet-cell-input");
       if (inp) {
+        // [type-ahead-seed] keys typed before this editor existed.
+        const seedMove = this._applySeedBuffer(inp);
         if (document.activeElement !== inp) {
           inp.focus();
           const n = inp.value.length;
           try { inp.setSelectionRange(n, n); } catch (_e) { /* number inputs */ }
         }
-        // morphdom replaced the cell input node; re-render the dropdown from
-        // the surviving state so an open menu isn't orphaned on the old node.
-        if (this._fn && this._fn.items && this._fn.items.length) this._fnRender(inp);
+        if (seedMove) {
+          this._commitEditor(inp, seedMove);
+        } else if (this._fn && this._fn.items && this._fn.items.length) {
+          // morphdom replaced the cell input node; re-render the dropdown from
+          // the surviving state so an open menu isn't orphaned on the old node.
+          this._fnRender(inp);
+        }
       } else {
         // No editor on screen (commit/cancel/nav) — the menu can't belong to
         // anything; drop it.
@@ -1461,6 +1474,48 @@
       this.el.addEventListener("mouseover", onOver);
       window.addEventListener("mouseup", onUp);
       return true;
+    },
+
+    // [type-ahead-seed] Typing on a selected cell starts an edit seeded with the
+    // key, but the editor input only exists once the server's reply renders it.
+    // Every key typed in that round trip used to push ANOTHER edit-start whose
+    // seed REPLACED the previous one, so "42" typed quickly (or over a slow
+    // link) landed as "2", and an Enter in the gap reopened the cell with its
+    // old value. The first key still pushes; later keys collect here and
+    // updated() writes them into the editor when it appears. A buffer the
+    // server never answers (a read-only grid ignores edit-start) goes stale
+    // after 3 s, so typing is never swallowed for good.
+    _pendingSeed() {
+      return this._seedBuf != null && Date.now() - this._seedAt < 3000;
+    },
+
+    _seedEdit(ch) {
+      if (this._pendingSeed()) {
+        this._seedBuf += ch;
+        return;
+      }
+      this._seedBuf = ch;
+      this._seedAt = Date.now();
+      this._seedCommit = null;
+      this._push("edit-start", { seed: ch });
+    },
+
+    // The editor input just rendered: hand it the keys typed while it was on
+    // its way (it was rendered with the FIRST key as its prefill), then run
+    // an Enter typed in the same gap. Returns the commit move, or null.
+    _applySeedBuffer(inp) {
+      if (this._seedBuf == null) return null;
+      const buf = this._seedBuf;
+      const move = this._seedCommit;
+      this._seedBuf = null;
+      this._seedCommit = null;
+      if (buf.length > 1 && inp.value === buf.charAt(0)) {
+        inp.value = buf;
+        if (typeof Event === "function" && inp.dispatchEvent) {
+          inp.dispatchEvent(new Event("input", { bubbles: true }));
+        }
+      }
+      return move;
     },
 
     // Enter/Tab commit from the cell editor: ghost accept-and-commit in ONE

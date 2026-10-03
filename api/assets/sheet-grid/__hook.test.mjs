@@ -3193,6 +3193,70 @@ check("reader: the shipped hook holds no pushEvent/pushEventTo code path at all"
   assert.deepEqual(h._pushed, []);
 });
 
+// ── [type-ahead-seed] keys typed before the editor exists ────────────────────
+// Dogfood 2026-10-03: "123" typed at 20 ms a key into a selected cell landed as
+// "3", and its Enter was lost — every key pushed a fresh edit-start whose seed
+// replaced the last. The editor renders with the FIRST key as its prefill;
+// the rest must reach it when it appears.
+function seededInput(h, value) {
+  const inp = fakeInput(value);
+  inp.focus = () => {
+    sandbox.document.activeElement = inp;
+  };
+  h.el._input = inp;
+  return inp;
+}
+
+check("type-ahead: keys typed before the editor renders all land in it (one edit-start)", () => {
+  const h = editable();
+  h.el.dispatch("keydown", keydown("4"));
+  h.el.dispatch("keydown", keydown("2"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "edit-start"),
+    [{ event: "edit-start", payload: { seed: "4" } }],
+  );
+  // The server's reply renders the editor with the first key as prefill.
+  const inp = seededInput(h, "4");
+  h.updated();
+  assert.equal(inp.value, "42");
+  assert.equal(inp.selectionStart, 2);
+  sandbox.document.activeElement = null;
+});
+
+check("type-ahead: an Enter typed before the editor renders commits the typed keys", () => {
+  const h = editable();
+  h.el.dispatch("keydown", keydown("1"));
+  h.el.dispatch("keydown", keydown("2"));
+  h.el.dispatch("keydown", keydown("3"));
+  h.el.dispatch("keydown", keydown("Enter"));
+  assert.deepEqual(
+    h._pushed.map((p) => p.event),
+    ["edit-start"],
+    "Enter in the gap must not push edit-start {} (it reopened the cell with its old value)",
+  );
+  seededInput(h, "1");
+  h.updated();
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "edit-commit"),
+    [{ event: "edit-commit", payload: { value: "123", move: "down" } }],
+  );
+  sandbox.document.activeElement = null;
+});
+
+check("type-ahead: a buffer the server never answered goes stale, so typing starts a new edit", () => {
+  const h = editable();
+  h.el.dispatch("keydown", keydown("x"));
+  h._seedAt = Date.now() - 5000; // read-only grid: no editor ever came
+  h.el.dispatch("keydown", keydown("y"));
+  assert.deepEqual(
+    h._pushed.filter((p) => p.event === "edit-start"),
+    [
+      { event: "edit-start", payload: { seed: "x" } },
+      { event: "edit-start", payload: { seed: "y" } },
+    ],
+  );
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
