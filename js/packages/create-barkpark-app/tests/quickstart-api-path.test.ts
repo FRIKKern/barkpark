@@ -23,7 +23,7 @@ const STARTERS = ['blog-starter', 'website-starter']
 function quickStartBlock(readme: string): string {
   const section = readme.split('## Quick start')[1] ?? ''
   const fence = section.match(/```sh\n([\s\S]*?)```/)
-  return fence ? fence[1] : ''
+  return fence?.[1] ?? ''
 }
 
 describe('starter quick start leads with bp setup, not docker compose', () => {
