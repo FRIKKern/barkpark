@@ -37,6 +37,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
             Barkpark.Content.Validation.check_tree(content, title, schema)
         end
 
+      errs = number_type_errors(errs, socket.assigns[:editor_schema], content)
+
       # The workspace's language, once, before any render site (E7, #87).
       errs = BarkparkWeb.StudioLocale.localize_findings(errs)
       warns = BarkparkWeb.StudioLocale.localize_findings(warns)
@@ -64,6 +66,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
       {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
     end
   end
+
+  # [number-fields-hold-numbers] task-63c17c67c6644377. A Classic `number` input
+  # is a text input (inputmode=numeric, a pattern the browser never enforces
+  # on autosave), and Forms.coerce_params keeps a value it cannot parse as the
+  # typed string — so "abc" in a number field was stored, published, and
+  # served as {"count": "abc"}. The flat validator is frozen and never
+  # type-checks a leaf, so the Studio publish gate refuses it here, inline on
+  # the field, before anything is published.
+  defp number_type_errors(errs, %{fields: fields}, content)
+       when is_list(fields) and is_map(content) do
+    Enum.reduce(fields, errs, fn
+      %{"type" => "number", "name" => name}, acc when is_binary(name) ->
+        case Map.get(content, name) do
+          v when is_binary(v) and v != "" ->
+            case Map.get(acc, name) do
+              list when is_list(list) -> Map.put(acc, name, list ++ ["Must be a number"])
+              nil -> Map.put(acc, name, ["Must be a number"])
+              _nested -> acc
+            end
+
+          _ ->
+            acc
+        end
+
+      _field, acc ->
+        acc
+    end)
+  end
+
+  defp number_type_errors(errs, _schema, _content), do: errs
 
   defp publish_open_doc(socket) do
     opts = Shared.hook_opts(socket)
