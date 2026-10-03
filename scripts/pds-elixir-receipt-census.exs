@@ -2903,8 +2903,13 @@ defmodule PDS.Census do
     # change that clears the basis_stale demotion the repair caused. It is also
     # UPGRADED off `:unexamined` in the same edit, because the repair shipped the
     # differential that judges it: this is the one register row this change touches.
+    # RE-KEYED again on task-3d64b961fca33036 (a passkey delete demands the
+    # password): the def head now binds `= params` to read it, which moved the
+    # head hash 99456611 -> 26480685. The expr_fp (84283662) did not move: the
+    # 200 receipt still renders the deleted row, so the verdict and its
+    # evidence stand.
     %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
-            "BarkparkWeb.WebauthnController.delete/2", "99456611", "84283662"},
+            "BarkparkWeb.WebauthnController.delete/2", "26480685", "84283662"},
       verdict: "PROVEN", basis: :end_to_end, evidence:
         {"api/test/barkpark_web/controllers/webauthn_controller_test.exs",
          ~S|test "delete (200 receipt) renders the ROW Repo.delete removed — nickname and " <>|},
