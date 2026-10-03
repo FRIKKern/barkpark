@@ -141,7 +141,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       # Wrapper carries the hook + phx-update=ignore + stable id
       assert html =~
-               ~r{<div[^>]*id="bp-rt-wrap-body"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-rt-wrap-body-doc"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       # Hidden input holds the form payload value + debounce
       assert html =~
@@ -284,7 +284,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         })
 
       assert String.trim(html) ==
-               ~s(<div id="bp-rt-wrap-body" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body"></bp-rich-text-editor>\n</div>),
+               ~s(<div id="bp-rt-wrap-body-doc" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body"></bp-rich-text-editor>\n</div>),
              "the unconfigured richText clause changed — Option A must not become " <>
                "Option B (the blocks editor as the DEFAULT for every richText field)"
 
@@ -420,7 +420,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       # Wrapper carries the hook + phx-update=ignore + stable id
       assert html =~
-               ~r{<div[^>]*id="bp-ref-wrap-author"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-ref-wrap-author-doc"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       # Hidden input holds the form payload value + debounce
       assert html =~
@@ -490,7 +490,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
 
       # Wrapper carries hook + phx-update=ignore + stable id
       assert html =~
-               ~r{<div[^>]*id="bp-mp-wrap-cover"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
+               ~r{<div[^>]*id="bp-mp-wrap-cover-doc"[^>]*phx-update="ignore"[^>]*phx-hook="BarkparkFieldBridge"}
 
       # Hidden input holds the form payload (URL string) + debounce
       assert html =~
