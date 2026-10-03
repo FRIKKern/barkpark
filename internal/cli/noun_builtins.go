@@ -170,7 +170,7 @@ var nounBuiltins = []nounBuiltin{
 	{
 		Noun:     "token",
 		Verb:     "create",
-		Summary:  "With --permissions: mint public-read OR read (a bare `create` is the manifest verb, public-read only).",
+		Summary:  "With --permissions: mint public-read, read, or (admin callers only) write/admin; a bare `create` is the manifest verb, public-read only.",
 		GateHint: "--permissions",
 		When:     func(g globals, tail []string) bool { return tokenCreateGated(tail) },
 		Run: func(out *writer, g globals, ctx manifest.Context, tail []string) int {

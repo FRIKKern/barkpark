@@ -1208,6 +1208,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens", "BarkparkWeb.TokenController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/elevated", "BarkparkWeb.ElevatedTokenController", :create, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable, :status_only_receipt},

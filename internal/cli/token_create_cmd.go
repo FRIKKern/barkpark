@@ -38,11 +38,22 @@ package cli
 // Default workspace instead of the stated one, has to SAY so here. The 2xx is
 // screened through screenBuiltinWriteReceipt (the one writeReceiptVerdict) first,
 // so an empty 200 or a proxy page cannot render as a minted token.
+//
+// WRITE AND ADMIN (task-7d4d405e0ee4bcbf). A permission set that names `write`
+// or `admin` goes to POST /w/<ws>/p/<project>/v1/tokens/elevated instead — the
+// admin-to-admin mint. The server refuses it unless the caller's own token holds
+// the flat `admin` permission and an admin seat in the workspace, and it never
+// mints a permission the caller lacks. The read-only /v1/tokens allowlist is
+// untouched. Both routes take --expires-in (sent as an absolute `expires_at`) or
+// --no-expiry, and both seat the minted token in the workspace.
 
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -50,7 +61,7 @@ import (
 
 // tokenCreateUsage is the one usage line the help block and every arg refusal
 // share, so the two can never describe different syntax.
-const tokenCreateUsage = "bp [-w <workspace>] [-p <project>] token create <label> --permissions read|public-read[,…] [--dataset <dataset>]"
+const tokenCreateUsage = "bp [-w <workspace>] [-p <project>] token create <label>|--label <label> --permissions public-read|read|write|admin[,…] [--dataset <dataset>] [--expires-in <90d|24h|…> | --no-expiry]"
 
 // tokenCreateArgs is the parsed command line. dataset defaults to the resolved
 // context's dataset rather than a literal, so `bp -d staging token create …`
@@ -59,6 +70,62 @@ type tokenCreateArgs struct {
 	label       string
 	permissions []string
 	dataset     string
+	// expiresIn is the requested lifetime (0 = not stated → the server's default);
+	// noExpiry is the audited admin-only opt-out. At most one is set.
+	expiresIn time.Duration
+	noExpiry  bool
+}
+
+// tokenElevatedPermissions are the tiers only the admin-to-admin mint issues.
+var tokenElevatedPermissions = map[string]bool{"write": true, "admin": true}
+
+// tokenMintPath picks the route: the read-only allowlist for public-read/read,
+// the admin-to-admin mint as soon as write or admin is asked for.
+func tokenMintPath(perms []string) string {
+	for _, p := range perms {
+		if tokenElevatedPermissions[p] {
+			return "/v1/tokens/elevated"
+		}
+	}
+	return "/v1/tokens"
+}
+
+// tokenMintBody is the JSON both mint routes take. permissions is an ARRAY (the
+// reason this built-in exists); a lifetime goes out as an absolute expires_at so
+// the server checks it against the class max without a second duration grammar.
+func tokenMintBody(args tokenCreateArgs, now time.Time) ([]byte, error) {
+	body := map[string]any{
+		"label":       args.label,
+		"permissions": args.permissions,
+		"dataset":     args.dataset,
+	}
+	switch {
+	case args.noExpiry:
+		body["no_expiry"] = true
+	case args.expiresIn > 0:
+		body["expires_at"] = now.Add(args.expiresIn).UTC().Format(time.RFC3339)
+	}
+	return json.Marshal(body)
+}
+
+// tokenDurationRe is the grammar `bp token rotate --grace` takes: an integer
+// with an optional s/m/h/d unit; a bare integer is seconds.
+var tokenDurationRe = regexp.MustCompile(`^(\d+)([smhd]?)$`)
+
+var tokenDurationUnits = map[string]time.Duration{
+	"": time.Second, "s": time.Second, "m": time.Minute, "h": time.Hour, "d": 24 * time.Hour,
+}
+
+func parseTokenDuration(v string) (time.Duration, error) {
+	m := tokenDurationRe.FindStringSubmatch(strings.TrimSpace(v))
+	if m == nil {
+		return 0, fmt.Errorf("--expires-in %q is not a duration — use 90s, 30m, 24h or 90d", v)
+	}
+	n, err := strconv.ParseInt(m[1], 10, 64)
+	if err != nil || n <= 0 {
+		return 0, fmt.Errorf("--expires-in %q must be greater than zero", v)
+	}
+	return time.Duration(n) * tokenDurationUnits[m[2]], nil
 }
 
 // runTokenCreate handles `bp token create <label> --permissions …`.
@@ -74,11 +141,7 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 	}
 
 	// permissions as a LIST — the whole reason this path exists.
-	body, merr := json.Marshal(map[string]any{
-		"label":       args.label,
-		"permissions": args.permissions,
-		"dataset":     args.dataset,
-	})
+	body, merr := tokenMintBody(args, time.Now())
 	if merr != nil {
 		return usageErrf(out, func() { printTokenCreateHelp(out) }, "could not build the mint request: %v", merr)
 	}
@@ -87,7 +150,7 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 	// /w/<ws>/p/<project> mirror (router.ex — the :scoped_admin block), so a
 	// stated -w always reaches the wire and there is no flat route that could
 	// silently mint in Default instead.
-	u := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, "/v1/tokens")
+	u := apiclient.ScopedURL(ctx.Server, ctx.Workspace, ctx.Project, tokenMintPath(args.permissions))
 	headers := map[string]string{"Content-Type": "application/json"}
 	if ctx.Token != "" {
 		headers["Authorization"] = "Bearer " + ctx.Token
@@ -127,6 +190,7 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 		"dataset":     resp.Dataset,
 		"workspace":   resp.Workspace,
 		"inserted_at": resp.InsertedAt,
+		"expires_at":  resp.ExpiresAt,
 	}) {
 		return exitOK
 	}
@@ -140,6 +204,11 @@ func runTokenCreate(out *writer, g globals, ctx manifest.Context, tail []string)
 	out.outf("  workspace    %s   (as the server resolved it)", resp.Workspace)
 	out.outf("  dataset      %s", resp.Dataset)
 	out.outf("  id           %s", resp.ID)
+	if resp.ExpiresAt == nil {
+		out.outf("  expires      never")
+	} else {
+		out.outf("  expires      %v", resp.ExpiresAt)
+	}
 	out.outf("  token        %s", resp.Token)
 	out.outf("")
 	out.outf("This token is shown ONCE. Store it now — the server keeps only its hash.")
@@ -155,6 +224,7 @@ type tokenMintReceipt struct {
 	Dataset     string   `json:"dataset"`
 	Workspace   string   `json:"workspace"`
 	InsertedAt  any      `json:"inserted_at"`
+	ExpiresAt   any      `json:"expires_at"`
 }
 
 // parseTokenMintReceipt decodes the mint response and REFUSES any body that
@@ -196,6 +266,14 @@ func parseTokenCreateArgs(tail []string, defaultDataset string) (tokenCreateArgs
 			out.label = a
 			continue
 		}
+		if name == "no-expiry" {
+			// A switch, not a valued flag: `--no-expiry` alone (or =true).
+			if hasInline && inline != "true" {
+				return out, fmt.Errorf("--no-expiry takes no value (usage: %s)", tokenCreateUsage)
+			}
+			out.noExpiry = true
+			continue
+		}
 		value := inline
 		if !hasInline {
 			if i+1 >= len(tail) {
@@ -210,6 +288,17 @@ func parseTokenCreateArgs(tail []string, defaultDataset string) (tokenCreateArgs
 			permsSet = true
 		case "dataset":
 			out.dataset = strings.TrimSpace(value)
+		case "label":
+			if out.label != "" {
+				return out, fmt.Errorf("the label was given twice (usage: %s)", tokenCreateUsage)
+			}
+			out.label = value
+		case "expires-in":
+			d, err := parseTokenDuration(value)
+			if err != nil {
+				return out, err
+			}
+			out.expiresIn = d
 		default:
 			return out, fmt.Errorf("unknown flag --%s (usage: %s)", name, tokenCreateUsage)
 		}
@@ -226,7 +315,10 @@ func parseTokenCreateArgs(tail []string, defaultDataset string) (tokenCreateArgs
 		return out, fmt.Errorf("--permissions is required on this path (usage: %s)", tokenCreateUsage)
 	}
 	if len(out.permissions) == 0 {
-		return out, fmt.Errorf("--permissions was empty — name at least one of read, public-read (usage: %s)", tokenCreateUsage)
+		return out, fmt.Errorf("--permissions was empty — name at least one of public-read, read, write, admin (usage: %s)", tokenCreateUsage)
+	}
+	if out.noExpiry && out.expiresIn > 0 {
+		return out, fmt.Errorf("--expires-in and --no-expiry contradict each other — give one (usage: %s)", tokenCreateUsage)
 	}
 	if strings.TrimSpace(out.dataset) == "" {
 		out.dataset = "production"
@@ -260,11 +352,13 @@ func splitCommaList(v string) []string {
 }
 
 // tokenCreateGated is the nounBuiltins `When` predicate: this built-in shadows the
-// manifest verb ONLY when the caller states --permissions. A bare
+// manifest verb ONLY when the caller states --permissions (or a flag only this
+// path understands: --label, --expires-in, --no-expiry). A bare
 // `bp token create <label>` is untouched and still rides the manifest path.
 func tokenCreateGated(tail []string) bool {
 	for _, a := range tail {
-		if name, _, _ := splitTokenFlag(a); name == "permissions" {
+		switch name, _, _ := splitTokenFlag(a); name {
+		case "permissions", "label", "expires-in", "no-expiry":
 			return true
 		}
 	}
@@ -274,7 +368,8 @@ func tokenCreateGated(tail []string) bool {
 func printTokenCreateHelp(out *writer) {
 	out.errf("usage: %s", tokenCreateUsage)
 	out.errf("")
-	out.errf("Mint a READ-ONLY, workspace-bound API token and print it once.")
+	out.errf("Mint a workspace-bound API token and print it once. The token is seated in the")
+	out.errf("workspace (it gets its membership row), so it works on /w/<workspace>/… routes.")
 	out.errf("")
 	out.errf("  public-read   reads only PUBLISHED documents of a PUBLIC schema (the default a")
 	out.errf("                deployed site needs — see `bp vercel deploy`).")
@@ -282,6 +377,15 @@ func printTokenCreateHelp(out *writer) {
 	out.errf("                tier a desk-private dataset needs, and the tier the manifest verb")
 	out.errf("                cannot ask for: its --permissions rides the query string as a")
 	out.errf("                scalar, which the server rejects as invalid.")
+	out.errf("  write, admin  ADMIN-TO-ADMIN mint: only a token that already holds `admin` and an")
+	out.errf("                admin seat in the workspace may ask, and never for more than it holds")
+	out.errf("                (403 admin_required / permission_escalation otherwise). Audited.")
+	out.errf("")
+	out.errf("  --expires-in <d>  lifetime: 90s, 30m, 24h or 90d (max 365d). Default: the server's.")
+	out.errf("  --no-expiry       never expires; an audited opt-out that needs an admin caller.")
+	out.errf("")
+	out.errf("No admin token locally? Recover one from Barkpark Cloud without SSH:")
+	out.errf("  bp instance admin-token <instance-id> --install")
 	out.errf("")
 	out.errf("The token is bound to the workspace your -w resolves to (the route is")
 	out.errf("POST /w/<workspace>/p/<project>/v1/tokens, admin-gated on your membership ROLE)")
@@ -291,4 +395,5 @@ func printTokenCreateHelp(out *writer) {
 	out.errf("examples:")
 	out.errf("  bp -w gyldendal token create desk-reader --permissions read")
 	out.errf("  bp -w acme token create site --permissions public-read --dataset staging")
+	out.errf("  bp token create --label laptop-admin --permissions read,write,admin --expires-in 90d")
 }

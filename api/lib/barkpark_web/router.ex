@@ -3324,6 +3324,11 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :scoped_admin])
 
     post("/v1/tokens", TokenController, :create)
+    # Admin-to-admin mint (write/admin): a SEPARATE controller so the read-only
+    # TokenController allowlist is never widened (Connectors D36). The flat
+    # `admin` permission and the never-escalate cap live in
+    # `Auth.mint_delegated_token/3`.
+    post("/v1/tokens/elevated", ElevatedTokenController, :create)
   end
 
   # Scoped MEMBER administration (admin) — the workspace roster: who holds a
