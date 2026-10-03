@@ -23,3 +23,14 @@ export const projectConfig = {
   dataset,
   projectUrl,
 }
+
+// The `codegen` script runs `barkpark generate --config barkpark.config.ts`,
+// which reads THIS default export. BARKPARK_TOKEN comes from the environment:
+// codegen does not read .env.local, so export it first. There is deliberately
+// no dev-token fallback here, because the app imports this module.
+export default {
+  apiUrl: projectUrl,
+  dataset,
+  output: 'lib/barkpark.types.ts',
+  token: process.env.BARKPARK_TOKEN,
+}
