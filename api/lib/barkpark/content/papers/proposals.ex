@@ -228,8 +228,19 @@ defmodule Barkpark.Content.Papers.Proposals do
   # first proposal — the same row shape `unpublish_document` creates (content
   # copied verbatim, status "draft", tenancy scope inherited), so the existing
   # publish gate closes the loop without special-casing proposals.
+  #
+  # The draft twin is read in the PUBLISHED row's own scope. It used to be read
+  # with `[]`, which resolves the dataset to the Default workspace's: in any
+  # other workspace the paper's own draft was never found (a second proposal
+  # re-seeded it and hit the unique index), and a same-slug Default draft was
+  # found instead and written to (task-dbd897d8b3623175).
   defp get_or_seed_draft(pub, dataset, opts) do
-    case Content.get_document(DraftId.draft_id(pub.doc_id), @paper_type, dataset, []) do
+    draft_scope =
+      Enum.reject([workspace_id: pub.workspace_id, project_id: pub.project_id], fn {_k, v} ->
+        is_nil(v)
+      end)
+
+    case Content.get_document(DraftId.draft_id(pub.doc_id), @paper_type, dataset, draft_scope) do
       {:ok, draft} ->
         draft
 
