@@ -2390,7 +2390,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "token.ls",
         "token",
         "ls",
-        "The token inventory for this workspace — label, permissions, revoked/expiry state, age, last use and rotation due date.",
+        "The token inventory for this workspace — label, permissions, revoked/expiry state.",
         "GET",
         "/v1/tokens",
         "scoped_admin",
