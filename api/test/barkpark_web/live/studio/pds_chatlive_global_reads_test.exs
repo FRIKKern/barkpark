@@ -139,7 +139,7 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
   end
 
   describe "scoped /w/:ws/p/:proj/studio/chat — the sidebar list" do
-    test "does not disclose another workspace's session, and still lists its own + NULL-owned",
+    test "does not disclose another workspace's or an owner-less session, and still lists its own",
          %{
            conn: conn,
            scoped_path: path,
@@ -172,17 +172,17 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
                "over-tight (a token-binding clamp would fail exactly here: this token is " <>
                "bound to workspace A)"
 
-      # LEGACY — a NULL `owner_workspace_id` row is pre-tenancy, not foreign, and
-      # must stay reachable. This is what a bare store-side workspace scope
-      # (strict `owner_workspace_id == ^ws`) would have silently deleted.
-      assert html =~ legacy_title,
-             "a NULL-owned legacy session vanished from the sidebar — the clamp narrowed " <>
-               "to a hard workspace equality instead of the write guard's permitted set"
+      # LEGACY — a NULL `owner_workspace_id` row is pre-tenancy and belongs to no
+      # workspace. Owner ruling #30 Q3 (2026-10-03): it is the instance
+      # operator's, reached from the flat mount, and a workspace's scoped mount
+      # does not list it.
+      refute html =~ legacy_title,
+             "a NULL-owned legacy session is listed on a workspace's scoped mount"
     end
   end
 
   describe "scoped /w/:ws/p/:proj/studio/chat — the detail pane" do
-    test "a foreign session id off the wire does not load, while its own and a legacy one do",
+    test "a foreign or owner-less session id off the wire does not load, while its own does",
          %{
            conn: conn,
            scoped_path: path,
@@ -218,12 +218,12 @@ defmodule BarkparkWeb.Studio.PdsChatLiveGlobalReadsTest do
       refute own_html =~ "no longer available",
              "opening its own session took the unknown-session branch"
 
-      # LEGACY — a NULL-owned row stays openable.
+      # LEGACY — a NULL-owned row is the operator's (owner ruling #30 Q3) and
+      # does not open on a workspace's scoped mount.
       legacy_html = mount_scoped!(conn, "#{path}/#{legacy.id}")
 
-      assert legacy_html =~ legacy_title,
-             "a NULL-owned legacy session could not be opened — the clamp is a hard " <>
-               "workspace equality, not the write guard's permitted set"
+      refute legacy_html =~ legacy_title,
+             "a NULL-owned legacy session opened on a workspace's scoped mount"
     end
   end
 
