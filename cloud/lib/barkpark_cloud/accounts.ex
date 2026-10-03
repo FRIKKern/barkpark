@@ -2393,6 +2393,7 @@ defmodule BarkparkCloud.Accounts do
         %{team_id: team.id, email: user.email}
         |> BarkparkCloud.Workers.InstanceMemberDeprovisionWorker.new()
         |> Oban.insert()
+
       :removed
     end)
   end
