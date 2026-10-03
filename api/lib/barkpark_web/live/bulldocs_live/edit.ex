@@ -1077,6 +1077,16 @@ defmodule BarkparkWeb.BulldocsLive.Edit do
     })
   end
 
+  # Owner ruling #21: a private field bound into the body is refused with the
+  # same banner as a lifecycle halt, carrying the guard's message.
+  defp handle_result({:error, {:private_field_bound, names}}, socket, request_id),
+    do:
+      handle_result(
+        {:error, {:halted, Barkpark.Content.BoundFieldGuard.message(names)}},
+        socket,
+        request_id
+      )
+
   # A lifecycle-hook HALT. MIRROR the server truth verbatim; the reader authors
   # no copy of its own (the same D5/D6 stance the Studio editor holds).
   defp handle_result({:error, {:halted, reason}}, socket, request_id) do
