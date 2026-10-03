@@ -133,8 +133,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def ensure_presence_subscription(socket) do
     if connected?(socket) do
-      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
-      new_topic = PresenceState.topic(ws_id)
+      new_topic = presence_topic(socket)
       old_topic = socket.assigns[:presence_topic]
 
       if new_topic == old_topic do
@@ -151,6 +150,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     else
       socket
     end
+  end
+
+  # The room this socket's presence belongs to: workspace + project + dataset
+  # (owner ruling #30 Q7). A viewer of one project never hears who is editing
+  # what in another.
+  defp presence_topic(socket) do
+    ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
+    project_id = socket.assigns[:current_project] && socket.assigns.current_project.id
+    PresenceState.topic(ws_id, project_id, socket.assigns[:dataset])
   end
 
   @doc false
@@ -203,8 +211,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         joined_at: System.system_time(:second)
       }
 
-      ws_id = socket.assigns[:current_workspace] && socket.assigns.current_workspace.id
-      topic = socket.assigns[:presence_topic] || PresenceState.topic(ws_id)
+      topic = socket.assigns[:presence_topic] || presence_topic(socket)
 
       case Presence.get_by_key(topic, socket.assigns.user_id) do
         [] -> Presence.track(self(), topic, socket.assigns.user_id, meta)

@@ -159,7 +159,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:paper_workspace_id, paper.workspace_id)
       |> assign(
         :presence_topic,
-        PaperPresence.topic(paper.workspace_id, dataset, slug)
+        PaperPresence.topic(paper.workspace_id, Map.get(paper, :project_id), dataset, slug)
       )
       |> assign(:paper_presence, PaperPresence.empty())
 

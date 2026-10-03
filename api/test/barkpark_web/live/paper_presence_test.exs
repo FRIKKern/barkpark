@@ -230,23 +230,27 @@ defmodule BarkparkWeb.PaperPresenceTest do
   end
 
   describe "the presence room itself" do
-    test "the topic is keyed per workspace, dataset and slug" do
-      assert PaperPresence.topic("ws-1", "production", "a") ==
-               "paper_presence:ws:ws-1:production:a"
+    test "the topic is keyed per workspace, project, dataset and slug" do
+      assert PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               "paper_presence:ws:ws-1:p:p-1:production:a"
 
-      # Different tenant, different dataset, different paper: three different
-      # rooms. Two tenants' same-slug papers must never see each other.
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-2", "production", "a")
+      # Different tenant, project, dataset or paper: different rooms. Two
+      # tenants' (or two projects') same-slug papers must never see each other.
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-2", "p-1", "production", "a")
 
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-1", "staging", "a")
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-2", "production", "a")
 
-      refute PaperPresence.topic("ws-1", "production", "a") ==
-               PaperPresence.topic("ws-1", "production", "b")
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-1", "staging", "a")
 
-      # A legacy NULL-workspace paper gets its OWN room, not a shared global.
-      assert PaperPresence.topic(nil, nil, "a") == "paper_presence:ws:none:default:a"
+      refute PaperPresence.topic("ws-1", "p-1", "production", "a") ==
+               PaperPresence.topic("ws-1", "p-1", "production", "b")
+
+      # A legacy NULL-scope paper gets its OWN room, not a shared global.
+      assert PaperPresence.topic(nil, nil, nil, "a") ==
+               "paper_presence:ws:none:p:none:default:a"
     end
 
     test "every anonymous viewer shares one key; each identified one has her own" do
