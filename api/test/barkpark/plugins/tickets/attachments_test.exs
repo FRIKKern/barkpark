@@ -452,7 +452,7 @@ defmodule Barkpark.Plugins.Tickets.AttachmentsTest do
       # A real operator credential: OptionalSessionToken must resolve it from
       # EITHER a Bearer header or `session["api_token"]`.
       operator_raw = "op-" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
-      Auth.create_token(operator_raw, "Support Desk", @dataset, ["read"], ws.id)
+      Auth.create_token(operator_raw, "Support Desk", @dataset, ["read", "write"], ws.id)
 
       ticket = insert_ticket_in_scope!(key.id, ws, project)
 

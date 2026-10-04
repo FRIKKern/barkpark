@@ -1,6 +1,8 @@
-// __heading_levels.test.mjs — D-headings: the canvas offers three levels; a deeper stored level
-// (an import, an agent) is shown at the nearest level, carried on the source, and never
-// rewritten by a text edit; a turn-into to another level is the author's change and wins.
+// __heading_levels.test.mjs — D-headings: the canvas offers six levels (owner ruling
+// 2026-10-03 #63, reversing the earlier three-level decision). A level 1–6 is shown
+// as itself. A stored level outside that range (a malformed import) is shown at the
+// nearest level, carried on the source, and never rewritten by a text edit; a
+// turn-into to another level is the author's change and wins.
 // Run: node src/__heading_levels.test.mjs   (or: npm test)
 import assert from "node:assert/strict";
 import { runToTiptap, runToOps, docToBlocks } from "./canvas/run-convert.js";
@@ -9,29 +11,46 @@ let failures = 0;
 function check(name, fn) { try { fn(); console.log(`PASS  ${name}`); } catch (e) { failures++; console.log(`FAIL  ${name}`); console.log(`      ${e.message}`); } }
 
 const H4 = { id: "h4", type: "heading", level: 4, text: "Deep" };
+const H9 = { id: "h9", type: "heading", level: 9, text: "Too deep" };
 const H2 = { id: "h2", type: "heading", level: 2, text: "Plain" };
 
-check("a level-4 heading is shown at level 3 and round-trips as level 4", () => {
+check("a level-4 heading is shown at level 4 with nothing carried, and round-trips", () => {
   const doc = runToTiptap([H4, H2]);
-  assert.equal(doc.content[0].attrs.level, 3, "shown at the nearest level");
+  assert.equal(doc.content[0].attrs.level, 4, "shown at its own level");
+  assert.equal(doc.content[0].attrs.bpHeadingSource.level, undefined, "no carried level");
   assert.deepEqual(docToBlocks(doc), [H4, H2]);
   assert.deepEqual(runToOps([H4, H2], doc), []);
 });
 
-check("editing the text of a level-4 heading keeps level 4 on the patch", () => {
+check("a level-9 heading is shown at level 6 and round-trips as level 9", () => {
+  const doc = runToTiptap([H9, H2]);
+  assert.equal(doc.content[0].attrs.level, 6, "shown at the nearest level");
+  assert.deepEqual(docToBlocks(doc), [H9, H2]);
+  assert.deepEqual(runToOps([H9, H2], doc), []);
+});
+
+check("editing the text of a level-9 heading keeps level 9 on the patch", () => {
+  const doc = runToTiptap([H9]);
+  doc.content[0].content = [{ type: "text", text: "Deeper" }];
+  const ops = runToOps([H9], doc);
+  assert.equal(ops.length, 1);
+  assert.equal(ops[0].op, "patch-block");
+  assert.equal(ops[0].patch.level, 9, JSON.stringify(ops[0]));
+  assert.equal(ops[0].patch.text, "Deeper");
+});
+
+check("editing the text of a level-4 heading patches level 4", () => {
   const doc = runToTiptap([H4]);
   doc.content[0].content = [{ type: "text", text: "Deeper" }];
   const ops = runToOps([H4], doc);
   assert.equal(ops.length, 1);
-  assert.equal(ops[0].op, "patch-block");
   assert.equal(ops[0].patch.level, 4, JSON.stringify(ops[0]));
-  assert.equal(ops[0].patch.text, "Deeper");
 });
 
-check("turning a level-4 heading into level 2 is the author's change and wins", () => {
-  const doc = runToTiptap([H4]);
+check("turning a level-9 heading into level 2 is the author's change and wins", () => {
+  const doc = runToTiptap([H9]);
   doc.content[0].attrs.level = 2;
-  const ops = runToOps([H4], doc);
+  const ops = runToOps([H9], doc);
   assert.equal(ops.length, 1);
   assert.equal(ops[0].patch.level, 2, JSON.stringify(ops[0]));
 });

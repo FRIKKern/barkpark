@@ -567,6 +567,9 @@
  * root.html.heex copy; view_edit_parity_test.exs §2/§5 pin both declarations. */
 .bp-paper-editor-body h2 { font-size: var(--bp-h2-size); font-weight: var(--bp-h2-weight); line-height: var(--bp-h2-lh); letter-spacing: var(--bp-h2-tracking); text-wrap: balance; margin: 1.9em 0 0; overflow-wrap: break-word; }
 .bp-paper-editor-body h3 { font-size: var(--bp-h3-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h4 { font-size: calc((var(--bp-h3-size) + var(--bp-body-size)) / 2); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.4em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h5 { font-size: var(--bp-body-size); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
+.bp-paper-editor-body h6 { font-size: calc(var(--bp-body-size) * 0.9); font-weight: var(--bp-heading-weight); line-height: var(--bp-h3-lh); margin: 1.3em 0 0; overflow-wrap: break-word; }
 /* THE SECTION HEAD — the EDIT twin of the reader's
  * `.bp-paper-surface > #paper-body > h2` (+ its keyed-stream leg) in
  * paper-surface.css, which carries the full reasoning. A TOP-LEVEL level-2

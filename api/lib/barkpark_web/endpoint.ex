@@ -3,13 +3,22 @@ defmodule BarkparkWeb.Endpoint do
 
   require Logger
 
-  # The session will be stored in the cookie and signed,
-  # this means its contents can be read but not tampered with.
-  # Set :encryption_salt if you would also like to encrypt it.
+  # The session is stored in the cookie, signed AND encrypted.
+  #
+  # Owner ruling #16 (task-2bf444a2bc350136): the cookie is ENCRYPTED, not only
+  # signed. It carries the Studio credential (`api_token` — a raw API token —
+  # or `user_session`), and a signed-only cookie is base64 a reader can decode:
+  # anyone who saw the cookie held a bearer token usable from anywhere, after
+  # logout too. With `encryption_salt` the payload is AES-GCM sealed under a
+  # key derived from `secret_key_base`. Every cookie minted before this change
+  # fails to decrypt and reads as an empty session, so each user signs in once
+  # more after the deploy. Making logout revoke the credential itself is the
+  # follow-up the ruling names (revocable session token).
   @session_options [
     store: :cookie,
     key: "_barkpark_key",
     signing_salt: "czq4X2DQ",
+    encryption_salt: "Qm7vR2pLx9Tc",
     same_site: "Lax"
   ]
 

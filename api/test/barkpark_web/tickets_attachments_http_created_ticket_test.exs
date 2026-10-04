@@ -206,7 +206,7 @@ defmodule BarkparkWeb.TicketsAttachmentsHttpCreatedTicketTest do
 
   defp mint_operator_token!(workspace_id) do
     raw = "op-" <> (:crypto.strong_rand_bytes(12) |> Base.encode16(case: :lower))
-    {:ok, _} = Auth.create_token(raw, "Support Desk", @dataset, ["read"], workspace_id)
+    {:ok, _} = Auth.create_token(raw, "Support Desk", @dataset, ["read", "write"], workspace_id)
     raw
   end
 
