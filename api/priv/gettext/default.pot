@@ -178,9 +178,14 @@ msgstr ""
 msgid "Preview"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:130
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:107
 #, elixir-autogen, elixir-format
 msgid "Publish"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:106
+#, elixir-autogen, elixir-format
+msgid "Publish — makes this sheet public"
 msgstr ""
 
 #: lib/barkpark_web/components/fields/array_field.ex:131

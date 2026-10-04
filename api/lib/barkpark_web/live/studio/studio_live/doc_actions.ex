@@ -98,6 +98,14 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
   # Diff toggle → Discard draft → Duplicate → Open another → View blast radius →
   # Delete (destructive, held to the TAIL — separated from the CTA so it is
   # out of the misclick zone) → schema actions.
+  # Owner ruling #58 (2026-10-03): publishing a sheet makes it public — the
+  # `/sheets/:slug` reader serves any published sheet to anyone, whatever the
+  # schema's visibility, the same way papers behave. The Publish control says
+  # so for sheets, so an author is not surprised after the click.
+  @doc false
+  def publish_label("sheet"), do: gettext("Publish — makes this sheet public")
+  def publish_label(_type), do: gettext("Publish")
+
   @doc false
   def default_doc_actions(assigns, _ctx) do
     assigns = socket_to_assigns(assigns)
@@ -127,7 +135,7 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
       if is_draft do
         %{
           "name" => "publish",
-          "label" => gettext("Publish"),
+          "label" => publish_label(assigns[:editor_type]),
           "kind" => "event",
           "scope" => "editor_header",
           "opts" => %{
