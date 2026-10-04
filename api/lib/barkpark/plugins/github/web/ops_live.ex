@@ -105,10 +105,7 @@ defmodule Barkpark.Plugins.Github.Web.OpsLive do
         Conflicts.resolve(id)
 
       ws_id ->
-        case Barkpark.Repo.get(Barkpark.Plugins.Github.Conflict, id) do
-          %{workspace_id: ^ws_id} -> Conflicts.resolve(id)
-          _ -> {:error, :not_found}
-        end
+        Conflicts.resolve(id, workspace_id: ws_id)
     end
   end
 
