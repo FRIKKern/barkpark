@@ -85,6 +85,18 @@ type Team struct {
 // statuses merged per-row. They are purely additive: a control plane that omits
 // any of them decodes to the field's zero value, and no existing field is
 // renamed, so `bp barkparks` and every current consumer are untouched.
+// UpdateFailure is one failed self-update run as the control plane mirrors it
+// (`update_last_failure`). ExitCode is a pointer: the plane stores null when the
+// box sent no integer, which is not exit 0.
+type UpdateFailure struct {
+	Phase      string   `json:"phase"`
+	Source     string   `json:"source"`
+	ExitCode   *int     `json:"exit_code"`
+	Mode       string   `json:"mode"`
+	FinishedAt string   `json:"finished_at"`
+	Tail       []string `json:"tail"`
+}
+
 type Barkpark struct {
 	ID           string `json:"id"`
 	Name         string `json:"name"`
@@ -237,10 +249,17 @@ type Barkpark struct {
 	UpdateLatestRelease     string  `json:"update_latest_release"`
 	UpdateCheckedAt         *string `json:"update_checked_at"`
 	UpdateUnavailableReason string  `json:"update_unavailable_reason"`
-	AutoupdateEnabled       *bool   `json:"autoupdate_enabled"`
-	AutoupdatePaused        bool    `json:"autoupdate_paused"`
-	PinnedRelease           string  `json:"pinned_release"`
-	Channel                 string  `json:"channel"`
+	// UpdateLastFailure is the box's LAST FAILED self-update run, mirrored by the
+	// control plane from the box's own `GET /v1/admin/self-update` `failure`
+	// key: the phase it failed in (build, migrate, restart, merge, fetch, ...),
+	// how that phase was derived, the exit code and a redacted log tail of at
+	// most 40 lines. nil = no failed run on file (or a plane that predates the
+	// field). It answers "build or migrate?" without SSH.
+	UpdateLastFailure *UpdateFailure `json:"update_last_failure"`
+	AutoupdateEnabled *bool          `json:"autoupdate_enabled"`
+	AutoupdatePaused  bool           `json:"autoupdate_paused"`
+	PinnedRelease     string         `json:"pinned_release"`
+	Channel           string         `json:"channel"`
 	// AutoupdateTriggeredAt is the IN-FLIGHT ROLLOUT MARKER (isu-w5.2): the
 	// instant the rollout worker triggered this box's self-update
 	// (`Registry.mark_autoupdate_triggered/1`), cleared by

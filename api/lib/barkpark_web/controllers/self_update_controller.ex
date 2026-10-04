@@ -207,9 +207,18 @@ defmodule BarkparkWeb.SelfUpdateController do
       exit_code: status.exit_code,
       log: status.log,
       started_at: iso(status.started_at),
-      finished_at: iso(status.finished_at)
+      finished_at: iso(status.finished_at),
+      # A failed run's phase + redacted tail (`Barkpark.SelfUpdate.FailureReport`),
+      # null otherwise. Barkpark Cloud mirrors it so an operator sees WHY an
+      # update failed without SSH.
+      failure: render_failure(Map.get(status, :failure))
     }
   end
+
+  defp render_failure(%{phase: phase, source: source, exit_code: code, tail: tail}),
+    do: %{phase: phase, source: source, exit_code: code, tail: tail}
+
+  defp render_failure(_none), do: nil
 
   defp iso(nil), do: nil
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)

@@ -13403,6 +13403,11 @@ defmodule BarkparkCloud.Web.Router do
       # anywhere outside its producer, so the console said "No update state
       # reported yet" about a box that had in fact answered 401.
       update_unavailable_reason: bp.update_unavailable_reason,
+      # The box's last FAILED self-update run (phase, source, exit_code, mode,
+      # finished_at, a redacted tail of at most 40 lines), mirrored by the same
+      # UpdateStatusWorker read. NULL = no failed run on file. `bp cloud status`
+      # prints it, so an operator learns build-vs-migrate without SSH.
+      update_last_failure: bp.update_last_failure,
       # dr-w24-s2 COMMIT DISTANCE — the control plane's OWN measurement of the
       # commit each box actually serves (`BarkparkCloud.GitHub.CommitDistance`,
       # written hourly by the UpdateStatusWorker), beside the box's release-tag

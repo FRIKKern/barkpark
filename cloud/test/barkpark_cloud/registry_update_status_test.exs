@@ -683,4 +683,120 @@ defmodule BarkparkCloud.RegistryUpdateStatusTest do
       assert Repo.aggregate(ProvisionJob, :count) == 1
     end
   end
+
+  describe "a failed run's phase and tail ride the same 200 (update_last_failure)" do
+    # The box's `GET /v1/admin/self-update` carries `failure` beside
+    # `state`/`exit_code` (`Barkpark.SelfUpdate.FailureReport`). Before this the
+    # plane dropped it, so "did the update die in the build or the migration?"
+    # needed SSH to the box's .deploy-status.json.
+    defp failed_body(phase, code, tail, finished_at \\ "2026-10-04T20:00:00Z") do
+      check_body("behind")
+      |> Jason.decode!()
+      |> Map.merge(%{
+        "state" => "done",
+        "mode" => "self_update",
+        "exit_code" => code,
+        "finished_at" => finished_at,
+        "failure" => %{
+          "phase" => phase,
+          "source" => "deploy_status",
+          "exit_code" => code,
+          "tail" => tail
+        }
+      })
+      |> Jason.encode!()
+    end
+
+    defp fresh_box do
+      live_barkpark(team_fixture())
+      |> Ecto.Changeset.change(url: "#{@instance_url}/#{System.unique_integer([:positive])}")
+      |> Repo.update!()
+    end
+
+    defp refresh_with(bp, body) do
+      StudioLinkFakeHttpClient.program([{:ok, %{status: 200, body: body}}])
+      _ = Registry.refresh_update_status(bp)
+      Repo.get!(Barkpark, bp.id)
+    end
+
+    defp failure_events(bp) do
+      bp
+      |> Registry.recent_events(50)
+      |> Enum.filter(&(&1.type == "status" and &1.payload["transition"] == "update_failed"))
+    end
+
+    test "a build failure lands phase=build with its tail, on the row and the event timeline" do
+      bp = fresh_box()
+
+      tail = [
+        "[deploy-rebuild] building aside",
+        "** (CompileError) lib/x.ex:1: undefined function foo/0"
+      ]
+
+      row = refresh_with(bp, failed_body("build", 1, tail))
+
+      assert %{"phase" => "build", "exit_code" => 1, "source" => "deploy_status", "tail" => ^tail} =
+               row.update_last_failure
+
+      assert row.update_last_failure["mode"] == "self_update"
+      assert row.update_last_failure["finished_at"] == "2026-10-04T20:00:00Z"
+
+      assert [event] = failure_events(bp)
+      assert event.payload["phase"] == "build"
+      assert event.payload["tail"] == tail
+    end
+
+    test "a migrate failure lands phase=migrate" do
+      bp = fresh_box()
+      row = refresh_with(bp, failed_body("migrate", 13, ["ERROR 42P07 (duplicate_table)"]))
+      assert %{"phase" => "migrate", "exit_code" => 13} = row.update_last_failure
+      assert [%{payload: %{"phase" => "migrate"}}] = failure_events(bp)
+    end
+
+    test "the hourly re-read of the SAME failure records ONE event; a new run records another" do
+      bp = fresh_box()
+      body = failed_body("build", 1, ["boom"])
+      bp = refresh_with(bp, body)
+      bp = refresh_with(bp, body)
+      assert length(failure_events(bp)) == 1
+
+      _ = refresh_with(bp, failed_body("migrate", 13, ["boom 2"], "2026-10-04T21:00:00Z"))
+      assert length(failure_events(bp)) == 2
+    end
+
+    test "a later successful run clears the failure; a pre-feature box (no key) stores none" do
+      bp = fresh_box()
+      bp = refresh_with(bp, failed_body("build", 1, ["boom"]))
+      assert bp.update_last_failure
+
+      ok_body =
+        check_body("current")
+        |> Jason.decode!()
+        |> Map.merge(%{"state" => "done", "exit_code" => 0, "failure" => nil})
+        |> Jason.encode!()
+
+      assert refresh_with(bp, ok_body).update_last_failure == nil
+      assert refresh_with(fresh_box(), check_body("current")).update_last_failure == nil
+    end
+
+    test "the tail is re-scrubbed and re-capped by the plane; a weird phase fails closed" do
+      long = for i <- 1..60, do: "line #{i}"
+
+      failure =
+        Registry.last_failure_of(%{
+          "failure" => %{
+            "phase" => "Build; rm -rf /",
+            "source" => "made-up",
+            "exit_code" => "1",
+            "tail" => long ++ ["token=ghp_abcdefghijklmnopqrstuvwxyz0123", 42]
+          }
+        })
+
+      assert failure["phase"] == "unknown"
+      assert failure["source"] == nil
+      assert failure["exit_code"] == nil
+      assert length(failure["tail"]) == 40
+      refute Enum.any?(failure["tail"], &(&1 =~ "ghp_abcdefghijklmnopqrstuvwxyz0123"))
+    end
+  end
 end

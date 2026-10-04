@@ -73,6 +73,7 @@ defmodule Barkpark.SelfUpdate.Runner do
 
   require Logger
 
+  alias Barkpark.SelfUpdate.FailureReport
   alias Barkpark.Sites.BuildLogScrub
 
   @default_command {"bash", ["scripts/self-update.sh"]}
@@ -804,14 +805,33 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp iso(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 
   defp render_status(state) do
+    log = Enum.reverse(state.log)
+
     %{
       state: run_state(state.run),
       mode: state.mode,
       exit_code: run_exit_code(state.run),
-      log: Enum.reverse(state.log),
+      log: log,
       started_at: state.started_at,
-      finished_at: state.finished_at
+      finished_at: state.finished_at,
+      failure: failure(state, log)
     }
+  end
+
+  # The failing phase + a redacted tail for a finished non-zero run, so the
+  # control plane reads WHY an update failed without SSH (FailureReport).
+  defp failure(%{run: {:done, code}} = state, log) when is_integer(code) and code != 0 do
+    FailureReport.build(code, log, safe_deploy_status(state))
+  rescue
+    _ -> FailureReport.build(code, log, nil)
+  end
+
+  defp failure(_state, _log), do: nil
+
+  defp safe_deploy_status(state) do
+    matching_deploy_status(state)
+  rescue
+    _ -> nil
   end
 
   defp run_state(:idle), do: :idle
