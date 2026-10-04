@@ -59,6 +59,9 @@ defmodule Barkpark.Plugins.Github.Link do
       append-only log. An event is not a document; there is no `Content.*`
       reader for it, and inventing one for a single caller would put plugin
       concerns inside `Content`.
+    * `restrip.ex` (1) — `Oban.Job` rows: the restrip tasks whose job is still
+      waiting, so a second `--apply` skips them (owner ruling #11). A job is not
+      a document, the same shape as `health.ex`'s queue-depth counts.
 
   So: no read site named above is expressible through an existing `Content.*`
   reader without changing its result set or its cost, and where a reader DID

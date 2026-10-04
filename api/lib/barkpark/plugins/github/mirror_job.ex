@@ -276,7 +276,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
           # a child that is already synced still re-runs to link its now-mirrored
           # parent. The issue create/PATCH stays idempotent (nothing changed → a
           # redundant no-op PATCH); the point of the re-run is the relations pass.
-          not relink?(opts) and Link.synced?(task_doc) ->
+          # A `restrip: true` job (owner ruling #11, `Github.RestripJob`) also
+          # bypasses it: the task has not moved, but its issue body was written
+          # before the body strip and must be re-PATCHed to the stripped shape.
+          not relink?(opts) and not restrip?(opts) and Link.synced?(task_doc) ->
             :ok
 
           true ->
@@ -397,7 +400,12 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # Record the issue number first (so a retry PATCHes, never re-CREATEs), then
   # converge `state` with a follow-up idempotent PATCH in the SAME reconcile.
   defp after_create(doc_id, dataset, repo, num, %{state: "open"}, rev, opts, task_doc) do
-    case stamp(doc_id, dataset, %{repo: repo, issue: num, synced_rev: rev, state: "synced"}, opts) do
+    case stamp(
+           doc_id,
+           dataset,
+           %{repo: repo, issue: num, synced_rev: rev, state: "synced", stripped: true},
+           opts
+         ) do
       # The issue mirror converged (created + stamped). NOW the issue number is
       # known and the issue write returned :ok, so run the failure-isolated
       # Projects + relations projections. A fresh create carries no prior link, so
@@ -450,9 +458,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
         # ADVANCE an `adopted` link to `synced` here: the born create path stamps
         # `synced` in after_create, but an intake→adopt task first reaches
         # `synced` ONLY through this update PATCH — without it the state field
-        # lies `adopted` forever (task-eb5ac970477f9308).
+        # lies `adopted` forever (task-eb5ac970477f9308). `stripped: true`
+        # records that this body was written under the body strip (owner
+        # ruling #11), so `Github.Restrip.plan/2` can count what is left.
         stamp_fields =
-          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired)}
+          %{synced_rev: rev, synced_fingerprint: desired_fingerprint(desired), stripped: true}
           |> advance_adopted_state(link)
 
         case stamp(doc_id, dataset, stamp_fields, opts) do
@@ -1245,6 +1255,7 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   defp cfg, do: Application.get_env(:barkpark, @config_key, [])
 
   defp relink?(opts), do: opts[:relink] == true
+  defp restrip?(opts), do: opts[:restrip] == true
 
   defp relink_attempt(opts) do
     case opts[:relink_attempt] do
