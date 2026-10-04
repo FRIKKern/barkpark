@@ -164,8 +164,21 @@ defmodule BarkparkWeb.Studio.ClaudeChatPerWorkspaceProfileTest do
       assert consecutive?(read_argv(argv), ["--workspace", ws.id])
     end
 
-    test "workspace B (unset chat settings) stays SELF-HOSTED — global config UNSET" do
-      {marker, argv} = install_marker_shims()
+    # OWNER RULING 2026-10-03 #3: on a MULTI-TENANT instance (this test DB
+    # holds the seeded Default plus `ws`) an unset workspace runs SANDBOXED
+    # when nothing chose otherwise; an explicit global config still decides.
+    test "workspace B (unset chat settings) runs SANDBOXED on a multi-tenant instance — global config UNSET" do
+      {marker, _argv} = install_marker_shims()
+
+      ws = workspace!()
+      assert Tenancy.multi_tenant?()
+      spawn_and_wait(%{workspace_id: ws.id, session_id: Ecto.UUID.generate()})
+
+      assert read_marker(marker) == "cloud-marker"
+    end
+
+    test "workspace B (unset chat settings) stays SELF-HOSTED under an explicit global :self_hosted" do
+      {marker, argv} = install_marker_shims(execution_profile: :self_hosted)
 
       ws = workspace!()
       spawn_and_wait(%{workspace_id: ws.id, session_id: Ecto.UUID.generate()})
@@ -182,8 +195,8 @@ defmodule BarkparkWeb.Studio.ClaudeChatPerWorkspaceProfileTest do
       assert read_marker(marker) == "selfhosted-marker"
     end
 
-    test "an unknown per-workspace value counts as UNSET → self-hosted (fail-safe)" do
-      {marker, _argv} = install_marker_shims()
+    test "an unknown per-workspace value counts as UNSET → the global choice (fail-safe)" do
+      {marker, _argv} = install_marker_shims(execution_profile: :self_hosted)
 
       ws = workspace!()
       {:ok, _} = Tenancy.set_workspace_chat_settings(ws, %{"execution_profile" => "mainframe"})

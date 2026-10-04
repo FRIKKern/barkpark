@@ -197,7 +197,9 @@ defmodule Barkpark.StudioChat.Provider.Claude do
   """
   @spec resolve_workspace_execution_profile(map()) :: map()
   def resolve_workspace_execution_profile(session_opts) when is_map(session_opts) do
-    case workspace_execution_profile(Map.get(session_opts, :workspace_id)) do
+    workspace_id = Map.get(session_opts, :workspace_id)
+
+    case workspace_execution_profile(workspace_id) || multi_tenant_default(workspace_id) do
       profile when profile in [:cloud, :self_hosted] ->
         Map.put(session_opts, :execution_profile, profile)
 
@@ -205,6 +207,22 @@ defmodule Barkpark.StudioChat.Provider.Claude do
         session_opts
     end
   end
+
+  # OWNER RULING 2026-10-03 #3 (task-6ca882967fd95dda): on a MULTI-TENANT
+  # instance a workspace session with no explicit choice — no per-workspace
+  # `execution_profile` and no global `:execution_profile` in config — runs
+  # SANDBOXED (`:cloud`), so the instance host is only ever reached by an
+  # explicit, operator-made choice. Single-tenant instances keep the host
+  # default; `nil`-owned (instance-global, operator) sessions are untouched;
+  # an explicit global config still decides. `multi_tenant?/0` fails closed
+  # (a lookup error reads as multi-tenant), which here means sandboxed.
+  defp multi_tenant_default(workspace_id) when is_binary(workspace_id) do
+    if Keyword.has_key?(config(), :execution_profile) or not Barkpark.Tenancy.multi_tenant?(),
+      do: nil,
+      else: :cloud
+  end
+
+  defp multi_tenant_default(_workspace_id), do: nil
 
   defp workspace_execution_profile(workspace_id) when is_binary(workspace_id) do
     workspace = Barkpark.Tenancy.get_workspace_by_id(workspace_id)
