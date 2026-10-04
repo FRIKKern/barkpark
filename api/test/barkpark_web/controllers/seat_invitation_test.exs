@@ -11,6 +11,8 @@ defmodule BarkparkWeb.SeatInvitationTest do
   """
   use BarkparkWeb.ConnCase, async: true
 
+  @password "correct horse battery"
+
   import Barkpark.TenancyFixtures
 
   alias Barkpark.{Accounts, Auth}
@@ -30,7 +32,7 @@ defmodule BarkparkWeb.SeatInvitationTest do
     {:ok, victim} =
       Accounts.register_user(%{
         email: "victim-#{System.unique_integer([:positive])}@example.com",
-        password: "correct horse battery"
+        password: @password
       })
 
     victim = Accounts.confirm_provisioned_user(victim)
@@ -61,7 +63,8 @@ defmodule BarkparkWeb.SeatInvitationTest do
   end
 
   defp mint_pat(session) do
-    as_user(session) |> post("/v1/auth/tokens", Jason.encode!(%{name: "laptop"}))
+    as_user(session)
+    |> post("/v1/auth/tokens", Jason.encode!(%{name: "laptop", current_password: @password}))
   end
 
   test "seating an existing user stores an invitation and seats nothing", ctx do
@@ -160,7 +163,10 @@ defmodule BarkparkWeb.SeatInvitationTest do
 
     named =
       as_user(ctx.session)
-      |> post("/v1/auth/tokens", Jason.encode!(%{name: "laptop", workspace: ctx.home.slug}))
+      |> post(
+        "/v1/auth/tokens",
+        Jason.encode!(%{name: "laptop", workspace: ctx.home.slug, current_password: @password})
+      )
       |> json_response(201)
 
     {:ok, token} = Auth.verify_token(named["token"])
@@ -169,8 +175,44 @@ defmodule BarkparkWeb.SeatInvitationTest do
     stranger = create_workspace!("stranger-#{System.unique_integer([:positive])}")
 
     assert as_user(ctx.session)
-           |> post("/v1/auth/tokens", Jason.encode!(%{name: "x", workspace: stranger.slug}))
+           |> post(
+             "/v1/auth/tokens",
+             Jason.encode!(%{name: "x", workspace: stranger.slug, current_password: @password})
+           )
            |> json_response(403)
+  end
+
+  test "a user in several workspaces names one by id too, and the PAT reads there", ctx do
+    # The CLI and Studio never call this route (no `bp` verb mints a PAT here;
+    # `bp token create` uses the scoped /w/:ws/p/:proj/v1/tokens door, whose URL
+    # names the workspace). A two-workspace user who names the workspace once
+    # gets a PAT that works on the CLI's scoped data verbs in that workspace.
+    assert seat(ctx, ctx.victim.email).status == 202
+    [inv] = json_response(as_user(ctx.session) |> get("/v1/auth/invitations"), 200)["invitations"]
+
+    assert as_user(ctx.session)
+           |> post("/v1/auth/invitations/#{inv["id"]}/accept", "{}")
+           |> json_response(201)
+
+    pat =
+      as_user(ctx.session)
+      |> post(
+        "/v1/auth/tokens",
+        Jason.encode!(%{name: "cli", workspace: ctx.ws.id, current_password: @password})
+      )
+      |> json_response(201)
+
+    {:ok, token} = Auth.verify_token(pat["token"])
+    assert token.workspace_id == ctx.ws.id
+
+    # Authorized in the named workspace: no 401/403 (the fixture project holds
+    # no dataset rows, so the read itself may answer 404 dataset-not-found).
+    status =
+      admin(pat["token"])
+      |> get("/w/#{ctx.ws.slug}/p/#{ctx.project.slug}/v1/data/query/#{@dataset}/post")
+      |> Map.fetch!(:status)
+
+    refute status in [401, 403]
   end
 
   test "a brand-new e-mail is still seated directly (201)", ctx do
