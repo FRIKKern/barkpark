@@ -114,6 +114,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
+      PUT     /v1/operator/teams/:id/support-cap operator  set one team's cap on CP-provisioned support boxes (owner ruling #37; `null` = platform default)
       POST    /v1/operator/teams/:id/billing/resume operator  lift a team's BILLING suspension after re-reading its subscription from the payment gateway (reason-scoped; 409 `subscription_unpaid` when the gateway does not say the payer is current)
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
@@ -2935,7 +2936,9 @@ defmodule BarkparkCloud.Web.Router do
     }
 
     # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
-    # never returns :limit_reached, so a saturated ceiling can't 403 here.
+    # never returns :limit_reached, so a saturated ceiling can't 403 here. The
+    # ruling #37 support-box cap is NOT applied here either: a register-only row
+    # binds the team's OWN box, which costs the platform nothing.
     case Registry.register_support_barkpark(team, attrs) do
       {:ok, support} ->
         push_event(team.id, "fleet")
@@ -3007,21 +3010,29 @@ defmodule BarkparkCloud.Web.Router do
       server_type: string_param_or_nil(conn.body_params["server_type"])
     }
 
-    case Registry.register_support_barkpark(team, attrs) do
-      {:ok, support} ->
-        case Registry.enqueue_support_provision_job(support) do
-          {:ok, job} ->
-            push_event(team.id, "fleet")
-            json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
+    # Owner ruling #37 (2026-10-03): provision mode starts a PAID server, so it
+    # runs under a per-team cap (PDF-D86's quota exemption still holds for the
+    # instance quota; this is a separate, smaller ceiling an operator can raise).
+    # The row and its job are written in ONE locked transaction with the count.
+    case Registry.provision_support_capped(team, attrs) do
+      {:ok, {support, job}} ->
+        push_event(team.id, "fleet")
+        json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
 
-          # A brand-new row can't already hold an active job, but stay honest
-          # rather than 500 if a race ever produces one.
-          {:error, :already_provisioning} ->
-            json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(support)})
+      {:error, {:support_cap_reached, cap, held}} ->
+        json(conn, 403, %{
+          error: "support_cap_reached",
+          cap: cap,
+          count: held,
+          detail:
+            "this team already holds #{held} provisioned support box(es), its cap is #{cap}. " <>
+              "Remove one (bp cloud support remove), or ask Barkpark support to raise the cap."
+        })
 
-          {:error, %Ecto.Changeset{} = cs} ->
-            json(conn, 422, %{error: "invalid", details: errors(cs)})
-        end
+      # A brand-new row can't already hold an active job, but stay honest rather
+      # than 500 if a race ever produces one. (The transaction rolled the row back.)
+      {:error, :already_provisioning} ->
+        json(conn, 409, %{error: "already_provisioning"})
 
       {:error, %Ecto.Changeset{} = cs} ->
         json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -5658,6 +5669,51 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:gateway, reason}} ->
             json(conn, 502, %{error: "resume_failed", reason: billing_reason(reason)})
+        end
+    end
+  end
+
+  # PUT /v1/operator/teams/:id/support-cap {cap: N | null} → 200 {team_id,
+  # support_box_cap, effective_cap} — owner ruling #37's operator override: raise
+  # (or lower) ONE team's ceiling on CP-provisioned support boxes; `null` returns
+  # the team to the platform default. Lowering below what a team holds removes
+  # nothing — it only refuses the next provision.
+  put "/v1/operator/teams/:id/support-cap" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not (Map.has_key?(conn.body_params, "cap") and
+               (is_nil(conn.body_params["cap"]) or is_integer(conn.body_params["cap"]))) ->
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{cap: ["must be a non-negative integer, or null for the platform default"]}
+        })
+
+      true ->
+        case Accounts.get_team(id) do
+          nil ->
+            json(conn, 404, %{error: "not_found", scope: "team"})
+
+          team ->
+            case Registry.set_support_box_cap(team, conn.body_params["cap"]) do
+              {:ok, updated} ->
+                Logger.info(
+                  "operator #{conn.assigns.current_user.id} set team #{id} support_box_cap=" <>
+                    inspect(updated.support_box_cap)
+                )
+
+                json(conn, 200, %{
+                  team_id: id,
+                  support_box_cap: updated.support_box_cap,
+                  effective_cap: Registry.support_box_cap(updated)
+                })
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
         end
     end
   end
