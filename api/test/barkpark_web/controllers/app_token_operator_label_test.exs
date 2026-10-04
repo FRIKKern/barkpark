@@ -63,12 +63,10 @@ defmodule BarkparkWeb.AppTokenOperatorLabelTest do
     assert mint(ctx.op_raw, %{email: @operator_email}).status == 201
   end
 
-  test "no app-token label makes a token the operator, whoever minted it", ctx do
+  test "no app-token label makes a token the operator, whoever minted it" do
     # The root of task-60ed926e61d3d048: RequirePlatformOperator no longer
-    # reads identity from the caller-chosen label at all.
-    body = json_response(mint(ctx.op_raw, %{email: @operator_email}), 201)
-    refute operator?(body["token"])
-
+    # reads identity from the caller-chosen label at all. A token carrying the
+    # operator's `app:` label but no owner user is not the operator.
     {:ok, forged} =
       Auth.create_token(
         "forged-#{System.unique_integer([:positive])}",
@@ -77,7 +75,25 @@ defmodule BarkparkWeb.AppTokenOperatorLabelTest do
         ["read", "write", "chat"]
       )
 
+    assert forged.owner_user_id == nil
     refute RequirePlatformOperator.permits?(forged)
+  end
+
+  test "an operator-minted app token is the operator through its owner user, not its label",
+       ctx do
+    # Since #21569 (owner ruling #32 item 3) a minted app token records
+    # `owner_user_id`, so the email arm recognises it by the account's real
+    # email. The label plays no part: a custom label is recognised the same.
+    default = json_response(mint(ctx.op_raw, %{email: @operator_email}), 201)
+    assert operator?(default["token"])
+
+    custom =
+      json_response(mint(ctx.op_raw, %{email: @operator_email, label: "kitchen tablet"}), 201)
+
+    {:ok, token} = Auth.verify_token(custom["token"])
+    assert token.label == "kitchen tablet"
+    assert Barkpark.Accounts.get_user(token.owner_user_id).email == @operator_email
+    assert RequirePlatformOperator.permits?(token)
   end
 
   test "an ordinary app token (default or matching label) is unaffected", ctx do

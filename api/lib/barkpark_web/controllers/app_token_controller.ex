@@ -557,13 +557,14 @@ defmodule BarkparkWeb.AppTokenController do
 
   defp audit_label(label, _email, _user_id), do: label
 
-  # task-60ed926e61d3d048: `RequirePlatformOperator` reads an app token's
-  # `"app:<email>"` label as its owner's identity (the token carries no
-  # `owner_user_id`). The label is caller-chosen, so (1) a label in that
-  # namespace must name THIS token's email, and (2) a token FOR an email on the
-  # armed operator allowlist is minted only by a bearer the allowlist already
-  # names — otherwise any minting admin could hand itself the operator's
-  # identity. Labels outside the "app:" namespace are unaffected.
+  # task-60ed926e61d3d048: `RequirePlatformOperator` resolves an app token's
+  # identity from `owner_user_id` (stamped above, #21569) and no longer reads
+  # the label. A minted token's owner is the user for `email`, so (2) is the
+  # load-bearing guard: a token FOR an email on the armed operator allowlist is
+  # minted only by a bearer the allowlist already names — otherwise any minting
+  # admin could hand itself the operator's identity. (1) keeps the `app:` label
+  # namespace honest: such a label must name THIS token's email. Labels outside
+  # the "app:" namespace are unaffected.
   defp label_names_email(%{"label" => label}, email) when is_binary(label) do
     case String.downcase(String.trim(label)) do
       "app:" <> named ->
