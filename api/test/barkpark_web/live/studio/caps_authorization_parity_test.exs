@@ -349,22 +349,21 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
         "PAIRING 1 — THE barkpark-23yi/fsko CELL. A global-admin token holding a plain " <>
           "`member` row in a FOREIGN workspace. Pre-arpss-w10 caps ADMITTED admin here.",
       build: :token_foreign_member_admin,
-      authorize: %{read: :admit, write: :admit, admin: :admit},
+      authorize: %{read: :admit, write: :admit, admin: :deny},
       caps: %{read: :admit, write: :admit, admin: :deny},
       admin_fn: :deny,
       workspace_admin: :deny,
       verdicts: %{
         read: :equivalent,
         write: :equivalent,
-        admin_vs_authorize: :real_divergent,
+        admin_vs_authorize: :equivalent,
         admin_vs_ws_admin: :equivalent
       },
       note:
         "THE RULING (charter D22). The declared oracle for :admin is workspace_admin?/2, " <>
-          "which caps now matches. authorize/3's disagreement is in the DENY direction and " <>
-          "is D9-ratified — its token arm is `member? AND permits?`, which is the very " <>
-          "cross-tenant shape barkpark-23yi/fsko fixed elsewhere. NOT a finding against " <>
-          "this file; recorded so a future reader cannot mistake it for drift. " <>
+          "which caps now matches. Since owner ruling #2 (task-6132833921b7dc36) " <>
+          "authorize/3's token arm also reads the seat role, so all three oracles deny " <>
+          ":admin here; before it, authorize/3 admitted on `member? AND permits?`. " <>
           "Before arpss-w10 caps read :admit here on BOTH derive/1 and admin?/1."
     },
     %{

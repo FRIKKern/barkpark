@@ -277,9 +277,17 @@ defmodule Barkpark.Access do
 
   defp authorize_revoke(principal, %Grant{} = grant) do
     cond do
-      principal_matches?(principal, grant.grantor_id) -> :ok
-      Auth.authorize(principal, grant.workspace_id, :admin) == :ok -> :ok
-      true -> {:error, :forbidden}
+      # OWNER RULING 2026-10-03 #2: the grantor arm needs the grantor to still
+      # hold a seat in the grant's workspace; a former grantor is refused.
+      principal_matches?(principal, grant.grantor_id) and
+          Auth.authorize(principal, grant.workspace_id, :read) == :ok ->
+        :ok
+
+      Auth.authorize(principal, grant.workspace_id, :admin) == :ok ->
+        :ok
+
+      true ->
+        {:error, :forbidden}
     end
   end
 

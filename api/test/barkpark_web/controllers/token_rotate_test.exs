@@ -99,6 +99,10 @@ defmodule BarkparkWeb.TokenRotateTest do
           password: "correct horse battery"
         })
 
+      # The PAT's owner is seated where the PAT is bound: since owner ruling #2
+      # a user-owned token reads only while its owner's seat allows it.
+      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, owner.id, "member", "user")
+
       {:ok, {old_raw, old}} =
         Auth.create_personal_access_token("ci deploy", ["read", "write"],
           role: "owner",

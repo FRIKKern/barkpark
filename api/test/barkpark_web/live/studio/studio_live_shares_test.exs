@@ -375,13 +375,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSharesTest do
       # prove nothing.
       {:ok, _} = TenancyAuth.create_membership(ws_b.id, admin_tok.id, "member")
 
-      # Preconditions asserted inline so the predicate choice is provably
-      # load-bearing: this actor PASSES `authorize/3` in B (its api_token arm
-      # ORs the token's GLOBAL permissions[] with membership) and FAILS
-      # `workspace_admin?/2`. Swap the new gate to `authorize/3` and the leak
-      # test below goes green on a leaking handler.
+      # Preconditions: this actor is a plain member of B and not its admin.
+      # Before owner ruling #2, task-6132833921b7dc36, authorize/3 admitted it on the
+      # token's GLOBAL permissions[]; it now reads the seat role and refuses, so
+      # both predicates agree.
       assert TenancyAuth.membership_role(admin_tok, ws_b.id) == "member"
-      assert TenancyAuth.authorize(admin_tok, ws_b.id, :admin) == :ok
+      assert TenancyAuth.authorize(admin_tok, ws_b.id, :admin) == {:error, :forbidden}
       refute TenancyAuth.workspace_admin?(admin_tok, ws_b.id)
 
       %{ws_b: ws_b, link_b: link_b, raw_b: raw_b}

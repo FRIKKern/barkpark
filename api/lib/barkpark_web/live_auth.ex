@@ -230,13 +230,23 @@ defmodule BarkparkWeb.LiveAuth do
   # `session["api_token"]` from earlier manual testing. In non-dev envs
   # `dev_browser_token_fallback/0` is nil, so this is a no-op there and
   # the real session token (or the user_session path) decides.
+  # OWNER RULING 2026-10-03 #2, the LiveView twin of `RequireAdmin`: the
+  # `:admin` gate (flat admin LiveViews: settings, plugin settings, …) also
+  # needs the token's holder to still have admin authority where it acts — a
+  # demoted or removed seat no longer opens them. The `:ops` gate is untouched.
+  defp admin_seat_ok?(["admin"], api_token),
+    do: BarkparkWeb.Plugs.RequireAdmin.admin_seat?(%{assigns: %{}}, api_token)
+
+  defp admin_seat_ok?(_allowed_perms, _api_token), do: true
+
   defp authorize(socket, session, allowed_perms, denial_flash) do
     candidates = Enum.filter([dev_browser_token_fallback(), session["api_token"]], &is_binary/1)
 
     granted =
       Enum.find_value(candidates, fn token ->
         with {:ok, api_token} <- Auth.verify_token(token),
-             true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) do
+             true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)),
+             true <- admin_seat_ok?(allowed_perms, api_token) do
           api_token
         else
           _ -> nil

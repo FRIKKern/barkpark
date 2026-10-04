@@ -93,7 +93,9 @@ defmodule BarkparkWeb.Studio.StudioSharesHandlerConfinementTest do
     # Preconditions, asserted inline. Without these the fixture could be a
     # stranger to B and the leak test would pass for the wrong reason.
     assert TenancyAuth.membership_role(token, ws_b.id) == "member"
-    assert TenancyAuth.authorize(token, ws_b.id, :admin) == :ok
+
+    # Since owner ruling #2, task-6132833921b7dc36, authorize/3 reads the seat role too and refuses.
+    assert TenancyAuth.authorize(token, ws_b.id, :admin) == {:error, :forbidden}
     refute TenancyAuth.workspace_admin?(token, ws_b.id)
     # ...and it IS a seat admin at home, so `Caps.admin?/1` cannot be the denier.
     assert TenancyAuth.workspace_admin?(token, default_ws.id)
