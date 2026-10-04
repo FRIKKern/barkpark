@@ -80,7 +80,14 @@ defmodule Barkpark.Content.ResealTest do
 
     sealed = raw_secret("drafts.legacy-1")
     assert FieldCipher.encrypted?(sealed)
-    assert {:ok, "old-plain"} = FieldCipher.decrypt(sealed, "dataset:" <> @dataset, ws.id)
+
+    assert {:ok, "old-plain"} =
+             FieldCipher.decrypt(
+               sealed,
+               "dataset:" <> @dataset,
+               ws.id,
+               FieldCipher.binding(type, "legacy-1", "secret")
+             )
 
     assert Enum.filter(Reseal.census(), &(&1.type == type)) == []
     assert Reseal.plan(workspace: ws.slug) |> Enum.filter(&(&1.type == type)) == []
@@ -107,7 +114,15 @@ defmodule Barkpark.Content.ResealTest do
 
     sealed = raw_secret("legacy-1")
     assert FieldCipher.encrypted?(sealed)
-    assert {:ok, "old-plain"} = FieldCipher.decrypt(sealed, "dataset:" <> @dataset, ws.id)
+
+    assert {:ok, "old-plain"} =
+             FieldCipher.decrypt(
+               sealed,
+               "dataset:" <> @dataset,
+               ws.id,
+               FieldCipher.binding(type, "legacy-1", "secret")
+             )
+
     assert published_rev("legacy-1") == rev_before
     assert raw_rev_and_count("drafts.legacy-1") == {nil, 0}
     assert Reseal.plan(workspace: ws.slug) |> Enum.filter(&(&1.type == type)) == []

@@ -16,7 +16,7 @@ defmodule Barkpark.Content.Reseal do
     * `plan/1` — the per-row walk the census cannot do (composite / arrayOf
       kids, bound block copies): every document of a marked type in a
       non-Default workspace whose content CHANGES under
-      `Encryption.encrypt_marked/4` in its own scope. Read-only.
+      `Encryption.encrypt_marked/5` in its own scope. Read-only.
     * `apply/2` — reseals ONE workspace's candidates in batches, sealing each
       named row (draft or published) in place, fenced on its rev. The logical
       value is unchanged, so the rev stays and no event fires. Refuses when the
@@ -199,7 +199,7 @@ defmodule Barkpark.Content.Reseal do
   defp field_encrypted?(_), do: false
 
   defp changes?(%Document{content: content} = doc, type, dataset) when is_map(content) do
-    case Encryption.encrypt_marked(content, type, dataset, doc_scope(doc)) do
+    case Encryption.encrypt_marked(content, type, dataset, doc_scope(doc), doc_id: doc.doc_id) do
       {:ok, sealed} -> sealed != content
       _ -> false
     end
@@ -223,7 +223,10 @@ defmodule Barkpark.Content.Reseal do
                    d.workspace_id == ^ws_id
              )
            ) || :not_found,
-         {:ok, sealed} <- Encryption.encrypt_marked(doc.content, type, dataset, doc_scope(doc)) do
+         {:ok, sealed} <-
+           Encryption.encrypt_marked(doc.content, type, dataset, doc_scope(doc),
+             doc_id: doc.doc_id
+           ) do
       cond do
         sealed == doc.content ->
           :ok

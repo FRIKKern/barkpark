@@ -150,9 +150,13 @@ Enrolling any factor opens the gate. Flag unset everywhere → byte-identical.
 ## Field encryption (at rest)
 
 `Barkpark.Crypto.FieldCipher` wraps a value in an AES-256-GCM envelope
-`%{"_bpenc" => 1, "k" => version, "v" => base64}`. The DEK scope is the GCM AAD;
+`%{"_bpenc" => 1 | 2, "k" => version, "v" => base64}`. The DEK scope is the GCM AAD;
 content fields encrypt under scope `"dataset:" <> dataset`. `DataKeys` manages
-the active DEK, versioned rotation, and rewrap.
+the active DEK, versioned rotation, and rewrap. A content write seals version 2,
+whose AAD also binds the type, the published doc id and the top-level field, so
+an envelope copied to another document or field is refused (422
+`validation_failed`). Version 1 (bare scope) envelopes still decrypt; a clone
+re-seals for its own id.
 
 **Ciphertext-at-rest is never auto-decrypted on read.** Normal reads — search,
 drafts, broadcasts, export — keep ciphertext and never see plaintext.
