@@ -439,7 +439,67 @@ defmodule Barkpark.Accounts do
   # every open Studio tab reading and writing until it reconnected.
   # `BarkparkWeb.LiveAuth` subscribes each mounted LiveView to its session's
   # topic. Best-effort: a broadcast failure never fails the revoke.
+  #
+  # AFTER COMMIT when a caller asks for it (owner ruling #35, item 8). Inside
+  # `with_session_teardown_after_commit/1` the ids are queued and sent only
+  # once the caller's transaction has committed; a client that reconnects on
+  # the teardown then re-authenticates against a revoked row. Without that
+  # wrapper the teardown goes out at once, as before.
+  @session_teardown_queue :barkpark_deferred_session_teardown
+
   defp broadcast_session_teardown(ids) when is_list(ids) do
+    case Process.get(@session_teardown_queue) do
+      queued when is_list(queued) ->
+        if Repo.in_transaction?(),
+          do: Process.put(@session_teardown_queue, queued ++ ids),
+          else: send_session_teardown(ids)
+
+      _ ->
+        send_session_teardown(ids)
+    end
+  end
+
+  @doc """
+  Run `fun` so that every session teardown its transaction triggers is sent
+  only AFTER the transaction commits.
+
+  `revoke_all_user_sessions/1` (and the other session revokes) broadcast a
+  disconnect to each revoked session's sockets. Called inside a
+  `Repo.transaction`, that broadcast used to go out before the revoke
+  committed: a client reconnecting in that window re-authenticated on the
+  still-valid row and stayed signed in.
+
+  Inside `fun`, a teardown raised while a transaction is open is queued. It is
+  sent when `fun` returns `{:ok, _}` and dropped on any other result, a raise,
+  a throw or an exit, so a rolled-back revoke sends nothing. A teardown raised
+  outside any transaction is sent at once. Nesting runs `fun` as is; the
+  outermost call sends. Same contract as `Barkpark.Content.Broadcast.with_deferred_queue/1`
+  for content broadcasts.
+  """
+  @spec with_session_teardown_after_commit((-> term())) :: term()
+  def with_session_teardown_after_commit(fun) when is_function(fun, 0) do
+    if is_list(Process.get(@session_teardown_queue)) do
+      fun.()
+    else
+      Process.put(@session_teardown_queue, [])
+
+      try do
+        fun.()
+      else
+        {:ok, _} = ok ->
+          queued = Process.delete(@session_teardown_queue) || []
+          send_session_teardown(queued)
+          ok
+
+        other ->
+          other
+      after
+        Process.delete(@session_teardown_queue)
+      end
+    end
+  end
+
+  defp send_session_teardown(ids) do
     Enum.each(ids, fn id ->
       try do
         BarkparkWeb.Endpoint.broadcast(
