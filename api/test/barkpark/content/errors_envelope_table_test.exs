@@ -114,6 +114,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"empty_list_members",
        {:error, {:empty_list_members, %{"keywords" => ["Keywords row 3 is empty"]}}},
        "validation_failed", 422, [:details]},
+      # Owner ruling #21: a body block binds a field the schema keeps private.
+      {"private_field_bound", {:error, {:private_field_bound, ["budget"]}}, "private_field_bound",
+       422, [:details]},
       {"quota_exceeded", {:error, :quota_exceeded}, "quota_exceeded", 402, []},
       {"quota_exceeded/quota", {:error, {:quota_exceeded, %{writes: 10}}}, "quota_exceeded", 402,
        [:details]},

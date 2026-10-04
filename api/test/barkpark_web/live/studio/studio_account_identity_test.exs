@@ -5,7 +5,7 @@ defmodule BarkparkWeb.Studio.StudioAccountIdentityTest do
 
   Found dogfooding: signed in as an editor, the avatar read "U" and its label
   "User islf — open your profile" — the localStorage presence handle. The fix
-  is SELF-ONLY: presence meta goes to every socket on the workspace topic
+  is SELF-ONLY: presence meta goes to every socket in the presence room
   (share-link and edit-share grant holders included), so the email must not
   ride it. Other viewers keep seeing the handle.
   """
@@ -50,8 +50,10 @@ defmodule BarkparkWeb.Studio.StudioAccountIdentityTest do
     {:ok, member_view, _} = live(member_conn, scoped_studio("/d/#{@dataset}/studio"))
     _ = render(member_view)
 
-    # The payload every socket on the workspace topic receives.
-    topic = PresenceState.topic(Barkpark.TenancyFixtures.default_workspace_id!())
+    # The payload every socket in this workspace + project + dataset room
+    # receives (owner ruling #30 Q7 keyed the room by project and dataset).
+    {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    topic = PresenceState.topic(ws.id, proj.id, @dataset)
 
     metas =
       topic

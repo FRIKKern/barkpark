@@ -52,9 +52,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
         else: PresenceState.pick_color(user_id)
 
     # Presence subscription happens in handle_params via
-    # ensure_presence_subscription/1 — the topic is workspace-keyed
-    # (tsk-url-p0) and the workspace isn't resolved until
-    # ensure_tenancy_scope runs there.
+    # ensure_presence_subscription/1 — the topic is keyed by workspace +
+    # project + dataset (tsk-url-p0, owner ruling #30 Q7) and the scope isn't
+    # resolved until ensure_tenancy_scope runs there.
     socket
     # LiveScope (scoped mount) assigns the real prefix BEFORE mount runs;
     # assign_new keeps it. The flat mount lands here unset → "" → every

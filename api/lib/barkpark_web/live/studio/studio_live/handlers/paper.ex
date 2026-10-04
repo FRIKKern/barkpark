@@ -947,20 +947,24 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   Blank query or query exceeding 100 chars → empty result (short-circuit
   before hitting the DB). Otherwise delegates to `Content.search_papers/3`
   (which is already capped at 20 results) using the same dataset + scope
-  that every other paper handler reads from socket assigns.
+  that every other paper handler reads from socket assigns. `scope_overrides`
+  replaces scope keys the socket cannot supply — the flat paper reader has no
+  `:current_workspace`, so it passes the paper's own workspace and project.
 
   Returns `{:reply, %{results: [%{title, id, type}]}, socket}` — LiveView
   forwards the map to the client's pushEvent callback, which resolves the
   Promise exposed on `el.wikilinkSource`.
   """
-  def paper_wikilink_search(q, socket)
+  def paper_wikilink_search(q, socket, scope_overrides \\ [])
+
+  def paper_wikilink_search(q, socket, _scope_overrides)
       when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
     {:reply, %{results: []}, socket}
   end
 
-  def paper_wikilink_search(q, socket) do
+  def paper_wikilink_search(q, socket, scope_overrides) do
     dataset = socket.assigns.dataset
-    opts = ScopeHelpers.scope_opts(socket)
+    opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
 
     results =
       Content.search_papers(q, dataset, opts)
@@ -988,14 +992,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   strings, which the client's pushEvent callback resolves onto the Promise
   exposed by `el.tagSource`.
   """
-  def paper_tag_search(q, socket)
+  def paper_tag_search(q, socket, scope_overrides \\ [])
+
+  def paper_tag_search(q, socket, _scope_overrides)
       when not is_binary(q) or byte_size(q) == 0 or byte_size(q) > 100 do
     {:reply, %{results: []}, socket}
   end
 
-  def paper_tag_search(q, socket) do
+  def paper_tag_search(q, socket, scope_overrides) do
     dataset = socket.assigns.dataset
-    opts = ScopeHelpers.scope_opts(socket)
+    opts = Keyword.merge(ScopeHelpers.scope_opts(socket), scope_overrides)
 
     results = Content.search_tags(q, dataset, opts)
 

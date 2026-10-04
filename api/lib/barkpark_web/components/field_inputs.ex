@@ -253,12 +253,20 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # A datetime shows local wall time and saves a UTC instant (owner ruling
+  # #46). The HIDDEN input carries the name and the stored value and is the
+  # only control the form posts; the nameless picker is the editor's view,
+  # and `BarkparkDatetimeField` (priv/static/assets/bp-datetime-field.js)
+  # converts between the two.
   def input(%{field: %{"type" => "datetime", "name" => name}} = assigns) do
     val = Map.get(assigns.editor_form, name, "")
     assigns = assign(assigns, n: name, v: val)
 
     ~H"""
-    <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="datetime-local" name={"doc[#{@n}]"} value={@v} class="form-input" phx-debounce="300" />
+    <div id={"bp-dt-wrap-#{@id_prefix}#{@n}"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+      <input type="hidden" id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} value={@v} data-datetime-value phx-debounce="300" />
+      <input type="datetime-local" class="form-input" aria-label={@field["title"] || @n} />
+    </div>
     """
   end
 
