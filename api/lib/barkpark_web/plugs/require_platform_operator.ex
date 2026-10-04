@@ -74,10 +74,11 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
       The direct handle, and the one an operator uses for a machine token that
       has no human behind it.
     * `BARKPARK_OPERATOR_EMAILS` — the bearer's OWNER email, resolved in this
-      order: a PAT's `owner_user_id` → `Accounts.get_user/1` → `user.email`;
-      otherwise an app token's `label` of the form `"app:<email>"` (the
-      convention `Auth.revoke_app_tokens_for_email/2` already matches on);
-      otherwise NO email, which means no email match is possible.
+      order: the token's `owner_user_id` → `Accounts.get_user/1` →
+      `user.email`; otherwise NO email, which means no email match is
+      possible. AMENDED 2026-10-04 (task-60ed926e61d3d048): the ruling's
+      app-token `label` arm (`"app:<email>"`) is retired — a label is chosen by
+      the minting admin, so it proved nothing about who holds the token.
 
   Emails are compared trimmed + downcased on both sides. Any error while
   resolving (a dangling `owner_user_id`, a DB hiccup) resolves to "no email",
@@ -232,13 +233,15 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
     end
   end
 
-  # PAT identity first (the token carries a real user), then the app-token label
-  # convention. Anything else has no owner email — and therefore cannot be
-  # admitted by the email arm at all.
+  # The token's REAL user only (`owner_user_id` → the account's email). The
+  # app-token label `"app:<email>"` used to count too, but a label is chosen by
+  # whoever mints the token, so any admin could mint one naming the operator
+  # (task-60ed926e61d3d048). A token with no owner user has no owner email and
+  # can only be admitted by its id (`BARKPARK_OPERATOR_TOKEN_IDS`).
   defp owner_email(token) do
     case Map.get(token, :owner_user_id) do
-      user_id when is_binary(user_id) -> user_email(user_id) || label_email(token)
-      _ -> label_email(token)
+      user_id when is_binary(user_id) -> user_email(user_id)
+      _ -> nil
     end
   rescue
     # FAIL CLOSED: a resolution error is "no email", never a pass.
@@ -250,13 +253,6 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperator do
   defp user_email(user_id) do
     case Accounts.get_user(user_id) do
       %{email: email} when is_binary(email) -> String.downcase(String.trim(email))
-      _ -> nil
-    end
-  end
-
-  defp label_email(token) do
-    case Map.get(token, :label) do
-      "app:" <> email when byte_size(email) > 0 -> String.downcase(String.trim(email))
       _ -> nil
     end
   end

@@ -466,6 +466,8 @@ defmodule BarkparkWeb.AppTokenController do
 
   defp mint(conn, params) do
     with {:ok, email} <- fetch_email(params),
+         :ok <- label_names_email(params, email),
+         :ok <- may_mint_for(conn.assigns.api_token, email),
          {:ok, permissions} <- fetch_permissions(params),
          {:ok, workspace} <- resolve_workspace(params),
          :ok <- may_mint_into(conn.assigns.api_token, workspace) do
@@ -534,6 +536,19 @@ defmodule BarkparkWeb.AppTokenController do
 
       {:error, :workspace_not_found} ->
         unprocessable(conn, "workspace could not be resolved")
+
+      {:error, :label_mismatch} ->
+        unprocessable(
+          conn,
+          "a label starting with \"app:\" must be \"app:\" followed by the email"
+        )
+
+      {:error, :operator_account} ->
+        ErrorResponse.emit_fields(conn, :forbidden, %{
+          code: "forbidden",
+          required: "platform_operator",
+          message: "only the instance operator mints an app token for an operator account"
+        })
     end
   end
 
@@ -541,6 +556,34 @@ defmodule BarkparkWeb.AppTokenController do
     do: String.replace(label, email, user_id)
 
   defp audit_label(label, _email, _user_id), do: label
+
+  # task-60ed926e61d3d048: `RequirePlatformOperator` reads an app token's
+  # `"app:<email>"` label as its owner's identity (the token carries no
+  # `owner_user_id`). The label is caller-chosen, so (1) a label in that
+  # namespace must name THIS token's email, and (2) a token FOR an email on the
+  # armed operator allowlist is minted only by a bearer the allowlist already
+  # names — otherwise any minting admin could hand itself the operator's
+  # identity. Labels outside the "app:" namespace are unaffected.
+  defp label_names_email(%{"label" => label}, email) when is_binary(label) do
+    case String.downcase(String.trim(label)) do
+      "app:" <> named ->
+        if named == String.downcase(email), do: :ok, else: {:error, :label_mismatch}
+
+      _ ->
+        :ok
+    end
+  end
+
+  defp label_names_email(_params, _email), do: :ok
+
+  defp may_mint_for(bearer, email) do
+    %{emails: operator_emails} = BarkparkWeb.Plugs.RequirePlatformOperator.allowlist()
+
+    if String.downcase(email) in operator_emails and
+         not BarkparkWeb.Plugs.RequirePlatformOperator.permits?(bearer),
+       do: {:error, :operator_account},
+       else: :ok
+  end
 
   defp fetch_email(%{"email" => email}) when is_binary(email) do
     case String.trim(email) do
