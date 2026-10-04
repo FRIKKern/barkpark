@@ -16,6 +16,34 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
+// Owner ruling #49 (task-229252f441569e57): `bp export` is a backup, so its
+// help must say how to restore one and with what semantics — drafts vs
+// published rows, existing ids, batch size — until `bp import` exists.
+func TestRunExportHelpDocumentsTheRestoreRecipe(t *testing.T) {
+	var so, se bytes.Buffer
+	out := newWriter(&so, &se)
+
+	if code := runExport(out, globals{help: true}, manifest.Context{}, nil); code != exitOK {
+		t.Fatalf("export --help exit = %d, want %d", code, exitOK)
+	}
+
+	help := so.String()
+	for _, want := range []string{
+		"RESTORE",
+		"no `bp import` yet",
+		"createOrReplace + publish",
+		"stays a draft",
+		"OVERWRITES",
+		"empty dataset",
+		"1000 mutations",
+		"bp doc mutate --file",
+	} {
+		if !strings.Contains(help, want) {
+			t.Errorf("export --help does not mention %q:\n%s", want, help)
+		}
+	}
+}
+
 // CONTENT NEGOTIATION. The export route rides `plug(:accepts, ["json"])`, so a
 // bare `Accept: application/x-ndjson` 406s BEFORE auth and the operator sees
 // only `export: unknown error` while `bp export > backup.ndjson` writes an
