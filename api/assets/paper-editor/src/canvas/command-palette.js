@@ -24,6 +24,7 @@
 // the slash menu does (default_block parity, asserted in __smoke.mjs).
 
 import { SlashMenu } from "../slash-menu.js";
+import { topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 import {
@@ -521,6 +522,8 @@ export function buildCommandRegistry(editor, opts) {
     { id: "turn-h6", label: "Heading 6", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 6 }).run(), need: "toggleHeading" },
     { id: "turn-bullet", label: "Bullet list", hint: "•", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
     { id: "turn-ordered", label: "Ordered list", hint: "1.", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
+    // Paragraph -> quote keeps the block id (turnTopLevelInto's same-id swap).
+    { id: "turn-quote", label: "Quote", hint: "❝", run: (ed) => turnTopLevelInto(ed, topLevelIndexAtSelection(ed), "quote"), need: "setParagraph" },
   ];
   for (const t of turnInto) {
     if (!editorHasCommand(editor, t.need)) continue;
