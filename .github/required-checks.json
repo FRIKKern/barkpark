@@ -847,6 +847,22 @@
     {
       "context": "Barkdown parity rows",
       "reason": "S4 PATHS-FILTERED: barkdown-parity.yml runs only for Paper editor/PortableDoc paths or manual dispatch. It drives the real Barkdown Electron parity rows against this Barkpark checkout, using Barkdown main by default. Its private-repository read token is optional and absence is explicitly reported; a skipped run is not parity evidence. Keep the job running and review actual row results for Paper integration; requiring this absent context globally would block unrelated PRs."
+    },
+    {
+      "context": "Decide (credential + version)",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: .github/workflows/api-image.yml (the gate job) runs only on push to main touching VERSION and on workflow_dispatch, never on pull_request, so this name never renders on a PR head and a required absent context would report 'expected' forever (D18). It publishes the public ghcr.io/barkpark/api image for a server release (owner ruling #60, 2026-10-03; task-984d287af0689251); a publish failure is a release problem, not a merge gate. Owner: deploy (.github/workflow-owners.json). ADDED BY HAND with the workflow, so no head has rendered it yet: the string is the job's static `name:` literal, acknowledged with --expect-unrendered in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "Build linux/amd64",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: .github/workflows/api-image.yml (the amd64 build) runs only on push to main touching VERSION and on workflow_dispatch, never on pull_request, so this name never renders on a PR head and a required absent context would report 'expected' forever (D18). It publishes the public ghcr.io/barkpark/api image for a server release (owner ruling #60, 2026-10-03; task-984d287af0689251); a publish failure is a release problem, not a merge gate. Owner: deploy (.github/workflow-owners.json). ADDED BY HAND with the workflow, so no head has rendered it yet: the string is the job's static `name:` literal, acknowledged with --expect-unrendered in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "Build linux/arm64",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: .github/workflows/api-image.yml (the arm64 build) runs only on push to main touching VERSION and on workflow_dispatch, never on pull_request, so this name never renders on a PR head and a required absent context would report 'expected' forever (D18). It publishes the public ghcr.io/barkpark/api image for a server release (owner ruling #60, 2026-10-03; task-984d287af0689251); a publish failure is a release problem, not a merge gate. Owner: deploy (.github/workflow-owners.json). ADDED BY HAND with the workflow, so no head has rendered it yet: the string is the job's static `name:` literal, acknowledged with --expect-unrendered in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "Tag the multi-arch manifest",
+      "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: .github/workflows/api-image.yml (the manifest job) runs only on push to main touching VERSION and on workflow_dispatch, never on pull_request, so this name never renders on a PR head and a required absent context would report 'expected' forever (D18). It publishes the public ghcr.io/barkpark/api image for a server release (owner ruling #60, 2026-10-03; task-984d287af0689251); a publish failure is a release problem, not a merge gate. Owner: deploy (.github/workflow-owners.json). ADDED BY HAND with the workflow, so no head has rendered it yet: the string is the job's static `name:` literal, acknowledged with --expect-unrendered in scripts/required-checks.test.sh's ACK_EX."
     }
   ]
 }
