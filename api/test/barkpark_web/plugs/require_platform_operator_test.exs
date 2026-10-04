@@ -35,7 +35,7 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
   | admin seated only in A | 200 (legacy)     | 403 on ALL SEVEN   |
   | operator (id-listed)   | 200              | 200                |
   | operator (email: PAT)  | 200              | 200                |
-  | operator (email: app:) | 200              | 200                |
+  | app: label (retired)   | 200              | 403 (label is not identity) |
   | anonymous              | 401              | 401 (RequireToken) |
 
   Both arms are asserted because a one-sided test cannot tell "the gate works"
@@ -320,9 +320,12 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       assert body["value"] == ctx.value
     end
 
-    test "an EMAIL-listed operator is served through an app token's app:<email> label", ctx do
-      body = as(ctx.op_app) |> get("/v1/secrets/#{ctx.secret}") |> json_response(200)
-      assert body["value"] == ctx.value
+    # AMENDED 2026-10-04 (task-60ed926e61d3d048): a label is chosen by the
+    # minting admin, so an `app:<operator email>` label no longer admits.
+    test "an app token's app:<operator email> LABEL alone does not admit", ctx do
+      conn = as(ctx.op_app) |> get("/v1/secrets/#{ctx.secret}")
+      assert conn.status == 403
+      assert Jason.decode!(conn.resp_body)["error"]["required"] == "platform_operator"
     end
 
     test "anonymous is still 401 — RequireToken, never this plug's 403", ctx do
