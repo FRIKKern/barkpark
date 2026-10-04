@@ -20,6 +20,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   alias Barkpark.Access
   alias Barkpark.Content
+  alias Barkpark.Content.BoundFieldGuard
   alias Barkpark.Content.Papers.CanvasRunContext
   alias Barkpark.Content.Papers.PreGateRegister
   alias Barkpark.PortableDoc.Render.SectionLayout
@@ -321,12 +322,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       true ->
         {:ok, if_rev} = paper_revision(op["if_rev"])
 
-        case Content.apply_paper_block_op(
-               slug,
-               Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
-               dataset,
-               BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
-             ) do
+        slug
+        |> Content.apply_paper_block_op(
+          Map.drop(op, ["if_rev", "request_id", @server_minted_block]),
+          dataset,
+          BarkparkWeb.ScopeHelpers.scope_opts(socket) ++ [if_rev: if_rev]
+        )
+        # Owner ruling #21: a private field bound into the body is refused with
+        # the same banner as a lifecycle halt.
+        |> BoundFieldGuard.as_halt()
+        |> case do
           {:ok, result} ->
             socket
             |> resync_pane_after_op()
@@ -473,7 +478,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             )
           end
 
-        case result do
+        case BoundFieldGuard.as_halt(result) do
           {:ok, receipt, outcome} ->
             socket =
               socket
@@ -2053,6 +2058,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
               }
             )
 
+          {:error, {:private_field_bound, names}} ->
+            document_bound_field_refused(socket, op, names)
+
           {:error, _reason} ->
             socket
             |> put_flash(:error, "Edit failed")
@@ -2117,12 +2125,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:error, {:rev_mismatch, current_rev}} ->
         document_conflict(socket, op["request_id"], current_rev)
 
+      {:error, {:private_field_bound, names}} ->
+        document_bound_field_refused(socket, op, names)
+
       {:error, _reason} ->
         socket
         |> put_flash(:error, "Edit failed")
         |> assign(last_paper_save_ok?: false)
         |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
     end
+  end
+
+  # Owner ruling #21: the document editor names the refused binding instead of
+  # a bare "Edit failed".
+  defp document_bound_field_refused(socket, op, names) do
+    socket
+    |> put_flash(:error, BoundFieldGuard.message(names))
+    |> assign(save_status: "Save failed")
+    |> assign(last_paper_save_ok?: false)
+    |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
   end
 
   defp document_table_confirmation(socket, result, %{"op" => kind} = op)

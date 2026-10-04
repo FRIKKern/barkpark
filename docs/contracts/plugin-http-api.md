@@ -13,20 +13,20 @@ Plugin-gated; each outsider's **`bptk_` key is their identity**. Server-derived 
 | Operator (write) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
-Operator reads need write (ruling #24): read-only → 403. Non-ticket routes refuse `bptk_` (capabilities tier `"none"`). Paused → reversible 403 `key paused`; revoked → 401; rotate changes secret, preserves identity.
+Operator reads need write (ruling #24): read-only → 403. Non-ticket routes refuse `bptk_` (capabilities tier `"none"`). Paused → reversible 403 `key paused`; revoked → 401; rotate keeps identity, new secret.
 
-Submitter attachments: magic-byte MIME, not client header; `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → 404. Per-key limits: create 10/hr, message 60/hr, attachment 30/hr; reads exempt; excess → 429 + `Retry-After`. Mint returns the raw key once + quickstart curls.
+Attachments: magic-byte MIME (not client header); `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → 404. Per-key limits: create 10/hr, message 60/hr, attachment 30/hr; reads exempt; excess → 429 + `Retry-After`. Mint returns the raw key once + quickstart curls.
 
 ## Sheets — `POST /v1/plugins/sheets/:slug/ops` [admin]
 
-Body `{"ops":[…]}` (`?dataset=`, default `production`); ingest token also authorizes. Ops apply individually; refusals appear in 200's `errors` as `{index,code,message}`. Grammar: `Barkpark.Plugins.Sheets.Session`.
+Body `{"ops":[…]}` (`?dataset=` default `production`); ingest token also authorizes. Ops apply individually; refusals ride 200's `errors` as `{index,code,message}`. Grammar: `Barkpark.Plugins.Sheets.Session`.
 
-**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a pure row permutation of the rect (formulas move verbatim; undo = the inverse). Refuses: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
+**`sort_range`** `{op:"sort_range", tab, range:"A2:D50", keys:[{col,dir}]}` — a row permutation of the rect (formulas move verbatim). Refuses: `sort_merge_overlap`/`sort_frozen_overlap` (rect below the frozen band)/`invalid_sort_keys`.
 
-Filtering is per-viewer Studio/reader state; sorting edits data. No filter wire endpoint.
+Filtering is per-viewer (no endpoint); sorting edits data. Publishing a sheet makes it public at `/sheets/:slug`, whatever its visibility (ruling #58).
 
 ## Bulldocs — `POST /v1/plugins/bulldocs/papers/:slug/ops`
 
-Editing runs `BlockOps.ratchet_hollow/2` + `reject_new_field_loss/2`, not `AuthoringWall.enforce/5`; its five gates are publish-time floors. Rationale: `bulldocs_ops_door_edit_contract_test.exs`.
+Editing runs `BlockOps.ratchet_hollow/2` + `reject_new_field_loss/2`, not `AuthoringWall.enforce/5`; its 5 gates are publish-time floors. Rationale: `bulldocs_ops_door_edit_contract_test.exs`.
 
-**Create:** `POST /v1/plugins/bulldocs/papers/:slug/create` [ingest]: native `blocks` + metadata → 201 slug/rev. Same scope/wall; existing published/draft → 409 `paper_exists`. Insert-only; no HTML/BPML/revision-fence input. Lost replies require scoped content readback. Concurrent generic draft writers are not namespace-reserved. `/papers` remains upsert.
+**Create:** `POST /v1/plugins/bulldocs/papers/:slug/create` [ingest]: native `blocks` + metadata → 201 slug/rev. Same scope/wall; existing published/draft → 409 `paper_exists`. Insert-only; no HTML/BPML/revision-fence input. A lost reply needs a scoped readback. Concurrent generic draft writers aren't namespace-reserved. `/papers` remains upsert.
