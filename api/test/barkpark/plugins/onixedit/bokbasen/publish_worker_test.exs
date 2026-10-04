@@ -362,6 +362,17 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorkerTest do
 
       assert count == 1
     end
+
+    # Owner ruling #51, RQ6: a same-id book in another workspace is its own job.
+    test "the same document_id in two workspaces is two jobs, not a duplicate" do
+      a = Map.put(args("p-tenant"), "workspace_id", Ecto.UUID.generate())
+      b = Map.put(args("p-tenant"), "workspace_id", Ecto.UUID.generate())
+
+      {:ok, job1} = Oban.insert(PublishWorker.new(a))
+      {:ok, job2} = Oban.insert(PublishWorker.new(b))
+
+      refute job1.id == job2.id
+    end
   end
 
   describe "cancel/3" do

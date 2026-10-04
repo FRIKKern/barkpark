@@ -178,10 +178,15 @@ msgstr "Åpne det i %{workspace}"
 msgid "Preview"
 msgstr "Forhåndsvisning"
 
-#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:130
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:107
 #, elixir-autogen, elixir-format
 msgid "Publish"
 msgstr "Publiser"
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:106
+#, elixir-autogen, elixir-format
+msgid "Publish — makes this sheet public"
+msgstr "Publiser — gjør dette arket offentlig"
 
 #: lib/barkpark_web/components/fields/array_field.ex:131
 #, elixir-autogen, elixir-format

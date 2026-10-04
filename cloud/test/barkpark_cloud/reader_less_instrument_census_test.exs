@@ -2025,6 +2025,8 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       "the box IP the provision worker ECHOED BACK (registry.ex:2081). registry.ex:2809 is explicit that it is stamped only when the worker echoed the ip it was told to configure, so the column is a CONSISTENCY check between two halves of a provision, not an address anyone is meant to dial.",
     "session_token_id" =>
       "the parentage of a derived token: accounts.ex:1572 scopes the sweep by it rather than by user_id + context, so revoking one browser session takes its own \"sse\" children and nobody else's. The client holds the token; the row id is the server's bookkeeping.",
+    "support_box_cap" =>
+      "the operator-set ceiling on a team's CP-provisioned support boxes (owner ruling #37), read only by Registry.support_box_cap/1 inside provision_support_capped/2 under the team row lock. Its one wire appearance is the operator route's own echo (PUT /v1/operator/teams/:id/support-cap); a team sees the cap only as the `cap` on a support_cap_reached refusal, which is the moment it matters.",
     "trial_ends_at" =>
       "the durable team-ledger end of trial, read at billing.ex:1370 to anchor a subscription's current_period_end. What reaches the customer is the anchored period on the subscription; this is the team-side stamp the anchor was computed from.",
     "trial_notice_1d_sent_at" =>

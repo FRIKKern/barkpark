@@ -1,23 +1,23 @@
 <!-- doc-tier: agent | canonical-for: prod-operations | budget: 1500tok -->
 # Production operations
 
-## Production environment (canonical)
+## Production hosts (canonical)
 
 | Fact | Value |
 |---|---|
-| Host | `89.167.28.206` — Hetzner cax11, ARM64, Ubuntu 22.04; pull-deployed, **not a `deploy.yml` target** (a merge is NOT live until pulled) |
-| App dir | `/opt/barkpark` (server tracks `origin/main`, `core.hooksPath=.githooks`) |
-| Service | systemd `barkpark.service`; wrapper `api/start.sh` (sources ASDF + `.env`) |
-| Proxy | Caddy on :80 → the `/etc/caddy/Caddyfile` upstream (`:4000` here, 4000↔4001 on `.slots`) — read it; smoke by the PUBLIC URL |
+| Content instance | guerrilla `157.180.90.121`, https://guerrilla.barkpark.cloud; `deploy.yml` → `deploy/instance-deploy.sh` on merge |
+| Control plane | barkpark-cp `178.105.92.191`, https://barkpark.cloud; `deploy.yml` → `deploy/cp-deploy.sh` (Docker Compose slots) |
+| Retired | barkpark-cms `89.167.28.206`, the pull-deployed box, deleted 2026-10-03 (snapshot 439115764). Docs calling it prod are history. |
+| App dir (guerrilla) | `/opt/barkpark`, one checkout, per-slot build roots `api/_build_blue`/`_build_green` |
+| Service | systemd `barkpark-slot@blue` (:4000) / `@green` (:4001), one live at a time; `ExecStart` `api/start.sh` (ASDF + `.env`) |
+| Proxy | Caddy; the `/etc/caddy/Caddyfile` upstream names the live slot — read it; smoke by the PUBLIC URL |
 | Erlang/Elixir | ASDF, pinned by repo-root `.tool-versions`: `erlang 27.3.4` / `elixir 1.18.4-otp-27` (Past Mistake #6) |
-| Go | `/usr/local/go/bin/go` (ARM64) |
-| Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) |
+| Env file | `/opt/barkpark/.env` (`DATABASE_URL`, `SECRET_KEY_BASE`, `BARKPARK_EXTRA_ORIGINS` ws origins) + `.slots/<slot>.env` |
 | Logs | `U='-u barkpark -u barkpark-slot@blue -u barkpark-slot@green'; journalctl $U -f` — all three; which exists varies. `-- No entries --` = "could not look", not "none": re-run unfiltered, quote the total. |
 
-Deploy: on the box, `cd /opt/barkpark && git pull` (post-merge hook
-rebuilds + restarts; `make deploy` wraps it). Golden Rules 2/3/6 apply.
+Pipeline, routing and slot flips: `deploy/README.md`. Golden Rules 2/3/6 apply.
 
-**The toolchain pin is a production change.** The box's asdf reads repo-root
+**The toolchain pin is a production change.** A box's asdf reads repo-root
 `.tool-versions` from `/opt/barkpark`, so editing it moves prod — never in a PR
 touching anything else. `elixir.yml` carries the same 1.18.4 (green
 prod-compile = "compiles on the box") and pins `otp: "27.0"` below the box's
@@ -68,47 +68,28 @@ sha, or mix recompiles under the serving BEAM; `nice` — that boot took the
 2-core box from load 1.9 to 6.3. No `.slots/`: `. ./.env` alone, default
 `_build`. Bare = dry run, `--apply` writes.
 
-## Prod migrations (validated live 2026-06-10)
+## Prod migrations
 
-The hook DOES migrate: `deploy-rebuild.sh` runs `ecto.migrate` on new code
-while the old build serves, aborting the swap on failure (exit 13). By hand
-keep that order — new code selecting an unmigrated column 500s every request:
-
-```bash
-ssh root@89.167.28.206  # then ON THE BOX — never `&&`
-cd /opt/barkpark
-set -a; . ./.env; set +a  # backup: ecto:// -> postgresql://
-pg_dump "${DATABASE_URL/ecto:/postgresql:}" | gzip > /root/pre-deploy.sql.gz
-git checkout -- bin/barkpark bin/barkpark-pg go.sum  # dirt aborts the pull
-git -c core.hooksPath=/dev/null pull --ff-only  # NO hook — old code serves on
-make migrate  # start.sh mix ecto.migrate (ASDF + .env)
-bash .githooks/post-merge # rebuild + migrate + restart — SEE WARNING BELOW
-./api/scripts/prod-postcheck.sh
-```
-
+`instance-deploy.sh` runs `ecto.migrate` from the idle slot's new build while
+the live slot serves, and on failure exits 13 without a flip (checkout reset).
+The control plane migrates when its idle Compose slot boots. Old and new code
+share the new schema during the swap, so migrations must be expand/contract.
 Destructive migrations (drop/rename) have no zero-downtime order — schedule a
-window: stop, migrate, deploy, start. Never `make reset-db`/`mix ecto.reset` on
-prod; a mid-way failure gets a forward fix, never an edit to an applied one.
+window. Never `make reset-db`/`mix ecto.reset` on prod; a mid-way failure gets
+a forward fix, never an edit to an applied one.
 
-**The hook cannot report failure.** It exits 0 even when the rebuild fails (old
-build keeps serving), so `prod-postcheck.sh` PASSes against that old build:
-grep it for `WARN: deploy-rebuild failed`. A green postcheck proves the service
-is up, never that your code deployed. No-op on a `.slots` (blue/green) box,
-which this host is not yet.
+## Rollback
 
-## Phoenix server rollback
-
-Roll back by reverting source (`git revert <bad-sha>`, as a PR), never by
-resetting the server checkout; then on the box `git pull` +
-`./api/scripts/prod-postcheck.sh`. Never `git reset --hard` or force-push the
-prod checkout; rebuild only via `make rebuild` (aside into `api/_build_next`,
-swaps on success) — never a hand-rolled partial clean, serving stale BEAM/HEEx
-(Past Mistakes #1-3). Reverting code does NOT undo a schema change; write a
-compensating migration.
+Roll back by reverting source (`git revert <bad-sha>`, as a PR); its merge
+redeploys through `deploy.yml`. For an immediate flip back, both scripts carry
+`--rollback` (`instance-deploy.sh --rollback-preflight` first). Never
+`git reset --hard` or force-push a prod checkout by hand, and never hand-roll a
+partial clean, which serves stale BEAM/HEEx (Past Mistakes #1-3). Reverting
+code does NOT undo a schema change; write a compensating migration.
 
 ## Code anchors
 
 - `api/scripts/prod-postcheck.sh` — the postcheck
-- `.githooks/post-merge` — rebuild + migrate + restart on server `git pull`
-- `Makefile` — `rebuild`/`deploy`/`migrate`/`restart`
+- `deploy/instance-deploy.sh` — content-instance deploy, migrate, flip, rollback
+- `Makefile` — `rebuild`/`deploy`/`migrate`/`restart` (single-checkout boxes)
 - `api/start.sh` — systemd wrapper (ASDF + `.env`)

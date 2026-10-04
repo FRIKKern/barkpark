@@ -1280,6 +1280,27 @@ defmodule Barkpark.Plugins.Github.MirrorJobTest do
       # Same unique job (the publish insert is a no-op that returns the draft's job).
       assert j2.id == j1.id
     end
+
+    # Owner ruling #51, RQ6: the unique key carries the tenant, so a same-id
+    # task in another workspace is its own mirror job instead of being dropped.
+    test "enqueue of the same doc_id in two workspaces makes two jobs" do
+      {:ok, a} =
+        MirrorJob.enqueue(%{
+          doc_id: "gh-tenant",
+          dataset: @dataset,
+          workspace_id: Ecto.UUID.generate()
+        })
+
+      {:ok, b} =
+        MirrorJob.enqueue(%{
+          doc_id: "gh-tenant",
+          dataset: @dataset,
+          workspace_id: Ecto.UUID.generate()
+        })
+
+      refute a.id == b.id
+      refute b.conflict?
+    end
   end
 
   # ---------------------------------------------------------------------------

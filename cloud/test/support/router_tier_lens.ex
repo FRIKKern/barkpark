@@ -123,7 +123,14 @@ defmodule BarkparkCloud.RouterTierLens do
         "row's `user` is correct — an `admin` cell here would tell every member " <>
         "they cannot mint the token they can in fact mint. `user` and not `user(s)`: " <>
         "the outer guard IS `Auth.require_user`, so PAT management is session-only, " <>
-        "exactly as the comment above the route says."
+        "exactly as the comment above the route says.",
+    {"POST", "/v1/sites"} =>
+      "the 403 is PAYLOAD-conditional (owner ruling #27, 2026-10-03): only a create " <>
+        "that would MINT a public-read token on the box (a static/node site with a " <>
+        "full workspace/project/dataset binding and no BYO read_token) needs a team " <>
+        "admin. Any member may still create a site that mints nothing, so the row's " <>
+        "`user` is correct and an `admin` cell would tell members they cannot create " <>
+        "the sites they can."
   }
 
   # Rows whose guard this resolver CANNOT reach, each with the reason it cannot.

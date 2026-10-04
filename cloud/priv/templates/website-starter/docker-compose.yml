@@ -17,7 +17,9 @@ services:
       retries: 10
 
   api:
-    # Build from ../../../../../api or use the published image
+    # The published image, built from each server release by
+    # .github/workflows/api-image.yml in the barkpark repo. To build from a
+    # checkout instead, see docker-compose.override.yml.example.
     image: ghcr.io/barkpark/api:latest
     restart: unless-stopped
     depends_on:
@@ -29,6 +31,12 @@ services:
       PHX_HOST: ${PHX_HOST:-localhost}
       PORT: "4000"
       MIX_ENV: prod
+      # The release refuses to boot without these four (config/runtime.exs).
+      # Put them in a `.env` beside this file; the README says how to make them.
+      BARKPARK_CLOAK_KEY: ${BARKPARK_CLOAK_KEY:?set BARKPARK_CLOAK_KEY in .env — openssl rand -base64 32}
+      BARKPARK_KEK: ${BARKPARK_KEK:?set BARKPARK_KEK in .env — openssl rand -base64 32}
+      PREVIEW_JWT_SECRET: ${PREVIEW_JWT_SECRET:?set PREVIEW_JWT_SECRET in .env — openssl rand -base64 48}
+      BARKPARK_RELEASE_CAPTURE_HMAC_SECRET: ${BARKPARK_RELEASE_CAPTURE_HMAC_SECRET:?set BARKPARK_RELEASE_CAPTURE_HMAC_SECRET in .env — openssl rand -base64 48}
     ports:
       - "4000:4000"
 

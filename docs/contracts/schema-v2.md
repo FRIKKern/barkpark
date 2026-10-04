@@ -5,11 +5,11 @@ Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constra
 
 ## Four v2 field types
 
-All four types appear only in plugin-authored schemas. The eight legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
+All four appear only in plugin-authored schemas. The eight legacy seed schemas (post, page, author, category, project, siteSettings, navigation, colors) use only v1 primitives and round-trip unchanged via the permanent `flat_mode` branch.
 
 ### `composite` — nested object with named subfields
 
-Composites recurse arbitrarily deep. The recursive validator (`Barkpark.Content.Validation`) walks composites with paths shaped `/<parent>/<child>` and folds path information into the v1-shaped error envelope so existing clients keep working.
+Composites nest to any depth. `Barkpark.Content.Validation` walks them with paths `/<parent>/<child>`, folded into the v1-shaped error envelope so existing clients keep working.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 

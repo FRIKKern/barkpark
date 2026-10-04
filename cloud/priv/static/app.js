@@ -273,6 +273,11 @@
     // link was opened more than an hour ago, by another account, or for another
     // team. Permanent for that link, so no transience verb; names the one act.
     install_state_invalid: "That GitHub install link was started by another account or team, or more than an hour ago, so Barkpark didn't record it. Start the install from Settings \u2192 Providers, then come back.",
+    // task-0cf611238d4ad597 CQ7a — the 422s on POST /v1/github/installations when
+    // the install came back without GitHub's user authorization, or GitHub
+    // refused it. Barkpark checks the install against your own GitHub account.
+    github_authorization_required: "GitHub didn't send an authorization with this install, so Barkpark can't check that it's yours. Connect GitHub again from Settings \u2192 Providers and approve the authorization GitHub asks for.",
+    github_authorization_failed: "GitHub refused the authorization for this install \u2014 it may have expired. Connect GitHub again from Settings \u2192 Providers.",
     suspended: "This instance is suspended — Barkpark Cloud won't act on it until the suspension is cleared.",
     // cch-w40-s1 (charter D447) — THE DEFAULT NOW STATES ONLY WHAT A BARE 403
     // PROVES. This key used to read "Only the team owner can manage billing."
@@ -4681,7 +4686,11 @@
     var action = (params.get("setup_action") || "").trim();
     var id = (params.get("installation_id") || "").trim();
     if (action === "" && id === "") return null;
-    return { installation_id: id, setup_action: action };
+    // CQ7a: with "Request user authorization (OAuth) during installation" on,
+    // GitHub adds a one-time `code`. The server exchanges it to check the
+    // install belongs to this person; an absent code is the server's to refuse.
+    var code = (params.get("code") || "").trim();
+    return { installation_id: id, setup_action: action, code: code };
   }
 
   // Drop ONLY the two GitHub keys from the address bar, preserving every other
@@ -4692,7 +4701,7 @@
     if (typeof history === "undefined" || !history.replaceState) return;
     var kept = (location.search || "").replace(/^\?/, "").split("&").filter(function (kv) {
       var k = kv.split("=")[0];
-      return kv !== "" && k !== "installation_id" && k !== "setup_action" && k !== "state";
+      return kv !== "" && k !== "installation_id" && k !== "setup_action" && k !== "state" && k !== "code";
     });
     var qs = kept.length ? "?" + kept.join("&") : "";
     history.replaceState(null, "", (location.pathname || "/") + qs + "#settings/providers");
@@ -4736,6 +4745,9 @@
   // Setup-URL redirect (the plane sealed it into install_url). Read once at boot
   // by handleGithubInstallReturn, BEFORE the scrub drops it from the address bar.
   var githubInstallState = "";
+  // CQ7a: the one-time user-authorization code from the same redirect. Read once
+  // at boot beside the state, before the scrub drops it from the address bar.
+  var githubInstallCode = "";
 
   function githubInstallStateFromSearch(search) {
     try { return (new URLSearchParams(search || "").get("state") || "").trim(); }
@@ -4743,7 +4755,7 @@
   }
 
   function recordGithubInstall(id) {
-    return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState }).then(function (r) {
+    return api("POST", "/v1/github/installations", { installation_id: id, state: githubInstallState, code: githubInstallCode }).then(function (r) {
       toast(githubInstallOutcome(r));
       // The install just proved the deployment IS configured (a 503 arm cannot
       // mint a 201), so the site screen's one-shot readiness band learns it for
@@ -4848,6 +4860,7 @@
     var ret = githubInstallReturnFromSearch(location.search);
     if (!ret) return false;
     githubInstallState = githubInstallStateFromSearch(location.search);
+    githubInstallCode = ret.code || "";
     scrubGithubInstallParams();
     if (!ret.installation_id) {
       toast(githubInstallUnconfirmedToast());
@@ -12227,6 +12240,12 @@
     }
     if (code === "limit_reached") {
       return "You're at your plan's support-server limit.";
+    }
+    // Owner ruling #37: the per-team cap on provisioned support servers (403).
+    if (code === "support_cap_reached") {
+      var cap = data && typeof data.cap === "number" ? data.cap : null;
+      return (cap === null ? "Your team is at its support-server cap." : "Your team is at its cap of " + cap + " support server" + (cap === 1 ? "" : "s") + ".") +
+        " Remove one, or ask Barkpark support to raise the cap.";
     }
     return friendly(data, "Couldn't add the support server — please try again.");
   }

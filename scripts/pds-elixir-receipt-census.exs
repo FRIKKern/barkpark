@@ -721,9 +721,21 @@ defmodule PDS.Census do
     # closure hop as the earlier entries, between every task verb and the fenced `Repo.update_all`;
     # two task-verb receipts land in the READ class at depth 6. Same ruling: the hop stays, the door is
     # one place. Engine printed live by that run: Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
+    #
+    # RE-DERIVED AGAIN 2026-10-03 at r6a/owner-scope (owner ruling #9, task-84f7e11095ee859c):
+    # read-routed 35 -> 37 and unrouted 15 -> 13. `CallerContext.from_conn/1` now builds a
+    # signed-in user's context with ONE `Tenancy.Auth.membership/3` read (Studio account
+    # sockets act as the user, not anonymous), so two receipts that reached no Repo verb inside
+    # depth 6 now reach that read. The UNROUTED SPLITS block diffed against the run on the
+    # parent tree names them: one receipt in the Sheets ImportController and
+    # one in SearchController left the unrouted list. `write` (52), `textual`
+    # (115), `ast` (106), `phantom` (9), `consumer` (4) and `emitted` (102) read `==` in the
+    # same run; lens unchanged. DERIVED BY THE INSTRUMENT: the `derived` half of this census's
+    # own D448-DRIFT-REFUSES line on this commit's tree. Engine printed live by that run:
+    # Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
     write: 52,
-    read: 35,
-    unrouted: 15
+    read: 37,
+    unrouted: 13
   }
 
   # THE ROW THE TWO D448 SELFTEST CASES INJECT, BUILT THE WAY drift/4 BUILDS IT — including
@@ -1082,6 +1094,7 @@ defmodule PDS.Census do
     # judged by it.
     {:post, "/v1/admin/workspaces/:slug/reinstate", "BarkparkWeb.WorkspaceReinstateController", :create, :status_only_receipt},
     {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
+    {:post, "/v1/auth/cloud-users/deprovision", "BarkparkWeb.CloudUserController", :deprovision, :status_only_receipt},
     {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
     {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
     {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login, :status_only_receipt},
@@ -1943,11 +1956,11 @@ defmodule PDS.Census do
     # search_controller.ex correction/2 row above, which removed two).
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "case Scim.provision_user(org, params) do",
-      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "42182949", callee_fp: "106034506",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.create/2", def_fp: "42182949", callee_fp: "80280370",
       verdict: "PROVEN", basis: :end_to_end,
       evidence: {"api/test/barkpark_web/controllers/scim_users_controller_test.exs",
                  "test \"provisions a confirmed user who can then log in (via magic-link)\" do"},
-      note: "RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1, SCIM adopts only accounts the org can vouch for): create/2 gained ONE error arm, `{:error, :email_not_owned_by_org}` -> a SCIM 409 scimType uniqueness, and its callee Scim.provision_user/2 now routes an existing account through Sso.org_adopt/3. That moved def_fp 70214860 -> 42182949 and callee_fp 90246701 -> 106034506. The 201 arm is byte-identical and still renders the `user` the write returned; the new arm is a SCIM error, so the 201 stays unreachable without a provisioned (or vouched-for adopted) row. scim_users_controller_test.exs re-runs GREEN (35 tests), including `org A's SCIM token cannot adopt org B's existing user (409, no seat)`. THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
+      note: "RE-DERIVED on task-43179d8d03efe969 (owner ruling #32 item 2, no raw email in audit metadata): the callee Scim.provision_user/2 now audits `user_provisioned` with `user_id` instead of `email`. callee_fp 106034506 -> 80280370, read from this census's ROSTER-VERDICT-FRESH line; def_fp unchanged. The 201 arm and its store-derived receipt are untouched; scim_users_controller_test.exs + scim_conformance_test.exs re-run GREEN. EARLIER: RE-DERIVED on task-9c0862560b65fc8b (owner ruling #1, SCIM adopts only accounts the org can vouch for): create/2 gained ONE error arm, `{:error, :email_not_owned_by_org}` -> a SCIM 409 scimType uniqueness, and its callee Scim.provision_user/2 now routes an existing account through Sso.org_adopt/3. That moved def_fp 70214860 -> 42182949 and callee_fp 90246701 -> 106034506. The 201 arm is byte-identical and still renders the `user` the write returned; the new arm is a SCIM error, so the 201 stays unreachable without a provisioned (or vouched-for adopted) row. scim_users_controller_test.exs re-runs GREEN (35 tests), including `org A's SCIM token cannot adopt org B's existing user (409, no seat)`. THE RECEIPT IS THE RESOURCE, AND IT IS STORE-DERIVED. `render_user(conn, user)` renders the `user` bound out of `{:ok, user} <- Scim.provision_user(org, params)` — the row the write returned, never a literal and never a request echo; the ETag is `ScimResponse.version(user.updated_at)`, a stored column. Every non-ok arm of the same `case` renders a SCIM error (400 invalidValue), so the 201 is unreachable without a provisioned row."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "with {:ok, patch} <- ScimPatch.classify(params) do",
       anchor_mfa: "BarkparkWeb.ScimUsersController.update/2", def_fp: "49888131", callee_fp: "22175733",
@@ -4092,7 +4105,7 @@ defmodule PDS.Census do
     #
     # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
     # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
-    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # writing caller as if it were THE caller. tickets_controller.ex's render_ticket/3
     # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
     # genuinely write, so the printed name was one arbitrary member of a set — stable
     # today only because `callers/2`'s order is, which nothing specifies and no

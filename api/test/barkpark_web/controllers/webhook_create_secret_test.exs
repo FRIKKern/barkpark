@@ -79,6 +79,9 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
       %MutationEvent{}
       |> Ecto.Changeset.change(%{
         dataset: "test",
+        # Same workspace as the hook: a workspace-less event replays only to a
+        # shared-layer webhook (owner ruling #51, RQ2).
+        workspace_id: wh.workspace_id,
         type: "widget",
         doc_id: "d1",
         mutation: "publish",

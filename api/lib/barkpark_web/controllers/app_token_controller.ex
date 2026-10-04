@@ -482,7 +482,13 @@ defmodule BarkparkWeb.AppTokenController do
       # `class: :app` — app tokens keep today's no-expiry mint: no max age and
       # no configured default apply until the App shape exists
       # (task-a0f8cfd7f4800236).
-      case Auth.create_token(raw, label, dataset, permissions, workspace.id, class: :app) do
+      # `owner_user_id` (owner ruling #32 item 3, 2026-10-03): the token is the
+      # USER's credential, so erasing the user revokes it. The member seat
+      # above stays — it is what the token acts through.
+      case Auth.create_token(raw, label, dataset, permissions, workspace.id,
+             class: :app,
+             owner_user_id: user.id
+           ) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
           # happened, for whom, into which workspace — never the token value.
@@ -493,7 +499,15 @@ defmodule BarkparkWeb.AppTokenController do
             actor_type: "user",
             actor_id: user.id,
             workspace_id: workspace.id,
-            metadata: %{"email" => email, "label" => label, "permissions" => permissions}
+            # No raw email (owner ruling #32 item 2): audit_events is
+            # append-only and hash-chained, so an email written here would
+            # outlive erasure. The user is named by id; the default label
+            # `app:<email>` is recorded as `app:<user id>`.
+            metadata: %{
+              "user_id" => user.id,
+              "label" => audit_label(label, email, user.id),
+              "permissions" => permissions
+            }
           })
 
           conn
@@ -522,6 +536,11 @@ defmodule BarkparkWeb.AppTokenController do
         unprocessable(conn, "workspace could not be resolved")
     end
   end
+
+  defp audit_label(label, email, user_id) when is_binary(label),
+    do: String.replace(label, email, user_id)
+
+  defp audit_label(label, _email, _user_id), do: label
 
   defp fetch_email(%{"email" => email}) when is_binary(email) do
     case String.trim(email) do

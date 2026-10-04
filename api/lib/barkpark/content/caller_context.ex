@@ -62,8 +62,27 @@ defmodule Barkpark.Content.CallerContext do
   permission grants `is_admin: true` (full visibility + ownership bypass),
   preserving today's behaviour for admin tokens.
   """
-  @spec from_token(map()) :: t()
-  def from_token(%{id: id, permissions: perms}) when is_list(perms) do
+  @spec from_token(map(), keyword()) :: t()
+  def from_token(token, opts \\ [])
+
+  # OWNER RULING 2026-10-03 #9: a token tied to a USER (`owner_user_id`: a
+  # PAT) acts as that user. It carries the owner's `user_id`, so the owner
+  # filter and the write-side owner stamp treat it as the user, and it is an
+  # admin (see-all) only when its owner holds an admin seat in the workspace
+  # the request acts on (`opts[:workspace_id]`) — never from the token's
+  # permission bits alone. Service tokens (no user) keep see-all below.
+  def from_token(%{id: id, permissions: perms, owner_user_id: uid}, opts)
+      when is_list(perms) and is_binary(uid) do
+    %__MODULE__{
+      principal_type: :api_token,
+      token_id: id,
+      user_id: uid,
+      roles: perms,
+      is_admin: owner_admin?(uid, Keyword.get(opts, :workspace_id))
+    }
+  end
+
+  def from_token(%{id: id, permissions: perms}, _opts) when is_list(perms) do
     %__MODULE__{
       principal_type: :api_token,
       token_id: id,
@@ -71,6 +90,11 @@ defmodule Barkpark.Content.CallerContext do
       is_admin: "admin" in perms
     }
   end
+
+  defp owner_admin?(uid, ws_id) when is_binary(ws_id),
+    do: Barkpark.Tenancy.Auth.workspace_admin?(uid, ws_id, :user)
+
+  defp owner_admin?(_uid, _ws_id), do: false
 
   @doc """
   Build a context from a verified user session. `roles` are the user's
@@ -128,12 +152,46 @@ defmodule Barkpark.Content.CallerContext do
   """
   @spec from_conn(%{assigns: map()}) :: t()
   def from_conn(%{assigns: assigns}) do
-    case {Map.get(assigns, :caller_context), Map.get(assigns, :api_token)} do
-      {%__MODULE__{} = ctx, _} -> ctx
-      {_, %{id: _, permissions: perms} = token} when is_list(perms) -> from_token(token)
-      _ -> anonymous()
+    ws_id = acting_workspace_id(assigns)
+
+    case {Map.get(assigns, :caller_context), Map.get(assigns, :api_token),
+          Map.get(assigns, :current_user)} do
+      {%__MODULE__{} = ctx, _, _} ->
+        ctx
+
+      {_, %{id: _, permissions: perms} = token, _} when is_list(perms) ->
+        from_token(token, workspace_id: ws_id)
+
+      # OWNER RULING 2026-10-03 #9: a signed-in user with no assigned context
+      # (a Studio account socket) acts as that user, with its role in the
+      # acting workspace — never as anonymous, which stamped no owner on its
+      # writes and hid its own owned rows from it.
+      # Grants are not loaded: a grant-admitted socket assigns its own context
+      # (LiveScope), so this arm only ever serves members and non-members.
+      {_, _, %{id: uid}} when is_binary(uid) ->
+        from_user(uid, roles: user_roles(uid, ws_id), load_grants: false)
+
+      _ ->
+        anonymous()
     end
   end
+
+  defp acting_workspace_id(assigns) do
+    case Map.get(assigns, :current_workspace) do
+      %{id: id} when is_binary(id) -> id
+      _ -> nil
+    end
+  end
+
+  defp user_roles(uid, ws_id) when is_binary(ws_id) do
+    # ONE read: the built-in owner/admin roles set `is_admin` in from_user/2.
+    case Barkpark.Tenancy.Auth.membership(uid, ws_id, :user) do
+      %{role: role} when is_binary(role) -> [role]
+      _ -> []
+    end
+  end
+
+  defp user_roles(_uid, _ws_id), do: []
 
   @doc "Keyword opts for threading into `Content` read/write calls."
   @spec to_opts(t()) :: keyword()

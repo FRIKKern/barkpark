@@ -130,11 +130,34 @@ export function turnTopLevelInto(editor, index, kind) {
     }
     return ok;
   };
+  // Paragraph <-> quote (owner ruling 2026-10-03 #62): both hold the same inline
+  // content, so the block is swapped in place with its id kept — the save is a
+  // same-id replace-block, never a remove + insert that would orphan references.
+  const swapTextblock = (typeName) => {
+    const type = state.schema.nodes[typeName];
+    if (!type || !src.node.isTextblock) return false;
+    let node;
+    try {
+      node = type.create({ bpId: src.node.attrs?.bpId ?? null, bpType: typeName }, src.node.content);
+    } catch (_e) {
+      return false;
+    }
+    const tr = state.tr.replaceWith(src.from, src.to, node);
+    try { tr.setSelection(TextSelection.near(tr.doc.resolve(src.from + 1))); } catch (_e) { /* keep selection */ }
+    editor.view.dispatch(tr);
+    return true;
+  };
   switch (kind) {
-    case "paragraph": return chain.setParagraph().run();
+    case "paragraph":
+      return src.node.type.name === "blockquote" ? swapTextblock("paragraph") : chain.setParagraph().run();
+    case "quote":
+      return src.node.type.name === "blockquote" ? true : swapTextblock("blockquote");
     case "h1": return chain.setHeading({ level: 1 }).run();
     case "h2": return chain.setHeading({ level: 2 }).run();
     case "h3": return chain.setHeading({ level: 3 }).run();
+    case "h4": return chain.setHeading({ level: 4 }).run();
+    case "h5": return chain.setHeading({ level: 5 }).run();
+    case "h6": return chain.setHeading({ level: 6 }).run();
     case "bullet": return src.node.type.name === "bulletList" ? true : keepListId(chain.toggleBulletList().run());
     case "ordered": return src.node.type.name === "orderedList" ? true : keepListId(chain.toggleOrderedList().run());
     case "task": return src.node.type.name === "taskList" ? true : keepListId(chain.toggleTaskList().run());
@@ -147,9 +170,13 @@ export const TURN_INTO = [
   { kind: "h1", label: "Heading 1", glyph: "H1" },
   { kind: "h2", label: "Heading 2", glyph: "H2" },
   { kind: "h3", label: "Heading 3", glyph: "H3" },
+  { kind: "h4", label: "Heading 4", glyph: "H4" },
+  { kind: "h5", label: "Heading 5", glyph: "H5" },
+  { kind: "h6", label: "Heading 6", glyph: "H6" },
   { kind: "bullet", label: "Bulleted list", glyph: "•" },
   { kind: "ordered", label: "Numbered list", glyph: "1." },
   { kind: "task", label: "Checklist", glyph: "☑" },
+  { kind: "quote", label: "Quote", glyph: "❝" },
 ];
 
 export class BlockHandle {

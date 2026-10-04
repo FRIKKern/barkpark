@@ -314,6 +314,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "workspaces it administers (task-ea8cae3258ea4bd3, and the LIST sweep too since " <>
          "task-aa07355fa8a53355 ruled it scoped); delete_current is self-revoke, " <>
          "where possession is the authorization."},
+    # CloudUserController.deprovision
+    {"POST", "/v1/auth/cloud-users/deprovision"} =>
+      {:global,
+       "instance-global by design (owner ruling #26): Auth.deprovision_cloud_user/1 takes " <>
+         "the person OFF the whole instance — every user session, every workspace seat, every " <>
+         "token they own — because removal from the owning Cloud team ends ALL their access. " <>
+         "Gated like the email form of /v1/auth/login-tickets: admin bearer, plus the " <>
+         "platform-operator allowlist when armed. :current_workspace is never read."},
     # LoginTicketController.create
     {"POST", "/v1/auth/login-tickets"} =>
       {:global,
@@ -1482,7 +1490,10 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     test "the same `read` token keeps every flat READ it had", %{conn: conn, read: read} do
       # The control: the gate is a write clamp, not a blanket refusal. If these
       # ever 403 the probes above stop proving anything about permissions.
-      for path <- ["/v1/tasks", "/v1/tasks/ready", "/v1/fleet/roster", "/v1/tickets/inbox"] do
+      # `/v1/tickets/inbox` left this list on purpose: owner ruling #24
+      # (2026-10-03) put the operator inbox READ on the write tier, enforced in
+      # TicketsController, not by this method gate (tickets_inbox_write_tier_test).
+      for path <- ["/v1/tasks", "/v1/tasks/ready", "/v1/fleet/roster"] do
         resp =
           conn
           |> put_req_header("authorization", "Bearer " <> read)

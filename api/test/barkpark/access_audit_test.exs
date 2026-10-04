@@ -97,7 +97,10 @@ defmodule Barkpark.AccessAuditTest do
 
       # non-secret descriptors present
       assert ev.metadata["workspace_id"] == ws.id
-      assert ev.metadata["grantee_email"] == "alice@example.com"
+      # No raw email in the hash-chained log (owner ruling #32 item 2); no
+      # account exists for this address yet, so there is no user id either.
+      refute Map.has_key?(ev.metadata, "grantee_email")
+      assert ev.metadata["grantee_user_id"] == nil
       assert ev.metadata["capabilities"] == ["read", "write"]
       assert ev.metadata["single_use"] == true
 

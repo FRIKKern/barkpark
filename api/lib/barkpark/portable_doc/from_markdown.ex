@@ -42,7 +42,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   # ── block-level mapping ─────────────────────────────────────────────────
 
   defp block({"h" <> n, _attrs, children, _meta}) when n in ~w(1 2 3 4 5 6) do
-    level = n |> String.to_integer() |> min(3)
+    level = String.to_integer(n)
     [%{"type" => "heading", "level" => level, "text" => flatten_text(children)}]
   end
 
@@ -97,7 +97,13 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
       end)
       |> Enum.intersperse(text_node(" "))
 
-    [%{"type" => "callout", "tone" => "info", "content" => content}]
+    # `> ` is a plain quote, and `> [!note] ` an Obsidian-style callout — the same
+    # split the canvas makes (owner ruling 2026-10-03 #62, Barkdown#16). This used
+    # to turn every quote into an info callout.
+    case callout_marker(content) do
+      {tone, rest} -> [%{"type" => "callout", "tone" => tone, "content" => rest}]
+      nil -> [%{"type" => "blockquote", "content" => content}]
+    end
   end
 
   defp block({"table", _attrs, children, _meta}) do
@@ -131,6 +137,33 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   end
 
   defp block(_other), do: []
+
+  # `[!type]` (optionally `[!type]+` / `[!type]-`) at the head of a quote's first
+  # text run → {tone, content without the marker}; else nil. Tone aliases mirror
+  # the canvas (paper-editor/src/tone.js): note → info, warn → warning,
+  # error → danger, unknown → info.
+  @callout_tones ~w(info success warning danger neutral)
+  @callout_tone_aliases %{"note" => "info", "warn" => "warning", "error" => "danger"}
+
+  defp callout_marker([%{"type" => "text", "value" => value} = first | rest])
+       when is_binary(value) do
+    case Regex.run(~r/^\[!(\w+)\][+-]?[ \t]*(.*)$/s, value) do
+      [_, raw, tail] ->
+        {callout_tone(String.downcase(raw)), callout_body(first, tail, rest)}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp callout_marker(_content), do: nil
+
+  defp callout_tone(tone) when tone in @callout_tones, do: tone
+  defp callout_tone(tone), do: Map.get(@callout_tone_aliases, tone, "info")
+
+  defp callout_body(_first, "", [%{"type" => "text", "value" => " "} | rest]), do: rest
+  defp callout_body(_first, "", rest), do: rest
+  defp callout_body(first, tail, rest), do: [%{first | "value" => tail} | rest]
 
   # `[ ] rest` / `[x] rest` at the head of an item's inline → {content, checked}; else nil.
   defp task_item([%{"type" => "text", "value" => value} = first | rest]) when is_binary(value) do

@@ -37,7 +37,7 @@ check("paragraph round-trip (text + bold + em + code)", () => {
   assert.deepEqual(back, sample);
 });
 
-// 2) heading carries flat text + level, clamped to 1..3.
+// 2) heading carries flat text + level, clamped to 1..6.
 check("heading round-trip (text + level)", () => {
   const sample = { id: "h-1", type: "heading", level: 2, text: "Status" };
   const back = tiptapToFullBlock(blockToTiptap(sample), "h-1", "heading");

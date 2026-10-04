@@ -117,9 +117,9 @@ defmodule BarkparkWeb.SessionController do
       # SSO (find-or-create by email); the Default-workspace OWNER grant is
       # legitimate because minting required the instance ADMIN token, and the
       # control plane only mints for the instance's own team.
-      {:ok, {:user, email, _admin_token}} ->
+      {:ok, {:user, email, _admin_token, role}} ->
         user = Barkpark.Sso.find_or_create_user(email)
-        ensure_default_owner_membership(user)
+        ensure_default_membership(user, role)
 
         {:ok, token} =
           Barkpark.Accounts.create_user_session_token(
@@ -154,16 +154,48 @@ defmodule BarkparkWeb.SessionController do
     |> redirect(to: "/login")
   end
 
-  # Idempotent: an existing membership (any role) is left untouched — the
-  # handoff never DOWNGRADES; absence gets the owner grant the admin-token
-  # mint vouches for.
-  defp ensure_default_owner_membership(user) do
-    with %{id: ws_id} <- Barkpark.Tenancy.get_default_workspace(),
-         nil <- Barkpark.Tenancy.Auth.membership(user, ws_id) do
-      {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_id, user.id, "owner", "user")
-      :ok
-    else
+  # Owner ruling #26 (2026-10-03, "Match role, revoke"): the handoff seats the
+  # user at the Cloud TEAM role the ticket carries — a team member lands as a
+  # member, an admin as an admin, the owner as owner. The team is the authority
+  # for a managed instance, so an existing BUILT-IN role is synced to it on every
+  # handoff (a promoted or demoted teammate lands at their current role). Two
+  # things are never touched: a CUSTOM role (an instance admin chose it), and the
+  # LAST owner of the workspace (`Members.update_role/3` refuses that demotion).
+  #
+  # A pre-ruling ticket carries no role (nil): it keeps the old behaviour — an
+  # absent membership gets owner, an existing one is left alone.
+  defp ensure_default_membership(user, role) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} -> seat_default_membership(user, ws_id, role)
       _ -> :ok
+    end
+  end
+
+  defp seat_default_membership(user, ws_id, role) do
+    alias Barkpark.Tenancy.Auth, as: TAuth
+
+    case {TAuth.membership(user, ws_id), role} do
+      {nil, nil} ->
+        {:ok, _} = TAuth.create_membership(ws_id, user.id, "owner", "user")
+        :ok
+
+      {nil, role} ->
+        {:ok, _} = TAuth.create_membership(ws_id, user.id, role, "user")
+        :ok
+
+      {_existing, nil} ->
+        :ok
+
+      {%{role: same}, same} ->
+        :ok
+
+      {%{role: current}, role} ->
+        # Members.update_role/3 refuses to demote the last owner on its own.
+        if current in Barkpark.Tenancy.Membership.roles() do
+          _ = Barkpark.Tenancy.Members.update_role(ws_id, %{type: :user, id: user.id}, role)
+        end
+
+        :ok
     end
   end
 

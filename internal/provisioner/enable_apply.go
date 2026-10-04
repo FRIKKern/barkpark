@@ -49,12 +49,50 @@ func setSelfUpdateApplyStep(envFile string) cloud.CaddyStep {
 	}
 }
 
-// enableApplySteps is the ordered remote plan — env flag, then app restart
-// (the Runner reads its enabled-flag config at boot). Pure, like
-// attachDomainSteps, so tests exercise the rendered script directly.
-func enableApplySteps(envFile string) []cloud.CaddyStep {
+// enableApplyRepoDir is the box checkout self-update.sh fast-forwards.
+const enableApplyRepoDir = "/opt/barkpark"
+
+// restoreGoModChurnStep clears the one kind of local edit that jammed the
+// whole fleet's self-update (2026-10-03, task-90f256a8c5e27cd2): an older
+// scripts/deploy-rebuild.sh ran `go mod tidy` on the box, rewriting the
+// TRACKED go.mod/go.sum, and every later --ff-only merge that touched go.mod
+// aborted with "Your local changes ... would be overwritten". A box runs its
+// OWN checkout's self-update.sh, so the fixed script (#21539) cannot reach a
+// box that is already jammed. This step can: the worker runs the LATEST code.
+//
+// GUARDED, NEVER BROAD: when the tracked changes are go.mod and/or go.sum and
+// NOTHING else, those two files go back to HEAD. When anything else is
+// modified, the step changes nothing and FAILS naming the files, so the job
+// reports the box for a human instead of discarding someone's edit. A clean
+// tree is a no-op. Untracked files are ignored (they never block a merge of
+// tracked paths). Idempotent: a re-run on a clean tree does nothing.
+func restoreGoModChurnStep(repoDir string) cloud.CaddyStep {
+	script := `cd ` + repoDir + ` || { echo "enable-apply: no checkout at ` + repoDir + `" >&2; exit 1; }
+g() { git -c safe.directory='` + repoDir + `' "$@"; }
+dirty=$(g status --porcelain --untracked-files=no | awk '{print $NF}')
+[ -z "$dirty" ] && { echo "checkout clean — nothing to restore"; exit 0; }
+others=$(printf '%s\n' "$dirty" | grep -v -x -e go.mod -e go.sum || true)
+if [ -n "$others" ]; then
+  echo "enable-apply: REFUSING to touch the checkout — tracked edits beyond go.mod/go.sum:" >&2
+  printf '%s\n' "$others" >&2
+  exit 1
+fi
+g checkout -- go.mod go.sum && echo "restored go.mod/go.sum to HEAD (box-side go mod tidy churn)"`
+	return cloud.CaddyStep{
+		Title: "restore box-side go.mod/go.sum churn so self-update can fast-forward",
+		Cmd:   script,
+		Argv:  []string{"bash", "-lc", script},
+	}
+}
+
+// enableApplySteps is the ordered remote plan — env flag, the go.mod/go.sum
+// churn restore, then app restart (the Runner reads its enabled-flag config at
+// boot). Pure, like attachDomainSteps, so tests exercise the rendered scripts
+// directly.
+func enableApplySteps(envFile, repoDir string) []cloud.CaddyStep {
 	return []cloud.CaddyStep{
 		setSelfUpdateApplyStep(envFile),
+		restoreGoModChurnStep(repoDir),
 		instanceRestartStep(),
 	}
 }
@@ -72,7 +110,7 @@ func EnableApplyWith(ctx context.Context, seams Seams, spec EnableApplySpec) err
 		runnerFor = func(host string) cloud.StepRunner { return cloud.NewSSHStepRunner(host) }
 	}
 	runner := runnerFor(spec.IP)
-	for _, s := range enableApplySteps(attachEnvFile) {
+	for _, s := range enableApplySteps(attachEnvFile, enableApplyRepoDir) {
 		if err := runner.Run(ctx, s); err != nil {
 			return fmt.Errorf("enable-apply %s: %w", spec.IP, err)
 		}

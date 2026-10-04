@@ -10,11 +10,14 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
   alias Barkpark.PortableDoc.Render
 
   describe "block mapping" do
-    test "headings clamp to level 3" do
+    test "headings keep their level, 1 through 6" do
       assert [%{"type" => "heading", "level" => 2, "text" => "Title"}] =
                FromMarkdown.blocks("## Title")
 
-      assert [%{"type" => "heading", "level" => 3}] = FromMarkdown.blocks("##### Deep")
+      # Six levels since owner ruling 2026-10-03 (#63); this used to clamp to 3.
+      assert [%{"type" => "heading", "level" => 4}] = FromMarkdown.blocks("#### Deeper")
+      assert [%{"type" => "heading", "level" => 5}] = FromMarkdown.blocks("##### Deep")
+      assert [%{"type" => "heading", "level" => 6}] = FromMarkdown.blocks("###### Deepest")
     end
 
     test "paragraph with bold, italic, inline code, and link" do
@@ -109,11 +112,32 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
                FromMarkdown.blocks("```mermaid\ngraph TD\n  A-->B\n```")
     end
 
-    test "blockquote becomes an info callout" do
-      [%{"type" => "callout", "tone" => "info", "content" => content}] =
-        FromMarkdown.blocks("> heads up")
+    # Owner ruling 2026-10-03 #62 (Barkdown#16): `> ` is a plain quote, as in the
+    # canvas; `> [!type] ` is a callout. Every quote used to become an info callout.
+    test "a blockquote becomes a plain quote block" do
+      [%{"type" => "blockquote", "content" => content}] = FromMarkdown.blocks("> heads up")
 
       assert [%{"type" => "text", "value" => "heads up"}] = content
+    end
+
+    test "an Obsidian-style [!type] quote becomes a callout of that tone" do
+      [%{"type" => "callout", "tone" => "warning", "content" => content}] =
+        FromMarkdown.blocks("> [!warn] mind the gap")
+
+      assert [%{"type" => "text", "value" => "mind the gap"}] = content
+
+      assert [%{"type" => "callout", "tone" => "info"}] =
+               FromMarkdown.blocks("> [!note] a note")
+
+      assert [%{"type" => "callout", "tone" => "success"}] =
+               FromMarkdown.blocks("> [!success]- folded")
+    end
+
+    test "a plain quote renders as the reader's blockquote" do
+      html = Render.render_blocks(FromMarkdown.blocks("> quoted words"), %{style: :article})
+      assert html =~ ~s(<blockquote class="bp-blockquote")
+      assert html =~ "quoted words"
+      refute html =~ "bp-callout"
     end
 
     test "gfm table maps head and rows" do

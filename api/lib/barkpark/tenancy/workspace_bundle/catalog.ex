@@ -185,11 +185,13 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   # D5): global codelists, admin/host state, the org tier, job queue, metrics,
   # user/auth tier, and the residual *_backup tables. A base table that is
   # neither live-tenant nor in this list makes the sentinel RAISE.
-  # chat_runtime_telemetry_events (20260715 cycle-fleet) FK-references
-  # chat_sessions only — it is NOT reachable from `workspaces` by any FK path, so
-  # the live E1/E2/E3 scans never surface it. Like chat_sessions / chat_messages
-  # it is host/admin-scoped runtime telemetry that rolls OUTSIDE the workspace
-  # grain; pinned non-tenant so the "unaccounted base table" sentinel is clear.
+  # chat_sessions / chat_messages / chat_runtime_telemetry_events: OWNED by a
+  # workspace (`chat_sessions.owner_workspace_id`, no FK; messages and telemetry
+  # FK-cascade off the session) but NOT carried in its bundle — admin
+  # transcripts with host paths never travel. No FK path from `workspaces`, so
+  # the live E1/E2/E3 scans never surface them; pinned here so the sentinel is
+  # clear. Teardown is NOT export: `Tenancy.delete_workspace/1` deletes the
+  # workspace's chats explicitly (`delete_workspace_chats/1`, owner ruling #32).
   @pinned_non_tenant ~w(
     chat_messages chat_runtime_telemetry_events chat_sessions
     codelist_value_translations codelist_values

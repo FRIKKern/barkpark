@@ -28,9 +28,10 @@ import { MAX_HITS } from "@/lib/search-limits";
  *
  * Ships DARK, exactly like `LiveBridge`: inert unless BOTH
  *   - `NEXT_PUBLIC_BARKPARK_WS_URL`   (e.g. wss://api.barkpark.cloud/socket), and
- *   - `NEXT_PUBLIC_BARKPARK_WS_TOKEN` (a READ-ONLY token scoped to the public
- *      workspace/dataset — it reaches the browser, so it must grant nothing
- *      beyond the already-public published reads the demo serves anyway)
+ *   - `NEXT_PUBLIC_BARKPARK_WS_TOKEN` (a PUBLIC-READ token — it reaches the
+ *      browser, so it must grant nothing beyond the already-public published
+ *      reads the demo serves anyway; `next.config.ts` drops any other token at
+ *      build time, see `verifyPublicReadWsToken`)
  * are set. With either unset, `enabled` is false and the finder keeps using the
  * same-origin HTTP path. `ready` only flips true once the channel has JOINED, so
  * any keystroke typed during the connect handshake still falls back to HTTP and

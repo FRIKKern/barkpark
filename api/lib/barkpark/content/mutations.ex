@@ -73,6 +73,7 @@ defmodule Barkpark.Content.Mutations do
     DraftId,
     Envelope,
     MutateDoorFences,
+    ReadOnlyFields,
     Warnings,
     Writer
   }
@@ -449,6 +450,8 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             :ok <-
+               ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
              {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
           warn_create_over_published("create", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
@@ -477,6 +480,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+         :ok <-
+           ensure_read_only_unchanged(type, existing, incoming_content(attrs), id, dataset, opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -503,6 +508,8 @@ defmodule Barkpark.Content.Mutations do
       _ ->
         with :ok <-
                run_mutate_door_fences(:before_rev, type, nil, attrs, dataset, opts),
+             :ok <-
+               ensure_read_only_unchanged(type, nil, incoming_content(attrs), id, dataset, opts),
              {:ok, doc} <- Content.create_document(type, attrs, dataset, opts) do
           warn_create_over_published("createIfNotExists", type, id, dataset, opts, doc)
           {:ok, doc, "create"}
@@ -610,6 +617,8 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
          :ok <- run_mutate_door_fences(:after_claim, type, existing, attrs, dataset, opts),
+         :ok <-
+           ensure_read_only_unchanged(type, existing, incoming_content(attrs), id, dataset, opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -668,6 +677,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <-
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
+           :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -705,6 +715,7 @@ defmodule Barkpark.Content.Mutations do
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
            :ok <-
              run_mutate_door_fences(:after_claim, type, existing, merged, patch, dataset, opts),
+           :ok <- ensure_read_only_unchanged(type, existing, merged, id, dataset, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            {:ok, doc} <- land_patch(existing, type, doc, dataset, opts),
@@ -1147,6 +1158,30 @@ defmodule Barkpark.Content.Mutations do
   # The create family passes its attrs as `op` and `incoming_content/1` as
   # `merged` (what the guards read today); `patch` passes the patch map and the
   # merged content it computed.
+  # ── readOnly schema fields (owner ruling #35, item 5) ──────────────────────
+  #
+  # The last step before the writer on every clause that stores content, so a
+  # task's own guards keep refusing first. `existing` is the row the clause
+  # resolved; a create (or a `createOrReplace` with no draft) compares against
+  # the published row instead, read only when the check applies. Who is refused
+  # and what counts as a change: `Barkpark.Content.ReadOnlyFields`.
+  defp ensure_read_only_unchanged(type, %{content: content}, merged, _id, dataset, opts),
+    do: ReadOnlyFields.check(type, content || %{}, merged, dataset, opts)
+
+  defp ensure_read_only_unchanged(type, _existing, merged, id, dataset, opts) do
+    base = fn ->
+      with true <- is_binary(id) and is_binary(type),
+           {:ok, published} <-
+             Content.get_document(DraftId.published_id(id), type, dataset, opts) do
+        published.content || %{}
+      else
+        _ -> %{}
+      end
+    end
+
+    ReadOnlyFields.check(type, base, merged, dataset, opts)
+  end
+
   defp run_mutate_door_fences(phase, type, existing, attrs, dataset, opts),
     do:
       run_mutate_door_fences(
@@ -1168,6 +1203,44 @@ defmodule Barkpark.Content.Mutations do
       dataset,
       opts
     ])
+  end
+
+  @doc """
+  The mutate door's content guards for a client write that reaches the writer
+  WITHOUT `apply_mutations/3`: the document block ops door
+  (`POST /v1/data/doc/:dataset/:type/:doc_id/ops`, owner ruling #35 item 4).
+
+  A block op re-projects every bound block (`fieldName`) into `content`, so it
+  can set any field a `patch` can. This runs, in the mutate door's order, the
+  close fence (`ensure_task_close_is_cas`), the claim fence
+  (`ensure_claim_not_dropped`), the `:after_claim` plugin fences and the
+  readOnly field check (`Barkpark.Content.ReadOnlyFields`) over the row the op read (`existing`) and the content it will store (`merged`), and
+  returns the same refusal the mutate door would.
+
+  One difference, on purpose: the close fence is judged as a write WITHOUT a
+  revision precondition. The ops door requires `ifRev` on every op to fence
+  concurrent block edits, so it proves nothing about intent to close; a block
+  edit is never a sanctioned close path.
+  """
+  @spec ensure_content_write_guards(String.t(), map() | nil, map(), String.t(), keyword()) ::
+          :ok | {:error, term()}
+  def ensure_content_write_guards(type, existing, merged, dataset, opts) do
+    no_revision_precondition = %{}
+
+    with :ok <- ensure_task_close_is_cas(type, existing, merged, no_revision_precondition, opts),
+         :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
+         :ok <-
+           run_mutate_door_fences(
+             :after_claim,
+             type,
+             existing,
+             merged,
+             no_revision_precondition,
+             dataset,
+             opts
+           ) do
+      ensure_read_only_unchanged(type, existing, merged, nil, dataset, opts)
+    end
   end
 
   @doc """

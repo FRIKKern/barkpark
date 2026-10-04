@@ -222,8 +222,11 @@ defmodule BarkparkWeb.PaperAttributionTest do
       assert [rev] = reader_history(slug)
       assert rev.actor_kind == "user"
       assert rev.actor_id == user.id
-      # The label carries the human identity the reader already resolved.
-      assert rev.actor_label == user.email
+      # No email at rest (owner ruling #32 item 1): the row names the user by
+      # id, and the read resolves the label from the account.
+      assert is_nil(rev.actor_label)
+      assert [%{actor_label: label}] = Barkpark.Accounts.Privacy.redact_actor_labels([rev])
+      assert label == user.email
       # The legacy single-column actor stays in step rather than going quiet.
       assert rev.actor_user_id == user.id
     end

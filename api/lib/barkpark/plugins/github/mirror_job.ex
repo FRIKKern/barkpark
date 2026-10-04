@@ -125,8 +125,10 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   use Oban.Worker,
     queue: :github_mirror,
     max_attempts: 5,
+    # `workspace_id` / `project_id` join the key (owner ruling #51, RQ6): a
+    # same-id task in another tenant is a different mirror, not a duplicate.
     unique: [
-      keys: [:doc_id, :dataset],
+      keys: [:doc_id, :dataset, :workspace_id, :project_id],
       states: [:available, :scheduled, :executing],
       period: 60
     ]

@@ -145,12 +145,13 @@ defmodule Barkpark.Content.WriteScope do
 
       true ->
         case Keyword.get(opts, :caller_context) do
+          # A token tied to a user acts as that user (owner ruling #9).
           %Barkpark.Content.CallerContext{
-            principal_type: :user,
+            principal_type: kind,
             is_admin: false,
             user_id: uid
           }
-          when is_binary(uid) ->
+          when kind in [:user, :api_token] and is_binary(uid) ->
             uid
 
           _ ->

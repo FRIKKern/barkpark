@@ -24,6 +24,7 @@
 // the slash menu does (default_block parity, asserted in __smoke.mjs).
 
 import { SlashMenu } from "../slash-menu.js";
+import { topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
 import {
@@ -64,10 +65,15 @@ import {
 //     NodeSelection on the atom (divider/code/diagram/field).
 //
 // Returns true iff a node was inserted, false on the no-op (non-insertable type).
-export function insertSlashTypeAtSelection(editor, type, fieldName) {
+export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
   if (!editor || !CANVAS_SLASH_TYPES.has(type)) return false;
 
   const node = slashTypeToNode(type);
+  // A slash "Heading N" row carries its level (H1–H6); the default heading is level 2.
+  const level = Number(opts && opts.level);
+  if (type === "heading" && node && node.attrs && Number.isInteger(level) && level >= 1 && level <= 6) {
+    node.attrs.level = level;
+  }
   // EXPECTED-style binding plumb-through (parity with _chooseSlash): thread the
   // field name onto the node so a bound-field insert round-trips. Harmless when
   // absent (the common palette case — palette Insert commands are unbound).
@@ -291,7 +297,7 @@ function focusInsertedIsland(editor) {
 //   Presets   — one per CANVAS_SECTION_PRESETS entry; run() inserts an ORDERED
 //               SEQUENCE of top-level blocks (via insertSectionPresetAtSelection).
 //   Format    — toggle bold/italic/strike/code + clear formatting, on the selection.
-//   Turn into — set the current block to paragraph / heading 1-3 / bullet / ordered.
+//   Turn into — set the current block to paragraph / heading 1-6 / bullet / ordered.
 //
 // The per-type Insert metadata (label/hint) is read from the slash menu's own item
 // list so the palette's Insert rows match the slash rows (no duplicate copy of the
@@ -511,8 +517,13 @@ export function buildCommandRegistry(editor, opts) {
     { id: "turn-h1", label: "Heading 1", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 1 }).run(), need: "toggleHeading" },
     { id: "turn-h2", label: "Heading 2", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 2 }).run(), need: "toggleHeading" },
     { id: "turn-h3", label: "Heading 3", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 3 }).run(), need: "toggleHeading" },
+    { id: "turn-h4", label: "Heading 4", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 4 }).run(), need: "toggleHeading" },
+    { id: "turn-h5", label: "Heading 5", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 5 }).run(), need: "toggleHeading" },
+    { id: "turn-h6", label: "Heading 6", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 6 }).run(), need: "toggleHeading" },
     { id: "turn-bullet", label: "Bullet list", hint: "•", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
     { id: "turn-ordered", label: "Ordered list", hint: "1.", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
+    // Paragraph -> quote keeps the block id (turnTopLevelInto's same-id swap).
+    { id: "turn-quote", label: "Quote", hint: "❝", run: (ed) => turnTopLevelInto(ed, topLevelIndexAtSelection(ed), "quote"), need: "setParagraph" },
   ];
   for (const t of turnInto) {
     if (!editorHasCommand(editor, t.need)) continue;
