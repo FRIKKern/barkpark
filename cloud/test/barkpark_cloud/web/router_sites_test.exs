@@ -15,6 +15,14 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   other teams get 404 (existence-leak protection), never 403.
   """
   use BarkparkCloud.DataCase, async: true
+
+  # Owner ruling #29: this suite's subject is not the domain proof, so DNS
+  # publishes every team's _barkpark-verify token (the proven state).
+  setup do
+    BarkparkCloud.DomainProofHelper.prove_every_domain()
+    :ok
+  end
+
   import Plug.Test
   import Plug.Conn
 
