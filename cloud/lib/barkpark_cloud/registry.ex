@@ -5655,7 +5655,7 @@ defmodule BarkparkCloud.Registry do
               # shape is what failed. Same word `Usage` already uses for it,
               # and it is the only writer of this rung (cch-w58 review).
               {:ok, %{"check" => %{} = check} = body} ->
-                persist_update_check(bp, check, arming_of(body))
+                persist_update_check(bp, check, arming_of(body), last_failure_of(body))
 
               _ ->
                 persist_update_unknown(bp, :bad_shape)
@@ -5709,7 +5709,41 @@ defmodule BarkparkCloud.Registry do
   # Mirror the instance's "check" verdict onto the row. A state outside the
   # whitelist is downgraded to "unknown" (fail-closed — never trust a weird
   # instance into a rendering state the SPA doesn't know).
-  defp persist_update_check(bp, check, arming) do
+  # THE LAST FAILED RUN, read off the sibling `failure` key (a box running the
+  # failure report; `Barkpark.SelfUpdate.FailureReport`). Fail-closed on shape
+  # like the arming probe: only a map with a phase is trusted, every field is
+  # re-validated here, and the tail is re-scrubbed with the control plane's own
+  # display scrubber and re-capped — the box already redacted it, and a second
+  # pass costs nothing. `nil` = no failed run on file (a pre-feature box sends
+  # no key; a box whose last run succeeded sends null).
+  @last_failure_tail_lines 40
+  @last_failure_line_bytes 400
+
+  @doc false
+  def last_failure_of(%{"failure" => %{"phase" => phase} = failure} = body)
+      when is_binary(phase) do
+    %{
+      "phase" => word(phase),
+      "source" => if(failure["source"] in ["deploy_status", "exit_code"], do: failure["source"]),
+      "exit_code" => if(is_integer(failure["exit_code"]), do: failure["exit_code"]),
+      "mode" => if(body["mode"] in ["self_update", "rollback"], do: body["mode"]),
+      "finished_at" => string_field(body["finished_at"]),
+      "tail" =>
+        failure["tail"]
+        |> List.wrap()
+        |> Enum.filter(&is_binary/1)
+        |> Enum.take(-@last_failure_tail_lines)
+        |> Enum.map(&(&1 |> FailureCopy.raw() |> String.slice(0, @last_failure_line_bytes)))
+    }
+  end
+
+  def last_failure_of(_body), do: nil
+
+  defp word(phase) do
+    if Regex.match?(~r/\A[a-z_]{1,32}\z/, phase), do: phase, else: "unknown"
+  end
+
+  defp persist_update_check(bp, check, arming, last_failure) do
     state =
       case check["state"] do
         s when is_binary(s) -> if s in Barkpark.update_states(), do: s, else: "unknown"
@@ -5734,7 +5768,8 @@ defmodule BarkparkCloud.Registry do
       # carried no arming" is itself a measurement (a pre-#12995 box) and is a
       # different fact from "we have never read one".
       apply_arming: arming,
-      apply_arming_checked_at: DateTime.utc_now()
+      apply_arming_checked_at: DateTime.utc_now(),
+      update_last_failure: last_failure
     })
     # FORCED, not cast: `cast` emits no change when the value already matches the
     # IN-MEMORY struct, and the caller may hold a struct read BEFORE the refusal
@@ -5753,8 +5788,36 @@ defmodule BarkparkCloud.Registry do
     # produces today.
     |> Ecto.Changeset.force_change(:apply_arming, arming)
     |> Repo.update()
+    |> record_update_failure(bp, last_failure)
     |> auto_enqueue_on_unarmed(arming)
   end
+
+  # A NEWLY observed failed run lands once on the box's event timeline
+  # (`GET /v1/barkparks/:id/events`) as a `status` event, transition
+  # `update_failed`. The hourly sweep re-reads the same failure every tick, so
+  # it is recorded only when it differs from the row's previous failure (a
+  # different run finishes at a different time). Best-effort: the mirror above
+  # is already committed, and an event write failure never undoes it.
+  defp record_update_failure({:ok, %Barkpark{} = updated} = ok, before, %{} = failure) do
+    if failure != before.update_last_failure do
+      _ =
+        record_event(updated, "status", %{
+          transition: "update_failed",
+          phase: failure["phase"],
+          source: failure["source"],
+          exit_code: failure["exit_code"],
+          mode: failure["mode"],
+          finished_at: failure["finished_at"],
+          tail: failure["tail"]
+        })
+    end
+
+    ok
+  rescue
+    _ -> ok
+  end
+
+  defp record_update_failure(result, _before, _failure), do: result
 
   # isu-w5 (task-509f5fd02bc48f9c): a box that just MEASURED unarmed gets its
   # repair filed, not just recorded — `maybe_enqueue_enable_apply_job/1` gates on
