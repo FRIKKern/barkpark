@@ -44,9 +44,25 @@ git fetch origin --tags --force ||
   echo "[self-update] WARN: tag fetch failed — continuing (version stamp may lag)"
 
 BRANCH="${BARKPARK_UPSTREAM_BRANCH:-main}"
+
+# Box-side churn in TRACKED files. Until 2026-10-03 scripts/deploy-rebuild.sh ran
+# `go mod tidy` before building the TUI, which rewrote go.mod/go.sum under the
+# box's own Go. The next update whose range touched go.mod then aborted the
+# --ff-only merge below ("Your local changes to the following files would be
+# overwritten by merge: go.mod go.sum") — measured on dnd during the 0.2.27
+# rollout, with every 1c6c3f21f box reporting dirty_tree. These two files are
+# GENERATED on a box, never authored there, so they go back to HEAD before the
+# merge. Nothing else is touched: any OTHER local edit still refuses below.
+for f in go.mod go.sum; do
+  if ! git diff --quiet -- "$f" 2>/dev/null; then
+    echo "[self-update] discarding box-side churn in $f (written by an older rebuild's go mod tidy)"
+    git checkout -- "$f"
+  fi
+done
+
 echo "[self-update] fast-forwarding to origin/$BRANCH..."
 git -c core.hooksPath=/dev/null merge --ff-only "origin/$BRANCH" || {
-  echo "[self-update] REFUSED: local checkout has diverged from origin/$BRANCH — resolve manually"
+  echo "[self-update] REFUSED: cannot fast-forward to origin/$BRANCH — local history diverged or local edits block the merge (git's error is above); resolve manually"
   exit 2
 }
 

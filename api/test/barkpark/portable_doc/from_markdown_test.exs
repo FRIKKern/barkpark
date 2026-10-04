@@ -10,11 +10,14 @@ defmodule Barkpark.PortableDoc.FromMarkdownTest do
   alias Barkpark.PortableDoc.Render
 
   describe "block mapping" do
-    test "headings clamp to level 3" do
+    test "headings keep their level, 1 through 6" do
       assert [%{"type" => "heading", "level" => 2, "text" => "Title"}] =
                FromMarkdown.blocks("## Title")
 
-      assert [%{"type" => "heading", "level" => 3}] = FromMarkdown.blocks("##### Deep")
+      # Six levels since owner ruling 2026-10-03 (#63); this used to clamp to 3.
+      assert [%{"type" => "heading", "level" => 4}] = FromMarkdown.blocks("#### Deeper")
+      assert [%{"type" => "heading", "level" => 5}] = FromMarkdown.blocks("##### Deep")
+      assert [%{"type" => "heading", "level" => 6}] = FromMarkdown.blocks("###### Deepest")
     end
 
     test "paragraph with bold, italic, inline code, and link" do

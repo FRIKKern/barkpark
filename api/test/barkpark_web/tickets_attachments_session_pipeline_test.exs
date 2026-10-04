@@ -83,9 +83,10 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
     asset_id = json_response(created, 201)["attachment"]["asset_id"]
     path = "/v1/tickets/inbox/#{ticket}/attachments/#{asset_id}"
 
-    # The LEGITIMATE operator: a read token minted INTO the Default workspace —
-    # the one principal that should still see these bytes.
-    operator_raw = mint_token!(["read"], ws.id)
+    # The LEGITIMATE operator: a write token minted INTO the Default workspace —
+    # the one principal that should still see these bytes. Write, not read:
+    # owner ruling #24 put operator downloads on the write tier.
+    operator_raw = mint_token!(["read", "write"], ws.id)
 
     %{path: path, ticket: ticket, default_ws: ws, operator_raw: operator_raw}
   end
@@ -278,7 +279,7 @@ defmodule BarkparkWeb.TicketsAttachmentsSessionPipelineTest do
   defp foreign_workspace_token! do
     other_ws = TenancyFixtures.create_workspace!()
     _other_project = TenancyFixtures.create_project!(other_ws)
-    mint_token!(["read"], other_ws.id)
+    mint_token!(["read", "write"], other_ws.id)
   end
 
   # A scope-bound SHARE token — `share_scope` set, `kind: "api"`, the exact

@@ -158,10 +158,12 @@ defmodule Barkpark.Plugins.Tickets.CLITest do
   end
 
   describe "CLI.commands/0 — auth tiers + write semantics" do
-    test "every `ticket` verb is read-tier, every `ticket-key` verb is admin-tier" do
+    # Owner ruling #24 (2026-10-03): reading the operator inbox needs the same
+    # write tier as answering it, so every `ticket` verb is write-tier.
+    test "every `ticket` verb is write-tier, every `ticket-key` verb is admin-tier" do
       for cmd <- CLI.commands() do
         case cmd.noun do
-          "ticket" -> assert cmd.auth_tier == "read", "#{cmd.id} should be read-tier"
+          "ticket" -> assert cmd.auth_tier == "write", "#{cmd.id} should be write-tier"
           "ticket-key" -> assert cmd.auth_tier == "admin", "#{cmd.id} should be admin-tier"
         end
       end

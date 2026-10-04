@@ -1455,7 +1455,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{522, 522}],
+      basis_spans: [{530, 530}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1471,7 +1471,9 @@ defmodule PDS.Census do
           "still sits on the def's first body line. RE-ANCHORED again off :512 on " <>
           "era-bl-allowed-auth-methods: login/2, above this def, grew by 10 lines when it took " <>
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
-          "body line.",
+          "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
+          "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
+          "the comment still sits on the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1480,7 +1482,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{537, 542}],
+      basis_spans: [{545, 550}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1497,7 +1499,9 @@ defmodule PDS.Census do
           "carrying its revoke count (the token `anti-enumeration` now on :530). RE-ANCHORED " <>
           "again off :527-532 on era-bl-allowed-auth-methods: +10 lines inserted above by " <>
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
-          "on :540).",
+          "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
+          "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
+          "`anti-enumeration` now on :548).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -4088,7 +4092,7 @@ defmodule PDS.Census do
     #
     # NO HALT — THE WHOLE SET, OR THE SENTENCE IS UNFALSIFIABLE (PDS wave 35). This used
     # to be `Enum.reduce_while(... :halt ...)` and route_tag/1 then printed the FIRST
-    # writing caller as if it were THE caller. tickets_controller.ex:263's render_ticket/3
+    # writing caller as if it were THE caller. tickets_controller.ex's render_ticket/3
     # has SIX call sites (:64 :110 :133 :175 :195 :222) and several of those enclosing defs
     # genuinely write, so the printed name was one arbitrary member of a set — stable
     # today only because `callers/2`'s order is, which nothing specifies and no

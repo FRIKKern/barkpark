@@ -355,8 +355,10 @@ defmodule BarkparkWeb.Contract.HistoryTest do
       assert body["offset"] == 500
     end
 
-    test "a garbage, negative or list-shaped offset reads as the first page",
-         %{conn: conn, doc_id: doc_id} do
+    # Owner ruling #53 (2026-10-03): a garbage or list-shaped offset is now a
+    # 400 naming the parameter (query_strict_params_test.exs); a negative
+    # integer still clamps to the first page.
+    test "a negative offset reads as the first page", %{conn: conn, doc_id: doc_id} do
       first =
         conn
         |> authed()
@@ -364,7 +366,7 @@ defmodule BarkparkWeb.Contract.HistoryTest do
         |> Map.fetch!(:resp_body)
         |> Jason.decode!()
 
-      for bad <- [%{"offset" => "abc"}, %{"offset" => "-7"}, %{"offset" => ["1"]}] do
+      for bad <- [%{"offset" => "-7"}, %{"offset" => "-1"}] do
         body =
           conn
           |> authed()

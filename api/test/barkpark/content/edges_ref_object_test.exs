@@ -79,7 +79,14 @@ defmodule Barkpark.Content.EdgesRefObjectTest do
     test "an arrayOf-of-reference emits one edge per element, whichever shape" do
       publish!("person", "ada")
       publish!("person", "bob")
-      src = publish!("article", "a-arr", %{"editors" => ["ada", ref("bob"), ref(""), 7]})
+      # The empty `ref("")` row cannot be published since owner ruling #47
+      # (publish refuses empty list rows), so the walker reads the draft.
+      {:ok, src} =
+        Content.create_document(
+          "article",
+          %{"_id" => "a-arr", "title" => "a-arr", "editors" => ["ada", ref("bob"), ref(""), 7]},
+          @dataset
+        )
 
       assert src |> Content.extract_edges() |> Enum.map(& &1.to_id) |> Enum.sort() ==
                ["ada", "bob"]
