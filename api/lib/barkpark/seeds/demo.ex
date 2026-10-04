@@ -165,14 +165,19 @@ defmodule Barkpark.Seeds.Demo do
         visibility: "public",
         dataset: dataset,
         # surface (t7): title / description / cover image read as article; slug,
-        # client + status + start date + featured flag are trade metadata → sidebar.
+        # client + phase + start date + featured flag are trade metadata → sidebar.
+        #
+        # `phase`, not `status` (owner ruling #45, task-e427940a663dc687):
+        # `status` is the document's draft/published state, so a project
+        # field named `status` was taken over by it and an editor's
+        # "active" was lost on publish.
         fields: [
           %{name: "title", title: "Title", type: "string", surface: "body"},
           %{name: "slug", title: "Slug", type: "slug", surface: "sidebar"},
           %{name: "client", title: "Client", type: "string", surface: "sidebar"},
           %{
-            name: "status",
-            title: "Status",
+            name: "phase",
+            title: "Phase",
             type: "select",
             options: ["planning", "active", "completed", "archived"],
             surface: "sidebar"
@@ -495,7 +500,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Website Redesign",
         status: "published",
-        content: %{"client" => "Acme Corp"},
+        content: %{"client" => "Acme Corp", "phase" => "completed"},
         inserted_at: hours.(8),
         updated_at: hours.(8)
       },
@@ -505,7 +510,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Mobile App v3",
         status: "draft",
-        content: %{"client" => "StartupX"},
+        content: %{"client" => "StartupX", "phase" => "planning"},
         inserted_at: hours.(52),
         updated_at: hours.(52)
       },
@@ -515,7 +520,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "API Migration",
         status: "published",
-        content: %{"client" => "BigCo"},
+        content: %{"client" => "BigCo", "phase" => "active"},
         inserted_at: hours.(200),
         updated_at: hours.(200)
       },
@@ -525,7 +530,7 @@ defmodule Barkpark.Seeds.Demo do
         dataset: dataset,
         title: "Design System",
         status: "published",
-        content: %{"client" => "Internal"},
+        content: %{"client" => "Internal", "phase" => "active"},
         inserted_at: hours.(270),
         updated_at: hours.(270)
       },
