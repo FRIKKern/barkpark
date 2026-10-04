@@ -91,14 +91,18 @@ const rawToken = (process.env.BARKPARK_TOKEN || '').trim()
  * The trap is sharp because this very template's `lib/bp-env.ts` documents
  * BARKPARK_TOKEN as a STRICTLY SERVER-SIDE value that is "never NEXT_PUBLIC":
  * anyone reaching for the admin token they already have publishes it to every
- * visitor. So the token is VERIFIED against the server's own `auth_tier`
- * contract (GET /v1/capabilities → "admin" | "read" | "none") rather than by
- * sniffing the string, which has no reliable shape.
+ * visitor. So the token is VERIFIED against the server's own answer (GET
+ * /v1/capabilities?token=1 → `auth_tier` "admin" | "write" | "read" | "none",
+ * plus `token.public_read`) rather than by sniffing the string, which has no
+ * reliable shape. "read" alone is not enough: a plain read token also ranks
+ * "read" and reads drafts, so the bake needs `token.public_read === true`.
  *
  * Two outcomes, deliberately different:
- *   - Positively privileged (any tier other than `read`) → HARD FAIL the build.
+ *   - Positively privileged (any tier other than `read`, or a `read` token
+ *     the server says is not public-read) → HARD FAIL the build.
  *     This is never a transient condition and never something to warn past.
- *   - Cannot determine (API unreachable, non-2xx, malformed) → DO NOT fail the
+ *   - Cannot determine (API unreachable, non-2xx, malformed, or a server too
+ *     old to answer `token.public_read`) → DO NOT fail the
  *     build; drop the token so the live path goes dark, and say so loudly. An
  *     offline or degraded build should lose a feature, never ship an unverified
  *     credential — and never break a deploy over a network blip.
@@ -112,20 +116,52 @@ export async function verifyPublicReadToken(t, origin) {
     return { token: '', note: 'no BARKPARK_API_URL to verify against — live search disabled' }
   }
   let tier
+  let publicRead
   try {
-    const res = await fetch(origin + '/v1/capabilities', {
+    // `?token=1` adds `token.public_read`: `auth_tier` alone says "read" for a
+    // public-read token AND for a plain read token, and only the first is safe
+    // in a browser (a plain read token reads drafts and private types).
+    const res = await fetch(origin + '/v1/capabilities?token=1', {
       headers: { authorization: `Bearer ${t}` },
       signal: AbortSignal.timeout(15_000),
     })
     if (!res.ok) {
       return { token: '', note: `capabilities returned ${res.status} — live search disabled` }
     }
-    tier = (await res.json())?.auth_tier
+    const body = await res.json()
+    tier = body?.auth_tier
+    publicRead = body?.token?.public_read
   } catch (e) {
     return { token: '', note: `capabilities unreachable (${e?.name || 'error'}) — live search disabled` }
   }
 
-  if (tier === 'read') return { token: t, note: '' }
+  if (tier === 'read' && publicRead === true) return { token: t, note: '' }
+
+  // A "read" token the server says is NOT public-read: a private read token,
+  // which reads drafts and private types in its workspace. Never a transient
+  // condition, so it fails the build like a privileged token does.
+  if (tier === 'read' && publicRead === false) {
+    throw new Error(
+      `BARKPARK_TOKEN is a private "read" token, not a public-read token. It ` +
+        `reads drafts and private types, and this build would inline it into ` +
+        `the browser bundle as NEXT_PUBLIC_BARKPARK_WS_TOKEN — i.e. hand that ` +
+        `access to every visitor.\n\n` +
+        `Mint a public-read token instead:\n` +
+        `  POST <api>/v1/tokens  {"label":"<site> live search","permissions":["public-read"]}`,
+    )
+  }
+
+  // "read", but the server did not answer `token.public_read` (it predates
+  // GET /v1/capabilities?token=1). Cannot determine, so the token is dropped,
+  // never baked.
+  if (tier === 'read') {
+    return {
+      token: '',
+      note:
+        'the API did not say whether this read token is public-read (update the ' +
+        'Barkpark instance) — live search disabled',
+    }
+  }
 
   // `none` is a DIFFERENT failure from a privileged token: the value does not
   // authenticate at all. Not a security problem — but baking it ships a browser
@@ -149,7 +185,8 @@ export async function verifyPublicReadToken(t, origin) {
     `BARKPARK_TOKEN is an "${tier}" token, and this build would inline it into ` +
       `the browser bundle as NEXT_PUBLIC_BARKPARK_WS_TOKEN — i.e. hand it to ` +
       `every visitor.\n\n` +
-      `Only a public-read token (auth_tier "read") may be used here. Mint one with:\n` +
+      `Only a public-read token (auth_tier "read" with token.public_read true) ` +
+      `may be used here. Mint one with:\n` +
       `  POST <api>/v1/tokens  {"label":"<site> live search","permissions":["public-read"]}\n\n` +
       `Or leave BARKPARK_TOKEN empty — the site still builds and search still ` +
       `works over the flat same-origin route; only the live WebSocket upgrade ` +

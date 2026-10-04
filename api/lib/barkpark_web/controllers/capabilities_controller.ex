@@ -74,6 +74,13 @@ defmodule BarkparkWeb.CapabilitiesController do
     # keep receiving the exact old shape unless they ask.
     include_bpml = params["bpml"] in ["1", "true"]
 
+    # ?token=1 opts in to the root "token" key (task-0cf611238d4ad597 JQ1):
+    # `token.public_read` says whether the caller's own credential is a
+    # `public-read` mint, which `auth_tier` ("read" for both) cannot say. The
+    # search starters ask for it before they inline a token into a browser
+    # bundle. Same opt-in discipline as ?build/?views/?chat/?bpml.
+    include_token = params["token"] in ["1", "true"]
+
     # base_url must be the host the caller ACTUALLY dialed, not the frozen
     # boot-time PHX_HOST scalar — a custom instance hostname and the canonical
     # FQDN each get their own host back (D4 server-side: one instance, many
@@ -89,6 +96,8 @@ defmodule BarkparkWeb.CapabilitiesController do
         include_views: include_views,
         include_chat: include_chat,
         include_bpml: include_bpml,
+        include_token: include_token,
+        public_read: BarkparkWeb.Plugs.PublicRead.public_read_token?(conn),
         server: server
       )
 
