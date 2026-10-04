@@ -6204,6 +6204,43 @@ defmodule BarkparkCloud.Registry do
   def pause_autoupdate(%Barkpark{} = bp), do: set_autoupdate(bp, %{autoupdate_paused: true})
 
   @doc """
+  The rollout's containment pause, WITH its record: pause `bp` and write a
+  `barkpark.autoupdate_paused` audit row (nil actor — the rollout did it, not a
+  person) in one transaction. The metadata says why: the box answered after the
+  settle grace and still did not report `current`.
+
+  Before this, the only trace was a Logger line. The team's audit trail showed
+  its last `autoupdate_changed` (paused=false) beside a box that was paused, and
+  nothing said who paused it or that a human must resume it.
+  """
+  @spec pause_autoupdate_unsettled(Barkpark.t(), pos_integer()) ::
+          {:ok, Barkpark.t()} | {:error, term()}
+  def pause_autoupdate_unsettled(%Barkpark{} = bp, grace_seconds) do
+    BarkparkCloud.Accounts.audit(
+      %{
+        team_id: bp.team_id,
+        actor_user_id: nil,
+        action: "barkpark.autoupdate_paused",
+        target_type: "barkpark",
+        target_id: bp.id
+      },
+      fn -> pause_autoupdate(bp) end,
+      fn _updated ->
+        %{
+          metadata: %{
+            "name" => bp.name,
+            "reason" => "did_not_settle",
+            "update_state" => bp.update_state,
+            "running_release" => bp.update_running_release,
+            "latest_release" => bp.update_latest_release,
+            "grace_seconds" => grace_seconds
+          }
+        }
+      end
+    )
+  end
+
+  @doc """
   Record — from the rollout's OWN 503 — that this box has not armed one-click
   apply, so `next_autoupdate_candidate/1` stops picking it.
 

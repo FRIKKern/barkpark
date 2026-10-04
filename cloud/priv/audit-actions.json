@@ -45,6 +45,7 @@
     { "verb": "barkpark.self_update_triggered", "label": "triggered a self-update" },
     { "verb": "barkpark.rollback_triggered", "label": "triggered a rollback" },
     { "verb": "barkpark.autoupdate_changed", "label": "changed autoupdate" },
+    { "verb": "barkpark.autoupdate_paused", "label": "paused autoupdate after an update did not land" },
     { "verb": "barkpark.agent_key_delivered", "label": "delivered a model key to a support box" },
     { "verb": "barkpark.domain_attached", "label": "attached a domain to a Barkpark" },
     { "verb": "barkpark.vercel_deploy_triggered", "label": "triggered a Vercel deploy" },
