@@ -57,8 +57,9 @@ defmodule Barkpark.Plugins.Github.RetireJob do
   use Oban.Worker,
     queue: :github_mirror,
     max_attempts: 5,
+    # Tenant scope joins the key (owner ruling #51, RQ6), as on MirrorJob.
     unique: [
-      keys: [:doc_id, :dataset, :issue],
+      keys: [:doc_id, :dataset, :issue, :workspace_id, :project_id],
       states: [:available, :scheduled, :executing],
       period: 60
     ]

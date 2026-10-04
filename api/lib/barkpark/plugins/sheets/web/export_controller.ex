@@ -150,7 +150,7 @@ defmodule Barkpark.Plugins.Sheets.Web.ExportController do
       # read again. A no-op when no session is live. A FAILED persist means
       # the row is stale — surface a clean 503 instead of serving it; the
       # session keeps retrying on its debounce, so the hint is honest.
-      case Barkpark.Plugins.Sheets.Session.flush(slug, dataset, doc.workspace_id) do
+      case Barkpark.Plugins.Sheets.Session.flush(slug, dataset, doc) do
         :ok ->
           read_sheet(slug, dataset, scope)
 

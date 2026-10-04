@@ -77,7 +77,7 @@ defmodule Barkpark.Plugins.Sheets.Web.OpsController do
          :ok <- check_batch_size(ops),
          {:ok, doc} <- authorize_sheet(conn, slug, dataset),
          {:ok, result} <-
-           Session.apply_ops(slug, dataset, ops, request_id, doc.workspace_id) do
+           Session.apply_ops(slug, dataset, ops, request_id, doc) do
       json(conn, %{
         ok: true,
         slug: slug,

@@ -231,7 +231,8 @@ defmodule Barkpark.Plugins.Sheets.SessionRingCrashTest do
         _ -> nil
       end
 
-    {@dataset, ws, Content.published_id(slug)}
+    # The project joined the key (owner ruling #51, RQ7); unscoped = nil.
+    {@dataset, ws, nil, Content.published_id(slug)}
   end
 
   # A REAL restart: kill the supervised singleton and wait for the supervisor
