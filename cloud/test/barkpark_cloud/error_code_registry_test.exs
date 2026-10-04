@@ -250,6 +250,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "read_failed",
              "read_token_inventory_unreadable",
              "read_token_mint_failed",
+             "reauth_failed",
              "rebind_ability_required",
              "recipient_not_member",
              "record_failed",
