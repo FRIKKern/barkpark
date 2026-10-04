@@ -1983,6 +1983,10 @@ defmodule BarkparkCloud.ReaderLessInstrumentCensusTest do
       "the window the backoff ladder ASKED for (sites/deploy.ex:2079). The PAIR is the instrument — scheduled against actual is the whole question of whether the ladder is obeyed — and deferral_pacing.ex:181 requires both non-nil before either counts, which is why neither is read alone.",
     "demand_class" =>
       "the only residual field with TWO owners: Registry.Site carries the operator's classification (registry.ex:8376 is its sole writer and says so) and Registry.Deployment carries a copy stamped at insert by stamp_demand_class/2 (registry.ex:8386) so the class is recomputed rather than remembered. Two columns, one vocabulary, zero consumer readers — the fix would be one render, not two deletions.",
+    "enqueued_host" =>
+      "the host a host-SSH job (push_agent_key, attach_domain, enable_apply) was enqueued against (registry.ex ownership_snapshot/1). The claim compares it with the row's current host in ownership_drift/2 and refuses the job when they differ (task-0cf611238d4ad597 CQ7c). A guard input, not an instrument: no surface shows where a job was aimed.",
+    "enqueued_team_id" =>
+      "the team that owned the barkpark when a host-SSH job was enqueued (registry.ex ownership_snapshot/1). ownership_drift/2 refuses the claim when the row has since moved team (task-0cf611238d4ad597 CQ7c). Like enqueued_host it is read by the claim guard only, never emitted.",
     "expiry_warned_at" =>
       "the send-once claim for PAT expiry mail: accounts.ex:1251 stamps it inside `UPDATE … WHERE expiry_warned_at IS NULL`, and accounts.ex:1235 documents that the update's own row count is what decides who won. A field whose entire meaning is that exactly one writer wins has nothing to say to a reader.",
     "failed_attempts" =>

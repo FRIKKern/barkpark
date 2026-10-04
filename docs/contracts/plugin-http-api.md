@@ -10,12 +10,12 @@ Plugin-gated; each outsider's **`bptk_` key is their identity**. Server-derived 
 | Persona (auth) | Routes (`/v1` prefix) |
 |---|---|
 | Submitter (`bptk_`) | `POST /tickets` · `GET /tickets[/:id]` (stamps `submitter_seen_at`) · `POST /tickets/:id/{messages,attachments}` · `GET /tickets/:id/attachments/:asset_id` |
-| Operator (bearer) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
+| Operator (write) | `GET /tickets/inbox[/:id[/attachments/:asset_id]]` (open first) · `POST /tickets/:id/answer` `{body,close?}` · `POST /tickets/:id/close` |
 | Admin (`/v1/plugins/tickets/keys`) | `POST` mint · `GET` ls · `POST /:id/{rotate,pause,unpause}` · `DELETE /:id` revoke |
 
-Non-ticket routes refuse `bptk_` (capabilities tier `"none"`). Paused → reversible 403 `key paused`; revoked → 401; rotate changes secret, preserves identity.
+Operator reads need write (ruling #24): read-only → 403. Non-ticket routes refuse `bptk_` (capabilities tier `"none"`). Paused → reversible 403 `key paused`; revoked → 401; rotate changes secret, preserves identity.
 
-Submitter attachments: magic-byte MIME, not client header; `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → 404. Per-key limits: create 10/hr, message 60/hr, attachment 30/hr; reads exempt; excess → 429 + `Retry-After`. Mint returns the raw key once + `quickstart` curls.
+Submitter attachments: magic-byte MIME, not client header; `png/jpeg/gif/webp/pdf/txt/log/zip`, ≤10 MB/file, ≤10/ticket; foreign → 404. Per-key limits: create 10/hr, message 60/hr, attachment 30/hr; reads exempt; excess → 429 + `Retry-After`. Mint returns the raw key once + quickstart curls.
 
 ## Sheets — `POST /v1/plugins/sheets/:slug/ops` [admin]
 

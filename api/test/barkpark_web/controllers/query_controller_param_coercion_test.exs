@@ -12,6 +12,8 @@ defmodule BarkparkWeb.QueryControllerParamCoercionTest do
 
   This asserts the anonymous public-read route never 500s on a non-binary
   `expand` param, and that the ordinary binary-shaped `expand` still works.
+  Since owner ruling #53 (2026-10-03) the list/map shapes are a 400 naming
+  the parameter (`query_strict_params_test.exs`); they stay < 500 here.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -22,7 +24,12 @@ defmodule BarkparkWeb.QueryControllerParamCoercionTest do
   setup do
     {:ok, _} =
       Content.upsert_schema(
-        %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [%{"name" => "author", "type" => "reference", "refType" => "author"}]
+        },
         @ds
       )
 

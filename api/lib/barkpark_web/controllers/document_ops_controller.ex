@@ -91,6 +91,12 @@ defmodule BarkparkWeb.DocumentOpsController do
       {:error, {:halted, _reason} = reason} ->
         ErrorResponse.emit(conn, {:error, reason})
 
+      # The mutate door's task guards (claim, close, plugin fences) and the
+      # writer's task validation: the same 422 `validation_failed` with
+      # per-field details that /v1/data/mutate answers (owner ruling #35).
+      {:error, {:invalid_task_content, %{}} = reason} ->
+        ErrorResponse.emit(conn, {:error, reason})
+
       # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
       {:error, {:write_admission, _}} = refused ->
         write_admission_refused(conn, refused)

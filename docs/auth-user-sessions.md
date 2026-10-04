@@ -76,6 +76,10 @@ the clear. Enrolment also issues one-time **recovery codes** — single-use
 fallbacks accepted by `auth.login`'s `recovery_code` when the authenticator is
 unavailable; each code is consumed on use. `mfa_disable` (SDK `client.auth.disableMfa(password)`)
 turns MFA back off — it requires the account password and clears the secret + recovery codes.
+Every door that re-checks the current password (erase, password change, TOTP
+enrol/verify/disable, passkey add/remove, Studio's erase form) shares one
+per-user budget, `Accounts.reauthenticate/2`: five attempts, refilled at one a
+minute. Past it even the right password gets `429 reauth_rate_limited`.
 
 ### Studio sign-in rides these accounts
 

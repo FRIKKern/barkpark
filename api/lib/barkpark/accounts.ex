@@ -200,20 +200,77 @@ defmodule Barkpark.Accounts do
     :ok
   end
 
-  @doc "Change an existing user's password (verify current first), revoking all sessions."
+  @doc """
+  Change an existing user's password (verify current first), revoking all
+  sessions. The current-password check spends the shared re-check budget
+  (`reauthenticate/2`); past it the answer is `{:error, :reauth_rate_limited}`
+  and nothing changes.
+  """
   @spec update_user_password(User.t(), String.t(), map()) ::
-          {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :invalid_current}
+          {:ok, User.t()}
+          | {:error, Ecto.Changeset.t()}
+          | {:error, :invalid_current}
+          | {:error, :reauth_rate_limited}
   def update_user_password(%User{} = user, current_password, attrs) do
-    if User.valid_password?(user, current_password) do
-      # Drops the revoked-session count deliberately: this arity publishes no
-      # claim about sessions, so it has nothing to carry it to.
-      case do_reset_password(user, attrs) do
-        {:ok, updated, _revoked} -> {:ok, updated}
-        err -> err
-      end
-    else
-      {:error, :invalid_current}
+    case reauthenticate(user, current_password) do
+      :ok ->
+        # Drops the revoked-session count deliberately: this arity publishes no
+        # claim about sessions, so it has nothing to carry it to.
+        case do_reset_password(user, attrs) do
+          {:ok, updated, _revoked} -> {:ok, updated}
+          err -> err
+        end
+
+      {:error, :reauth_rate_limited} ->
+        {:error, :reauth_rate_limited}
+
+      {:error, :invalid_password} ->
+        {:error, :invalid_current}
     end
+  end
+
+  # Owner ruling #34 item 1 (2026-10-03, task-d9e8f02056e39763): ONE per-user
+  # budget for every door that re-checks a signed-in user's current password —
+  # erase (JSON and Studio), password change, TOTP enrol/verify/disable, passkey
+  # add and remove. Before, only Studio's erase form counted, so a session
+  # holder could guess the password through any JSON re-check at the general
+  # per-IP rate. Five attempts, refilled at one a minute (the erase form's old
+  # numbers). Every attempt with a password spends one, right or wrong, so the
+  # budget cannot be probed; a legitimate flow uses one or two. The key is the
+  # user id, never the IP. The cost, stated: someone holding a session can
+  # spend the budget and hold these actions shut for a few minutes; sign-in and
+  # password reset do not draw on it.
+  @reauth_capacity 5
+  @reauth_refill_per_sec 1 / 60
+
+  @doc """
+  Re-check `password` as `user`'s current password before a sensitive action.
+
+  Returns `:ok`, `{:error, :invalid_password}` (wrong, missing or empty), or
+  `{:error, :reauth_rate_limited}` when the shared per-user budget is spent —
+  then even the right password is refused. A missing or empty password spends
+  nothing (it is not a guess).
+  """
+  @spec reauthenticate(User.t(), term()) ::
+          :ok | {:error, :invalid_password} | {:error, :reauth_rate_limited}
+  def reauthenticate(%User{} = user, password) when is_binary(password) and password != "" do
+    cond do
+      not reauth_attempt_allowed?(user) -> {:error, :reauth_rate_limited}
+      User.valid_password?(user, password) -> :ok
+      true -> {:error, :invalid_password}
+    end
+  end
+
+  def reauthenticate(%User{}, _password), do: {:error, :invalid_password}
+
+  # `scoped_key/2` is the identity outside tests and there is no conn here, so
+  # the key is per user either way (the census in
+  # rate_limiter_scoped_key_coverage_test.exs requires the call shape).
+  defp reauth_attempt_allowed?(%User{id: id}) do
+    Barkpark.RateLimiter.check(Barkpark.RateLimiter.scoped_key(nil, {:reauth_attempt, id}),
+      capacity: @reauth_capacity,
+      refill_per_sec: @reauth_refill_per_sec
+    ) == :ok
   end
 
   # ── Sessions ───────────────────────────────────────────────────────────────

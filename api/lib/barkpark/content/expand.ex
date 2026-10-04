@@ -52,6 +52,19 @@ defmodule Barkpark.Content.Expand do
     end)
   end
 
+  @doc """
+  The reference fields `?expand=` can name on `type`, resolved with the SAME
+  schema lookup `expand/4` uses (scoped first, then global), so a field the
+  validator accepts is a field the expansion will actually walk.
+  """
+  @spec expandable_fields(String.t(), String.t(), keyword()) :: [String.t()]
+  def expandable_fields(type, dataset, opts \\ []) do
+    case load_schemas([type], dataset, opts) |> Map.get(type) do
+      nil -> []
+      schema -> schema.fields |> Enum.filter(&ref_field?/1) |> Enum.map(& &1["name"])
+    end
+  end
+
   # Swap one reference field's stored value for its pre-resolved render. An
   # unresolvable id (or a non-list value on an array field) is left untouched —
   # byte-identical to the prior per-ref path.

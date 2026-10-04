@@ -64,6 +64,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unauthorized", {:error, :unauthorized}, "unauthorized", 401, []},
       {"replay", {:error, :replay}, "unauthorized", 401, [:reason]},
       {"forbidden", {:error, :forbidden}, "forbidden", 403, []},
+      # A preview JWT reading outside its doc_ids / workspace (owner ruling #17).
+      {"preview_scope", {:error, :preview_scope}, "forbidden", 403, [:reason]},
       {"forbidden_membership", {:error, :forbidden_membership}, "forbidden", 403, [:reason]},
       # The same membership refusal for an API TOKEN (task-7d4d405e0ee4bcbf):
       # byte-identical code/status/reason, with the workspace named in the

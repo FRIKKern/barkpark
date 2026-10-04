@@ -6,6 +6,11 @@ defmodule BarkparkWeb.QuizHostLive do
   input. Subscribes to the room events topic so every `{:tally, t}` /
   `{:player_joined|left, _}` broadcast re-renders without polling.
 
+  Binding a stored quiz (`?quiz=<id>`) needs a Studio host link
+  (`Barkpark.Quiz.HostLink`, `&host=<token>`) or a signed-in Studio author
+  session (owner ruling #23); without one the room runs the default question.
+  `/quiz/host/new` picks a fresh PIN and keeps the query.
+
   Host controls: the browser session that OWNS the pin (`Quiz.Bridge`, first
   host wins: `bind_as_host/4` with `?quiz=`, `claim_host/2` without) gets a
   toolbar that drives the room's phases: start the question (arms the
@@ -20,8 +25,18 @@ defmodule BarkparkWeb.QuizHostLive do
   use Phoenix.LiveView
 
   alias Barkpark.Quiz
+  alias Barkpark.Quiz.HostLink
 
+  # `/quiz/host/new` is the PIN-less entry the Studio "Host this quiz" link
+  # opens: pick a fresh PIN and carry the quiz + host token along, so every
+  # click of the same link opens its own room.
   @impl true
+  def mount(%{"pin" => "new"} = params, _session, socket) do
+    query = params |> Map.take(["quiz", "host"]) |> URI.encode_query()
+    to = "/quiz/host/" <> Quiz.new_pin() <> if(query == "", do: "", else: "?" <> query)
+    {:ok, redirect(unavailable_assigns(socket, "new"), to: to)}
+  end
+
   def mount(%{"pin" => pin} = params, session, socket) do
     if connected?(socket) do
       # `Quiz.ensure_room/1` is specced `{:ok, pid()} | {:error, term()}` and
@@ -39,7 +54,7 @@ defmodule BarkparkWeb.QuizHostLive do
       # refusals render different copy: a budget refusal is about THIS visitor
       # and clears on its own; a capacity refusal is about the service.
       case Quiz.ensure_room(pin, connect_info(socket)) do
-        {:ok, _pid} -> mount_room(pin, params, host_key(session), socket)
+        {:ok, _pid} -> mount_room(pin, params, session, socket)
         {:error, reason} -> {:ok, assign(unavailable_assigns(socket, pin), error: reason)}
       end
     else
@@ -48,7 +63,9 @@ defmodule BarkparkWeb.QuizHostLive do
   end
 
   # The connected mount once the room is live.
-  defp mount_room(pin, params, host_key, socket) do
+  defp mount_room(pin, params, session, socket) do
+    host_key = host_key(session)
+
     # Bind an optional `?quiz=<id>` so a Studio publish of that quiz reaches
     # this live room in under a second (charter Vision + Decision M). This is
     # the first production call site of `bind_quiz/3`. The default dataset
@@ -57,13 +74,34 @@ defmodule BarkparkWeb.QuizHostLive do
     # always returns `:ok`: it silently no-ops on a garbage/unpublished id
     # (the room keeps its default question) and is idempotent across refresh,
     # so there is no error branch to render.
-    case params["quiz"] do
-      # Bound as THIS host session: a second browser (a player who read the PIN
-      # off the projector) cannot swap a live room's quiz (task-680f88266f783346).
-      qid when is_binary(qid) and qid != "" -> Quiz.bind_quiz_as_host(pin, qid, host_key)
-      # No quiz: still claim the unowned pin, so the default question can be run.
-      _ -> Quiz.Bridge.claim_host(pin, host_key)
-    end
+    #
+    # Owner ruling #23 (task-f5d0ce5677e1c1d0): binding a stored quiz is an
+    # authoring act — the host hears every answer and the answer key of a
+    # PRIVATE-type document. `?quiz=` binds only with a valid Studio host link
+    # for THAT quiz, or a signed-in Studio session that may write the Default
+    # workspace. Anyone else still gets a working room on the default question,
+    # and is told why the named quiz did not load.
+    link_error =
+      case params["quiz"] do
+        qid when is_binary(qid) and qid != "" ->
+          case authorize_bind(params["host"], qid, session) do
+            :ok ->
+              # Bound as THIS host session: a second browser (a player who read
+              # the PIN off the projector) cannot swap a live room's quiz
+              # (task-680f88266f783346).
+              Quiz.bind_quiz_as_host(pin, qid, host_key)
+              nil
+
+            {:error, reason} ->
+              Quiz.Bridge.claim_host(pin, host_key)
+              reason
+          end
+
+        # No quiz: still claim the unowned pin, so the default question can be run.
+        _ ->
+          Quiz.Bridge.claim_host(pin, host_key)
+          nil
+      end
 
     host? = Quiz.Bridge.host?(pin, host_key)
 
@@ -85,10 +123,21 @@ defmodule BarkparkWeb.QuizHostLive do
         phase: state.phase,
         scores: state.scores,
         answer: nil,
-        error: nil
+        error: nil,
+        link_error: link_error
       )
 
     {:ok, arm_countdown(socket, state.seconds_remaining)}
+  end
+
+  defp authorize_bind(token, quiz_id, session) do
+    case HostLink.verify(token, quiz_id) do
+      :ok ->
+        :ok
+
+      {:error, reason} ->
+        if HostLink.signed_in_author?(session), do: :ok, else: {:error, reason}
+    end
   end
 
   # The host browser's identity: a hash of its session CSRF token (per browser
@@ -113,7 +162,8 @@ defmodule BarkparkWeb.QuizHostLive do
       answer: nil,
       ends_at: nil,
       remaining: nil,
-      error: nil
+      error: nil,
+      link_error: nil
     )
   end
 
@@ -232,6 +282,9 @@ defmodule BarkparkWeb.QuizHostLive do
             in a moment and the room starts as soon as one frees up.
           </p>
         <% @question -> %>
+          <p :if={@link_error} class="q-status" role="status">
+            {link_error_copy(@link_error)} This room is running the sample question.
+          </p>
           <div :if={@host?} class="q-host-controls" role="toolbar" aria-label="Host controls">
             <button type="button" class="q-host-btn" phx-click="host" phx-value-action="start">
               {if @phase == :question and is_nil(@ends_at), do: "Start question", else: "Restart question"}
@@ -324,6 +377,12 @@ defmodule BarkparkWeb.QuizHostLive do
   # raising, so a transport that stops carrying connect_info degrades to the
   # shared fallback bucket instead of breaking the door.
   defp connect_info(%{private: private}), do: Map.get(private, :connect_info)
+
+  defp link_error_copy(:expired),
+    do: "This host link has expired. Open Host this quiz in Studio again for a new one."
+
+  defp link_error_copy(_missing_or_invalid),
+    do: "Only the quiz's authors can host it. Open Host this quiz in Studio to get a host link."
 
   defp pct(_count, 0), do: 0
   defp pct(count, total), do: round(count / total * 100)

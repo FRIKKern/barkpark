@@ -517,8 +517,26 @@ defmodule Barkpark.Content.Query do
     )
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
+    |> maybe_only_doc_ids(Keyword.get(opts, :only_doc_ids))
     |> apply_filter_map(filter_map, dataset, opts)
   end
+
+  # A preview token that names documents (owner ruling #17) lists only those,
+  # draft twin included: the ids are PUBLISHED ids, compared against the row's
+  # id with its `drafts.` prefix removed.
+  defp maybe_only_doc_ids(query, [_ | _] = ids) do
+    where(
+      query,
+      [d],
+      fragment(
+        "regexp_replace(?, '^drafts\\.', '') = ANY(?)",
+        d.doc_id,
+        type(^ids, {:array, :string})
+      )
+    )
+  end
+
+  defp maybe_only_doc_ids(query, _), do: query
 
   # Row/ownership ACL (Phase 4, core-auth). Appends `scope_to_owner/2` ONLY when
   # the type opts into `owner_scoped` — a non-owner_scoped read is byte-identical
