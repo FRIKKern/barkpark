@@ -770,6 +770,10 @@ const PIN = [
   // diff that deleted its wire-vs-reader census row.
   { key: "MAP|ERRORS.installation_not_found", verdict: "CONSULTED", copy: "Barkpark can't see that GitHub installation any more — it w..." },
   { key: "MAP|ERRORS.install_state_invalid", verdict: "CONSULTED", copy: "That GitHub install link was started by another account or..." },
+  // task-0cf611238d4ad597 CQ7a: the 422s on POST /v1/github/installations when the
+  // install came back without GitHub's user authorization, or GitHub refused it.
+  { key: "MAP|ERRORS.github_authorization_required", verdict: "CONSULTED", copy: "GitHub didn't send an authorization with this install, so Barkpark can..." },
+  { key: "MAP|ERRORS.github_authorization_failed", verdict: "CONSULTED", copy: "GitHub refused the authorization for this install \\u2014 it may have e..." },
   // githubInstallOutcome's two TOAST sentences. AUTHORED, both, and neither is
   // a refusal CAUSE: the first is the console's own success line for a 201 it
   // verified (installation.connected === true and nothing less), the second is

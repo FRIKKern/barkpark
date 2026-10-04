@@ -145,6 +145,8 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "feature_not_configured",
              "forbidden",
              "forms_unsupported",
+             "github_authorization_failed",
+             "github_authorization_required",
              "github_error",
              "host_mismatch",
              "host_taken",

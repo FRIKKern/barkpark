@@ -6887,11 +6887,17 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # POST /v1/github/installations {installation_id} → 201 {installation:
-  # {connected, account_login, …}} — records the team's GitHub App installation
-  # after the App-install redirect (GitHub sends the browser back with the
-  # installation_id). The id is VALIDATED through the client seam before it lands
-  # (a forged / uninstalled id → 422 installation_not_found, nothing written).
+  # POST /v1/github/installations {installation_id, state, code} → 201
+  # {installation: {connected, account_login, …}} — records the team's GitHub App
+  # installation after the App-install redirect (GitHub sends the browser back
+  # with the installation_id, the state and a user-authorization code). The id is
+  # VALIDATED through the client seam before it lands (a forged / uninstalled id
+  # → 422 installation_not_found, nothing written), and the code proves the
+  # caller can access that install on GitHub (task-0cf611238d4ad597 CQ7a):
+  #   422 github_authorization_required — no code came back with the install
+  #   422 github_authorization_failed   — GitHub refused the code
+  #   422 installation_not_found        — the caller's GitHub user cannot see it
+  #   503 feature_not_configured        — the App's OAuth client is not wired
   # 503 feature_not_configured when the App credentials are absent (HUMAN-LAST).
   # RBAC: stores a capability handle → team admin only (parity with providers).
   # One installation per team (v1) — a re-connect replaces the existing row.
@@ -6943,7 +6949,13 @@ defmodule BarkparkCloud.Web.Router do
               action: "github.installation_connected",
               target_type: "github_installation"
             },
-            fn -> GitHub.record_installation(team, conn.body_params["installation_id"]) end,
+            fn ->
+              GitHub.record_user_installation(
+                team,
+                conn.body_params["installation_id"],
+                conn.body_params["code"]
+              )
+            end,
             fn inst -> %{target_id: inst.id, metadata: %{account_login: inst.account_login}} end
           )
 
@@ -6959,6 +6971,29 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, :installation_not_found} ->
             json(conn, 422, %{error: "installation_not_found"})
+
+          {:error, :github_authorization_required} ->
+            json(conn, 422, %{
+              error: "github_authorization_required",
+              detail:
+                "GitHub did not send an authorization with this install, so Barkpark " <>
+                  "cannot check that the installation is yours. Connect GitHub again " <>
+                  "from Settings → Providers and approve the authorization GitHub asks for."
+            })
+
+          {:error, :github_authorization_failed} ->
+            json(conn, 422, %{
+              error: "github_authorization_failed",
+              detail:
+                "GitHub refused the authorization for this install (it may have " <>
+                  "expired). Connect GitHub again from Settings → Providers."
+            })
+
+          {:error, :user_authorization_not_configured} ->
+            json(conn, 503, %{
+              error: "feature_not_configured",
+              detail: "The GitHub App's OAuth client is not configured on this control plane."
+            })
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
