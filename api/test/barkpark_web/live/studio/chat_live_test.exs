@@ -8409,7 +8409,7 @@ defmodule BarkparkWeb.Studio.ChatLiveTest do
       {:ok, _} = token |> Ecto.Changeset.change(%{workspace_id: nil}) |> Barkpark.Repo.update()
 
       {:ok, super_view, _html} =
-        build_conn() |> init_test_session(%{"api_token" => raw}) |> live("/studio/chat")
+        scoped_conn() |> init_test_session(%{"api_token" => raw}) |> live("/studio/chat")
 
       super_html = render(super_view)
       assert super_html =~ "/studio/chat/#{tenant.id}"
