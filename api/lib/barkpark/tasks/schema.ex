@@ -49,7 +49,13 @@ defmodule Barkpark.Tasks.Schema do
       name: "task",
       title: "Task",
       icon: "✅",
-      visibility: "public",
+      # Owner ruling #10 (2026-10-03, task-771adf3d4bb86c69): the ledger is an
+      # internal work queue — security rows describe open holes before they
+      # are fixed — so anonymous reads of tasks 404 and anonymous search never
+      # sees them. `bp task`, Studio, the board and the CI task gate all send a
+      # credential. Same reason as `listener` below. Existing rows are flipped
+      # by migration 20261004113000.
+      visibility: "private",
       dataset: dataset,
 
       # Generic list-row preview (host affordance, plugin-declared data):

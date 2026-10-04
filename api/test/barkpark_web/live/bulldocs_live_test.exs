@@ -303,8 +303,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
     @dt_paper "2026-07-02-dt-paper"
     @dt_task "2026-07-02-dt-task"
 
-    test "renders a 'Driven tasks' section with the citing task's criteria state",
-         %{conn: conn} do
+    # Seeds a paper and a REAL published task citing it via design_doc, under
+    # the plugin's task schema with `visibility` set as given.
+    defp seed_driven_task!(visibility) do
       {:ok, _p} =
         Content.upsert_paper(
           Barkpark.LabelFixtures.paper_attrs(%{slug: @dt_paper, body_html: "<h1>Strategy</h1>"})
@@ -327,6 +328,9 @@ defmodule BarkparkWeb.BulldocsLiveTest do
           |> Map.from_struct()
           |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
           |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        attrs =
+          if attrs["name"] == "task", do: Map.put(attrs, "visibility", visibility), else: attrs
 
         {:ok, _} = Content.upsert_schema(attrs, dataset, scope)
       end
@@ -363,6 +367,11 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         [%{from_id: @dt_task, to_id: @dt_paper, kind: "design_doc"}],
         dataset: dataset
       )
+    end
+
+    test "with a public task schema, renders a 'Driven tasks' section with the citing task's criteria state",
+         %{conn: conn} do
+      seed_driven_task!("public")
 
       {:ok, _view, html} = live(conn, "/papers/#{@dt_paper}")
 
@@ -372,6 +381,20 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert html =~ "satisfied claim"
       assert html =~ "PR #42"
       assert html =~ "open claim"
+    end
+
+    # Owner ruling #10 (task-771adf3d4bb86c69): the shipped task schema is
+    # private, so the anonymous reader never prints a citing task.
+    test "with the shipped private task schema, the anonymous reader shows no citing task",
+         %{conn: conn} do
+      seed_driven_task!("private")
+
+      {:ok, _view, html} = live(conn, "/papers/#{@dt_paper}")
+
+      assert html =~ "Strategy"
+      refute html =~ "Driven tasks"
+      refute html =~ "Drive the strategy"
+      refute html =~ "PR #42"
     end
   end
 

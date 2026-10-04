@@ -56,7 +56,8 @@ defmodule Barkpark.TasksTest do
                Content.get_schema("task", @dataset, scope)
 
       assert is_list(schema.fields) and schema.fields != []
-      assert schema.visibility == "public"
+      # Owner ruling #10: the ledger is private.
+      assert schema.visibility == "private"
     end
 
     test "goal/phase/event are NOT registered types", %{scope: scope} do

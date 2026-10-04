@@ -508,23 +508,11 @@ defmodule BarkparkWeb.BulldocsLive do
         |> Keyword.put(:card_schemas, %{"paper" => paper_schema})
       )
 
-    task_opts =
-      if Enum.any?(referencers, &(&1.type == "task")),
-        do:
-          Keyword.put(
-            opts,
-            :anonymous_task_schema,
-            Content.Papers.reader_schema(paper, "task", dataset, reader_scope)
-          ),
-        else: opts
-
     socket
     |> assign(:backlinks_html, BarkparkWeb.PaperBacklinks.section_html(referencers))
     |> assign(
       :driven_tasks_html,
-      referencers
-      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(task_opts)
-      |> BarkparkWeb.PaperTasks.section_html()
+      driven_tasks_html(referencers, paper, dataset, reader_scope, opts)
     )
   end
 
@@ -532,6 +520,28 @@ defmodule BarkparkWeb.BulldocsLive do
     socket
     |> assign(:backlinks_html, "")
     |> assign(:driven_tasks_html, "")
+  end
+
+  # "Driven tasks" lists citing tasks to the ANONYMOUS reader, so it renders
+  # only when that reader may read tasks at all: the workspace's `task` schema
+  # is public. The shipped schema is private (owner ruling #10,
+  # task-771adf3d4bb86c69: anonymous task reads 404), so by default the
+  # section is empty and no task is hydrated. Without this gate the hydration's
+  # type-pinned retry (`Expectations.resolve_task/4`) re-read each task the
+  # schema-visibility clamp had dropped, one statement per citing task, and
+  # printed private tasks on a public page.
+  defp driven_tasks_html(referencers, paper, dataset, reader_scope, opts) do
+    with true <- Enum.any?(referencers, &(&1.type == "task")),
+         %{visibility: "public"} = task_schema <-
+           Content.Papers.reader_schema(paper, "task", dataset, reader_scope) do
+      referencers
+      |> Barkpark.Tasks.Expectations.driven_tasks_from_referencers(
+        Keyword.put(opts, :anonymous_task_schema, task_schema)
+      )
+      |> BarkparkWeb.PaperTasks.section_html()
+    else
+      _ -> ""
+    end
   end
 
   defp maybe_scope(opts, _key, nil), do: opts
