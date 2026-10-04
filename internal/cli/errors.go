@@ -369,6 +369,7 @@ var codeExit = map[string]int{
 	"import_body_too_large":      exitValidation, // 413, workspace_controller.ex:992
 	"searchable_text_too_large":  exitValidation, // 422, content/mutations.ex:216 (tsvector cap)
 	"document_too_large":         exitValidation, // 413, content/document_size.ex (owner ruling #39, per-document cap)
+	"private_field_bound":        exitValidation, // 422, content/bound_field_guard.ex (owner ruling #21)
 	// 402. There is no payment/quota bucket in the 0-8 scheme, and inventing
 	// one would redefine the published table. 5 is the honest neighbour: it
 	// says "not retryable as sent", which is the fact a wrapper needs.

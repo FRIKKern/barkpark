@@ -196,6 +196,26 @@ defmodule BarkparkWeb.Studio.TmuxLiveTest do
       assert html =~ "studio-tab active"
     end
 
+    # Owner ruling #30 Q13 (2026-10-03, task-1631e0fa917452d9): the host shell
+    # re-checks its principal on every event, not only at mount. A token
+    # revoked mid-session used to keep typing into the PTY.
+    test "a token revoked mid-session can no longer spawn or type into the PTY",
+         %{view: view} do
+      render_hook(view, "term-init", %{"cols" => 80, "rows" => 24})
+      assert_receive {:fake_spawn, _}
+
+      {:ok, _} =
+        Barkpark.Auth.ApiToken
+        |> Barkpark.Repo.get_by!(token_hash: Barkpark.Auth.ApiToken.hash_token(@admin_token))
+        |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
+        |> Barkpark.Repo.update()
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               render_hook(view, "term-input", %{"d" => Base.encode64("whoami\n")})
+
+      refute_received {:fake_write, _}
+    end
+
     test "term-init spawns the PTY at the reported geometry", %{view: view} do
       render_hook(view, "term-init", %{"cols" => 100, "rows" => 30})
       assert_receive {:fake_spawn, %{cols: 100, rows: 30}}

@@ -64,9 +64,54 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   end
 
   @impl true
+  # EVERY EVENT RE-CHECKS THE PRINCIPAL (owner ruling #30 Q13, 2026-10-03). The
+  # mount gate ran once; a token revoked, expired or stripped of admin, or an
+  # account removed from the Default workspace, kept a live host shell until the
+  # socket reconnected. Each event now re-reads the principal from the database
+  # and re-asks the mount's own rule; a principal that no longer passes is sent
+  # back to /studio (the LiveView exits, and `terminate/2` kills the tmux
+  # client).
+  def handle_event(event, params, socket) do
+    if host_principal_now?(socket) do
+      handle_console_event(event, params, socket)
+    else
+      {:noreply,
+       socket
+       |> put_flash(:error, "Your access to the host terminal ended. Sign in again to continue.")
+       |> redirect(to: "/studio")}
+    end
+  end
+
+  defp host_principal_now?(socket) do
+    TmuxConsole.enabled?() and
+      BarkparkWeb.HostExecutionGate.instance_principal?(fresh_principal(socket.assigns))
+  end
+
+  # The mount-time struct, re-read: a token through the same WHERE clause
+  # `Auth.verify_token/1` applies (api kind, not revoked, not expired); a user
+  # by id. `nil` when it is gone — which `instance_principal?/1` refuses.
+  defp fresh_principal(%{api_token: %Barkpark.Auth.ApiToken{id: id}}) when is_binary(id) do
+    import Ecto.Query, only: [from: 2]
+    now = DateTime.utc_now()
+
+    Barkpark.Repo.one(
+      from(t in Barkpark.Auth.ApiToken,
+        where: t.id == ^id,
+        where: t.kind == "api",
+        where: is_nil(t.revoked_at),
+        where: is_nil(t.expires_at) or t.expires_at > ^now
+      )
+    )
+  end
+
+  defp fresh_principal(%{current_user: %Barkpark.Accounts.User{id: id}}),
+    do: Barkpark.Accounts.get_user(id)
+
+  defp fresh_principal(_assigns), do: nil
+
   # First message from the hook: it has measured the viewport and reports the
   # initial geometry. Spawn the PTY exactly once, at that size.
-  def handle_event("term-init", %{"cols" => cols, "rows" => rows}, socket) do
+  defp handle_console_event("term-init", %{"cols" => cols, "rows" => rows}, socket) do
     if socket.assigns.pty do
       {:noreply, socket}
     else
@@ -84,7 +129,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   end
 
   # User keystrokes → PTY stdin.
-  def handle_event("term-input", %{"d" => d}, socket) do
+  defp handle_console_event("term-input", %{"d" => d}, socket) do
     with pty when not is_nil(pty) <- socket.assigns.pty,
          {:ok, bytes} <- Base.decode64(d) do
       TmuxConsole.send_input(pty, bytes)
@@ -94,7 +139,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
   end
 
   # Browser resize → PTY SIGWINCH so tmux repaints at the new geometry.
-  def handle_event("term-resize", %{"cols" => cols, "rows" => rows}, socket) do
+  defp handle_console_event("term-resize", %{"cols" => cols, "rows" => rows}, socket) do
     if pty = socket.assigns.pty do
       TmuxConsole.resize(pty, to_int(cols), to_int(rows))
     end
@@ -104,7 +149,7 @@ defmodule BarkparkWeb.Studio.TmuxLive do
 
   # Stale/unknown client events (e.g. a hook firing mid-reconnect) must never
   # crash the console — mirror the other admin LVs' tolerant catch-all.
-  def handle_event(_event, _params, socket), do: {:noreply, socket}
+  defp handle_console_event(_event, _params, socket), do: {:noreply, socket}
 
   @impl true
   # PTY stdout → terminal. Base64 so raw bytes survive JSON.

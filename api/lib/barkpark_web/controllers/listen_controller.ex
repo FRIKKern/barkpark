@@ -55,6 +55,12 @@ defmodule BarkparkWeb.ListenController do
     scope = scope_opts(conn)
     caller_context = Keyword.get(scope, :caller_context)
 
+    # A stream opened on a project URL carries only that project (owner ruling
+    # #50, task-d60479a7749b0ca5): `pass_meta?/2` drops a sibling project's live
+    # event and the replay query below never reads one. A flat URL stays
+    # workspace-wide, as the ruling chose.
+    lf = ListenFilter.narrow_to_project(lf, project_path_project_id(conn, scope))
+
     # Tenancy scope for BOTH stream legs, read from the SAME `scope_opts/1` the
     # field-visibility scope above comes from — not from a private re-read of
     # `conn.assigns[:current_workspace]`.
@@ -123,7 +129,7 @@ defmodule BarkparkWeb.ListenController do
 
     conn =
       if since do
-        Enum.reduce(replay_since(dataset, since, workspace_id), conn, fn ev, c ->
+        Enum.reduce(replay_since(dataset, since, workspace_id, replay_opts(lf)), conn, fn ev, c ->
           # The replay path reads the STORED mutation_events.document — a frozen,
           # unredacted snapshot. Re-render from the CURRENT document so a privacy
           # change since write is honoured; fall back to redacting the snapshot
@@ -181,6 +187,20 @@ defmodule BarkparkWeb.ListenController do
   assert the replay filter directly (same convention as `format_event/2`).
   """
   defdelegate replay_since(dataset, since, workspace_id \\ nil, opts \\ []), to: EventLog
+
+  # The project half of the replay query (owner ruling #50).
+  defp replay_opts(%ListenFilter{project_id: project_id}) when is_binary(project_id),
+    do: [project_id: project_id]
+
+  defp replay_opts(_lf), do: []
+
+  # The project this stream is narrowed to: the scope's resolved project, but
+  # only when the URL itself named one (`/w/:ws/p/:proj/...`).
+  @doc false
+  def project_path_project_id(%Plug.Conn{path_info: ["w", _ws, "p", _proj | _]}, scope),
+    do: Keyword.get(scope, :project_id)
+
+  def project_path_project_id(_conn, _scope), do: nil
 
   @doc false
   def format_event(ev, dataset) do

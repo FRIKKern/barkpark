@@ -460,6 +460,25 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     end
   end
 
+  # A datetime subfield: the same hidden-value + local picker pair as the
+  # top-level datetime input (owner ruling #46, BarkparkDatetimeField).
+  defp leaf_input(%{field: %{type: "datetime"}} = assigns) do
+    ~H"""
+    <span id={"#{@input_id}-dt"} phx-hook="BarkparkDatetimeField" class="bp-datetime-field">
+      <input
+        type="hidden"
+        id={@input_id}
+        name={@input_name}
+        value={to_string(@value || "")}
+        data-datetime-value
+        phx-change={@on_change}
+        disabled={@readonly}
+      />
+      <input type="datetime-local" class="bp-input" disabled={@readonly} />
+    </span>
+    """
+  end
+
   defp leaf_input(assigns) do
     ~H"""
     <input

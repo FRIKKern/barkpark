@@ -80,8 +80,13 @@ defmodule Barkpark.Content.Forms do
   end
 
   @doc """
-  The value a stored `datetime` shows in the Classic `datetime-local` input,
-  which accepts ONLY `YYYY-MM-DDTHH:MM` and renders anything else EMPTY.
+  The value a stored `datetime` hands the Classic datetime field's hidden
+  input (owner ruling #46). The browser hook `BarkparkDatetimeField` shows it
+  in the editor's local time and writes back a UTC instant ("...Z").
+
+  An instant (offset or `Z`) is handed over as its UTC instant with seconds,
+  so an untouched value posts back equal and is kept byte-identical. A value
+  with no zone (written before #46) keeps its wall time at minute precision.
 
   Stranger walk (2026-09-30): a datetime written as ISO-8601 with an offset —
   `2026-01-01T12:00:00Z`, what `bp seed`, the API and the SDK write — showed an
@@ -100,9 +105,12 @@ defmodule Barkpark.Content.Forms do
       Regex.match?(~r/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/, raw) ->
         raw
 
+      # An instant (offset or Z) rides to the hidden input as its UTC
+      # instant; the browser hook shows it in the editor's local time (owner
+      # ruling #46). Seconds are kept so an untouched value posts back equal.
       match?({:ok, _, _}, DateTime.from_iso8601(raw)) ->
         {:ok, dt, _} = DateTime.from_iso8601(raw)
-        Calendar.strftime(dt, "%Y-%m-%dT%H:%M")
+        dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()
 
       match?({:ok, _}, NaiveDateTime.from_iso8601(raw)) ->
         {:ok, ndt} = NaiveDateTime.from_iso8601(raw)

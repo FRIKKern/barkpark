@@ -33,6 +33,25 @@ defmodule BarkparkWeb.Studio.PresenceState do
   def topic(workspace_id) when is_binary(workspace_id), do: "#{@topic}:ws:#{workspace_id}"
   def topic(_workspace_id), do: @topic
 
+  @doc """
+  Studio presence topic keyed by workspace + project + dataset — the room a
+  Studio socket joins (owner ruling #30 Q7, 2026-10-03).
+
+  The workspace-only topic above let a share or grant viewer of ONE project
+  receive the doc ids, types and display names being edited in every other
+  project of the workspace. A nil project or dataset gets a `none` segment: its
+  own room, never the workspace-wide one and never a real project's. A nil
+  workspace keeps the legacy global topic, as `topic/1` does.
+  """
+  @spec topic(String.t() | nil, String.t() | nil, String.t() | nil) :: String.t()
+  def topic(workspace_id, project_id, dataset) when is_binary(workspace_id),
+    do: "#{topic(workspace_id)}:p:#{segment(project_id)}:d:#{segment(dataset)}"
+
+  def topic(_workspace_id, _project_id, _dataset), do: @topic
+
+  defp segment(value) when is_binary(value) and value != "", do: value
+  defp segment(_), do: "none"
+
   @doc "Generate a random 12-char hex user id (used when client localStorage has none)."
   @spec generate_user_id() :: String.t()
   def generate_user_id do

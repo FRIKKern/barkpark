@@ -15,8 +15,8 @@ CRUD, the flat `/v1/secrets` tier, `POST /v1/status/incidents[/:id/resolve]`,
 `pipe_through([:api, :require_admin, :require_platform_operator])` — the
 `admin` bit stays NECESSARY, the allowlist makes it INSUFFICIENT. Populated
 from `BARKPARK_OPERATOR_EMAILS` (comma list, matched against the bearer's
-OWNER email: a PAT's `owner_user_id` → user email, or an app token's
-`"app:<email>"` label) and `BARKPARK_OPERATOR_TOKEN_IDS` (comma list of
+OWNER email: the token's `owner_user_id` → user email; an app token's
+`app:` label no longer counts, 2026-10-04) and `BARKPARK_OPERATOR_TOKEN_IDS` (comma list of
 `api_tokens.id`). BOTH unset/blank → the plug is a PASS-THROUGH (legacy: the
 `admin` bit alone still opens all seven) and the node logs a boot warning
 naming the seven groups; EITHER non-empty → allowlist-only, fail closed, with
