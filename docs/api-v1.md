@@ -109,17 +109,17 @@ One PortableDoc block op on any document type (Studio's block editor op). Body `
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
-SSE mutation stream, scoped to the resolved workspace + project.
+SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
 
 **Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (`?lastEventId=<int>` for browsers) replays later scope events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=<int>`) replays later events oldest-first, then live.
 
-**First frame:** `event: welcome`.
+First frame: `event: welcome`.
 
-**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. **Keepalive:** `: keepalive` per 30 s idle.
+**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. Keepalive: `: keepalive` per 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID`. (Chat never sheds.)
+**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID` (chat never sheds).
 
 **Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
 
