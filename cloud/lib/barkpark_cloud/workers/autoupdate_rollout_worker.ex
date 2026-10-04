@@ -142,7 +142,9 @@ defmodule BarkparkCloud.Workers.AutoupdateRolloutWorker do
     # answer to it — the same "last resort, and only where dropping it would wedge"
     # judgement the 503 branch records below.
     _ = Registry.clear_autoupdate_triggered(fresh)
-    _ = Registry.pause_autoupdate(fresh)
+    # Paused WITH an audit row (nil actor, reason did_not_settle), so the team's
+    # trail says the rollout paused it and a human must resume it.
+    _ = Registry.pause_autoupdate_unsettled(fresh, @settle_grace_seconds)
 
     Logger.warning(
       "autoupdate: #{fresh.slug} did not settle within grace (state=#{fresh.update_state}) — " <>

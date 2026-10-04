@@ -23513,7 +23513,7 @@
   // marker reds design/check.mjs Part A. Regenerate: node design/emit.mjs --write.
   var ACTION_LABELS = {
     /* BEGIN GENERATED: audit action labels (cloud/priv/audit-actions.json via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-    // 2 of the 60 declared verbs have no entry here: they render
+    // 2 of the 61 declared verbs have no entry here: they render
     // as their raw dotted slug through humanAction's fallback below, each one
     // declared unlabelled ON PURPOSE with a reason in cloud/priv/audit-actions.json
     // (charter D582 — ugly, not false).
@@ -23557,6 +23557,7 @@
     "barkpark.self_update_triggered": "triggered a self-update",
     "barkpark.rollback_triggered": "triggered a rollback",
     "barkpark.autoupdate_changed": "changed autoupdate",
+    "barkpark.autoupdate_paused": "paused autoupdate after an update did not land",
     "barkpark.agent_key_delivered": "delivered a model key to a support box",
     "barkpark.domain_attached": "attached a domain to a Barkpark",
     "barkpark.vercel_deploy_triggered": "triggered a Vercel deploy",

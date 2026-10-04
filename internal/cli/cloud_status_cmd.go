@@ -1035,12 +1035,30 @@ func attentionDetail(b cloudclient.Barkpark, status string) string {
 	// say — muscle-1's rung is removal_failed and its reason is a 200-character
 	// deprovision error, behind which a trailing "dark 50d" would be cut off.
 	parts := make([]string, 0, 8)
-	for _, s := range []string{darkMarker(b, status), reason, queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
+	for _, s := range []string{darkMarker(b, status), reason, pausedMarker(b), queuedDeployAgeMarker(b), slotUnitMarker(b), runawayMarker(b), err5xxMarker(b), unmeteredMarker(b), boxDeployRateMarker(b)} {
 		if s != "" {
 			parts = append(parts, s)
 		}
 	}
 	return strings.Join(parts, " · ")
+}
+
+// pausedMarker names a box whose autoupdate is PAUSED, with the command that
+// resumes it. No code path clears the pause on its own: a team admin sets it, or
+// the rollout sets it when an update it started did not land within its settle
+// grace (that case also writes a `barkpark.autoupdate_paused` audit row naming
+// why). Either way the box will not update again until someone resumes it, and
+// "behind" alone reads as "waiting for the rollout". A pin wins: it is a
+// deliberate freeze the POLICY column already names, so no second sentence.
+func pausedMarker(b cloudclient.Barkpark) string {
+	if !b.AutoupdatePaused || strings.TrimSpace(b.PinnedRelease) != "" {
+		return ""
+	}
+	target := strings.TrimSpace(b.Slug)
+	if target == "" {
+		target = strings.TrimSpace(b.Name)
+	}
+	return "autoupdate paused — it will not update until `bp cloud autoupdate resume " + sanitizeCell(target) + "`"
 }
 
 // reachabilityEvidence renders the two counters `health_status` is computed
