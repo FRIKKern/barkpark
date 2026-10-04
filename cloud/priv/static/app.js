@@ -20373,6 +20373,10 @@
   // since passed — otherwise the honest answer is "invalid" (either/or copy).
   function inviteTerminalFrom(status, data, preview, nowMs) {
     if (status === 200) return "joined";
+    // task-0cf611238d4ad597 CQ6: the right account, but its address is not
+    // confirmed yet. The invitation is still live, so this is not the
+    // wrong-account card: confirm, then join from this same screen.
+    if (status === 403 && data && data.error === "email_unconfirmed") return "unconfirmed";
     if (status === 403) return "wrong_account";
     if (status === 404) {
       if (preview && preview.expires_at && Date.parse(preview.expires_at) <= nowMs) return "expired";
@@ -20438,6 +20442,23 @@
           (ctx.meEmail ? ", but you're signed in as <b><bdi>" + esc(String(ctx.meEmail)) + "</bdi></b>." : ".") +
           " Sign in with the invited address to accept it.",
         act("switch", "Switch account"));
+    }
+    // CQ6: accepting needs a confirmed address. `unconfirmed` offers the
+    // confirmation mail; `unconfirmed_sent` follows it and offers the join
+    // again, because the invitation is still live and the parked token is kept.
+    if (state === "unconfirmed") {
+      return card(ICO_MAIL, "Confirm your email first",
+        "Before you can join " + teamB + ", confirm that " +
+          (ctx.meEmail ? "<b><bdi>" + esc(String(ctx.meEmail)) + "</bdi></b>" : "your address") +
+          " is yours. We'll email you a confirmation link.",
+        act("resend", "Send confirmation link"));
+    }
+    if (state === "unconfirmed_sent") {
+      return card(ICO_MAIL, "Check your inbox",
+        "We sent a confirmation link" +
+          (ctx.meEmail ? " to <b><bdi>" + esc(String(ctx.meEmail)) + "</bdi></b>" : "") +
+          ". Open it, then come back to this tab and join " + teamB + ".",
+        act("retry", "Join " + team));
     }
     if (state === "error") {
       return card(ICO_WARN, "Something went wrong",
@@ -20565,7 +20586,27 @@
         return;
       }
       if (act === "recheck") { loadInvite(null); return; } // cch-w67-s4: re-run the preview read
+      if (act === "resend") { sendInviteConfirmation(box, btn, token, preview, me); return; }
       if (act === "join" || act === "retry") submitInviteAccept(box, btn, token, preview, me);
+    });
+  }
+
+  // CQ6: POST /v1/auth/resend-verification always answers 200 (it leaks
+  // nothing and throttles quietly), so any answer that came back moves the card
+  // on; a transport failure leaves the card and re-enables the button.
+  function sendInviteConfirmation(box, btn, token, preview, me) {
+    btn.disabled = true;
+    btn.textContent = "Sending…";
+    api("POST", "/v1/auth/resend-verification", {}).then(function (r) {
+      if (currentView() !== "invite") return;
+      if (r && r.ok) {
+        renderInviteState(box, "unconfirmed_sent", token, preview, me);
+        return;
+      }
+      btn.disabled = false;
+      btn.textContent = "Send confirmation link";
+      toast({ kind: "error", title: "Couldn't send the link",
+        body: "The confirmation link may not have gone out. Try again in a moment." });
     });
   }
 
@@ -24636,11 +24677,12 @@
   //      the person already landed on. Getting this wrong would turn a stale
   //      bookmark into an apparent sign-out.
   //
-  // NOT A NEW GATE. `confirmed_at` gates no authority anywhere in cloud/lib
-  // today — GET /v1/me reports it as `user.confirmed` and nothing reads that —
-  // so this makes an already-shipped flow honest rather than adding a wall.
-  // That is also why the outcome is a toast and not a screen: nothing the
-  // person can do next depends on it.
+  // ONE GATE READS IT. `confirmed_at` gates exactly one thing in cloud/lib:
+  // accepting a team invitation (POST /v1/invitations/accept answers 403
+  // email_unconfirmed until the address is proven, task-0cf611238d4ad597 CQ6).
+  // The invite landing carries its own "confirm your email first" card and
+  // re-offers the join, so this boot reader still reports a toast and not a
+  // screen: the person returns to the invite tab to finish.
 
   // Pure: the ?confirm= token out of a location.search string, or null. A
   // malformed query degrades to null — never a throw on the boot path.

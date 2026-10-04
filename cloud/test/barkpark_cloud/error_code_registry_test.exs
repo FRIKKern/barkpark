@@ -136,6 +136,7 @@ defmodule BarkparkCloud.ErrorCodeRegistryTest do
              "email_mismatch",
              "email_required",
              "email_taken",
+             "email_unconfirmed",
              "empty_artifact",
              "enqueue_failed",
              "env_required",

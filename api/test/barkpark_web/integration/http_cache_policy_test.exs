@@ -306,7 +306,9 @@ defmodule BarkparkWeb.Integration.HttpCachePolicyTest do
       {ws, project} = ensure_default_scope!()
 
       operator = "cache-policy-op-" <> Integer.to_string(System.unique_integer([:positive]))
-      {:ok, _} = Auth.create_token(operator, "cache-policy-op", "production", ["read"], ws.id)
+
+      {:ok, _} =
+        Auth.create_token(operator, "cache-policy-op", "production", ["read", "write"], ws.id)
 
       key = %{
         id: "cache-policy-key",

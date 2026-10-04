@@ -167,7 +167,7 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
 
   describe "a refusal writes ONE queryable row, read back from the audit table" do
     test "POST /site-url on a suspended box: 409, no wire, and a row naming the act" do
-      {user, team, session} = user_with_team("member")
+      {user, team, session} = user_with_team("admin")
       bp = bootstrapped_barkpark(team, suspended_attrs())
 
       assert refusal_rows(team, bp) == []
@@ -264,7 +264,7 @@ defmodule BarkparkCloud.Web.RouterSuspendedRefusalAuditTest do
 
   describe "CONTROLS — the verb means REFUSED, and the refusal is unchanged" do
     test "an UNSUSPENDED box driving the same route to 200 writes NO refusal row" do
-      {_user, team, session} = user_with_team("member")
+      {_user, team, session} = user_with_team("admin")
       bp = bootstrapped_barkpark(team)
 
       StudioLinkFakeHttpClient.program([

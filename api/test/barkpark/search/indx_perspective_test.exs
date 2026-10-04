@@ -113,9 +113,12 @@ defmodule Barkpark.Search.IndxPerspectiveTest do
     assert total == 1
   end
 
-  test ":drafts keeps only drafts and :raw keeps both (parity with DocumentsRetriever)",
+  test ":drafts is the draft-over-published overlay and :raw keeps both (parity with DocumentsRetriever)",
        %{scope: scope} do
-    assert {["drafts.unpublished"], 1} = search(scope, :drafts)
+    # Owner ruling #52: `live` has no drafts twin, so the overlay keeps it.
+    {draft_ids, draft_total} = search(scope, :drafts)
+    assert Enum.sort(draft_ids) == ["drafts.unpublished", "live"]
+    assert draft_total == 2
 
     {raw_ids, raw_total} = search(scope, :raw)
     assert Enum.sort(raw_ids) == ["drafts.unpublished", "live"]

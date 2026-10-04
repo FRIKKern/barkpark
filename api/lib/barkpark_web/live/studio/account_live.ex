@@ -20,10 +20,10 @@ defmodule BarkparkWeb.Studio.AccountLive do
        the same functions: the subject is the user the `user_session` cookie
        resolves to (`Accounts.verify_user_session/1`, re-run at submit so a
        session revoked since mount is refused), the password is checked with
-       `User.valid_password?/2` against the freshly loaded row, and only then
-       is `Privacy.erase_subject/1` called. Wrong-password attempts share a
-       small per-user budget so the form cannot be used to guess passwords
-       faster than the metered HTTP door allows.
+       `Accounts.reauthenticate/2` against the freshly loaded row, and only
+       then is `Privacy.erase_subject/1` called. Password attempts draw on the
+       per-user re-check budget every password door shares, so the form cannot
+       be used to guess passwords.
 
   ## Who sees what
 
@@ -51,14 +51,9 @@ defmodule BarkparkWeb.Studio.AccountLive do
   alias Barkpark.Accounts
   alias Barkpark.Accounts.Privacy
   alias Barkpark.Accounts.User
-  alias Barkpark.RateLimiter
 
   @export_path "/v1/auth/export"
   @export_filename "barkpark-data-export.json"
-
-  # Five password attempts, refilled at one a minute, per user.
-  @reauth_capacity 5
-  @reauth_refill_per_sec 1 / 60
 
   @doc "The fixed download filename. Carries no email, id or date."
   def export_filename, do: @export_filename
@@ -126,8 +121,7 @@ defmodule BarkparkWeb.Studio.AccountLive do
 
   defp erase_with_password(socket, password) do
     with {:session, {%User{} = user, _session}} <- {:session, live_session(socket)},
-         {:budget, :ok} <- {:budget, reauth_budget(user)},
-         {:password, true} <- {:password, User.valid_password?(user, password)},
+         {:password, :ok} <- {:password, Accounts.reauthenticate(user, password)},
          {:erase, {:ok, _summary}} <- {:erase, Privacy.erase_subject(user)} do
       {:noreply,
        socket
@@ -144,14 +138,14 @@ defmodule BarkparkWeb.Studio.AccountLive do
          |> put_flash(:error, "Your session has ended. Sign in again to continue.")
          |> redirect(to: "/login")}
 
-      {:budget, :rate_limited} ->
+      {:password, {:error, :reauth_rate_limited}} ->
         {:noreply,
          assign(socket,
            erase_error:
              "Too many password attempts. Wait a minute and try again. Nothing was erased."
          )}
 
-      {:password, false} ->
+      {:password, {:error, :invalid_password}} ->
         {:noreply,
          assign(socket,
            erase_error: "That password is not correct. Nothing was erased."
@@ -169,16 +163,6 @@ defmodule BarkparkWeb.Studio.AccountLive do
     do: Accounts.verify_user_session(raw)
 
   defp live_session(_socket), do: nil
-
-  # `scoped_key/2` is the identity outside tests; a LiveView socket carries no
-  # test scope, so the key is per-user either way (the census in
-  # rate_limiter_scoped_key_coverage_test.exs requires the call shape).
-  defp reauth_budget(%User{id: id}) do
-    RateLimiter.check(RateLimiter.scoped_key(nil, {:studio_erase_reauth, id}),
-      capacity: @reauth_capacity,
-      refill_per_sec: @reauth_refill_per_sec
-    )
-  end
 
   @impl true
   def render(assigns) do

@@ -1,6 +1,7 @@
 defmodule BarkparkWeb.MutateCreateOverPublishedTest do
   @moduledoc """
-  task-ab87d3e04f02021e: `create` / `createIfNotExists` over a PUBLISHED-only id.
+  task-ab87d3e04f02021e: `create` over a PUBLISHED-only id (and, since owner
+  ruling #41, `createIfNotExists`, which is now a no-op there).
 
   Found dogfooding bp: create {title, pages, genre}, publish, create again with
   only {title}, publish, and pages + genre were gone. The two verbs conflict
@@ -73,7 +74,11 @@ defmodule BarkparkWeb.MutateCreateOverPublishedTest do
     assert w["message"] =~ "bp doc patch post cop-1"
   end
 
-  test "createIfNotExists over a published-only id warns too", %{conn: conn} do
+  # Owner ruling #41 (task-e27126ee5e796e47): a published row occupies its id,
+  # so createIfNotExists is a no-op there. It used to mint a fresh draft over
+  # the live content, and the next publish replaced the page with it.
+  test "createIfNotExists over a published-only id is a noop and writes no draft",
+       %{conn: conn} do
     publish_full!("cop-2")
 
     resp =
@@ -82,9 +87,73 @@ defmodule BarkparkWeb.MutateCreateOverPublishedTest do
       ])
 
     assert resp.status == 200, resp.resp_body
-    assert [w] = warnings(resp)
-    assert w["message"] =~ "createIfNotExists minted a FRESH draft"
-    refute w["message"] =~ "EMPTY"
+    [result] = Jason.decode!(resp.resp_body)["results"]
+    assert result["operation"] == "noop"
+    assert result["id"] == "cop-2"
+    assert result["document"]["title"] == "Dune"
+    assert warnings(resp) == []
+
+    assert {:error, :not_found} = Content.get_document("drafts.cop-2", "post", @ds)
+    assert {:ok, live} = Content.get_document("cop-2", "post", @ds)
+    assert live.title == "Dune"
+    assert live.content["pages"] == 413
+  end
+
+  test "createIfNotExists on a published-only id honours ifRevisionID against the published row",
+       %{conn: conn} do
+    publish_full!("cop-rev")
+
+    resp =
+      mutate(conn, [
+        %{
+          "createIfNotExists" => %{
+            "_id" => "cop-rev",
+            "_type" => "post",
+            "title" => "dup",
+            "ifRevisionID" => "stale-rev"
+          }
+        }
+      ])
+
+    assert resp.status == 412, resp.resp_body
+    assert {:error, :not_found} = Content.get_document("drafts.cop-rev", "post", @ds)
+  end
+
+  test "createIfNotExists naming drafts.<id> explicitly still creates that draft",
+       %{conn: conn} do
+    publish_full!("cop-explicit")
+
+    resp =
+      mutate(conn, [
+        %{
+          "createIfNotExists" => %{
+            "_id" => "drafts.cop-explicit",
+            "_type" => "post",
+            "title" => "Dune",
+            "pages" => 413,
+            "genre" => "scifi"
+          }
+        }
+      ])
+
+    assert resp.status == 200, resp.resp_body
+    [result] = Jason.decode!(resp.resp_body)["results"]
+    assert result["operation"] == "create"
+    assert result["id"] == "drafts.cop-explicit"
+  end
+
+  test "createIfNotExists on a fresh id creates the draft, and a repeat is a noop",
+       %{conn: conn} do
+    op = %{"createIfNotExists" => %{"_id" => "cop-fresh", "_type" => "post", "title" => "New"}}
+
+    resp = mutate(conn, [op])
+    assert resp.status == 200, resp.resp_body
+
+    assert [%{"operation" => "create", "id" => "drafts.cop-fresh"}] =
+             Jason.decode!(resp.resp_body)["results"]
+
+    resp2 = mutate(conn, [op])
+    assert [%{"operation" => "noop"}] = Jason.decode!(resp2.resp_body)["results"]
   end
 
   # task-b64beb44bafc6023: a create that carries every published field drops

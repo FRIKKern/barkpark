@@ -482,11 +482,18 @@ defmodule Barkpark.Content.Mutations do
     end
   end
 
+  # A PUBLISHED row occupies its id (owner ruling #41, task-e27126ee5e796e47).
+  # The lookup used to read the draft alone, so on a published document with
+  # no draft the call minted a fresh draft over the live content and the next
+  # publish replaced the page with the "if not exists" payload. The SDK docs
+  # and Sanity both call this a no-op; the server now agrees. A caller who
+  # names `drafts.<id>` explicitly asks for the draft row itself, so only that
+  # row is checked.
   defp apply_one(%{"createIfNotExists" => attrs}, dataset, opts) do
     type = attrs["_type"] || attrs["type"]
     id = attrs["_id"] || attrs["doc_id"]
 
-    case id && Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
+    case id && type && create_if_not_exists_existing(id, type, dataset, opts) do
       {:ok, existing} ->
         case ensure_rev(existing, if_rev(attrs)) do
           :ok -> {:ok, existing, "noop"}
@@ -748,6 +755,18 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(_, _, _), do: {:error, :malformed}
+
+  defp create_if_not_exists_existing(id, type, dataset, opts) do
+    case Content.get_document(DraftId.draft_id(id), type, dataset, opts) do
+      {:ok, _} = found ->
+        found
+
+      _ ->
+        if DraftId.draft?(id),
+          do: {:error, :not_found},
+          else: Content.get_document(DraftId.published_id(id), type, dataset, opts)
+    end
+  end
 
   # The first @id_type_verbs key present with a MAP payload that omits `id` or
   # `type`, as `{verb, missing_keys}`. `nil` means "not this defect" — either no
@@ -1152,6 +1171,42 @@ defmodule Barkpark.Content.Mutations do
   end
 
   @doc """
+  The mutate door's content guards for a client write that reaches the writer
+  WITHOUT `apply_mutations/3`: the document block ops door
+  (`POST /v1/data/doc/:dataset/:type/:doc_id/ops`, owner ruling #35 item 4).
+
+  A block op re-projects every bound block (`fieldName`) into `content`, so it
+  can set any field a `patch` can. This runs, in the mutate door's order, the
+  close fence (`ensure_task_close_is_cas`), the claim fence
+  (`ensure_claim_not_dropped`) and the `:after_claim` plugin fences over the
+  row the op read (`existing`) and the content it will store (`merged`), and
+  returns the same refusal the mutate door would.
+
+  One difference, on purpose: the close fence is judged as a write WITHOUT a
+  revision precondition. The ops door requires `ifRev` on every op to fence
+  concurrent block edits, so it proves nothing about intent to close; a block
+  edit is never a sanctioned close path.
+  """
+  @spec ensure_content_write_guards(String.t(), map() | nil, map(), String.t(), keyword()) ::
+          :ok | {:error, term()}
+  def ensure_content_write_guards(type, existing, merged, dataset, opts) do
+    no_revision_precondition = %{}
+
+    with :ok <- ensure_task_close_is_cas(type, existing, merged, no_revision_precondition, opts),
+         :ok <- ensure_claim_not_dropped(type, existing, merged, opts) do
+      run_mutate_door_fences(
+        :after_claim,
+        type,
+        existing,
+        merged,
+        no_revision_precondition,
+        dataset,
+        opts
+      )
+    end
+  end
+
+  @doc """
   Run the create family's `:before_rev` mutate-door fences for a create
   naming `id` — the published-fork fence the Tasks plugin declares (refuse a
   create that would fork a published task somebody holds, otherwise advise).
@@ -1468,9 +1523,11 @@ defmodule Barkpark.Content.Mutations do
   defp ensure_rev(%{rev: actual}, expected),
     do: {:error, {:rev_mismatch, %{expected: expected, actual: actual}}}
 
-  # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create` and
-  # `createIfNotExists` conflict only with an existing DRAFT (docs/api-v1.md),
-  # so over an id whose PUBLISHED row exists they mint a FRESH draft. It is
+  # CREATE OVER A PUBLISHED-ONLY ID (task-ab87d3e04f02021e). `create`
+  # conflicts only with an existing DRAFT (docs/api-v1.md), so over an id whose
+  # PUBLISHED row exists it mints a FRESH draft. (`createIfNotExists` reaches
+  # here only when the caller named `drafts.<id>` explicitly; on a bare id a
+  # published row is a noop since owner ruling #41.) It is
   # not seeded from the published row, so the next publish replaces the
   # document with only the fields this create set. That is silent field loss
   # through two documented verbs used in their obvious order (found by

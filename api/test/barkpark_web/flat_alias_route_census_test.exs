@@ -1482,7 +1482,10 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
     test "the same `read` token keeps every flat READ it had", %{conn: conn, read: read} do
       # The control: the gate is a write clamp, not a blanket refusal. If these
       # ever 403 the probes above stop proving anything about permissions.
-      for path <- ["/v1/tasks", "/v1/tasks/ready", "/v1/fleet/roster", "/v1/tickets/inbox"] do
+      # `/v1/tickets/inbox` left this list on purpose: owner ruling #24
+      # (2026-10-03) put the operator inbox READ on the write tier, enforced in
+      # TicketsController, not by this method gate (tickets_inbox_write_tier_test).
+      for path <- ["/v1/tasks", "/v1/tasks/ready", "/v1/fleet/roster"] do
         resp =
           conn
           |> put_req_header("authorization", "Bearer " <> read)

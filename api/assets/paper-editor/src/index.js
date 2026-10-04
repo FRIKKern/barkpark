@@ -219,8 +219,8 @@ class BpPaperEditor extends HTMLElement {
           BpTableHeaderCell,
         ] : []),
         StarterKit.configure({
-          // Single-block editing: heading levels 1–3, lists, history on.
-          heading: { levels: [1, 2, 3] },
+          // Single-block editing: heading levels 1–6, lists, history on.
+          heading: { levels: [1, 2, 3, 4, 5, 6] },
           // PortableDoc quotes use their own inline carrier. The native nested
           // quote cannot round-trip and consumes `> ` before callout shorthand.
           blockquote: false,

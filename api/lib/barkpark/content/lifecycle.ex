@@ -42,6 +42,7 @@ defmodule Barkpark.Content.Lifecycle do
     Broadcast,
     Document,
     DraftId,
+    EmptyListMembers,
     PrePublishFences,
     Sheets,
     Writer,
@@ -115,6 +116,7 @@ defmodule Barkpark.Content.Lifecycle do
         # module named it directly; each refusal is returned verbatim.
         with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
              :ok <- ensure_bound_title_agrees(draft),
+             :ok <- ensure_no_empty_list_members(draft, type, dataset, opts),
              :ok <- PrePublishFences.run(fences, :door, [type, draft, published, opts]) do
           publish_after_gate(draft, pid, type, dataset, opts, published, fences)
         end
@@ -123,6 +125,27 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, :not_found}
     end
   end
+
+  # EMPTY LIST ROWS DO NOT PUBLISH (owner ruling #47, task-fe2dcfc7cb681922).
+  # A draft may hold `null` in a scalar or reference list while the editor
+  # fills a new row in; publishing it would hand that `null` to every site
+  # that loops over the list. Refused for every door (Studio, mutate, CLI),
+  # before any hook fires, with one field-level message per empty row.
+  defp ensure_no_empty_list_members(%{content: content}, type, dataset, opts)
+       when is_map(content) do
+    scope = Keyword.take(opts, [:workspace_id, :project_id])
+
+    # `resolve_schema/3` (tenant → workspace → global), so a globally declared
+    # type is checked in every workspace, as the status-field door does.
+    with {:ok, schema} <- Content.resolve_schema(type, dataset, scope),
+         [_ | _] = findings <- EmptyListMembers.findings(content, schema) do
+      {:error, {:empty_list_members, EmptyListMembers.error_map(findings)}}
+    else
+      _ -> :ok
+    end
+  end
+
+  defp ensure_no_empty_list_members(_draft, _type, _dataset, _opts), do: :ok
 
   # THE GATE'S SCOPE DESCENDS FROM THE READER, NOT FROM THE WRITER'S KEY.
   #

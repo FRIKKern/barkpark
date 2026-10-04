@@ -1583,6 +1583,22 @@
         coordinator._pumpMutations();
         return true;
       };
+      // A canvas Terminal / Stage pick the server REFUSED (task-f3c8acd1e09a0eda).
+      // The block was never inserted locally, so there is nothing to retry or
+      // review: settle it, release the queue and let the canvas hook report the
+      // server's own message. A transport failure (no reply) or a revision
+      // conflict keeps the ordinary retry / conflict path.
+      coordinator._terminalSlashFailure = (entry, reply) => {
+        if (entry.kind !== "slash" || reply == null || reply?.conflict === true) return false;
+        mutationQueue.shift();
+        mutationById.delete(entry.requestId);
+        mutationPaused = false;
+        coordinator._notifyResult(entry, false, reply);
+        coordinator._resolveWaiters(entry, false);
+        renderHistoryControls();
+        coordinator._pumpMutations();
+        return true;
+      };
       // A canvas batch the server REFUSED with a lifecycle halt (the hollow
       // ratchet: "a published paper cannot be hollowed out"). Resending the
       // same batch is refused again, so pausing the queue behind it only
@@ -2261,8 +2277,14 @@
           banner.querySelectorAll("[data-detached-reference-recovery]").forEach(
             (element) => element.remove(),
           );
-          banner.querySelector(".bp-conflict-description").textContent =
-            "This document changed elsewhere. Your edits are still here.";
+          // A canvas batch refused by the Terminal / Stage fence is not a change
+          // made elsewhere: show the server's own message (task-f3c8acd1e09a0eda).
+          const outdatedCanvas = ["outdated_terminal_canvas", "outdated_stage_canvas"]
+            .includes(conflict.reply?.rejected) && typeof conflict.reply?.error === "string" &&
+            conflict.reply.error !== "";
+          banner.querySelector(".bp-conflict-description").textContent = outdatedCanvas
+            ? conflict.reply.error
+            : "This document changed elsewhere. Your edits are still here.";
           const latest = banner.querySelector('[data-action="latest"]');
           latest.disabled = false;
           latest.setAttribute("aria-disabled", "false");
@@ -2453,6 +2475,7 @@
           coordinator.finishSave(token, saved);
           if (!saved && (coordinator._terminalHistoryFailure(entry, reply) ||
               coordinator._terminalMasterFailure(entry, reply) ||
+              coordinator._terminalSlashFailure(entry, reply) ||
               coordinator._terminalHaltFailure(entry, reply))) {
             renderSaveStatus(false);
             return;
@@ -3752,6 +3775,47 @@
               entry: entry.mutationEntry,
               promise: this._exitCoordinator.retryMutation(entry.mutationEntry),
             };
+          } else if (entry.kind === "slash") {
+            // A canvas Terminal / Stage pick (task-f3c8acd1e09a0eda): the server
+            // builds the block through `paper-slash-insert`, the default_block +
+            // insert-after path "+ Add block" uses. Queued BEHIND the "/query"
+            // removal batch the canvas flushed just before it, with a request id
+            // and the acknowledged if_rev, like a master insert.
+            mutation = bpPaperMutation(this, this.el, "paper-slash-insert", entry.payload, {
+              requestId: entry.requestId,
+              kind: "slash",
+              trackDraft: false,
+              onResult: (saved, result) => {
+                this._sendingOps = false;
+                const terminal = !saved && result != null && result?.conflict !== true;
+                if ((saved || terminal) && this._opsQueue[0] === entry) {
+                  this._opsQueue.shift();
+                }
+                refreshLeasePending();
+                if (saved || terminal) {
+                  this._opsFailed = false;
+                  this._opsReconnectRetryRequested = false;
+                  if (terminal) {
+                    const label = entry.payload.type === "stage" ? "Stage" : "Terminal";
+                    this.el.dispatchEvent(new CustomEvent("bp-error", {
+                      detail: {
+                        code: "paper_slash_insert_refused",
+                        error: typeof result?.error === "string" && result.error !== ""
+                          ? result.error
+                          : `The ${label} was not added. Try + Add block.`,
+                      },
+                      bubbles: true,
+                      composed: true,
+                    }));
+                  }
+                  sendNextOps();
+                } else {
+                  this._opsFailed = true;
+                  entry.transportRetryable = result == null;
+                }
+              },
+            });
+            entry.mutationEntry = mutation.entry;
           } else if (entry.kind === "master") {
             // Paper masters: a slash-menu master pick, queued BEHIND any canvas
             // batch already waiting (the "/query" removal the canvas flushed
@@ -4003,6 +4067,29 @@
           sendNextOps();
         };
         this.el.addEventListener("bp-master-insert", this._onMasterInsert);
+        // A canvas Terminal / Stage pick (task-f3c8acd1e09a0eda, owner ruling
+        // 2026-10-03 #56): the canvas fence refuses a canvas batch that
+        // introduces one, so the canvas asks the server to insert it instead.
+        this._onServerInsert = (e) => {
+          const detail = e.detail || {};
+          if (!["terminal", "stage"].includes(detail.type)) return;
+          this._exitCoordinator?.markDirty(this.el);
+          this._opsQueue.push({
+            kind: "slash",
+            payload: {
+              type: detail.type,
+              afterId: typeof detail.after_id === "string" ? detail.after_id : "",
+            },
+            boundaryLeasePending: false,
+            containerContext: {},
+            invalidContainerContext: false,
+            requestId: this._exitCoordinator?.requestId() || bpPaperRequestId(),
+            expiresAt: Date.now() + PAPER_OP_RETRY_TTL_MS,
+          });
+          refreshLeasePending();
+          sendNextOps();
+        };
+        this.el.addEventListener("bp-server-insert", this._onServerInsert);
         // "Save as master" from the canvas block menu: a new paper_master
         // document, not a paper op — a plain reply-event, reported on the footer.
         this._onSaveMaster = (e) => {
@@ -4258,6 +4345,7 @@
         this.el.removeEventListener("bp-canvas-ops", this._onCanvasOps);
         this.el.removeEventListener("bp-noop", this._onCanvasNoop);
         if (this._onMasterInsert) this.el.removeEventListener("bp-master-insert", this._onMasterInsert);
+        if (this._onServerInsert) this.el.removeEventListener("bp-server-insert", this._onServerInsert);
         if (this._onSaveMaster) this.el.removeEventListener("bp-save-master", this._onSaveMaster);
         this.el.removeEventListener("bp-flush-pending", this._onFlushPending);
         this.el.removeEventListener("bp-ready", this._onCanvasReady);

@@ -99,8 +99,11 @@ defmodule BarkparkWeb.SchemaController do
   # legitimate partial update and skips validation entirely.
   defp validate_fields(attrs) do
     if Map.has_key?(attrs, "fields") or Map.has_key?(attrs, :fields) do
-      case SchemaDefinition.parse(attrs, plugin: nil) do
-        {:ok, _parsed} -> :ok
+      with {:ok, _parsed} <- SchemaDefinition.parse(attrs, plugin: nil),
+           :ok <- refuse_reserved_status(attrs) do
+        :ok
+      else
+        {:error, {:invalid_schema_fields, _}} = err -> err
         {:error, reason} -> {:error, {:invalid_schema_fields, reason}}
       end
     else
@@ -147,4 +150,62 @@ defmodule BarkparkWeb.SchemaController do
       _ -> false
     end
   end
+
+  # [reserved-status] owner ruling #45 (task-e427940a663dc687). `status` is
+  # the document's draft/published state: Studio writes a `status` select to
+  # the row status column and publish sets it to `published`, so a select named
+  # `status` whose options are anything else (the demo project's
+  # planning/active/completed) loses the editor's choice on publish. Refused at
+  # this door — the one `bp schema apply` uses — with a message naming the
+  # rename. A `status` select limited to draft/published/archived (the post
+  # schema) mirrors the real state and stays allowed. Plugin-declared schemas
+  # register through `Content.upsert_schema/3` directly and handle their own
+  # status fields, so they are not checked here.
+  @lifecycle_status_options ~w(draft published archived)
+
+  defp refuse_reserved_status(attrs) do
+    fields = Map.get(attrs, "fields") || Map.get(attrs, :fields) || []
+
+    bad =
+      Enum.find_value(List.wrap(fields), fn
+        %{} = f ->
+          name = Map.get(f, "name") || Map.get(f, :name)
+          options = Map.get(f, "options") || Map.get(f, :options)
+
+          with "status" <- name,
+               list when is_list(list) <- options_values(options),
+               [_ | _] = extra <- list -- @lifecycle_status_options do
+            extra
+          else
+            _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
+
+    case bad do
+      nil ->
+        :ok
+
+      extra ->
+        {:error,
+         {:invalid_schema_fields,
+          {:status_field_reserved,
+           "a field named `status` is the document's draft/published state, so the options " <>
+             "#{Enum.join(extra, ", ")} would be lost on publish; rename the field " <>
+             "(for example `phase`) or limit its options to draft, published, archived"}}}
+    end
+  end
+
+  defp options_values(list) when is_list(list) do
+    Enum.map(list, fn
+      %{"value" => v} -> to_string(v)
+      %{value: v} -> to_string(v)
+      v -> to_string(v)
+    end)
+  end
+
+  defp options_values(%{"list" => list}) when is_list(list), do: options_values(list)
+  defp options_values(_), do: nil
 end

@@ -219,7 +219,9 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
          %{conn: conn} do
       # The revoke route resolves :token_id INSIDE the caller's workspace, so the
       # subject token has to sit in the same workspace as `admin()` for the
-      # receipt (not a 404) to be the thing under test.
+      # receipt (not a 404) to be the thing under test. It must also BE a
+      # share-edit token (`share_scope` set): since owner ruling #34 item 3 the
+      # door answers 404 for any other token kind.
       {:ok, token} =
         Auth.create_token(
           uniq("pdsw39share"),
@@ -228,6 +230,11 @@ defmodule BarkparkWeb.Contract.PDSDeleteReceiptDifferentialTest do
           ["read"],
           Barkpark.TenancyFixtures.default_workspace_id!()
         )
+
+      token =
+        token
+        |> Ecto.Changeset.change(share_scope: "default/default/test")
+        |> Repo.update!()
 
       assert is_nil(token.revoked_at)
 

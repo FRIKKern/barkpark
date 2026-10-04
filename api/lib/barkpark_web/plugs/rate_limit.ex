@@ -53,7 +53,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every one of the 14 `plug(BarkparkWeb.Plugs.RateLimit)` lines in router.ex
+  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
   # passes NO options, so `opts` is `[]` here and this falls to the method
   # clause below — byte-identical keys, budgets and refusals to what those
   # pipelines got before `:browser` existed. A browser pipeline opts IN with
@@ -83,7 +83,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every one of the 14 `plug(BarkparkWeb.Plugs.RateLimit)` lines in router.ex
+  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
   # passes NO options, so `opts` is `[]` here and this falls to the method
   # clause — byte-identical keys, budgets and refusals to what those pipelines
   # got before `:browser` existed. A browser pipeline opts IN with

@@ -9105,6 +9105,9 @@ test("inviteLandingState: 404 → invalid; past expiry → expired; own team →
 test("inviteTerminalFrom: 200→joined, 403→wrong_account, 404 splits expired/invalid by OUR preview, else error", () => {
   assert.equal(hooks.inviteTerminalFrom(200, { team_id: "t" }, livePreview, INV_NOW), "joined");
   assert.equal(hooks.inviteTerminalFrom(403, { error: "email_mismatch" }, livePreview, INV_NOW), "wrong_account");
+  // CQ6: the right account with an unconfirmed address is NOT the wrong-account card.
+  assert.equal(hooks.inviteTerminalFrom(403, { error: "email_unconfirmed" }, livePreview, INV_NOW), "unconfirmed");
+  assert.equal(hooks.inviteTerminalFrom(403, {}, livePreview, INV_NOW), "wrong_account");
   // 404 with a preview that expired since landing → honest "expired".
   assert.equal(hooks.inviteTerminalFrom(404, { error: "invalid_or_expired" }, { ...livePreview, expires_at: INV_PAST }, INV_NOW), "expired");
   // 404 with a still-live (or absent) preview → the server folded it: "invalid".
@@ -9125,6 +9128,9 @@ test("every invite terminal state renders exactly one next action", () => {
     invalid: [/isn&#39;t valid any more/, /data-invite-act="overview"/],
     wrong_account: [/different email/, /data-invite-act="switch"/, /Switch account/],
     error: [/Something went wrong/, /data-invite-act="retry"/, /Try again/],
+    // CQ6: confirm first, then the same screen offers the join again.
+    unconfirmed: [/Confirm your email first/, /data-invite-act="resend"/, /someone@else\.com/],
+    unconfirmed_sent: [/Check your inbox/, /data-invite-act="retry"/, /Join Northwind/],
   };
   for (const [state, patterns] of Object.entries(expectations)) {
     const html = hooks.inviteStateHtml(state, ctx);

@@ -54,7 +54,8 @@ import TaskItem from "@tiptap/extension-task-item";
 // caret naturally after the swap (TextSelection INTO a prose/callout body;
 // NodeSelection ONTO a divider/code/diagram/field atom). @tiptap/pm re-exports the
 // PM core modules, so this is the canonical TipTap-vanilla import (no extra dep).
-import { TextSelection, NodeSelection, Plugin } from "@tiptap/pm/state";
+import { TextSelection, NodeSelection, Plugin, Selection } from "@tiptap/pm/state";
+import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import { Fragment, Slice, Mark, DOMParser as PMDOMParser } from "@tiptap/pm/model";
 import { prepareHTMLTablePaste } from "./html-table-paste.js";
 import { normalizeWordListHTML } from "./word-paste.js";
@@ -254,6 +255,7 @@ import {
   CANVAS_SLASH_TEXTABLE_NODES,
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
+  CANVAS_SERVER_INSERT_TYPES,
   masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
@@ -297,7 +299,7 @@ import {
 // never be deleted or moved live (the FELT half of the server backstop). Split into
 // its own DOM-free module so it unit-tests in plain Node (this file can't be
 // imported DOM-free — it calls customElements.define at load).
-import { transactionVetoesLock } from "./locks.js";
+import { transactionVetoesLock, isLockedTitle } from "./locks.js";
 // pdd-t20c: the PURE constraint-vocabulary veto — the calm lock veto GENERALIZED to
 // cardinality (a remove dropping a required/min-N kind below its floor) + relative
 // order (a move misplacing a positioned kind against its before/after relation).
@@ -580,8 +582,21 @@ function hasOnlyBpKeys(attrs) {
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
-    it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
+    if (it.type === "list") return [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }];
+    // One row per heading level, H1–H6 (owner ruling 2026-10-03 #63). Canvas-only:
+    // the per-block menu's server default_block/2 inserts one default heading.
+    if (it.type === "heading") {
+      return [1, 2, 3, 4, 5, 6].map((level) => ({
+        ...it,
+        level,
+        label: `Heading ${level}`,
+        hint: `H${level}`,
+        desc: level === 1 ? "page title size" : `level ${level} heading`,
+      }));
+    }
+    return [it];
+  }),
   // Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
   // whose server default_block/2 has no sheet clause.
   { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" },
@@ -826,8 +841,10 @@ class BpPaperCanvas extends HTMLElement {
         }),
         ownDomReadback,
         StarterKit.configure({
-          // Same as ../index.js: heading levels 1–3, lists, history on.
-          heading: { levels: [1, 2, 3] },
+          // Same as ../index.js: heading levels 1–6 (owner ruling 2026-10-03 #63),
+          // lists, history on. The levels drive the `# `…`###### ` input rules and
+          // the Mod-Alt-1..6 turn-into chords.
+          heading: { levels: [1, 2, 3, 4, 5, 6] },
           // Authored quotes have a dedicated PortableDoc editor. Native nested
           // quotes lose their body on save and preempt `> [!note] ` shorthand.
           blockquote: false,
@@ -864,11 +881,38 @@ class BpPaperCanvas extends HTMLElement {
           includeChildren: false,
           showOnlyWhenEditable: true,
           placeholder: ({ node }) => {
+            if (isLockedTitle(node)) return PLACEHOLDER.title;
             if (node.type.name === "heading") {
               return PLACEHOLDER.heading(node.attrs && node.attrs.level);
             }
             return PLACEHOLDER[node.type.name] || PLACEHOLDER.paragraph;
           },
+        }),
+        // The empty locked title reads "Title" wherever the caret is (owner ruling
+        // 2026-10-03 #54). The Placeholder extension above marks only the caret's
+        // node; this keeps the title's ghost text up at rest. Same `is-empty` +
+        // data-placeholder pair, so the existing placeholder CSS paints it.
+        Extension.create({
+          name: "bpTitlePlaceholder",
+          addProseMirrorPlugins: () => [
+            new Plugin({
+              props: {
+                decorations: (state) => {
+                  if (!host._editable) return null;
+                  const decorations = [];
+                  state.doc.forEach((node, pos) => {
+                    if (isLockedTitle(node) && node.content.size === 0) {
+                      decorations.push(Decoration.node(pos, pos + node.nodeSize, {
+                        class: "is-empty",
+                        "data-placeholder": PLACEHOLDER.title,
+                      }));
+                    }
+                  });
+                  return decorations.length ? DecorationSet.create(state.doc, decorations) : null;
+                },
+              },
+            }),
+          ],
         }),
         // Smart typography — parity with ../index.js. A prose run holds no code
         // block, so nothing to exclude.
@@ -1813,6 +1857,8 @@ class BpPaperCanvas extends HTMLElement {
       // (Backspace handling sits below, outside the modifier branch.)
       // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
       // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      // Mod-Shift-4..6 are taken, so H1–H6 are ALSO on Mod-Alt-1..6 (StarterKit's heading
+      // keymap for the six configured levels; Alt chords skip this branch).
       const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
       if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
         const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
@@ -2020,6 +2066,23 @@ class BpPaperCanvas extends HTMLElement {
         default:
           return false;
       }
+    }
+
+    // Enter in the locked title (owner ruling 2026-10-03 #54, charter D6 amended):
+    // still no split, no new block and no op — the caret moves to the first body
+    // block, so the author keeps writing in the body instead of the title.
+    if (
+      this._editable &&
+      event.key === "Enter" &&
+      !event.shiftKey &&
+      !event.metaKey &&
+      !event.ctrlKey &&
+      !event.altKey &&
+      !event.isComposing &&
+      this._enterFromLockedTitle()
+    ) {
+      event.preventDefault();
+      return true;
     }
 
     if (
@@ -2920,6 +2983,12 @@ class BpPaperCanvas extends HTMLElement {
       insertSectionPresetAtSelection(this._editor, item.preset);
       return;
     }
+    // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
+    // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
+    if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
+      this._insertViaServer(item.type, { replaceSlashLine: true });
+      return;
+    }
     if (!item || !CANVAS_SLASH_TYPES.has(item.type)) {
       // Non-insertable (e.g. an EXPECTED field-image/field-reference): leave the
       // "/query" text in place and refocus, exactly like a dismiss.
@@ -2936,7 +3005,7 @@ class BpPaperCanvas extends HTMLElement {
     // identical behavior to the pre-refactor in-place replaceWith. EXPECTED-group
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
-    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName);
+    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level });
   }
 
   // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
@@ -3010,6 +3079,47 @@ class BpPaperCanvas extends HTMLElement {
     return true;
   }
 
+  // Terminal / Stage (CANVAS_SERVER_INSERT_TYPES, owner ruling 2026-10-03 #56): ask
+  // the host to insert the block through the server (`paper-slash-insert`, the same
+  // default_block/2 + insert-after "+ Add block" uses) instead of inserting a node the
+  // server's canvas fence refuses. The anchor is a block the server already holds
+  // (masterInsertAnchor). A slash pick removes its "/query" line first and flushes
+  // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
+  // caret's block and anchors on it when it is confirmed. The editor is blurred so
+  // the server echo carrying the new block renders at once.
+  _insertViaServer(type, { replaceSlashLine = false } = {}) {
+    const editor = this._editor;
+    if (!editor || !this._editable || !CANVAS_SERVER_INSERT_TYPES.has(type)) return false;
+    const index = topLevelIndexAtSelection(editor);
+    const liveIds = [];
+    editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
+    const confirmed = new Set((this._blocks || []).map((block) => block && block.id));
+    // A palette pick may anchor ON the caret's block (search from index + 1 down);
+    // a slash pick never anchors on the line it removes.
+    const afterId = masterInsertAnchor(liveIds, replaceSlashLine ? index : index + 1, confirmed);
+
+    if (replaceSlashLine) {
+      const { state } = editor;
+      let offset = 0;
+      for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
+      const slashNode = state.doc.child(index);
+      let tr = state.tr.delete(offset, offset + slashNode.nodeSize);
+      if (tr.doc.childCount === 0) tr = tr.insert(0, state.schema.nodes.paragraph.create());
+      editor.view.dispatch(tr);
+    }
+    this.flushPendingChanges();
+    editor.commands.blur();
+
+    this.dispatchEvent(
+      new CustomEvent("bp-server-insert", {
+        detail: { type, after_id: afterId },
+        bubbles: true,
+        composed: true,
+      }),
+    );
+    return true;
+  }
+
   // Esc / outside-click: close the menu but LEAVE the typed "/" in place — the user
   // may want to keep typing a real slash. Mirrors ../index.js:_dismissSlash.
   _dismissSlash() {
@@ -3030,7 +3140,11 @@ class BpPaperCanvas extends HTMLElement {
     // The View-group "Toggle Markdown source" command calls back into the WC's
     // toggle (the canvas owns the rich⇄source swap, not the editor) — the SAME method
     // Mod-Shift-m calls, so both triggers are identical.
-    const registryOpts = { onToggleSource: () => this.toggleSourceMode() };
+    const registryOpts = {
+      onToggleSource: () => this.toggleSourceMode(),
+      // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
+      onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
+    };
     if (!this._palette) {
       this._palette = new CommandPalette({
         commands: buildCommandRegistry(this._editor, registryOpts),
@@ -3716,6 +3830,69 @@ class BpPaperCanvas extends HTMLElement {
     }
     view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
     view.focus();
+    return true;
+  }
+
+  // Enter with the caret in the locked title. Returns false when the caret is not
+  // in it (Enter keeps its normal meaning). Otherwise the caret goes to the first
+  // unlocked block after the title in this run; with none, to the next run's first
+  // body block, else the first ghost slot or the "+ Add block" control. Selection
+  // only: no doc change, no op, no history entry. Returns true either way, so the
+  // Enter stays a no-op on the document (the D6 guarantee).
+  _enterFromLockedTitle() {
+    const editor = this._editor;
+    if (!editor) return false;
+    const { selection } = editor.state;
+    const $from = selection.$from;
+    if ($from.depth !== 1 || !isLockedTitle($from.parent)) return false;
+    if (!selection.$to.sameParent($from)) return false;
+    if (this._focusBodyFrom($from.index(0) + 1)) return true;
+    this._focusBodyAfterRun();
+    return true;
+  }
+
+  // Put the caret in the first unlocked top-level block at or after `startIndex`.
+  _focusBodyFrom(startIndex = 0) {
+    const editor = this._editor;
+    if (!editor || !this._editable) return false;
+    const { state, view } = editor;
+    let target = null;
+    state.doc.forEach((node, offset, index) => {
+      if (target == null && index >= startIndex && node.attrs?.locked !== true) target = offset;
+    });
+    if (target == null) return false;
+    let next;
+    try {
+      next = Selection.near(state.doc.resolve(target), 1);
+    } catch (_e) {
+      return false;
+    }
+    if (!next || next.from < target) return false;
+    view.dispatch(state.tr.setSelection(next).setMeta("addToHistory", false).scrollIntoView());
+    view.focus();
+    return true;
+  }
+
+  // Public seam for a neighbouring run: focus this run's first body block.
+  focusFirstBodyBlock() {
+    return this._focusBodyFrom(0);
+  }
+
+  // The title run holds no body block: try the following canvas runs in document
+  // order, then the first ghost slot (Ingress / Featured), then "+ Add block".
+  _focusBodyAfterRun() {
+    const root = this.closest(".bp-paper-editor") || this.ownerDocument?.body;
+    if (!root) return false;
+    const canvases = [...root.querySelectorAll("bp-paper-canvas")];
+    for (const canvas of canvases.slice(canvases.indexOf(this) + 1)) {
+      if (typeof canvas.focusFirstBodyBlock === "function" && canvas.focusFirstBodyBlock()) return true;
+    }
+    const affordance =
+      root.querySelector('[data-test-id="paper-ghost-slots"] button:not([disabled])') ||
+      root.querySelector('[data-test-id="paper-add-block"] select, [data-test-id="paper-add-block"] button');
+    if (!affordance) return false;
+    this._editor?.commands.blur();
+    affordance.focus();
     return true;
   }
 

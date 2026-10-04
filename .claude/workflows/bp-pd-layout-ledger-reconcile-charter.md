@@ -85,6 +85,14 @@ silence.
   with this ratification cited; the jsdom mounted-editor test gap (crit 3) stays honestly
   met:false with residue task **pdd-t14-jsdom-residue** filed (the editorProp-ignored
   regression class is uncatchable by pure predicates).
+  - **D6 amendment, 2026-10-03 (owner ruling 2026-10-03 #54, task-0f6a172b8bc795b2).**
+    The calm no-op stays a no-op on the DOCUMENT: Enter in the locked title still never
+    splits, creates a block or emits an op. What changes is the caret: Enter moves it to
+    the first unlocked body block of the run; with none, to the next canvas run's first
+    body block, else the first ghost slot, else "+ Add block". Reason: dogfooding showed
+    the no-op silently wrote the body into the title (the fresh body paragraph is a
+    hidden resting scaffold). The empty locked title also shows a "Title" placeholder.
+    Pinned by `api/assets/paper-editor/src/canvas/__title_enter_caret.test.mjs`.
 - **D7 — pdd-t15's C2 is AMENDED to name the real gate.** The t10 corpus is fleet-only by
   design; title/h1 parity is pinned by render_test.exs:772 (bare `<h1>`) +
   view_edit_parity_test.exs:57 (h1 in @parity_elements) + the byte-equal render proof.

@@ -62,7 +62,10 @@ Brute-force defense lives in the router, not the controller. The `:user_auth`
 pipeline (`api/lib/barkpark_web/router.ex`) runs `BarkparkWeb.Plugs.RateLimit`
 keyed on the client **IP** before any `/v1/auth/*` handler — anonymous by
 design, since login is pre-auth. No per-account counter; the IP key is the
-chokepoint.
+chokepoint. The four browser auth form POSTs (`/login/account`, `/login/mfa`,
+`/login/reset`, `/login/magic`) draw on the same per-IP write budget (60 a
+minute) through `:browser_auth_write_meter`; the sign-in pages themselves stay
+unmetered.
 
 ## MFA (TOTP)
 
@@ -73,6 +76,10 @@ the clear. Enrolment also issues one-time **recovery codes** — single-use
 fallbacks accepted by `auth.login`'s `recovery_code` when the authenticator is
 unavailable; each code is consumed on use. `mfa_disable` (SDK `client.auth.disableMfa(password)`)
 turns MFA back off — it requires the account password and clears the secret + recovery codes.
+Every door that re-checks the current password (erase, password change, TOTP
+enrol/verify/disable, passkey add/remove, Studio's erase form) shares one
+per-user budget, `Accounts.reauthenticate/2`: five attempts, refilled at one a
+minute. Past it even the right password gets `429 reauth_rate_limited`.
 
 ### Studio sign-in rides these accounts
 
@@ -95,6 +102,10 @@ to that raw token, and `GET /login/ticket/:t` consumes it atomically (one
 winner), sets `session["api_token"]` and redirects to `/studio`.
 Unknown/used/expired are indistinguishable (no oracle); the response is
 `no-store` + `no-referrer`. See `BarkparkWeb.LoginTicketController`.
+The `email` form (signs in AS that account and seats it Default owner) needs
+`admin` and, once the operator allowlist is armed, a bearer it names
+(`403 required: platform_operator`); a Cloud-managed box that arms it lists
+Cloud's credential id in `BARKPARK_OPERATOR_TOKEN_IDS` (ruling #6, 2026-10-03).
 
 Browser password-reset rides the same email tokens as the JSON flow:
 `GET|POST /login/reset` ("Forgot password?", anti-enumeration — always the

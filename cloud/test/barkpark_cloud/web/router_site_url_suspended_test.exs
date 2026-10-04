@@ -152,7 +152,7 @@ defmodule BarkparkCloud.Web.RouterSiteUrlSuspendedTest do
 
   describe "POST /v1/barkparks/:id/site-url on a SUSPENDED box" do
     test "a plain MEMBER is refused 409 suspended and the instance is never called" do
-      {team, session} = user_with_team("member")
+      {team, session} = user_with_team("admin")
       bp = bootstrapped_barkpark(team, suspended_attrs())
 
       # Programmed anyway: if the guard regressed, the wire would SUCCEED and
@@ -185,7 +185,7 @@ defmodule BarkparkCloud.Web.RouterSiteUrlSuspendedTest do
     end
 
     test "CONTROL: the same call on a NOT-suspended box still wires — 200, 2 requests, same bearer" do
-      {team, session} = user_with_team("member")
+      {team, session} = user_with_team("admin")
       bp = bootstrapped_barkpark(team)
       program_site_url_wire()
 
@@ -214,7 +214,7 @@ defmodule BarkparkCloud.Web.RouterSiteUrlSuspendedTest do
     end
 
     test "NO REACHABILITY GATE: a never-verified (nil/nil) unsuspended row STILL WIRES" do
-      {team, session} = user_with_team("member")
+      {team, session} = user_with_team("admin")
 
       bp =
         bootstrapped_barkpark(team, %{last_verified_at: nil, verify_reachable: nil})

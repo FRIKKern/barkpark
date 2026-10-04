@@ -83,7 +83,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/fleet/supports/:id admin(d)  remove a SUPPORT fleet row (PDF-D61; live box -> deprovision job 202 so its A record dies WITH it; ?mode=detach = row only; mains refused 409)
       POST    /v1/barkparks/:id/agent-key admin(d)  paste-a-key delivery to a LIVE support box (PDF-D94; key rides memory only, never stored)
       GET     /v1/barkparks/:id/agent-key admin(d)  latest push_agent_key job status (status/error only — the row never held the key)
-      POST    /v1/barkparks/:id/site-url user  wire the deployed site URL → activate the ISR webhook (dwb-6)
+      POST    /v1/barkparks/:id/site-url admin  wire the deployed site URL → activate the ISR webhook (dwb-6; team-admin: it re-points a signed webhook with the stored admin token)
       GET     /v1/barkparks/:id/bootstrap admin  reveal the dwb-4 content-bootstrap outputs (team-admin only)
       PATCH   /v1/barkparks/:id/autoupdate admin  set fleet-autoupdate policy (isu-w4 opt-out/pause/pin)
       POST    /v1/barkparks/:id/verify user  run the post-provision health verification
@@ -4436,7 +4436,7 @@ defmodule BarkparkCloud.Web.Router do
   # /v1/relay/chat-blocked/:id receiver, and agrees a shared signing secret.
   # Until it runs, Cloud's receiver is a door nobody knocks on.
   #
-  # TEAM-ADMIN gated (`/credentials`' RBAC, not `/site-url`'s member gate): it
+  # TEAM-ADMIN gated (`/credentials`' RBAC, like `/site-url`): it
   # spends the stored admin token to WRITE instance config and ROTATES a signing
   # secret. Team-scoped fail-closed — a wrong-team / nonexistent / malformed id
   # is the SAME 404 (no existence leak). Idempotent: re-running converges an
@@ -4547,16 +4547,19 @@ defmodule BarkparkCloud.Web.Router do
   # ACTIVE — server-side, with the STORED admin token (never sent to the client),
   # exactly the studio-link pattern.
   #
-  # USER-authed + TEAM-SCOPED, fail-closed: any MEMBER of the owning team may wire
-  # their site; a wrong-team / nonexistent / malformed id is the SAME 404 (no
-  # existence leak). 422 invalid_url (not an http(s) origin); 409 suspended (a
+  # TEAM-ADMIN gated + TEAM-SCOPED, fail-closed (owner ruling #25, 2026-10-03,
+  # task-c537add0d1291c9f): it spends the stored admin token to re-point and
+  # activate a SIGNED content webhook, the same power as the instance-webhook
+  # update proxy, so it carries the same tier. A plain member gets a 403 naming
+  # `required: "admin"` before any lookup; a wrong-team / nonexistent /
+  # malformed id is the SAME 404 (no existence leak). 422 invalid_url (not an http(s) origin); 409 suspended (a
   # suspended box is not written — the refusal fires BEFORE the stored admin
   # token is decrypted, so nothing reaches a wire); 409 not_live while
   # provisioning; 404 no_admin_token / no_bootstrap (pre-feature / template-less);
   # 409 no_webhook (template registered no revalidation hook); 502 on instance
   # failure; 500 on tampered ciphertext. Idempotent — a re-PUT converges (200).
   post "/v1/barkparks/:id/site-url" do
-    conn = Auth.require_user(conn, [])
+    conn = Auth.require_team_admin(conn, [])
 
     cond do
       conn.halted ->
@@ -7666,7 +7669,9 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/invitations/accept {token} → 200 {team_id}. Authed but NOT
   # team-scoped (the user is not yet a member). The email-match guard ensures the
-  # logged-in user's email equals the invited email.
+  # logged-in user's email equals the invited email (403 email_mismatch), and the
+  # account must have proven that address (403 email_unconfirmed — confirmed, or
+  # verified by a linked identity provider).
   post "/v1/invitations/accept" do
     conn = Auth.require_user(conn, [])
 
@@ -7703,6 +7708,17 @@ defmodule BarkparkCloud.Web.Router do
 
         {:error, :email_mismatch} ->
           json(conn, 403, %{error: "email_mismatch"})
+
+        # The right account, but the address is not proven yet. The invitation
+        # stays live: confirm the address, then accept again.
+        {:error, :email_unconfirmed} ->
+          json(conn, 403, %{
+            error: "email_unconfirmed",
+            detail:
+              "Confirm your email address before joining the team. " <>
+                "POST /v1/auth/resend-verification sends a new confirmation link.",
+            resend: "/v1/auth/resend-verification"
+          })
 
         {:error, _} ->
           json(conn, 422, %{error: "accept_failed"})

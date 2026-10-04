@@ -31,6 +31,17 @@ defmodule BarkparkWeb.ScimUsersController do
       {:error, :missing_username} ->
         ScimResponse.error(conn, 400, "userName is required", "invalidValue")
 
+      # Ruling #1: an existing account this org cannot vouch for (not seated
+      # here, email not on a verified domain of the org). Invite them instead.
+      {:error, :email_not_owned_by_org} ->
+        ScimResponse.error(
+          conn,
+          409,
+          "an account with this userName already exists and is not part of this organization; " <>
+            "invite the user, or verify the email's domain for this organization",
+          "uniqueness"
+        )
+
       {:error, _} ->
         ScimResponse.error(conn, 400, "could not provision user", "invalidValue")
     end

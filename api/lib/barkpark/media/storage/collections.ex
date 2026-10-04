@@ -7,6 +7,7 @@ defmodule Barkpark.Media.Storage.Collections do
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
   alias Barkpark.Content.Document
+  alias Barkpark.Content.Envelope
   alias Barkpark.Content.Schema
   alias Barkpark.Content.Scope
   alias Barkpark.Media
@@ -305,7 +306,45 @@ defmodule Barkpark.Media.Storage.Collections do
 
   def render(%Document{} = doc, false) do
     content = doc.content || %{}
+    render_content(doc, content)
+  end
 
+  @doc """
+  `render/2` for a named reader (owner ruling #22, task-76ddf1b3b0587fe6).
+
+  The collection's content goes through `Envelope.redact/4` first — the same
+  chokepoint every document read uses — so a field the `mediaCollection`
+  schema declares `private`, `owner_only` or `readable_by` is absent for a
+  caller who may not read it. `visibility` is `{schema, caller_context}` from
+  `redaction_visibility/2`, resolved once per request. A nil caller is the
+  anonymous reader (fail closed); an admin sees everything.
+  """
+  @spec render(Document.t(), boolean(), {term(), term()}) :: map()
+  def render(%Document{} = doc, pending?, {schema, caller_context}) do
+    redacted =
+      Envelope.redact(doc.content || %{}, schema, caller_context, Map.get(doc, :owner_id))
+
+    render(%{doc | content: redacted}, pending?)
+  end
+
+  @doc """
+  The `{schema, caller_context}` pair `render/3` redacts with: the
+  `mediaCollection` schema resolved through the redaction chokepoint
+  (`Schema.get_schema_for_redaction/3`) in the caller's tenancy, and the
+  caller context carried in `opts`.
+  """
+  @spec redaction_visibility(String.t(), keyword()) :: {term(), term()}
+  def redaction_visibility(dataset, opts) when is_binary(dataset) do
+    schema =
+      case Schema.get_schema_for_redaction(@collection_type, dataset, scope_opts(opts)) do
+        {:ok, s} -> s
+        _ -> nil
+      end
+
+    {schema, opts[:caller_context]}
+  end
+
+  defp render_content(%Document{} = doc, content) do
     %{
       id: doc.doc_id,
       title: doc.title,
@@ -373,12 +412,19 @@ defmodule Barkpark.Media.Storage.Collections do
   # The narrow arm FAILS CLOSED for the tier it does cover: `public_type_names`
   # is derived at READ TIME, so a schema flipped to private drops out on the
   # very next read, and an empty allowlist means the caller sees NOTHING.
-  defp restrict_public_read_tier?(%CallerContext{principal_type: p} = ctx)
-       when p in [:api_token, :user],
-       do: not Schema.bypasses_visibility_gate?(ctx)
+  #
+  # OWNER RULING #22 (2026-10-03, task-76ddf1b3b0587fe6) settled the product
+  # decision above: anonymous callers follow the public-read rule too. Every
+  # `%CallerContext{}` that has not earned the wide view — anonymous, the
+  # public-read tier, any future principal — is clamped to public-visibility
+  # types, so with the shipped `mediaCollection` schema (`visibility:
+  # "private"`) an anonymous caller lists no collection and `get/3` answers
+  # 404. An install that wants open folders declares the type public.
+  defp restrict_public_read_tier?(%CallerContext{} = ctx),
+    do: not Schema.bypasses_visibility_gate?(ctx)
 
-  # Anonymous, `nil` (the `share_view/2` path passes no caller context), a bare
-  # map, and any future principal shape: today's answer, untouched.
+  # `nil` (the `share_view/2` path, where the resolved share token is the
+  # principal and passes no caller context) and internal callers: unclamped.
   defp restrict_public_read_tier?(_), do: false
 
   defp restrict_public_read_tier(query, dataset, opts) do
