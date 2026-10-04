@@ -20,7 +20,7 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels}
+  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels, SlugValue}
   alias Barkpark.PortableDoc.{Projection, Synthesis}
 
   # Set on a field of a plugin-owned type: keep the value's stored shape
@@ -71,6 +71,11 @@ defmodule Barkpark.Content.Forms do
             # and the save never posts it.
             field["type"] == "datetime" and (is_binary(raw) or is_nil(raw)) ->
               datetime_form_value(raw)
+
+            # A `{current}` slug (the canonical shape, owner ruling #43) is
+            # edited as its text in the slug input.
+            field["type"] == "slug" and is_map(raw) and is_binary(SlugValue.text(raw)) ->
+              SlugValue.text(raw)
 
             true ->
               classic_form_value(raw, field, content, key)
@@ -280,6 +285,22 @@ defmodule Barkpark.Content.Forms do
         |> Enum.zip(stored)
         |> Enum.map(fn {p, s} -> restore_untouched(field["of"], p, s) end)
 
+      # A slug stored as a plain string is rewritten in the canonical
+      # `{current}` shape on its next save, touched or not (owner ruling #43).
+      field["type"] == "slug" and is_binary(stored) and is_map(coerced) ->
+        coerced
+
+      # An edited `{current}` slug keeps its sibling keys.
+      field["type"] == "slug" and is_map(stored) and is_map(coerced) and
+          coerced["current"] != SlugValue.text(stored) ->
+        Map.put(stored, "current", coerced["current"])
+
+      # A plugin-owned type keeps a `{current}` slug an object when edited
+      # (`@keep_shape`: its text was not coerced).
+      field["type"] == "slug" and is_map(stored) and is_binary(coerced) and coerced != "" and
+          coerced != SlugValue.text(stored) ->
+        Map.put(stored, "current", coerced)
+
       coerced === coerce_field_value(field, form_image(field, stored)) ->
         stored
 
@@ -331,6 +352,7 @@ defmodule Barkpark.Content.Forms do
   # posts back when the author does not touch it.
   defp form_image(%{"type" => "reference"}, %{"_ref" => ref}) when is_binary(ref), do: ref
   defp form_image(%{"type" => "datetime"}, v) when is_binary(v), do: datetime_form_value(v)
+  defp form_image(%{"type" => "slug"}, %{} = v), do: SlugValue.text(v) || ""
   defp form_image(_field, v) when is_number(v) or is_boolean(v), do: to_string(v)
   defp form_image(_field, nil), do: ""
   defp form_image(_field, v), do: v
@@ -541,6 +563,18 @@ defmodule Barkpark.Content.Forms do
     case String.trim(val) do
       "" -> val
       id -> %{"_ref" => id, "_type" => "reference"}
+    end
+  end
+
+  # A slug is stored as `{"_type": "slug", "current": text}` (owner ruling
+  # #43). The Studio slug input and Generate post the text; this is where it
+  # becomes the canonical object. Readers accept a plain string too
+  # (`Barkpark.Content.SlugValue.text/1`).
+  defp coerce_field_value(%{"type" => "slug"} = field, val)
+       when is_binary(val) and not is_map_key(field, @keep_shape) do
+    case String.trim(val) do
+      "" -> val
+      text -> SlugValue.canonical(text)
     end
   end
 

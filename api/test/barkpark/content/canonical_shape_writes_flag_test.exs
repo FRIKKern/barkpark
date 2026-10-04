@@ -12,7 +12,7 @@ defmodule Barkpark.Content.CanonicalShapeWritesFlagTest do
 
   alias Barkpark.Content
   alias Barkpark.Content.{CanonicalShapes, Forms}
-  alias Barkpark.Content.ShapeMigrations.BareReferences
+  alias Barkpark.Content.ShapeMigrations.{BareReferences, StringSlugs}
 
   @ds "shape-flag"
   @fields [
@@ -110,6 +110,46 @@ defmodule Barkpark.Content.CanonicalShapeWritesFlagTest do
       bare = doc!("fo-bare", %{"author" => "ada"})
       form = bare |> Forms.doc_to_form(@schema) |> Map.put("title", "After")
       assert save!(bare, form).content["author"] == @ref_ada
+    end
+  end
+
+  describe "slugs (owner ruling #43)" do
+    setup do
+      fields = [%{"name" => "title", "type" => "string"}, %{"name" => "slug", "type" => "slug"}]
+
+      {:ok, _} =
+        Content.upsert_schema(%{"name" => "flagslug", "title" => "S", "fields" => fields}, @ds)
+
+      {:ok, doc} =
+        Content.create_document(
+          "flagslug",
+          %{"doc_id" => "fs-str", "title" => "T", "content" => %{"slug" => "old-slug"}},
+          @ds
+        )
+
+      %{slug_schema: %{fields: fields}, slug_doc: doc}
+    end
+
+    test "flag off: a plain-string slug stays a string; an edit stays a string; apply is refused",
+         %{slug_schema: schema, slug_doc: doc} do
+      flag(false)
+      form = doc |> Forms.doc_to_form(schema) |> Map.put("title", "After")
+      {:ok, saved, _} = Forms.upsert_draft(doc, "flagslug", schema, form, @ds)
+      assert saved.content["slug"] == "old-slug"
+
+      {:ok, edited, _} =
+        Forms.upsert_draft(saved, "flagslug", schema, Map.put(form, "slug", "new-slug"), @ds)
+
+      assert edited.content["slug"] == "new-slug"
+      assert_raise ArgumentError, fn -> StringSlugs.run(apply: true) end
+    end
+
+    test "flag on: a plain-string slug is rewritten as {current}",
+         %{slug_schema: schema, slug_doc: doc} do
+      flag(true)
+      form = doc |> Forms.doc_to_form(schema) |> Map.put("title", "After")
+      {:ok, saved, _} = Forms.upsert_draft(doc, "flagslug", schema, form, @ds)
+      assert saved.content["slug"] == %{"_type" => "slug", "current" => "old-slug"}
     end
   end
 end

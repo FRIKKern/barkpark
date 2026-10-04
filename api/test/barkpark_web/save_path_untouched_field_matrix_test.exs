@@ -148,6 +148,8 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
   # next Studio Classic save, touched or not. Every other cell stays
   # byte-identical.
   @rewritten_on_save %{
+    # Owner ruling #43: likewise a plain-string slug becomes `{current}`.
+    "slug_string" => %{"_type" => "slug", "current" => "my-slug"},
     "ref_string" => %{"_ref" => "author-1", "_type" => "reference"},
     "arr_ref_string" => [
       %{"_ref" => "a1", "_type" => "reference"},

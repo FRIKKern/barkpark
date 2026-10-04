@@ -90,7 +90,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # Types whose own clause below already copes with a structured (map/list)
   # stored value: reference/image read ids and JSON, array/object render
   # read-only JSON, richText renders block content read-only.
-  @structured_value_types ~w(richText reference image array object)
+  @structured_value_types ~w(richText reference image array object slug)
 
   # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
   # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
@@ -410,7 +410,9 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # exactly like a typed value. The input itself stays the standard text
   # input (hand-editing always wins).
   def input(%{field: %{"type" => "slug", "name" => name} = f} = assigns) do
-    val = scalar_text(Map.get(assigns.editor_form, name, ""))
+    # Either stored shape edits as its text (owner ruling #43).
+    raw = Map.get(assigns.editor_form, name, "")
+    val = if is_map(raw), do: Barkpark.Content.SlugValue.text(raw) || "", else: scalar_text(raw)
     source = slug_source_of(f)
     assigns = assign(assigns, n: name, v: val, source: source)
 
