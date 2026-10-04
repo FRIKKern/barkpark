@@ -430,8 +430,9 @@ defmodule BarkparkWeb.ShareControllerTest do
     # PRECONDITIONS — the whole strength of these tests lives here.
     assert TenancyAuth.membership_role(actor, ws_a.id) == "admin"
     assert TenancyAuth.membership_role(actor, ws_b.id) == "member"
-    # …and the weaker predicate WOULD let this actor through:
-    assert TenancyAuth.authorize(actor, ws_b.id, :admin) == :ok
+    # Before owner ruling #2, task-6132833921b7dc36, authorize/3 let this actor through on
+    # its global permissions; it now reads the seat role and refuses too.
+    assert TenancyAuth.authorize(actor, ws_b.id, :admin) == {:error, :forbidden}
     refute TenancyAuth.workspace_admin?(actor, ws_b.id)
 
     {actor, ws_b, proj_b, scope_b}

@@ -93,6 +93,10 @@ defmodule BarkparkWeb.Plugs.RequirePlatformOperatorTest do
       |> Ecto.Changeset.change(owner_user_id: user.id)
       |> Repo.update!()
 
+    # A PAT's owner holds a seat where the PAT is bound (the self-mint path
+    # seats them); since owner ruling #2 the owner's seat must allow admin too.
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_a.id, user.id, "admin", "user")
+
     # OPERATOR 3 — admitted by BARKPARK_OPERATOR_EMAILS through the app-token
     # label convention `app:<email>` (the same one
     # Auth.revoke_app_tokens_for_email/2 matches on).

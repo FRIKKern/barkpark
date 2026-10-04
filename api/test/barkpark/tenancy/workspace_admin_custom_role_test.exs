@@ -153,9 +153,13 @@ defmodule Barkpark.Tenancy.WorkspaceAdminCustomRoleTest do
 
       {:ok, _} = TenancyAuth.create_membership(ws.id, tok.id)
 
-      # The D9 shape verbatim: authorize/3 admits on the token's global perms…
+      # The D9 shape: the token holds global `admin`, seated as a plain member.
+      # Since owner ruling #2 (task-6132833921b7dc36) authorize/3 reads the
+      # seat role too, so it no longer admits `:admin` here; the member seat
+      # still reads and writes.
       assert Barkpark.Auth.has_permission?(tok, "admin")
-      assert TenancyAuth.authorize(tok, ws.id, :admin) == :ok
+      assert TenancyAuth.authorize(tok, ws.id, :admin) == {:error, :forbidden}
+      assert TenancyAuth.authorize(tok, ws.id, :write) == :ok
       assert TenancyAuth.membership_role(tok, ws.id) == "member"
       # …and the admin gate still refuses. The custom-role arm never reaches a
       # built-in role name, so "member" cannot borrow an admin action.

@@ -572,13 +572,12 @@ defmodule BarkparkWeb.ShareLinkTest do
 
       {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, actor.id, "member")
 
-      # PRECONDITION, asserted inline so the predicate choice is provably
-      # load-bearing: this actor IS a member of B and DOES pass authorize/3
-      # (whose api_token arm ORs in the token's GLOBAL permissions), and is NOT
-      # a workspace admin of B. Swap the gate to authorize/3 and these tests go
-      # green on a leaking controller.
+      # PRECONDITION: this actor IS a member of B and is NOT a workspace admin
+      # of B. Before owner ruling #2 authorize/3 admitted it on the token's
+      # GLOBAL permissions alone, which made the predicate choice load-bearing;
+      # since #2 authorize/3 reads the seat role too, so both predicates refuse.
       assert Barkpark.Tenancy.Auth.membership_role(actor, ws.id) == "member"
-      assert Barkpark.Tenancy.Auth.authorize(actor, ws.id, :admin) == :ok
+      assert Barkpark.Tenancy.Auth.authorize(actor, ws.id, :admin) == {:error, :forbidden}
       refute Barkpark.Tenancy.Auth.workspace_admin?(actor, ws.id)
 
       %{attacker_raw: raw, attacker: actor}

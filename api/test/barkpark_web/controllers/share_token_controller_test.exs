@@ -255,7 +255,8 @@ defmodule BarkparkWeb.ShareTokenControllerTest do
       # preconditions: admin of A, plain member (never admin) of B
       assert TenancyAuth.membership_role(actor, ws_a.id) == "admin"
       assert TenancyAuth.membership_role(actor, ws_b.id) == "member"
-      assert TenancyAuth.authorize(actor, ws_b.id, :admin) == :ok
+      # Since owner ruling #2, task-6132833921b7dc36, authorize/3 reads the seat role too.
+      assert TenancyAuth.authorize(actor, ws_b.id, :admin) == {:error, :forbidden}
 
       {:ok, {_raw_b, token_b}} =
         Auth.create_share_token(ws_slug(scope), proj_slug(scope), @dataset, ["docs"])
