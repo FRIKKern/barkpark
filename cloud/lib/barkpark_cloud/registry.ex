@@ -2008,7 +2008,12 @@ defmodule BarkparkCloud.Registry do
       {:error, :already_attaching}
     else
       %ProvisionJob{}
-      |> ProvisionJob.changeset(%{barkpark_id: bp_id, kind: "attach_domain", status: "pending"})
+      |> ProvisionJob.changeset(
+        Map.merge(
+          %{barkpark_id: bp_id, kind: "attach_domain", status: "pending"},
+          ownership_snapshot(bp_id)
+        )
+      )
       |> Repo.insert()
       |> translate_active_job_conflict(:already_attaching)
     end
@@ -2096,11 +2101,12 @@ defmodule BarkparkCloud.Registry do
       {:error, :already_delivering}
     else
       %ProvisionJob{}
-      |> ProvisionJob.changeset(%{
-        barkpark_id: bp_id,
-        kind: "push_agent_key",
-        status: "pending"
-      })
+      |> ProvisionJob.changeset(
+        Map.merge(
+          %{barkpark_id: bp_id, kind: "push_agent_key", status: "pending"},
+          ownership_snapshot(bp_id)
+        )
+      )
       |> Repo.insert()
       |> translate_active_job_conflict(:already_delivering)
     end
@@ -2127,11 +2133,12 @@ defmodule BarkparkCloud.Registry do
       {:error, :already_arming}
     else
       %ProvisionJob{}
-      |> ProvisionJob.changeset(%{
-        barkpark_id: bp_id,
-        kind: "enable_apply",
-        status: "pending"
-      })
+      |> ProvisionJob.changeset(
+        Map.merge(
+          %{barkpark_id: bp_id, kind: "enable_apply", status: "pending"},
+          ownership_snapshot(bp_id)
+        )
+      )
       |> Repo.insert()
       |> translate_active_job_conflict(:already_arming)
     end
@@ -2435,18 +2442,93 @@ defmodule BarkparkCloud.Registry do
         claim_loop(claim_token, kind, now, stale_before, max_attempts)
 
       %ProvisionJob{} = job ->
-        {:ok, claimed} =
-          job
-          |> ProvisionJob.changeset(%{
-            status: "claimed",
-            claim_token: claim_token,
-            claimed_at: now,
-            attempts: job.attempts + 1
-          })
-          |> Repo.update()
+        barkpark = Repo.get(Barkpark, job.barkpark_id)
 
-        {claimed, Repo.get(Barkpark, claimed.barkpark_id)}
+        case ownership_drift(job, barkpark) do
+          nil ->
+            {:ok, claimed} =
+              job
+              |> ProvisionJob.changeset(%{
+                status: "claimed",
+                claim_token: claim_token,
+                claimed_at: now,
+                attempts: job.attempts + 1
+              })
+              |> Repo.update()
+
+            {claimed, barkpark}
+
+          reason ->
+            discard_for_ownership!(job, reason)
+            claim_loop(claim_token, kind, now, stale_before, max_attempts)
+        end
     end
+  end
+
+  # task-0cf611238d4ad597 CQ7c (owner ruling #36). These kinds SSH to the
+  # barkpark's `host` as root: push an agent key, add a Caddy vhost for a custom
+  # domain, flip self-update on. Registration refuses a host another team holds,
+  # but only at registration. So the claim re-checks, at the moment the worker
+  # would act, that the row still belongs to the team it was enqueued for, that
+  # its host has not moved, and that no OTHER team's barkpark now records the
+  # same host. A job that fails any of these is failed with the reason and never
+  # reaches the worker.
+  @ownership_checked_kinds ~w(push_agent_key attach_domain enable_apply)
+
+  @doc "The job kinds whose claim re-checks host ownership (CQ7c)."
+  @spec ownership_checked_kinds() :: [String.t()]
+  def ownership_checked_kinds, do: @ownership_checked_kinds
+
+  # The team + host to record on a job of a checked kind at enqueue. Read from
+  # the row as it is NOW, not from a struct the caller may have held for a while.
+  defp ownership_snapshot(bp_id) do
+    case Repo.get(Barkpark, bp_id) do
+      %Barkpark{team_id: tid, host: host} -> %{enqueued_team_id: tid, enqueued_host: host}
+      nil -> %{}
+    end
+  end
+
+  # nil when the job may run; otherwise the reason it may not. A missing row, or
+  # a row that lost its host, is left to the existing paths: each claim route
+  # already fails a host-less job with its own "no host" reason. A NULL snapshot
+  # (a job enqueued before the columns existed) skips the two equality checks.
+  defp ownership_drift(%ProvisionJob{kind: kind} = job, %Barkpark{} = bp)
+       when kind in @ownership_checked_kinds do
+    cond do
+      not is_nil(job.enqueued_team_id) and job.enqueued_team_id != bp.team_id ->
+        "the barkpark moved to another team after the job was enqueued"
+
+      not is_nil(job.enqueued_host) and not is_nil(bp.host) and job.enqueued_host != bp.host ->
+        "the barkpark's host changed after the job was enqueued"
+
+      host_held_by_other_team?(bp.host, bp.team_id) ->
+        "the host is recorded on another team's barkpark"
+
+      true ->
+        nil
+    end
+  end
+
+  defp ownership_drift(_job, _barkpark), do: nil
+
+  defp discard_for_ownership!(%ProvisionJob{} = job, reason) do
+    {:ok, _failed} =
+      job
+      |> ProvisionJob.changeset(%{
+        status: "failed",
+        error:
+          "ownership re-check refused the job: " <> reason <> ". Nothing was run on the host."
+      })
+      |> Repo.update()
+
+    # A key push carries its key in memory, keyed by the job id. The job will
+    # never be claimed, so drop the key now instead of waiting for its TTL.
+    if job.kind == "push_agent_key", do: _ = BarkparkCloud.Registry.AgentKeyStash.take(job.id)
+
+    Logger.warning(
+      "[registry] discarded #{job.kind} job #{job.id} for barkpark #{job.barkpark_id}: " <>
+        reason
+    )
   end
 
   # claim-fence (bp-c55): read a provision job FOR UPDATE so the guard + write in

@@ -427,6 +427,21 @@ defmodule Barkpark.PortableDoc.Render.Components do
     )
   end
 
+  # A Card's title keeps the three title sizes it always had. Document headings
+  # render all six levels since owner ruling 2026-10-03 (#63); a Card title
+  # authored at level 4 is ordinary (the portabledoc-showcase spelling) and has
+  # always read as an h2, and the canvas Card title (card-node.js cardTitleLevel)
+  # shows the same 1..3-else-2 level, so View and Edit stay aligned.
+  defp card_slot_html(block, "title", style) do
+    block
+    |> Slots.slot_elements("title")
+    |> Enum.map(&card_title_level/1)
+    |> Barkpark.PortableDoc.Render.Compose.render_children(
+      style,
+      Barkpark.PortableDoc.Render.Compose.render_opts(block)
+    )
+  end
+
   defp card_slot_html(block, name, style) do
     block
     |> Slots.slot_elements(name)
@@ -435,6 +450,13 @@ defmodule Barkpark.PortableDoc.Render.Components do
       Barkpark.PortableDoc.Render.Compose.render_opts(block)
     )
   end
+
+  defp card_title_level(%{"type" => "heading", "level" => level} = el)
+       when level in [1, 2, 3] or level in ["1", "2", "3"],
+       do: el
+
+  defp card_title_level(%{"type" => "heading"} = el), do: Map.put(el, "level", 2)
+  defp card_title_level(el), do: el
 
   # A media element persisted WITHOUT a `type` key (a bare `{src, alt}` map from an
   # older writer) is normalized to an `image` element so generic recursion fast-paths

@@ -51,7 +51,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
 
   defp block(%{"type" => "eyebrow"} = b, d), do: text_tag("eyebrow", b, d)
 
-  defp block(%{"type" => "heading", "level" => l} = b, d) when l in 1..3,
+  defp block(%{"type" => "heading", "level" => l} = b, d) when l in 1..6,
     do: heading_line(l, b, d)
 
   # The stored corpus spells the heading level BOTH ways: 283 integer levels and
@@ -67,12 +67,13 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # render/compose.ex heading_level/1), so printing them identically spells the
   # heading every reader already sees.
   #
-  # DELIBERATELY NARROW — exactly "1" / "2" / "3". "01", " 2", "4" and every
-  # junk spelling keep falling through; see the note above the catch-all.
-  defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3),
+  # DELIBERATELY NARROW — exactly "1".."6" (six levels since owner ruling
+  # 2026-10-03 #63). "01", " 2", "7" and every junk spelling keep falling
+  # through; see the note above the catch-all.
+  defp block(%{"type" => "heading", "level" => l} = b, d) when l in ~w(1 2 3 4 5 6),
     do: heading_line(String.to_integer(l), b, d)
 
-  # `align` rides the row on <p> and <h1..3> (Barkdown plan #21): render/compose.ex reads it
+  # `align` rides the row on <p> and <h1..6> (Barkdown plan #21): render/compose.ex reads it
   # ("center" | "right"), so a pulled paper that lost it came back flush left on push.
   defp block(%{"type" => "paragraph"} = b, d), do: inline_tag("p", b, d, ["id", "align"])
   defp block(%{"type" => "pullquote"} = b, d), do: inline_tag("pullquote", b, d)
@@ -862,7 +863,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
     end)
   end
 
-  # `<h1..3>` and `<eyebrow>` hold PLAIN escaped text — the spelling carries no
+  # `<h1..6>` and `<eyebrow>` hold PLAIN escaped text — the spelling carries no
   # marks. An UNMARKED inline array flattens losslessly (all 4878 content-keyed
   # heading bodies in the corpus are exactly that shape). A body carrying a MARK
   # or a non-text node cannot be spelled here, so it takes the ONE typed refusal
@@ -870,7 +871,7 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   defp plain_body(b, keys), do: esc(plain_alias(b, keys) || "")
 
   # The PLAIN-TEXT reading of an alias body, for every position that holds
-  # escaped text rather than inline markup: `<h1..3>`, `<eyebrow>`, `<code>`,
+  # escaped text rather than inline markup: `<h1..6>`, `<eyebrow>`, `<code>`,
   # and the `summary` ATTRIBUTE. An alias key can hold the body as a bare
   # string OR as an inline-node list (14 `code` blocks and 1 `expandable`
   # carry a list in the corpus) — a list reaches `esc/1`'s `to_string/1`

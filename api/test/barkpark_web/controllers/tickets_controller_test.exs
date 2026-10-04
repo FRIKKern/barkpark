@@ -225,7 +225,7 @@ defmodule BarkparkWeb.TicketsControllerTest do
 
   # ── PDS w36 crit 2: render_ticket/3's receipt against the STORED ROW ─────
   #
-  # `tickets_controller.ex:263` (`render_ticket/3`) is the ONE renderer every
+  # `tickets_controller.ex:render_ticket/3` is the ONE renderer every
   # ticket receipt passes through — create's 201, show_own, reply, answer and
   # close all end there. Every other test in this file reads that receipt and
   # NOTHING else, so a create that renders a faithful ticket while persisting
