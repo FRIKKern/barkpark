@@ -5,7 +5,7 @@
 // Exact shapes (verified against api/lib/barkpark/portable_doc/render.ex,
 // patch.ex, and the golden fixtures in test/support/fixtures/doc-patch-op/):
 //
-//   heading   : { id, type:"heading", level:1..3, text:"..." }   (flat string)
+//   heading   : { id, type:"heading", level:1..6, text:"..." }   (flat string)
 //   paragraph : { id, type:"paragraph", content:[ inline... ] }
 //   list      : { id, type:"list", ordered:bool, items:[ [inline...], ... ] }
 //
@@ -422,9 +422,10 @@ export function blockToTiptap(block) {
       for (const key of ["content", "text"]) {
         if (Object.hasOwn(block, key)) source[key] = deepCloneJson(block[key]);
       }
-      // A level beyond the three the canvas offers (an import, an agent) is shown at the
+      // A level outside the six the editor offers (a malformed import) is shown at the
       // nearest level and carried on the source, so an edit to the text never rewrites it
-      // (D-headings: three levels to author, a deeper stored level is never restructured).
+      // (D-headings: six levels to author since owner ruling 2026-10-03; a stored level the
+      // editor cannot show is never restructured).
       if (Number.isFinite(Number(block.level)) && clampLevel(block.level) !== Number(block.level)) source.level = Number(block.level);
       if (Object.hasOwn(block, "align")) source.align = block.align === "center" || block.align === "right" ? block.align : null;
       const node = { type: "heading", attrs: { level, bpHeadingSource: source } };
@@ -1294,7 +1295,7 @@ function clampLevel(level) {
   const n = Number(level);
   if (!Number.isFinite(n)) return 1;
   if (n < 1) return 1;
-  if (n > 3) return 3;
+  if (n > 6) return 6;
   return Math.trunc(n);
 }
 

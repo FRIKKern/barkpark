@@ -1171,6 +1171,42 @@ defmodule Barkpark.Content.Mutations do
   end
 
   @doc """
+  The mutate door's content guards for a client write that reaches the writer
+  WITHOUT `apply_mutations/3`: the document block ops door
+  (`POST /v1/data/doc/:dataset/:type/:doc_id/ops`, owner ruling #35 item 4).
+
+  A block op re-projects every bound block (`fieldName`) into `content`, so it
+  can set any field a `patch` can. This runs, in the mutate door's order, the
+  close fence (`ensure_task_close_is_cas`), the claim fence
+  (`ensure_claim_not_dropped`) and the `:after_claim` plugin fences over the
+  row the op read (`existing`) and the content it will store (`merged`), and
+  returns the same refusal the mutate door would.
+
+  One difference, on purpose: the close fence is judged as a write WITHOUT a
+  revision precondition. The ops door requires `ifRev` on every op to fence
+  concurrent block edits, so it proves nothing about intent to close; a block
+  edit is never a sanctioned close path.
+  """
+  @spec ensure_content_write_guards(String.t(), map() | nil, map(), String.t(), keyword()) ::
+          :ok | {:error, term()}
+  def ensure_content_write_guards(type, existing, merged, dataset, opts) do
+    no_revision_precondition = %{}
+
+    with :ok <- ensure_task_close_is_cas(type, existing, merged, no_revision_precondition, opts),
+         :ok <- ensure_claim_not_dropped(type, existing, merged, opts) do
+      run_mutate_door_fences(
+        :after_claim,
+        type,
+        existing,
+        merged,
+        no_revision_precondition,
+        dataset,
+        opts
+      )
+    end
+  end
+
+  @doc """
   Run the create family's `:before_rev` mutate-door fences for a create
   naming `id` — the published-fork fence the Tasks plugin declares (refuse a
   create that would fork a published task somebody holds, otherwise advise).

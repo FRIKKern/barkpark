@@ -582,8 +582,21 @@ function hasOnlyBpKeys(attrs) {
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) =>
-    it.type === "list" ? [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }] : [it]),
+  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
+    if (it.type === "list") return [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }];
+    // One row per heading level, H1–H6 (owner ruling 2026-10-03 #63). Canvas-only:
+    // the per-block menu's server default_block/2 inserts one default heading.
+    if (it.type === "heading") {
+      return [1, 2, 3, 4, 5, 6].map((level) => ({
+        ...it,
+        level,
+        label: `Heading ${level}`,
+        hint: `H${level}`,
+        desc: level === 1 ? "page title size" : `level ${level} heading`,
+      }));
+    }
+    return [it];
+  }),
   // Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
   // whose server default_block/2 has no sheet clause.
   { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" },
@@ -828,8 +841,10 @@ class BpPaperCanvas extends HTMLElement {
         }),
         ownDomReadback,
         StarterKit.configure({
-          // Same as ../index.js: heading levels 1–3, lists, history on.
-          heading: { levels: [1, 2, 3] },
+          // Same as ../index.js: heading levels 1–6 (owner ruling 2026-10-03 #63),
+          // lists, history on. The levels drive the `# `…`###### ` input rules and
+          // the Mod-Alt-1..6 turn-into chords.
+          heading: { levels: [1, 2, 3, 4, 5, 6] },
           // Authored quotes have a dedicated PortableDoc editor. Native nested
           // quotes lose their body on save and preempt `> [!note] ` shorthand.
           blockquote: false,
@@ -1842,6 +1857,8 @@ class BpPaperCanvas extends HTMLElement {
       // (Backspace handling sits below, outside the modifier branch.)
       // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
       // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      // Mod-Shift-4..6 are taken, so H1–H6 are ALSO on Mod-Alt-1..6 (StarterKit's heading
+      // keymap for the six configured levels; Alt chords skip this branch).
       const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
       if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
         const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
@@ -2988,7 +3005,7 @@ class BpPaperCanvas extends HTMLElement {
     // identical behavior to the pre-refactor in-place replaceWith. EXPECTED-group
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
-    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName);
+    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level });
   }
 
   // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────

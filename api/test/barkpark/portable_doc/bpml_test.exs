@@ -623,9 +623,9 @@ defmodule Barkpark.PortableDoc.BpmlTest do
       assert e.hint =~ "<p>"
     end
 
-    test "<h5> teaches the heading ceiling" do
-      assert {:error, [e]} = Bpml.parse_blocks("<h5>too deep</h5>")
-      assert e.hint =~ "<h3>"
+    test "<h5> is a heading (six levels since owner ruling 2026-10-03, no ceiling at <h3>)" do
+      assert {:ok, [%{"type" => "heading", "level" => 5, "text" => "deep"}]} =
+               Bpml.parse_blocks("<h5>deep</h5>")
     end
 
     test "links cannot nest inside marks" do
@@ -688,7 +688,7 @@ defmodule Barkpark.PortableDoc.BpmlTest do
     do: %{
       "id" => gen_id(),
       "type" => "heading",
-      "level" => Enum.random(1..3),
+      "level" => Enum.random(1..6),
       "text" => gen_text()
     }
 
