@@ -10,7 +10,7 @@
 # any judgement at all about WHO the credential was or WHICH box it pointed at.
 # The first judgement each made was the write's own HTTP status, by which time
 # the write had landed. media-smoke.sh's default target was literally the prod
-# box (BARKPARK_BASE default http://89.167.28.206), so a stale-but-valid
+# box (BARKPARK_BASE default http://89.167.28.206, deleted 2026-10-03), so a stale-but-valid
 # BARKPARK_TOKEN in an operator's shell wrote prod media.
 #
 # The remedy is the one PR #17717 put on scripts/cmux-smoke.sh, factored out so

@@ -164,7 +164,7 @@ Only if the Vercel project itself is corrupted (bad deployment loop, state poiso
 
 After 7 days of stable operation:
 
-- Remove the transitional `http://89.167.28.206` block from Caddy (see `adding-a-domain.md`).
+- Remove any transitional `http://<ip>` block from Caddy (see `adding-a-domain.md`).
 - Raise DNS TTL back to 3600 for routine operations.
 - Add `barkpark.cloud` + `api.barkpark.cloud` to Uptime Kuma (per slice 8.0 preflight item, not this doc).
 

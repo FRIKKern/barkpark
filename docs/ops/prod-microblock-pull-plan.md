@@ -1,6 +1,8 @@
-<!-- doc-tier: agent | canonical-for: prod-microblock-pull-plan | budget: 2200tok -->
+<!-- doc-tier: cold | canonical-for: prod-microblock-pull-plan | budget: 2200tok -->
 
 # Pulling 89.167.28.206 forward — the plan
+
+> HISTORICAL RECORD (2026-10-03) — retired. The owner updated the box this plan targets (89.167.28.206) to `bd3a30233` and deleted it on 2026-10-03; snapshot 439115764 is kept. Run nothing below. Current hosts: `docs/ops/PROD_OPS.md`.
 
 **A plan for a human to approve and run by hand. Nothing here auto-executes.** Every step is
 a command you type and read the output of before continuing. Conditional on the LIVE decision in

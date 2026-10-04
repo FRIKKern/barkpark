@@ -17,7 +17,7 @@ First-run setup is through the web UI. SSH-tunnel to reach it:
 
 ```bash
 # From your laptop:
-ssh -L 3001:127.0.0.1:3001 root@89.167.28.206
+ssh -L 3001:127.0.0.1:3001 root@<host-running-uptime-kuma>
 # Then open http://localhost:3001 on your laptop.
 ```
 
