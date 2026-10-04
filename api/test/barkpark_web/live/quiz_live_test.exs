@@ -89,14 +89,16 @@ defmodule BarkparkWeb.QuizLiveTest do
     assert Barkpark.Quiz.Room.whereis(pin) == nil
   end
 
-  test "host with ?quiz=<id> binds the room and renders the bound question", %{
-    conn: conn,
-    pin: pin
-  } do
+  test "host with ?quiz=<id> and a Studio host link binds the room and renders the bound question",
+       %{
+         conn: conn,
+         pin: pin
+       } do
     qid = "quiz-#{System.unique_integer([:positive])}"
     publish_quiz(qid, "WHO HOSTS THE GAME?", [%{"id" => "a", "label" => "A", "correct" => true}])
 
-    {:ok, _view, html} = live(conn, "/quiz/host/#{pin}?quiz=#{qid}")
+    link = "/quiz/host/#{pin}?quiz=#{qid}&host=#{Quiz.HostLink.sign(qid)}"
+    {:ok, _view, html} = live(conn, link)
 
     assert html =~ "WHO HOSTS THE GAME?"
     assert Quiz.state(pin).question.prompt == "WHO HOSTS THE GAME?"

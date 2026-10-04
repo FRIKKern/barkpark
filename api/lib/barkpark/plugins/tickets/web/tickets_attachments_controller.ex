@@ -80,6 +80,20 @@ defmodule BarkparkWeb.TicketsAttachmentsController do
 
   action_fallback BarkparkWeb.FallbackController
 
+  # Owner ruling #24 (2026-10-03, task-eec10eeab544e619 Q1): an operator
+  # download needs the write tier, the same as answering the ticket it belongs
+  # to and as the sibling inbox reads. Decided by `RequireWritePermission`
+  # itself (token, grant and account arms, 403 `forbidden`), so this route
+  # cannot drift from them. An anonymous conn skips it and keeps the action's
+  # own 401 from `require_operator/1`.
+  plug :require_operator_write when action == :show_operator
+
+  defp require_operator_write(conn, _opts) do
+    if is_nil(conn.assigns[:api_token]) and is_nil(conn.assigns[:current_user]),
+      do: conn,
+      else: BarkparkWeb.Plugs.RequireWritePermission.call(conn, [])
+  end
+
   # ───────────────────────────────── create ─────────────────────────────────
 
   @doc "Upload one attachment to a ticket the presenting key owns (multipart)."

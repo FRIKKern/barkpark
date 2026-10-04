@@ -911,7 +911,7 @@
         "tags": [
           "ticket"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/plugins/sheets/{slug}/ops": {
@@ -4699,7 +4699,7 @@
         "tags": [
           "ticket"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/chat/sessions/{id}/interrupt": {
@@ -12627,7 +12627,7 @@
         "tags": [
           "ticket"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/v1/chat/sessions/{id}/archive": {
@@ -15289,7 +15289,7 @@
         "tags": [
           "ticket"
         ],
-        "x-barkpark-scope": "read"
+        "x-barkpark-scope": "write"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/search/suggestions": {

@@ -752,7 +752,7 @@ defmodule Barkpark.Structure do
         items
       end
 
-    # Projects — with status filter sub-views
+    # Projects — with phase filter sub-views
     items =
       if Map.has_key?(schemas, "project") do
         items ++ [doc_type_with_filters(schemas["project"])]
@@ -991,12 +991,21 @@ defmodule Barkpark.Structure do
 
   # ── Node builders ──────────────────────────────────────────────────────────
 
-  # A document type that has a status field → gets a sub-list with filtered views
+  # A document type that has a status field → gets a sub-list with filtered views.
+  #
+  # `status` is the ROW status (draft/published/archived), filtered on the
+  # column. A `phase` select is a CONTENT field (owner ruling #45: the demo
+  # project's old `status` select moved there because the row status took it
+  # over), filtered as `phase=<opt>` → `content->>'phase'`. `status` wins when
+  # a schema declares both.
   defp doc_type_with_filters(schema) do
     status_field =
       Enum.find(schema.fields, fn f ->
         f["name"] == "status" && is_list(f["options"])
-      end)
+      end) ||
+        Enum.find(schema.fields, fn f ->
+          f["name"] == "phase" && is_list(f["options"])
+        end)
 
     if status_field do
       %Node{
@@ -1024,7 +1033,7 @@ defmodule Barkpark.Structure do
                 icon: status_icon(opt),
                 type: :document_type_list,
                 type_name: schema.name,
-                filter: "status=#{opt}"
+                filter: "#{status_field["name"]}=#{opt}"
               }
             end)
       }

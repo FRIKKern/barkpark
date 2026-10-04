@@ -131,7 +131,11 @@ rm -rf api/_build_next
 # Before the restart on purpose: after it we may not exist (cgroup kill).
 echo "[deploy-rebuild] Building Go TUI client (non-fatal)..."
 if command -v go > /dev/null 2>&1; then
-  if go mod tidy && go build -o bin/barkpark-tui ./cmd/barkpark; then
+  # NO `go mod tidy` here (removed 2026-10-03): it rewrote the TRACKED go.mod /
+  # go.sum under the box's Go, and that churn made the NEXT self-update's
+  # --ff-only merge abort on every box. The committed go.sum is complete — CI
+  # builds from it — so a plain (read-only module mode) build is enough.
+  if go build -o bin/barkpark-tui ./cmd/barkpark; then
     echo "[deploy-rebuild] Go TUI client built."
   else
     echo "[deploy-rebuild] WARN: Go TUI client build failed — API deploy unaffected."
