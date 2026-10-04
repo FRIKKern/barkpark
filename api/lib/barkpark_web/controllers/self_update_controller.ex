@@ -108,6 +108,13 @@ defmodule BarkparkWeb.SelfUpdateController do
       {:error, :not_supported} ->
         conflict(conn, "not_supported", "rollback is not supported on this instance")
 
+      {:error, :v2_seals_unreadable} ->
+        conflict(
+          conn,
+          "v2_seals_unreadable",
+          "the rollback target cannot open the bound field seals this instance holds; fix forward instead"
+        )
+
       {:error, :already_running} ->
         already_running(conn)
 

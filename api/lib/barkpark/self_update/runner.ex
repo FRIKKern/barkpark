@@ -180,13 +180,20 @@ defmodule Barkpark.SelfUpdate.Runner do
     * `{:error, :no_previous_slot}` — exit 21
     * `{:error, :not_supported}` — exit 22 (box has no `.slots` machinery)
     * `{:error, :already_running}` — exit 23 (script flock held)
+    * `{:error, :v2_seals_unreadable}` — exit 25: the target predates bound
+      field seals (owner ruling #18) and this box holds some, which the
+      target could not open
     * `{:error, {:preflight_failed, code}}` — any other outcome (incl. an
       exit 0 with no parseable sha) → the caller FAILS CLOSED, never flips.
   """
   @spec preflight_rollback() ::
           {:ok, String.t()}
           | {:error,
-             :no_previous_slot | :not_supported | :already_running | {:preflight_failed, term()}}
+             :no_previous_slot
+             | :not_supported
+             | :already_running
+             | :v2_seals_unreadable
+             | {:preflight_failed, term()}}
   def preflight_rollback do
     {exe, args} =
       Keyword.get(config(), :rollback_preflight_command, @default_rollback_preflight_command)
@@ -216,6 +223,9 @@ defmodule Barkpark.SelfUpdate.Runner do
 
       {_output, 23} ->
         {:error, :already_running}
+
+      {_output, 25} ->
+        {:error, :v2_seals_unreadable}
 
       {_output, code} ->
         {:error, {:preflight_failed, code}}

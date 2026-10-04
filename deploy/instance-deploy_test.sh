@@ -109,6 +109,14 @@ fi
 
 make_fakes() {
   local dir="$1"; mkdir -p "$dir"
+  # Fake psql: the rollback preflight's v2-seal count. FAKE_V2_SEALS=<n>
+  # answers n; unset = psql fails (the "unknown" path, which only warns).
+  cat > "$dir/psql" <<'EOF'
+#!/usr/bin/env bash
+[ -n "${FAKE_V2_SEALS:-}" ] || exit 2
+echo "$FAKE_V2_SEALS"
+EOF
+  chmod +x "$dir/psql"
   cat > "$dir/git" <<'EOF'
 #!/usr/bin/env bash
 # Fake git: record the invocation, honor refs. Skip leading -c KV / -C PATH
@@ -388,6 +396,8 @@ run_preflight() { # $1=fake sha (live HEAD); stdout kept for TARGET_* asserts
     BARKPARK_APP_DIR="$APP" BARKPARK_DEPLOY_LOCK="$TMP/lock" \
     BARKPARK_CADDYFILE="$CADDY" BARKPARK_HEALTH_HOST=test.example \
     BARKPARK_CADDYFILE_LOCK="$TMP/caddyfile.lock" \
+    FAKE_V2_SEALS="${FAKE_V2_SEALS:-}" \
+    BARKPARK_ROLLBACK_ALLOW_V2_SEALS="${BARKPARK_ROLLBACK_ALLOW_V2_SEALS:-}" \
     HOME="$TMP/home" FAKE_SHA="$1" HEALTH_CODE=200 \
     bash "$SCRIPT" --rollback-preflight > "$TMP/preflight.log" 2>&1
   echo $?
@@ -720,6 +730,26 @@ check "rolled-away slot retired"          "grep -q 'disable --now barkpark-slot@
 check "no rebuild during rollback"        "[ \"\$(grep -c compile '$MIXLOG')\" = '0' ]"
 rm -rf "$TMP"
 
+echo "== Case 9c: rollback past bound field seals is refused while v2 seals exist =="
+# Ruling #18 bind half: a target sha without FieldCipher's @bound_version (the
+# fake git show prints nothing, i.e. "predates") cannot open "_bpenc": 2 seals.
+setup_case
+run_deploy 200 v1sha >/dev/null
+run_deploy 200 v2sha >/dev/null
+cp "$CADDY" "$TMP/caddy.before"; : > "$SYSCTLLOG"; : > "$GITLOG"
+rc="$(FAKE_V2_SEALS=3 run_preflight v2sha)"
+check "v2 seals present: exit 25 v2_seals_unreadable" "[ '$rc' = '25' ]"
+check "the refusal is named in the log"   "grep -q 'v2_seals_unreadable' '$TMP/preflight.log'"
+check "refusal prints no TARGET_SHA"      "! grep -q '^TARGET_SHA=' '$TMP/preflight.log'"
+check "refusal leaves Caddyfile byte-identical" "cmp -s '$CADDY' '$TMP/caddy.before'"
+check "refusal never resets the checkout" "! grep -q 'reset --hard' '$GITLOG'"
+rc="$(FAKE_V2_SEALS=0 run_preflight v2sha)"
+check "no v2 seals: exit 0"               "[ '$rc' = '0' ]"
+rc="$(FAKE_V2_SEALS=3 BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1 run_preflight v2sha)"
+check "explicit accept: exit 0"           "[ '$rc' = '0' ]"
+rc="$(run_preflight v2sha)"
+check "count unknown: exit 0 with a WARN" "[ '$rc' = '0' ] && grep -q 'could not count v2 seals' '$TMP/preflight.log'"
+rm -rf "$TMP"
 echo "== Case 9b: a rollback flip that matches NOTHING is refused, live slot kept =="
 # The rollback path's own post-flip curl is deliberately log-only (its pre-flip
 # own-port loop is the gate), so a no-op rewrite here has NOTHING downstream to

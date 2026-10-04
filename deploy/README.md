@@ -108,7 +108,7 @@ while the status-scoped form answers **404** — with two controls (an existing
 file → 200, the proxied path → 503) identical under both arms, so the difference
 is the status list and nothing else. Reference block + manual arming:
 `deploy/caddy/barkpark-maintenance.caddy`. Offline test harness for the deploy
-script: `bash deploy/instance-deploy_test.sh` — 572 checks: slot selection,
+script: `bash deploy/instance-deploy_test.sh` — 580 checks: slot selection,
 flip, failure semantics, channel seam, coalesce, rollback happy flip-back +
 typed refusals + unhealthy fail-closed, /mcp + /connectors route idempotence
 and their install guards, and the on-box-compile ruling below. EVERY `<engine> …
@@ -191,7 +191,7 @@ that the contention path was mute.
 what its idle slot holds. `instance-deploy.sh --rollback-preflight` (read-only)
 answers whether a rollback is possible: exit 0 prints `TARGET_SLOT=`/
 `TARGET_SHA=`; typed refusals — 21 `no_previous_slot`, 22 `not_supported`
-(pre-stamp box), 23 deploy lock held. `instance-deploy.sh --rollback` flips to
+(pre-stamp box), 23 deploy lock held, 25 `v2_seals_unreadable` (see below). `instance-deploy.sh --rollback` flips to
 the idle slot at its recorded sha: `git reset --hard <stamp>` first (a bare
 port flip lies — both slots share ONE checkout, so a slot restart would
 recompile NEW source into the old build root), reboot the slot, health-gate it
@@ -199,6 +199,14 @@ on its own port, flip Caddy only on green, rewrite `.instance-deploy-last`.
 Unhealthy = fail closed: slot re-disabled, Caddy untouched, checkout reset
 back, exit 24. Schema stays forward — rolling back code does NOT undo a
 migration; write a compensating one.
+
+**Rollback past bound field seals is one-way (e067ef7cd, ruling #18).** Since
+that commit, encrypted fields are sealed as `"_bpenc": 2` envelopes, which older
+code cannot open: a rollback to a sha before it leaves every v2-sealed field
+unrevealable until you roll forward again. The preflight refuses with exit 25
+`v2_seals_unreadable` when the target lacks v2 support AND `psql` counts v2
+seals on the box. When it cannot count, it only warns. Fix forward instead;
+`BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1` accepts the loss on purpose.
 
 **Slot memory peaks (`deploy/slot-memory-peaks.sh`).** systemd's `MemoryPeak`/
 `MemorySwapPeak` reset per unit invocation and read 0 on a stopped unit — both

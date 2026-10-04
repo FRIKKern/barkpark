@@ -40,7 +40,9 @@
 # ROLLBACK MODES (W6) — the same script owns the reverse flip:
 #   --rollback-preflight  read-only: is a rollback possible right now? Typed
 #                         exits (21 no_previous_slot, 22 not_supported, 23 lock
-#                         held); exit 0 prints TARGET_SLOT=/TARGET_SHA= lines
+#                         held, 25 v2_seals_unreadable: the target predates
+#                         bound field seals and this box holds some); exit 0
+#                         prints TARGET_SLOT=/TARGET_SHA= lines
 #                         (machine-parsed by the instance controller).
 #   --rollback            flip+reset to the IDLE slot at its RECORDED sha
 #                         (.slots/<slot>.sha): git reset --hard <stamp>, reboot
@@ -933,6 +935,29 @@ if [ "$MODE" != "deploy" ]; then
   if [ ! -d "$APP/api/_build_$TARGET_SLOT/prod" ]; then
     log "idle slot '$TARGET_SLOT' has no complete build root (api/_build_$TARGET_SLOT/prod) — no_previous_slot"
     exit 21
+  fi
+  # Bound field seals (owner ruling #18 bind half, e067ef7cd): code before it
+  # has no decrypt clause for a version-2 envelope ("_bpenc": 2), so rolling
+  # back past it leaves every v2-sealed field unrevealable. Refuse when the
+  # target predates v2 support AND this box holds v2 seals. The count is
+  # best-effort: no psql or no answer is "unknown" and only warns (a box
+  # this cannot inspect is not blocked). BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1
+  # accepts the loss deliberately.
+  # Captured, not piped: `git show | grep -q` under pipefail can SIGPIPE.
+  TARGET_CIPHER="$(git show "$TARGET_SHA:api/lib/barkpark/crypto/field_cipher.ex" 2>/dev/null || true)"
+  if [[ "$TARGET_CIPHER" != *"@bound_version"* ]]; then
+    V2_SEALS="unknown"
+    V2_DB_URL="$(set -a; . "$APP/.env" >/dev/null 2>&1; printf '%s' "${DATABASE_URL:-}")"
+    if command -v psql >/dev/null 2>&1 && [ -n "$V2_DB_URL" ]; then
+      V2_SEALS="$(PGCONNECT_TIMEOUT=5 psql "$V2_DB_URL" -tAc "SELECT count(*) FROM documents WHERE content::text LIKE '%\"_bpenc\": 2%'" 2>/dev/null || true)"
+      case "$V2_SEALS" in ''|*[!0-9]*) V2_SEALS="unknown" ;; esac
+    fi
+    if [ "$V2_SEALS" = "unknown" ]; then
+      log "WARN: target $TARGET_SHA predates bound field seals; could not count v2 seals on this box — if any exist, they become unrevealable after this rollback"
+    elif [ "$V2_SEALS" != "0" ] && [ "${BARKPARK_ROLLBACK_ALLOW_V2_SEALS:-}" != "1" ]; then
+      log "target $TARGET_SHA predates bound field seals and $V2_SEALS document(s) here hold one — rolling back would make them unrevealable (v2_seals_unreadable). Fix forward, or set BARKPARK_ROLLBACK_ALLOW_V2_SEALS=1 to accept"
+      exit 25
+    fi
   fi
   if [ "$MODE" = "preflight" ]; then
     log "rollback possible: would flip :$ACTIVE_PORT ($LIVE) -> :$TARGET_PORT ($TARGET_SLOT) at $TARGET_SHA"
