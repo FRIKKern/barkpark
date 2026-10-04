@@ -485,7 +485,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       # `@doc.content` only.
       content =
         if socket.assigns.live_session do
-          case Session.peek(slug, assigns.dataset, doc.workspace_id) do
+          case Session.peek(slug, assigns.dataset, doc) do
             {:ok, content} -> content
             {:error, :no_session} -> doc.content || %{}
           end
@@ -2367,7 +2367,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
            Session.peek(
              socket.assigns.slug,
              socket.assigns.dataset,
-             GridData.session_workspace_id(socket)
+             GridData.session_scope(socket)
            ),
          tab when is_map(tab) <- Enum.at(Map.get(content, "tabs") || [], socket.assigns.tab),
          cells when is_map(cells) <- Map.get(tab, "cells") do

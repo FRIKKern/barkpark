@@ -97,6 +97,10 @@ defmodule BarkparkWeb.DocumentOpsController do
       {:error, {:invalid_task_content, %{}} = reason} ->
         ErrorResponse.emit(conn, {:error, reason})
 
+      # A non-admin op changed a schema `readOnly` field (owner ruling #35).
+      {:error, {:read_only_fields, _fields} = reason} ->
+        ErrorResponse.emit(conn, {:error, reason})
+
       # C083: a held instance refuses the write at the door. 503 transient, never an op fault.
       {:error, {:write_admission, _}} = refused ->
         write_admission_refused(conn, refused)

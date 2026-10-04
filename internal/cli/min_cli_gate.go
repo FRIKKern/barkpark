@@ -6,7 +6,7 @@ import (
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
 
-// THE MEASUREMENT THIS FILE EXISTS FOR (prod, 2026-09-16).
+// THE MEASUREMENT THIS FILE EXISTS FOR (prod, 2026-09-16; that box was deleted 2026-10-03).
 //
 //	GET http://89.167.28.206/v1/capabilities -> server.version "0.1.0", server.min_cli "1.0.0"
 //	GET http://89.167.28.206/status.json     -> version "0.2.26.929", commit ca4534461
@@ -129,7 +129,7 @@ func minCLINotice(server manifest.Server) string {
 // which is precisely why the stale population is stuck. Ship the ear now; the
 // mouth is an api-side field change (see the c1 note on the row).
 //
-// WHAT IT DOES TODAY, measured rather than assumed (prod, 2026-09-17):
+// WHAT IT DID, measured rather than assumed (prod, 2026-09-17; that box was deleted 2026-10-03):
 //
 //	GET http://89.167.28.206/v1/capabilities -> server.min_cli "1.0.0"
 //	git tag -l 'cli-v*' | sed 's/cli-v//' | sort -V -> 1.1.0 … 1.21.0, none < 1.0.0

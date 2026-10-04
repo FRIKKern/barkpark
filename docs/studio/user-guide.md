@@ -44,7 +44,7 @@ Everything in this section needs the OnixEdit plugin enabled.
 SSH procedure:
 
 ```bash
-ssh root@89.167.28.206
+ssh root@<your-box>
 cd /opt/barkpark/api
 source /root/.asdf/asdf.sh
 set -a; source ../.env; set +a

@@ -29,7 +29,10 @@ debounce of 2s or 25 ops, plus on terminate.
 - **before_save gate:** A1 keys, XFD grid bounds, merge ≤10k → 409 `halted`.
 - **`:ingest` API:** import (xlsx/csv/tsv, with size and cell caps) · export
   `.{xlsx,csv,tsv,md,html}` (flush-first) · `/ops` (batch caps).
-- **`:public_root` reader:** `/sheets/:slug`, published-only.
+- **`:public_root` reader:** `/sheets/:slug`, published-only. **Publishing a
+  sheet makes it public:** the reader serves any published sheet to anyone,
+  whatever the schema's `visibility` (default `private`), as `/papers` does
+  (owner ruling 2026-10-03). Studio's Publish control and flash say so.
 - Error envelopes (413/422/503) live in `plugins/sheets.ex`.
 
 ## Embed pipeline

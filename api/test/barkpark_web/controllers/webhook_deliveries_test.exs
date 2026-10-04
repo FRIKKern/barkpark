@@ -86,6 +86,10 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
         Map.merge(
           %{
             dataset: "test",
+            # The flat routes stamp the webhook with the Default workspace, and
+            # a workspace-less event replays only to a shared-layer webhook
+            # (owner ruling #51, RQ2), so the fixture event lives in Default.
+            workspace_id: Barkpark.TenancyFixtures.default_workspace_id!(),
             type: "widget",
             doc_id: "doc-#{System.unique_integer([:positive])}",
             mutation: "publish",
@@ -323,6 +327,20 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
 
       assert resp.status == 404
       assert Jason.decode!(resp.resp_body)["error"]["message"] == "event not found"
+      refute_receive {:webhook_post, _, _, _}, 200
+    end
+  end
+
+  describe "a workspace-less event (owner ruling #51, RQ2)" do
+    test "cannot be replayed to a workspace's webhook → 404, nothing POSTed", %{conn: conn} do
+      wh = make_webhook(conn, %{"dataset" => "test"})
+      assert is_binary(wh.workspace_id)
+      orphan = make_event(%{workspace_id: nil})
+
+      resp =
+        conn |> authed() |> post("/v1/webhooks/test/#{wh.id}/deliveries/#{orphan.id}/replay")
+
+      assert resp.status == 404
       refute_receive {:webhook_post, _, _, _}, 200
     end
   end

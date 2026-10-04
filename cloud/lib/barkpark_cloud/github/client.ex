@@ -116,4 +116,22 @@ defmodule BarkparkCloud.GitHub.Client do
 
   @doc "List the repos `installation_id` can access. Returns `{:ok, [repo_map]}` or an error."
   @callback list_repos(installation_id) :: {:ok, [map()]} | {:error, term}
+
+  @doc """
+  Exchange the user-authorization `code` GitHub sends back with an App install
+  (the App's "Request user authorization (OAuth) during installation" setting)
+  for a short-lived USER-to-server token. `{:error, :bad_verification_code}`
+  for a spent, expired or forged code; `{:error, :not_configured}` when the
+  App's client id or secret is not wired.
+  """
+  @callback exchange_user_code(code :: String.t()) :: {:ok, String.t()} | {:error, term}
+
+  @doc """
+  The ids of the App installations the USER behind `user_token` can access
+  (`GET /user/installations`). This is the proof an installation id belongs
+  to the person recording it: the App-JWT check in `get_installation/1`
+  answers for every install of the App, this one only for the user's own.
+  """
+  @callback list_user_installation_ids(user_token :: String.t()) ::
+              {:ok, [String.t()]} | {:error, term}
 end

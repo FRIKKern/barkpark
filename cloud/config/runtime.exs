@@ -164,6 +164,14 @@ if config_env() == :prod do
       private_key: github_private_key,
       webhook_secret: System.get_env("GITHUB_APP_WEBHOOK_SECRET"),
       app_slug: System.get_env("GITHUB_APP_SLUG"),
+      # The App's OAuth client (task-0cf611238d4ad597 CQ7a). Recording an
+      # install exchanges the user-authorization code GitHub sends with the
+      # install redirect, which needs the App setting "Request user
+      # authorization (OAuth) during installation" ON and its Callback URL set
+      # to the console root. Unset → POST /v1/github/installations answers 503
+      # feature_not_configured; nothing else changes.
+      client_id: System.get_env("GITHUB_APP_CLIENT_ID"),
+      client_secret: System.get_env("GITHUB_APP_CLIENT_SECRET"),
       # Injected verified-TLS transport (no new dep) — the same built-in :httpc
       # client the billing + studio-link seams use.
       http_client: &BarkparkCloud.Billing.HttpClient.request/1

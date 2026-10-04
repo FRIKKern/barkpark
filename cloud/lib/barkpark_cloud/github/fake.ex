@@ -115,6 +115,31 @@ defmodule BarkparkCloud.GitHub.Fake do
     end
   end
 
+  # The user-authorization leg (task-0cf611238d4ad597 CQ7a). A code minted by
+  # `user_code_for/1` names the installation ids its user can access; any other
+  # code is refused the way GitHub refuses a spent or forged one.
+  @user_code_prefix "fake-user-code:"
+  @user_token_prefix "ghu_fake:"
+
+  @impl true
+  def exchange_user_code(@user_code_prefix <> ids), do: {:ok, @user_token_prefix <> ids}
+  def exchange_user_code(_code), do: {:error, :bad_verification_code}
+
+  @impl true
+  def list_user_installation_ids(@user_token_prefix <> ids),
+    do: {:ok, String.split(ids, ",", trim: true)}
+
+  def list_user_installation_ids(_token), do: {:error, :bad_credentials}
+
+  @doc """
+  A user-authorization code whose user can access exactly `installation_ids`.
+  For tests: the code the console would forward from GitHub's install redirect.
+  """
+  @spec user_code_for([String.t() | integer()]) :: String.t()
+  def user_code_for(installation_ids) when is_list(installation_ids) do
+    @user_code_prefix <> Enum.map_join(installation_ids, ",", &to_string/1)
+  end
+
   ## Test inspection helpers ────────────────────────────────────────────────
 
   @doc "Every repo created via `create_repo/3` in this process, in call order."

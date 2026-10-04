@@ -283,6 +283,83 @@ defmodule BarkparkWeb.BulldocsIngestScopeTest do
     end
   end
 
+  # OWNER RULING 2026-10-03 #8 (task-8e46d70f7b5e3fc7): a token that names a
+  # workspace must have write access there, or be on an ARMED operator
+  # allowlist; the shared-secret producer is unchanged.
+  describe "REFUSE — a homeless token naming a workspace it cannot write (ruling #8)" do
+    test "a homeless admin token seated only in A cannot write a paper into B",
+         %{conn: conn, ws_a: ws_a, ws_b: ws_b} do
+      raw = "ingest-named-b-#{System.unique_integer([:positive])}"
+      _token = homeless_admin_token!(raw, [ws_a])
+      slug = "ingest-named-b-#{System.unique_integer([:positive])}"
+
+      resp = post_paper(conn, raw, slug, [{"x-barkpark-workspace", ws_b.slug}])
+
+      assert resp.status == 403, resp.resp_body
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "workspace_forbidden"
+      refute find_paper(slug), "a refused write must leave no row"
+    end
+
+    test "the same token naming B by workspace_id in the body is refused too",
+         %{conn: conn, ws_a: ws_a, ws_b: ws_b} do
+      raw = "ingest-named-b-id-#{System.unique_integer([:positive])}"
+      _token = homeless_admin_token!(raw, [ws_a])
+      slug = "ingest-named-b-id-#{System.unique_integer([:positive])}"
+
+      resp =
+        conn
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> put_req_header("content-type", "application/json")
+        |> post(@path, Map.put(body(slug), "workspace_id", ws_b.id))
+
+      assert resp.status == 403, resp.resp_body
+      refute find_paper(slug)
+    end
+
+    test "naming its OWN workspace still writes there", %{conn: conn, ws_a: ws_a} do
+      raw = "ingest-named-a-#{System.unique_integer([:positive])}"
+      _token = homeless_admin_token!(raw, [ws_a])
+      slug = "ingest-named-a-#{System.unique_integer([:positive])}"
+
+      resp = post_paper(conn, raw, slug, [{"x-barkpark-workspace", ws_a.slug}])
+
+      assert resp.status == 200, resp.resp_body
+      assert find_paper(slug).workspace_id == ws_a.id
+    end
+
+    test "the read twin: B's session is not readable by naming B", %{
+      conn: conn,
+      ws_a: ws_a,
+      ws_b: ws_b
+    } do
+      slug = "ingest-named-session-#{System.unique_integer([:positive])}"
+
+      seeded =
+        conn
+        |> put_req_header("authorization", "Bearer #{@ingest_secret}")
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-barkpark-workspace", ws_b.slug)
+        |> post("/v1/plugins/bulldocs/sessions", %{
+          "slug" => slug,
+          "title" => slug,
+          "blocks" => [%{"id" => "p-1", "type" => "paragraph", "text" => "b only"}]
+        })
+
+      assert seeded.status == 200, seeded.resp_body
+
+      raw = "ingest-named-read-#{System.unique_integer([:positive])}"
+      _token = homeless_admin_token!(raw, [ws_a])
+
+      resp =
+        build_conn()
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> put_req_header("x-barkpark-workspace", ws_b.slug)
+        |> get("/v1/plugins/bulldocs/sessions/#{slug}")
+
+      assert resp.status == 403, resp.resp_body
+    end
+  end
+
   describe "UNCHANGED — the excluded population" do
     test "the SHARED SECRET carries no principal and keeps the pipeline's Default",
          %{conn: conn} do

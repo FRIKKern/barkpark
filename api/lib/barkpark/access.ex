@@ -86,8 +86,12 @@ defmodule Barkpark.Access do
 
       case %Grant{} |> Grant.changeset(insert_attrs) |> Repo.insert() do
         {:ok, grant} ->
+          # The grantee by user id when the address already has an account,
+          # never by email (owner ruling #32 item 2): the audit log is
+          # append-only and hash-chained. The grant row (pseudonymised on
+          # erasure) is where the address lives.
           emit_grant_event("grant.minted", grant, principal, %{
-            "grantee_email" => grant.grantee_email,
+            "grantee_user_id" => grant.grantee_user_id || grantee_user_id(grant.grantee_email),
             "capabilities" => grant.capabilities,
             "project_id" => grant.project_id,
             "dataset" => grant.dataset,
@@ -616,4 +620,13 @@ defmodule Barkpark.Access do
       {k, v} -> {k, v}
     end)
   end
+
+  defp grantee_user_id(email) when is_binary(email) and email != "" do
+    case Barkpark.Accounts.get_user_by_email(email) do
+      %{id: id} -> id
+      _ -> nil
+    end
+  end
+
+  defp grantee_user_id(_email), do: nil
 end

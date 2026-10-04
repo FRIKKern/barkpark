@@ -73,7 +73,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin; a PAT must also hold `root`)
       POST    /v1/barkparks/adopt admin    attach an already-running box: proof of admin control, Cloud mints + stores its own `barkpark cloud admin` token (team-admin; a PAT must also hold `root`)
-      POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
+      POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket; seats the caller at their TEAM role, ruling #26)
       POST    /v1/auth/studio-signin        user   instance-initiated Studio entry by public host → {url}
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
       DELETE  /v1/barkparks/:id/app-token user  revoke app token(s) — body {token} for one, EMPTY (never {token:""}) for logout-everywhere (wave 2; admin token stays server-side)
@@ -106,6 +106,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/fleet   operator  fleet snapshot for the session-gated operator console
       GET     /v1/operator/autoupdate operator  fleet-autoupdate policy snapshot (console read)
       POST    /v1/operator/autoupdate/halt operator  halt fleet autoupdate (console brake)
+      POST    /v1/operator/barkparks/:id/enable-apply operator  re-run the enable-apply job on one ARMED box (re-arms + restores box-side go.mod/go.sum churn; consent-gated on autoupdate_enabled)
       POST    /v1/operator/autoupdate/resume operator  resume fleet autoupdate (console)
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       POST    /v1/operator/digest/send operator  send ONE fleet digest now (scope REQUIRED: {"scope":"fleet"} or {"team_id":"…"}; 2/min/operator; 422 `scope_required` on a bodyless call)
@@ -113,6 +114,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/barkparks/without-agent-token operator  boxes holding NO live agent token (disarmed vs down), each row with its remedy
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
       POST    /v1/operator/sites/content-secrets/mint operator  mint the content-publish secret for content-bound sites that have none, and register the webhook
+      PUT     /v1/operator/teams/:id/support-cap operator  set one team's cap on CP-provisioned support boxes (owner ruling #37; `null` = platform default)
       POST    /v1/operator/teams/:id/billing/resume operator  lift a team's BILLING suspension after re-reading its subscription from the payment gateway (reason-scoped; 409 `subscription_unpaid` when the gateway does not say the payer is current)
       GET     /v1/deliveries       user(s)+worker  the platform's OWN per-sha delivery record — what was delivered, on whose run, and the clocks around it (?sha= narrows; a pinned window otherwise). PAT-reachable on purpose (D385/D412)
       GET     /v1/deploy-ledger/census user(s)  the SAME deploy ledger, scoped to the caller's own team sites (+ a scope line naming the team slug); the read a non-operator can actually reach
@@ -202,7 +204,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/forms  user(s)   the site's form endpoint state + its inbox, newest first (read ability; N-08)
       PUT     /v1/sites/:id/forms  user(s)   turn the site's form endpoint on/off on the box (write ability; N-08)
       PATCH   /v1/sites/:id/forms/submissions/:sub_id user(s)  set one submission's state (new/seen) and/or spam disposition (write ability; N-08)
-      POST    /v1/sites/:id/forms/export user(s)  the selected submissions as CSV or JSON (write ability — bulk personal-data copy; N-08)
+      POST    /v1/sites/:id/forms/export admin(s)  the selected submissions as CSV or JSON (write ability AND team-admin — bulk personal-data copy; N-08, owner ruling #28)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user(s)  list a site's PRODUCTION deployments, newest first (read ability) — the only route that can express a DENOMINATOR, so an automation credential can compute the owner's own deploy number (D219 re-tiering)
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
@@ -214,7 +216,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
       POST    /v1/sites/:id/deployments/:dep_id/artifact user(s)  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    admin     replace the encrypted env blob (admin-or-owner; task-9dfa4854b5e22e94)
-      POST    /v1/sites/:id/domains user     add a domain to a site
+      POST    /v1/sites/:id/domains user     add a domain to a site (ruling #29: the team proves it first via a _barkpark-verify TXT record; 409 domain_verification_required names the record)
       DELETE  /v1/sites/:id/domains user     remove a domain from a site — frees the hostname
       POST    /v1/sites/:id/github  admin    link a GitHub repo + branch + webhook secret (manual)
       POST    /v1/sites/:id/github/connect admin  pick a repo → auto-register the push webhook on GitHub (gh-4)
@@ -2934,7 +2936,9 @@ defmodule BarkparkCloud.Web.Router do
     }
 
     # PDF-D86: register_support_barkpark/2 is quota-exempt — a support
-    # never returns :limit_reached, so a saturated ceiling can't 403 here.
+    # never returns :limit_reached, so a saturated ceiling can't 403 here. The
+    # ruling #37 support-box cap is NOT applied here either: a register-only row
+    # binds the team's OWN box, which costs the platform nothing.
     case Registry.register_support_barkpark(team, attrs) do
       {:ok, support} ->
         push_event(team.id, "fleet")
@@ -3006,21 +3010,29 @@ defmodule BarkparkCloud.Web.Router do
       server_type: string_param_or_nil(conn.body_params["server_type"])
     }
 
-    case Registry.register_support_barkpark(team, attrs) do
-      {:ok, support} ->
-        case Registry.enqueue_support_provision_job(support) do
-          {:ok, job} ->
-            push_event(team.id, "fleet")
-            json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
+    # Owner ruling #37 (2026-10-03): provision mode starts a PAID server, so it
+    # runs under a per-team cap (PDF-D86's quota exemption still holds for the
+    # instance quota; this is a separate, smaller ceiling an operator can raise).
+    # The row and its job are written in ONE locked transaction with the count.
+    case Registry.provision_support_capped(team, attrs) do
+      {:ok, {support, job}} ->
+        push_event(team.id, "fleet")
+        json(conn, 202, %{barkpark: barkpark_json(support), job_id: job.id})
 
-          # A brand-new row can't already hold an active job, but stay honest
-          # rather than 500 if a race ever produces one.
-          {:error, :already_provisioning} ->
-            json(conn, 409, %{error: "already_provisioning", barkpark: barkpark_json(support)})
+      {:error, {:support_cap_reached, cap, held}} ->
+        json(conn, 403, %{
+          error: "support_cap_reached",
+          cap: cap,
+          count: held,
+          detail:
+            "this team already holds #{held} provisioned support box(es), its cap is #{cap}. " <>
+              "Remove one (bp cloud support remove), or ask Barkpark support to raise the cap."
+        })
 
-          {:error, %Ecto.Changeset{} = cs} ->
-            json(conn, 422, %{error: "invalid", details: errors(cs)})
-        end
+      # A brand-new row can't already hold an active job, but stay honest rather
+      # than 500 if a race ever produces one. (The transaction rolled the row back.)
+      {:error, :already_provisioning} ->
+        json(conn, 409, %{error: "already_provisioning"})
 
       {:error, %Ecto.Changeset{} = cs} ->
         json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -4036,10 +4048,13 @@ defmodule BarkparkCloud.Web.Router do
         case Registry.get_barkpark(conn.path_params["id"]) do
           %Barkpark{team_id: tid} = bp when tid == team.id ->
             # cloud-identity handoff: pass the cloud account's email so the
-            # instance signs the browser in AS this user (JIT-provisioned
-            # owner) rather than an anonymous admin-token session. Older
-            # instances ignore the field — legacy ticket, still one-click.
-            case Registry.mint_studio_link(bp, conn.assigns.current_user.email) do
+            # instance signs the browser in AS this user rather than an
+            # anonymous admin-token session, and (owner ruling #26) the TEAM
+            # role, so a member lands as a member, not as the workspace owner.
+            # Older instances ignore both fields — legacy ticket, one-click.
+            role = Accounts.team_role(conn.assigns.current_user, team)
+
+            case Registry.mint_studio_link(bp, conn.assigns.current_user.email, role) do
               {:ok, url} ->
                 # OC24: audit THAT a link was minted — never the URL (it embeds
                 # the single-use login ticket) and never the admin token.
@@ -4157,8 +4172,8 @@ defmodule BarkparkCloud.Web.Router do
       # resolve, one step before the grant question is even asked.
       with %Barkpark{} = bp <- Registry.get_barkpark_by_public_host(host || ""),
            %Team{} = team <- Accounts.get_team(bp.team_id),
-           %{} <- Accounts.get_membership(team, user.id) do
-        case Registry.mint_studio_link(bp, user.email) do
+           %{role: role} <- Accounts.get_membership(team, user.id) do
+        case Registry.mint_studio_link(bp, user.email, role) do
           {:ok, url} ->
             audit_lifecycle_trigger(conn, team, bp.id, "barkpark.studio_link_minted", %{
               name: bp.name,
@@ -5269,6 +5284,53 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # POST /v1/operator/barkparks/:id/enable-apply → 202 {job_id} — re-run the
+  # enable-apply SSH job on ONE box (task-90f256a8c5e27cd2). The job is how the
+  # control plane reaches a box with the LATEST worker code: besides arming
+  # BARKPARK_SELF_UPDATE_APPLY it restores the box-side go.mod/go.sum churn an
+  # older deploy-rebuild's `go mod tidy` left, which jammed every self-update
+  # on the fleet. The automatic paths only enqueue it for an UNARMED box, and
+  # those boxes are armed — hence this operator door. Same consent gate as the
+  # automatic path (`maybe_enqueue_enable_apply_job/1`): autoupdate enabled, not
+  # suspended, has a host. A job already in flight answers 200 already_arming.
+  post "/v1/operator/barkparks/:id/enable-apply" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      true ->
+        case Registry.get_barkpark(id) do
+          nil ->
+            json(conn, 404, %{error: "not_found"})
+
+          %Barkpark{suspended: true} ->
+            json(conn, 409, %{error: "suspended"})
+
+          %Barkpark{} = bp ->
+            case Registry.maybe_enqueue_enable_apply_job(bp) do
+              {:ok, :already_arming} ->
+                json(conn, 200, %{status: "already_arming"})
+
+              {:ok, :skipped} ->
+                json(conn, 409, %{
+                  error: "not_live",
+                  detail:
+                    "enable-apply needs a box with a host and autoupdate enabled (the team's " <>
+                      "consent); this one has neither or one of them off"
+                })
+
+              {:ok, job} ->
+                json(conn, 202, %{status: "queued", job_id: job.id})
+
+              {:error, cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
+        end
+    end
+  end
+
   post "/v1/operator/autoupdate/resume" do
     conn = Auth.require_platform_operator(conn, [])
 
@@ -5610,6 +5672,51 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:gateway, reason}} ->
             json(conn, 502, %{error: "resume_failed", reason: billing_reason(reason)})
+        end
+    end
+  end
+
+  # PUT /v1/operator/teams/:id/support-cap {cap: N | null} → 200 {team_id,
+  # support_box_cap, effective_cap} — owner ruling #37's operator override: raise
+  # (or lower) ONE team's ceiling on CP-provisioned support boxes; `null` returns
+  # the team to the platform default. Lowering below what a team holds removes
+  # nothing — it only refuses the next provision.
+  put "/v1/operator/teams/:id/support-cap" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    cond do
+      conn.halted ->
+        conn
+
+      not (Map.has_key?(conn.body_params, "cap") and
+               (is_nil(conn.body_params["cap"]) or is_integer(conn.body_params["cap"]))) ->
+        json(conn, 422, %{
+          error: "invalid",
+          details: %{cap: ["must be a non-negative integer, or null for the platform default"]}
+        })
+
+      true ->
+        case Accounts.get_team(id) do
+          nil ->
+            json(conn, 404, %{error: "not_found", scope: "team"})
+
+          team ->
+            case Registry.set_support_box_cap(team, conn.body_params["cap"]) do
+              {:ok, updated} ->
+                Logger.info(
+                  "operator #{conn.assigns.current_user.id} set team #{id} support_box_cap=" <>
+                    inspect(updated.support_box_cap)
+                )
+
+                json(conn, 200, %{
+                  team_id: id,
+                  support_box_cap: updated.support_box_cap,
+                  effective_cap: Registry.support_box_cap(updated)
+                })
+
+              {:error, %Ecto.Changeset{} = cs} ->
+                json(conn, 422, %{error: "invalid", details: errors(cs)})
+            end
         end
     end
   end
@@ -6783,11 +6890,17 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # POST /v1/github/installations {installation_id} → 201 {installation:
-  # {connected, account_login, …}} — records the team's GitHub App installation
-  # after the App-install redirect (GitHub sends the browser back with the
-  # installation_id). The id is VALIDATED through the client seam before it lands
-  # (a forged / uninstalled id → 422 installation_not_found, nothing written).
+  # POST /v1/github/installations {installation_id, state, code} → 201
+  # {installation: {connected, account_login, …}} — records the team's GitHub App
+  # installation after the App-install redirect (GitHub sends the browser back
+  # with the installation_id, the state and a user-authorization code). The id is
+  # VALIDATED through the client seam before it lands (a forged / uninstalled id
+  # → 422 installation_not_found, nothing written), and the code proves the
+  # caller can access that install on GitHub (task-0cf611238d4ad597 CQ7a):
+  #   422 github_authorization_required — no code came back with the install
+  #   422 github_authorization_failed   — GitHub refused the code
+  #   422 installation_not_found        — the caller's GitHub user cannot see it
+  #   503 feature_not_configured        — the App's OAuth client is not wired
   # 503 feature_not_configured when the App credentials are absent (HUMAN-LAST).
   # RBAC: stores a capability handle → team admin only (parity with providers).
   # One installation per team (v1) — a re-connect replaces the existing row.
@@ -6839,7 +6952,13 @@ defmodule BarkparkCloud.Web.Router do
               action: "github.installation_connected",
               target_type: "github_installation"
             },
-            fn -> GitHub.record_installation(team, conn.body_params["installation_id"]) end,
+            fn ->
+              GitHub.record_user_installation(
+                team,
+                conn.body_params["installation_id"],
+                conn.body_params["code"]
+              )
+            end,
             fn inst -> %{target_id: inst.id, metadata: %{account_login: inst.account_login}} end
           )
 
@@ -6855,6 +6974,29 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, :installation_not_found} ->
             json(conn, 422, %{error: "installation_not_found"})
+
+          {:error, :github_authorization_required} ->
+            json(conn, 422, %{
+              error: "github_authorization_required",
+              detail:
+                "GitHub did not send an authorization with this install, so Barkpark " <>
+                  "cannot check that the installation is yours. Connect GitHub again " <>
+                  "from Settings → Providers and approve the authorization GitHub asks for."
+            })
+
+          {:error, :github_authorization_failed} ->
+            json(conn, 422, %{
+              error: "github_authorization_failed",
+              detail:
+                "GitHub refused the authorization for this install (it may have " <>
+                  "expired). Connect GitHub again from Settings → Providers."
+            })
+
+          {:error, :user_authorization_not_configured} ->
+            json(conn, 503, %{
+              error: "feature_not_configured",
+              detail: "The GitHub App's OAuth client is not configured on this control plane."
+            })
 
           {:error, %Ecto.Changeset{} = cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -9314,6 +9456,9 @@ defmodule BarkparkCloud.Web.Router do
              # A static site IS its content binding — refuse an unbound one AT THE
              # DOOR rather than writing a row the deploy path can never build.
              :ok <- require_content_binding(kind, attrs),
+             # Owner ruling #29: the CREATE door claims `domains` too, so each one
+             # must already be proven by this team (_barkpark-verify TXT).
+             :ok <- Registry.require_proven_domains(team.id, attrs.domains),
              # ssw8-bl-accepted-frameworks-no-implementation: a framework with no
              # shipped builder (hugo/nuxt/sveltekit) or a scale_mode with no
              # runtime (zero) is refused HERE, with the shipped menu for this
@@ -9333,6 +9478,11 @@ defmodule BarkparkCloud.Web.Router do
              # binding but no token can't build, and nothing downstream would say
              # so). An unreachable/refusing instance is a 502 with its own words —
              # no site row is written.
+             # Owner ruling #27 (2026-10-03): minting a box credential is a
+             # TEAM-ADMIN act, like every other credential verb. A create that
+             # would mint (a content binding with no BYO read_token) needs an
+             # admin; a member may still create a site that mints nothing.
+             :ok <- require_admin_to_mint(conn, team, attrs),
              {:ok, attrs} <- mint_site_read_token(bp, attrs, slug),
              # site-spawner W8 (charter D73): PROVE the binding by READING it,
              # here — the last moment the PLAINTEXT read token is in hand. Until
@@ -9412,6 +9562,12 @@ defmodule BarkparkCloud.Web.Router do
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
 
+          # Binding a site to content MINTS a public-read token on the box, and
+          # minting a box credential needs a team admin (owner ruling #27). The
+          # standard evidence keys only: the console's reason arms read them.
+          {:error, :mint_requires_admin} ->
+            Auth.forbidden(conn, required: "admin", scope: "team")
+
           # site-spawner W8 (charter D73): the binding was READ and it is empty —
           # the site's OWN token sees nothing at workspace/project/dataset/type.
           # Refuse at the door with the real menu (what that token could actually
@@ -9434,6 +9590,17 @@ defmodule BarkparkCloud.Web.Router do
           # honour for two owners.
           {:error, :domain_taken} ->
             json(conn, 409, %{error: "domain_taken"})
+
+          # Ruling #29: one or more named domains are not proven by this team.
+          # Nothing was minted or written; the body names every record to publish.
+          {:error, {:unverified_domains, challenges}} ->
+            json(conn, 409, %{
+              error: "domain_verification_required",
+              verifications: challenges,
+              detail:
+                "prove you control each domain first: add the DNS TXT record listed for it, " <>
+                  "or create the site without domains and add them with POST /v1/sites/:id/domains."
+            })
 
           # Same envelope and status the changeset error below produces — the
           # only difference is that nothing was minted first.
@@ -9569,6 +9736,13 @@ defmodule BarkparkCloud.Web.Router do
         #
         # theme/doc_type/prebuilt_enabled=false stay plain `write` — this adds
         # one gate on one arm, it does not re-tier the route.
+        # Owner ruling #27 (2026-10-03): the mint is a TEAM-ADMIN act on top of
+        # the credential bar above — a member's session carries ["root"], so the
+        # ability check alone let every member mint in any scope on the box.
+        rebinding? and may_grant? and
+            not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          Auth.forbidden(conn, required: "admin", scope: "team")
+
         rebinding? and not may_grant? ->
           json(conn, 403, %{
             error: "rebind_ability_required",
@@ -10546,13 +10720,32 @@ defmodule BarkparkCloud.Web.Router do
 
   # POST /v1/sites/:id/domains {domain} → 200 {site}. Adds the domain to the
   # site's array; the domain becomes acceptable to the on-demand-TLS ask-gate.
+  #
+  # Owner ruling #29 (2026-10-03, "DNS TXT check"): the team must first PROVE it
+  # controls the domain. Until `_barkpark-verify.<domain>` carries the team's
+  # token this answers 409 `domain_verification_required` with the record to
+  # publish (the token is minted on that first ask and kept, so a re-run checks
+  # the same value). A domain the site already holds stays idempotent. A proven
+  # domain that another team's site squatted is RECLAIMED when DNS backs the
+  # claimant and not the holder (`Registry.add_site_domain_verified/3`).
   post "/v1/sites/:id/domains" do
     with_team_site(conn, fn conn, site ->
       domain = conn.body_params["domain"]
 
+      proof =
+        if is_binary(domain) and domain != "" and not Registry.site_holds_domain?(site, domain),
+          do: Registry.prove_team_domain(site.team_id, domain),
+          else: :ok
+
       cond do
         not is_binary(domain) or domain == "" ->
           json(conn, 422, %{error: "domain_required"})
+
+        # Proven OUTSIDE the audited transaction below: an unproven answer must
+        # keep the minted token, which a rolled-back transaction would discard.
+        match?({:error, {:unverified, _, _}}, proof) ->
+          {:error, {:unverified, challenge, observed}} = proof
+          json(conn, 409, domain_verification_body(challenge, observed))
 
         true ->
           # activity-audit-log: the domain-array update + a `site.domain_added`
@@ -10568,13 +10761,16 @@ defmodule BarkparkCloud.Web.Router do
                 target_id: site.id,
                 metadata: %{site_id: site.id, domain: domain}
               },
-              fn -> Registry.add_site_domain(site, domain) end
+              fn -> Registry.add_site_domain_verified(site, domain) end
             )
 
           case audited do
             {:ok, site} ->
               push_event(site.team_id, "audit")
               json(conn, 200, %{site: site_json(site)})
+
+            {:error, {:unverified, challenge, observed}} ->
+              json(conn, 409, domain_verification_body(challenge, observed))
 
             # Cross-team collision guard: a domain owned by another site is a
             # conflict, not a validation error — 409, never a 200 the ask-gate
@@ -10587,6 +10783,20 @@ defmodule BarkparkCloud.Web.Router do
           end
       end
     end)
+  end
+
+  # The 409 body for an unproven domain (ruling #29): the record to publish, the
+  # TXT values DNS answered with right now, and the one sentence a CLI prints.
+  defp domain_verification_body(challenge, observed) do
+    %{
+      error: "domain_verification_required",
+      verification: challenge,
+      observed_txt: observed,
+      detail:
+        "prove you control #{challenge.domain}: add a DNS TXT record " <>
+          "#{challenge.txt_name} with the value #{challenge.txt_value}, wait for it " <>
+          "to resolve, then add the domain again."
+    }
   end
 
   # DELETE /v1/sites/:id/domains {domain} → 200 {site}. The inverse of the POST
@@ -12074,8 +12284,13 @@ defmodule BarkparkCloud.Web.Router do
   # read-only PAT can list, not export. Ids that are not this site's
   # submissions come back in `missing` (JSON) or as the `x-barkpark-missing`
   # count (CSV), never dropped without a trace.
+  #
+  # TEAM-ADMIN on top of `write` (owner ruling #28, 2026-10-03): a bulk copy of
+  # visitors' personal data follows the line already drawn for webhook delivery
+  # bodies. Members still LIST submissions; only admins export them. A PAT keeps
+  # working for an admin who holds `write`.
   post "/v1/sites/:id/forms/export" do
-    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+    with_team_site(conn, {:team_admin_ability, "write"}, fn conn, site ->
       params = if is_map(conn.body_params), do: conn.body_params, else: %{}
       ids = params["ids"]
       format = params["format"] || "csv"
@@ -16397,9 +16612,17 @@ defmodule BarkparkCloud.Web.Router do
   defp with_team_site(conn, auth, fun) do
     conn =
       case auth do
-        :session -> Auth.require_user(conn, [])
-        :team_admin -> Auth.require_team_admin(conn, [])
-        {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+        :session ->
+          Auth.require_user(conn, [])
+
+        :team_admin ->
+          Auth.require_team_admin(conn, [])
+
+        {:ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+
+        {:team_admin_ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> require_admin_ability(ab)
       end
 
     cond do
@@ -16414,6 +16637,20 @@ defmodule BarkparkCloud.Web.Router do
           %Registry.Site{} = site -> apply_site_fun(fun, conn, site)
           nil -> json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # `write`-ability AND team admin: the session or PAT must hold the ability, and
+  # the user behind it must be an owner/admin of the resolved team. A member gets
+  # the named 403 `{forbidden, required: "admin", scope: "team"}`.
+  defp require_admin_ability(conn, ab) do
+    conn = Auth.require_ability(conn, ab)
+
+    cond do
+      conn.halted -> conn
+      is_nil(conn.assigns[:current_team]) -> conn
+      Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+      true -> Auth.forbidden(conn, required: "admin", scope: "team")
     end
   end
 
@@ -16503,6 +16740,64 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # The member arm of owner ruling #27. A team ADMIN is not narrowed here: the
+  # ruling's line is that a plain member may deploy to a fresh hostname, which is
+  # normal work, but may not take over the bare domain or re-point a name that
+  # already serves something else in the team's zone. Returns nil (proceed) or a
+  # halted conn. A lookup that fails is a refusal, never a pass.
+  defp member_dns_refusal(conn, token, zone_id, domain, origin) do
+    team = conn.assigns.current_team
+
+    if team && Authz.team_admin?(conn.assigns.current_user, team) do
+      nil
+    else
+      case Cloudflare.lookup_dns_name(token, zone_id, domain) do
+        {:ok, %{zone_name: zone_name, records: records}} when is_binary(zone_name) ->
+          elsewhere =
+            Enum.filter(records, fn r ->
+              r[:type] in ["A", "AAAA", "CNAME"] and r[:content] != origin
+            end)
+
+          cond do
+            dns_name_eq?(zone_name, domain) ->
+              json(conn, 403, %{
+                error: "cloudflare_apex_refused",
+                required: "admin",
+                scope: "team",
+                detail:
+                  "#{domain} is the bare domain of the team's Cloudflare zone — only a team admin " <>
+                    "can point it at a box. Deploy to a subdomain instead (e.g. www.#{domain})."
+              })
+
+            elsewhere != [] ->
+              json(conn, 409, %{
+                error: "cloudflare_name_taken",
+                detail:
+                  "#{domain} already has a DNS record in the team's Cloudflare zone pointing " <>
+                    "somewhere else — a member cannot re-point it. Pick a fresh hostname, or ask a " <>
+                    "team admin."
+              })
+
+            true ->
+              nil
+          end
+
+        _ ->
+          json(conn, 502, %{
+            error: "cloudflare_lookup_failed",
+            detail:
+              "could not read the team's Cloudflare zone to check #{domain} is free — nothing was " <>
+                "written; the box keeps serving standalone. Try again."
+          })
+      end
+    end
+  end
+
+  defp dns_name_eq?(a, b) do
+    norm = fn n -> n |> String.trim() |> String.trim_trailing(".") |> String.downcase() end
+    norm.(a) == norm.(b)
+  end
+
   defp do_bind_cloudflare(conn, site, domain, token, zone_id) do
     bp = Registry.get_barkpark(site.barkpark_id)
     origin = bp && bp.host
@@ -16527,6 +16822,12 @@ defmodule BarkparkCloud.Web.Router do
            detail:
              "the instance backing this site was deprovisioned while this request was in flight; refusing to point DNS at a freed address (fail closed)"
          })}
+
+      # Owner ruling #27 (2026-10-03): DNS on deploy stays MEMBER-level, but a
+      # member points FRESH names only — never the zone apex, never a name that
+      # already answers somewhere else. Read before the write, fail closed.
+      (refusal = member_dns_refusal(conn, token, zone_id, domain, origin)) != nil ->
+        {:halt, refusal}
 
       true ->
         # Point the domain at the box origin (A record), flip it PROXIED (orange
@@ -17204,6 +17505,22 @@ defmodule BarkparkCloud.Web.Router do
 
     if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
   end
+
+  # Would `mint_site_read_token/3` mint? Exactly when it would take its middle
+  # arm: a static/node site, a full binding triple, and no BYO read_token. Only
+  # then does the caller need to be a team admin (owner ruling #27).
+  defp require_admin_to_mint(conn, %Team{} = team, %{kind: kind} = attrs)
+       when kind in ["static", "node"] do
+    mints? =
+      not is_binary(attrs[:read_token]) and is_binary(attrs[:bootstrap_workspace]) and
+        is_binary(attrs[:bootstrap_project]) and is_binary(attrs[:bootstrap_dataset])
+
+    if mints? and not Authz.team_admin?(conn.assigns.current_user, team),
+      do: {:error, :mint_requires_admin},
+      else: :ok
+  end
+
+  defp require_admin_to_mint(_conn, _team, _attrs), do: :ok
 
   # site-spawner W7 (charter D62): a node site is content-bound like a static one,
   # so it mints the SAME public-read token over the SAME scoped route.

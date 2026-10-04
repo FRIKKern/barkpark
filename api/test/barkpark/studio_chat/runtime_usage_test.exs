@@ -1056,6 +1056,9 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
     refute Repo.get(RuntimeAttempt, doomed_attempt.assignment_id)
     assert Repo.get(RuntimeAttempt, survivor_attempt.assignment_id)
     assert Repo.get(Session, survivor_attempt.session_id)
+    # Owner ruling #32 item 6: the attempt's session, once its own workspace's
+    # teardown has unpinned it, is deleted with that workspace.
+    refute Repo.get(Session, doomed_attempt.session_id)
   end
 
   test "native envelopes and unallowlisted counters never enter the receipt", ctx do
@@ -1199,9 +1202,11 @@ defmodule Barkpark.StudioChat.RuntimeUsageTest do
   # `unboxed_run` COMMITS — that is the point (two real connections have to block
   # each other), but it also means every row the drive writes OUTLIVES the test.
   # `prepare_runtime_attempt/3` mints a `chat_sessions` row for the attempt, and
-  # `Tenancy.delete_workspace/1` does NOT reach it: `owner_workspace_id` carries
-  # no foreign key, so the teardown returns `{:ok, _}` and leaves the session
-  # behind. Measured on main (2026-09-01): running this file against an empty
+  # until owner ruling #32 (2026-10-03) `Tenancy.delete_workspace/1` did NOT
+  # reach it: `owner_workspace_id` carries no foreign key, so the teardown
+  # returned `{:ok, _}` and left the session behind. It now deletes the
+  # workspace's chats itself, so the purge below is the belt to that brace and
+  # its assertion still pins the outcome. Measured on main (2026-09-01): running this file against an empty
   # `chat_sessions` leaves exactly ONE committed row, cleaned by nothing, ever.
   # THIS FILE IS THE SOURCE of the residue every studio-chat suite has been
   # working around: 86 such rows on one long-lived box, all carrying this

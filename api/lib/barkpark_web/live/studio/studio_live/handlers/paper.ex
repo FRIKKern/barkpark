@@ -575,7 +575,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       opts =
         [
           if_rev: socket.assigns[:paper_rev],
-          actor_user_id: socket.assigns[:user_id]
+          actor_user_id: Shared.actor_user_id(socket)
         ] ++ ScopeHelpers.scope_opts(socket)
 
       case Content.accept_valueref_baseline(

@@ -123,6 +123,17 @@ defmodule BarkparkCloud.Cloudflare.Client do
               {:ok, %{proxied: boolean()}} | {:error, term}
 
   @doc """
+  What already answers for `name` in `zone_id`: the zone's own apex name and
+  every DNS record whose name is `name` (`GET /zones/:zone` +
+  `GET /zones/:zone/dns_records?name=`). The pre-write check of the cf-in-front
+  deploy path (owner ruling #27): a member may point a FRESH hostname at a box,
+  never the bare domain and never a name that already points somewhere else.
+  Returns `{:ok, %{zone_name:, records: [%{id:, type:, content:, name:}]}}`.
+  """
+  @callback lookup_dns_name(token, zone_id, name :: String.t()) ::
+              {:ok, %{zone_name: String.t(), records: [map()]}} | {:error, term}
+
+  @doc """
   Mint a Cloudflare Origin CA certificate for `hostnames` from the PEM `csr`.
   Returns `{:ok, %{id: id, certificate: pem}}` or `{:error, term}`.
   """

@@ -12,6 +12,13 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
   # parallel test reading `GitHub.configured?/0`.
   use BarkparkCloud.DataCase, async: false
 
+  # Owner ruling #29: this suite's subject is not the domain proof, so DNS
+  # publishes every team's _barkpark-verify token (the proven state).
+  setup do
+    BarkparkCloud.DomainProofHelper.prove_every_domain()
+    :ok
+  end
+
   import BarkparkCloud.TotpTestHelper
   import Plug.Test
   import Plug.Conn
@@ -1247,7 +1254,16 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       state = BarkparkCloud.GitHub.install_state(team, user.id)
 
       conn =
-        call(:post, "/v1/github/installations", %{installation_id: "4242", state: state}, token)
+        call(
+          :post,
+          "/v1/github/installations",
+          %{
+            installation_id: "4242",
+            state: state,
+            code: BarkparkCloud.GitHub.Fake.user_code_for(["4242"])
+          },
+          token
+        )
 
       assert conn.status == 201
 

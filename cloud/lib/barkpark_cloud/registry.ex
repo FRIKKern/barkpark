@@ -41,6 +41,7 @@ defmodule BarkparkCloud.Registry do
     AgentToken,
     Barkpark,
     Deployment,
+    DomainVerification,
     FleetSettings,
     HostnameClaim,
     Provider,
@@ -2048,6 +2049,73 @@ defmodule BarkparkCloud.Registry do
       |> Repo.insert()
       |> translate_active_job_conflict(:already_resurrecting)
     end
+  end
+
+  @support_box_cap_default 3
+
+  @doc """
+  Owner ruling #37 (2026-10-03): how many CP-PROVISIONED support boxes `team`
+  may hold — its operator-set `support_box_cap`, else the platform default
+  (`config :barkpark_cloud, :support_box_cap_default`, #{@support_box_cap_default}
+  when unset). Register-only supports (the team's own boxes) never count.
+  """
+  @spec support_box_cap(map()) :: non_neg_integer()
+  def support_box_cap(%{support_box_cap: cap}) when is_integer(cap) and cap >= 0, do: cap
+
+  def support_box_cap(_team),
+    do: Application.get_env(:barkpark_cloud, :support_box_cap_default, @support_box_cap_default)
+
+  @doc """
+  The team's CP-provisioned support boxes: support rows that carry a
+  `provision_support` job (pending, claimed, done or failed — a failed one may
+  still hold a box until it tears down, so it counts). Register-only supports
+  have no such job and are not counted.
+  """
+  @spec count_provisioned_supports(Ecto.UUID.t()) :: non_neg_integer()
+  def count_provisioned_supports(team_id) do
+    Repo.one(
+      from b in Barkpark,
+        as: :bp,
+        where: b.team_id == ^team_id and b.fleet_role == "support",
+        where:
+          exists(
+            from j in ProvisionJob,
+              where: j.barkpark_id == parent_as(:bp).id and j.kind == "provision_support"
+          ),
+        select: count(b.id)
+    )
+  end
+
+  @doc """
+  Register a support row AND enqueue its `provision_support` job under the
+  team's support-box cap (owner ruling #37), in ONE transaction that holds the
+  team row lock — so two concurrent requests cannot both pass a cap of N with N
+  boxes held. `{:error, {:support_cap_reached, cap, count}}` names the ceiling.
+  """
+  def provision_support_capped(team, attrs) do
+    Repo.transaction(fn ->
+      locked = Repo.one!(from t in Team, where: t.id == ^team.id, lock: "FOR UPDATE")
+      cap = support_box_cap(locked)
+      held = count_provisioned_supports(team.id)
+
+      cond do
+        held >= cap ->
+          Repo.rollback({:support_cap_reached, cap, held})
+
+        true ->
+          with {:ok, support} <- register_support_barkpark(team, attrs),
+               {:ok, job} <- enqueue_support_provision_job(support) do
+            {support, job}
+          else
+            {:error, reason} -> Repo.rollback(reason)
+          end
+      end
+    end)
+  end
+
+  @doc "Operator-only: set (or with `nil`, clear) a team's support-box cap."
+  def set_support_box_cap(%Team{} = team, cap) when is_nil(cap) or is_integer(cap) do
+    team |> Team.support_cap_changeset(%{support_box_cap: cap}) |> Repo.update()
   end
 
   @doc """
@@ -4798,11 +4866,17 @@ defmodule BarkparkCloud.Registry do
   admin-token session — the "your cloud account works on your instance"
   handoff. An older instance ignores the extra field and mints the legacy
   token-shaped ticket: graceful degradation, never an error.
+
+  Owner ruling #26 (2026-10-03, "Match role, revoke"): the ticket also carries
+  `role` — the caller's Cloud TEAM role (`"owner" | "admin" | "member"`) — so
+  the instance seats a team member as a member, not as the Default-workspace
+  owner. An instance that predates the ruling ignores the field. A role outside
+  the three is sent as `"member"` (fail closed).
   """
-  @spec mint_studio_link(Barkpark.t(), String.t() | nil) ::
+  @spec mint_studio_link(Barkpark.t(), String.t() | nil, String.t() | nil) ::
           {:ok, String.t()}
           | {:error, :suspended | :not_live | :no_admin_token | :decrypt_failed | :instance_error}
-  def mint_studio_link(bp, user_email \\ nil)
+  def mint_studio_link(bp, user_email \\ nil, role \\ nil)
 
   # cch-w54-s2 — a SUSPENDED box mints nothing. `billing.ex`'s own
   # cancel_subscription/1 calls suspension "data retained, access revoked"; until
@@ -4814,9 +4888,9 @@ defmodule BarkparkCloud.Registry do
   # clause deliberately: the refusal fires BEFORE reveal_admin_token/1, so the
   # stored admin credential is never decrypted and no byte leaves the control
   # plane for a suspended box.
-  def mint_studio_link(%Barkpark{suspended: true}, _user_email), do: {:error, :suspended}
+  def mint_studio_link(%Barkpark{suspended: true}, _user_email, _role), do: {:error, :suspended}
 
-  def mint_studio_link(%Barkpark{url: url} = bp, user_email)
+  def mint_studio_link(%Barkpark{url: url} = bp, user_email, role)
       when is_binary(url) and url != "" do
     case reveal_admin_token(bp) do
       {:ok, nil} ->
@@ -4830,8 +4904,11 @@ defmodule BarkparkCloud.Registry do
 
         body =
           case user_email do
-            email when is_binary(email) and email != "" -> Jason.encode!(%{email: email})
-            _ -> "{}"
+            email when is_binary(email) and email != "" ->
+              Jason.encode!(%{email: email, role: ticket_role(role)})
+
+            _ ->
+              "{}"
           end
 
         request = %{
@@ -4865,7 +4942,12 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  def mint_studio_link(_, _), do: {:error, :not_live}
+  def mint_studio_link(_, _, _), do: {:error, :not_live}
+
+  # The team role a user-shaped ticket carries (ruling #26). Fail closed: no
+  # role, or one outside the three built-ins, is a member.
+  defp ticket_role(role) when role in ["owner", "admin", "member"], do: role
+  defp ticket_role(_), do: "member"
 
   defp public_base(%Barkpark{custom_host: ch}) when is_binary(ch) and ch != "",
     do: "https://" <> ch
@@ -5116,6 +5198,85 @@ defmodule BarkparkCloud.Registry do
   end
 
   def revoke_app_token(_, _, _), do: {:error, :not_live}
+
+  @doc """
+  Owner ruling #26 (2026-10-03): take `email` OFF the instance `bp` after its
+  removal from the owning team — sessions revoked, workspace seats dropped,
+  owned tokens revoked (`POST /v1/auth/cloud-users/deprovision` with the stored
+  admin token, which never leaves this function).
+
+  Answers:
+    * `{:ok, %{"found" => _, "sessions_revoked" => _, …}}` — the box did it;
+    * `{:ok, %{"fallback" => "app_tokens_only", …}}` — the box predates the
+      route (a no-route 404), so only its `app:<email>` tokens were revoked;
+    * `{:error, :operator_required}` — the box's operator allowlist is armed
+      and does not name the stored token (a standing answer, not an outage);
+    * `{:error, :not_live | :no_admin_token | :decrypt_failed}`;
+    * `{:error, :instance_error}` — the box did not answer; retry.
+  """
+  @spec deprovision_instance_user(Barkpark.t(), String.t()) :: {:ok, map()} | {:error, atom()}
+  def deprovision_instance_user(%Barkpark{url: url} = bp, email)
+      when is_binary(url) and url != "" and is_binary(email) and email != "" do
+    case reveal_admin_token(bp) do
+      {:ok, nil} ->
+        {:error, :no_admin_token}
+
+      :error ->
+        {:error, :decrypt_failed}
+
+      {:ok, admin_token} ->
+        request = %{
+          method: :post,
+          url: String.trim_trailing(url, "/") <> "/v1/auth/cloud-users/deprovision",
+          headers: [
+            {"Authorization", "Bearer " <> admin_token},
+            {"Accept", "application/json"},
+            {"Content-Type", "application/json"}
+          ],
+          body: Jason.encode!(%{email: email})
+        }
+
+        case studio_link_http_client().request(request) do
+          {:ok, %{status: 200, body: resp}} ->
+            case Jason.decode(resp) do
+              {:ok, decoded} when is_map(decoded) ->
+                {:ok,
+                 Map.take(decoded, [
+                   "found",
+                   "sessions_revoked",
+                   "memberships_dropped",
+                   "tokens_revoked"
+                 ])}
+
+              _ ->
+                {:error, :instance_error}
+            end
+
+          {:ok, %{status: 404}} ->
+            case revoke_app_token(bp, {:email, email}) do
+              {:ok, counts} ->
+                {:ok, Map.put(counts, "fallback", "app_tokens_only")}
+
+              {:error, :not_found} ->
+                {:ok, %{"fallback" => "app_tokens_only", "revoked_count" => 0}}
+
+              {:error, :revoke_unsupported} ->
+                {:ok, %{"fallback" => "unsupported"}}
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+
+          {:ok, %{status: 403}} ->
+            {:error, :operator_required}
+
+          _ ->
+            {:error, :instance_error}
+        end
+    end
+  end
+
+  def deprovision_instance_user(_, _), do: {:error, :not_live}
 
   # Relay the ORIGINAL caller's address so the instance's `{:app_token_revoke,
   # ip}` bucket keys per phone. Without it every cloud-proxied revoke arrives
@@ -8675,6 +8836,177 @@ defmodule BarkparkCloud.Registry do
       end
     end)
   end
+
+  # ── Owner ruling #29 (2026-10-03, "DNS TXT check"): domain proof ────────────
+
+  @doc """
+  The team's verification row for `domain` (normalized), created with a fresh
+  token on first ask. Its challenge (`DomainVerification.challenge/1`) is what a
+  person publishes: `_barkpark-verify.<domain> TXT "barkpark-verify=<token>"`.
+  """
+  @spec domain_verification(Ecto.UUID.t(), String.t()) :: {:ok, DomainVerification.t()}
+  def domain_verification(team_id, domain) when is_binary(team_id) and is_binary(domain) do
+    norm = normalize_domain(domain)
+
+    case Repo.get_by(DomainVerification, team_id: team_id, domain: norm) do
+      %DomainVerification{} = row ->
+        {:ok, row}
+
+      nil ->
+        %DomainVerification{}
+        |> DomainVerification.changeset(%{
+          team_id: team_id,
+          domain: norm,
+          token: DomainVerification.new_token()
+        })
+        |> Repo.insert(on_conflict: :nothing, conflict_target: [:team_id, :domain])
+        |> case do
+          # A racing insert won: read the winner's row back.
+          {:ok, %DomainVerification{id: nil}} ->
+            {:ok, Repo.get_by!(DomainVerification, team_id: team_id, domain: norm)}
+
+          {:ok, row} ->
+            {:ok, row}
+        end
+    end
+  end
+
+  @doc """
+  Has `team_id` proven it controls `domain`? A row already `verified_at` answers
+  `:ok` from the record; otherwise the TXT record is read NOW and, when it
+  carries this team's token, the row is stamped. Unproven answers
+  `{:error, {:unverified, challenge, observed_txt_values}}` — never a claim.
+  """
+  @spec prove_team_domain(Ecto.UUID.t(), String.t(), keyword()) ::
+          :ok | {:error, {:unverified, map(), [String.t()]}}
+  def prove_team_domain(team_id, domain, opts \\ []) do
+    {:ok, row} = domain_verification(team_id, domain)
+
+    cond do
+      row.verified_at != nil ->
+        :ok
+
+      true ->
+        case BarkparkCloud.DomainOwnership.txt_proven?(
+               row.domain,
+               DomainVerification.record_value(row.token),
+               opts
+             ) do
+          :ok ->
+            {:ok, _} =
+              row
+              |> DomainVerification.changeset(%{verified_at: DateTime.utc_now()})
+              |> Repo.update()
+
+            :ok
+
+          {:error, observed} ->
+            {:error, {:unverified, DomainVerification.challenge(row), observed}}
+        end
+    end
+  end
+
+  @doc """
+  `add_site_domain/2` behind the ruling-#29 proof. A domain the site ALREADY
+  holds stays idempotent (pre-ruling claims keep working untouched). Otherwise
+  the site's team must have proven the domain (`prove_team_domain/3`).
+
+  THE RECLAIM PATH: when the proven domain is held by a site of ANOTHER team,
+  DNS decides. If the TXT record carries the claimant's token right now and NOT
+  the holder team's, the holder's claim is released and the claimant's lands —
+  the real owner takes back a name squatted before the ruling. A name held as a
+  barkpark `custom_host` or a provisioning FQDN is not reclaimable here (those
+  claims have their own A-record proof), and stays `:domain_taken`.
+  """
+  def add_site_domain_verified(%Site{domains: existing} = site, domain, opts \\ [])
+      when is_binary(domain) do
+    norm = normalize_domain(domain)
+
+    cond do
+      norm in existing ->
+        {:ok, site}
+
+      true ->
+        with :ok <- prove_team_domain(site.team_id, norm, opts) do
+          case add_site_domain(site, norm) do
+            {:error, :domain_taken} -> maybe_reclaim_site_domain(site, norm, opts)
+            other -> other
+          end
+        end
+    end
+  end
+
+  defp maybe_reclaim_site_domain(site, norm, opts) do
+    holder =
+      Repo.one(
+        from c in HostnameClaim,
+          join: s in Site,
+          on: s.id == c.site_id,
+          where: c.host == ^norm and c.kind == "site_domain",
+          select: s
+      )
+
+    with %Site{} = holder <- holder,
+         true <- holder.team_id != site.team_id,
+         {:ok, mine} <- domain_verification(site.team_id, norm),
+         :ok <-
+           BarkparkCloud.DomainOwnership.txt_proven?(
+             norm,
+             DomainVerification.record_value(mine.token),
+             opts
+           ),
+         false <- holder_still_proves?(holder.team_id, norm, opts),
+         {:ok, _released} <- remove_site_domain(holder, norm) do
+      Logger.warning(
+        "domain reclaim: #{norm} released from site #{holder.id} (team #{holder.team_id}) " <>
+          "to site #{site.id} (team #{site.team_id}) on a fresh _barkpark-verify TXT proof"
+      )
+
+      add_site_domain(get_site(site.id) || site, norm)
+    else
+      _ -> {:error, :domain_taken}
+    end
+  end
+
+  # Does the HOLDER's team's token sit in the TXT answer too? If both teams'
+  # records are published, DNS has not decided between them — no reclaim.
+  defp holder_still_proves?(holder_team_id, norm, opts) do
+    case Repo.get_by(DomainVerification, team_id: holder_team_id, domain: norm) do
+      nil ->
+        false
+
+      %DomainVerification{token: token} ->
+        BarkparkCloud.DomainOwnership.txt_proven?(
+          norm,
+          DomainVerification.record_value(token),
+          opts
+        ) == :ok
+    end
+  end
+
+  @doc "Does `site` already hold `domain` (normalized)? Pre-ruling claims count."
+  def site_holds_domain?(%Site{domains: existing}, domain) when is_binary(domain),
+    do: normalize_domain(domain) in (existing || [])
+
+  @doc """
+  Ruling #29 on the CREATE door: every domain a new site names must already be
+  proven by `team_id`. Answers `:ok` or `{:error, {:unverified_domains,
+  [challenge]}}` naming each unproven one.
+  """
+  def require_proven_domains(team_id, domains, opts \\ [])
+
+  def require_proven_domains(team_id, domains, opts) when is_list(domains) do
+    challenges =
+      for d <- domains,
+          is_binary(d),
+          d != "",
+          {:error, {:unverified, challenge, _}} <- [prove_team_domain(team_id, d, opts)],
+          do: challenge
+
+    if challenges == [], do: :ok, else: {:error, {:unverified_domains, challenges}}
+  end
+
+  def require_proven_domains(_team_id, _domains, _opts), do: :ok
 
   # Case-folded, trimmed, trailing-dot-stripped — the ONE normalization used for
   # BOTH the cross-site uniqueness guard and the ask-gate lookup, so `Example.com`

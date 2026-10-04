@@ -641,6 +641,18 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
     # The read half of this arm (instance_no_origin, domain_not_pointed,
     # invalid_domain, taken, already_attaching) is Side-B read and needs no rows.
     %{
+      code: "cloudflare_apex_refused",
+      site:
+        "router.ex member_dns_refusal (do_bind_cloudflare's pre-write check, owner ruling #27)",
+      reason:
+        "Console-UNREACHABLE today, same fence as cloudflare_bind_failed: no console " <>
+          "deploy body sets `via`, so maybe_bind_cloudflare short-circuits {:cont} and the " <>
+          "member DNS fence never runs from the console. Were it to, this 403 returns on the " <>
+          "SYNCHRONOUS POST /v1/sites/:id/deploy response before any deployment row is " <>
+          "minted, so the deploy caller's fallback renders. Flip: a console domain-binding " <>
+          "UI starts sending via."
+    },
+    %{
       code: "cloudflare_bind_failed",
       site: "router.ex do_bind_cloudflare (deploy path via maybe_bind_cloudflare)",
       reason:
@@ -672,6 +684,25 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
           "{git_ref}, createAndDeploy {}). It returns on the SYNCHRONOUS deploy response " <>
           "before any deployment row is minted, so the deploy caller's fallback renders, " <>
           "not the async deployRefusalCopy rail. Flip: a console UI starts sending via."
+    },
+    %{
+      code: "cloudflare_lookup_failed",
+      site:
+        "router.ex member_dns_refusal (the zone read before a member's DNS write, ruling #27)",
+      reason:
+        "Console-UNREACHABLE today: no console deploy body sets `via`, so the zone read " <>
+          "never runs from the console. Were it to, this fail-closed 502 returns on the " <>
+          "SYNCHRONOUS deploy response ahead of any deployment row — the deploy caller's " <>
+          "fallback renders. Flip: a console UI starts sending via."
+    },
+    %{
+      code: "cloudflare_name_taken",
+      site: "router.ex member_dns_refusal (a name already pointing elsewhere, ruling #27)",
+      reason:
+        "Console-UNREACHABLE today: no console deploy body sets `via`, so a member's " <>
+          "name-taken 409 never fires from the console. Were it to, it returns on the " <>
+          "SYNCHRONOUS deploy response before any deployment row is minted, so the deploy " <>
+          "caller's fallback renders. Flip: a console domain-binding UI starts sending via."
     },
     %{
       code: "cloudflare_orphan_cleanup_failed",
@@ -720,6 +751,23 @@ defmodule BarkparkCloud.ConsoleReaderCensusTest do
       reason:
         "CLI-only: same zero-console-caller route as its sibling row; the CLI renders " <>
           "the slug in its own dialect. Flip: a console site-domain form ships."
+    },
+    %{
+      code: "domain_verification_required",
+      site: "router.ex POST /v1/sites/:id/domains + POST /v1/sites (owner ruling #29)",
+      reason:
+        "CLI-only: the sites-domains route has zero app.js callers, and no console " <>
+          "create body sends `domains`. The 409 carries a `detail` sentence (the TXT " <>
+          "record to publish) that the CLI prints verbatim. Flip: a console site-domain " <>
+          "form ships, or the console create starts sending domains."
+    },
+    %{
+      code: "domain_taken",
+      site: "router.ex POST /v1/sites/:id/domains (ruling #29 reclaim refused)",
+      reason:
+        "CLI-only, the reclaim arm: a proven owner whose TXT record ALSO carries the " <>
+          "holder team's token, or a name held as a barkpark custom_host, keeps the same " <>
+          "409 slug. Zero console callers. Flip: a console site-domain form ships."
     },
     %{
       code: "no_cloudflare_provider",

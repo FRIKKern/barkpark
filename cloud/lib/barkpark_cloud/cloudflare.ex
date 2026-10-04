@@ -108,6 +108,16 @@ defmodule BarkparkCloud.Cloudflare do
   def ensure_zone_proxied(token, zone_id, record_id),
     do: client().ensure_zone_proxied(token, zone_id, record_id)
 
+  @doc """
+  The zone apex name and the records already answering for `name` in
+  `zone_id` (owner ruling #27's pre-write check), with the per-team `token`
+  threaded in (D52).
+  """
+  @spec lookup_dns_name(Client.token(), Client.zone_id(), String.t()) ::
+          {:ok, %{zone_name: String.t(), records: [map()]}} | {:error, term}
+  def lookup_dns_name(token, zone_id, name),
+    do: client().lookup_dns_name(token, zone_id, name)
+
   @doc "Mint an Origin CA cert for `hostnames` from the PEM `csr`."
   @spec create_origin_ca_cert([String.t()], String.t()) ::
           {:ok, %{id: String.t(), certificate: String.t()}} | {:error, term}

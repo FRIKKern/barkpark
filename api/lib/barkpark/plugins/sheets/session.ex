@@ -373,14 +373,15 @@ defmodule Barkpark.Plugins.Sheets.Session do
   semantics — the caller committed to that key). See the moduledoc's
   "Idempotency (request_id replay ring)" section for the accepted residuals.
   """
-  @spec apply_ops(String.t(), String.t(), [map()], String.t() | nil, String.t() | nil) ::
+  @spec apply_ops(String.t(), String.t(), [map()], String.t() | nil, scope()) ::
           {:ok, %{rev: non_neg_integer(), applied: non_neg_integer(), errors: [map()]}}
           | {:error, term()}
           | {:error, :batch_too_large, pos_integer()}
   def apply_ops(slug, dataset, ops, request_id \\ nil, workspace_id \\ nil)
       when is_binary(slug) and is_binary(dataset) and is_list(ops) and
              (is_nil(request_id) or is_binary(request_id)) and
-             (is_nil(workspace_id) or is_binary(workspace_id)) do
+             (is_nil(workspace_id) or is_binary(workspace_id) or is_list(workspace_id) or
+                is_map(workspace_id)) do
     case length(ops) do
       n when n > @max_ops_per_call -> {:error, :batch_too_large, n}
       _ -> call_session(slug, dataset, workspace_id, {:apply_ops, ops, request_id})
@@ -399,7 +400,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
   debounce retry stays armed, so callers must NOT serve the stale row as
   fresh (the export controller maps this to a 503 with a retry hint).
   """
-  @spec flush(String.t(), String.t(), String.t() | nil) :: :ok | {:error, term()}
+  @spec flush(String.t(), String.t(), scope()) :: :ok | {:error, term()}
   def flush(slug, dataset, workspace_id) do
     case whereis(slug, dataset, workspace_id) do
       nil -> :ok
@@ -427,7 +428,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
     @registry
     |> Registry.select([{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.filter(fn {{ds, _ws, id}, _pid} -> ds == dataset and id == pubid end)
+    |> Enum.filter(fn {{ds, _ws, _proj, id}, _pid} -> ds == dataset and id == pubid end)
     |> Enum.reduce(:ok, fn {_key, pid}, acc ->
       case safe_call(pid, :flush) do
         :ok -> acc
@@ -440,7 +441,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
   The session's in-memory content (authoritative while it lives).
   `{:error, :no_session}` when none is live — this never starts one.
   """
-  @spec peek(String.t(), String.t(), String.t() | nil) :: {:ok, map()} | {:error, :no_session}
+  @spec peek(String.t(), String.t(), scope()) :: {:ok, map()} | {:error, :no_session}
   def peek(slug, dataset, workspace_id \\ nil) do
     case whereis(slug, dataset, workspace_id) do
       nil -> {:error, :no_session}
@@ -452,7 +453,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
   Stop a live session (normal shutdown — `terminate/2` persists any dirty
   state). A no-op when none is registered.
   """
-  @spec stop(String.t(), String.t(), String.t() | nil) :: :ok
+  @spec stop(String.t(), String.t(), scope()) :: :ok
   def stop(slug, dataset, workspace_id \\ nil) do
     case whereis(slug, dataset, workspace_id) do
       nil -> :ok
@@ -460,8 +461,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
     end
   end
 
-  @doc "The live session pid for `{dataset, workspace_id, slug}`, or `nil`."
-  @spec whereis(String.t(), String.t(), String.t() | nil) :: pid() | nil
+  @doc "The live session pid for `{dataset, workspace_id, project_id, slug}`, or `nil`."
+  @spec whereis(String.t(), String.t(), scope()) :: pid() | nil
   def whereis(slug, dataset, workspace_id \\ nil) do
     case Registry.lookup(@registry, key(slug, dataset, workspace_id)) do
       [{pid, _}] -> pid
@@ -475,9 +476,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
   subscribers never see session deltas. Subscribers receive
   `{:sheets_op, payload}` (see the moduledoc for the payload shape).
   """
-  @spec topic(String.t(), String.t(), String.t() | nil) :: String.t()
-  def topic(slug, dataset, workspace_id) do
-    Content.doc_topic(Content.published_id(slug), "sheet", workspace_id, dataset) <> ":sheets:op"
+  @spec topic(String.t(), String.t(), scope()) :: String.t()
+  def topic(slug, dataset, scope) do
+    {ws, proj} = scope_parts(scope)
+
+    Content.doc_topic(Content.published_id(slug), "sheet", ws, dataset) <>
+      project_suffix(project_component(normalize_scope_ws(ws), proj)) <> ":sheets:op"
   end
 
   @doc """
@@ -487,16 +491,70 @@ defmodule Barkpark.Plugins.Sheets.Session do
   `BarkparkWeb.Presence` with
   `%{name, color, tab, active, selection, editing, joined_at}` metas.
   """
-  @spec presence_topic(String.t(), String.t(), String.t() | nil) :: String.t()
-  def presence_topic(slug, dataset, workspace_id) do
-    Content.doc_topic(Content.published_id(slug), "sheet", workspace_id, dataset) <>
-      ":sheets:presence"
+  @spec presence_topic(String.t(), String.t(), scope()) :: String.t()
+  def presence_topic(slug, dataset, scope) do
+    {ws, proj} = scope_parts(scope)
+
+    Content.doc_topic(Content.published_id(slug), "sheet", ws, dataset) <>
+      project_suffix(project_component(normalize_scope_ws(ws), proj)) <> ":sheets:presence"
+  end
+
+  @typedoc """
+  The tenant a session call names: `nil` (unscoped), a workspace id, or a
+  keyword list / map carrying `workspace_id` and `project_id` (a loaded
+  `%Document{}` works). Owner ruling #51, RQ7 (task-6132833921b7dc36): two
+  projects in one workspace may hold a sheet with the same slug, so the
+  project is part of the session key, the load and the delta topics.
+  """
+  @type scope :: nil | String.t() | keyword() | map()
+
+  @doc false
+  @spec scope_parts(scope()) :: {String.t() | nil, String.t() | nil}
+  def scope_parts(nil), do: {nil, nil}
+  def scope_parts(ws) when is_binary(ws), do: {ws, nil}
+
+  def scope_parts(scope) when is_list(scope),
+    do: {present(Keyword.get(scope, :workspace_id)), present(Keyword.get(scope, :project_id))}
+
+  def scope_parts(%{} = scope),
+    do: {present(Map.get(scope, :workspace_id)), present(Map.get(scope, :project_id))}
+
+  defp present(v) when is_binary(v) and v != "", do: v
+  defp present(_), do: nil
+
+  # A project-less scope keeps the pre-project topic string byte for byte.
+  defp project_suffix(nil), do: ""
+  defp project_suffix(proj), do: ":p:" <> proj
+
+  # The project half of the session key and topics. The workspace's DEFAULT
+  # project (slug "default") counts as no project, so every sheet that lives
+  # where the pre-project key already pointed (an unscoped or workspace-only
+  # caller, or a doc in the default project) keeps its key and topic byte for
+  # byte; only a sheet in another project gets its own session and topics.
+  defp project_component(_ws, nil), do: nil
+  defp project_component(nil, proj), do: proj
+
+  defp project_component(ws, proj) do
+    if proj == default_project_id(ws), do: nil, else: proj
+  end
+
+  defp default_project_id(ws) do
+    import Ecto.Query, only: [from: 2]
+
+    Barkpark.Repo.one(
+      from(p in Barkpark.Tenancy.Project,
+        where: p.workspace_id == ^ws and p.slug == "default",
+        select: p.id,
+        limit: 1
+      )
+    )
   end
 
   @doc false
-  def start_link({dataset, workspace_id, pubid} = session_key)
+  def start_link({dataset, workspace_id, project_id, pubid} = session_key)
       when is_binary(dataset) and is_binary(pubid) and
-             (is_nil(workspace_id) or is_binary(workspace_id)) do
+             (is_nil(workspace_id) or is_binary(workspace_id)) and
+             (is_nil(project_id) or is_binary(project_id)) do
     GenServer.start_link(__MODULE__, session_key,
       name: {:via, Registry, {@registry, session_key}},
       hibernate_after: config().hibernate_after
@@ -505,8 +563,11 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   # ── resolve-or-start + call plumbing ─────────────────────────────────────
 
-  defp key(slug, dataset, workspace_id),
-    do: {dataset, normalize_scope_ws(workspace_id), Content.published_id(slug)}
+  defp key(slug, dataset, scope) do
+    {ws, proj} = scope_parts(scope)
+    ws = normalize_scope_ws(ws)
+    {dataset, ws, project_component(ws, proj), Content.published_id(slug)}
+  end
 
   # The registry key's tenant token. Mirrors `Content.Broadcast.doc_topic/4`'s
   # own `normalize_topic_ws/1` EXACTLY, and for the same reason: the two sides
@@ -536,8 +597,13 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # one pins the tenant: `resolve_read_dataset_id/2` then declines to fall back
   # to the seeded Default project (it only does that when NO scope key is
   # present at all) and `scope_to_workspace_or_global/3` fences the row.
-  defp read_scope(nil), do: []
-  defp read_scope(workspace_id) when is_binary(workspace_id), do: [workspace_id: workspace_id]
+  defp read_scope(nil, _project_id), do: []
+
+  defp read_scope(workspace_id, nil) when is_binary(workspace_id),
+    do: [workspace_id: workspace_id]
+
+  defp read_scope(workspace_id, project_id) when is_binary(workspace_id),
+    do: [workspace_id: workspace_id, project_id: project_id]
 
   defp call_session(slug, dataset, workspace_id, msg, retry? \\ true) do
     with {:ok, pid} <- ensure_session(slug, dataset, workspace_id) do
@@ -590,12 +656,12 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # ── GenServer ────────────────────────────────────────────────────────────
 
   @impl true
-  def init({dataset, scope_ws, pubid}) do
+  def init({dataset, scope_ws, scope_proj, pubid}) do
     # Trap exits so a supervisor shutdown runs terminate/2 (the dirty-state
     # persist) instead of killing the process outright.
     Process.flag(:trap_exit, true)
 
-    case load_doc(pubid, dataset, scope_ws) do
+    case load_doc(pubid, dataset, scope_ws, scope_proj) do
       {:ok, doc} ->
         content = doc.content || %{}
 
@@ -621,6 +687,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
            # The registry-key half: the tenant the CALLER declared. Drives every
            # read this session makes and the ReplayRing key. `nil` = unscoped.
            scope_ws: scope_ws,
+           scope_proj: scope_proj,
            # The ROW's own workspace — the topic key (`Content.doc_topic/4`
            # normalizes a nil), unchanged by this fix.
            workspace_id: doc.workspace_id,
@@ -668,7 +735,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   @impl true
   def handle_call({:apply_ops, ops, request_id}, _from, state) do
-    ring_key = {state.dataset, state.scope_ws, state.slug}
+    ring_key = {state.dataset, state.scope_ws, state.scope_proj, state.slug}
 
     case request_id && ReplayRing.lookup(ring_key, request_id) do
       {:ok, cached} ->
@@ -905,7 +972,7 @@ defmodule Barkpark.Plugins.Sheets.Session do
            state.persisted_doc_id,
            "sheet",
            state.dataset,
-           read_scope(state.scope_ws)
+           read_scope(state.scope_ws, state.scope_proj)
          ) do
       {:ok, %{rev: rev}} when rev != state.persisted_rev ->
         Logger.warning(
@@ -941,8 +1008,8 @@ defmodule Barkpark.Plugins.Sheets.Session do
   # SCOPED to the session's tenant (task-f0c064a406e8d363). An unscoped load
   # resolved the seeded Default project's `dataset_id` and could not see a
   # non-Default workspace's own sheet row at all.
-  defp load_doc(pubid, dataset, workspace_id) do
-    scope = read_scope(workspace_id)
+  defp load_doc(pubid, dataset, workspace_id, project_id) do
+    scope = read_scope(workspace_id, project_id)
 
     with {:error, :not_found} <-
            Content.get_document(Content.draft_id(pubid), "sheet", dataset, scope),

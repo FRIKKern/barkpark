@@ -437,8 +437,8 @@ Its TLS cert renews on its own schedule — see below.
 
 ## Smoke a box: read the Caddy upstream, or use the public URL
 
-**There is no repo-wide app port.** A single-checkout box (the `89.167.28.206`
-micro-block, `docs/ops/PROD_OPS.md`) serves one BEAM on `:4000`. A `.slots`
+**There is no repo-wide app port.** A single-checkout box serves one BEAM on
+`:4000` (the last one, barkpark-cms, was deleted 2026-10-03). A `.slots`
 blue/green host — guerrilla, and every host this pipeline deploys — runs
 `barkpark-slot@blue` on `:4000` and `@green` on `:4001`, and **only one of them
 is bound at a time**: whichever slot is live. The live port is not a constant
@@ -470,7 +470,7 @@ refuses, rc=7; `:4001` times out, rc=28), so neither failure distinguishes
 "wrong port" from "box down".
 
 `CLAUDE.md` Golden Rule 6 still reads `curl http://localhost:4000/api/schemas`.
-That is correct only on the micro-block, and Golden Rules are verbatim-exempt
+That is correct only on a single-checkout box, and Golden Rules are verbatim-exempt
 (an edit needs explicit owner sign-off), so read it as "smoke it after deploy",
 with the port taken from the Caddy upstream — or the public URL — on any other
 host.
@@ -592,8 +592,6 @@ deploys fully automatic.
 1. Put its IP in a new secret (e.g. `PROD_HOST`).
 2. If it's a content instance, reuse `instance-deploy.sh`; if a control plane,
    `cp-deploy.sh`. Add a job mirroring the matching one in `deploy.yml`.
-   (The CLAUDE.md prod box `89.167.28.206` is a candidate once the deploy key is
-   added to its `authorized_keys`.)
 
 ## Attaching a running box to Cloud (`bp barkparks adopt`)
 

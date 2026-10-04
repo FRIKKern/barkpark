@@ -55,6 +55,17 @@ defmodule BarkparkCloud.Web.RouterSiteFormsTest do
     {user, team}
   end
 
+  defp member_of(team, role) do
+    {:ok, user} =
+      Accounts.register_user(%{
+        email: "user-#{System.unique_integer([:positive])}@example.com",
+        password: @password
+      })
+
+    {:ok, _} = Accounts.add_member(team, user, role)
+    user
+  end
+
   defp live_barkpark(team) do
     n = System.unique_integer([:positive])
     {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
@@ -569,6 +580,55 @@ defmodule BarkparkCloud.Web.RouterSiteFormsTest do
   ## ── POST export ──────────────────────────────────────────────────────────────
 
   describe "POST /v1/sites/:id/forms/export" do
+    # Owner ruling #28 (2026-10-03): export is TEAM-ADMIN; members still list.
+    test "a plain MEMBER may list the inbox but is refused export 403 required admin, and the box is never asked" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      sub = submission_doc(site.slug)
+      program_inbox(site, [sub])
+
+      token = login_token(member_of(team, "member"))
+
+      assert req(:get, "/v1/sites/#{site.id}/forms", token).status == 200
+      before = length(StudioLinkFakeHttpClient.requests())
+
+      conn =
+        req(:post, "/v1/sites/#{site.id}/forms/export", token, %{
+          "ids" => [sub["_publishedId"]],
+          "format" => "json"
+        })
+
+      assert conn.status == 403
+      assert decode(conn) == %{"error" => "forbidden", "required" => "admin", "scope" => "team"}
+      assert length(StudioLinkFakeHttpClient.requests()) == before
+    end
+
+    test "a team ADMIN exports (200), by session and by a write PAT" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      sub = submission_doc(site.slug)
+      program_inbox(site, [sub])
+
+      admin = member_of(team, "admin")
+      body = %{"ids" => [sub["_publishedId"]], "format" => "json"}
+
+      session = req(:post, "/v1/sites/#{site.id}/forms/export", login_token(admin), body)
+      assert session.status == 200
+      assert Enum.map(decode(session)["submissions"], & &1["id"]) == [sub["_publishedId"]]
+
+      program_inbox(site, [sub])
+
+      {:ok, pat, _} =
+        Accounts.create_personal_access_token(admin, team, %{
+          name: "ci-write",
+          abilities: ["write"]
+        })
+
+      assert req(:post, "/v1/sites/#{site.id}/forms/export", pat, body).status == 200
+    end
+
     test "JSON export returns exactly the selected rows and names the ids it could not find" do
       {user, team} = user_with_team()
       bp = live_barkpark(team)

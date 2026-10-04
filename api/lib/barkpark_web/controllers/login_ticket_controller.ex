@@ -59,7 +59,10 @@ defmodule BarkparkWeb.LoginTicketController do
   # Auth.mint_login_ticket gates it on the bearer holding `admin` — a lesser
   # token gets the same generic unauthorized.
   defp do_mint(conn, raw_token, params) do
-    case Barkpark.Auth.mint_login_ticket(raw_token, user_email: params["email"]) do
+    case Barkpark.Auth.mint_login_ticket(raw_token,
+           user_email: params["email"],
+           user_role: params["role"]
+         ) do
       {:ok, ticket} ->
         conn
         |> put_status(:created)

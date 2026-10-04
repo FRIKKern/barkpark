@@ -15,7 +15,7 @@ scripts/bp-vercel-quick-setup.sh \
   --schema templates/place-directory/schemas/place.json \
   --seed  templates/place-directory/seed-places.json \
   --publish-type place \
-  --token-ssh root@89.167.28.206 \
+  --token-ssh root@<your-box> \
   --vercel-team guerrilla
 ```
 
