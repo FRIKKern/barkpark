@@ -486,6 +486,88 @@ defmodule BarkparkCloud.Web.RouterSiteRebindTest do
   ## ── The tier ──────────────────────────────────────────────────────────────
 
   describe "PATCH /v1/sites/:id — who may rebind" do
+    # Owner ruling #27 (2026-10-03): the rebind MINT is a team-admin act. A
+    # member's browser session carries ["root"], so the ability bar alone let
+    # every member mint a public-read token in any scope on the box.
+    test "a plain MEMBER's session cannot rebind → 403 required admin, nothing minted, row untouched" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      StudioLinkFakeHttpClient.program(%{})
+
+      conn =
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{workspace: "acme", project: "press", dataset: "staging"},
+          login_token(member)
+        )
+
+      assert conn.status == 403
+      body = json_body(conn)
+      assert body["error"] == "forbidden"
+      assert body["required"] == "admin"
+      assert body["scope"] == "team"
+      assert Registry.get_site(site.id).bootstrap_project == "blog"
+      assert StudioLinkFakeHttpClient.requests() == []
+    end
+
+    test "a plain MEMBER may still patch theme and doc_type (no mint, no admin needed)" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      StudioLinkFakeHttpClient.program(%{})
+
+      conn =
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{theme: "fjord", doc_type: "paper"},
+          login_token(member)
+        )
+
+      assert conn.status == 200, conn.resp_body
+      row = Registry.get_site(site.id)
+      assert row.theme == "fjord"
+      assert row.bootstrap_dataset == "production"
+    end
+
+    test "a team ADMIN (not owner) rebinds → 200, the token re-minted in the new scope" do
+      {_owner, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      label = Registry.site_read_token_label(site)
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+
+      StudioLinkFakeHttpClient.program(%{
+        "/w/acme/p/blog/v1/tokens" => {:ok, %{status: 200, body: token_list("tok-old", label)}},
+        "/w/acme/p/press/v1/tokens" =>
+          {:ok, %{status: 201, body: ~s({"token":"bpt_public_read_NEW"})}},
+        "/w/acme/p/press/v1/data/query/staging/post" =>
+          {:ok, %{status: 200, body: ~s({"result":{"count":1,"total":7,"documents":[{}]}})}},
+        "/w/acme/p/blog/v1/tokens/tok-old" => {:ok, %{status: 200, body: ~s({"ok":true})}}
+      })
+
+      conn =
+        call(
+          :patch,
+          "/v1/sites/#{site.id}",
+          %{workspace: "acme", project: "press", dataset: "staging"},
+          login_token(admin)
+        )
+
+      assert conn.status == 200, conn.resp_body
+      assert Registry.get_site(site.id).bootstrap_project == "press"
+      assert requested?(:post, "/w/acme/p/press/v1/tokens")
+    end
+
     test "a write-only PAT cannot rebind → 403 rebind_ability_required, row untouched" do
       # A rebind MINTS a public-read token in the scope the caller names — the
       # authority `POST /v1/sites` reserves to a SESSION (it has no PAT arm). At

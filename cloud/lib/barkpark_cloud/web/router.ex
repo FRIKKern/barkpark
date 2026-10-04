@@ -203,7 +203,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/sites/:id/forms  user(s)   the site's form endpoint state + its inbox, newest first (read ability; N-08)
       PUT     /v1/sites/:id/forms  user(s)   turn the site's form endpoint on/off on the box (write ability; N-08)
       PATCH   /v1/sites/:id/forms/submissions/:sub_id user(s)  set one submission's state (new/seen) and/or spam disposition (write ability; N-08)
-      POST    /v1/sites/:id/forms/export user(s)  the selected submissions as CSV or JSON (write ability — bulk personal-data copy; N-08)
+      POST    /v1/sites/:id/forms/export admin(s)  the selected submissions as CSV or JSON (write ability AND team-admin — bulk personal-data copy; N-08, owner ruling #28)
       POST    /v1/sites/:id/deploy user(s)   enqueue a Deployment (the build job) (write ability)
       GET     /v1/sites/:id/deployments user(s)  list a site's PRODUCTION deployments, newest first (read ability) — the only route that can express a DENOMINATOR, so an automation credential can compute the owner's own deploy number (D219 re-tiering)
       GET     /v1/sites/:id/deployments/:dep_id user(s)  one deployment (read ability)
@@ -9381,6 +9381,11 @@ defmodule BarkparkCloud.Web.Router do
              # binding but no token can't build, and nothing downstream would say
              # so). An unreachable/refusing instance is a 502 with its own words —
              # no site row is written.
+             # Owner ruling #27 (2026-10-03): minting a box credential is a
+             # TEAM-ADMIN act, like every other credential verb. A create that
+             # would mint (a content binding with no BYO read_token) needs an
+             # admin; a member may still create a site that mints nothing.
+             :ok <- require_admin_to_mint(conn, team, attrs),
              {:ok, attrs} <- mint_site_read_token(bp, attrs, slug),
              # site-spawner W8 (charter D73): PROVE the binding by READING it,
              # here — the last moment the PLAINTEXT read token is in hand. Until
@@ -9459,6 +9464,12 @@ defmodule BarkparkCloud.Web.Router do
 
           {:error, {:mint_failed, detail}} ->
             json(conn, 502, %{error: "read_token_mint_failed", detail: detail})
+
+          # Binding a site to content MINTS a public-read token on the box, and
+          # minting a box credential needs a team admin (owner ruling #27). The
+          # standard evidence keys only: the console's reason arms read them.
+          {:error, :mint_requires_admin} ->
+            Auth.forbidden(conn, required: "admin", scope: "team")
 
           # site-spawner W8 (charter D73): the binding was READ and it is empty —
           # the site's OWN token sees nothing at workspace/project/dataset/type.
@@ -9617,6 +9628,13 @@ defmodule BarkparkCloud.Web.Router do
         #
         # theme/doc_type/prebuilt_enabled=false stay plain `write` — this adds
         # one gate on one arm, it does not re-tier the route.
+        # Owner ruling #27 (2026-10-03): the mint is a TEAM-ADMIN act on top of
+        # the credential bar above — a member's session carries ["root"], so the
+        # ability check alone let every member mint in any scope on the box.
+        rebinding? and may_grant? and
+            not Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
+          Auth.forbidden(conn, required: "admin", scope: "team")
+
         rebinding? and not may_grant? ->
           json(conn, 403, %{
             error: "rebind_ability_required",
@@ -12122,8 +12140,13 @@ defmodule BarkparkCloud.Web.Router do
   # read-only PAT can list, not export. Ids that are not this site's
   # submissions come back in `missing` (JSON) or as the `x-barkpark-missing`
   # count (CSV), never dropped without a trace.
+  #
+  # TEAM-ADMIN on top of `write` (owner ruling #28, 2026-10-03): a bulk copy of
+  # visitors' personal data follows the line already drawn for webhook delivery
+  # bodies. Members still LIST submissions; only admins export them. A PAT keeps
+  # working for an admin who holds `write`.
   post "/v1/sites/:id/forms/export" do
-    with_team_site(conn, {:ability, "write"}, fn conn, site ->
+    with_team_site(conn, {:team_admin_ability, "write"}, fn conn, site ->
       params = if is_map(conn.body_params), do: conn.body_params, else: %{}
       ids = params["ids"]
       format = params["format"] || "csv"
@@ -16445,9 +16468,17 @@ defmodule BarkparkCloud.Web.Router do
   defp with_team_site(conn, auth, fun) do
     conn =
       case auth do
-        :session -> Auth.require_user(conn, [])
-        :team_admin -> Auth.require_team_admin(conn, [])
-        {:ability, ab} -> conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+        :session ->
+          Auth.require_user(conn, [])
+
+        :team_admin ->
+          Auth.require_team_admin(conn, [])
+
+        {:ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> Auth.require_ability(ab)
+
+        {:team_admin_ability, ab} ->
+          conn |> Auth.require_user_or_pat([]) |> require_admin_ability(ab)
       end
 
     cond do
@@ -16462,6 +16493,20 @@ defmodule BarkparkCloud.Web.Router do
           %Registry.Site{} = site -> apply_site_fun(fun, conn, site)
           nil -> json(conn, 404, %{error: "not_found"})
         end
+    end
+  end
+
+  # `write`-ability AND team admin: the session or PAT must hold the ability, and
+  # the user behind it must be an owner/admin of the resolved team. A member gets
+  # the named 403 `{forbidden, required: "admin", scope: "team"}`.
+  defp require_admin_ability(conn, ab) do
+    conn = Auth.require_ability(conn, ab)
+
+    cond do
+      conn.halted -> conn
+      is_nil(conn.assigns[:current_team]) -> conn
+      Authz.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
+      true -> Auth.forbidden(conn, required: "admin", scope: "team")
     end
   end
 
@@ -16551,6 +16596,64 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # The member arm of owner ruling #27. A team ADMIN is not narrowed here: the
+  # ruling's line is that a plain member may deploy to a fresh hostname, which is
+  # normal work, but may not take over the bare domain or re-point a name that
+  # already serves something else in the team's zone. Returns nil (proceed) or a
+  # halted conn. A lookup that fails is a refusal, never a pass.
+  defp member_dns_refusal(conn, token, zone_id, domain, origin) do
+    team = conn.assigns.current_team
+
+    if team && Authz.team_admin?(conn.assigns.current_user, team) do
+      nil
+    else
+      case Cloudflare.lookup_dns_name(token, zone_id, domain) do
+        {:ok, %{zone_name: zone_name, records: records}} when is_binary(zone_name) ->
+          elsewhere =
+            Enum.filter(records, fn r ->
+              r[:type] in ["A", "AAAA", "CNAME"] and r[:content] != origin
+            end)
+
+          cond do
+            dns_name_eq?(zone_name, domain) ->
+              json(conn, 403, %{
+                error: "cloudflare_apex_refused",
+                required: "admin",
+                scope: "team",
+                detail:
+                  "#{domain} is the bare domain of the team's Cloudflare zone — only a team admin " <>
+                    "can point it at a box. Deploy to a subdomain instead (e.g. www.#{domain})."
+              })
+
+            elsewhere != [] ->
+              json(conn, 409, %{
+                error: "cloudflare_name_taken",
+                detail:
+                  "#{domain} already has a DNS record in the team's Cloudflare zone pointing " <>
+                    "somewhere else — a member cannot re-point it. Pick a fresh hostname, or ask a " <>
+                    "team admin."
+              })
+
+            true ->
+              nil
+          end
+
+        _ ->
+          json(conn, 502, %{
+            error: "cloudflare_lookup_failed",
+            detail:
+              "could not read the team's Cloudflare zone to check #{domain} is free — nothing was " <>
+                "written; the box keeps serving standalone. Try again."
+          })
+      end
+    end
+  end
+
+  defp dns_name_eq?(a, b) do
+    norm = fn n -> n |> String.trim() |> String.trim_trailing(".") |> String.downcase() end
+    norm.(a) == norm.(b)
+  end
+
   defp do_bind_cloudflare(conn, site, domain, token, zone_id) do
     bp = Registry.get_barkpark(site.barkpark_id)
     origin = bp && bp.host
@@ -16575,6 +16678,12 @@ defmodule BarkparkCloud.Web.Router do
            detail:
              "the instance backing this site was deprovisioned while this request was in flight; refusing to point DNS at a freed address (fail closed)"
          })}
+
+      # Owner ruling #27 (2026-10-03): DNS on deploy stays MEMBER-level, but a
+      # member points FRESH names only — never the zone apex, never a name that
+      # already answers somewhere else. Read before the write, fail closed.
+      (refusal = member_dns_refusal(conn, token, zone_id, domain, origin)) != nil ->
+        {:halt, refusal}
 
       true ->
         # Point the domain at the box origin (A record), flip it PROXIED (orange
@@ -17252,6 +17361,22 @@ defmodule BarkparkCloud.Web.Router do
 
     if missing == [], do: :ok, else: {:error, {:binding_required, missing}}
   end
+
+  # Would `mint_site_read_token/3` mint? Exactly when it would take its middle
+  # arm: a static/node site, a full binding triple, and no BYO read_token. Only
+  # then does the caller need to be a team admin (owner ruling #27).
+  defp require_admin_to_mint(conn, %Team{} = team, %{kind: kind} = attrs)
+       when kind in ["static", "node"] do
+    mints? =
+      not is_binary(attrs[:read_token]) and is_binary(attrs[:bootstrap_workspace]) and
+        is_binary(attrs[:bootstrap_project]) and is_binary(attrs[:bootstrap_dataset])
+
+    if mints? and not Authz.team_admin?(conn.assigns.current_user, team),
+      do: {:error, :mint_requires_admin},
+      else: :ok
+  end
+
+  defp require_admin_to_mint(_conn, _team, _attrs), do: :ok
 
   # site-spawner W7 (charter D62): a node site is content-bound like a static one,
   # so it mints the SAME public-read token over the SAME scoped route.
