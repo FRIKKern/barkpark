@@ -216,6 +216,16 @@ defmodule Barkpark.Plugins.OnixEdit.Actions do
   # ── real publish (Oban enqueue + pending marker) ──────────────────────────
 
   defp enqueue_publish(doc, dataset, scope) do
+    # Owner ruling #12: refuse before the pill flips to "pending" — the worker
+    # would cancel the job and leave the status stuck.
+    if Barkpark.Plugins.OnixEdit.Bokbasen.Settings.workspace_allowed?(doc.workspace_id) do
+      do_enqueue_publish(doc, dataset, scope)
+    else
+      {:error, :workspace_not_allowed}
+    end
+  end
+
+  defp do_enqueue_publish(doc, dataset, scope) do
     args =
       %{"document_id" => doc.doc_id, "type" => doc.type, "dataset" => dataset}
       |> put_scope_args(scope)

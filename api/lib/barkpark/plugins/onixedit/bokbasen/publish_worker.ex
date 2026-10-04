@@ -130,15 +130,30 @@ defmodule Barkpark.Plugins.OnixEdit.Bokbasen.PublishWorker do
         {:cancel, :document_missing}
 
       {:ok, %Document{} = doc} ->
-        status = Status.read(doc)
+        if Barkpark.Plugins.OnixEdit.Bokbasen.Settings.workspace_allowed?(doc.workspace_id) do
+          submit(doc, attempt, client_opts)
+        else
+          # Owner ruling #12: the instance's Bokbasen account only takes books
+          # from an allow-listed workspace (BARKPARK_BOKBASEN_WORKSPACE_IDS).
+          Logger.warning(
+            "PublishWorker: refusing doc_id=#{inspect(doc_id)} - workspace " <>
+              "#{inspect(doc.workspace_id)} is not in BARKPARK_BOKBASEN_WORKSPACE_IDS"
+          )
 
-        case submission_id_of(status) do
-          sub_id when is_binary(sub_id) and sub_id != "" ->
-            poll_step(doc, sub_id, status["poll_url"], attempt, client_opts)
-
-          _ ->
-            stage_step(doc, attempt, client_opts)
+          {:cancel, :workspace_not_allowed}
         end
+    end
+  end
+
+  defp submit(doc, attempt, client_opts) do
+    status = Status.read(doc)
+
+    case submission_id_of(status) do
+      sub_id when is_binary(sub_id) and sub_id != "" ->
+        poll_step(doc, sub_id, status["poll_url"], attempt, client_opts)
+
+      _ ->
+        stage_step(doc, attempt, client_opts)
     end
   end
 

@@ -24,6 +24,7 @@ defmodule Barkpark.Plugins.Github.Outbox do
   import Ecto.Query
 
   alias Barkpark.Content.MutationEvent
+  alias Barkpark.Plugins.Github.Settings
   alias Barkpark.Repo
 
   @doc """
@@ -44,6 +45,20 @@ defmodule Barkpark.Plugins.Github.Outbox do
       order_by: [asc: e.id],
       limit: ^limit
     )
+    |> scope_to_intake_workspace(Settings.intake_workspace_id())
     |> Repo.all()
   end
+
+  # Owner ruling #12 (task-803343b8cce8bfb7): with
+  # `BARKPARK_GITHUB_INTAKE_WORKSPACE_ID` set, only THAT workspace's tasks
+  # mirror out — the same workspace inbound intake writes into. On a box with
+  # several workspaces every workspace's tasks used to land in the one repo.
+  # Unset keeps today's instance-wide window, so a single-workspace install
+  # sees no change. The cursor still advances past filtered-out events
+  # (`DrainWorker` moves it to the last FETCHED id, and a filtered event is
+  # simply never fetched), so nothing piles up.
+  defp scope_to_intake_workspace(query, nil), do: query
+
+  defp scope_to_intake_workspace(query, workspace_id) when is_binary(workspace_id),
+    do: from(e in query, where: e.workspace_id == ^workspace_id)
 end

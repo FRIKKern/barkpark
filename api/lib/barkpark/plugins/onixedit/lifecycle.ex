@@ -57,6 +57,17 @@ defmodule Barkpark.Plugins.OnixEdit.Lifecycle do
       not is_book?(doc) ->
         :ok
 
+      # Owner ruling #12: only an allow-listed workspace's books go out.
+      not Barkpark.Plugins.OnixEdit.Bokbasen.Settings.workspace_allowed?(
+        Map.get(doc, :workspace_id)
+      ) ->
+        Logger.info(
+          "OnixEdit.Lifecycle: not submitting #{inspect(doc_id(doc))} to Bokbasen — its workspace " <>
+            "is not in BARKPARK_BOKBASEN_WORKSPACE_IDS"
+        )
+
+        :ok
+
       true ->
         enqueue(doc, dataset)
     end
