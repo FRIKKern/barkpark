@@ -172,6 +172,7 @@
                   "paper_rev_unreadable",
                   "payload_too_large",
                   "precondition_failed",
+                  "private_field_bound",
                   "quota_exceeded",
                   "rate_limited",
                   "replay_unavailable",

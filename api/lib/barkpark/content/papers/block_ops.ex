@@ -5618,12 +5618,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # MUST be the row's workspace so a later `reveal_fields` resolves the same
   # (workspace_id, scope) DEK that sealed the bound block. `nil` (an unscoped
   # write) → the NULL-workspace DEK.
+  #
+  # Owner ruling #21 (task-9a7298f03aad0c42) rides the same chokepoint: before
+  # sealing, a block list that binds a field the schema keeps private is
+  # refused (`BoundFieldGuard`), because the body is the public artifact.
   defp encrypt_blocks_for_type(type, blocks, dataset, workspace_id)
        when is_list(blocks) and is_binary(dataset) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
-      {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
-      {:ok, _} -> {:ok, blocks}
-      {:error, _} = err -> err
+    with :ok <- Barkpark.Content.BoundFieldGuard.check(blocks, type, dataset, workspace_id) do
+      case Encryption.encrypt_marked(%{"blocks" => blocks}, type, dataset, workspace_id) do
+        {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
+        {:ok, _} -> {:ok, blocks}
+        {:error, _} = err -> err
+      end
     end
   end
 
