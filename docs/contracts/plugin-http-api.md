@@ -25,8 +25,6 @@ Body `{"ops":[…]}` (`?dataset=`, default `production`); ingest token also auth
 
 Filtering is per-viewer Studio/reader state; sorting edits data. No filter wire endpoint.
 
-Publishing a sheet makes it public at `/sheets/:slug`.
-
 ## Bulldocs — `POST /v1/plugins/bulldocs/papers/:slug/ops`
 
 Editing runs `BlockOps.ratchet_hollow/2` + `reject_new_field_loss/2`, not `AuthoringWall.enforce/5`; its five gates are publish-time floors. Rationale: `bulldocs_ops_door_edit_contract_test.exs`.
