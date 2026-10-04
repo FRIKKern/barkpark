@@ -99,6 +99,9 @@ defmodule Barkpark.Content.Errors do
       "A task with this _id already exists in another dataset of this workspace/project, and a second copy would make the id ambiguous for every by-id reader. Write to the dataset that already holds it (details.datasets), use a different _id, or — if a genuinely separate copy is intended — resend with content.dataset_twin_intended: true.",
     # Postgres' per-tsvector 1 048 575-byte cap, hit by the generated
     # `documents.search_vector` column (task-655f368ae5c72120). Was a bare 500.
+    # Owner ruling #39 — `Barkpark.Content.DocumentSize`.
+    "document_too_large" =>
+      "One document may hold at most details.limit_bytes of JSON (title + content); this one is details.size_bytes. Split it into several documents, move large files to media assets, or ask the operator to raise BARKPARK_MAX_DOCUMENT_BYTES.",
     "searchable_text_too_large" =>
       "This document's searchable text (its title plus every string in content) exceeds Postgres' 1048575-byte full-text index limit. Shorten or split the document — details.field names the longest string in your payload, which is the likely culprit. Note the limit is on the derived index, not the request: a long, repetitive body can pass where a shorter, high-entropy one fails.",
     # Reversible workspace archive (task-55474a106554e65a). 409, NOT the 404 a
@@ -1130,20 +1133,13 @@ defmodule Barkpark.Content.Errors do
        }
 
   defp build({:error, %Ecto.Changeset{} = cs}) do
-    details =
-      Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
-        Enum.reduce(opts, msg, fn {k, v}, acc ->
-          String.replace(acc, "%{#{k}}", to_string(v))
-        end)
-      end)
-
-    %{
-      code: "validation_failed",
-      message: "document failed validation",
-      status: 422,
-      details: details
-    }
+    case Barkpark.Content.DocumentSize.refusal(cs) do
+      {limit, size} -> document_too_large(limit, size)
+      nil -> changeset_validation_failed(cs)
+    end
   end
+
+  defp build({:error, {:document_too_large, limit, size}}), do: document_too_large(limit, size)
 
   # Task content validation (Content.validate_task_kind → Tasks.
   # validate_kind_content): a per-field errors map, e.g. %{"kind" => ["is
@@ -1440,5 +1436,34 @@ defmodule Barkpark.Content.Errors do
             nil
         end
     end
+  end
+
+  # Owner ruling #39: one document over the configured size cap. 413 (the
+  # request is too large for this door), named so a client can tell it from
+  # the transport-level `payload_too_large`.
+  defp document_too_large(limit, size) do
+    %{
+      code: "document_too_large",
+      message:
+        "the document is #{size} bytes of JSON (title + content), over this server's #{limit}-byte limit per document",
+      status: 413,
+      details: %{"limit_bytes" => limit, "size_bytes" => size}
+    }
+  end
+
+  defp changeset_validation_failed(cs) do
+    details =
+      Ecto.Changeset.traverse_errors(cs, fn {msg, opts} ->
+        Enum.reduce(opts, msg, fn {k, v}, acc ->
+          String.replace(acc, "%{#{k}}", to_string(v))
+        end)
+      end)
+
+    %{
+      code: "validation_failed",
+      message: "document failed validation",
+      status: 422,
+      details: details
+    }
   end
 end

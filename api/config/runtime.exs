@@ -1712,3 +1712,17 @@ case System.get_env("BARKPARK_SCHEMA_ENFORCE_DATASETS") do
   _ ->
     :ok
 end
+
+# PER-DOCUMENT SIZE CAP (owner ruling #39, task-923e630674853500). Every save
+# copies the whole document into history and the event log, so one document is
+# capped: 10 MB of JSON-encoded title + content by default
+# (`Barkpark.Content.DocumentSize`). Raise or lower it per box with a restart:
+#
+#   BARKPARK_MAX_DOCUMENT_BYTES=20000000
+case System.get_env("BARKPARK_MAX_DOCUMENT_BYTES") do
+  value when is_binary(value) and value != "" ->
+    config :barkpark, :max_document_bytes, String.to_integer(String.trim(value))
+
+  _ ->
+    :ok
+end

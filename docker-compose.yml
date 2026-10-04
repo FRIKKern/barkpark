@@ -93,6 +93,9 @@ services:
       # Per-dataset schema ENFORCEMENT opt-in (comma-separated slugs or `all`; #16147,
       # read in api/config/runtime.exs). Unset = advise-only, the default.
       - BARKPARK_SCHEMA_ENFORCE_DATASETS
+      # Per-document size cap in bytes (owner ruling #39; read in api/config/runtime.exs).
+      # Unset = 10 MB; 0 turns the cap off.
+      - BARKPARK_MAX_DOCUMENT_BYTES
       # Core web / endpoint
       - BARKPARK_ADMIN_TOKEN
       - BARKPARK_DEPLOYMENT_DIGEST
