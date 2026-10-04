@@ -226,6 +226,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
         |> bearer(user_bearer(user_a))
         |> post("/v1/auth/tokens", %{
           "name" => "my token",
+          "current_password" => "correct-horse-battery",
           # Escalation attempt — must be IGNORED.
           "owner_user_id" => user_b.id,
           "user_id" => user_b.id
@@ -325,7 +326,10 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       conn =
         conn
         |> bearer(user_bearer(user))
-        |> post("/v1/auth/tokens", %{"name" => "blocked"})
+        |> post("/v1/auth/tokens", %{
+          "name" => "blocked",
+          "current_password" => "correct-horse-battery"
+        })
 
       assert json_response(conn, 403)["error"]["code"] == "mfa_enrolment_required"
     end
@@ -360,7 +364,10 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
       conn =
         conn
         |> bearer(user_bearer(user))
-        |> post("/v1/auth/tokens", %{"name" => "allowed"})
+        |> post("/v1/auth/tokens", %{
+          "name" => "allowed",
+          "current_password" => "correct-horse-battery"
+        })
 
       assert %{"personal_access_token" => pat} = json_response(conn, 201)
       assert pat["owner_user_id"] == user.id
@@ -382,7 +389,7 @@ defmodule BarkparkWeb.AccessTokenIdentityTest do
     conn =
       scoped_conn()
       |> bearer(user_bearer(user))
-      |> post("/v1/auth/tokens", params)
+      |> post("/v1/auth/tokens", Map.put(params, "current_password", "correct-horse-battery"))
 
     assert %{"token" => raw, "personal_access_token" => pat} = json_response(conn, 201)
     {raw, pat}

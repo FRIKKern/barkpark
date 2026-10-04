@@ -96,7 +96,10 @@ defmodule BarkparkWeb.PatSelfMintAdminCapTest do
     conn =
       scoped_conn()
       |> bearer(user_bearer(user))
-      |> post("/v1/auth/tokens", %{"name" => uniq("cli")})
+      |> post("/v1/auth/tokens", %{
+        "name" => uniq("cli"),
+        "current_password" => "correct-horse-battery"
+      })
 
     assert %{"token" => raw, "personal_access_token" => pat} = json_response(conn, 201)
     {raw, pat}

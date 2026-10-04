@@ -754,8 +754,14 @@ defmodule Barkpark.Accounts do
         Repo.transaction(fn ->
           case do_reset_password(user, attrs, reset_mfa: true, keep_token_id: tok.id) do
             {:ok, reset_user, revoked} ->
+              # Owner ruling #13 (task-f4cfc3e2ab4bd6b8): recovery also removes
+              # every passkey, social link and owned personal token — whatever a
+              # thief added with a stolen session. Same transaction: a failed
+              # revoke keeps the old password and the reset link.
+              stripped = Barkpark.Accounts.Privacy.strip_added_credentials!(reset_user)
+
               case Repo.delete(tok, stale_error_field: :id) do
-                {:ok, _} -> {reset_user, revoked}
+                {:ok, _} -> {reset_user, revoked, stripped}
                 {:error, _cs} -> Repo.rollback(:stale)
               end
 
@@ -765,9 +771,32 @@ defmodule Barkpark.Accounts do
         end)
 
       case txn do
-        {:ok, {reset_user, revoked}} -> {:ok, reset_user, revoked}
-        {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
-        {:error, :stale} -> :error
+        {:ok, {reset_user, revoked, stripped}} ->
+          Enum.each(
+            stripped.revoked_token_ids,
+            &Barkpark.Auth.broadcast_socket_teardown(%Barkpark.Auth.ApiToken{id: &1})
+          )
+
+          Barkpark.Audit.emit(%{
+            category: "auth",
+            action: "reset_credentials_cleared",
+            subject: reset_user.id,
+            actor_type: "user",
+            actor_id: reset_user.id,
+            metadata: %{
+              "passkeys" => stripped.passkeys,
+              "social_links" => stripped.social_links,
+              "api_tokens_revoked" => length(stripped.revoked_token_ids)
+            }
+          })
+
+          {:ok, reset_user, revoked}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, changeset}
+
+        {:error, :stale} ->
+          :error
       end
     else
       _ -> :error
