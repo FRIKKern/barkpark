@@ -4978,7 +4978,12 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       {:ok, 409, %{"error" => %{"code" => code}}}
-      when code in ["no_previous_slot", "already_running", "not_supported"] ->
+      when code in [
+             "no_previous_slot",
+             "already_running",
+             "not_supported",
+             "v2_seals_unreadable"
+           ] ->
         json(conn, 409, %{error: %{code: code}})
 
       # A REAL instance 503 carries {"error":{"code":"feature_not_
