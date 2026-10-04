@@ -95,6 +95,98 @@ defmodule Barkpark.Content.Reseal do
     end)
   end
 
+  # Owner ruling #18 bind half (task-7cdf86a62a1d8c08): version-1 envelopes
+  # (bare-scope AAD) stored before #21609 can still be copied between
+  # documents. One row per workspace, type and TOP-LEVEL field holding a v1
+  # envelope; nested and bound-block copies are counted per document by
+  # `@v1_docs_sql`.
+  @v1_census_sql """
+  SELECT coalesce(w.slug, '-'), d.type, e.key, count(*) AS v1_rows
+  FROM documents d
+  LEFT JOIN workspaces w ON w.id = d.workspace_id
+  CROSS JOIN LATERAL jsonb_each(d.content) AS e
+  WHERE jsonb_typeof(d.content) = 'object'
+    AND jsonb_typeof(e.value) = 'object'
+    AND e.value ->> '_bpenc' = '1'
+  GROUP BY 1, 2, 3
+  ORDER BY 4 DESC, 1, 2, 3
+  """
+
+  @v1_docs_sql """
+  SELECT coalesce(w.slug, '-'), d.type, count(*) AS docs
+  FROM documents d
+  LEFT JOIN workspaces w ON w.id = d.workspace_id
+  WHERE d.content::text LIKE '%"_bpenc": 1%'
+  GROUP BY 1, 2
+  ORDER BY 3 DESC, 1, 2
+  """
+
+  @doc """
+  The read-only v1 census: `{top_level_rows, docs_rows}`. `top_level_rows` is
+  `%{workspace, type, field, rows}` per top-level field holding a v1 envelope;
+  `docs_rows` is `%{workspace, type, field: "*", rows}`, the documents holding
+  a v1 envelope ANYWHERE (nested fields and bound blocks included). Workspace
+  `-` is a row with no workspace.
+  """
+  @spec v1_census() :: {[census_row()], [census_row()]}
+  def v1_census do
+    top = Repo.query!(@v1_census_sql, [], timeout: :infinity) |> census_rows()
+
+    %{rows: rows} = Repo.query!(@v1_docs_sql, [], timeout: :infinity)
+
+    docs =
+      Enum.map(rows, fn [ws, type, n] -> %{workspace: ws, type: type, field: "*", rows: n} end)
+
+    {top, docs}
+  end
+
+  @doc """
+  Every document (optionally in one workspace, by slug; `"-"` = no workspace)
+  holding a v1 envelope that `Encryption.upgrade_v1/5` would turn into a bound
+  v2 seal. Read-only.
+  """
+  @spec upgrade_plan(keyword()) :: [candidate()]
+  def upgrade_plan(opts \\ []) do
+    v1_documents(opts)
+    |> Enum.filter(fn {doc, _ws} -> upgrade_changes?(doc) end)
+    |> Enum.map(fn {doc, ws} ->
+      %{
+        workspace: (ws && ws.slug) || "-",
+        workspace_id: doc.workspace_id,
+        type: doc.type,
+        dataset: doc.dataset,
+        doc_id: doc.doc_id
+      }
+    end)
+  end
+
+  @doc """
+  Upgrade ONE workspace's v1 envelopes (by slug; `"-"` = rows with no
+  workspace) to bound v2 seals, in place, fenced on each row's rev. The value
+  each field decrypts to is unchanged, so the rev stays and no event fires.
+  Refuses without a working KEK. Re-running finds nothing left to upgrade.
+  """
+  @spec upgrade_apply(String.t(), keyword()) :: {:ok, map()} | {:error, atom()}
+  def upgrade_apply(workspace_slug, opts \\ []) when is_binary(workspace_slug) do
+    with true <- kek_ready?() || {:error, :kek_unavailable},
+         true <-
+           (workspace_slug == "-" or Repo.get_by(Workspace, slug: workspace_slug) != nil) ||
+             {:error, :workspace_not_found} do
+      batch = Keyword.get(opts, :batch_size, 100)
+
+      results =
+        [workspace: workspace_slug]
+        |> upgrade_plan()
+        |> Enum.chunk_every(batch)
+        |> Enum.flat_map(fn chunk -> Enum.map(chunk, &upgrade_one/1) end)
+
+      failed = for {:error, id, reason} <- results, do: %{doc_id: id, reason: inspect(reason)}
+      {:ok, %{upgraded: Enum.count(results, &(&1 == :ok)), failed: failed}}
+    else
+      {:error, _} = err -> err
+    end
+  end
+
   @type candidate :: %{
           workspace: String.t(),
           workspace_id: binary(),
@@ -165,6 +257,64 @@ defmodule Barkpark.Content.Reseal do
   end
 
   # ── internals ─────────────────────────────────────────────────────────────
+
+  # {document, workspace | nil} for every row whose content holds a v1
+  # envelope anywhere (the same predicate as `@v1_docs_sql`).
+  defp v1_documents(opts) do
+    query =
+      from(d in Document,
+        left_join: w in Workspace,
+        on: w.id == d.workspace_id,
+        where: fragment("?::text LIKE ?", d.content, ^~s(%"_bpenc": 1%)),
+        order_by: [asc: d.id],
+        select: {d, w}
+      )
+
+    query =
+      case Keyword.get(opts, :workspace) do
+        "-" -> where(query, [d], is_nil(d.workspace_id))
+        slug when is_binary(slug) -> where(query, [_d, w], w.slug == ^slug)
+        _ -> query
+      end
+
+    Repo.all(query, timeout: :infinity)
+  end
+
+  defp upgrade_changes?(%Document{content: content} = doc) when is_map(content) do
+    case Encryption.upgrade_v1(content, doc.type, doc.dataset, doc_scope(doc), doc.doc_id) do
+      {:ok, upgraded} -> upgraded != content
+      :error -> true
+    end
+  end
+
+  defp upgrade_changes?(_doc), do: false
+
+  defp upgrade_one(%{doc_id: id, type: type, dataset: dataset, workspace_id: ws_id}) do
+    query =
+      from(d in Document, where: d.doc_id == ^id and d.type == ^type and d.dataset == ^dataset)
+
+    query =
+      if ws_id,
+        do: where(query, [d], d.workspace_id == ^ws_id),
+        else: where(query, [d], is_nil(d.workspace_id))
+
+    with %Document{} = doc <- Repo.one(query) || :not_found,
+         {:ok, upgraded} <-
+           Encryption.upgrade_v1(doc.content, type, dataset, doc_scope(doc), doc.doc_id) do
+      if upgraded == doc.content do
+        :ok
+      else
+        {n, _} =
+          from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
+          |> Repo.update_all(set: [content: upgraded, updated_at: DateTime.utc_now()])
+
+        if n == 1, do: :ok, else: {:error, id, :changed_since_read}
+      end
+    else
+      :error -> {:error, id, :undecryptable}
+      other -> {:error, id, other}
+    end
+  end
 
   # {workspace, type, dataset} for every non-Default workspace schema that
   # marks any field (at any depth) encrypted.

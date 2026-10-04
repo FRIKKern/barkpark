@@ -128,6 +128,66 @@ defmodule Barkpark.Content.Encryption do
 
   def unseal_for_copy(content, _type, _dataset, _scope, _source_doc_id), do: {:ok, content}
 
+  @doc """
+  Upgrade every version-1 envelope in a document's marked fields (top-level,
+  nested and bound block copies) to a version-2 seal bound to that document
+  and field. Version-2 envelopes and plain values are left as they are, so a
+  second run changes nothing. `{:ok, content}`; `:error` when a v1 envelope
+  does not open under this document's key (it is never rewritten blind).
+  """
+  @spec upgrade_v1(map(), String.t(), String.t(), binary() | keyword() | nil, String.t()) ::
+          {:ok, map()} | :error
+  def upgrade_v1(content, type, dataset, scope, doc_id)
+      when is_map(content) and is_binary(type) and is_binary(dataset) and is_binary(doc_id) do
+    scope_opts = scope_opts(scope)
+    cx = cx(dataset, Keyword.get(scope_opts, :workspace_id), type, doc_id)
+
+    with {:ok, %SchemaDefinition{fields: raw}} when is_list(raw) <-
+           schema_for_write(type, dataset, scope_opts),
+         {:parsed, {:ok, fields}} <- {:parsed, parse_fields(raw)},
+         {:ok, upgraded} <- transform_map(content, fields, cx, :upgrade),
+         {:blocks, {:ok, upgraded}} <- {:blocks, upgrade_bound_blocks(upgraded, fields, cx)} do
+      {:ok, upgraded}
+    else
+      :error -> :error
+      {:blocks, :error} -> :error
+      _ -> {:ok, content}
+    end
+  end
+
+  def upgrade_v1(content, _type, _dataset, _scope, _doc_id), do: {:ok, content}
+
+  # Bound block copies, all or nothing: a block whose v1 value will not open
+  # fails the whole document rather than leaving it half upgraded.
+  defp upgrade_bound_blocks(%{"blocks" => blocks} = content, fields, cx) when is_list(blocks) do
+    by_name =
+      for %Field{name: n} = f <- fields, is_binary(n) and n != "", into: %{}, do: {n, f}
+
+    blocks
+    |> Enum.reduce_while({:ok, []}, fn
+      %{"fieldName" => name, "value" => value} = block, {:ok, acc} when is_binary(name) ->
+        case Map.get(by_name, name) do
+          %Field{} = field ->
+            case transform_value(value, field, at_field(cx, name), :upgrade) do
+              {:ok, v} -> {:cont, {:ok, [Map.put(block, "value", v) | acc]}}
+              :error -> {:halt, :error}
+            end
+
+          _ ->
+            {:cont, {:ok, [block | acc]}}
+        end
+
+      block, {:ok, acc} ->
+        {:cont, {:ok, [block | acc]}}
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Map.put(content, "blocks", Enum.reverse(acc))}
+      :error -> :error
+    end
+  end
+
+  defp upgrade_bound_blocks(content, _fields, _cx), do: {:ok, content}
+
   # The cipher context threaded through every walk: the DEK scope, the
   # workspace, and (when the document id is known) the binding base.
   defp cx(dataset, workspace_id, type, doc_id) do
@@ -506,4 +566,18 @@ defmodule Barkpark.Content.Encryption do
 
   defp apply_cipher(value, cx, :decrypt),
     do: FieldCipher.decrypt(value, cx.scope, cx.ws, cx_binding(cx))
+
+  # v1 -> bound v2 (the reseal tool's upgrade mode). Anything else unchanged.
+  defp apply_cipher(value, cx, :upgrade) do
+    case {FieldCipher.version(value), cx_binding(cx)} do
+      {1, binding} when is_binary(binding) ->
+        case FieldCipher.decrypt(value, cx.scope, cx.ws) do
+          {:ok, plain} -> {:ok, FieldCipher.encrypt(plain, cx.scope, cx.ws, binding)}
+          :error -> :error
+        end
+
+      _ ->
+        {:ok, value}
+    end
+  end
 end
