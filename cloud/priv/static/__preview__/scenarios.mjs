@@ -226,6 +226,10 @@ export function bpBase(over) {
       // refused state cannot exist at all — the whole corpus rendered the Updates
       // panel in exactly ONE state before this row was added.
       update_unavailable_reason: null,
+      // The box's last FAILED self-update run (phase, source, exit_code, mode,
+      // finished_at, redacted tail). The Ecto column default is NULL: no failed
+      // run on file.
+      update_last_failure: null,
       // dr-w24-s2 COMMIT DISTANCE — the control plane's own measurement of the
       // commit each box serves, a DIFFERENT question from the release-tag grade
       // above (prod carries rows reading distance 2493 / "behind" while
