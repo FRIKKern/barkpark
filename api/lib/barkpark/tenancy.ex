@@ -2185,7 +2185,7 @@ defmodule Barkpark.Tenancy do
          :ok <- delete_workspace_documents(ws_id),
          :ok <- delete_workspace_audit_sinks(ws_id),
          {:ok, _} <- Repo.delete(workspace),
-         :ok <- delete_workspace_chats(ws_id) do
+         {:ok, _chats_deleted} <- delete_workspace_chats(ws_id) do
       {:ok, workspace}
     else
       {:error, _} = err -> err
@@ -2392,6 +2392,9 @@ defmodule Barkpark.Tenancy do
   #      no scope can list (its owner no longer exists).
   # The tables are capability-owned (`studio_chat`, `epic_fleet`), so each is
   # touched only when `OwnedTables.present?/1` says it exists.
+  # Returns the write's own counts (`{:ok, %{messages:, sessions:}}`), never a
+  # bare `:ok`: the receipt lens (SentinelOkReturnerLensTest) refuses a write
+  # helper that answers with a literal it did not measure.
   defp delete_workspace_chats(ws_id) do
     if OwnedTables.present?("chat_sessions") do
       owned =
@@ -2400,11 +2403,16 @@ defmodule Barkpark.Tenancy do
           select: s.id
         )
 
-      Repo.delete_all(from(m in "chat_messages", where: m.session_id in subquery(owned)))
-      Repo.delete_all(from(s in exclude(owned, :select), where: ^unpinned_chat_session()))
-    end
+      {messages, _} =
+        Repo.delete_all(from(m in "chat_messages", where: m.session_id in subquery(owned)))
 
-    :ok
+      {sessions, _} =
+        Repo.delete_all(from(s in exclude(owned, :select), where: ^unpinned_chat_session()))
+
+      {:ok, %{messages: messages, sessions: sessions}}
+    else
+      {:ok, %{messages: 0, sessions: 0}}
+    end
   end
 
   defp unpinned_chat_session do
