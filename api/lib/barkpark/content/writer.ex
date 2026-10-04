@@ -494,7 +494,10 @@ defmodule Barkpark.Content.Writer do
               # PLAINTEXT content the caller actually sent.
               with :ok <- check_document_schema(type, attrs, dataset),
                    {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
-                enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
+                enc_attrs =
+                  enc_attrs
+                  |> maybe_render_paper_body_html(type, dataset)
+                  |> keep_row_owner(existing, opts)
 
                 # [acrc-publish-atomicity-txn-boundary] The doc write and its
                 # `mutation_events` row land or fail TOGETHER. Before this wrap
@@ -965,6 +968,24 @@ defmodule Barkpark.Content.Writer do
       else: attrs
   end
 
+  # OWNER RULING 2026-10-03 #9 — no claim-on-edit. An UPDATE keeps the row's
+  # STORED owner: `put_scope_attrs` stamps the acting user on every non-admin
+  # write, so without this one member's patch to the shared unowned base made
+  # the row theirs and hid it from every other member. Only creates stamp the
+  # actor. An admin (see-all) caller may still reassign with an explicit
+  # `owner_id`, as on create.
+  defp keep_row_owner(attrs, %Document{owner_id: stored}, opts) do
+    case Keyword.get(opts, :caller_context) do
+      %Barkpark.Content.CallerContext{is_admin: true} when is_map_key(attrs, "owner_id") ->
+        attrs
+
+      _ ->
+        if Map.has_key?(attrs, "owner_id") or Map.has_key?(attrs, :owner_id),
+          do: attrs |> Map.delete(:owner_id) |> Map.put("owner_id", stored),
+          else: attrs
+    end
+  end
+
   defp do_upsert_document(type, attrs, dataset, doc_id, opts) do
     ctx = WriteScope.build_ctx(opts)
 
@@ -1073,6 +1094,7 @@ defmodule Barkpark.Content.Writer do
                 enc_attrs =
                   enc_attrs
                   |> keep_row_scope(existing)
+                  |> keep_row_owner(existing, opts)
                   |> maybe_render_paper_body_html(type, dataset)
 
                 # [acrc-publish-atomicity-txn-boundary] The doc write and its
