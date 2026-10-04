@@ -80,10 +80,16 @@ defmodule Barkpark.Content.Reseal do
 
   @doc "The read-only census (`:plaintext`, default) or its positive control (`:control`)."
   @spec census(:plaintext | :control) :: [census_row()]
-  def census(which \\ :plaintext) do
-    sql = if which == :control, do: @control_sql, else: @census_sql
-    %{rows: rows} = Repo.query!(sql, [], timeout: :infinity)
+  def census(which \\ :plaintext)
 
+  # One literal statement per clause: no SQL text travels in a variable.
+  def census(:control),
+    do: Repo.query!(@control_sql, [], timeout: :infinity) |> census_rows()
+
+  def census(:plaintext),
+    do: Repo.query!(@census_sql, [], timeout: :infinity) |> census_rows()
+
+  defp census_rows(%{rows: rows}) do
     Enum.map(rows, fn [ws, type, field, n] ->
       %{workspace: ws, type: type, field: field, rows: n}
     end)
