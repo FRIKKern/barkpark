@@ -109,17 +109,17 @@ One PortableDoc block op on any document type (Studio's block editor op). Body `
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
-SSE mutation stream, scoped to the resolved workspace + project.
+SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
 
 **Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (`?lastEventId=<int>` for browsers) replays later scope events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=<int>`) replays later events oldest-first, then live.
 
-**First frame:** `event: welcome`.
+First frame: `event: welcome`.
 
-**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. **Keepalive:** `: keepalive` per 30 s idle.
+**Mutation frame** — `id: <n>`, `event: mutation`, `data`: `eventId` (int, `Last-Event-ID`), `mutation` (kind), `type`, `documentId` (full id, `drafts.` if draft), `rev` (after write), `previousRev` (`null` on `create`), `result` (envelope), `syncTags`. Keepalive: `: keepalive` per 30 s idle.
 
-**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID`. (Chat never sheds.)
+**Shed frame:** a stalled consumer gets ONE `event: overloaded` (`reason: slow_consumer`), then closes; reconnect with `Last-Event-ID` (chat never sheds).
 
 **Chat stream** (`GET /v1/chat/sessions/:id/events` [admin]) adds **`event: workflow`** — a live workflow summary (unreplayable, NO `id:`).
 
@@ -150,7 +150,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/dataset/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required` 422 · `searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` present but not an integer; absent anchors on 0). · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
 
 Per endpoint: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 

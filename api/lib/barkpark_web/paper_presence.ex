@@ -19,8 +19,8 @@ defmodule BarkparkWeb.PaperPresence do
   future subscriber grows a clause for a message it does not care about — or
   drops it into a catch-all and stops noticing.
 
-  So presence rides `paper_presence:ws:<ws>:<ds>:<slug>`: the same tenant,
-  dataset and paper key, its own channel. A workspace-less paper (legacy NULL
+  So presence rides `paper_presence:ws:<ws>:p:<project>:<ds>:<slug>`: the same
+  tenant, project, dataset and paper key, its own channel. A workspace-less paper (legacy NULL
   row) falls back to a `ws:none` segment rather than an instance-global topic,
   mirroring the shape `PresenceState.topic/1` takes for the same case — except
   we do NOT collapse to a shared global, because two tenants' same-slug papers
@@ -45,18 +45,22 @@ defmodule BarkparkWeb.PaperPresence do
   @anonymous_key "anonymous"
 
   @doc """
-  The presence topic for one paper in one dataset in one workspace.
+  The presence topic for one paper in one dataset of one project in one
+  workspace. The project segment is owner ruling #30 / RQ11 (2026-10-03): two
+  projects of one workspace can hold same-slug papers, and their readers must
+  not share a room.
 
-  A nil workspace resolves to a `ws:none` segment — distinct from every real
-  workspace, so a legacy NULL-workspace paper gets its own room instead of a
+  A nil workspace (or project) resolves to a `none` segment — distinct from
+  every real one, so a legacy NULL-scope paper gets its own room instead of a
   shared global one.
   """
-  @spec topic(binary() | nil, String.t() | nil, String.t()) :: String.t()
-  def topic(workspace_id, dataset, slug) when is_binary(slug) do
+  @spec topic(binary() | nil, binary() | nil, String.t() | nil, String.t()) :: String.t()
+  def topic(workspace_id, project_id, dataset, slug) when is_binary(slug) do
     ws = if is_binary(workspace_id) and workspace_id != "", do: workspace_id, else: "none"
+    proj = if is_binary(project_id) and project_id != "", do: project_id, else: "none"
     ds = if is_binary(dataset) and dataset != "", do: dataset, else: "default"
 
-    "#{@topic_prefix}:ws:#{ws}:#{ds}:#{slug}"
+    "#{@topic_prefix}:ws:#{ws}:p:#{proj}:#{ds}:#{slug}"
   end
 
   @doc "The shared key every anonymous viewer is tracked under."

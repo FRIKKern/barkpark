@@ -111,6 +111,9 @@ defmodule Barkpark.Content.Errors do
       "This workspace is archived: its content is intact but it accepts no reads or writes until a workspace admin restores it (POST /api/workspaces/:workspace_slug/restore).",
     "default_workspace_not_archivable" =>
       "The instance-Default workspace cannot be archived — every unscoped route resolves to it. Archive a named workspace instead.",
+    # Owner ruling #21 (task-9a7298f03aad0c42) — `Content.BoundFieldGuard`.
+    "private_field_bound" =>
+      "The body is public, so it may not bind a field the schema keeps private (private, owner_only or readable_by). details.fields names them: remove those bound blocks (or unbind them), or make the field public in the schema.",
     # quota_exceeded stays the LAST entry: scaffy/commands/add-error-shape.scaffy
     # anchors its hint-append on this exact comma-free tail.
     "quota_exceeded" =>
@@ -860,6 +863,16 @@ defmodule Barkpark.Content.Errors do
   # MutateController used to emit a bare %{error: "halted", reason: reason}
   # here that carried no code/request_id and was invisible to every machine
   # consumer. The plugin's reason string becomes the message verbatim.
+  # Owner ruling #21: a block list bound a field the schema keeps private.
+  # 422 — the write is well-formed but its body would publish a hidden field.
+  defp build({:error, {:private_field_bound, names}}) when is_list(names),
+    do: %{
+      code: "private_field_bound",
+      message: Barkpark.Content.BoundFieldGuard.message(names),
+      status: 422,
+      details: %{fields: names}
+    }
+
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 

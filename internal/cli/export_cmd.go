@@ -79,6 +79,22 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("--verify <file> re-derives the sha256 and document count from the")
 		out.outf("artifact itself and compares them to the sidecar. It FAILS CLOSED:")
 		out.outf("a missing, empty or unparsable sidecar is a refusal, never a pass.")
+		out.outf("")
+		out.outf("RESTORE. There is no `bp import` yet. Restore by hand with `bp doc mutate`:")
+		out.outf("each export line is a whole document, so a published row (no `drafts.`")
+		out.outf("prefix) becomes createOrReplace + publish, and a draft row (`drafts.<id>`)")
+		out.outf("becomes createOrReplace on that draft id and stays a draft. Published")
+		out.outf("rows go first so a draft lands on top of its published twin. Server-")
+		out.outf("owned keys (_rev, _draft, _publishedId, _createdAt, _updatedAt) are")
+		out.outf("dropped. createOrReplace OVERWRITES a document already at that id, so")
+		out.outf("restore into an empty dataset. One batch holds at most 1000 mutations,")
+		out.outf("so split a large export (500 documents per file below):")
+		out.outf("  jq -c 'select(._id|startswith(\"drafts.\")|not)|del(._rev,._draft,._publishedId,._createdAt,._updatedAt)' backup.ndjson > pub.ndjson")
+		out.outf("  jq -c 'select(._id|startswith(\"drafts.\"))|del(._rev,._draft,._publishedId,._createdAt,._updatedAt)' backup.ndjson > drafts.ndjson")
+		out.outf("  split -l 500 pub.ndjson pub- && split -l 500 drafts.ndjson drafts-")
+		out.outf("  for f in pub-*; do jq -s '{mutations: (map({createOrReplace: .}) + map({publish: {id: ._id, type: ._type}}))}' $f > m.json && bp doc mutate --file m.json; done")
+		out.outf("  for f in drafts-*; do jq -s '{mutations: map({createOrReplace: .})}' $f > m.json && bp doc mutate --file m.json; done")
+		out.outf("Then compare: `bp export | wc -l` against the backup's line count.")
 		return exitOK
 	}
 	var opts apiclient.ExportOpts

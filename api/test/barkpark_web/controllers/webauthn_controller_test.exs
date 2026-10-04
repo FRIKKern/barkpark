@@ -254,6 +254,69 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     assert first.(3) |> json_response(401)
   end
 
+  describe "a passkey challenge is single-use" do
+    # Owner ruling #34 item 2 (2026-10-03, task-d9e8f02056e39763). A synced
+    # passkey always reports sign count 0, so the clone check above cannot
+    # catch a replay: a captured login body used to mint a fresh session every
+    # time it was POSTed inside the challenge's 5-minute life.
+    defp challenge! do
+      scoped_conn()
+      |> json_conn()
+      |> post("/v1/auth/webauthn/login/challenge", "{}")
+      |> json_response(200)
+    end
+
+    defp login_body(cred, ch, count),
+      do:
+        Jason.encode!(
+          Map.put(
+            make_assertion(cred, ch["challenge"], count),
+            :challenge_token,
+            ch["challenge_token"]
+          )
+        )
+
+    test "a captured sign-count-0 login body signs in once, never twice", %{token: token} do
+      cred = register!(token)
+      ch = challenge!()
+      body = login_body(cred, ch, 0)
+
+      first = scoped_conn() |> json_conn() |> post("/v1/auth/webauthn/login", body)
+      assert json_response(first, 201)["token"]
+
+      replay = scoped_conn() |> json_conn() |> post("/v1/auth/webauthn/login", body)
+      assert replay.status == 401, "replay answered #{replay.status}: #{replay.resp_body}"
+      refute Jason.decode!(replay.resp_body)["token"]
+    end
+
+    test "a login challenge already spent cannot clear a step-up", %{token: token} do
+      cred = register!(token)
+      ch = challenge!()
+      body = login_body(cred, ch, 0)
+
+      assert scoped_conn()
+             |> json_conn()
+             |> post("/v1/auth/webauthn/login", body)
+             |> json_response(201)
+
+      step_up = authed(token) |> post("/v1/auth/webauthn/step-up", body)
+      assert step_up.status == 422, "step-up answered #{step_up.status}: #{step_up.resp_body}"
+    end
+
+    test "each fresh challenge still signs in (the legitimate path)", %{token: token} do
+      cred = register!(token)
+
+      for _ <- 1..3 do
+        ch = challenge!()
+
+        resp =
+          scoped_conn() |> json_conn() |> post("/v1/auth/webauthn/login", login_body(cred, ch, 0))
+
+        assert json_response(resp, 201)["token"]
+      end
+    end
+  end
+
   test "list and delete passkeys; registration + login emit audit", %{token: token} do
     cred = register!(token)
     assert Repo.one(from e in Event, where: e.action == "passkey_registered")
