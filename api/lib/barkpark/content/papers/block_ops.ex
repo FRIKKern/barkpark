@@ -44,6 +44,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   alias Barkpark.Content.Papers
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.Content.Papers.ChangeEvents
   alias Barkpark.Content.Papers.ContextualHistory
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.PortableDoc.{FieldVocabulary, HtmlSanitizer, Patch, Projection, Render, Slots}
@@ -835,6 +836,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # transaction in `persist_blocks_doc` (see the note there).
     _ = {existing, opts}
     broadcast_paper_update(doc)
+    announce_ingest(doc, type, existing, opts)
     enqueue_edge_projection(doc)
     # P6.U1: append a goal-path lifecycle event ALONGSIDE the paper save,
     # gated strictly on a present `event_type` so ordinary streaming saves
@@ -847,6 +849,25 @@ defmodule Barkpark.Content.Papers.BlockOps do
     maybe_append_paper_event(attrs, slug, doc)
     {:ok, doc}
   end
+
+  # Owner ruling #40: an ingest / BPML sync write of a PAPER is one change
+  # event right away (mutation_events row, list/doc frames, webhooks). Other
+  # blocks types (sessions) keep their own channels. `existing` tells a
+  # create from an update and carries the rev it replaced.
+  defp announce_ingest(%Document{} = doc, @paper_type, existing, opts) do
+    {mutation, previous_rev} =
+      case existing do
+        %Document{rev: rev} -> {"update", rev}
+        _ -> {"create", nil}
+      end
+
+    ChangeEvents.announce(doc, mutation,
+      previous_rev: previous_rev,
+      source: Keyword.get(opts, :source, :api)
+    )
+  end
+
+  defp announce_ingest(_doc, _type, _existing, _opts), do: :ok
 
   defp emit_tail_boundary_telemetry(type, dataset, slug) do
     :telemetry.execute(
@@ -1087,6 +1108,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
           broadcast_paper_block(slug, doc.workspace_id, dataset, frame)
           enqueue_edge_projection(saved)
           maybe_save_op_revision(saved, dataset, opts)
+          # One combined change event once the editing burst settles (#40).
+          ChangeEvents.settle(saved, doc.rev)
 
           {:ok,
            %{
@@ -1754,6 +1777,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
     enqueue_edge_projection(saved)
     maybe_save_batch_revision(saved, dataset, opts)
+    # One combined change event once the editing burst settles (#40). The
+    # batch frame does not carry the pre-batch rev; the job compares against
+    # the rev it finds when it fires.
+    ChangeEvents.settle(saved, Keyword.get(opts, :previous_rev))
     :ok
   end
 

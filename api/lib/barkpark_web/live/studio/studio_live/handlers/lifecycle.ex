@@ -281,6 +281,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       viewing_type != type ->
         {:noreply, socket}
 
+      # An open paper repaints from its own paper topic (`{:paper_updated}` /
+      # `{:paper_block}`). Paper writes reach this list topic too since owner
+      # ruling #40 (they now emit change events for listen/sync/webhooks); a
+      # pane rebuild on top of the paper frame would discard the HTML it just
+      # painted.
+      type == "paper" and socket.assigns[:editor_view] == :paper ->
+        {:noreply, socket}
+
       # A rebuild reloads the open doc's form from the DB — with unsaved local
       # edits that would clobber the buffer just like `doc_updated`. Skip the
       # refresh; `doc_updated` (same broadcast) raises the reload banner.
