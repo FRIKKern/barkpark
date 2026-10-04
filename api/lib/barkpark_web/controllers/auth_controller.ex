@@ -385,16 +385,12 @@ defmodule BarkparkWeb.AuthController do
         mint_pat(conn, params, workspace_id, role)
 
       {:error, {:workspace_required, slugs}} ->
-        conn
-        |> put_status(422)
-        |> json(%{
-          error: %{
-            code: "workspace_required",
-            message:
-              "you belong to several workspaces — name the one this token is for " <>
-                "(\"workspace\": slug or id)",
-            workspaces: slugs
-          }
+        BarkparkWeb.ErrorResponse.emit_fields(conn, 422, %{
+          code: "workspace_required",
+          message:
+            "you belong to several workspaces — name the one this token is for " <>
+              "(\"workspace\": slug or id)",
+          workspaces: slugs
         })
 
       {:error, :not_a_member} ->
