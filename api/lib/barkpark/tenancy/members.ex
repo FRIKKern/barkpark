@@ -59,6 +59,7 @@ defmodule Barkpark.Tenancy.Members do
   alias Barkpark.Repo
   alias Barkpark.Sso
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias Barkpark.Tenancy.Invitation
   alias Barkpark.Tenancy.Membership
 
   @owner_role "owner"
@@ -171,35 +172,215 @@ defmodule Barkpark.Tenancy.Members do
   (task-02cb6bfc7b54924d). JIT creation is a real side effect: the account is
   auto-confirmed with a random password and NO e-mail is sent, so the invitee
   must sign in through a channel that does not need that password (SSO, magic
-  link, or a reset). Callers that need a notification must send it themselves;
-  this function does not pretend to be an invitation system.
+  link, or a reset). Callers that need a notification must send it themselves.
+
+  CONSENT (OWNER RULING 2026-10-03 #7): with an `actor:` (every HTTP door), a
+  CONFIRMED existing account is not seated here — an invitation is stored and
+  `{:ok, {:invited, row}}` returned; the seat appears when the user accepts
+  (`accept_invitation/2`). A second request for the same pending pair is
+  `{:error, :already_invited}`.
 
   Refuses `{:error, :already_member}` rather than silently re-roling an
   existing seat — changing a role is `update_role/3`, and an "add" that quietly
   overwrote a role would be a privilege change disguised as a no-op.
   """
   @spec add_user_member(binary(), String.t(), String.t(), keyword()) ::
-          {:ok, member_row()} | {:error, atom() | Ecto.Changeset.t()}
+          {:ok, member_row()}
+          | {:ok, {:invited, invitation_row()}}
+          | {:error, atom() | Ecto.Changeset.t()}
   def add_user_member(workspace_id, email, role, opts \\ [])
       when is_binary(workspace_id) and is_binary(email) and is_binary(role) do
     with :ok <- role_ceiling(opts[:actor], workspace_id, nil, role),
          {:ok, email} <- normalize_email(email),
-         %User{} = user <- Sso.find_or_create_user(email),
-         nil <- TenancyAuth.membership(user.id, workspace_id, :user),
-         {:ok, user} <- Accounts.Privacy.reclaim_unconfirmed(user) do
-      case TenancyAuth.create_membership(workspace_id, user.id, role, "user") do
-        {:ok, membership} ->
-          {:ok, decorate(membership, %{user.id => email}, %{})}
-
-        {:error, changeset} ->
-          {:error, changeset}
-      end
+         existing = Accounts.get_user_by_email(email),
+         %User{} = user <- existing || Sso.find_or_create_user(email),
+         nil <- TenancyAuth.membership(user.id, workspace_id, :user) do
+      if invite?(existing, opts),
+        do: invite(workspace_id, user, email, role, opts[:actor]),
+        else: seat_now(workspace_id, user, email, role)
     else
       {:error, reason} -> {:error, reason}
       %Membership{} -> {:error, :already_member}
       _ -> {:error, :user_unavailable}
     end
   end
+
+  # OWNER RULING 2026-10-03 #7: an HTTP door (an `actor` is present) seating a
+  # CONFIRMED existing account creates an invitation the user must accept;
+  # nothing is seated until they do. A brand-new email (JIT-created here) and
+  # an UNCONFIRMED account (reclaimed first: nobody proved that email, so
+  # there is no owner whose consent the seat could bypass) are seated
+  # directly, as before. Internal callers (no actor) keep direct seating.
+  defp invite?(%User{confirmed_at: %{}}, opts), do: not is_nil(opts[:actor])
+  defp invite?(_existing, _opts), do: false
+
+  defp seat_now(workspace_id, user, email, role) do
+    with {:ok, user} <- Accounts.Privacy.reclaim_unconfirmed(user),
+         {:ok, membership} <- TenancyAuth.create_membership(workspace_id, user.id, role, "user") do
+      {:ok, decorate(membership, %{user.id => email}, %{})}
+    end
+  end
+
+  defp invite(workspace_id, user, email, role, actor) do
+    %Invitation{}
+    |> Invitation.changeset(
+      %{workspace_id: workspace_id, user_id: user.id, role: role, invited_by: actor_ref(actor)},
+      valid_role_names(workspace_id)
+    )
+    |> Repo.insert()
+    |> case do
+      {:ok, invitation} ->
+        {:ok, {:invited, invitation_row(invitation, email)}}
+
+      {:error, %Ecto.Changeset{} = changeset} ->
+        if unique_violation?(changeset),
+          do: {:error, :already_invited},
+          else: {:error, changeset}
+    end
+  end
+
+  defp unique_violation?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn {_field, {_msg, meta}} -> meta[:constraint] == :unique end)
+  end
+
+  defp actor_ref(%ApiToken{id: id}), do: "api_token:" <> id
+  defp actor_ref(%User{id: id}), do: "user:" <> id
+  defp actor_ref(_), do: nil
+
+  @typedoc "A pending invitation as the roster API renders it."
+  @type invitation_row :: %{
+          id: binary(),
+          workspace_id: binary(),
+          email: String.t() | nil,
+          role: String.t(),
+          invited_by: String.t() | nil,
+          inserted_at: DateTime.t()
+        }
+
+  defp invitation_row(%Invitation{} = i, email) do
+    %{
+      id: i.id,
+      workspace_id: i.workspace_id,
+      email: email,
+      role: i.role,
+      invited_by: i.invited_by,
+      inserted_at: i.inserted_at
+    }
+  end
+
+  @doc "Pending invitations of a workspace (the admin's view), oldest first."
+  @spec list_invitations(binary()) :: [invitation_row()]
+  def list_invitations(workspace_id) when is_binary(workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil ->
+        []
+
+      ws ->
+        from(i in Invitation,
+          join: u in User,
+          on: u.id == i.user_id,
+          where: i.workspace_id == ^ws,
+          order_by: [asc: i.inserted_at, asc: i.id],
+          select: {i, u.email}
+        )
+        |> Repo.all()
+        |> Enum.map(fn {i, email} -> invitation_row(i, email) end)
+    end
+  end
+
+  @doc "Withdraw a pending invitation of this workspace; `{:error, :not_found}` otherwise."
+  @spec cancel_invitation(binary(), binary()) :: {:ok, invitation_row()} | {:error, :not_found}
+  def cancel_invitation(workspace_id, invitation_id) do
+    with %Invitation{} = i <- get_invitation(invitation_id),
+         true <- i.workspace_id == workspace_id,
+         {:ok, i} <- Repo.delete(i) do
+      {:ok, invitation_row(i, nil)}
+    else
+      _ -> {:error, :not_found}
+    end
+  end
+
+  @doc "The signed-in user's own pending invitations, with each workspace's slug and name."
+  @spec list_invitations_for_user(binary()) :: [map()]
+  def list_invitations_for_user(user_id) when is_binary(user_id) do
+    case Repo.uuid_or_nil(user_id) do
+      nil ->
+        []
+
+      uid ->
+        from(i in Invitation,
+          join: w in assoc(i, :workspace),
+          where: i.user_id == ^uid,
+          order_by: [asc: i.inserted_at, asc: i.id],
+          select: %{
+            id: i.id,
+            workspace_id: w.id,
+            workspace: w.slug,
+            workspace_name: w.name,
+            role: i.role,
+            inserted_at: i.inserted_at
+          }
+        )
+        |> Repo.all()
+    end
+  end
+
+  @doc """
+  Accept an invitation addressed to `user_id`: the seat is created with the
+  invited role and the invitation deleted, in one transaction. Someone else's
+  invitation answers `{:error, :not_found}` (no oracle).
+  """
+  @spec accept_invitation(binary(), binary()) :: {:ok, member_row()} | {:error, term()}
+  def accept_invitation(user_id, invitation_id) do
+    Repo.transaction(fn ->
+      with %Invitation{user_id: ^user_id} = i <- get_invitation(invitation_id),
+           {:ok, _} <- Repo.delete(i),
+           {:ok, membership} <- accept_seat(i) do
+        membership
+      else
+        {:error, reason} -> Repo.rollback(reason)
+        _ -> Repo.rollback(:not_found)
+      end
+    end)
+    |> case do
+      {:ok, membership} ->
+        announce_seats_changed(membership.workspace_id)
+        {:ok, decorate_one(membership)}
+
+      error ->
+        error
+    end
+  end
+
+  # Already seated by another path meanwhile: the existing seat stands.
+  defp accept_seat(%Invitation{} = i) do
+    case TenancyAuth.membership(i.user_id, i.workspace_id, :user) do
+      %Membership{} = m -> {:ok, m}
+      nil -> TenancyAuth.create_membership(i.workspace_id, i.user_id, i.role, "user")
+    end
+  end
+
+  @doc "Decline (delete) an invitation addressed to `user_id`."
+  @spec decline_invitation(binary(), binary()) :: :ok | {:error, :not_found}
+  def decline_invitation(user_id, invitation_id) do
+    case get_invitation(invitation_id) do
+      %Invitation{user_id: ^user_id} = i ->
+        {:ok, _} = Repo.delete(i)
+        :ok
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
+  defp get_invitation(id) when is_binary(id) do
+    case Repo.uuid_or_nil(id) do
+      nil -> nil
+      uuid -> Repo.get(Invitation, uuid)
+    end
+  end
+
+  defp get_invitation(_), do: nil
 
   @doc """
   Change an existing seat's role.

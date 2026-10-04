@@ -380,9 +380,27 @@ defmodule BarkparkWeb.AuthController do
   defp session_mfa_fresh?(_), do: false
 
   defp mint_token(conn, params) do
+    case resolve_caller_workspace(conn.assigns.current_user, params["workspace"]) do
+      {:ok, {workspace_id, role}} ->
+        mint_pat(conn, params, workspace_id, role)
+
+      {:error, {:workspace_required, slugs}} ->
+        BarkparkWeb.ErrorResponse.emit_fields(conn, 422, %{
+          code: "workspace_required",
+          message:
+            "you belong to several workspaces — name the one this token is for " <>
+              "(\"workspace\": slug or id)",
+          workspaces: slugs
+        })
+
+      {:error, :not_a_member} ->
+        error(conn, 403, "forbidden", "you are not a member of that workspace")
+    end
+  end
+
+  defp mint_pat(conn, params, workspace_id, role) do
     user = conn.assigns.current_user
     name = token_name(params)
-    {workspace_id, role} = resolve_caller_workspace(user)
     permissions = Auth.max_pat_permissions_for_role(role)
 
     # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
@@ -437,13 +455,32 @@ defmodule BarkparkWeb.AuthController do
   # `workspace_memberships`), so a workspace the caller has no membership row
   # in can never come back; a user with no membership anywhere resolves to
   # `{nil, nil}`, which `Auth.create_personal_access_token/3` reads as "mint
-  # workspace-less" (no Tenancy.Membership grant). Ordered by slug, so a user
-  # in more than one workspace resolves deterministically to the same one on
-  # every call.
-  defp resolve_caller_workspace(user) do
-    case Tenancy.list_workspaces_for(user) do
-      [workspace | _rest] -> {workspace.id, TenancyAuth.membership_role(user, workspace.id)}
-      [] -> {nil, nil}
+  # workspace-less" (no Tenancy.Membership grant).
+  #
+  # OWNER RULING 2026-10-03 #7: the mint NAMES its workspace. `workspace` (a
+  # slug or id among the caller's OWN workspaces) picks it; a non-member target
+  # is 403. Without it, a user in exactly one workspace gets that one (as
+  # before) and a user in several gets 422 `workspace_required` listing them —
+  # never the first by slug, which let any admin who seated the user decide
+  # where the user's next token landed.
+  defp resolve_caller_workspace(user, requested) do
+    workspaces = Tenancy.list_workspaces_for(user)
+
+    case {requested, workspaces} do
+      {ref, _} when is_binary(ref) and ref != "" ->
+        case Enum.find(workspaces, &(&1.slug == ref or &1.id == ref)) do
+          nil -> {:error, :not_a_member}
+          ws -> {:ok, {ws.id, TenancyAuth.membership_role(user, ws.id)}}
+        end
+
+      {_, [workspace]} ->
+        {:ok, {workspace.id, TenancyAuth.membership_role(user, workspace.id)}}
+
+      {_, []} ->
+        {:ok, {nil, nil}}
+
+      {_, several} ->
+        {:error, {:workspace_required, Enum.map(several, & &1.slug)}}
     end
   end
 

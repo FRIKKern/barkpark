@@ -918,6 +918,14 @@ defmodule PDS.Census do
     {:patch, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :update, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/members/:principal_ref", "BarkparkWeb.MemberController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id", "BarkparkWeb.MemberController", :revoke_token, :status_only_receipt},
+    # Seat consent (owner ruling #7, task-a08da65bc33083d0): three NEW routed
+    # writes, rows proposed by `--routed-rows` and pasted verbatim. Each renders
+    # the row the context function returned (accept: the created seat; decline:
+    # the id it deleted; withdraw: the deleted invitation) behind a tagged
+    # `{:ok, _}` match — a status receipt, never an `ok: true` literal.
+    {:delete, "/v1/auth/invitations/:id", "BarkparkWeb.InvitationController", :decline, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/invitations/:id", "BarkparkWeb.MemberController", :cancel_invitation, :status_only_receipt},
+    {:post, "/v1/auth/invitations/:id/accept", "BarkparkWeb.InvitationController", :accept, :status_only_receipt},
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
@@ -1468,7 +1476,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{573, 573}],
+      basis_spans: [{610, 610}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1486,7 +1494,7 @@ defmodule PDS.Census do
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
           "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
           "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
-          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6.",
+          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1495,7 +1503,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{588, 593}],
+      basis_spans: [{625, 630}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1625,7 +1633,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{599, 621}],
+      basis_spans: [{636, 658}],
       basis_token: "why it must merge",
       class: "PURE-ECHO",
       confirmation: "declared",

@@ -312,6 +312,14 @@ var codeExit = map[string]int{
 	// terminal for a caller who is not the instance owner (task-6ca882967fd95dda).
 	"host_execution_not_permitted": exitAuth,
 
+	// 403, Auth.rotate_token/3 (owner ruling #7): a user-owned token is rotated
+	// only by its owner; a workspace admin revokes it instead.
+	"owner_only": exitAuth,
+
+	// 422, auth_controller.ex create_token (owner ruling #7): the caller sits in
+	// several workspaces and must name the PAT's workspace.
+	"workspace_required": exitValidation,
+
 	// 404 → not-found.
 	"webhook_not_found": exitNotFound, // 404, webhook_controller.ex:288
 	"event_not_found":   exitNotFound, // 404, webhook_controller.ex:280

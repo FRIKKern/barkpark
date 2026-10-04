@@ -168,6 +168,7 @@
                   "missing_slug",
                   "missing_source",
                   "not_found",
+                  "owner_only",
                   "paper_exists",
                   "paper_rev_unreadable",
                   "payload_too_large",
@@ -197,6 +198,7 @@
                   "validation_failed",
                   "webhook_not_found",
                   "workspace_archived",
+                  "workspace_required",
                   "workspace_scope_required",
                   "workspace_slug_conflict",
                   "workspace_suspended"

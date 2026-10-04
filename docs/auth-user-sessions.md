@@ -31,6 +31,16 @@ token (`POST /v1/auth/tokens`) needs `current_password` in the body or a
 session that presented an MFA factor within the step-up window; otherwise it
 answers 401 `reauth_required`.
 
+**Seat consent (ruling #7, 2026-10-03).** `POST /w/:ws/p/:p/v1/members` for a
+confirmed existing account stores a `workspace_invitations` row and answers
+`202 {invitation}`; nothing is seated until the user accepts
+(`GET /v1/auth/invitations`, `POST …/:id/accept`, `DELETE …/:id` declines;
+admins list/withdraw at `…/v1/invitations`). New emails and unconfirmed
+accounts are still seated at once. A user-owned token is rotated only by its
+owner (`403 owner_only`); admins revoke instead. `POST /v1/auth/tokens` takes
+`workspace` (slug/id); a user in several workspaces without it gets `422
+workspace_required` listing them.
+
 ## Sessions
 
 `Barkpark.Accounts.UserSession` is the login bearer, separate from API tokens.
