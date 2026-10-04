@@ -213,7 +213,15 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   @facet_keys [:goal, :priority, :label, :worker]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
+    # Owner ruling #4: operator-gated flat mount, workspace-clamped scoped mount.
+    case BarkparkWeb.OpsOperatorGate.mount(socket, session) do
+      {:ok, socket} -> mount_board(socket)
+      {:halt, socket} -> {:ok, socket}
+    end
+  end
+
+  defp mount_board(socket) do
     connected = connected?(socket)
 
     if connected do
@@ -224,7 +232,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       # `subscribe_documents/2` joins BOTH — the shared layer on the global topic,
       # this surface's own workspace on the keyed one — so every document arrives
       # exactly once, WITH its payload, and no foreign tenant's body ever does.
-      Broadcast.subscribe_documents(@dataset, board_workspace_id())
+      Broadcast.subscribe_documents(@dataset, restage_workspace_id(socket))
       Process.send_after(self(), :refresh, @refresh_ms)
     end
 
@@ -236,7 +244,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     # Running the projection there was pure waste (2× per open). Guard it behind
     # `connected?/1`: paint an empty board skeleton on the dead render (the pure,
     # DB-free `Board.build([])`), and load the real snapshot ONCE, on connect.
-    board = if connected, do: Board.snapshot(dataset: @dataset), else: Board.build([])
+    board = if connected, do: snapshot(socket, @dataset), else: Board.build([])
 
     # FIELD-VISIBILITY SEAL (felix W19): compute the fail-closed visibility
     # predicate ONCE per mount and thread it into every `card_from_broadcast/3`,
@@ -332,7 +340,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
     # reconcile cadence, never per broadcast.
     {:noreply,
      socket
-     |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+     |> assign(:board, snapshot(socket, socket.assigns.dataset))
      |> assign(:readable?, Board.field_visibility_gate(socket.assigns.dataset))
      |> assign(:last_change, nil)
      |> refresh_peek()
@@ -624,7 +632,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # (D9) so a rejected optimistic move never lingers, and raises the notice.
   defp rollback(socket, message) do
     socket
-    |> assign(:board, Board.snapshot(dataset: socket.assigns.dataset))
+    |> assign(:board, snapshot(socket, socket.assigns.dataset))
     |> assign(:last_change, nil)
     |> assign(:notice, message)
     |> assign_view()
@@ -839,7 +847,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # Parse-and-load the `?task=` param into @peek. nil/blank closes; an unknown
   # id peeks nothing (no crash, no panel — the board is unchanged).
   defp assign_peek(socket, task_id) when is_binary(task_id) and task_id != "" do
-    assign(socket, :peek, load_peek(task_id, socket.assigns.board))
+    assign(socket, :peek, load_peek(task_id, socket))
   end
 
   defp assign_peek(socket, _), do: assign(socket, :peek, nil)
@@ -848,7 +856,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # the :refresh reconcile) so the panel is as live as the board behind it.
   defp refresh_peek(socket) do
     case socket.assigns[:peek] do
-      %{doc_id: doc_id} -> assign(socket, :peek, load_peek(doc_id, socket.assigns.board))
+      %{doc_id: doc_id} -> assign(socket, :peek, load_peek(doc_id, socket))
       _ -> socket
     end
   end
@@ -857,8 +865,10 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # criteria with evidence, the claim lease) + the board's own cards for
   # children (same corpus the columns paint) + a titled blocker list off the
   # blocks-edges. Reads only — the panel writes nothing.
-  defp load_peek(task_id, board) do
-    case peek_doc(task_id) do
+  defp load_peek(task_id, socket) do
+    board = socket.assigns.board
+
+    case peek_doc(task_id, socket) do
       %Document{} = doc ->
         content = doc.content || %{}
         lid = Content.published_id(doc.doc_id)
@@ -931,25 +941,39 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
   # The same exact/`drafts.` fallback the restage fresh-read uses, dataset-
   # scoped, published row preferred, NEVER interpolated (a crafted ?task= is
   # only ever a bind parameter).
-  defp peek_doc(task_id) do
-    case fetch_peek_doc(task_id) do
+  defp peek_doc(task_id, socket) do
+    case fetch_peek_doc(task_id, socket) do
       %Document{} = doc ->
         doc
 
       nil ->
         if String.starts_with?(task_id, "drafts."),
           do: nil,
-          else: fetch_peek_doc("drafts." <> task_id)
+          else: fetch_peek_doc("drafts." <> task_id, socket)
     end
   end
 
-  defp fetch_peek_doc(doc_id) do
-    Repo.one(
+  # Owner ruling #4: a scoped board peeks only its own workspace's task.
+  defp fetch_peek_doc(doc_id, socket) do
+    query =
       from(d in Document,
         where: d.doc_id == ^doc_id and d.type == "task" and d.dataset == ^@dataset,
         limit: 1
       )
-    )
+
+    case BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket) do
+      nil -> Repo.one(query)
+      ws_id -> Repo.one(from(d in query, where: d.workspace_id == ^ws_id))
+    end
+  end
+
+  # The board's card set: instance-wide on the operator's flat mount, the
+  # mounted workspace's tasks only on a scoped mount (owner ruling #4).
+  defp snapshot(socket, dataset) do
+    case BarkparkWeb.OpsOperatorGate.scoped_workspace_id(socket) do
+      nil -> Board.snapshot(dataset: dataset)
+      ws_id -> Board.snapshot(dataset: dataset, workspace_id: ws_id)
+    end
   end
 
   # Resolve the task schema for the peek field-visibility cross-check,
