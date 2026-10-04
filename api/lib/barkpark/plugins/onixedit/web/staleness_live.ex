@@ -330,6 +330,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
 
     case listed do
       [%{doc: %Document{id: pk}}] ->
+        # global-read: same flat-posture ops console as load_books/0 — pk is a row this view listed
         case Repo.get(Document, pk) do
           %Document{type: @type_default, dataset: @dataset_default} = doc -> {:ok, doc}
           _ -> {:error, :not_found}
