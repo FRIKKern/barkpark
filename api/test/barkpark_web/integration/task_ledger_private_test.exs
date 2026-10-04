@@ -79,7 +79,7 @@ defmodule BarkparkWeb.Integration.TaskLedgerPrivateTest do
            |> get("/v1/data/doc/#{@dataset}/task/task-ledger-private-1")
            |> json_response(404)
 
-    assert build_conn() |> get("/v1/data/query/#{@dataset}/task") |> json_response(404)
+    assert scoped_conn() |> get("/v1/data/query/#{@dataset}/task") |> json_response(404)
   end
 
   test "anonymous search finds the public post but never the task", %{conn: conn} do
