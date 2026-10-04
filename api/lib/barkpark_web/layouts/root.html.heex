@@ -5267,6 +5267,11 @@
         before the inline script below folds it into Hooks and connects the
         LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
   <script src="/assets/bp-paper-editor-hooks.js"></script>
+  <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
+        nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
+        delegates to `window.BarkparkDatetimeFieldHook` and waits for
+        DOMContentLoaded, which fires only after deferred scripts have run. --%>
+  <script src="/assets/bp-datetime-field.js" defer></script>
   <script nonce={assigns[:csp_nonce]}>
     let csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content");
 
@@ -6277,6 +6282,30 @@
         });
       },
     };
+
+    // BarkparkDatetimeField — a datetime field shows local wall time and
+    // saves a UTC instant ("...Z"). The logic lives in the deferred
+    // /assets/bp-datetime-field.js; this entry delegates to it, waiting for
+    // DOMContentLoaded (after every deferred script) if it is not there yet.
+    Hooks.BarkparkDatetimeField = (() => {
+      const call = (name, self) => {
+        const run = () => {
+          const impl = window.BarkparkDatetimeFieldHook;
+          if (!impl || !impl[name]) return;
+          // The implementation's private helpers (`_sync`, `_hidden`, …)
+          // ride on `this`, as they would for a directly registered hook.
+          for (const k of Object.keys(impl)) if (k.startsWith("_")) self[k] = impl[k];
+          impl[name].call(self);
+        };
+        if (window.BarkparkDatetimeFieldHook || document.readyState !== "loading") run();
+        else document.addEventListener("DOMContentLoaded", run, { once: true });
+      };
+      return {
+        mounted() { call("mounted", this); },
+        updated() { call("updated", this); },
+        destroyed() { call("destroyed", this); }
+      };
+    })();
 
     // BarkparkColorField — keeps an OPTIONAL color field from autosaving a
     // phantom hex. Mounted on the wrapper holding a hidden <input> (the only
