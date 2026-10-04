@@ -109,10 +109,10 @@ defmodule BarkparkWeb.OrgMfaDemandsFactorTest do
 
       assert json_response(login(conn, user), 401)["error"]["code"] == "mfa_required"
 
-      code = NimbleTOTP.verification_code(user.totp_secret)
+      code = Barkpark.TotpTestHelper.totp_code_stable!(user.totp_secret)
 
       assert %{"token" => _} =
-               json_response(login(build_conn(), user, %{"totp_code" => code}), 201)
+               json_response(login(scoped_conn(), user, %{"totp_code" => code}), 201)
     end
 
     test "a passkey-only user OUTSIDE any require-MFA org is unchanged", %{conn: conn} do
