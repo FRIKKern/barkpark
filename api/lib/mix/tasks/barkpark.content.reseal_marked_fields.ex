@@ -11,6 +11,16 @@ defmodule Mix.Tasks.Barkpark.Content.ResealMarkedFields do
       mix barkpark.content.reseal_marked_fields                      # census + plan
       mix barkpark.content.reseal_marked_fields --workspace acme     # one workspace
       mix barkpark.content.reseal_marked_fields --apply --workspace acme
+      mix barkpark.content.reseal_marked_fields --upgrade-v1                    # v1 census + plan
+      mix barkpark.content.reseal_marked_fields --upgrade-v1 --apply --workspace acme
+
+  `--upgrade-v1` (owner ruling #18 bind half) works on version-1 envelopes,
+  sealed before field seals were bound to their document and field, which can
+  still be copied between documents of one workspace. It prints a census per
+  workspace, type and field, and with `--apply --workspace <slug>` (`-` = rows
+  with no workspace, the Default workspace allowed) rewrites each one as a
+  bound version-2 seal in place, fenced on the row's rev. Re-running finds
+  nothing left. Deploy the binding code (#21609) on the box first.
 
   `--apply` needs `--workspace`: one workspace per run, in batches of
   `--batch-size` (default 100). Each named row, draft or published, is sealed
@@ -27,7 +37,13 @@ defmodule Mix.Tasks.Barkpark.Content.ResealMarkedFields do
 
   alias Barkpark.Content.Reseal
 
-  @switches [apply: :boolean, dry_run: :boolean, workspace: :string, batch_size: :integer]
+  @switches [
+    apply: :boolean,
+    dry_run: :boolean,
+    workspace: :string,
+    batch_size: :integer,
+    upgrade_v1: :boolean
+  ]
 
   @impl Mix.Task
   def run(args) do
@@ -41,6 +57,52 @@ defmodule Mix.Tasks.Barkpark.Content.ResealMarkedFields do
     apply? = Keyword.get(opts, :apply, false) and not Keyword.get(opts, :dry_run, false)
     workspace = Keyword.get(opts, :workspace)
 
+    if Keyword.get(opts, :upgrade_v1, false),
+      do: upgrade_v1(apply?, workspace, opts),
+      else: reseal_plaintext(apply?, workspace, opts)
+  end
+
+  # Owner ruling #18 bind half: version-1 envelopes (sealed before #21609) can
+  # still be copied between documents; this upgrades them to bound v2 seals.
+  defp upgrade_v1(apply?, workspace, opts) do
+    {top, docs} = Reseal.v1_census()
+    print_census("V1 CENSUS — top-level fields holding a version-1 envelope", top)
+    print_census("V1 CENSUS — documents holding a version-1 envelope anywhere", docs)
+
+    plan = Reseal.upgrade_plan(if workspace, do: [workspace: workspace], else: [])
+    Mix.shell().info("UPGRADE PLAN — #{length(plan)} document(s) change")
+
+    plan
+    |> Enum.group_by(& &1.workspace)
+    |> Enum.each(fn {ws, rows} -> Mix.shell().info("  #{ws}\t#{length(rows)}") end)
+
+    cond do
+      not apply? ->
+        Mix.shell().info(
+          "Dry run: nothing was written. Re-run with --upgrade-v1 --apply --workspace <slug> (- = rows with no workspace)."
+        )
+
+      not is_binary(workspace) ->
+        Mix.raise("--apply needs --workspace <slug>: one workspace per run.")
+
+      true ->
+        case Reseal.upgrade_apply(workspace, Keyword.take(opts, [:batch_size])) do
+          {:ok, %{upgraded: n, failed: failed}} ->
+            Mix.shell().info(
+              "Upgraded #{n} document(s) in #{workspace}; #{length(failed)} failed."
+            )
+
+            Enum.each(failed, &Mix.shell().error("  #{&1.doc_id}: #{&1.reason}"))
+            {top_after, _} = Reseal.v1_census()
+            print_census("V1 CENSUS AFTER", top_after)
+
+          {:error, reason} ->
+            Mix.raise("Refused: #{reason}")
+        end
+    end
+  end
+
+  defp reseal_plaintext(apply?, workspace, opts) do
     print_census("CENSUS — plaintext marked fields, non-Default workspaces", Reseal.census())
 
     print_census(
