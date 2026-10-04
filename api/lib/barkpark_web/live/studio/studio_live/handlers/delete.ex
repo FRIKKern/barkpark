@@ -59,15 +59,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
-    if doc && type do
-      if params["disconnect"] == "true" do
-        Content.disconnect_references(
-          doc.doc_id,
-          socket.assigns.dataset,
-          ScopeHelpers.scope_opts(socket)
-        )
-      end
+    disconnect =
+      if doc && type && params["disconnect"] == "true",
+        do:
+          Content.disconnect_references(
+            doc.doc_id,
+            socket.assigns.dataset,
+            Shared.disconnect_opts(socket)
+          ),
+        else: :ok
 
+    case disconnect do
+      {:error, {:outside_write_grant, denied}} ->
+        {:noreply,
+         socket
+         |> assign(show_delete: false, delete_refs: [])
+         |> put_flash(:error, Shared.outside_grant_disconnect_message(denied, "deleted"))}
+
+      _ ->
+        do_confirm_delete(params, socket, doc, type)
+    end
+  end
+
+  defp do_confirm_delete(params, socket, doc, type) do
+    if doc && type do
       case Content.delete_document(
              doc.doc_id,
              type,

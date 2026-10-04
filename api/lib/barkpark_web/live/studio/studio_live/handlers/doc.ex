@@ -266,22 +266,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     doc = socket.assigns[:editor_doc]
 
     if doc && socket.assigns[:editor_type] do
-      socket =
-        if params["disconnect"] == "true" do
-          Content.disconnect_references(
-            doc.doc_id,
-            socket.assigns.dataset,
-            ScopeHelpers.scope_opts(socket)
-          )
+      disconnect =
+        if params["disconnect"] == "true",
+          do:
+            Content.disconnect_references(
+              doc.doc_id,
+              socket.assigns.dataset,
+              Shared.disconnect_opts(socket)
+            ),
+          else: :ok
 
-          socket
-        else
-          socket
-        end
+      case disconnect do
+        {:error, {:outside_write_grant, denied}} ->
+          {:noreply,
+           socket
+           |> assign(show_unpublish_guard: false, unpublish_refs: [])
+           |> put_flash(:error, Shared.outside_grant_disconnect_message(denied, "unpublished"))}
 
-      socket
-      |> assign(show_unpublish_guard: false, unpublish_refs: [])
-      |> Shared.do_unpublish()
+        _ ->
+          socket
+          |> assign(show_unpublish_guard: false, unpublish_refs: [])
+          |> Shared.do_unpublish()
+      end
     else
       {:noreply, assign(socket, show_unpublish_guard: false, unpublish_refs: [])}
     end
