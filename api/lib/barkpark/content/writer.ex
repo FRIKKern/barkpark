@@ -493,7 +493,8 @@ defmodule Barkpark.Content.Writer do
               # BEFORE encryption, so an enforcing dataset refuses on the
               # PLAINTEXT content the caller actually sent.
               with :ok <- check_document_schema(type, attrs, dataset),
-                   {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                   {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, existing.doc_id) do
                 enc_attrs =
                   enc_attrs
                   |> maybe_render_paper_body_html(type, dataset)
@@ -541,7 +542,8 @@ defmodule Barkpark.Content.Writer do
               # `required` rule, so checking the pre-scaffold attrs would warn
               # about fields the schema itself just filled in.
               with :ok <- check_document_schema(type, attrs, dataset),
-                   {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+                   {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, Map.get(attrs, "doc_id")) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
                 inject_write_fault!(:insert)
 
@@ -591,7 +593,7 @@ defmodule Barkpark.Content.Writer do
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
     new_id = generate_id(type)
     src_title = Map.get(doc, :title) || "Untitled"
-    src_content = Map.get(doc, :content) || %{}
+    src_content = clone_content(doc, type, dataset)
 
     create_document(
       type,
@@ -604,6 +606,31 @@ defmodule Barkpark.Content.Writer do
       dataset,
       opts
     )
+  end
+
+  # A sealed field is bound to its document (owner ruling #18 bind half), so a
+  # copy written under a new id would be refused. Open the source's sealed
+  # values; the create seals them again for the copy. A value that does not
+  # open is left as it is and the create's own check refuses it.
+  defp clone_content(doc, type, dataset) do
+    content = Map.get(doc, :content) || %{}
+
+    case {Map.get(doc, :doc_id), content} do
+      {src_id, %{} = content} when is_binary(src_id) ->
+        case Encryption.unseal_for_copy(
+               content,
+               type,
+               dataset,
+               Map.get(doc, :workspace_id),
+               src_id
+             ) do
+          {:ok, plain} -> plain
+          :error -> content
+        end
+
+      _ ->
+        content
+    end
   end
 
   # ── Initial values (Sanity-style schema-declared defaults) ────────────────
@@ -1090,7 +1117,8 @@ defmodule Barkpark.Content.Writer do
             %Document{} = existing ->
               # Field-encryption chokepoint (mirror of create_document). Fail
               # closed: a marked field that cannot be sealed rejects the write.
-              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+              with {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, existing.doc_id) do
                 enc_attrs =
                   enc_attrs
                   |> keep_row_scope(existing)
@@ -1121,7 +1149,8 @@ defmodule Barkpark.Content.Writer do
               end
 
             _ ->
-              with {:ok, enc_attrs} <- maybe_encrypt_marked_fields(attrs, type, dataset) do
+              with {:ok, enc_attrs} <-
+                     maybe_encrypt_marked_fields(attrs, type, dataset, Map.get(attrs, "doc_id")) do
                 enc_attrs = maybe_render_paper_body_html(enc_attrs, type, dataset)
 
                 # [acrc-publish-atomicity-txn-boundary] See the update branch:
@@ -1555,7 +1584,9 @@ defmodule Barkpark.Content.Writer do
   # type has no encrypted field, passes through byte-identical (additive +
   # idempotent — see `Barkpark.Content.Encryption`). Called immediately before
   # every `Document.changeset` in both create and upsert.
-  defp maybe_encrypt_marked_fields(attrs, type, dataset)
+  # `doc_id` is the id of the row being written (the existing row on an update):
+  # new seals bind to it (owner ruling #18 bind half, task-7cdf86a62a1d8c08).
+  defp maybe_encrypt_marked_fields(attrs, type, dataset, doc_id)
        when is_binary(type) and is_binary(dataset) do
     case Map.get(attrs, "content") do
       content when is_map(content) ->
@@ -1580,7 +1611,9 @@ defmodule Barkpark.Content.Writer do
                  dataset,
                  stamped_scope(attrs)
                ) do
-          case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs)) do
+          case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs),
+                 doc_id: doc_id
+               ) do
             {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
             {:error, _} = err -> err
           end
@@ -1596,7 +1629,7 @@ defmodule Barkpark.Content.Writer do
   # resolution (`WriteScope.put_scope_attrs` → `owner_scoped?` → `get_schema`)
   # already fails closed on a non-binary dataset, and the mutate route's
   # `:dataset` is a path param (always binary). So this is a plain no-op.
-  defp maybe_encrypt_marked_fields(attrs, _type, _dataset), do: {:ok, attrs}
+  defp maybe_encrypt_marked_fields(attrs, _type, _dataset, _doc_id), do: {:ok, attrs}
 
   # ── Envelope coercion + id/rev generation ─────────────────────────────────
 

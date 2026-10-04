@@ -122,8 +122,18 @@ defmodule Barkpark.Content.EncryptedFieldSealVerifyTest do
 
       assert raw_secret(again) == stored
 
+      # A write-path seal is a v2 envelope bound to this document and field
+      # (ruling #18 bind half): it opens only with that binding.
+      assert stored["_bpenc"] == 2
+      assert :error = FieldCipher.decrypt(stored, "dataset:" <> @dataset, again.workspace_id)
+
       assert {:ok, "hunter2"} =
-               FieldCipher.decrypt(stored, "dataset:" <> @dataset, again.workspace_id)
+               FieldCipher.decrypt(
+                 stored,
+                 "dataset:" <> @dataset,
+                 again.workspace_id,
+                 FieldCipher.binding(type, "v2", "secret")
+               )
     end
   end
 
