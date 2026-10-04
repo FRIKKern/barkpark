@@ -159,7 +159,7 @@ defmodule BarkparkWeb.BulldocsLive do
       |> assign(:paper_workspace_id, paper.workspace_id)
       |> assign(
         :presence_topic,
-        PaperPresence.topic(paper.workspace_id, dataset, slug)
+        PaperPresence.topic(paper.workspace_id, Map.get(paper, :project_id), dataset, slug)
       )
       |> assign(:paper_presence, PaperPresence.empty())
 
@@ -912,13 +912,13 @@ defmodule BarkparkWeb.BulldocsLive do
   def handle_event("paper-wikilink-search", %{"query" => query}, socket) do
     if item_share_grant?(socket.assigns),
       do: {:reply, %{results: []}, socket},
-      else: PaperHandlers.paper_wikilink_search(query, socket)
+      else: PaperHandlers.paper_wikilink_search(query, socket, search_scope(socket))
   end
 
   def handle_event("paper-tag-search", %{"query" => query}, socket) do
     if item_share_grant?(socket.assigns),
       do: {:reply, %{results: []}, socket},
-      else: PaperHandlers.paper_tag_search(query, socket)
+      else: PaperHandlers.paper_tag_search(query, socket, search_scope(socket))
   end
 
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
@@ -1963,6 +1963,26 @@ defmodule BarkparkWeb.BulldocsLive do
   # The independent grant assign is the authoritative capability boundary.
   defp item_share_grant?(assigns),
     do: match?(%{grant: :item}, assigns[:paper_share_grant])
+
+  # The editor's [[wikilink]] / #tag typeahead searches the paper's OWN tenant
+  # (owner ruling #30 Q10, 2026-10-03). The flat /papers reader carries no
+  # `:current_workspace`, so `ScopeHelpers.scope_opts/1` named no workspace and
+  # the search leaned on dataset scoping alone — a legacy NULL-dataset_id paper
+  # of ANOTHER workspace could surface. The same scope the backlinks read uses
+  # (`assign_linked_sections/4`): the paper's workspace and project. A scoped
+  # reader already has a workspace and keeps it; a legacy NULL-workspace paper
+  # stays unscoped, as its own read is.
+  defp search_scope(socket) do
+    paper = socket.assigns[:paper_doc] || %{}
+
+    if socket.assigns[:current_workspace] do
+      []
+    else
+      []
+      |> maybe_scope(:workspace_id, Map.get(paper, :workspace_id))
+      |> maybe_scope(:project_id, Map.get(paper, :project_id))
+    end
+  end
 
   # Public (unscoped) reader — flat /papers/:slug and dataset-scoped
   # /d/:dataset/papers/:slug both arrive here (reader_scope == nil). The

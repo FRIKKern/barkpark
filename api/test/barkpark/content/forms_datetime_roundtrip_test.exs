@@ -21,10 +21,12 @@ defmodule Barkpark.Content.FormsDatetimeRoundtripTest do
   }
 
   describe "datetime_form_value/1 (what the datetime-local input shows)" do
-    test "renders every ISO shape the API accepts in the input's one format" do
-      assert Forms.datetime_form_value("2026-01-01T12:00:00Z") == "2026-01-01T12:00"
-      assert Forms.datetime_form_value("2026-01-01T14:00:00+02:00") == "2026-01-01T12:00"
-      assert Forms.datetime_form_value("2026-01-01T12:00:30.123Z") == "2026-01-01T12:00"
+    # Owner ruling #46: an instant rides to the hidden input as its UTC
+    # instant; the browser hook shows it in local time.
+    test "renders every ISO shape the API accepts" do
+      assert Forms.datetime_form_value("2026-01-01T12:00:00Z") == "2026-01-01T12:00:00Z"
+      assert Forms.datetime_form_value("2026-01-01T14:00:00+02:00") == "2026-01-01T12:00:00Z"
+      assert Forms.datetime_form_value("2026-01-01T12:00:30.123Z") == "2026-01-01T12:00:30Z"
       assert Forms.datetime_form_value("2026-01-01T12:00:00") == "2026-01-01T12:00"
       assert Forms.datetime_form_value("2026-10-01T09:30") == "2026-10-01T09:30"
       assert Forms.datetime_form_value("2026-01-01") == "2026-01-01T00:00"
@@ -38,7 +40,7 @@ defmodule Barkpark.Content.FormsDatetimeRoundtripTest do
 
     test "doc_to_form hands the input the representable value" do
       doc = %{title: "T", status: "draft", content: %{"publishedAt" => "2026-01-01T12:00:00Z"}}
-      assert Forms.doc_to_form(doc, @schema)["publishedAt"] == "2026-01-01T12:00"
+      assert Forms.doc_to_form(doc, @schema)["publishedAt"] == "2026-01-01T12:00:00Z"
     end
   end
 

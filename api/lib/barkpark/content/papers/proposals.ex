@@ -365,11 +365,16 @@ defmodule Barkpark.Content.Papers.Proposals do
 
   # `workspace_id` attributes the DEK to the draft's workspace (charter
   # D51-D54) so a later reveal resolves the same (workspace_id, scope) DEK.
+  # Owner ruling #21: an accepted suggestion may not bind a private field
+  # into the body either (`BoundFieldGuard`).
   defp encrypt_blocks(blocks, dataset, workspace_id) do
-    case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
-      {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
-      {:ok, _} -> {:ok, blocks}
-      {:error, _} = err -> err
+    with :ok <-
+           Barkpark.Content.BoundFieldGuard.check(blocks, @paper_type, dataset, workspace_id) do
+      case Encryption.encrypt_marked(%{"blocks" => blocks}, @paper_type, dataset, workspace_id) do
+        {:ok, %{"blocks" => encrypted}} -> {:ok, encrypted}
+        {:ok, _} -> {:ok, blocks}
+        {:error, _} = err -> err
+      end
     end
   end
 

@@ -26,8 +26,9 @@ defmodule BarkparkWeb.Studio.GrantWriteTargetLadderOwnerTest do
       `revoked_at`) still says `:ok` there.
 
   That second answer is NOT a hole: the sheet snapshot is a UI AFFORDANCE, and
-  expiry/revocation truth reaches the real sheet write seam through
-  `Caps.write_capable_now?/1` (a fresh derive) before any mutation. The tests
+  the real sheet write seam (`Shared.sheet_write_capable?/1`) derives fresh —
+  `Caps.write_capable_now?/1` AND, since owner ruling #30 Q11, a fresh grant
+  load for the target walk — before any mutation. The tests
   below pin BOTH answers, because a hoist that silently equalised them would be
   a behaviour change wearing a refactor's clothes.
 
@@ -175,6 +176,40 @@ defmodule BarkparkWeb.Studio.GrantWriteTargetLadderOwnerTest do
       # the real sheet seam re-derives through `Caps.write_capable_now?/1`.
       assert Shared.sheet_write_capable_snapshot?(sheet),
              "the render-time snapshot must stay query-free and therefore stale"
+    end
+
+    # Owner ruling #30 Q11 (2026-10-03, task-1631e0fa917452d9). The WRITE seam
+    # (`sheet_write_capable?/1`, which SheetGrid re-asks before every mutation)
+    # used the CAPTURED grants for the target walk too. With a second write
+    # grant still live, `write_capable_now?/1` stays true, so a revoked grant
+    # on THIS sheet kept admitting writes until the socket remounted. The write
+    # seam now walks a fresh grant load; the render snapshot stays query-free.
+    test "the sheet WRITE seam sees a grant revoked mid-session (the snapshot does not)",
+         ctx do
+      _still_live =
+        bind_grant!(ctx.ws, ctx.user, %{
+          capabilities: ["read", "write"],
+          project_id: ctx.proj.id,
+          dataset: @dataset,
+          type: "sheet",
+          doc_id: @other_slug
+        })
+
+      sheet = sheet_assigns(ctx, @granted_slug, %{caps: %{write: true}})
+
+      # CONTROL — before the revocation the write seam admits this target.
+      assert Shared.sheet_write_capable?(sheet)
+
+      revoke!(ctx.grant)
+
+      refute Shared.sheet_write_capable?(sheet),
+             "a sheet write still passed on a grant revoked mid-session"
+
+      # The other grant's sheet still writes on the same assigns shape.
+      assert Shared.sheet_write_capable?(sheet_assigns(ctx, @other_slug, %{caps: %{write: true}}))
+
+      # The render snapshot is unchanged: query-free, therefore stale.
+      assert Shared.sheet_write_capable_snapshot?(sheet)
     end
 
     test "the difference is the ARGUMENT, not the owner — the same call answers both ways",
