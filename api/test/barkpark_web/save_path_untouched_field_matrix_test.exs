@@ -144,8 +144,24 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
   end
 
   # Every cell whose stored value moved. `===`: 1 and 1.0 are different JSON.
-  defp failing_cells(content) do
-    for {name, _decl, expected} <- @cells,
+  # Owner ruling #42: a bare-id reference is rewritten as `{_ref}` on the
+  # next Studio Classic save, touched or not. Every other cell stays
+  # byte-identical.
+  @rewritten_on_save %{
+    "ref_string" => %{"_ref" => "author-1", "_type" => "reference"},
+    "arr_ref_string" => [
+      %{"_ref" => "a1", "_type" => "reference"},
+      %{"_ref" => "a2", "_type" => "reference"}
+    ]
+  }
+
+  # The rewrite is the Studio Classic save's (`Content.Forms`); the API,
+  # SDK, Beta editor and field canvas doors store what they are given.
+  defp failing_cells(content, path) do
+    rewrites = if String.starts_with?(path, "classic"), do: @rewritten_on_save, else: %{}
+
+    for {name, _decl, stored} <- @cells,
+        expected = Map.get(rewrites, name, stored),
         actual = Map.fetch(content, name),
         not same?(expected, actual) do
       {name, expected, actual}
@@ -165,7 +181,7 @@ defmodule BarkparkWeb.SavePathUntouchedFieldMatrixTest do
   end
 
   defp assert_cells!(path, doc, except \\ []) do
-    case Enum.reject(failing_cells(doc.content), fn {name, _, _} -> name in except end) do
+    case Enum.reject(failing_cells(doc.content, path), fn {name, _, _} -> name in except end) do
       [] ->
         :ok
 

@@ -134,15 +134,17 @@ defmodule Barkpark.Content.FormsReferenceRoundtripTest do
     end
   end
 
-  test "a bare-string reference stays a bare string (no new contract)" do
+  # Owner ruling #42: `{_ref}` is canonical; a bare id is rewritten on its
+  # next save.
+  test "a bare-string reference is rewritten as {_ref} on the next save" do
     doc = seed!("seed-author-3")
 
     params = %{"title" => "Title 3 edited", "author" => "seed-author-3"}
     assert {:ok, saved, _} = Forms.upsert_draft(doc, "post", @schema, params, @dataset)
-    assert saved.content["author"] == "seed-author-3"
+    assert saved.content["author"] == %{"_ref" => "seed-author-3", "_type" => "reference"}
 
     params = Map.put(params, "author", "seed-author-1")
     assert {:ok, saved, _} = Forms.upsert_draft(saved, "post", @schema, params, @dataset)
-    assert saved.content["author"] == "seed-author-1"
+    assert saved.content["author"]["_ref"] == "seed-author-1"
   end
 end

@@ -1690,6 +1690,15 @@ if config_env() == :prod do
   # the `rewrite_on` form above.
 end
 
+# Canonical value-shape writes (owner rulings #42/#43/#44): default OFF in
+# config.exs. The owner turns them on per box once its consumers read both
+# shapes (Gyldendal's site first). `Barkpark.Content.CanonicalShapes`.
+case System.get_env("BARKPARK_CANONICAL_SHAPE_WRITES") do
+  v when v in ["1", "true", "on"] -> config :barkpark, canonical_shape_writes: true
+  v when v in ["0", "false", "off"] -> config :barkpark, canonical_shape_writes: false
+  _ -> :ok
+end
+
 # Ephemeral dev database override (CREATE-quickstart smoke, agent-onramps D24).
 # `config/dev.exs` hardcodes the dev Repo to `barkpark_dev`; DATABASE_URL is only
 # honored under :prod (above). The CREATE-quickstart smoke boots a THROWAWAY
