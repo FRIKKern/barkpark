@@ -113,7 +113,7 @@ SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its 
 
 **Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
 
-**Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=`) replays later events oldest-first, then live.
+**Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=<int>`) replays later events oldest-first, then live.
 
 First frame: `event: welcome`.
 
