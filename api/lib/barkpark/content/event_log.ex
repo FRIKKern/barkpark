@@ -115,6 +115,8 @@ defmodule Barkpark.Content.EventLog do
     |> keyset_stream(since, batch)
   end
 
+  def replay_since(_dataset, _since, _workspace_id, _opts), do: []
+
   # `opts[:project_id]` narrows the replay to one project (owner ruling #50:
   # a listen stream opened on a project URL). Absent keeps the workspace-wide
   # replay.
@@ -122,8 +124,6 @@ defmodule Barkpark.Content.EventLog do
     do: where(query, [e], e.project_id == ^project_id)
 
   defp narrow_project(query, _), do: query
-
-  def replay_since(_dataset, _since, _workspace_id, _opts), do: []
 
   # Drive the ordered, `limit`-bounded `base_query` as a keyset cursor: each step
   # fetches one batch with `id > cursor`, emits it, and advances the cursor to
