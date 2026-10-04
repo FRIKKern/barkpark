@@ -37,7 +37,9 @@ confirmed existing account stores a `workspace_invitations` row and answers
 (`GET /v1/auth/invitations`, `POST …/:id/accept`, `DELETE …/:id` declines;
 admins list/withdraw at `…/v1/invitations`). New emails and unconfirmed
 accounts are still seated at once. A user-owned token is rotated only by its
-owner (`403 owner_only`); admins revoke instead.
+owner (`403 owner_only`); admins revoke instead. `POST /v1/auth/tokens` takes
+`workspace` (slug/id); a user in several workspaces without it gets `422
+workspace_required` listing them.
 
 ## Sessions
 

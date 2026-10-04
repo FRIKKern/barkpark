@@ -146,6 +146,33 @@ defmodule BarkparkWeb.SeatInvitationTest do
     refute TenancyAuth.membership(ctx.victim.id, ctx.ws.id, :user)
   end
 
+  test "a user in several workspaces must name the PAT's workspace", ctx do
+    assert seat(ctx, ctx.victim.email).status == 202
+    [inv] = json_response(as_user(ctx.session) |> get("/v1/auth/invitations"), 200)["invitations"]
+
+    assert as_user(ctx.session)
+           |> post("/v1/auth/invitations/#{inv["id"]}/accept", "{}")
+           |> json_response(201)
+
+    body = json_response(mint_pat(ctx.session), 422)
+    assert body["error"]["code"] == "workspace_required"
+    assert Enum.sort(body["error"]["workspaces"]) == Enum.sort([ctx.ws.slug, ctx.home.slug])
+
+    named =
+      as_user(ctx.session)
+      |> post("/v1/auth/tokens", Jason.encode!(%{name: "laptop", workspace: ctx.home.slug}))
+      |> json_response(201)
+
+    {:ok, token} = Auth.verify_token(named["token"])
+    assert token.workspace_id == ctx.home.id
+
+    stranger = create_workspace!("stranger-#{System.unique_integer([:positive])}")
+
+    assert as_user(ctx.session)
+           |> post("/v1/auth/tokens", Jason.encode!(%{name: "x", workspace: stranger.slug}))
+           |> json_response(403)
+  end
+
   test "a brand-new e-mail is still seated directly (201)", ctx do
     email = "brand-new-#{System.unique_integer([:positive])}@example.com"
     body = json_response(seat(ctx, email), 201)
