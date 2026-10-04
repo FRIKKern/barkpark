@@ -122,6 +122,11 @@ defmodule Barkpark.Content.Edges do
   closes the gap: for each referencing source we strip the target from BOTH
   scalar `reference` fields (delete the field) AND `arrayOf`-of-`reference`
   fields (`List.delete` the element, keeping the array's other references).
+
+  `opts[:source_guard]`, when given, is `fun(type, doc_id) -> boolean` — may the
+  caller write that referencing document? If any referencer fails it, nothing is
+  stripped and the call returns `{:error, {:outside_write_grant, [{doc_id, type}]}}`;
+  otherwise it returns `:ok`.
   """
   def disconnect_references(doc_id, dataset, opts \\ []),
     do: Door.admit!(fn -> admitted_disconnect_references(doc_id, dataset, opts) end)
@@ -129,7 +134,39 @@ defmodule Barkpark.Content.Edges do
   # C083: the referencer strip is a door; it runs before the Lifecycle door in the
   # Studio delete and unpublish handlers, so a hold must refuse it on its own.
   defp admitted_disconnect_references(doc_id, dataset, opts) do
+    {source_guard, opts} = Keyword.pop(opts, :source_guard)
     pub_id = DraftId.published_id(doc_id)
+
+    # `:source_guard` (r4a Q8): `fun(type, doc_id) -> boolean`, true when the
+    # caller may WRITE that referencing document. A grant-graded Studio socket
+    # passes one, because its write gate checked only the target, not the
+    # documents a disconnect rewrites. Refuse as a whole BEFORE any write when a
+    # referencer is outside it — a partial strip would leave the caller's delete
+    # with dangling references it cannot see.
+    case denied_sources(source_guard, doc_id, pub_id, dataset, opts) do
+      [] -> strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard)
+      denied -> {:error, {:outside_write_grant, denied}}
+    end
+  end
+
+  defp denied_sources(nil, _doc_id, _pub_id, _dataset, _opts), do: []
+
+  defp denied_sources(guard, doc_id, pub_id, dataset, opts) when is_function(guard, 2) do
+    edge_refs =
+      Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
+      |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
+
+    scalar_refs =
+      doc_id |> find_referencing_docs(dataset, opts) |> Enum.map(&{&1.doc_id, &1.type})
+
+    (edge_refs ++ scalar_refs ++ find_array_referencing_docs(pub_id, dataset, opts))
+    |> Enum.reject(fn {id, type} -> is_nil(id) or is_nil(type) end)
+    |> Enum.uniq()
+    |> Enum.reject(fn {id, type} -> guard.(type, id) end)
+  end
+
+  defp strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard) do
+    opts = if source_guard, do: Keyword.put(opts, :source_guard, source_guard), else: opts
 
     # arrayOf-of-reference referencers come from the materialised inbound-edge
     # scan (`list_inbound_edges`, no row cap) — gather + disconnect them once.
@@ -246,7 +283,12 @@ defmodule Barkpark.Content.Edges do
   # workspace's, so another workspace's referencer was stripped by Default's
   # field list, or not at all, leaving its reference dangling.
   defp disconnect_one_source(ref_doc_id, type, target_pub_id, dataset, opts) do
-    with {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts),
+    {source_guard, opts} = Keyword.pop(opts, :source_guard)
+
+    # The pre-pass already refused when a referencer was outside the guard; a
+    # source a later drain page surfaces is re-checked here and left untouched.
+    with true <- is_nil(source_guard) or source_guard.(type, ref_doc_id),
+         {:ok, doc} <- Content.get_document(ref_doc_id, type, dataset, opts),
          {:ok, schema} <- doc_scoped_schema(doc, type, dataset) do
       content = doc.content || %{}
       updated_content = strip_reference_fields(content, schema.fields, target_pub_id)

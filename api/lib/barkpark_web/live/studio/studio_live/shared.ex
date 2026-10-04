@@ -670,6 +670,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   end
 
   @doc """
+  Opts for `Content.disconnect_references/3` from a Studio socket (r4a Q8,
+  task-651462bb70d1be7f). The LiveScope write gate checks only the event's
+  target — the open document — but a disconnect rewrites every document that
+  references it. A grant-graded socket therefore passes a `:source_guard` that
+  admits a referencer only inside its write grants (one fresh grant load, then
+  `Caps.grant_target_denied?/4` per referencer); any other socket is unchanged.
+  """
+  def disconnect_opts(socket) do
+    opts = ScopeHelpers.scope_opts(socket)
+
+    if Caps.grant_graded?(socket.assigns) do
+      assigns = socket.assigns
+
+      grants =
+        case assigns[:current_user] do
+          %{id: uid} when is_binary(uid) -> Barkpark.Access.list_active_grants_for_grantee(uid)
+          _ -> []
+        end
+
+      Keyword.put(opts, :source_guard, fn type, doc_id ->
+        not Caps.grant_target_denied?(assigns, grants, type, doc_id)
+      end)
+    else
+      opts
+    end
+  end
+
+  @doc "The flash for a disconnect refused by `disconnect_opts/1`'s guard."
+  def outside_grant_disconnect_message(denied, verb) do
+    n = length(denied)
+    noun = if n == 1, do: "document references", else: "documents reference"
+
+    "#{n} #{noun} this one outside your access grant, so the references can't be removed. " <>
+      "Nothing was #{verb}."
+  end
+
+  @doc """
   The user a Studio write is credited to (owner ruling #51, RQ8,
   task-6132833921b7dc36): the SIGNED-IN account, never `assigns.user_id`.
 
