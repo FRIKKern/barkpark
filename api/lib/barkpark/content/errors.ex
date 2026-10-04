@@ -136,6 +136,13 @@ defmodule Barkpark.Content.Errors do
   # are kept separate from @hints rather than diluting it.
   @public_inline_codes MapSet.new([
                          "invalid_enrollment",
+                         # Owner ruling #7 — member_controller.ex rotate_token:
+                         # a user-owned token is rotated only by its owner (403).
+                         "owner_only",
+                         # Owner ruling #7 — auth_controller.ex create_token: a
+                         # user in several workspaces must name the PAT's
+                         # workspace (422, with the slugs listed).
+                         "workspace_required",
                          # Herd-s6 fenced state report (chat_host_controller.ex
                          # report_state): an off-vocabulary state or a
                          # missing/non-integer lease epoch — refused before the
