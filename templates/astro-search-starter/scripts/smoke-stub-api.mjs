@@ -173,7 +173,7 @@ export function createStubServer({ distDir, onUnknown = () => {} }) {
     if (p.startsWith('/v1/')) {
       // `/v1/capabilities` — the token guard in astro.config.mjs. The smoke
       // never passes a token, so this is answered for completeness only.
-      if (p === '/v1/capabilities') return sendJson(res, { auth_tier: 'read' })
+      if (p === '/v1/capabilities') return sendJson(res, { auth_tier: 'read', token: { public_read: true } })
 
       // `/v1/data/search/:dataset/suggestions`
       if (/^\/v1\/data\/search\/[^/]+\/suggestions$/.test(p)) {

@@ -82,6 +82,11 @@ defmodule BarkparkWeb.QuizChannel do
         reply = Map.put(snapshot, :player_token, BarkparkWeb.QuizSocket.sign(player_id))
         {:ok, reply, socket}
 
+      # Named refusals for the flood controls (owner ruling #59), so a client
+      # can tell "locked" and "slow down" apart from "no room".
+      {:error, reason} when reason in [:room_locked, :join_rate_limited, :kicked] ->
+        {:error, %{reason: Atom.to_string(reason)}}
+
       {:error, _reason} ->
         {:error, %{reason: "room_unavailable"}}
     end
@@ -130,6 +135,16 @@ defmodule BarkparkWeb.QuizChannel do
     # delta protocol never encodes removals).
     push(socket, "player_left", %{id: player_id, slot: slot, player_count: count})
     {:noreply, socket}
+  end
+
+  # The host removed THIS player (ruling #59): tell the client, then close.
+  def handle_info({:quiz, _pin, {:player_kicked, player_id}}, socket) do
+    if not Map.get(socket.assigns, :observer, false) and player_id == socket.assigns.player_id do
+      push(socket, "kicked", %{})
+      {:stop, :normal, socket}
+    else
+      {:noreply, socket}
+    end
   end
 
   def handle_info({:quiz, _pin, {:hover_counts, counts}}, socket) do

@@ -758,7 +758,7 @@ defmodule Barkpark.Content.Broadcast do
       # row shape this function produced before the columns existed.
       actor_kind: Map.get(actor_stamp, :actor_kind),
       actor_id: Map.get(actor_stamp, :actor_id),
-      actor_label: Map.get(actor_stamp, :actor_label)
+      actor_label: stored_actor_label(actor_stamp)
     })
     # `mode: :savepoint` is what KEEPS the log-and-continue below honest now that
     # `write_atomically/1` puts this insert inside a transaction on the writer
@@ -969,4 +969,11 @@ defmodule Barkpark.Content.Broadcast do
       _ -> "global"
     end
   end
+
+  # Owner ruling #32 item 1 (2026-10-03): a USER actor is stored by id only —
+  # no email at rest on the append-only history trail. Reads resolve the label
+  # from the account (`Accounts.Privacy.redact_actor_labels/1`). Token and share
+  # labels are names, not personal data, and are kept.
+  defp stored_actor_label(%{actor_kind: "user"}), do: nil
+  defp stored_actor_label(actor_stamp), do: Map.get(actor_stamp, :actor_label)
 end

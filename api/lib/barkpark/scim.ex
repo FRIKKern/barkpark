@@ -131,7 +131,9 @@ defmodule Barkpark.Scim do
     with true <- is_binary(email) and email != "",
          {:ok, user} <- upsert_user(org, email) do
       attach_to_org(user, org)
-      audit(org, user, "user_provisioned", %{"email" => email})
+      # The user by id, never the email (owner ruling #32 item 2): the audit
+      # log is append-only and hash-chained, so an email here outlives erasure.
+      audit(org, user, "user_provisioned", %{"user_id" => user.id})
       {:ok, user}
     else
       false -> {:error, :missing_username}

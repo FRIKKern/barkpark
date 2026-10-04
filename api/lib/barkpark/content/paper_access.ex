@@ -156,9 +156,15 @@ defmodule Barkpark.Content.PaperAccess do
       action: action,
       actor_kind: Map.get(actor, :kind) || "anonymous",
       actor_id: Map.get(actor, :id),
-      actor_label: Map.get(actor, :label)
+      actor_label: stored_label(actor)
     }
   end
+
+  # Owner ruling #32 item 1 (2026-10-03): a USER actor is stored by id only — no
+  # email at rest. `Accounts.Privacy.redact_actor_labels/1` resolves the label
+  # from the account at read time.
+  defp stored_label(%{kind: "user"}), do: nil
+  defp stored_label(actor), do: Map.get(actor, :label)
 
   @doc """
   List access rows for one paper, NEWEST FIRST.

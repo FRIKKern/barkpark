@@ -1056,14 +1056,18 @@ tripwire() {
 # silently narrowing what the tripwire covers; dropping them re-arms those
 # files, so the literal reappearing there warns again.
 #
+# 2026-10-03 (task-90603c89798abb32): the owner DELETED that box. The IP is no
+# longer a host anyone should reach, so the tripwire now catches a doc that
+# names it as current. Seven entries left the allowlist in the same change
+# because their mentions were repointed or removed (adding-a-domain,
+# vercel-dns-connect, uptime-kuma, studio user-guide, deploy/README.md,
+# api/lib/barkpark/sync/HANDOFF.md, templates/DEPLOYING.md). What stays names it
+# only as retired, with the date: CLAUDE.md and PROD_OPS.md (the "deleted
+# 2026-10-03" line), the 0007 decision's dated measurement, the cold pull plan,
+# and path-frozen studio-nav-bug.
+#
 # Entries below the original set, each verified against the code before adding —
 # a WARN is only noise once you have checked that the claim behind it is true:
-#   deploy/README.md            names the box in a parenthetical that ALREADY
-#                               attributes it to CLAUDE.md ("the CLAUDE.md prod
-#                               box …") — a pointer that happens to quote.
-#   api/lib/barkpark/sync/HANDOFF.md   runnable `ssh root@<ip>` for an agent.
-#   templates/DEPLOYING.md      runnable `--token-ssh root@<ip>`; the flag is
-#                               real (scripts/bp-vercel-quick-setup.sh).
 #   templates/place-directory/README.md   the starter-README class already
 #                               exempted above; the dev token is real on the
 #                               `mix setup` path it documents (BARKPARK_SEED_
@@ -1072,7 +1076,7 @@ tripwire() {
 #                               audit table — it cannot be replaced by a
 #                               pointer without deleting the finding.
 tripwire '89.167.28.206' \
-  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/adding-a-domain.md docs/ops/vercel-dns-connect.md deploy/uptime-kuma/README.md docs/studio/user-guide.md docs/ops/studio-nav-bug-2026-04-19.md deploy/README.md api/lib/barkpark/sync/HANDOFF.md templates/DEPLOYING.md"
+  "docs/ops/PROD_OPS.md CLAUDE.md docs/ops/studio-nav-bug-2026-04-19.md docs/decisions/0007-capability-oracle.md docs/ops/prod-microblock-pull-plan.md"
 tripwire 'v1=<hex>' \
   "docs/contracts/webhook-realtime.md js/packages/create-barkpark-app/templates/blog-starter/README.md js/packages/create-barkpark-app/templates/website-starter/README.md"
 tripwire 'barkpark-dev-token' \

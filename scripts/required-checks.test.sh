@@ -2786,7 +2786,15 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         # Schedule + workflow_dispatch only, so its job name renders on main
         # commits and never on a PR head; its row lands with the workflow and the
         # frozen fixture pair predates it.
-        --expect-unrendered "Core without owned tables (differential, two suite runs)")
+        --expect-unrendered "Core without owned tables (differential, two suite runs)"
+        # api-image.yml (owner ruling #60, 2026-10-03): push-to-main on VERSION and
+        # workflow_dispatch only, so its four job names render on release commits on
+        # main and never on a PR head; the rows land with the workflow and the frozen
+        # fixture pair predates it.
+        --expect-unrendered "Decide (credential + version)"
+        --expect-unrendered "Build linux/amd64"
+        --expect-unrendered "Build linux/arm64"
+        --expect-unrendered "Tag the multi-arch manifest")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

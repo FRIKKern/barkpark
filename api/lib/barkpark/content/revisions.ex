@@ -117,15 +117,19 @@ defmodule Barkpark.Content.Revisions do
     workspace_id = Keyword.get(opts, :workspace_id)
     project_id = Keyword.get(opts, :project_id)
 
-    Revision
-    |> where([r], r.doc_id == ^Content.published_id(doc_id) and r.type == ^type)
-    |> scope_to_dataset(dataset, opts)
-    |> scope_to_workspace_or_global(workspace_id, project_id)
-    |> maybe_scope_to_grants(opts)
-    |> order_by([r], desc: r.inserted_at, desc: r.id)
-    |> limit(^limit)
-    |> offset(^offset)
-    |> Repo.all()
+    if owner_may_read?(doc_id, type, dataset, opts) do
+      Revision
+      |> where([r], r.doc_id == ^Content.published_id(doc_id) and r.type == ^type)
+      |> scope_to_dataset(dataset, opts)
+      |> scope_to_workspace_or_global(workspace_id, project_id)
+      |> maybe_scope_to_grants(opts)
+      |> order_by([r], desc: r.inserted_at, desc: r.id)
+      |> limit(^limit)
+      |> offset(^offset)
+      |> Repo.all()
+    else
+      []
+    end
   end
 
   @doc """
@@ -160,10 +164,7 @@ defmodule Barkpark.Content.Revisions do
         |> scope_to_workspace_or_global(workspace_id, project_id)
         |> maybe_scope_to_grants(opts)
         |> Repo.one()
-        |> case do
-          nil -> {:error, :not_found}
-          rev -> {:ok, rev}
-        end
+        |> owner_filtered(dataset, opts)
     end
   end
 
@@ -225,10 +226,50 @@ defmodule Barkpark.Content.Revisions do
     |> order_by([r], desc: r.inserted_at)
     |> limit(1)
     |> Repo.one()
-    |> case do
-      nil -> {:error, :not_found}
-      rev -> {:ok, rev}
+    |> owner_filtered(dataset, opts)
+  end
+
+  # ── The owner rule on history (OWNER RULING 2026-10-03 #9) ─────────────────
+  #
+  # A revision carries no `owner_id`, so on an `owner_scoped` type its
+  # visibility is its DOCUMENT's: a caller that may not read the document
+  # (published or draft twin) under the same opts — the same `scope_to_owner`
+  # decision every document read makes — gets no history and no revision, and
+  # so cannot restore one either (`restore_revision/4` loads through
+  # `get_revision/3`). Admins and service tokens see all, as on documents;
+  # non-owner-scoped types are untouched (no extra read).
+  defp owner_filtered(nil, _dataset, _opts), do: {:error, :not_found}
+
+  defp owner_filtered(%Revision{} = rev, dataset, opts) do
+    if owner_may_read?(rev.doc_id, rev.type, dataset, opts),
+      do: {:ok, rev},
+      else: {:error, :not_found}
+  end
+
+  defp owner_may_read?(doc_id, type, dataset, opts) do
+    cond do
+      sees_all_owners?(Keyword.get(opts, :caller_context)) -> true
+      not Content.owner_scoped?(type, dataset, opts) -> true
+      true -> document_readable?(doc_id, type, dataset, opts)
     end
+  end
+
+  defp sees_all_owners?(%Barkpark.Content.CallerContext{is_admin: true}), do: true
+
+  defp sees_all_owners?(%Barkpark.Content.CallerContext{
+         principal_type: :api_token,
+         user_id: nil
+       }),
+       do: true
+
+  defp sees_all_owners?(_ctx), do: false
+
+  defp document_readable?(doc_id, type, dataset, opts) do
+    published = Content.published_id(doc_id)
+
+    Enum.any?([published, Content.draft_id(published)], fn id ->
+      match?({:ok, _}, Content.get_document(id, type, dataset, opts))
+    end)
   end
 
   @doc """

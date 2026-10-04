@@ -320,6 +320,7 @@ defmodule Barkpark.Plugins.Capabilities do
     |> maybe_gate_views(opts)
     |> maybe_gate_chat(base, opts)
     |> maybe_gate_bpml(base, opts)
+    |> maybe_put_token(base, opts)
     |> then(fn m -> Map.put(m, "etag", etag_for(m)) end)
   end
 
@@ -358,6 +359,24 @@ defmodule Barkpark.Plugins.Capabilities do
   defp maybe_gate_bpml(manifest, _caller_tier, opts) do
     if Keyword.get(opts, :include_bpml, false) do
       Map.put(manifest, "bpml", Barkpark.PortableDoc.Bpml.vocabulary())
+    else
+      manifest
+    end
+  end
+
+  # The root `token` key (task-0cf611238d4ad597 JQ1, owner ruling #36): facts
+  # about the CALLER'S OWN credential that `auth_tier` cannot carry. Today one:
+  # `public_read`. A `public-read` token and a plain `read` token both rank
+  # "read" on the ladder, but only the first is pinned to published, public
+  # types (`BarkparkWeb.Plugs.PublicRead`). A starter that inlines its token
+  # into a browser bundle must tell them apart, and this is the signal.
+  # STRICTLY OPT-IN (`include_token: true`, wired from `?token=1`) for the same
+  # reason `build`/`chat`/`bpml` are: released bp binaries strict-decode the
+  # manifest root. Withheld from tier "none": there is no credential to
+  # describe. Feeds etag_for/1, so a public-read body and a read body differ.
+  defp maybe_put_token(manifest, caller_tier, opts) do
+    if Keyword.get(opts, :include_token, false) and caller_tier != "none" do
+      Map.put(manifest, "token", %{"public_read" => Keyword.get(opts, :public_read, false)})
     else
       manifest
     end

@@ -106,7 +106,7 @@ type ChatProviderCaps struct {
 //
 // VERSION IS A PLACEHOLDER — NOTHING MAY BRANCH ON IT. Server-side it is
 // Application.spec(:barkpark, :vsn), i.e. the mix.exs project version, which is
-// frozen: the prod box at 89.167.28.206 answered server.version "0.1.0" on
+// frozen: the prod box at 89.167.28.206 (deleted 2026-10-03) answered server.version "0.1.0" on
 // 2026-09-16 while its own /status.json reported version "0.2.26.929" (commit
 // ca4534461). Display it, never compare it. The honest running-release oracle
 // is GET /status.json, or the control plane, which holds each box's

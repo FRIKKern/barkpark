@@ -73,8 +73,8 @@
 #     degraded read shape, with every exit code taken WITHOUT A PIPE, and
 #     additionally pins the pipe trap itself.
 #
-# THE FENCE — this project holds FIVE RUNNING PRODUCTION SERVERS, including
-# barkpark-cms (89.167.28.206) and guerrilla (157.180.90.121):
+# THE FENCE — this project held FIVE RUNNING PRODUCTION SERVERS when written, including
+# barkpark-cms (89.167.28.206, deleted 2026-10-03) and guerrilla (157.180.90.121):
 #
 #   · PLACEMENT GROUPS ONLY. Never a server, network, volume, load balancer,
 #     floating IP, certificate or zone — nothing that routes or holds data. A

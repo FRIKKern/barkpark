@@ -123,6 +123,10 @@
       "owner": "gates",
       "why_off_pr": "walks the ledger for rows whose work merged and never closed -- a slowly-moving population in Barkpark, not a fact about any diff."
     },
+    "api-image.yml": {
+      "owner": "deploy",
+      "why_off_pr": "publishes the public ghcr.io/barkpark/api image when a server release changes VERSION on main; a PR has no release to publish."
+    },
     "paper-readers.yml": {
       "owner": "api",
       "why_off_pr": "inventories the LIVE production Paper corpus, which production can change without touching this repository, so a PR green would say nothing about it."

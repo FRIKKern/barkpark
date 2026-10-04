@@ -29,6 +29,21 @@ defmodule Barkpark.Quiz.Room do
   carry the AUTHORITATIVE `player_count` so subscribers assign it directly
   rather than accumulating deltas.
 
+  ## Join flood protection (owner ruling #59, task-eec10eeab544e619 Q3)
+
+  One client could join a room as up to `@max_players` fake players and skew
+  the results. Three controls, none of which caps players per address (that
+  would break a classroom behind one network):
+
+    * a per-room JOIN RATE — a token bucket of `join_burst` new players
+      (default 50) refilled at `join_rate_per_sec` (default 5), set under
+      `config :barkpark, Barkpark.Quiz.Room`. Past it a NEW player gets
+      `{:error, :join_rate_limited}`; a re-join of a known player is free;
+    * a host LOCK — `lock/2` refuses every new player with
+      `{:error, :room_locked}` until unlocked;
+    * a host KICK — `kick/2` removes a player and refuses that player id for
+      the rest of the room's life (`{:error, :kicked}`).
+
   Backstops: a per-room player cap (`@max_players`), a PER-PRINCIPAL spawn
   budget in front of `ensure/2` (`Barkpark.Quiz.SpawnBudget` — the brake a real
   visitor hits, and the reason the global cap is no longer the only one), and
@@ -161,9 +176,27 @@ defmodule Barkpark.Quiz.Room do
   past the per-room cap.
   """
   @spec join(pin(), player_id(), String.t()) ::
-          {:ok, map()} | {:error, :no_room | :room_full | term()}
+          {:ok, map()}
+          | {:error, :no_room | :room_full | :room_locked | :join_rate_limited | :kicked | term()}
   def join(pin, player_id, name),
     do: call_existing(pin, {:join, player_id, name}, {:error, :no_room})
+
+  @doc """
+  Lock (`true`) or unlock (`false`) the room to NEW players. Players already in
+  the room stay and keep answering. Broadcasts `{:locked, locked?}`.
+  """
+  @spec lock(pin(), boolean()) :: :ok
+  def lock(pin, locked?) when is_boolean(locked?),
+    do: call_existing(pin, {:set_locked, locked?}, :ok)
+
+  @doc """
+  Remove `player_id` and refuse it for the rest of the room's life. Broadcasts
+  `{:player_left, …}` (so every surface evicts it) and `{:player_kicked, id}`
+  (so the kicked player's own surface can say why).
+  """
+  @spec kick(pin(), player_id()) :: :ok
+  def kick(pin, player_id) when is_binary(player_id),
+    do: call_existing(pin, {:kick, player_id}, :ok)
 
   @doc "Remove a player and drop their answer. No-op (never starts a room) when none lives."
   @spec leave(pin(), player_id()) :: :ok
@@ -296,7 +329,7 @@ defmodule Barkpark.Quiz.Room do
   end
 
   defp empty_snapshot(pin),
-    do: %{pin: pin, question: nil, players: [], player_count: 0, tally: %{}}
+    do: %{pin: pin, question: nil, players: [], player_count: 0, tally: %{}, locked: false}
 
   defp safe_stop(pid) do
     GenServer.stop(pid, :normal, @call_timeout)
@@ -328,7 +361,13 @@ defmodule Barkpark.Quiz.Room do
       q_timer_gen: 0,
       deadline: nil,
       round_secs: nil,
-      heatmap_threshold: @heatmap_threshold
+      heatmap_threshold: @heatmap_threshold,
+      locked: false,
+      kicked: MapSet.new(),
+      join_burst: join_burst(),
+      join_rate: join_rate(),
+      join_tokens: join_burst() * 1.0,
+      join_refilled_at: System.monotonic_time(:millisecond)
     }
 
     Process.send_after(self(), :cursor_tick, @cursor_tick_ms)
@@ -339,9 +378,20 @@ defmodule Barkpark.Quiz.Room do
   def handle_call({:join, player_id, name}, _from, state) do
     new? = not Map.has_key?(state.players, player_id)
 
+    state = if new?, do: refill_joins(state), else: state
+
     cond do
+      new? and MapSet.member?(state.kicked, player_id) ->
+        {:reply, {:error, :kicked}, state}
+
+      new? and state.locked ->
+        {:reply, {:error, :room_locked}, state}
+
       new? and map_size(state.players) >= @max_players ->
         {:reply, {:error, :room_full}, arm_idle(state)}
+
+      new? and state.join_tokens < 1 ->
+        {:reply, {:error, :join_rate_limited}, state}
 
       not new? ->
         # Idempotent re-join — the SAME browser's cursor socket re-joining after
@@ -350,7 +400,9 @@ defmodule Barkpark.Quiz.Room do
         {:reply, {:ok, public(state)}, arm_idle(state)}
 
       true ->
-        # Genuinely-new player: assign a cursor slot (the CursorFrame idx).
+        # Genuinely-new player: spend one join token, assign a cursor slot
+        # (the CursorFrame idx).
+        state = %{state | join_tokens: state.join_tokens - 1}
         state = assign_slot(state, player_id)
         slot = Map.get(state.slots, player_id)
         player = %{id: player_id, name: name, slot: slot, joined_at: System.system_time(:second)}
@@ -361,21 +413,19 @@ defmodule Barkpark.Quiz.Room do
   end
 
   def handle_call({:leave, player_id}, _from, state) do
-    existed? = Map.has_key?(state.players, player_id)
-    idx = Map.get(state.slots, player_id)
+    {:reply, :ok, arm_idle(drop_player(state, player_id))}
+  end
 
-    state =
-      state
-      |> update_in([:players], &Map.delete(&1, player_id))
-      |> update_in([:answers], &Map.delete(&1, player_id))
-      |> update_in([:hovers], &Map.delete(&1, player_id))
-      |> update_in([:slots], &Map.delete(&1, player_id))
-      |> update_in([:cursors], &Map.delete(&1, idx))
-      |> update_in([:last_sent], &Map.delete(&1, idx))
+  def handle_call({:kick, player_id}, _from, state) do
+    state = drop_player(state, player_id)
+    state = %{state | kicked: MapSet.put(state.kicked, player_id)}
+    broadcast(state, {:player_kicked, player_id})
+    {:reply, :ok, arm_idle(state)}
+  end
 
-    # Carry the cursor SLOT (idx) so subscribers can evict the departed dot —
-    # the binary cursor protocol only sends changed slots, never removals.
-    if existed?, do: broadcast(state, {:player_left, player_id, idx, map_size(state.players)})
+  def handle_call({:set_locked, locked?}, _from, state) do
+    state = %{state | locked: locked?}
+    broadcast(state, {:locked, locked?})
     {:reply, :ok, arm_idle(state)}
   end
 
@@ -584,6 +634,7 @@ defmodule Barkpark.Quiz.Room do
       player_count: map_size(state.players),
       cursor_count: map_size(state.cursors),
       phase: state.phase,
+      locked: state.locked,
       seconds_remaining: seconds_remaining(state),
       tally: compute_tally(state),
       hover_counts: hover_counts(state),
@@ -688,6 +739,48 @@ defmodule Barkpark.Quiz.Room do
     Enum.reduce(state.hovers, base, fn {_player_id, choice_id}, acc ->
       Map.update(acc, choice_id, 1, &(&1 + 1))
     end)
+  end
+
+  # Remove a player and everything keyed on them. Carries the cursor SLOT (idx)
+  # in the broadcast so subscribers can evict the departed dot — the binary
+  # cursor protocol only sends changed slots, never removals.
+  defp drop_player(state, player_id) do
+    existed? = Map.has_key?(state.players, player_id)
+    idx = Map.get(state.slots, player_id)
+
+    state =
+      state
+      |> update_in([:players], &Map.delete(&1, player_id))
+      |> update_in([:answers], &Map.delete(&1, player_id))
+      |> update_in([:hovers], &Map.delete(&1, player_id))
+      |> update_in([:slots], &Map.delete(&1, player_id))
+      |> update_in([:cursors], &Map.delete(&1, idx))
+      |> update_in([:last_sent], &Map.delete(&1, idx))
+
+    if existed?, do: broadcast(state, {:player_left, player_id, idx, map_size(state.players)})
+    state
+  end
+
+  # Token-bucket refill for the per-room join rate (ruling #59).
+  defp refill_joins(state) do
+    now = System.monotonic_time(:millisecond)
+    earned = (now - state.join_refilled_at) * state.join_rate / 1000
+
+    %{
+      state
+      | join_tokens: min(state.join_burst * 1.0, state.join_tokens + earned),
+        join_refilled_at: now
+    }
+  end
+
+  defp join_burst, do: room_config(:join_burst, 50)
+  defp join_rate, do: room_config(:join_rate_per_sec, 5)
+
+  defp room_config(key, default) do
+    case :barkpark |> Application.get_env(__MODULE__, []) |> Keyword.get(key, default) do
+      n when is_number(n) and n > 0 -> n
+      _ -> default
+    end
   end
 
   # Assign the LOWEST free cursor slot (the CursorFrame idx) to a new player,

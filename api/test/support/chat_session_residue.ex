@@ -9,9 +9,10 @@ defmodule Barkpark.ChatSessionResidue do
   ordering test needs two real Postgres connections that actually block each
   other, which one sandbox transaction cannot express. Every row such a drive
   writes therefore OUTLIVES the test. `CycleFleet.prepare_runtime_attempt/3`
-  mints a `chat_sessions` row for the attempt, and `Tenancy.delete_workspace/1`
-  does NOT reach it: `chat_sessions.owner_workspace_id` carries no foreign key,
-  so the workspace teardown leaves the session behind. A committed session
+  mints a `chat_sessions` row for the attempt, and until owner ruling #32
+  (2026-10-03) `Tenancy.delete_workspace/1` did not reach it:
+  `chat_sessions.owner_workspace_id` carries no foreign key, so the workspace
+  teardown left the session behind (it now deletes the workspace's chats). A committed session
   escapes every LATER test's sandbox rollback and rides `list_sessions/2`'s
   recency-desc ordering ahead of that test's own pinned fixtures.
 

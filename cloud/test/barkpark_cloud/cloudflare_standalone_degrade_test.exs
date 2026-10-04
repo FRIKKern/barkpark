@@ -97,6 +97,10 @@ defmodule BarkparkCloud.CloudflareStandaloneDegradeTest do
     @impl true
     def create_origin_ca_cert(_hosts, _csr),
       do: raise("Cloudflare.Client.create_origin_ca_cert/2 ran on the standalone path")
+
+    @impl true
+    def lookup_dns_name(_token, _zone_id, _name),
+      do: raise("Cloudflare.Client.lookup_dns_name/3 ran on the standalone path")
   end
 
   # ── Reviewed allowlist: live control-plane code that names a provider ────────

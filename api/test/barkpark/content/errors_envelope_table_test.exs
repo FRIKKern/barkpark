@@ -107,6 +107,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"searchable_text_too_large/unlocated",
        {:error, {:searchable_text_too_large, 1_048_575, nil}}, "searchable_text_too_large", 422,
        [:details]},
+      # Owner ruling #39: one document over the per-document size cap.
+      {"document_too_large", {:error, {:document_too_large, 10_000_000, 10_000_001}},
+       "document_too_large", 413, [:details]},
       # Owner ruling #47: publish refuses an empty list row.
       {"empty_list_members",
        {:error, {:empty_list_members, %{"keywords" => ["Keywords row 3 is empty"]}}},
@@ -214,6 +217,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"changeset", {:error, changeset()}, "validation_failed", 422, [:details]},
       {"invalid_task_content", {:error, {:invalid_task_content, %{"kind" => ["is required"]}}},
        "validation_failed", 422, [:details]},
+      # A non-admin write changed a schema `readOnly` field (owner ruling #35).
+      {"read_only_fields", {:error, {:read_only_fields, ["key_id"]}}, "validation_failed", 422,
+       [:details]},
       # The mutate-path schema check's ENFORCE arm (task-41a740fd6701ec28).
       # Only reachable for a dataset that opted in; the DEFAULT advises and
       # never renders an envelope at all. Shares `validation_failed` + 422 +

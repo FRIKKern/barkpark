@@ -132,7 +132,91 @@ defmodule BarkparkCloud.GitHub.Real do
     end
   end
 
+  # task-0cf611238d4ad597 CQ7a: the user-authorization leg. GitHub sends a
+  # `code` with the install redirect when the App has "Request user
+  # authorization (OAuth) during installation" on; it is exchanged with the
+  # App's OAuth client id + secret for a user-to-server token.
+  @oauth_token_url "https://github.com/login/oauth/access_token"
+  # GET /user/installations pages at most 100; a user reaching more installs
+  # of ONE App than this is not a real account.
+  @user_installations_max_pages 10
+
+  @impl true
+  def exchange_user_code(code) when is_binary(code) do
+    cfg = config()
+
+    with id when is_binary(id) and id != "" <- cfg[:client_id],
+         secret when is_binary(secret) and secret != "" <- cfg[:client_secret] do
+      case request(user_token_request(id, secret, code)) do
+        {:ok, %{"access_token" => token}} when is_binary(token) and token != "" -> {:ok, token}
+        # GitHub answers a spent / expired / forged code with 200 + an error.
+        {:ok, %{"error" => _}} -> {:error, :bad_verification_code}
+        {:ok, _} -> {:error, :unexpected_response}
+        {:error, _} = err -> err
+      end
+    else
+      _ -> {:error, :not_configured}
+    end
+  end
+
+  @impl true
+  def list_user_installation_ids(user_token) when is_binary(user_token) do
+    collect_user_installation_ids(user_token, 1, [])
+  end
+
+  defp collect_user_installation_ids(_token, page, acc)
+       when page > @user_installations_max_pages,
+       do: {:ok, acc}
+
+  defp collect_user_installation_ids(token, page, acc) do
+    case request(user_installations_request(token, page)) do
+      {:ok, %{"installations" => installs} = body} when is_list(installs) ->
+        ids = acc ++ Enum.map(installs, &to_string(&1["id"]))
+        total = body["total_count"]
+
+        if installs == [] or (is_integer(total) and length(ids) >= total),
+          do: {:ok, ids},
+          else: collect_user_installation_ids(token, page + 1, ids)
+
+      {:ok, _} ->
+        {:error, :unexpected_response}
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
   ## Pure request builders — the assertion seam (NO network) ─────────────────
+
+  @doc """
+  Pure request map for the user-authorization code exchange
+  (`POST https://github.com/login/oauth/access_token`, JSON in and out).
+  """
+  def user_token_request(client_id, client_secret, code) do
+    body =
+      Jason.encode!(%{"client_id" => client_id, "client_secret" => client_secret, "code" => code})
+
+    %{
+      method: :post,
+      url: @oauth_token_url,
+      headers: [
+        {"Accept", "application/json"},
+        {"Content-Type", "application/json"},
+        {"User-Agent", @user_agent}
+      ],
+      body: body
+    }
+  end
+
+  @doc "Pure request map for `GET /user/installations` (user-to-server token auth)."
+  def user_installations_request(user_token, page) do
+    build_request(
+      :get,
+      "/user/installations?per_page=100&page=#{page}",
+      [{"Authorization", "Bearer " <> user_token}],
+      ""
+    )
+  end
 
   @doc """
   Build the compact GitHub App JWT (RS256) for `app_id`, signed by `private_key`

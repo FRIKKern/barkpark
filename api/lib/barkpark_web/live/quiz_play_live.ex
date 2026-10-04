@@ -104,6 +104,14 @@ defmodule BarkparkWeb.QuizPlayLive do
       when phase in [:reveal, :leaderboard, :ended],
       do: {:noreply, assign(socket, locked: true)}
 
+  # The host removed THIS player (owner ruling #59): stop showing the question
+  # and say why. The room already dropped the player and refuses its id.
+  def handle_info(
+        {:quiz, _pin, {:player_kicked, player_id}},
+        %{assigns: %{player_id: player_id}} = socket
+      ),
+      do: {:noreply, assign(socket, error: :kicked, question: nil, player_id: nil)}
+
   def handle_info(_msg, socket), do: {:noreply, socket}
 
   @impl true
@@ -133,6 +141,16 @@ defmodule BarkparkWeb.QuizPlayLive do
         <% @error == :no_room -> %>
           <p class="q-status">
             Nobody is hosting this room right now — check the pin, or refresh once your host is up.
+          </p>
+        <% @error == :kicked -> %>
+          <p class="q-status">The host removed you from this room.</p>
+        <% @error == :room_locked -> %>
+          <p class="q-status">
+            The host has locked this room, so nobody new can join. Ask the host to unlock it.
+          </p>
+        <% @error == :join_rate_limited -> %>
+          <p class="q-status">
+            Lots of players are joining this room right now. Refresh in a few seconds to join.
           </p>
         <% @error -> %>
           <p class="q-status">This room is unavailable right now. Try again shortly.</p>

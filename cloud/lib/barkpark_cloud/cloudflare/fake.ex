@@ -36,6 +36,7 @@ defmodule BarkparkCloud.Cloudflare.Fake do
   @deletes_key :cloudflare_fake_deletes
   @on_upsert_key :cloudflare_fake_on_upsert_hook
   @fail_deletes_key :cloudflare_fake_fail_deletes
+  @zones_key :cloudflare_fake_zone_names
 
   @doc "A sentinel record id the fake ALWAYS rejects as `:not_found`. For tests."
   @spec invalid_record_id() :: String.t()
@@ -75,6 +76,7 @@ defmodule BarkparkCloud.Cloudflare.Fake do
           record_id: record_id,
           name: name,
           type: record[:type] || record["type"],
+          content: record[:content] || record["content"],
           proxied: record[:proxied] || record["proxied"] || false
         })
 
@@ -149,6 +151,37 @@ defmodule BarkparkCloud.Cloudflare.Fake do
     end
   end
 
+  # The zone's apex is whatever `put_zone_name/2` seeded for it, else a name no
+  # test hostname can equal — so an unseeded zone never refuses a deploy as
+  # "apex" by accident. Records are the zone as `records/0` models it (seeded
+  # with `seed_record/2` or written by `upsert_dns_record/3`).
+  @impl true
+  def lookup_dns_name(token, zone_id, name)
+      when is_binary(token) and is_binary(zone_id) and is_binary(name) do
+    cond do
+      fail?(token) ->
+        {:error, :invalid_token}
+
+      fail?(zone_id) ->
+        {:error, :lookup_failed}
+
+      true ->
+        wanted = normalize_name(name)
+
+        records =
+          for r <- Process.get(@records_key, []),
+              r.zone_id == zone_id,
+              normalize_name(to_string(r.name)) == wanted do
+            %{id: r.record_id, type: r[:type], content: r[:content], name: r.name}
+          end
+
+        zone_name =
+          Map.get(Process.get(@zones_key, %{}), zone_id, "fake-zone-" <> zone_id <> ".invalid")
+
+        {:ok, %{zone_name: zone_name, records: records}}
+    end
+  end
+
   @impl true
   def create_origin_ca_cert(hostnames, csr) when is_list(hostnames) and is_binary(csr) do
     cond do
@@ -208,6 +241,31 @@ defmodule BarkparkCloud.Cloudflare.Fake do
     Process.put(@fail_deletes_key, bool)
   end
 
+  @doc "TEST-ONLY seam: name the apex of `zone_id` for `lookup_dns_name/3`."
+  @spec put_zone_name(String.t(), String.t()) :: :ok
+  def put_zone_name(zone_id, name) when is_binary(zone_id) and is_binary(name) do
+    Process.put(@zones_key, Map.put(Process.get(@zones_key, %{}), zone_id, name))
+    :ok
+  end
+
+  @doc """
+  TEST-ONLY seam: put a record that already exists in `zone_id` (e.g. a name
+  someone else points elsewhere) without going through `upsert_dns_record/3`.
+  """
+  @spec seed_record(String.t(), map()) :: :ok
+  def seed_record(zone_id, %{name: name} = rec) when is_binary(zone_id) do
+    record(@records_key, %{
+      zone_id: zone_id,
+      record_id: Map.get(rec, :id, "rec_seed_" <> digest(zone_id <> name)),
+      name: name,
+      type: Map.get(rec, :type, "A"),
+      content: Map.get(rec, :content),
+      proxied: Map.get(rec, :proxied, false)
+    })
+
+    :ok
+  end
+
   @doc "The proxy flips recorded in THIS process (for test assertions)."
   @spec proxied() :: [map()]
   def proxied, do: Process.get(@proxied_key, [])
@@ -222,6 +280,8 @@ defmodule BarkparkCloud.Cloudflare.Fake do
   defp fail?(_), do: false
 
   defp record(key, entry), do: Process.put(key, Process.get(key, []) ++ [entry])
+
+  defp normalize_name(name), do: name |> String.trim_trailing(".") |> String.downcase()
 
   defp digest(input) do
     :crypto.hash(:sha256, to_string(input))

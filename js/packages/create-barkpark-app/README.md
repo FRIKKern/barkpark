@@ -31,11 +31,16 @@ Short alias: `pnpm dlx cba my-site`
 ## Default local workflow
 
 ```bash
+# A Barkpark API on :4000 (skip if you already run one)
+curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/install-cli.sh | sh
+bp setup --target local --yes
+
 cd my-site
-docker compose up -d          # Phoenix API + Postgres on :4000
 pnpm barkpark generate        # generate types from schema
 pnpm dev                      # Next.js on :3000
 ```
+
+The generated `docker-compose.yml` is the Docker alternative: it runs the published image `ghcr.io/barkpark/api` and needs a `.env` with the API's secrets — each starter's README lists them.
 
 ## Demo eject
 
