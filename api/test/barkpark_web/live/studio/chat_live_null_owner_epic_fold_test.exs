@@ -114,10 +114,11 @@ defmodule BarkparkWeb.Studio.ChatLiveNullOwnerEpicFoldTest do
       control = view |> element(~s([data-test-id="chat-epic-#{b_sid}"])) |> render()
       assert control =~ @ws_b_epic_title
 
-      # CONTROL 2 — the NULL-owned row is STILL LISTED. The disposition suppresses
-      # the derived LINE, not the row: a clamp that fail-closes reds here.
-      assert has_element?(view, ~s([data-test-id="chat-workflow-#{null_sid}"])),
-             "the NULL-owned legacy row must remain visible to a scoped admin"
+      # Since owner ruling #30 Q3 (2026-10-03) the NULL-owned row is not LISTED
+      # on a workspace's scoped mount at all — owner-less rows are the
+      # operator's, reached from the flat mount (the describe below).
+      refute has_element?(view, ~s([data-test-id="chat-workflow-#{null_sid}"])),
+             "a NULL-owned legacy row is listed on a workspace's scoped mount"
 
       # THE LEAK.
       refute has_element?(view, ~s([data-test-id="chat-epic-#{null_sid}"])),

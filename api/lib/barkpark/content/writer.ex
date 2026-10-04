@@ -1571,9 +1571,19 @@ defmodule Barkpark.Content.Writer do
         # unscoped write) → the NULL-workspace DEK.
         # The same stamped scope also picks the SCHEMA, so the type resolves
         # in the document's own workspace, never Default's.
-        case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs)) do
-          {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
-          {:error, _} = err -> err
+        # Owner ruling #21: the body may not bind a field the schema keeps
+        # private (`BoundFieldGuard`) — checked on the same stamped scope.
+        with :ok <-
+               Barkpark.Content.BoundFieldGuard.check(
+                 content,
+                 type,
+                 dataset,
+                 stamped_scope(attrs)
+               ) do
+          case Encryption.encrypt_marked(content, type, dataset, stamped_scope(attrs)) do
+            {:ok, encrypted} -> {:ok, Map.put(attrs, "content", encrypted)}
+            {:error, _} = err -> err
+          end
         end
 
       _ ->

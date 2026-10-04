@@ -55,6 +55,28 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
     doc
   end
 
+  defp put_workspace!(doc, ws) do
+    doc |> Ecto.Changeset.change(workspace_id: ws.id) |> Repo.update!()
+  end
+
+  defp seed_book_in(doc_id, ws) do
+    {:ok, doc} =
+      %Document{}
+      |> Document.changeset(%{
+        "doc_id" => doc_id,
+        "type" => "book",
+        "dataset" => "production",
+        "title" => "Book " <> doc_id,
+        "status" => "draft",
+        "content" => %{},
+        "rev" => "rev_" <> doc_id <> "_#{System.unique_integer([:positive])}"
+      })
+      |> Ecto.Changeset.put_change(:workspace_id, ws.id)
+      |> Repo.insert()
+
+    doc
+  end
+
   describe "admin gate" do
     test "redirects to /studio without an admin token", %{conn: conn} do
       conn = init_test_session(conn, %{})
@@ -192,6 +214,33 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLiveTest do
       # Doc content is unchanged after re-validate (read-only action).
       doc = Repo.get_by!(Document, doc_id: "reval-1", type: "book", dataset: "production")
       assert doc.content == original_content
+    end
+  end
+
+  describe "acknowledge targets the listed row (owner ruling #30 Q12)" do
+    test "two workspaces' books with one doc_id: acknowledge flips only the clicked row",
+         %{conn: conn} do
+      ws_a =
+        Barkpark.TenancyFixtures.create_workspace!(
+          "stale-a-#{System.unique_integer([:positive])}"
+        )
+
+      ws_b =
+        Barkpark.TenancyFixtures.create_workspace!(
+          "stale-b-#{System.unique_integer([:positive])}"
+        )
+
+      book_a = seed_book("dup-book", %{}) |> put_workspace!(ws_a)
+      book_b = seed_book_in("dup-book", ws_b)
+
+      conn = init_test_session(conn, %{"api_token" => @admin_token})
+      {:ok, view, _html} = live(conn, @url)
+
+      render_click(view, "acknowledge", %{"doc_id" => "dup-book", "id" => book_a.id})
+
+      assert Repo.get!(Document, book_a.id).content["staleness_acknowledged"] == true
+      refute Repo.get!(Document, book_b.id).content["staleness_acknowledged"]
+      assert Process.alive?(view.pid)
     end
   end
 

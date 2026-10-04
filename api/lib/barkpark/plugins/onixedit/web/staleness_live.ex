@@ -109,8 +109,8 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     end
   end
 
-  def handle_event("acknowledge", %{"doc_id" => doc_id}, socket) do
-    with {:ok, doc} <- fetch_doc(doc_id),
+  def handle_event("acknowledge", %{"doc_id" => doc_id} = params, socket) do
+    with {:ok, doc} <- fetch_listed_doc(socket.assigns.rows, doc_id, params["id"]),
          updated_content <- Map.put(doc.content || %{}, "staleness_acknowledged", true),
          {:ok, updated_doc} <- acknowledge_write(doc, updated_content) do
       rows =
@@ -129,6 +129,14 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     else
       {:error, :not_found} ->
         {:noreply, put_flash(socket, :error, "Book #{doc_id} no longer exists.")}
+
+      {:error, :ambiguous} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           "Book #{doc_id} exists in more than one workspace. Reload the page and try again."
+         )}
 
       {:error, %Ecto.Changeset{} = cs} ->
         {:noreply, put_flash(socket, :error, "Acknowledge failed: #{inspect(cs.errors)}")}
@@ -223,6 +231,7 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
                     type="button"
                     phx-click="acknowledge"
                     phx-value-doc_id={row.doc_id}
+                    phx-value-id={row.doc.id}
                     data-test-action="acknowledge"
                     disabled={row.acknowledged}
                   >
@@ -306,12 +315,32 @@ defmodule Barkpark.Plugins.OnixEdit.Web.StalenessLive do
     |> Repo.all()
   end
 
-  # global-read: FLAT-POSTURE admin console (see load_books/0) — single-row twin
-  # of the unscoped list read; narrowed by doc_id + type + dataset, not workspace.
-  defp fetch_doc(doc_id) do
-    case Repo.get_by(Document, doc_id: doc_id, type: @type_default, dataset: @dataset_default) do
-      nil -> {:error, :not_found}
-      doc -> {:ok, doc}
+  # The acknowledge target is the ROW THIS VIEW LISTED, re-read by primary key
+  # (owner ruling #30 Q12, 2026-10-03). It used to be a global
+  # `Repo.get_by(doc_id:, type:, dataset:)`: the console lists every
+  # workspace's books, two workspaces can hold the same doc_id, and the read
+  # then raised (MultipleResultsError) or picked a row the operator did not
+  # click. The button carries the row's id; an id-less event still resolves
+  # when exactly one listed row has that doc_id, and refuses otherwise.
+  defp fetch_listed_doc(rows, doc_id, id) do
+    listed =
+      Enum.filter(rows, fn r ->
+        r.doc_id == doc_id and (is_nil(id) or r.doc.id == id)
+      end)
+
+    case listed do
+      [%{doc: %Document{id: pk}}] ->
+        # global-read: same flat-posture ops console as load_books/0 — pk is a row this view listed
+        case Repo.get(Document, pk) do
+          %Document{type: @type_default, dataset: @dataset_default} = doc -> {:ok, doc}
+          _ -> {:error, :not_found}
+        end
+
+      [] ->
+        {:error, :not_found}
+
+      _many ->
+        {:error, :ambiguous}
     end
   end
 
