@@ -727,8 +727,8 @@ defmodule PDS.Census do
     # signed-in user's context with ONE `Tenancy.Auth.membership/3` read (Studio account
     # sockets act as the user, not anonymous), so two receipts that reached no Repo verb inside
     # depth 6 now reach that read. The UNROUTED SPLITS block diffed against the run on the
-    # parent tree names them: sheets/web/import_controller.ex:67 and
-    # controllers/search_controller.ex:272 left the unrouted list. `write` (52), `textual`
+    # parent tree names them: one receipt in the Sheets ImportController and
+    # one in SearchController left the unrouted list. `write` (52), `textual`
     # (115), `ast` (106), `phantom` (9), `consumer` (4) and `emitted` (102) read `==` in the
     # same run; lens unchanged. DERIVED BY THE INSTRUMENT: the `derived` half of this census's
     # own D448-DRIFT-REFUSES line on this commit's tree. Engine printed live by that run:
