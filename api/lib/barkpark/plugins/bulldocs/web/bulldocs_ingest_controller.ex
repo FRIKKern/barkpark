@@ -733,6 +733,7 @@ defmodule BarkparkWeb.BulldocsIngestController do
   # byte-unchanged AND makes `put_scope/3`'s strict match a real precondition
   # rather than a hope. Halts on refusal; otherwise the conn passes through and
   # `put_scope/3` re-resolves the same (pure) decision.
+  plug(:require_named_workspace_access)
   plug(:require_resolvable_scope when action in [:ingest, :ingest_session, :create])
 
   def create(conn, %{"ifRev" => _}), do: refuse_unfenced_if_rev(conn, "ifRev")
@@ -2031,9 +2032,10 @@ defmodule BarkparkWeb.BulldocsIngestController do
          {:workspace_scope_conflict,
           scope_value(conn, params, "workspace", "x-barkpark-workspace"), ws.slug}}
 
-      # No pipeline tenant, but the request named one: unchanged legacy
-      # behaviour (the shared-secret producer that addresses a workspace by
-      # slug).
+      # No pipeline tenant, but the request named one: the shared-secret
+      # producer that addresses a workspace by slug, or a token that
+      # `require_named_workspace_access/2` already proved may write there
+      # (ruling #8).
       not is_nil(req_ws) ->
         {:ok, {req_ws, req_proj}}
 
@@ -2109,6 +2111,49 @@ defmodule BarkparkWeb.BulldocsIngestController do
             "the write was refused rather than retargeted",
           %{sent: sent, resolved: resolved}
         )
+    end
+  end
+
+  # OWNER RULING 2026-10-03 #8 (task-8e46d70f7b5e3fc7): the "no pipeline
+  # tenant, request names one" arm of BOTH reconciliations below
+  # (`resolve_write_workspace/2`'s legacy arm and `resolve_scope/2`'s
+  # `is_nil(ws)` arm) used to honour a named workspace for ANY credential. A
+  # workspace-less admin token seated only in A could then create, overwrite
+  # and edit B's papers and sessions by naming B. Now a TOKEN that names a
+  # workspace must hold write access there (`Tenancy.Auth.authorize/3`) or be
+  # on an ARMED instance-operator allowlist; else 403 `workspace_forbidden`.
+  # The shared-secret producer carries no `:api_token` and is unchanged; a
+  # workspace-bound token is already confined by the reconciliations
+  # themselves. One door for every action, so the read twin is covered too.
+  defp require_named_workspace_access(conn, _opts) do
+    with %Barkpark.Auth.ApiToken{} = token <- conn.assigns[:api_token],
+         nil <- pipeline_workspace(conn),
+         {ws_id, _project} when is_binary(ws_id) <- requested_scope(conn, conn.params),
+         false <- may_address_workspace?(token, ws_id) do
+      conn
+      |> ErrorResponse.emit_custom(
+        :forbidden,
+        "workspace_forbidden",
+        "this token has no write access in the workspace the request names — use a token " <>
+          "seated in that workspace",
+        %{sent: scope_value(conn, conn.params, "workspace", "x-barkpark-workspace") || ws_id}
+      )
+      |> halt()
+    else
+      _ -> conn
+    end
+  end
+
+  defp may_address_workspace?(token, ws_id) do
+    Tenancy.Auth.authorize(token, ws_id, :write) == :ok or armed_operator?(token)
+  end
+
+  # The instance operator, only when the allowlist is ARMED: an unset allowlist
+  # admits every admin token, which is exactly the population this closes.
+  defp armed_operator?(token) do
+    case BarkparkWeb.Plugs.RequirePlatformOperator.allowlist() do
+      %{emails: [], token_ids: []} -> false
+      _ -> BarkparkWeb.Plugs.RequirePlatformOperator.permits?(token)
     end
   end
 
