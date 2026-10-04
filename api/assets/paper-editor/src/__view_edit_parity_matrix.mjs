@@ -82,6 +82,10 @@ const FIXTURES = [
   { id: "figure", type: "figure", caption: "A rendered child with an editable caption.", child: para("figure-child", "Figure child geometry comes from the server renderer.") },
   { id: "task-list", type: "task-list", title: "Parity tasks", snapshot: [{ title: "Measure the reader", status: "ready", priority: 1 }, { title: "Match the canvas", status: "done" }] },
   { id: "heading-3", type: "heading", level: 3, text: "A third-level heading carries a quieter voice" },
+  // Six heading levels (owner ruling 2026-10-03 #63): h4–h6 render as real hN on both surfaces.
+  { id: "heading-4", type: "heading", level: 4, text: "A fourth-level heading steps down toward the body size" },
+  { id: "heading-5", type: "heading", level: 5, text: "A fifth-level heading sits at the body size" },
+  { id: "heading-6", type: "heading", level: 6, text: "A sixth-level heading is the smallest heading voice" },
   { id: "list-ordered", type: "list", ordered: true, items: [text("An ordered first item that is long enough to wrap on phones"), text("An ordered second item")] },
   { id: "callout-info", type: "callout", tone: "info", title: "Info tone", content: text("Info callout body copy for the parity matrix.") },
   { id: "callout-success", type: "callout", tone: "success", title: "Success tone", content: text("Success callout body copy for the parity matrix.") },

@@ -578,11 +578,11 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     |> Enum.join("")
   end
 
-  # Clamp a heading level to 1..3; default to 2 when absent/out of range.
-  defp heading_level(l) when l in [1, 2, 3], do: l
-  defp heading_level("1"), do: 1
-  defp heading_level("2"), do: 2
-  defp heading_level("3"), do: 3
+  # A heading level 1..6 renders as itself (owner ruling 2026-10-03 #63 — six
+  # levels; it used to fold 4..6 to 2). Absent / out of range stays 2.
+  defp heading_level(l) when l in 1..6, do: l
+
+  defp heading_level(l) when l in ~w(1 2 3 4 5 6), do: String.to_integer(l)
   defp heading_level(_), do: 2
 
   # ── article typographic roles ──────────────────────────────────────────────
@@ -699,7 +699,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     ]
   end
 
-  defp heading_style(_3, pal) do
+  defp heading_style(3, pal) do
     [
       "font-family:#{pal.font_heading}",
       "color:#{pal.text}",
@@ -707,6 +707,20 @@ defmodule Barkpark.PortableDoc.Render.Walk do
       "margin:24px 0 8px",
       "font-weight:600",
       "font-size:20px"
+    ]
+  end
+
+  # Levels 4..6 step down from the h3 size; 6 is the body size.
+  defp heading_style(level, pal) do
+    size = %{4 => 18, 5 => 17}[level] || 16
+
+    [
+      "font-family:#{pal.font_heading}",
+      "color:#{pal.text}",
+      "line-height:1.35",
+      "margin:20px 0 6px",
+      "font-weight:600",
+      "font-size:#{size}px"
     ]
   end
 

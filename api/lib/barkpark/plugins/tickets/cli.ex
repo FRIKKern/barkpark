@@ -90,7 +90,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         verb: "inbox",
         summary: "Operator triage: tickets waiting on you, oldest-waiting first (status=open).",
         http: %{method: "GET", path_template: "/v1/tickets/inbox"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [],
         flags: [
           %{name: "limit", type: "int", summary: "Max tickets to return.", default: 50}
@@ -108,7 +108,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         verb: "show",
         summary: "Show one ticket thread (operator detail: subject, status, messages).",
         http: %{method: "GET", path_template: "/v1/tickets/inbox/:id"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{name: "id", required: true, type: "string", summary: "Ticket id."}
         ],
@@ -127,7 +127,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         summary:
           "Operator answer (flips status to answered — the key-holder's move). --close answers and closes in one write.",
         http: %{method: "POST", path_template: "/v1/tickets/:id/answer"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{name: "id", required: true, type: "string", summary: "Ticket id to answer."},
           %{name: "body", required: true, type: "string", summary: "The answer text."}
@@ -152,7 +152,7 @@ defmodule Barkpark.Plugins.Tickets.CLI do
         verb: "close",
         summary: "Close a ticket (status=closed, done).",
         http: %{method: "POST", path_template: "/v1/tickets/:id/close"},
-        auth_tier: "read",
+        auth_tier: "write",
         args: [
           %{name: "id", required: true, type: "string", summary: "Ticket id to close."}
         ],

@@ -14,6 +14,7 @@ defmodule BarkparkWeb.QueryController do
   alias BarkparkWeb.AnonPerspective
   alias BarkparkWeb.Http.IfNoneMatch
   alias BarkparkWeb.ReadPerspective
+  alias BarkparkWeb.StrictReadParams
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
@@ -65,6 +66,14 @@ defmodule BarkparkWeb.QueryController do
           # an existence probe, exactly the ordering counts/2 uses.
           bad = unsupported_read_perspective(params) ->
             refuse_read_perspective(conn, bad)
+
+          # Owner ruling #53 (2026-10-03): `?limit=abc` used to answer 200 with
+          # the default page and `?offset=abc` read as page one. A non-integer is
+          # now a 400 naming the parameter; an out-of-range integer is still
+          # clamped below. Same position as the perspective refusal: after the
+          # existence-hiding 404, so it cannot become an existence probe.
+          bad = StrictReadParams.malformed_int(params, ["limit", "offset"]) ->
+            StrictReadParams.refuse_int(conn, bad)
 
           true ->
             query_index(conn, dataset, type, params)
@@ -298,6 +307,11 @@ defmodule BarkparkWeb.QueryController do
     caller_context = CallerContext.from_conn(conn)
 
     cond do
+      # Owner ruling #53: `?expand=` naming a field that is not a reference
+      # field on this type used to answer 200 with nothing expanded.
+      refusal = expand_refusal(conn, params["expand"], expand_spec, type, dataset, schema) ->
+        refusal
+
       # An unparseable flat --filter string normalizes to an {:error, …}
       # sentinel, never %{} — an empty map here used to slip past both
       # guards below and SILENTLY return the UNFILTERED set (D75: `--filter
@@ -880,9 +894,13 @@ defmodule BarkparkWeb.QueryController do
     inject_read_fault!(:doc_show)
     t0 = System.monotonic_time(:microsecond)
     expand_spec = parse_expand(params["expand"])
+    schema = fetch_schema(conn, type, dataset)
 
-    with {:ok, doc} <- get_document_for_perspective(conn, doc_id, type, dataset, params) do
-      schema = fetch_schema(conn, type, dataset)
+    # Owner ruling #53: an `?expand=` naming a non-reference field is a 400. It
+    # depends on the type's schema only, never on whether `doc_id` exists, so
+    # answering it before the lookup reveals nothing about the document.
+    with nil <- expand_refusal(conn, params["expand"], expand_spec, type, dataset, schema),
+         {:ok, doc} <- get_document_for_perspective(conn, doc_id, type, dataset, params) do
       caller_context = CallerContext.from_conn(conn)
 
       rendered =
@@ -1651,9 +1669,38 @@ defmodule BarkparkWeb.QueryController do
   end
 
   # Catch-all: a list param (`?expand[]=author` → Plug parses to `["author"]`) or
-  # a map param (`?expand[k]=v` → `%{"k" => "v"}`) falls back to no expansion
-  # instead of raising FunctionClauseError → 500.
-  defp parse_expand(_), do: []
+  # a map param (`?expand[k]=v` → `%{"k" => "v"}`). It used to fall back to no
+  # expansion (a silent 200); since owner ruling #53 it is refused with a 400 by
+  # `expand_refusal/6`. Never a FunctionClauseError → 500.
+  defp parse_expand(_), do: :malformed
+
+  # nil when `?expand` is absent, `true`/`false`, or names only reference fields
+  # this caller can read on `type`; otherwise the 400 conn. The expandable set
+  # comes from `Expand.expandable_fields/3` (the lookup the expansion itself
+  # uses) narrowed to fields this caller may read, so the refusal never names a
+  # private field to a caller who cannot see it.
+  defp expand_refusal(_conn, _raw, spec, _type, _dataset, _schema) when spec in [:all, []],
+    do: nil
+
+  defp expand_refusal(conn, raw, spec, type, dataset, schema) do
+    caller_context = CallerContext.from_conn(conn)
+
+    expandable =
+      type
+      |> Expand.expandable_fields(dataset, scope_opts(conn))
+      |> Enum.filter(&Envelope.field_readable?(schema, &1, caller_context))
+
+    case spec do
+      :malformed ->
+        StrictReadParams.refuse_expand(conn, raw, nil, expandable)
+
+      fields when is_list(fields) ->
+        case Enum.uniq(fields) -- expandable do
+          [] -> nil
+          unknown -> StrictReadParams.refuse_expand(conn, raw, unknown, expandable)
+        end
+    end
+  end
 
   # `?fields=title,slug` — projection. Returns the requested content field names, or
   # nil (no projection → whole document) when the param is absent/blank.

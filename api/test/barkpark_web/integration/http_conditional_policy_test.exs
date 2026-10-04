@@ -130,7 +130,9 @@ defmodule BarkparkWeb.Integration.HttpConditionalPolicyTest do
     # test in this block reds — the header comes back.
     for {label, qs} <- [
           {"?fields= projection", "?fields=title"},
-          {"?expand= hydration", "?expand=author"},
+          # `true`, not a field name: this schema declares no reference fields,
+          # and naming one it lacks is a 400 since owner ruling #53.
+          {"?expand= hydration", "?expand=true"},
           {"?resolve=tasks snapshotting", "?resolve=tasks"},
           {"?count=true totalling", "?count=true"}
         ] do

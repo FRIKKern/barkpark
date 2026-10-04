@@ -130,6 +130,48 @@ defmodule Barkpark.Plugins.Quiz do
     _, _ -> false
   end
 
+  # "Host this quiz" in the Studio editor header (owner ruling #23,
+  # task-f5d0ce5677e1c1d0). `/quiz/host` binds a stored quiz only with a host
+  # link minted here (or a signed-in author session), so Studio is where a
+  # host link comes from. Rendered only for a quiz in the Default workspace —
+  # the one workspace the anonymous host door reads quizzes from — and opened
+  # in a new tab so the editor stays put.
+  @impl Barkpark.Plugin
+  def resolve_doc_actions(prev, %{doc_type: "quiz", doc: %{doc_id: doc_id}} = ctx)
+      when is_binary(doc_id) do
+    if default_workspace?(Map.get(ctx, :workspace_id)) do
+      prev ++
+        [
+          %{
+            "name" => "quiz_host",
+            "label" => "Host this quiz",
+            "kind" => "link",
+            "scope" => "editor_header",
+            "opts" => %{
+              "href" => Barkpark.Quiz.HostLink.path(doc_id),
+              "class" => "btn btn-ghost btn-sm",
+              "icon" => "external-link",
+              "target" => "_blank",
+              "rel" => "noopener"
+            }
+          }
+        ]
+    else
+      prev
+    end
+  end
+
+  def resolve_doc_actions(prev, _ctx), do: prev
+
+  # nil = a flat (unscoped) Studio, which reads the Default workspace.
+  defp default_workspace?(nil), do: true
+
+  defp default_workspace?(ws_id) do
+    match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+  rescue
+    _ -> false
+  end
+
   # The `quiz` document type. PRIVATE visibility: the doc stores the correct
   # answer inline, so it must NOT be anonymously readable via the public content
   # API (the Room loads it server-side and broadcasts an answer-stripped

@@ -42,7 +42,7 @@ defmodule Barkpark.PortableDoc.FromMarkdown do
   # ── block-level mapping ─────────────────────────────────────────────────
 
   defp block({"h" <> n, _attrs, children, _meta}) when n in ~w(1 2 3 4 5 6) do
-    level = n |> String.to_integer() |> min(3)
+    level = String.to_integer(n)
     [%{"type" => "heading", "level" => level, "text" => flatten_text(children)}]
   end
 

@@ -137,6 +137,13 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
     # payload (router `resurrect_claim_json`) so the Go worker knows which bundle
     # to pull and rehydrate onto the fresh box.
     field :bundle_ref, :string
+    # task-0cf611238d4ad597 CQ7c: the barkpark's team and host when the job was
+    # enqueued, for the kinds that SSH to that host
+    # (`Registry.ownership_checked_kinds/0`). The claim refuses a job whose row
+    # has since changed team or host. NULL on rows enqueued before these columns
+    # existed, and on every other kind.
+    field :enqueued_team_id, :binary_id
+    field :enqueued_host, :string
 
     belongs_to :barkpark, BarkparkCloud.Registry.Barkpark
 
@@ -181,6 +188,8 @@ defmodule BarkparkCloud.Registry.ProvisionJob do
       :steps,
       :console,
       :bundle_ref,
+      :enqueued_team_id,
+      :enqueued_host,
       :barkpark_id
     ])
     |> validate_required([:status, :kind, :barkpark_id])
