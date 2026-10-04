@@ -43,8 +43,11 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: api-image
-  cancel-in-progress: false
+  # PER PUSH SHA ON MAIN (scripts/main-run-concurrency-check.sh): a flat group
+  # would let a later release evict a queued earlier one before a runner picks
+  # it up. Never cancels a main run.
+  group: api-image-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 permissions:
   contents: read
