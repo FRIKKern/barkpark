@@ -58,6 +58,63 @@ defmodule BarkparkWeb.SessionIssuer do
   end
 
   @doc """
+  Must this sign-in PRESENT a factor that the door it came through cannot
+  carry? Owner ruling #14 (task-f4cfc3e2ab4bd6b8): in an organization that
+  requires MFA, a password, magic-link or social sign-in must present a TOTP
+  code or a passkey. The TOTP arm is handled where the code is read; this is
+  the rest — a governed user with a factor enrolled but no TOTP (passkey only),
+  or (for social sign-in, which carries no code) any governed enrolled user.
+  Those sign-ins are refused and the user is pointed at the passkey door
+  (`POST /v1/auth/webauthn/login`, which mints an MFA-verified session) or
+  the password + code door.
+
+  `false` whenever no governing org requires MFA, and for a governed user with
+  no factor yet (their session is how they enrol — `org_mfa_enrolment_blocked?/1`).
+  """
+  @spec org_factor_required?(Accounts.User.t(), :code_door | :no_code_door) :: boolean()
+  def org_factor_required?(%Accounts.User{} = user, door) do
+    cond do
+      door == :code_door and user.totp_enabled -> false
+      not Accounts.mfa_enrolled?(user) -> false
+      true -> Barkpark.Tenancy.org_requires_mfa_for_user?(user.id)
+    end
+  end
+
+  @doc """
+  The refusal for `org_factor_required?/2`: audited, then 401 `mfa_required`
+  (the code a two-step client already handles) with the doors that work.
+  """
+  @spec deny_org_factor_required(Plug.Conn.t(), Accounts.User.t(), String.t()) :: Plug.Conn.t()
+  def deny_org_factor_required(conn, %Accounts.User{} = user, method) do
+    Barkpark.Audit.emit(%{
+      category: "auth",
+      action: "mfa_failed",
+      subject: user.id,
+      actor_type: "user",
+      actor_id: user.id,
+      metadata: %{"context" => "login", "reason" => "org_require_mfa", "method" => method}
+    })
+
+    ErrorResponse.emit_fields(conn, 401, %{
+      code: "mfa_required",
+      message: "an organization you belong to requires a second factor at sign-in",
+      hint: org_factor_hint(user)
+    })
+  end
+
+  @doc "Where a governed user presents their factor, in words for a flash or a hint."
+  @spec org_factor_hint(Accounts.User.t()) :: String.t()
+  def org_factor_hint(%Accounts.User{totp_enabled: true}),
+    do:
+      "sign in with your password and the 6-digit code from your authenticator app, " <>
+        "or with your passkey (POST /v1/auth/webauthn/login/challenge, then /v1/auth/webauthn/login)"
+
+  def org_factor_hint(_user),
+    do:
+      "sign in with your passkey (POST /v1/auth/webauthn/login/challenge, then " <>
+        "/v1/auth/webauthn/login; in the browser, the passkey button on /login)"
+
+  @doc """
   Refuse an SSO session-mint for a governed factor-less user
   (era-w8-sso-mfa-binding). Audits the block, then forks on the caller: a
   browser (Accept: text/html) is redirected to `/login` with enrolment
