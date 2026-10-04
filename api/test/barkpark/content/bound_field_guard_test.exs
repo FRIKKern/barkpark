@@ -90,6 +90,73 @@ defmodule Barkpark.Content.BoundFieldGuardTest do
     end
   end
 
+  describe "check/4 on inline valuerefs to another document" do
+    # A valueref's pinned `fallback` is the value the author saw when binding
+    # it, and the public render prints it, so a private target field is
+    # refused like a private field-* block.
+    defp valueref(target, field, fallback),
+      do: %{
+        "id" => "v-#{field}",
+        "type" => "paragraph",
+        "content" => [
+          %{"type" => "text", "text" => "Budget: "},
+          %{"type" => "valueref", "target" => target, "field" => field, "fallback" => fallback}
+        ]
+      }
+
+    setup do
+      ds = dataset()
+      schema!("memo", ds, @fields)
+
+      {:ok, _} =
+        Content.create_document(
+          "memo",
+          %{"doc_id" => "q3-memo", "title" => "Q3", "content" => %{"budget" => "1M"}},
+          ds
+        )
+
+      %{ds: ds}
+    end
+
+    test "refuses a valueref to the target's private, owner_only or readable_by field",
+         %{ds: ds} do
+      blocks = [
+        valueref("q3-memo", "summary", "ok"),
+        valueref("q3-memo", "budget", "1M"),
+        %{"id" => "s", "type" => "section", "blocks" => [valueref("q3-memo", "allow", "y")]}
+      ]
+
+      assert {:error, {:private_field_bound, ["q3-memo.budget", "q3-memo.allow"]}} =
+               BoundFieldGuard.check(blocks, "paper", ds, nil)
+
+      assert {:error, {:private_field_bound, ["drafts.q3-memo.owner_note"]}} =
+               BoundFieldGuard.check(
+                 [valueref("drafts.q3-memo", "owner_note", "x")],
+                 "paper",
+                 ds,
+                 nil
+               )
+    end
+
+    test "a public field, an encrypted-only field and an unresolved target pass", %{ds: ds} do
+      blocks = [
+        valueref("q3-memo", "summary", "ok"),
+        valueref("q3-memo", "vault", "sealed"),
+        valueref("q3-memo", "title", "Q3"),
+        valueref("no-such-doc", "budget", "1M")
+      ]
+
+      assert :ok = BoundFieldGuard.check(blocks, "paper", ds, nil)
+    end
+
+    test "upsert_paper refuses the paper and writes nothing", %{ds: ds} do
+      assert {:error, {:private_field_bound, ["q3-memo.budget"]}} =
+               paper!(ds, "vr-leak", [valueref("q3-memo", "budget", "1M")])
+
+      assert Content.get_paper("vr-leak", ds) in [nil, {:error, :not_found}]
+    end
+  end
+
   test "as_halt/1 turns the refusal into the editors' halt banner, other results pass" do
     assert {:error, {:halted, msg}} =
              BoundFieldGuard.as_halt({:error, {:private_field_bound, ["budget"]}})

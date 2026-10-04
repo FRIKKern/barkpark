@@ -18,13 +18,24 @@ defmodule Barkpark.Content.BoundFieldGuard do
   rule and the read redaction cannot disagree. Nested blocks (a `section`'s
   children) are checked too.
 
+  The same rule covers an inline `valueref` (`{"target", "field"}`, see
+  `docs/contracts/portable-doc-inline.md`) that points at ANOTHER document's
+  restricted field. The live value is redacted at read, but the node's pinned
+  `fallback` is the value the author saw when binding it (and the Studio
+  "accept" control re-pins it), and the public render prints the fallback.
+  Such a node is refused the same way, named `"<target>.<field>"`. A target
+  that does not resolve in the writer's scope is left alone (it renders as
+  dangling, and there is no schema to judge it by).
+
   Called on every author write path that persists blocks: the paper block ops
   and whole-paper upserts/ingest (`Papers.BlockOps`), suggestion acceptance
   (`Papers.Proposals`), and the generic document writer (`Content.Writer`),
   which document block ops and `/v1/data/mutate` reach.
   """
 
-  alias Barkpark.Content.{CallerContext, Envelope, Schema}
+  alias Barkpark.Content
+  alias Barkpark.Content.{CallerContext, DraftId, Envelope, Schema}
+  alias Barkpark.PortableDoc.BodyWalk
 
   @doc """
   `:ok`, or `{:error, {:private_field_bound, field_names}}` when `blocks`
@@ -40,6 +51,14 @@ defmodule Barkpark.Content.BoundFieldGuard do
 
   def check(blocks, type, dataset, scope)
       when is_list(blocks) and is_binary(type) and is_binary(dataset) do
+    with :ok <- check_bound_fields(blocks, type, dataset, scope) do
+      check_valuerefs(blocks, dataset, scope)
+    end
+  end
+
+  def check(_content, _type, _dataset, _scope), do: :ok
+
+  defp check_bound_fields(blocks, type, dataset, scope) do
     case bound_names(blocks) do
       [] ->
         :ok
@@ -62,7 +81,91 @@ defmodule Barkpark.Content.BoundFieldGuard do
     end
   end
 
-  def check(_content, _type, _dataset, _scope), do: :ok
+  # Inline valuerefs that bind another document's restricted field. One
+  # batched, scope-identical read for every distinct target, one schema read
+  # per target type; nothing at all when the body carries no valueref.
+  defp check_valuerefs(blocks, dataset, scope) do
+    case valueref_pairs(blocks) do
+      [] ->
+        :ok
+
+      pairs ->
+        opts = scope_opts(scope)
+        types = target_types(pairs, dataset, opts)
+        anonymous = CallerContext.anonymous()
+
+        {restricted, _cache} =
+          Enum.flat_map_reduce(pairs, %{}, fn {target, field}, cache ->
+            case Map.get(types, DraftId.published_id(target)) do
+              nil ->
+                {[], cache}
+
+              target_type ->
+                {schema, cache} = schema_cached(cache, target_type, dataset, opts)
+
+                if schema != nil and not Envelope.field_readable?(schema, field, anonymous),
+                  do: {["#{target}.#{field}"], cache},
+                  else: {[], cache}
+            end
+          end)
+
+        case restricted do
+          [] -> :ok
+          names -> {:error, {:private_field_bound, names}}
+        end
+    end
+  end
+
+  # Distinct `{target, field}` pairs, document order. Same well-formedness rule
+  # as the read-side resolver (`Papers.resolve_values_in_blocks/3`): a single
+  # top-level field name; a malformed node never resolves, so it binds nothing.
+  defp valueref_pairs(blocks) do
+    blocks
+    |> BodyWalk.collect_nodes(["valueref"])
+    |> Enum.flat_map(fn node ->
+      case {Map.get(node, "target"), Map.get(node, "field")} do
+        {target, field} when is_binary(target) and is_binary(field) and field != "" ->
+          if String.contains?(field, "."), do: [], else: [{target, field}]
+
+        _ ->
+          []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  # published doc_id => type, for every target that resolves in scope (either
+  # spelling; the published row wins when both exist).
+  defp target_types(pairs, dataset, opts) do
+    ids =
+      pairs
+      |> Enum.flat_map(fn {target, _} ->
+        pub = DraftId.published_id(target)
+        [pub, DraftId.draft_id(pub)]
+      end)
+      |> Enum.uniq()
+
+    ids
+    |> Content.resolve_docs_by_ids(dataset, opts)
+    |> Enum.sort_by(&String.starts_with?(&1.doc_id, DraftId.drafts_prefix()), :desc)
+    |> Map.new(fn doc -> {DraftId.published_id(doc.doc_id), doc.type} end)
+  end
+
+  defp schema_cached(cache, type, dataset, opts) do
+    case Map.fetch(cache, type) do
+      {:ok, schema} ->
+        {schema, cache}
+
+      :error ->
+        schema =
+          case schema_for_write(type, dataset, opts) do
+            {:ok, schema} -> schema
+            _ -> nil
+          end
+
+        {schema, Map.put(cache, type, schema)}
+    end
+  end
 
   @doc "The refusal message the editor and the API show for `names`."
   @spec message([String.t()]) :: String.t()
