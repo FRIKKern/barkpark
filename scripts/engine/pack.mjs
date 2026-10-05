@@ -30,7 +30,7 @@ const launcherDir = path.join(repo, 'js', 'packages', 'engine');
 export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64'];
 const USAGE = 'usage: node scripts/engine/pack.mjs platform --engine <engine folder> --out <folder> [--version <v>]\n       node scripts/engine/pack.mjs launcher --out <folder> [--version <v>]';
 
-function fail(message, code = 2) { console.error(message); process.exit(code); }
+function fail(message, code = 2) { console.error(message); process.exit(code); } // pipe-exit-ok: one stderr line before anything is written to stdout
 
 function args(argv) {
   const [form, ...rest] = argv;

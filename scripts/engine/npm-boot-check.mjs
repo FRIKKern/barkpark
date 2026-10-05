@@ -12,12 +12,12 @@ import { startBarkpark, findPlatformRelease } from '@barkpark/engine';
 
 if (process.env.BARKPARK_ENGINE_RELEASE) {
   console.error('BARKPARK_ENGINE_RELEASE is set; this check must find the engine through the platform package alone.');
-  process.exit(2);
+  process.exit(2); // pipe-exit-ok: one stderr line before anything is written to stdout
 }
 const found = findPlatformRelease();
 if (!found || !found.includes(`${path.sep}node_modules${path.sep}`)) {
   console.error(`The platform package was not found in node_modules (got ${found}).`);
-  process.exit(1);
+  process.exit(1); // pipe-exit-ok: one stderr line before anything is written to stdout
 }
 
 const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'barkpark-npm-boot-'));
