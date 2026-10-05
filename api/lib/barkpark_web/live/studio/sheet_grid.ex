@@ -2770,7 +2770,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <.document_header
         :if={@chrome == :studio}
         dataset={@dataset}
-        title={if @renaming_title, do: "", else: @renamed_title || @doc.title || @slug}
+        title={if @renaming_title, do: "", else: @renamed_title || @doc.title || gettext("Untitled")}
       >
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
