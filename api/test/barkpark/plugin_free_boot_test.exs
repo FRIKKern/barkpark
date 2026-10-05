@@ -96,6 +96,10 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/geometry.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/grid_data.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/ops.ex"},
+    # The sheet header's Publish and Delete (task-64d23dae8eed88e7) flush or
+    # discard the live Sheets.Session before the lifecycle write.
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/delete.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/doc.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/shared.ex"}
   ]
 
