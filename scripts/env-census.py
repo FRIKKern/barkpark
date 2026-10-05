@@ -192,6 +192,7 @@ EXEMPT = {
     "CI": "CI-only (2026-08-08)",
     "GITHUB_ACTIONS": "CI-only (2026-08-08)",
     "GITHUB_TOKEN": "CI-only (2026-08-08)",
+    "BARKPARK_HTTP_IP": "set by @barkpark/engine to bind loopback in the App shape; a container bound to loopback is unreachable through its port map, so compose must not pass it (2026-10-05)",
 }
 
 # ─────────────────────────────────────────────────────────────────────────────

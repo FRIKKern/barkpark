@@ -111,6 +111,10 @@
       "owner": "api",
       "why_off_pr": "runs the ELEVEN tags test_helper.exs excludes from every PR and main push; putting that cost on each PR is the reason they are excluded in the first place."
     },
+    "engine-release.yml": {
+      "owner": "cli",
+      "why_off_pr": "builds the engine folder for three platforms and boots each with @barkpark/engine; three runners and a full release build per push are too heavy for a PR head, and it reads the release a merge produced."
+    },
     "grip-suite.yml": {
       "owner": "gates",
       "why_off_pr": "the Grip ledger suite reads durable ledger state, not the diff; on a PR it measures the same thing every time at full cost."

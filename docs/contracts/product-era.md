@@ -42,7 +42,7 @@ The installing door declares the shape in `BARKPARK_SHAPE` (`cloud`, `solo` or `
 
 Core never assumes a shape: no hard-coded dataset, no self-update when the host owns updates, no login when local. Shape-specific code lives at the edges. A change is proven in every shape it touches.
 
-"Barkspark" is only the codename for the App work. What ships is compiled Barkpark: `@barkpark/server`, `startBarkpark({ dataDir, plugins })` and `bp build`.
+"Barkspark" is only the codename for the App work. What ships is compiled Barkpark: `@barkpark/engine`, `startBarkpark({ dataDir, plugins })` and `bp build`.
 
 ## Born clean
 
