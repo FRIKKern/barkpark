@@ -31,7 +31,7 @@ Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `e
 
 `result` for queries (§4): `{count, offset, limit, perspective, hasMore, documents:[...]}` (+`nextOffset` when more); for a single doc (§5), the envelope object.
 
-**Document envelope keys** (in `result` for a single doc; each `result.documents[]` for queries): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, changes on every write · `_draft` bool · `_publishedId` `_id` minus `drafts.` · `_createdAt`/`_updatedAt` ISO 8601 UTC `Z` (all strings but `_draft`).
+**Document envelope keys** (`result`, or each `result.documents[]`): `_id` full id, `drafts.` prefix when draft · `_type` schema name · `_rev` 32-char hex, new per write · `_draft` bool · `_publishedId` `_id` minus `drafts.` · `_createdAt`/`_updatedAt` ISO 8601 UTC `Z` (all strings but `_draft`).
 
 Other keys = stored content plus `title`; user fields shadowing reserved keys are dropped on write.
 
@@ -80,7 +80,7 @@ Mutations applied atomically (one failure rolls back all). Body: `{"mutations":[
 
 ### Mutation kinds
 
-**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<opaque _rev>" } }`. Needs the exact draft ID and revision; missing row →404, stale →412. Removes only that draft (published twin kept), committing recovery history/event with the delete. Receipt names the removed row; generic `delete` still removes both variants. On a lost reply, reconcile; never retry against a recreated row.
+**`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact draft ID + revision (missing →404, stale →412). Removes only that draft, with recovery history; generic `delete` removes both variants. On a lost reply, reconcile; never retry against a recreated row.
 
 **`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
@@ -88,9 +88,9 @@ Mutations applied atomically (one failure rolls back all). Body: `{"mutations":[
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
-All three create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`, `details._id` names the verbs), else a `create.forked_published` warning. `patch` edits a published task in place.
+All three create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. One doc's patches serialize.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
 
@@ -101,11 +101,11 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
-Failures: §9. A write whose searchable text (title + every `content` string) exceeds Postgres' **1 048 575-byte** tsvector cap is refused `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`) and nothing is written. One document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) is refused `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` (owner decision, persisted) skips the duplicate scan.
+Failures: §9. Searchable text (title + every `content` string) over Postgres' **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` (owner decision, persisted) skips the duplicate scan.
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
-One PortableDoc block op on any document type (Studio's block editor op). Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
+One PortableDoc block op on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 

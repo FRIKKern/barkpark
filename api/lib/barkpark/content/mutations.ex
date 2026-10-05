@@ -73,6 +73,7 @@ defmodule Barkpark.Content.Mutations do
     DraftId,
     Envelope,
     MutateDoorFences,
+    PatchPath,
     ReadOnlyFields,
     ReferenceIntegrity,
     Warnings,
@@ -643,27 +644,22 @@ defmodule Barkpark.Content.Mutations do
   defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
        when is_map_key(patch, "setIfMissing") or is_map_key(patch, "unset") or
               is_map_key(patch, "inc") or is_map_key(patch, "dec") or
-              is_map_key(patch, "append") or is_map_key(patch, "prepend") do
+              is_map_key(patch, "append") or is_map_key(patch, "prepend") or
+              is_map_key(patch, "insert") do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — `id`/`_id` under set/setIfMissing
     # address nothing here; refuse BEFORE the read so the answer does not depend
     # on whether the document exists. See Writer.refuse_bare_id/2.
     with :ok <- Writer.refuse_bare_id(Map.get(patch, "set"), :patch),
          :ok <- Writer.refuse_bare_id(Map.get(patch, "setIfMissing"), :patch),
+         :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)) do
-      protected = patch_protected_keys(patch, type, dataset, opts)
+         :ok <- ensure_rev(existing, if_rev(patch)),
+         protected = patch_protected_keys(patch, type, dataset, opts),
+         {:ok, applied} <- apply_patch_ops(existing.content || %{}, patch, protected) do
       set_fields = Map.get(patch, "set", %{})
-      unset_keys = list_or_empty(Map.get(patch, "unset"))
 
       merged =
-        (existing.content || %{})
-        |> put_new_fields(Map.get(patch, "setIfMissing"), protected)
-        |> Map.merge(Map.drop(set_fields, protected))
-        |> apply_delta(Map.get(patch, "inc"), protected, 1)
-        |> apply_delta(Map.get(patch, "dec"), protected, -1)
-        |> apply_array_op(Map.get(patch, "append"), protected, :append)
-        |> apply_array_op(Map.get(patch, "prepend"), protected, :prepend)
-        |> Map.drop(unset_keys -- protected)
+        applied
         # Bound-block write-through (task-d8785cff163c8013). On a blocks-bearing
         # document `Writer.maybe_project_document_content/2` re-derives every
         # `content[fieldName]` from `content["blocks"]`, so a merge alone was
@@ -697,15 +693,20 @@ defmodule Barkpark.Content.Mutations do
        ) do
     # [bare-id-refusal] task-eeaf3a622b6c74c7 — see the ops arm above.
     with :ok <- Writer.refuse_bare_id(fields, :patch),
+         :ok <- lock_patch_target(id, dataset, opts),
          {:ok, existing} <- get_patch_base(id, type, dataset, opts),
-         :ok <- ensure_rev(existing, if_rev(patch)) do
+         :ok <- ensure_rev(existing, if_rev(patch)),
+         prior = existing.content || %{},
+         {:ok, applied} <-
+           apply_patch_ops(
+             prior,
+             %{"set" => fields},
+             patch_protected_keys(patch, type, dataset, opts)
+           ) do
       warn_on_nested_content(fields)
 
-      prior = existing.content || %{}
-
       merged =
-        prior
-        |> Map.merge(Map.drop(fields, patch_protected_keys(patch, type, dataset, opts)))
+        applied
         # Bound-block write-through — see the ops clause above and
         # `Barkpark.Content.BoundFieldSync`.
         |> BoundFieldSync.sync(prior, fields["title"])
@@ -1479,6 +1480,172 @@ defmodule Barkpark.Content.Mutations do
 
   defp list_or_empty(l) when is_list(l), do: l
   defp list_or_empty(_), do: []
+
+  # ── Patch ops with paths (task-bfb66a2ff491f6e7) ─────────────────────────
+  #
+  # One pass for both patch clauses. Order is unchanged for plain keys:
+  # setIfMissing fills absent defaults → set merges (overriding) → inc/dec →
+  # append/prepend → insert → unset. A key containing `.` or `[` is a PATH
+  # (`seo.metaTitle`, `body[_key=="b1"].text`) applied in the same slot through
+  # `PatchPath`; plain keys keep the shallow top-level behaviour byte for byte.
+  # A path whose first key is protected is skipped like a protected plain key.
+  # A path that does not parse, or walks into a scalar, refuses the batch (422);
+  # a selector that matches no item is a no-op with a `patch.path_unmatched`
+  # warning, as Sanity's API leaves the document unchanged there.
+  defp apply_patch_ops(content, patch, protected) do
+    {set_plain, set_paths} = split_paths(Map.get(patch, "set"))
+    {sim_plain, sim_paths} = split_paths(Map.get(patch, "setIfMissing"))
+    {inc_plain, inc_paths} = split_paths(Map.get(patch, "inc"))
+    {dec_plain, dec_paths} = split_paths(Map.get(patch, "dec"))
+
+    {unset_paths, unset_plain} =
+      Enum.split_with(list_or_empty(Map.get(patch, "unset")), &PatchPath.path?/1)
+
+    content
+    |> put_new_fields(sim_plain, protected)
+    |> path_ops(sim_paths, protected, &set_if_missing_fun/1, true)
+    |> ok_then(&Map.merge(&1, Map.drop(set_plain, protected)))
+    |> path_ops(set_paths, protected, &set_fun/1, true)
+    |> ok_then(&apply_delta(&1, inc_plain, protected, 1))
+    |> path_ops(numeric(inc_paths), protected, &delta_fun(&1, 1), true)
+    |> ok_then(&apply_delta(&1, dec_plain, protected, -1))
+    |> path_ops(numeric(dec_paths), protected, &delta_fun(&1, -1), true)
+    |> ok_then(&apply_array_op(&1, Map.get(patch, "append"), protected, :append))
+    |> ok_then(&apply_array_op(&1, Map.get(patch, "prepend"), protected, :prepend))
+    |> apply_insert(Map.get(patch, "insert"), protected)
+    |> path_ops(Enum.map(unset_paths, &{&1, nil}), protected, &unset_fun/1, false)
+    |> ok_then(&Map.drop(&1, unset_plain -- protected))
+  end
+
+  defp split_paths(fields) when is_map(fields) do
+    {paths, plain} = Enum.split_with(fields, fn {k, _} -> PatchPath.path?(k) end)
+    {Map.new(plain), Enum.sort(paths)}
+  end
+
+  defp split_paths(nil), do: {%{}, []}
+  defp split_paths(other), do: {other, []}
+
+  defp numeric(pairs), do: Enum.filter(pairs, fn {_k, d} -> is_number(d) end)
+
+  # PatchPath.update/4 callbacks: given the current value (`{:ok, v}` or
+  # `:absent`), say what to store.
+  defp set_fun(value), do: fn _ -> {:put, value} end
+
+  defp set_if_missing_fun(value) do
+    fn
+      :absent -> {:put, value}
+      {:ok, _} -> :keep
+    end
+  end
+
+  defp unset_fun(_value) do
+    fn
+      :absent -> :keep
+      {:ok, _} -> :delete
+    end
+  end
+
+  defp delta_fun(delta, sign) do
+    fn
+      {:ok, n} when is_number(n) -> {:put, n + sign * delta}
+      _ -> {:put, sign * delta}
+    end
+  end
+
+  defp ok_then({:ok, content}, fun), do: {:ok, fun.(content)}
+  defp ok_then(content, fun) when is_map(content), do: {:ok, fun.(content)}
+  defp ok_then(error, _fun), do: error
+
+  defp wrap_ok({:ok, _} = ok), do: ok
+  defp wrap_ok(content) when is_map(content), do: {:ok, content}
+  defp wrap_ok(error), do: error
+
+  defp path_ops({:error, _} = error, _pairs, _protected, _make_fun, _create?), do: error
+
+  defp path_ops(acc, pairs, protected, make_fun, create?) do
+    Enum.reduce_while(pairs, wrap_ok(acc), fn {path, value}, {:ok, content} ->
+      with {:ok, segs} <- path_error(PatchPath.parse(path)),
+           false <- PatchPath.root(path) in protected do
+        case PatchPath.update(content, segs, create?, make_fun.(value)) do
+          {:ok, updated} -> {:cont, {:ok, updated}}
+          :unmatched -> {:cont, {:ok, warn_unmatched(path, content)}}
+          {:error, msg} -> {:halt, path_error({:error, "#{msg} (path #{inspect(path)})"})}
+        end
+      else
+        true -> {:cont, {:ok, content}}
+        {:error, _} = e -> {:halt, e}
+      end
+    end)
+  end
+
+  # `insert: {"before"|"after"|"replace": path, "items": [...]}` — one anchor.
+  defp apply_insert(acc, nil, _protected), do: wrap_ok(acc)
+
+  defp apply_insert(acc, insert, protected) do
+    with {:ok, content} <- wrap_ok(acc),
+         {:ok, position, path, items} <- insert_shape(insert),
+         {:ok, segs} <- path_error(PatchPath.parse(path)) do
+      if PatchPath.root(path) in protected do
+        {:ok, content}
+      else
+        case PatchPath.insert(content, segs, position, items) do
+          {:ok, _} = ok -> ok
+          :unmatched -> {:ok, warn_unmatched(path, content)}
+          {:error, msg} -> path_error({:error, "#{msg} (path #{inspect(path)})"})
+        end
+      end
+    end
+  end
+
+  defp insert_shape(%{"items" => items} = insert) when is_list(items) do
+    case Enum.filter(~w(before after replace), &is_binary(Map.get(insert, &1))) do
+      [pos] -> {:ok, String.to_existing_atom(pos), insert[pos], items}
+      _ -> path_error({:error, "insert needs exactly one of before, after or replace"})
+    end
+  end
+
+  defp insert_shape(_),
+    do: path_error({:error, "insert must be an object with `items` (a list) and one anchor path"})
+
+  defp path_error({:error, msg}) when is_binary(msg),
+    do:
+      {:error,
+       {:validation_failed, "patch path", %{"path" => [msg]},
+        ~s(Use field.sub, list[_key=="…"] or list[N]; insert takes {"after"|"before"|"replace": path, "items": [...]}.)}}
+
+  defp path_error(other), do: other
+
+  defp warn_unmatched(path, content) do
+    Warnings.put(
+      "patch.path_unmatched",
+      "patch path #{inspect(path)} matched no array item, so that op changed nothing. " <>
+        "Re-read the document: the item may have been removed or re-keyed.",
+      "warning"
+    )
+
+    content
+  end
+
+  # Serialize patches on one document (task-bfb66a2ff491f6e7 c1). Without this,
+  # two clients patching sibling nested fields (seo.metaTitle, seo.metaDescription)
+  # both read the same base, and the later UPDATE writes its stale merge over the
+  # earlier one. A transaction-scoped advisory lock on the document's published
+  # id makes the second patch wait and read the first one's result. It covers
+  # the fork-from-published case too, where no draft row exists yet to lock.
+  # Released at commit or rollback. Two-key form, so it never shares a lock
+  # with the single-key audit-chain locks.
+  @patch_lock_class 0x7061
+
+  defp lock_patch_target(id, dataset, opts) when is_binary(id) do
+    key =
+      :erlang.crc32("#{Keyword.get(opts, :workspace_id)}:#{dataset}:#{DraftId.published_id(id)}") -
+        2_147_483_648
+
+    Repo.query!("SELECT pg_advisory_xact_lock($1::int, $2::int)", [@patch_lock_class, key])
+    :ok
+  end
+
+  defp lock_patch_target(_id, _dataset, _opts), do: :ok
 
   # setIfMissing: put each field only if absent (Map.put_new), so it fills
   # defaults without clobbering existing values. Protected keys are skipped; a
