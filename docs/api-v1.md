@@ -25,7 +25,7 @@ Markers: **[public]** = no token (schema visibility) · **[token]** = any · **[
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header DIFFERS: a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints).
+Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header DIFFERS: a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 **Read-envelope `syncTags` are metadata-only here** (webhook `sync_tags` are not; pin: `js/packages/core/tests/synctags-read-envelope-pin.test.ts`).
 
@@ -90,7 +90,7 @@ Mutations applied atomically (one failure rolls back all). Body: `{"mutations":[
 
 All three create kinds write the **draft** row. On a **published `task`** id, `create`/`createOrReplace` fork a `drafts.<id>` twin: **refused** while the task holds a live claim (422 `validation_failed`), else a `create.forked_published` warning. `patch` edits a published task in place.
 
-**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (set creates parents; unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. Same-document patches serialize.
+**`patch`** — `{ "patch": { "id": "drafts.my-post", "type": "post", "set": {…}, "ifRevisionID": "<rev>" } }` merges `set` into the doc. `ifRevisionID` = optimistic concurrency (mismatch → `412`; `ifMatch` alias; a 1-mutation batch inherits `If-Match`). Composes `setIfMissing`/`unset`/`inc`/`dec`/`append`/`prepend`/`insert`; server-owned `status`/`_id`/`_type`/`_rev` dropped; `title` promoted. Keys with `.`/`[` are paths: `seo.metaTitle`, `body[_key=="b1"].text`, `tags[-1]` (unmatched item → no-op + `patch.path_unmatched` warning; bad path → 422). `insert: {"after"|"before"|"replace": path, "items": […]}`. One doc's patches serialize.
 
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
 
