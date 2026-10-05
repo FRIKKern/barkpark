@@ -2794,7 +2794,14 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Decide (credential + version)"
         --expect-unrendered "Build linux/amd64"
         --expect-unrendered "Build linux/arm64"
-        --expect-unrendered "Tag the multi-arch manifest")
+        --expect-unrendered "Tag the multi-arch manifest"
+        # weekly-changelog.yml + chronicle-paper.yml (task-26d47d28df1391cd):
+        # paths-filtered report workflows whose names render only on heads that
+        # touch their paths; the rows land after the frozen fixture pair.
+        --expect-unrendered "Weekly changelog generator"
+        --expect-unrendered "Publish weekly changelog"
+        --expect-unrendered "verify"
+        --expect-unrendered "publish")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 

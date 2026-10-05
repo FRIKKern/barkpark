@@ -863,6 +863,22 @@
     {
       "context": "Tag the multi-arch manifest",
       "reason": "S4 STRUCTURALLY ABSENT ON EVERY PR HEAD: .github/workflows/api-image.yml (the manifest job) runs only on push to main touching VERSION and on workflow_dispatch, never on pull_request, so this name never renders on a PR head and a required absent context would report 'expected' forever (D18). It publishes the public ghcr.io/barkpark/api image for a server release (owner ruling #60, 2026-10-03; task-984d287af0689251); a publish failure is a release problem, not a merge gate. Owner: deploy (.github/workflow-owners.json). ADDED BY HAND with the workflow, so no head has rendered it yet: the string is the job's static `name:` literal, acknowledged with --expect-unrendered in scripts/required-checks.test.sh's ACK_EX."
+    },
+    {
+      "context": "Weekly changelog generator",
+      "reason": "S4 PATHS-FILTERED: weekly-changelog.yml job `verify` only runs on matching paths (pull_request and, since #21663, push to main), so on other PRs this name is ABSENT — a required absent context never reports. A red costs one weekly edition and gates nothing (task-26d47d28df1391cd)."
+    },
+    {
+      "context": "Publish weekly changelog",
+      "reason": "S4 PATHS-FILTERED: weekly-changelog.yml job `publish` runs only on schedule, dispatch or a push to main touching its paths, and is SKIPPED on every PR; a required context that never concludes on a PR would block forever. It edits GitHub issues and gates nothing (task-26d47d28df1391cd)."
+    },
+    {
+      "context": "verify",
+      "reason": "S4 PATHS-FILTERED: chronicle-paper.yml job `verify` (bare job id, no name:) only runs when its pull_request paths match, e.g. changelog/README.md, so on other PRs this name is ABSENT. The Chronicle is a nightly narrative digest that gates nothing (task-26d47d28df1391cd)."
+    },
+    {
+      "context": "publish",
+      "reason": "S4 PATHS-FILTERED: chronicle-paper.yml job `publish` (bare job id, no name:) runs only on schedule or dispatch and is SKIPPED on every PR where it renders; a required context that never concludes on a PR would block forever. It publishes Chronicle papers and gates nothing (task-26d47d28df1391cd)."
     }
   ]
 }
