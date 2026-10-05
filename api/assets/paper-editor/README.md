@@ -72,7 +72,7 @@ The element reports back through these events. Every event bubbles and is compos
 
 ## A whole paper with `<bp-paper-canvas>`
 
-This is the element Barkdown and Studio use. EMBED-CONTRACT.md does not version it yet, so treat its surface as the code in `src/canvas/index.js`.
+This is the element Barkdown and Studio use. EMBED-CONTRACT.md specifies its surface from contract 1.1.0 on.
 
 ```js
 const canvas = document.createElement("bp-paper-canvas");

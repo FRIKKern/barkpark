@@ -22,7 +22,7 @@
     "custom-element"
   ],
   "barkpark": {
-    "contractVersion": "1.0.0"
+    "contractVersion": "1.1.0"
   },
   "main": "./dist/bp-paper-editor.bundle.js",
   "types": "./index.d.ts",
