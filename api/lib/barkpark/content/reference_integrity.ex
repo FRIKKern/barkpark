@@ -26,7 +26,7 @@ defmodule Barkpark.Content.ReferenceIntegrity do
   alias Barkpark.Content.{Document, DraftId}
   alias Barkpark.Repo
 
-  import Barkpark.Content.Scope, only: [scope_to_workspace_or_global: 3]
+  import Barkpark.Content.Scope, only: [scope_to_workspace: 3]
 
   # Every reference object to $id at any depth, skipping `_weak: true`. Bound
   # as a parameter: Ecto reads each `?` in a fragment as a placeholder, and
@@ -42,6 +42,16 @@ defmodule Barkpark.Content.ReferenceIntegrity do
   """
   @spec referrers(String.t(), String.t(), keyword()) :: [%{id: String.t(), type: String.t()}]
   def referrers(doc_id, dataset, opts \\ []) when is_binary(doc_id) do
+    # Fail CLOSED on tenancy (task-f758cabf3a936e5e): a caller with no
+    # workspace reads no referrers at all, rather than every tenant's. Both
+    # halves below take the same scope, so they can never disagree about
+    # whose documents count. The /mutate door always resolves a workspace.
+    if is_nil(Keyword.get(opts, :workspace_id)),
+      do: [],
+      else: scoped_referrers(doc_id, dataset, opts)
+  end
+
+  defp scoped_referrers(doc_id, dataset, opts) do
     pub_id = DraftId.published_id(doc_id)
     self_ids = [pub_id, DraftId.draft_id(pub_id)]
     limit = Keyword.get(opts, :limit, @default_limit)
@@ -60,7 +70,7 @@ defmodule Barkpark.Content.ReferenceIntegrity do
         limit: ^limit,
         select: %{id: d.doc_id, type: d.type}
       )
-      |> scope_to_workspace_or_global(
+      |> scope_to_workspace(
         Keyword.get(opts, :workspace_id),
         Keyword.get(opts, :project_id)
       )
