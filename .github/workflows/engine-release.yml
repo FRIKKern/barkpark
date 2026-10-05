@@ -125,7 +125,8 @@ jobs:
           if-no-files-found: error
 
   boot:
-    name: boot (${{ matrix.target }})
+    # The App shape's CI leg (docs/contracts/product-era.md); deploy.yml is Cloud's, compose-smoke.yml Solo's.
+    name: App shape boot (${{ matrix.target }})
     needs: build
     # Boot every platform whose build passed, even when another platform's build failed.
     if: ${{ !cancelled() }}
