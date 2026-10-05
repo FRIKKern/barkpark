@@ -151,6 +151,35 @@ defmodule BarkparkWeb.Integration.ListenServerFilterTest do
         assert seen(run.(%{"types" => "post", "filter" => %{"stage" => "wip,live"}})) ==
                  [{"post", "drafts.p-live"}, {"post", "drafts.p-wip"}, {"post", "p-live"}]
       end
+
+      # task-66d495ccd23e7f16 — ?ids= narrows to named documents.
+      test "?ids=p-live,a-live keeps only those documents, both spellings", %{run: run} do
+        assert seen(run.(%{"ids" => "p-live,a-live"})) ==
+                 [
+                   {"article", "a-live"},
+                   {"article", "drafts.a-live"},
+                   {"post", "drafts.p-live"},
+                   {"post", "p-live"}
+                 ]
+      end
+
+      test "a drafts. id names the same document", %{run: run} do
+        assert seen(run.(%{"ids" => "drafts.p-wip"})) == [{"post", "drafts.p-wip"}]
+      end
+
+      test "?ids= composes with perspective and types", %{run: run} do
+        assert seen(run.(%{"ids" => "p-live,a-live", "perspective" => "published"})) ==
+                 [{"article", "a-live"}, {"post", "p-live"}]
+
+        assert seen(run.(%{"ids" => "p-live,a-live", "types" => "article"})) ==
+                 [{"article", "a-live"}, {"article", "drafts.a-live"}]
+      end
+
+      test "an id with no events streams nothing, and a blank ?ids= is every event",
+           %{run: run} do
+        assert seen(run.(%{"ids" => "nobody"})) == []
+        assert seen(run.(%{"ids" => " , "})) == @all
+      end
     end
   end
 
