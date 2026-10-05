@@ -1,0 +1,199 @@
+name: engine-release
+
+# Builds the Barkpark engine folder (scripts/engine/) for macOS arm64, Linux x64
+# and Linux arm64, uploads each as an artifact, then boots each artifact with the
+# @barkpark/engine integration test on a runner with no Elixir and no Postgres on
+# PATH and checks /status.json.
+#
+# WHY IT EXISTS: plan work for the App shape (task-03d94dbc4ad7b160, paper
+# /papers/the-engine-2026-10-05), not a merge gate. It runs on pushes to main
+# that can change the release and on demand, never on pull requests, and no
+# required check names it. The paths mirror release-artifact.yml plus the
+# compile-time assets api/Dockerfile copies from outside api/.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "api/**"
+      - ".tool-versions"
+      - "VERSION"
+      - "design/status-manifest.json"
+      - "cloud/priv/secret-scrub.exs"
+      - "tooling/pds/pre-gate-papers.json"
+      - "scripts/engine/**"
+      - "js/packages/engine/**"
+      - "js/pnpm-lock.yaml"
+      - ".github/workflows/engine-release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  POSTGRES_VERSION: "15.18"
+
+jobs:
+  build:
+    name: build (${{ matrix.target }})
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, target: darwin-arm64 }
+          - { runner: ubuntu-latest, target: linux-x64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          # Barkpark.BuildInfo runs `git describe` at compile time, so tags and history are needed.
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup BEAM (.tool-versions)
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Build tools for Postgres (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update -q && sudo apt-get install -y -q build-essential bison flex zlib1g-dev libssl-dev
+
+      - name: Static OpenSSL for Postgres (macOS)
+        if: runner.os == 'macOS'
+        run: brew list openssl@3 >/dev/null 2>&1 || brew install openssl@3
+
+      - name: Cache mix deps and build
+        uses: actions/cache@v6
+        with:
+          path: |
+            api/deps
+            api/_build/engine-prod
+          key: engine-mix-${{ matrix.target }}-${{ hashFiles('.tool-versions', 'api/mix.lock') }}
+          restore-keys: engine-mix-${{ matrix.target }}-
+
+      - name: Cache Postgres build
+        id: pg-cache
+        uses: actions/cache@v6
+        with:
+          path: ${{ runner.temp }}/postgres
+          key: engine-postgres-${{ matrix.target }}-${{ env.POSTGRES_VERSION }}-${{ hashFiles('scripts/engine/build-postgres.mjs') }}
+
+      - name: Build Postgres
+        if: steps.pg-cache.outputs.cache-hit != 'true'
+        run: node scripts/engine/build-postgres.mjs --version "$POSTGRES_VERSION" --out "$RUNNER_TEMP/postgres"
+
+      - name: Build the release
+        run: |
+          mix local.hex --force && mix local.rebar --force
+          node scripts/engine/build-release.mjs --out "$RUNNER_TEMP/engine"
+          node scripts/engine/build-release.mjs --add-postgres "$RUNNER_TEMP/engine" "$RUNNER_TEMP/postgres"
+
+      - name: Pack
+        id: pack
+        run: |
+          name="barkpark-engine-$(git rev-parse --short=9 HEAD)-${{ matrix.target }}"
+          tar -czf "$RUNNER_TEMP/$name.tar.gz" -C "$RUNNER_TEMP" engine
+          echo "name=$name" >> "$GITHUB_OUTPUT"
+          {
+            echo "### ${{ matrix.target }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| engine folder | $(du -sh "$RUNNER_TEMP/engine" | cut -f1) |"
+            echo "| of which postgres/ | $(du -sh "$RUNNER_TEMP/engine/postgres" | cut -f1) |"
+            echo "| tarball | $(du -sh "$RUNNER_TEMP/$name.tar.gz" | cut -f1) |"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/engine/engine.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-${{ matrix.target }}
+          path: ${{ runner.temp }}/${{ steps.pack.outputs.name }}.tar.gz
+          retention-days: 14
+          if-no-files-found: error
+
+  boot:
+    name: boot (${{ matrix.target }})
+    needs: build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: macos-14, target: darwin-arm64 }
+          - { runner: ubuntu-latest, target: linux-x64 }
+          - { runner: ubuntu-24.04-arm, target: linux-arm64 }
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: js
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      - name: Install @barkpark/engine
+        working-directory: js
+        run: pnpm install --frozen-lockfile --filter @barkpark/engine
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine-${{ matrix.target }}
+          path: ${{ runner.temp }}/artifact
+
+      - name: Unpack
+        run: tar -xzf "$RUNNER_TEMP"/artifact/*.tar.gz -C "$RUNNER_TEMP"
+
+      # The runner images carry a Postgres (and macOS a Homebrew OpenSSL). Remove what
+      # could stand in for the engine's own, then prove nothing is left on the PATH
+      # the test runs with.
+      - name: Take away Elixir, Erlang, Postgres and Homebrew OpenSSL
+        run: |
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get purge -y -q 'postgresql*' >/dev/null 2>&1 || true
+          else
+            for f in openssl@3 postgresql@14 postgresql@15 postgresql@16 postgresql@17; do
+              p="$(brew --prefix "$f" 2>/dev/null)" && [ -e "$p" ] && sudo mv "$(cd "$p" && pwd -P)" "$RUNNER_TEMP/hidden-$f" || true
+            done
+          fi
+          test_path="$(dirname "$(command -v node)"):/usr/bin:/bin:/usr/sbin:/sbin"
+          echo "TEST_PATH=$test_path" >> "$GITHUB_ENV"
+          found=0
+          for tool in erl elixir mix iex initdb pg_ctl postgres psql createdb; do
+            if PATH="$test_path" command -v "$tool" >/dev/null 2>&1; then echo "still on PATH: $tool -> $(PATH="$test_path" command -v "$tool")"; found=1; fi
+          done
+          [ "$found" = 0 ] || exit 1
+          echo "none of erl, elixir, mix, iex, initdb, pg_ctl, postgres, psql, createdb is on $test_path"
+
+      - name: Boot the engine and read /status.json
+        working-directory: js/packages/engine
+        run: |
+          mkdir -p "$RUNNER_TEMP/it"
+          PATH="$TEST_PATH" TMPDIR="$RUNNER_TEMP/it" BARKPARK_ENGINE_RELEASE="$RUNNER_TEMP/engine" BARKPARK_ENGINE_REPORT="$RUNNER_TEMP/report.json" \
+            ./node_modules/.bin/vitest run -c vitest.config.ts tests/engine.integration.test.ts
+          { echo "### boot ${{ matrix.target }}"; echo; echo '```json'; cat "$RUNNER_TEMP/report.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Keep the data folder on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-boot-logs-${{ matrix.target }}
+          path: ${{ runner.temp }}/it/barkpark-engine-it-*/logs
+          if-no-files-found: ignore
