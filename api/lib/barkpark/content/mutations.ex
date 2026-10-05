@@ -74,6 +74,7 @@ defmodule Barkpark.Content.Mutations do
     Envelope,
     MutateDoorFences,
     ReadOnlyFields,
+    ReferenceIntegrity,
     Warnings,
     Writer
   }
@@ -563,37 +564,41 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_one(%{"delete" => %{"id" => id, "type" => type} = op}, dataset, opts) do
-    case if_rev(op) do
-      nil ->
-        with {:ok, doc} <- Content.delete_document(id, type, dataset, opts),
-             do: {:ok, doc, "delete"}
+    # Reference integrity (task-c8c22ee8076535fe): refuse while another document
+    # still points here, unless the op says `force: true`. See ensure_unreferenced/5.
+    with :ok <- ensure_unreferenced(id, type, op, dataset, opts) do
+      case if_rev(op) do
+        nil ->
+          with {:ok, doc} <- Content.delete_document(id, type, dataset, opts),
+               do: {:ok, doc, "delete"}
 
-      expected ->
-        # The guard must read the SAME row-set delete_document acts on. It removes
-        # BOTH the draft and published spellings, but get_document is an exact-id
-        # match with no draft/published fallback — so an unpublished doc (present
-        # only as drafts.<id>) guarded by its canonical id would miss the row and
-        # spuriously 412. Read the exact id first (preserves every working case),
-        # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
-        # rev_mismatch for a truly-absent doc — no regression on that path.
-        existing =
-          case Content.get_document(id, type, dataset, opts) do
-            {:ok, d} ->
-              d
+        expected ->
+          # The guard must read the SAME row-set delete_document acts on. It removes
+          # BOTH the draft and published spellings, but get_document is an exact-id
+          # match with no draft/published fallback — so an unpublished doc (present
+          # only as drafts.<id>) guarded by its canonical id would miss the row and
+          # spuriously 412. Read the exact id first (preserves every working case),
+          # then fall back to the sibling spelling. ensure_rev(nil, _) still yields
+          # rev_mismatch for a truly-absent doc — no regression on that path.
+          existing =
+            case Content.get_document(id, type, dataset, opts) do
+              {:ok, d} ->
+                d
 
-            _ ->
-              Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
-                case Content.get_document(v, type, dataset, opts) do
-                  {:ok, d} -> d
-                  _ -> nil
-                end
-              end)
+              _ ->
+                Enum.find_value([DraftId.draft_id(id), DraftId.published_id(id)] -- [id], fn v ->
+                  case Content.get_document(v, type, dataset, opts) do
+                    {:ok, d} -> d
+                    _ -> nil
+                  end
+                end)
+            end
+
+          with :ok <- ensure_rev(existing, expected),
+               {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
+            {:ok, doc, "delete"}
           end
-
-        with :ok <- ensure_rev(existing, expected),
-             {:ok, doc} <- Content.delete_document(id, type, dataset, opts) do
-          {:ok, doc, "delete"}
-        end
+      end
     end
   end
 
@@ -1534,6 +1539,66 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp apply_array_op(content, _fields, _protected, _position), do: content
+
+  # ── Reference integrity on delete (task-c8c22ee8076535fe) ─────────────────
+  #
+  # A delete of a document that other documents still reference is refused
+  # 409 `document_referenced`, listing the referrers, as Sanity's API does. The
+  # op's `"force": true` deletes anyway; that path writes a
+  # `document.delete_forced` audit event naming the referrers, in the same
+  # transaction, so an override is never silent. A target that does not exist
+  # is left to the delete itself to answer 404. Who counts as a referrer:
+  # `Barkpark.Content.ReferenceIntegrity`.
+  defp ensure_unreferenced(id, type, op, dataset, opts) when is_binary(id) do
+    case ReferenceIntegrity.referrers(id, dataset, opts) do
+      [] ->
+        :ok
+
+      referrers ->
+        case {delete_target(id, type, dataset, opts), Map.get(op, "force") == true} do
+          {nil, _} -> :ok
+          {doc, true} -> audit_forced_delete(doc, type, dataset, referrers, opts)
+          {_doc, false} -> {:error, {:document_referenced, DraftId.published_id(id), referrers}}
+        end
+    end
+  end
+
+  defp ensure_unreferenced(_id, _type, _op, _dataset, _opts), do: :ok
+
+  defp delete_target(id, type, dataset, opts) do
+    Enum.find_value([DraftId.published_id(id), DraftId.draft_id(id)], fn v ->
+      case Content.get_document(v, type, dataset, opts) do
+        {:ok, doc} -> doc
+        _ -> nil
+      end
+    end)
+  end
+
+  defp audit_forced_delete(doc, type, dataset, referrers, opts) do
+    user_id = Keyword.get(opts, :user_id)
+
+    result =
+      Barkpark.Audit.emit(%{
+        category: "content_mutation",
+        action: "document.delete_forced",
+        subject: DraftId.published_id(doc.doc_id),
+        actor_type: if(user_id, do: "user"),
+        actor_id: user_id,
+        workspace_id: doc.workspace_id,
+        project_id: doc.project_id,
+        metadata: %{
+          "type" => type,
+          "dataset" => dataset,
+          "referrer_count" => length(referrers),
+          "referrers" => Enum.map(referrers, &"#{&1.type}:#{&1.id}")
+        }
+      })
+
+    case result do
+      {:ok, _event} -> :ok
+      {:error, _} = error -> error
+    end
+  end
 
   defp if_rev(%{} = attrs), do: attrs["ifRevisionID"] || attrs["ifMatch"]
   defp if_rev(_), do: nil

@@ -236,6 +236,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        "validation_failed", 422, [:details]},
       {"schema_has_documents", {:error, {:schema_has_documents, 3}}, "schema_has_documents", 409,
        [:details]},
+      {"document_referenced", {:error, {:document_referenced, "a1", [%{id: "p1", type: "post"}]}},
+       "document_referenced", 409, [:details]},
       {"rate_limited", {:error, :rate_limited}, "rate_limited", 429, []},
       {"storage_unavailable", {:error, :storage_unavailable}, "storage_unavailable", 503, []},
       {"unsupported_media_type", {:error, :unsupported_media_type}, "unsupported_media_type", 422,
