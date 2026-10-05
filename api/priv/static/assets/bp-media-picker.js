@@ -361,7 +361,10 @@ class BpMediaPicker extends HTMLElement {
     const actionsHtml = ghost
       ? '<input class="bp-mp-file" type="file" accept="image/*" hidden />'
       : '<div class="bp-mp-actions">' +
-        '<label class="bp-mp-upload btn btn-sm">' +
+        // tabindex + role: a <label> is not focusable and the [hidden] input is
+        // not either, so without them Tab skipped Upload — and with an image set
+        // it is the only way to choose a new file. Enter/Space are wired below.
+        '<label class="bp-mp-upload btn btn-sm" role="button" tabindex="0">' +
         '<span>' + this._t("upload_button", "Upload") + '</span>' +
         '<input type="file" accept="image/*" hidden />' +
         "</label>" +
@@ -401,6 +404,17 @@ class BpMediaPicker extends HTMLElement {
       if (f) this._takeFile(f);
       e.target.value = "";
     });
+
+    const uploadLabel = this.querySelector(".bp-mp-upload");
+    if (uploadLabel) {
+      uploadLabel.addEventListener("keydown", (e) => {
+        if (this._busy) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          this._fileInput.click();
+        }
+      });
+    }
 
     // Browse/Remove buttons exist only in the default variant (ghost drops the
     // whole row and routes those actions through the context menu instead).
@@ -723,6 +737,8 @@ class BpMediaPicker extends HTMLElement {
     if (this._fileInput) this._fileInput.disabled = busy;
     if (this._browseBtn) this._browseBtn.disabled = busy;
     if (this._clearBtn) this._clearBtn.disabled = busy;
+    const upload = this.querySelector(".bp-mp-upload");
+    if (upload) upload.setAttribute("aria-disabled", busy ? "true" : "false");
     this._renderPreview();
   }
 
