@@ -494,3 +494,18 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Type at least 2 characters"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2812
+#, elixir-autogen, elixir-format
+msgid "Rename"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2794
+#, elixir-autogen, elixir-format
+msgid "Sheet name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:33
+#, elixir-autogen, elixir-format
+msgid "The sheet's latest edits could not be saved, so it was not published. Try again."
+msgstr ""

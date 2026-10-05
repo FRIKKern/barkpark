@@ -2791,7 +2791,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               value={@renamed_title || @doc.title || ""}
               class="sheet-title-rename-input"
               autocomplete="off"
-              aria-label="Sheet name"
+              aria-label={gettext("Sheet name")}
               phx-mounted={Phoenix.LiveView.JS.focus()}
               phx-keydown="title-rename-cancel"
               phx-key="Escape"
@@ -2809,7 +2809,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-target={@myself}
             data-test-id="sheet-rename"
           >
-            Rename
+            {gettext("Rename")}
           </button>
           <%!-- Publish and Delete are NOT targeted at this component: they reach
                 StudioLive's own handlers and its Caps deny-gate, like every
@@ -2824,7 +2824,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             aria-label={DocActions.publish_label("sheet")}
             data-test-id="sheet-publish"
           >
-            <.icon name="send" size={14} /> Publish
+            <.icon name="send" size={14} /> {gettext("Publish")}
           </button>
           <button
             :if={@write_capable}
@@ -2834,7 +2834,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             phx-click="delete-doc"
             data-test-id="sheet-delete"
           >
-            <.icon name="trash-2" size={14} /> Delete
+            <.icon name="trash-2" size={14} /> {gettext("Delete")}
           </button>
           <%!-- AUTHORIZATION axis, and the header's ONE authority-bearing item.
                 `toggle-mode` flips @mode, but @editable is `mode == :edit and
