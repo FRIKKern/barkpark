@@ -137,12 +137,12 @@ function buildRelease(outArg) {
   mix(['release', 'barkpark', '--overwrite', '--path', out]);
   const erts = fs.readdirSync(out).find(name => name.startsWith('erts-')) || null;
   if (!erts) fail('The release has no erts- folder; check include_erts in api/mix.exs.', 1);
-  const systemLibraries = selfContain(out);
+  const sharedLibraries = selfContain(out);
   const otp = execFileSync('erl', ['-noshell', '-eval', 'io:put_chars(erlang:system_info(otp_release)), halt().'], { encoding: 'utf8' }).trim();
   const elixir = execFileSync('elixir', ['-e', 'IO.write(System.version())'], { encoding: 'utf8' }).trim();
   const manifest = {
     version: 1, commit, builtAt: new Date().toISOString(), platform: process.platform, arch: process.arch,
-    osRelease: os.release(), erts: erts.slice('erts-'.length), otp, elixir, systemLibraries, postgres: null,
+    osRelease: os.release(), erts: erts.slice('erts-'.length), otp, elixir, sharedLibraries, postgres: null,
   };
   fs.writeFileSync(path.join(out, MANIFEST), JSON.stringify(manifest, null, 2) + '\n');
   console.log(`Built Barkpark ${commit.slice(0, 9)} (OTP ${otp}, ${erts}) at ${out}`);

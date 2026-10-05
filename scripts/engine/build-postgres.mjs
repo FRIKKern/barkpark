@@ -119,7 +119,7 @@ const foreign = [];
 const files = [...under(path.join(out, 'lib')).filter(f => /\.(dylib|so)(\.\d+)*$/.test(f)), ...under(path.join(out, 'bin'))];
 const systemLib = process.platform === 'darwin'
   ? dep => dep.startsWith('/usr/lib/') || dep.startsWith('/System/') || dep.startsWith('@')
-  : dep => /^(linux-vdso|ld-linux|libc|libm|libdl|libpthread|librt|libz|libssl|libcrypto)\.so/.test(path.basename(dep)) || dep.startsWith(out + '/');
+  : dep => /^(linux-vdso|ld-linux[\w-]*|libc|libm|libdl|libpthread|librt|libz|libssl|libcrypto)\.so/.test(path.basename(dep)) || dep.startsWith(out + '/');
 for (const file of files) {
   let deps = [];
   try {
