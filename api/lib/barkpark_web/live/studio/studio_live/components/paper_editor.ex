@@ -30,6 +30,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   alias Barkpark.PortableDoc.{Projection, Render, Slots, TaskResolver}
   alias Barkpark.PortableDoc.Render.{Compose, Figures, SectionLayout}
   alias Barkpark.PortableDoc.Render.Components, as: RenderComponents
+  alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
@@ -4760,8 +4761,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
              data-block-id={@id} data-field-type={@type} data-field-name={Map.get(@block, "fieldName")} class="bp-paper-edit-field">
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <%= if @picker_browse do %>
+            <%!-- A bound block carries the stored value verbatim, and a reference
+                  is stored as {"_ref": id}: an HTML attribute cannot hold a map
+                  (the LiveView crashed on Beta, task-a6f50ddb9201e7b1), and the
+                  picker wants the bare id, as Classic passes it. --%>
             <bp-reference-picker
-              value={Map.get(@block, "value", "")}
+              value={FieldInputs.reference_id(Map.get(@block, "value", ""))}
               ref-type={Map.get(@block, "refType", "")}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
@@ -4769,7 +4774,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             ></bp-reference-picker>
           <% else %>
             <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
-              {Map.get(@block, "value", "")}
+              {FieldInputs.reference_id(Map.get(@block, "value", ""))}
             </output>
           <% end %>
         </div>
@@ -4780,7 +4785,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <%= if @picker_browse do %>
             <bp-media-picker
-              value={Map.get(@block, "value", "")}
+              value={FieldInputs.image_form_value(Map.get(@block, "value", ""))}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
               data-token={@api_token_raw}
@@ -4788,7 +4793,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             ></bp-media-picker>
           <% else %>
             <output class="bp-paper-picker-current" data-test-id="paper-picker-current">
-              {Map.get(@block, "value", "")}
+              {FieldInputs.image_form_value(Map.get(@block, "value", ""))}
             </output>
           <% end %>
         </div>

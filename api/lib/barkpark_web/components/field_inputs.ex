@@ -689,7 +689,12 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   defp to_types(_), do: []
 
-  defp image_form_value(%{} = map), do: Jason.encode!(map)
-  defp image_form_value(v) when is_binary(v), do: v
-  defp image_form_value(_), do: ""
+  @doc """
+  The image picker's wire value: a stored image object re-encoded as JSON, a
+  string as is, anything else empty. Shared with the Beta block editor, whose
+  field-image block carries the stored value verbatim.
+  """
+  def image_form_value(%{} = map), do: Jason.encode!(map)
+  def image_form_value(v) when is_binary(v), do: v
+  def image_form_value(_), do: ""
 end
