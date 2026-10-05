@@ -297,7 +297,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   @doc """
   Sign-out form for the Studio topbar. POSTs to `logout_path` (default
   `/logout`). Renders byte-identical to the legacy inline form in
-  `studio.html.heex`. Caller wraps with `:if={assigns[:api_token]}` —
+  `studio.html.heex`. Caller wraps with `:if={assigns[:api_token] || assigns[:current_user]}` —
   the component itself does NOT guard, so an empty `<div class="studio-bar-actions">`
   wrapper does not leak into the topbar when no api_token is set.
 
