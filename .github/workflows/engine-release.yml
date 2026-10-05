@@ -268,7 +268,7 @@ jobs:
   # publish the three platform packages first, then @barkpark/engine, so a fresh
   # install never resolves an optional dependency the registry does not have yet.
   npm:
-    name: npm ${{ inputs.npm }}
+    name: npm publish (dry-run unless chosen)
     needs: boot
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
