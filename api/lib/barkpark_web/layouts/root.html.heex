@@ -5572,9 +5572,12 @@
 
       // The accessible name of the pressed control, or null. NOTHING is
       // invented: an unnamed control gets "Working…", never a guess at what it
-      // does.
+      // does. A control may name ITSELF for the answer with `data-press-name`:
+      // a desk row's aria-label is "<title>, <status>, Updated <ago>", which
+      // made the answer "Opened “<title>, published, Updated 3m …”."
+      // (task-7271a3724e34f2ee); the row hands over its title instead.
       _paName(el) {
-        var n = el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "";
+        var n = el.getAttribute("data-press-name") || el.getAttribute("aria-label") || el.getAttribute("title") || el.textContent || "";
         n = n.replace(/\s+/g, " ").trim();
         if (!n) return null;
         return n.length > 60 ? n.slice(0, 59) + "…" : n;
