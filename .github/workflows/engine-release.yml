@@ -6,7 +6,7 @@ name: engine-release
 # PATH and checks /status.json.
 #
 # WHY IT EXISTS: plan work for the App shape (task-03d94dbc4ad7b160, paper
-# /papers/the-engine-2026-10-05), not a merge gate. It runs on pushes to main
+# /papers/the-engine-2026-10-05); no merge waits on it. It runs on pushes to main
 # that can change the release and on demand, never on pull requests, and no
 # required check names it. The paths mirror release-artifact.yml plus the
 # compile-time assets api/Dockerfile copies from outside api/.
