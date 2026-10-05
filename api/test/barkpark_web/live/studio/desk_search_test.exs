@@ -112,6 +112,22 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     assert html =~ ~s(href="#{prefix}/author/aut-nord")
   end
 
+  # task-6f820118621e0f9d: the hit's type label is the schema TITLE the desk
+  # shows ("Publication" here, "Utgivelse" on an agency desk), not its id.
+  test "each hit names its type by the schema title", %{conn: conn, ws: ws, proj: proj} do
+    {view, _} = desk(conn, ws, proj)
+    html = type_in(view, "nor")
+
+    subs =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(~s([data-test-id="desk-search-hit"] .pane-doc-sub))
+      |> Enum.map(&LazyHTML.text/1)
+      |> Enum.sort()
+
+    assert subs == ["Author", "Publication"]
+  end
+
   # Stranger walk, 2026-09-30: a never-published document was unsearchable.
   # Its hit links by the PUBLISHED id, the address every Studio path uses —
   # never the `drafts.` row id.
