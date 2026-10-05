@@ -1423,15 +1423,32 @@ if config_env() == :prod do
       _ -> if scheme == "https", do: 443, else: 80
     end
 
+  # The address the HTTP listener binds. Unset keeps every interface, IPv6 and
+  # IPv4, which every prod box needs behind its proxy. BARKPARK_HTTP_IP narrows
+  # it: @barkpark/engine sets 127.0.0.1 so a Barkpark inside an app on a
+  # person's machine cannot be reached from the local network. An address that
+  # does not parse refuses the boot rather than silently binding everywhere.
+  http_ip =
+    case System.get_env("BARKPARK_HTTP_IP") do
+      value when is_binary(value) and value != "" ->
+        case :inet.parse_address(String.to_charlist(value)) do
+          {:ok, address} ->
+            address
+
+          {:error, _} ->
+            raise "BARKPARK_HTTP_IP=#{inspect(value)} is not an IP address. Use an address such as 127.0.0.1 or ::1, or unset it to bind every interface."
+        end
+
+      _ ->
+        {0, 0, 0, 0, 0, 0, 0, 0}
+    end
+
   config :barkpark, BarkparkWeb.Endpoint,
     url: [host: host, port: url_port, scheme: scheme],
     check_origin: check_origin,
     http: [
-      # Enable IPv6 and bind on all interfaces.
-      # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
-      # See the documentation on https://hexdocs.pm/bandit/Bandit.html#t:options/0
-      # for details about using IPv6 vs IPv4 and loopback vs public addresses.
-      ip: {0, 0, 0, 0, 0, 0, 0, 0}
+      # See https://hexdocs.pm/bandit/Bandit.html#t:options/0 for the options.
+      ip: http_ip
     ],
     secret_key_base: secret_key_base
 

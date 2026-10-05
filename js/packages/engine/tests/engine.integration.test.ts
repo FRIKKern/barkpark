@@ -1,6 +1,7 @@
 // Boots a real engine folder. Runs only when BARKPARK_ENGINE_RELEASE names one
 // (built by scripts/engine/build-release.mjs with --add-postgres); skipped otherwise.
 import fs from 'node:fs'
+import net from 'node:net'
 import os from 'node:os'
 import path from 'node:path'
 import { spawnSync } from 'node:child_process'
@@ -39,6 +40,23 @@ describe.skipIf(!release)('startBarkpark against a built release', () => {
     }
     expect(first.commit.startsWith(status.commit)).toBe(true)
     expect(status.shape).toBe('app')
+
+    // The listener is loopback only: no TCP connection may open on this machine's own
+    // network address. A listener on every interface accepts the connection (and may
+    // close it at once); a loopback-only one gets a refusal or, behind a firewall that
+    // drops packets to closed ports, silence. So the test is the connection, not a code.
+    const lanAddress = Object.values(os.networkInterfaces()).flat()
+      .find(i => i && i.family === 'IPv4' && !i.internal)?.address
+    if (lanAddress) {
+      const connected = await new Promise<boolean>(resolve => {
+        const socket = net.connect({ host: lanAddress, port: first.port })
+        const done = (value: boolean) => { socket.destroy(); resolve(value) }
+        socket.once('connect', () => done(true))
+        socket.once('error', () => done(false))
+        socket.setTimeout(3_000, () => done(false))
+      })
+      expect(connected, `port ${first.port} accepted a connection on ${lanAddress}`).toBe(false)
+    }
 
     // The returned token is a working admin token; no token is refused.
     const me = await whoami(first, first.token)
