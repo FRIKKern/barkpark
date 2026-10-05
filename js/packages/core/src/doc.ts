@@ -11,7 +11,7 @@
 // On 404, transport throws BarkparkNotFoundError; getDoc catches and returns { data: null }
 // so callers (client.doc) can treat missing as null (the 404 → null read convention).
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { assertSegment } from './util/guards'
 import { BarkparkNotFoundError } from './errors'
 import { normalizeFieldList } from './filter-builder'
@@ -106,7 +106,7 @@ export async function getDoc<T = BarkparkDocument>(
   if (opts?.fields !== undefined) qp.set('fields', normalizeFieldList(opts.fields, 'fields'))
   if (opts?.resolve !== undefined) qp.set('resolve', opts.resolve)
   const query = qp.toString() ? `?${qp.toString()}` : ''
-  const path = `${scopePrefix(config)}/v1/data/doc/${encodeURIComponent(config.dataset)}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
+  const path = `${dataPath(config, 'doc')}/${encodeURIComponent(type)}/${encodeURIComponent(id)}${query}`
 
   try {
     const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }

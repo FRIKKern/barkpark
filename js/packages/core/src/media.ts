@@ -39,6 +39,19 @@ import type {
 // emitted `DELETE /v1/media/:dataset/:id` — MediaController.delete, an asset
 // deletion). One shared rule covers both: a path segment may not be a
 // relative-path operator. See util/guards.ts.
+// `/w/:ws/p/:proj/v1/media/:dataset` (or the flat form): the base of every
+// route in this file, built once so core stays under its gzipped size cap.
+function mediaBase(config: BarkparkClientConfig): string {
+  return `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}`
+}
+
+// A request bag plus the caller's signal when one was passed
+// (exactOptionalPropertyTypes forbids an explicit `signal: undefined`). Shared
+// by every request below so core stays under its gzipped size cap.
+function withSignal<T extends object>(base: T, opts?: { signal?: AbortSignal }): T & { signal?: AbortSignal } {
+  return opts?.signal !== undefined ? { ...base, signal: opts.signal } : base
+}
+
 function assertAssetId(id: string, field = 'id'): void {
   assertSegment(id, field)
 }
@@ -85,7 +98,7 @@ export async function uploadAsset(
   const filename = opts?.filename ?? (file as { name?: string }).name ?? 'upload'
   form.append('file', file, filename)
 
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/upload`
+  const path = `${mediaBase(config)}/upload`
   const reqOpts: {
     method: 'POST'
     kind: 'write'
@@ -119,9 +132,8 @@ export async function listAssets(
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
   const query = qp.toString() ? `?${qp.toString()}` : ''
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}${query}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}${query}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   const { data } = await request<MediaAssetPage & { result?: MediaAssetPage }>(
     config,
     path,
@@ -140,9 +152,8 @@ export async function getAsset(
   opts?: AssetOptions,
 ): Promise<MediaAsset | null> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/${encodeURIComponent(id)}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   try {
     const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
     return (data.result ?? data) as MediaAsset
@@ -162,12 +173,8 @@ export async function deleteAsset(
   opts?: AssetOptions,
 ): Promise<{ deleted: string }> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
-  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
-    method: 'DELETE',
-    kind: 'write',
-  }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/${encodeURIComponent(id)}`
+  const reqOpts = withSignal({ method: 'DELETE' as const, kind: 'write' as const }, opts)
   const { data } = await request<{ deleted: string } & { result?: { deleted: string } }>(
     config,
     path,
@@ -189,7 +196,7 @@ export async function updateAsset(
   opts?: AssetOptions,
 ): Promise<MediaAsset> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}`
+  const path = `${mediaBase(config)}/${encodeURIComponent(id)}`
   const reqOpts: { method: 'PATCH'; kind: 'write'; body: unknown; signal?: AbortSignal } = {
     method: 'PATCH',
     kind: 'write',
@@ -235,12 +242,8 @@ async function assetLockOp(
   opts?: AssetOptions,
 ): Promise<MediaAsset> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/${op}`
-  const reqOpts: { method: 'POST'; kind: 'write'; signal?: AbortSignal } = {
-    method: 'POST',
-    kind: 'write',
-  }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/${encodeURIComponent(id)}/${op}`
+  const reqOpts = withSignal({ method: 'POST' as const, kind: 'write' as const }, opts)
   const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
   return (data.result ?? data) as MediaAsset
 }
@@ -257,9 +260,8 @@ export async function getAssetRelations(
   opts?: AssetOptions,
 ): Promise<AssetRelations> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/${encodeURIComponent(id)}/relations`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/${encodeURIComponent(id)}/relations`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   const { data } = await request<AssetRelations & { result?: AssetRelations }>(config, path, reqOpts)
   const graph = (data.result ?? data) as Partial<AssetRelations>
   return { outbound: graph.outbound ?? [], inbound: graph.inbound ?? [] }
@@ -297,9 +299,8 @@ export async function searchAssets(
   const facets = cleanValueList(opts?.facets, 'facets')
   if (facets !== undefined) params.set('facets', facets)
 
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search?${params.toString()}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/search?${params.toString()}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
 
   const { data } = await request<Record<string, unknown>>(config, path, reqOpts)
   // hits/total/facets/pagination live under `result`; highlights/parsedQuery/ms
@@ -342,9 +343,8 @@ export async function getAssetSearchSuggestions(
   if (prefix) params.set('q', prefix)
   if (opts?.limit !== undefined) params.set('limit', String(opts.limit))
   const qs = params.toString()
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/search/suggestions${qs ? `?${qs}` : ''}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/search/suggestions${qs ? `?${qs}` : ''}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
 
   const { data } = await request<{ result?: Partial<AssetSearchSuggestions> } & Partial<AssetSearchSuggestions>>(
     config,
@@ -372,9 +372,8 @@ export async function listCollections(
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
   const query = qp.toString() ? `?${qp.toString()}` : ''
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections${query}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/collections${query}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   const { data } = await request<MediaCollectionPage & { result?: MediaCollectionPage }>(
     config,
     path,
@@ -393,9 +392,8 @@ export async function getCollection(
   opts?: AssetOptions,
 ): Promise<MediaCollection | null> {
   assertAssetId(id)
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   try {
     const { data } = await request<MediaCollection & { result?: MediaCollection }>(
       config,
@@ -425,9 +423,8 @@ export async function getCollectionAssets(
   if (opts?.limit !== undefined) qp.set('limit', String(opts.limit))
   if (opts?.offset !== undefined) qp.set('offset', String(opts.offset))
   const query = qp.toString() ? `?${qp.toString()}` : ''
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/assets${query}`
-  const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}/assets${query}`
+  const reqOpts = withSignal({ kind: 'read' as const }, opts)
   const { data } = await request<MediaCollectionAssets & { result?: MediaCollectionAssets }>(
     config,
     path,
@@ -449,7 +446,7 @@ export async function addCollectionMember(
 ): Promise<MediaAsset> {
   assertAssetId(id, 'collectionId')
   assertAssetId(assetId, 'assetId')
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members`
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}/members`
   // The server's add_member reads `assetId` (camelCase) from the BODY, not the path.
   const reqOpts: {
     method: 'POST'
@@ -476,12 +473,8 @@ export async function removeCollectionMember(
   assertAssetId(id, 'collectionId')
   assertAssetId(assetId, 'assetId')
   // assetId rides the PATH here (the server's remove_member reads :asset_id).
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/members/${encodeURIComponent(assetId)}`
-  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
-    method: 'DELETE',
-    kind: 'write',
-  }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}/members/${encodeURIComponent(assetId)}`
+  const reqOpts = withSignal({ method: 'DELETE' as const, kind: 'write' as const }, opts)
   const { data } = await request<MediaAsset & { result?: MediaAsset }>(config, path, reqOpts)
   return (data.result ?? data) as MediaAsset
 }
@@ -498,7 +491,7 @@ export async function shareCollection(
   opts?: { ttl?: number; signal?: AbortSignal },
 ): Promise<CollectionShare> {
   assertAssetId(id, 'collectionId')
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}/share`
   if (opts?.ttl !== undefined && (!Number.isInteger(opts.ttl) || opts.ttl < 1)) {
     throw new BarkparkValidationError('ttl must be a positive integer (seconds)', { field: 'ttl' })
   }
@@ -529,11 +522,7 @@ export async function revokeCollectionShare(
   opts?: { signal?: AbortSignal },
 ): Promise<void> {
   assertAssetId(id, 'collectionId')
-  const path = `${scopePrefix(config)}/v1/media/${encodeURIComponent(config.dataset)}/collections/${encodeURIComponent(id)}/share`
-  const reqOpts: { method: 'DELETE'; kind: 'write'; signal?: AbortSignal } = {
-    method: 'DELETE',
-    kind: 'write',
-  }
-  if (opts?.signal !== undefined) reqOpts.signal = opts.signal
+  const path = `${mediaBase(config)}/collections/${encodeURIComponent(id)}/share`
+  const reqOpts = withSignal({ method: 'DELETE' as const, kind: 'write' as const }, opts)
   await request<{ result?: { revoked: string } }>(config, path, reqOpts)
 }

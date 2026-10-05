@@ -14,7 +14,7 @@
 // `"name"`. `normalizeTags()` collapses either shape into `{ names, entries }`
 // so a consumer never has to branch on the wire form.
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { assertSegment } from './util/guards'
 import { request } from './transport'
 import { assertNoCommaEntries } from './filter-builder'
@@ -46,7 +46,7 @@ export async function listTags(
   config: BarkparkClientConfig,
   opts?: ListTagsOptions,
 ): Promise<ListTagsResult> {
-  const path = `${scopePrefix(config)}/v1/data/tags/${encodeURIComponent(config.dataset)}${typeQuery(opts?.types)}`
+  const path = `${dataPath(config, 'tags')}${typeQuery(opts?.types)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<ListTagsResult & { result?: ListTagsResult }>(
@@ -73,7 +73,7 @@ export async function getTagDocs(
   // segment. `.`/`..` are not — they survive the encode and retarget the request.
   assertSegment(tag, 'tag', "tag must be non-empty and not '.' or '..'", true)
   const path =
-    `${scopePrefix(config)}/v1/data/tags/${encodeURIComponent(config.dataset)}/${encodeURIComponent(tag)}${typeQuery(opts?.types)}`
+    `${dataPath(config, 'tags')}/${encodeURIComponent(tag)}${typeQuery(opts?.types)}`
   const reqOpts: { kind: 'read'; signal?: AbortSignal } = { kind: 'read' }
   if (opts?.signal !== undefined) reqOpts.signal = opts.signal
   const { data } = await request<TagDocsResult & { result?: TagDocsResult }>(

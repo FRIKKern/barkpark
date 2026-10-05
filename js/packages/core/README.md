@@ -194,6 +194,16 @@ await bp.publish('p1', 'post')
 await bp.unpublish('p1', 'post') // published → draft
 await bp.discardDraft('p1', 'post') // drop the draft, keep the published doc
 
+// Block ops, fenced on a revision. A stale ifRev throws BarkparkConflictError with status 412:
+const draft = await bp.withConfig({ perspective: 'raw' }).doc('post', 'drafts.p1')
+const para = { op: 'append-block', block: { type: 'paragraph', content: [{ type: 'text', value: 'Hi' }] } }
+const op = await bp.applyDocOp('post', 'p1', para, draft._rev) // edits drafts.p1 when it exists; op.rev is the next ifRev
+
+// Papers (Bulldocs): publish, edit a batch on the paper's integer rev, propose draft edits:
+const paper = await bp.publishPaper({ slug: 'notes', title: 'Notes', blocks })
+await bp.applyPaperOps('notes', [para], { ifRev: Number(paper.rev) }) // returns { rev, op_count, block_ids }
+await bp.proposePaperEdits('notes', { ops: [para], source: { doc_id: 'note-1', agent: 'my-app' } })
+
 // Document history — list revisions, fetch one (with content), restore a past version as a draft:
 const revisions = await bp.getHistory('post', 'p1') // DocumentRevision[]: { id, action, timestamp }
 const rev = await bp.getRevision(revisions[0].id) // includes the doc content at that revision
@@ -201,6 +211,7 @@ await bp.restoreRevision(rev.id, 'post') // writes that version back as a draft
 
 // Upload a media asset (multipart) — `file` is a web Blob/File:
 const asset = await bp.uploadAsset(file, { filename: 'cover.png' })
+// asset.absoluteUrl is fetchable from any origin; asset.asset holds the mediaAsset doc (altText, fileInfo.width/height).
 
 // Build an image URL from an asset/reference — pick a server rendition with `preset`:
 const url = bp.imageUrl(asset, { preset: 'hero' }) // thumb | preview | hero | og; omit for the original
@@ -320,6 +331,6 @@ try {
 
 Across bundle boundaries (pnpm can hoist duplicate class copies), `instanceof` can fail — use `isBarkparkError(e, code?)`, which matches the string `code` field instead; pass a `code` (e.g. `'BarkparkAuthError'`) to narrow to that subclass — its extra fields become reachable with no cast (`isBarkparkError(e, 'BarkparkRateLimitError')` then `e.retryAfterMs`). The known class names are the exported `BarkparkErrorCode` union, so you get autocomplete on the `code` argument (an arbitrary string is still accepted for cross-bundle codes, but only a union member narrows the subclass).
 
-Typed subclasses (all extend `BarkparkError`) let you branch on the failure kind: `BarkparkAuthError` (401/403), `BarkparkValidationError` (422 — carries `.issues`, the per-field errors), `BarkparkNotFoundError` (404), `BarkparkConflictError` (409 id collision / 412 `ifMatch` mismatch), and `BarkparkRateLimitError` (429).
+Typed subclasses (all extend `BarkparkError`) let you branch on the failure kind: `BarkparkAuthError` (401/403), `BarkparkValidationError` (422 — carries `.issues`, the per-field errors), `BarkparkNotFoundError` (404), `BarkparkConflictError` (409 id collision / 412 stale `ifMatch` or `ifRev`, `serverCode: 'precondition_failed'`), and `BarkparkRateLimitError` (429).
 
 See `docs/decisions/0001-sdk-envelope.md` for the envelope contract (Phoenix canonical, SDK adapts).

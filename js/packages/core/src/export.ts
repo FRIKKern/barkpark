@@ -8,7 +8,7 @@
 // a ReadableStream reader (same approach as listen.ts), NOT the JSON transport,
 // because the body is a stream, not a single JSON envelope.
 
-import { scopePrefix } from './scope'
+import { dataPath } from './scope'
 import { BarkparkAPIError, BarkparkNetworkError, assertStreamResponse } from './errors'
 import type { BarkparkClientConfig, BarkparkDocument, ExportOptions } from './types'
 
@@ -40,7 +40,7 @@ export async function* exportDataset(
   const qs = params.toString()
 
   const base = config.projectUrl.replace(/\/+$/, '')
-  const path = `${scopePrefix(config)}/v1/data/export/${encodeURIComponent(config.dataset)}${qs ? `?${qs}` : ''}`
+  const path = `${dataPath(config, 'export')}${qs ? `?${qs}` : ''}`
 
   const headers: Record<string, string> = {
     Accept: 'application/x-ndjson',

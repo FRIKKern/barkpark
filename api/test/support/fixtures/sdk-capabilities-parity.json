@@ -340,6 +340,26 @@
       "method": "POST",
       "path_template": "/api/workspaces/:workspace_slug/projects",
       "sdk_method": "client.createProject"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/data/doc/:dataset/:type/:doc_id/ops",
+      "sdk_method": "client.applyDocOp"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers",
+      "sdk_method": "client.publishPaper"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers/:slug/ops",
+      "sdk_method": "client.applyPaperOps"
+    },
+    {
+      "method": "POST",
+      "path_template": "/v1/plugins/bulldocs/papers/:slug/proposals",
+      "sdk_method": "client.proposePaperEdits"
     }
   ],
   "generated_at": "2026-09-11T13:30:51Z",
@@ -559,6 +579,11 @@
       "command": "doc.get",
       "method": "GET",
       "path_template": "/v1/data/doc/:dataset/:type/:doc_id"
+    },
+    {
+      "command": "doc.op",
+      "method": "POST",
+      "path_template": "/v1/data/doc/:dataset/:type/:doc_id/ops"
     },
     {
       "command": "doc.history",
