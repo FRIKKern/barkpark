@@ -31,6 +31,7 @@ defmodule Barkpark.Plugins.Bootstrap do
   schemas to land.
   """
 
+  import Ecto.Query
   require Logger
 
   alias Barkpark.Content
@@ -268,11 +269,17 @@ defmodule Barkpark.Plugins.Bootstrap do
 
     dataset = schema.dataset || "production"
 
-    if Tenancy.pulled_schema_row?(attrs["name"], dataset) do
-      skip_pulled(plugin_name, attrs["name"], dataset)
-    else
-      do_upsert(plugin_name, attrs, dataset, scope)
-    end
+    result =
+      if Tenancy.pulled_schema_row?(attrs["name"], dataset) do
+        skip_pulled(plugin_name, attrs["name"], dataset)
+      else
+        do_upsert(plugin_name, attrs, dataset, scope)
+      end
+
+    # AFTER the Default install: on an empty table the Default upsert's
+    # unscoped read would otherwise find the shared row and adopt it.
+    install_shared(plugin_name, attrs, dataset)
+    result
   end
 
   defp upsert_one(plugin_name, other, _scope) do
@@ -318,6 +325,93 @@ defmodule Barkpark.Plugins.Bootstrap do
         )
 
         {:error, reason}
+    end
+  end
+
+  # ─── The shared copy (task-be5eaec4a5b9e524, ruling A) ─────────────────────
+  #
+  # Every plugin schema is ALSO installed as a GLOBAL row (`workspace_id`,
+  # `project_id` and `dataset_id` all NULL), which `Content.Schema.get_schema_raw/3`
+  # falls back to when a workspace owns no row of that name. Before this, the
+  # rows landed in the Default workspace only, and a member of any other
+  # workspace could not open a `mediaAsset` (alt text) or any other plugin type.
+  #
+  # The Default copy above is left exactly as it was, so Default reads its own
+  # row first and is unchanged. Retiring the Default copies is a separate,
+  # dry-run-first step: `shared_duplicates/0` lists them and deletes nothing.
+  #
+  # Written straight through the changeset, not `Content.upsert_schema/3`:
+  # that path stamps the resolved write scope, which is the Default workspace.
+  # The partial unique index on `(name, dataset) WHERE dataset_id IS NULL`
+  # keeps this to one row. A legacy NULL-dataset_id row owned by a workspace
+  # holds that slot; the insert is then refused, logged, and the plugin's
+  # result is unchanged.
+  defp install_shared(plugin_name, attrs, dataset) do
+    attrs =
+      attrs
+      |> Map.drop(["workspace_id", "project_id", "dataset_id", "scope_source"])
+      |> Map.put("dataset", dataset)
+
+    (shared_row(attrs["name"], dataset) || %SchemaDefinition{})
+    |> SchemaDefinition.changeset(attrs)
+    |> Repo.insert_or_update()
+    |> case do
+      {:ok, _} ->
+        :ok
+
+      {:error, changeset} ->
+        Logger.warning(
+          "Plugins.Bootstrap: shared copy of schema #{inspect(attrs["name"])} from plugin " <>
+            "#{inspect(plugin_name)} not installed: #{inspect(changeset.errors)}"
+        )
+
+        :ok
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "Plugins.Bootstrap: shared copy of schema #{inspect(attrs["name"])} from plugin " <>
+          "#{inspect(plugin_name)} raised: #{Exception.message(e)}"
+      )
+
+      :ok
+  end
+
+  defp shared_row(name, dataset) do
+    SchemaDefinition
+    |> where([s], s.name == ^name and s.dataset == ^dataset)
+    |> where([s], is_nil(s.workspace_id) and is_nil(s.project_id) and is_nil(s.dataset_id))
+    |> Repo.one()
+  end
+
+  @doc """
+  DRY RUN, never a delete: the Default-workspace plugin schema rows that now
+  have a shared global twin with the same fields. These are the rows a later
+  cleanup could retire. Returns `[%{name:, dataset:, id:, identical?:}]`.
+
+  Deleting one today would not make Default read the shared row for long:
+  the next boot's Default install re-creates it. Retiring them needs that
+  install switched off first.
+  """
+  @spec shared_duplicates() :: [map()]
+  def shared_duplicates do
+    case default_scope() do
+      {nil, _} ->
+        []
+
+      {ws_id, _} ->
+        from(d in SchemaDefinition,
+          join: g in SchemaDefinition,
+          on:
+            g.name == d.name and g.dataset == d.dataset and is_nil(g.workspace_id) and
+              is_nil(g.dataset_id),
+          where: d.workspace_id == ^ws_id,
+          select: {d, g}
+        )
+        |> Repo.all()
+        |> Enum.map(fn {d, g} ->
+          %{name: d.name, dataset: d.dataset, id: d.id, identical?: d.fields == g.fields}
+        end)
     end
   end
 
