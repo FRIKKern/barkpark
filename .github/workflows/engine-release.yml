@@ -189,7 +189,7 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/it"
           PATH="$TEST_PATH" TMPDIR="$RUNNER_TEMP/it" BARKPARK_ENGINE_RELEASE="$RUNNER_TEMP/engine" BARKPARK_ENGINE_REPORT="$RUNNER_TEMP/report.json" \
-            ./node_modules/.bin/vitest run -c vitest.config.ts tests/engine.integration.test.ts
+            ./node_modules/.bin/vitest run -c vitest.config.ts tests/engine.integration.test.ts tests/app-shape.integration.test.ts
           cat "$RUNNER_TEMP/report.json"
           { echo "### boot ${{ matrix.target }}"; echo; echo '```json'; cat "$RUNNER_TEMP/report.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
