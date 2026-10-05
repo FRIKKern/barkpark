@@ -1245,8 +1245,8 @@ if (failed === failedBeforeH)
     "--paper-bg-deep": "paper.surface.bg-deep",
   };
   const VERDICT_PAIRINGS = [
-    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--bp-verdict-loss-soft",  kind: "text", where: "paper-surface.css .bp-callout--loss — the card paints its own soft wash under the ink" },
-    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--bp-verdict-peace-soft", kind: "text", where: "paper-surface.css .bp-callout--peace — the card paints its own soft wash under the ink" },
+    { sel: ".bp-paper-surface .bp-callout--loss",  surface: "--paper-bg",  kind: "text", where: "paper-surface.css .bp-callout--loss — the quiet card has no wash: the ink sits on the page (2026-10-05)" },
+    { sel: ".bp-paper-surface .bp-callout--peace", surface: "--paper-bg", kind: "text", where: "paper-surface.css .bp-callout--peace — the quiet card has no wash: the ink sits on the page (2026-10-05)" },
     { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
     { sel: ".bp-paper-surface .bp-stat__v--peace", surface: "--paper-bg-deep",         kind: "text", where: "paper-surface.css .bp-stat — the KPI tile's ground is --paper-bg-deep, no wash under the digits" },
     { sel: ".bp-paper-surface .bp-stat__v--loss",  surface: "--paper-bg",              kind: "text", where: "paper-surface.css — a bare stat outside a tile falls back to the page ground" },

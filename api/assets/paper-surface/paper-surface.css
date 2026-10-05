@@ -754,14 +754,19 @@ html[data-theme="dark"] .bp-paper-body {
 }
 .bp-paper-surface .bp-blockquote__cite::before { content: "\2014\00a0"; }
 
-/* Callout TONES. `bp-callout` is the card; `bp-callout--<tone>` resolves the
-   tone token pair (light + dark, defined above). */
-.bp-paper-surface .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 16px; border-left: 4px solid transparent; }
-.bp-paper-surface .bp-callout--info    { background: var(--bp-tone-info-bg);    color: var(--bp-tone-info-fg);    border-left-color: var(--bp-tone-info-fg); }
-.bp-paper-surface .bp-callout--success { background: var(--bp-tone-success-bg); color: var(--bp-tone-success-fg); border-left-color: var(--bp-tone-success-fg); }
-.bp-paper-surface .bp-callout--warning { background: var(--bp-tone-warning-bg); color: var(--bp-tone-warning-fg); border-left-color: var(--bp-tone-warning-fg); }
-.bp-paper-surface .bp-callout--danger  { background: var(--bp-tone-danger-bg);  color: var(--bp-tone-danger-fg);  border-left-color: var(--bp-tone-danger-fg); }
-.bp-paper-surface .bp-callout--neutral { background: var(--bp-tone-neutral-bg); color: var(--bp-tone-neutral-fg); border-left-color: var(--bp-tone-neutral-fg); }
+/* Callout. A quiet card (owner, 2026-10-05: the 4px rail and tinted wash read
+   clumsy): a hairline frame in --paper-rule, the page's own ground, ink text.
+   The title is a small uppercase label on its own line, and the tone is a 6px
+   dot before it — `bp-callout--<tone>` sets only `--bp-callout-dot`. */
+.bp-paper-surface .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
+.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-callout > strong:first-child { display: block; margin: 0 0 6px; }
+.bp-paper-surface .bp-callout > strong:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
+.bp-paper-surface .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
+.bp-paper-surface .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
+.bp-paper-surface .bp-callout--warning { --bp-callout-dot: var(--bp-tone-warning-fg); }
+.bp-paper-surface .bp-callout--danger  { --bp-callout-dot: var(--bp-tone-danger-fg); }
+.bp-paper-surface .bp-callout--neutral { --bp-callout-dot: var(--paper-ink-faint); }
 
 /* VERDICT callouts — the two SEMANTIC tones (design/tokens.json color.verdict):
    `loss` is the terracotta-red verdict and `peace` the green one. They sit here
@@ -772,9 +777,9 @@ html[data-theme="dark"] .bp-paper-body {
    ink and the card takes the soft ground — the same rail/wash split the tone
    rules use, so the two families are visually one system and semantically two.
    check.mjs Part H's verdict arm reads THESE rules: delete one and it reds. */
-.bp-paper-surface .bp-callout--loss  { background: var(--bp-verdict-loss-soft);  color: var(--bp-verdict-loss);  border-left-color: var(--bp-verdict-loss); }
-.bp-paper-surface .bp-callout--peace { background: var(--bp-verdict-peace-soft); color: var(--bp-verdict-peace); border-left-color: var(--bp-verdict-peace); }
-.bp-paper-surface .bp-callout__summary { cursor: pointer; font-weight: bold; }
+.bp-paper-surface .bp-callout--loss  { color: var(--bp-verdict-loss);  --bp-callout-dot: var(--bp-verdict-loss); }
+.bp-paper-surface .bp-callout--peace { color: var(--bp-verdict-peace); --bp-callout-dot: var(--bp-verdict-peace); }
+.bp-paper-surface .bp-callout__summary { cursor: pointer; }
 .bp-paper-surface .bp-callout__body { margin-top: 8px; }
 
 /* Code-block LINE EMPHASIS (pe-bl-code-emphasis). `Figures.code_block_html/2`

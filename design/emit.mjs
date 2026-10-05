@@ -2296,7 +2296,7 @@ function elixirTokensGen(themes = loadThemes()) {
     // ── Paper EMAIL surface skin (theme-system Wave 1 CAPTURE — tokens.json
     // paperEmail). Verbatim hand values, NOT derived from color.primary/border:
     // those HSL-round-tripped brand/rule slots ABOVE (#1e5243/#e4e4e7) are drifted
-    // from the live email hexes (#1e5347/#dde7e2), so palettes.ex / data_viz.ex
+    // from the live email hexes (#1e5347/#e2e6e5), so palettes.ex / data_viz.ex
     // consume THESE instead — zero email-golden retint. RATIFIED 2026-09-11; the
     // decision record is tokens.json paperEmail._note (do not restate it here).
     "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
@@ -2782,7 +2782,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "       `bp-paper-surface`) so they WIN over the shared source's fallback",
     "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
     "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
-    "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
+    "       the reader on the bp-theme (a shared ink #15211d, rule #e2e6e5,",
     "       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via",
     "       its pre-paint toggle script (localStorage `barkpark_theme`, shared",
     "       with Studio); before that script runs — and with JS off — the",
