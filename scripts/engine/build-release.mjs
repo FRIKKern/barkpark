@@ -105,7 +105,7 @@ export function selfContain(out) {
     for (const file of binaries) {
       let text = '';
       try { text = execFileSync('ldd', [file], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }); } catch { continue; }
-      for (const line of text.split('\n').map(l => l.trim()).filter(Boolean)) {
+      for (const line of text.split('\n').map(l => l.trim()).filter(l => l && !l.includes('statically linked'))) {
         const name = line.split(' ')[0];
         if (line.includes('not found')) missing.push(`${path.relative(out, file)} -> ${name}`);
         else if (!/^(linux-vdso|\/lib|ld-linux|libc\.|libm\.|libdl\.|libpthread\.|librt\.)/.test(name) && !line.includes(out)) needed.add(name);

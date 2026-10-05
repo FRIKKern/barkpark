@@ -125,7 +125,7 @@ for (const file of files) {
   try {
     deps = process.platform === 'darwin'
       ? execFileSync('otool', ['-L', file], { encoding: 'utf8' }).split('\n').slice(1).map(l => l.trim().split(' ')[0]).filter(Boolean)
-      : execFileSync('ldd', [file], { encoding: 'utf8' }).split('\n').map(l => l.trim()).filter(Boolean).map(l => {
+      : execFileSync('ldd', [file], { encoding: 'utf8' }).split('\n').map(l => l.trim()).filter(l => l && !l.includes('statically linked')).map(l => {
         if (l.includes('not found')) return l.split(' ')[0] + ' (not found)';
         return l.includes('=>') ? l.split('=>')[1].trim().split(' ')[0] : l.split(' ')[0];
       });
