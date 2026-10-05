@@ -2826,6 +2826,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >
             <.icon name="send" size={14} /> {gettext("Publish")}
           </button>
+          <%!-- History reaches StudioLive's own handler; its restore goes
+                through Sheets.Session.restore/4 so the live session cannot
+                overwrite the restored row (task-1eaa2c0dc6e60047). --%>
+          <button
+            :if={@write_capable}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="show-history"
+            data-test-id="sheet-history"
+          >
+            <.icon name="history" size={14} /> {gettext("History")}
+          </button>
           <button
             :if={@write_capable}
             type="button"

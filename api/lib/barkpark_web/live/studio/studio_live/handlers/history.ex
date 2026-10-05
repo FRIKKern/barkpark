@@ -7,7 +7,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def show_history(socket) do
@@ -65,7 +67,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   defp do_restore_revision(rev_id, socket) do
     type = socket.assigns[:editor_type]
 
-    case Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+    case restore_open_doc(socket, rev_id, type) do
       {:ok, _doc} ->
         {:noreply,
          socket
@@ -80,6 +82,30 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
         {:noreply, put_flash(socket, :error, "Failed to restore")}
     end
   end
+
+  # A sheet's cells live in its session, which would overwrite a restored row
+  # on its next persist. Session.restore/4 discards it around the write and
+  # restarts it from the restored row (task-1eaa2c0dc6e60047).
+  defp restore_open_doc(socket, rev_id, "sheet") do
+    doc = socket.assigns.editor_doc
+
+    Session.restore(
+      Content.published_id(doc.doc_id),
+      socket.assigns.dataset,
+      GridData.session_scope(%{doc: doc}),
+      fn ->
+        Content.restore_revision(
+          rev_id,
+          "sheet",
+          socket.assigns.dataset,
+          Shared.hook_opts(socket)
+        )
+      end
+    )
+  end
+
+  defp restore_open_doc(socket, rev_id, type),
+    do: Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
 
   def show_profile(socket) do
     {:noreply, assign(socket, show_profile: true)}
