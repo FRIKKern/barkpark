@@ -78,7 +78,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         class={"btn btn-sm " <> if(@mode == :classic, do: "btn-primary", else: "btn-ghost")}
         phx-click="editor-set-mode"
         phx-value-mode="classic"
-        aria-pressed={@mode == :classic}
+        aria-pressed={to_string(@mode == :classic)}
         data-test-id="editor-mode-classic"
       >Classic</button>
       <button
@@ -86,7 +86,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         class={"btn btn-sm " <> if(@mode == :beta, do: "btn-primary", else: "btn-ghost")}
         phx-click="editor-set-mode"
         phx-value-mode="beta"
-        aria-pressed={@mode == :beta}
+        aria-pressed={to_string(@mode == :beta)}
         data-test-id="editor-mode-beta"
       >Beta</button>
     </div>
