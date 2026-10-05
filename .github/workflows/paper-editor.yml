@@ -10,6 +10,7 @@ name: paper-editor
 #   1. convert.js round-trip regressions  -> npm run smoke
 #   2. stale committed bundle             -> rebuild + git diff --exit-code
 #   3. stale committed stylesheet         -> rebuild + git diff --exit-code
+#   4. @barkpark/paper-editor package     -> npm run pack:check
 # `npm run build` emits TWO artifacts from src/ -- the IIFE bundle and
 # bp-paper-editor.css (the stylesheet the LiveView editor and the web demo
 # load). The css was ungated until 2026-09-01 and went stale once (#11816
@@ -68,6 +69,9 @@ on:
       - "api/test/support/fixtures/paper-editor/**"
       # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
       - "web/public/bp-paper-editor.bundle.js"
+      # shipped in the npm package beside the bundle (scripts/pack-stage.mjs)
+      - "api/priv/static/assets/bp-paper-mermaid.js"
+      - "LICENSE"
       - ".github/workflows/paper-editor.yml"
   pull_request:
     paths:
@@ -107,6 +111,9 @@ on:
       - "api/test/support/fixtures/paper-editor/**"
       # __no_raw_nul.test.mjs scans the web demo's copy of the bundle too
       - "web/public/bp-paper-editor.bundle.js"
+      # shipped in the npm package beside the bundle (scripts/pack-stage.mjs)
+      - "api/priv/static/assets/bp-paper-mermaid.js"
+      - "LICENSE"
       - ".github/workflows/paper-editor.yml"
 
 concurrency:
@@ -152,6 +159,16 @@ jobs:
             stale=1
           fi
           exit "$stale"
+
+      # The npm package @barkpark/paper-editor. pack:check runs prepack (build,
+      # third-party notices --check, copy into dist/), packs the tarball, and
+      # fails unless it holds the bundle, both stylesheets, the mermaid helper,
+      # the types, README, EMBED-CONTRACT, LICENSE and the notices, with the
+      # bundle and CSS byte-identical to api/priv/static/assets. A stale
+      # THIRD-PARTY-NOTICES.txt after a dependency bump fails here: run
+      # `npm run notices` and commit the result.
+      - name: Pack @barkpark/paper-editor and inspect the tarball
+        run: npm run pack:check
 
   # ── the RENDERED half of the narrow-viewport sweep ──────────────────────────
   #
