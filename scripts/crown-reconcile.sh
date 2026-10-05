@@ -1251,7 +1251,12 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
   RUNS_LIST_COMPLETE=0
   RUNS_PAGES_READ=0
   while [ "$page" -le "$RUNS_PAGE_CAP" ]; do
-    if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?branch=main&per_page=100&page=$page" \
+    # NO `?branch=main` EITHER. GitHub's branch-filtered run index can lag the
+    # unfiltered one by days: on 2026-10-05 it answered with a page whose newest
+    # run predated the window, and the reconciler reported an empty population
+    # while five deploy runs sat inside it (task-e50f648581214974). The
+    # unfiltered listing is current; main is selected below, in jq.
+    if ! gh api "repos/$REPO/actions/workflows/deploy.yml/runs?per_page=100&page=$page" \
       > "$WORK/runs-page.json" 2>"$WORK/runs-err.txt"; then
       # A FIRST page that does not answer is the old total failure. A LATER page
       # that does not answer is a SHORTER listing, not a missing one — it is
@@ -1266,7 +1271,7 @@ fetch_runs() { # -> writes $WORK/runs-raw.json, 0 ok / 2 could not read
     RUNS_PAGES_READ=$((RUNS_PAGES_READ + 1))
     rows="$(jq '.workflow_runs | length' "$WORK/runs-page.json" 2>/dev/null || echo 0)"
     case "${rows:-}" in ''|*[!0-9]*) rows=0 ;; esac
-    jq -c '.workflow_runs[]?' "$WORK/runs-page.json" >> "$WORK/runs-pages.jsonl" 2>/dev/null
+    jq -c '.workflow_runs[]? | select(.head_branch == "main")' "$WORK/runs-page.json" >> "$WORK/runs-pages.jsonl" 2>/dev/null
     # A short page IS the end of the list.
     if [ "$rows" -lt 100 ]; then RUNS_LIST_COMPLETE=1; break; fi
     # Runs come back newest-first, so once a page reaches back past the WIDE
