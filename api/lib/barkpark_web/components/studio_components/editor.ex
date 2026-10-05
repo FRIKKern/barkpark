@@ -752,7 +752,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-click="select-view"
                 phx-value-view=""
                 role="tab"
-                aria-selected={@nav_view == nil}
+                aria-selected={to_string(@nav_view == nil)}
                 class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
                 data-test-id="document-view-form"
               ><%= gettext("Fields") %></button>
@@ -762,7 +762,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-click="select-view"
                 phx-value-view={v["id"]}
                 role="tab"
-                aria-selected={@nav_view == v["id"]}
+                aria-selected={to_string(@nav_view == v["id"])}
                 title={v["title"]}
                 class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
                 data-test-id="document-view-tab"
@@ -794,7 +794,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     phx-click="select-group"
                     phx-value-group={grp["name"]}
                     role="tab"
-                    aria-selected={@nav_group == grp["name"]}
+                    aria-selected={to_string(@nav_group == grp["name"])}
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
