@@ -11,26 +11,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   alias BarkparkWeb.Studio.StudioLive
   alias BarkparkWeb.Studio.StudioLive.Shared
 
-  # The Studio's display default for a brand-new row's `title` FIELD.
-  @untitled "Untitled"
-
-  # Types whose title is NOT a plain field but the text of a locked title
-  # BLOCK. Mirrors `Writer.maybe_apply_paper_template/2`, which seeds the paper
-  # template for "paper" and nothing else.
-  #
-  # [untitled-is-a-fallback-not-a-seed] A paper is born WITHOUT a title, on
-  # purpose. `Papers.Template.template_blocks/1` copies the attrs title
-  # verbatim into the locked `tpl-title` heading's `"text"`, so seeding
-  # "Untitled" here did not write chrome — it wrote CONTENT, into the one block
-  # the author is about to type in, and the caret landing after it made the
-  # first keystroke APPEND ("UntitledHand walk…"). Every display site already
-  # renders `doc.title || "Untitled"` (pane_builder, components, secondary,
-  # refs, editor_fields, modals), so a nil title still reads "Untitled" on the
-  # desk, the breadcrumb and the tab — while the title block itself starts
-  # empty and the editor paints its own heading placeholder. `derive_title/2`
-  # then fills the row title from the block the moment the author types, which
-  # is the single-truth contract the literal was quietly pre-empting.
-  @block_titled_types ["paper"]
+  # [untitled-is-a-fallback-not-a-seed] A new document is born WITHOUT a
+  # title, on purpose. A paper showed it first: `Papers.Template.template_blocks/1`
+  # copies the attrs title verbatim into the locked `tpl-title` heading's
+  # `"text"`, so seeding "Untitled" did not write chrome — it wrote CONTENT,
+  # into the one block the author is about to type in, and the caret landing
+  # after it made the first keystroke APPEND ("UntitledHand walk…"). Every
+  # display site already renders `doc.title || "Untitled"` (pane_builder,
+  # components, secondary, refs, editor_fields, modals), so a nil title still
+  # reads "Untitled" on the desk, the breadcrumb and the tab — while the title
+  # input or block itself starts empty. `derive_title/2` (papers) and
+  # `TitleDerivation.maybe_derive` (titleless types) then fill the row title
+  # the moment the author types, which is the single-truth contract the
+  # literal was quietly pre-empting.
 
   # How long a create press stays "the press you just made". PUSH_TIMEOUT in
   # phoenix_live_view.js is 30_000ms — after that the client itself has given
@@ -143,14 +136,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
     end
   end
 
-  # See [untitled-is-a-fallback-not-a-seed] above.
-  defp new_document_attrs(type) do
-    attrs = %{"content" => Shared.seed_new_doc_content(type)}
+  # See [untitled-is-a-fallback-not-a-seed] above (task-79e28148d9925097). For
+  # a field-titled type the stored "Untitled" opened in the title input as
+  # text the editor had to delete, and it SATISFIED a required title, so +
+  # then Publish shipped "Untitled". For a titleless type (author:
+  # `list_preview.title = name`) it blocked `TitleDerivation.maybe_derive`,
+  # which fills only a BLANK title, so the name never reached the title column
+  # and the header kept saying Untitled.
+  #
+  # A task alone keeps the seed: the Tasks plugin's authoring quality gate
+  # (`Plugins.Tasks` `gate_title/2`) refuses a task with a blank title, so a
+  # titleless + would answer "Create cancelled".
+  defp new_document_attrs("task" = type),
+    do: %{"content" => Shared.seed_new_doc_content(type), "title" => "Untitled"}
 
-    if type in @block_titled_types,
-      do: attrs,
-      else: Map.put(attrs, "title", @untitled)
-  end
+  defp new_document_attrs(type), do: %{"content" => Shared.seed_new_doc_content(type)}
 
   def save(params, socket) when is_map(params) do
     socket = track_touched(socket, params)
