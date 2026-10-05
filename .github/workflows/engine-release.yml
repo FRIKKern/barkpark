@@ -202,12 +202,14 @@ jobs:
       # tarballs into a scratch app, then startBarkpark({ dataDir }) and nothing else.
       - name: Pack @barkpark/engine and its platform package
         run: |
+          set -o pipefail  # tee below must not hide a failed pack
           (cd js/packages/engine && pnpm build)
           node scripts/engine/pack.mjs platform --engine "$RUNNER_TEMP/engine" --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/platform.json"
           node scripts/engine/pack.mjs launcher --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/launcher.json"
 
       - name: npm install and one startBarkpark call
         run: |
+          set -o pipefail  # tee below must not hide a failed boot
           app="$RUNNER_TEMP/app"
           mkdir -p "$app"
           cd "$app"
