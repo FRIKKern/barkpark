@@ -1573,17 +1573,25 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   end
 
   @doc """
-  Update a doc's title in the pane items list without rebuilding from
-  DB. Hot-path optimisation for autosave — preserves N+1-query-free
-  behaviour per IMPL-SPEC Risk #3.
+  Refresh a saved doc's row in the pane items without rebuilding from DB:
+  its title, and the draft state and "Updated …" subtitle the save just
+  changed. Hot-path optimisation for autosave — preserves N+1-query-free
+  behaviour per IMPL-SPEC Risk #3. Our own save's `document_changed`
+  broadcast is skipped (`sender == self()`), so without this the row kept
+  saying "published, Updated 3m ago" until a reload. The row keeps its place.
   """
-  @spec update_title([map()], String.t(), String.t()) :: [map()]
-  def update_title(panes, doc_id, new_title) do
+  @spec update_saved_row([map()], String.t(), String.t(), map()) :: [map()]
+  def update_saved_row(panes, doc_id, new_title, saved_doc) do
     Enum.map(panes, fn pane ->
       updated_items =
         Enum.map(pane.items, fn item ->
           if Map.get(item, :type) == :doc && Map.get(item, :id) == doc_id do
-            %{item | title: new_title}
+            Map.merge(item, %{
+              title: new_title,
+              is_draft: Content.draft?(saved_doc.doc_id),
+              status: Map.get(saved_doc, :status),
+              updated: relative_updated(saved_doc)
+            })
           else
             item
           end
