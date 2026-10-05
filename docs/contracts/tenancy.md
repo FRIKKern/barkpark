@@ -26,10 +26,10 @@ All tenant mutation goes through `api/lib/barkpark/tenancy.ex`. Never insert/del
 
 - **`create_workspace_with_owner/2`** — one atomic transaction: workspace + owner Membership + Default project + production Dataset. The only correct way to stand up a tenant.
 - **`create_project_with_dataset/2`** — atomic project + production dataset.
-- **`get_or_create_dataset/2`** — idempotent (`on_conflict: :nothing` on `(project_id, slug)`); reloads after insert for the persisted id.
-- **`list_workspaces_for/1`** — INNER-JOINs `workspace_memberships`, so it returns only workspaces the token belongs to; unknown principal → `[]`.
+- **`get_or_create_dataset/2`** — idempotent (`on_conflict: :nothing` on `(project_id, slug)`); reloads for the persisted id.
+- **`list_workspaces_for/1`** — INNER JOIN on memberships: only the principal's workspaces; unknown → `[]`.
 - **`multi_tenant?/0`** — true when >1 workspace exists; **fail-closed** (rescues to `true`), which flips stricter scoping on (see below).
-- **`resolve_scope_slugs/2`** — `{workspace_id, project_id}` → `{ws_slug, project_slug}`, falling back to `"default"` when an id is nil or stale.
+- **`resolve_scope_slugs/2`** — `{workspace_id, project_id}` → `{ws_slug, project_slug}`, falling back to `"default"` on a nil or stale id.
 
 ### Safe delete — NEVER `Repo.delete/1` on a Workspace
 
@@ -54,6 +54,7 @@ Canonical scope helpers in `api/lib/barkpark/content/scope.ex`:
 - **`scope_to_workspace/3`** — **fail-closed**: a `nil` workspace_id compiles to `where: false` (zero rows), never a silent all-rows query. Binary id → `WHERE workspace_id = $1` (`AND project_id = $2` when given).
 - **`scope_to_workspace_global/1`** — explicit, greppable cross-tenant opt-in; used by surfaces not yet path-scoped.
 - **`scope_to_workspace_or_global/3`** — back-compat bridge for flat routes: nil → global, binary → the fail-closed form.
+- **Shared schemas** — plugin schemas install with `workspace_id` NULL; `get_schema/3` falls back to one when the workspace owns none by that name.
 - **`maybe_scope_to_grants/2`** — the single opts-gated owner of grant (Layer-2) row-narrowing: a no-op unless `opts[:grant_scoped]`, else `scope_to_grants/3` over the caller's grant union (fail-closed `where: false` on an undecidable grant). One wrapper serves every grant-aware read (`Content.Query`, `DocumentsRetriever`, Indx hydration, `Content.Graph` backlinks).
 
 In multi-tenant installs the content-edge projection uses strict `scope_to_workspace/3` (not the `_or_global` bridge), preventing cross-tenant `content_edges`.
@@ -70,13 +71,13 @@ resolve_read_dataset_id(dataset, opts) → id | nil
   nil → WHERE dataset = $string
 ```
 
-The OR clause keeps un-backfilled rows (`dataset_id` never stamped) visible via the string path until backfill completes — so a `dataset_id IS NULL` row is **not** invisible to dataset scoping, though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id.
+The OR clause keeps un-backfilled rows visible via the string path — so a `dataset_id IS NULL` row is **not** invisible to dataset scoping, though it *is* invisible under strict `scope_to_workspace/3` with a nil workspace_id.
 
 **Known asymmetry:** `resolve_read_dataset_id/2` returns `nil` when scoped by workspace **without** a project (string-path fallback), preventing cross-tenant bleed into the Default project; id-precise dataset scoping requires `project_id`.
 
 ## Tables & constraints
 
-`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs are also `CASCADE` (17 workspace_id tables, flipped from `nilify_all`); only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The literal column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
+`UNIQUE`: `workspaces(slug)` · `projects(workspace_id, slug)` · `workspace_memberships(workspace_id, principal_type, principal_id)` · `datasets(project_id, slug)`. Parent FKs (project/membership/dataset → parent) are `ON DELETE CASCADE`; content/scope tables' nullable `workspace_id`/`project_id`/`dataset_id` FKs are also `CASCADE` (17 workspace_id tables); only `audit_events` + `audit_export_sinks` carry `workspace_id` with no FK. The literal column is `dataset` on content tables (`documents`, `revisions`, `media_files`, `schema_definitions`, `webhooks`, `api_tokens`, `mutation_events`), `scope` on search-intel tables.
 
 ## Canonical homes (link, don't duplicate)
 

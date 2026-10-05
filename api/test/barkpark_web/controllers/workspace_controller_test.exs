@@ -1631,7 +1631,9 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       {:ok, _} = Auth.create_token(raw_admin, "ws admin", "test", ["read", "write", "admin"])
 
       # SOURCE workspace carrying a NULL-dataset_id schema row — the slot the
-      # partial unique index (name, dataset) WHERE dataset_id IS NULL guards.
+      # per-workspace partial unique index (workspace_id, name, dataset) WHERE
+      # dataset_id IS NULL guards (20261005210000; before it the index was
+      # cross-workspace and a SIBLING's row was the collision).
       {:ok, source} =
         Tenancy.create_workspace_with_owner(%{name: "Conflict Src WS"}, admin_token(raw_admin))
 
@@ -1640,19 +1642,22 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
 
       {:ok, bundle} = WorkspaceBundle.export(source.id)
 
-      # The source leaves (a different box); a SIBLING workspace on the target
-      # holds a different-id row in the SAME (name, dataset) NULL slot. The
-      # merge arbiter is the primary key only, so the bundle row must collide
-      # on the partial index — the exact raise class that used to escape as an
-      # opaque internal_error 500 (bp exit 8, body never captured).
-      {:ok, _} = Tenancy.delete_workspace(source)
-      {:ok, ws_bin} = Ecto.UUID.dump(source.id)
-      purge_fkless_audit!(ws_bin)
+      # The source's row is replaced by a different-id row of the SAME name.
+      # The merge arbiter is the primary key only, so the bundle row must
+      # collide on the partial index — the exact raise class that used to
+      # escape as an opaque internal_error 500 (bp exit 8, body never captured).
+      Repo.query!(
+        "DELETE FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
+        [source.id, clash]
+      )
 
-      {:ok, sibling} =
-        Tenancy.create_workspace_with_owner(%{name: "Conflict Sib WS"}, admin_token(raw_admin))
+      insert_null_dsid_schema!(source.id, clash)
 
-      insert_null_dsid_schema!(sibling.id, clash)
+      [[resident_id]] =
+        Repo.query!(
+          "SELECT id::text FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
+          [source.id, clash]
+        ).rows
 
       resp =
         conn
@@ -1666,16 +1671,13 @@ defmodule BarkparkWeb.WorkspaceControllerTest do
       assert err["details"]["pg_code"] == "unique_violation"
 
       assert err["details"]["constraint"] ==
-               "schema_definitions_name_dataset_null_dataset_id_index"
+               "schema_definitions_ws_name_dataset_null_dataset_id_index"
 
-      # The whole import rolled back: the source workspace did NOT land, and the
-      # sibling's resident row is untouched.
-      refute Tenancy.get_workspace_by_slug(source.slug)
-
+      # The whole import rolled back: the resident row is untouched and alone.
       assert Repo.query!(
-               "SELECT count(*) FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
-               [sibling.id, clash]
-             ).rows == [[1]]
+               "SELECT id::text FROM schema_definitions WHERE workspace_id = $1::text::uuid AND name = $2",
+               [source.id, clash]
+             ).rows == [[resident_id]]
     end
 
     # pds-bl-import-409-http-test: the PDS-D9 same-slug/different-id root

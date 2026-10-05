@@ -160,11 +160,35 @@ defmodule Barkpark.Content.Schema do
       # (limit, perspective, caller context) do not change the row
       {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
        Keyword.fetch(opts, :project_id)},
-      fn -> do_get_schema_raw(name, dataset, opts) end,
+      fn -> do_get_schema_raw(name, dataset, opts) |> shared_fallback(name, dataset, opts) end,
       # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
       8
     )
   end
+
+  # THE SHARED LAYER UNDER EVERY WORKSPACE (task-be5eaec4a5b9e524, ruling A).
+  # Plugin schemas are installed once as GLOBAL rows (`workspace_id IS NULL`,
+  # `Plugins.Bootstrap`), so a workspace that owns no row of a type reads the
+  # shared one. A tenant's own row of the same name is found by the scoped read
+  # above and wins. The retry pins `:shared_only`, which filters to
+  # `workspace_id IS NULL` — dropping the scope keys instead would read the
+  # Default dataset slot and hand back Default's row first.
+  #
+  # Reads only. `upsert_schema/3`, `validate_schema/3` and `delete_schema/3`
+  # stay on the strict `do_get_schema_raw/3`, so a tenant's write never updates
+  # or deletes the shared row.
+  defp shared_fallback({:error, :not_found}, name, dataset, opts) do
+    case Keyword.get(opts, :workspace_id) do
+      ws when is_binary(ws) ->
+        shared = opts |> Keyword.delete(:project_id) |> Keyword.put(:workspace_id, :shared_only)
+        do_get_schema_raw(name, dataset, shared)
+
+      _ ->
+        {:error, :not_found}
+    end
+  end
+
+  defp shared_fallback(found, _name, _dataset, _opts), do: found
 
   defp do_get_schema_raw(name, dataset, opts) do
     workspace_id = Keyword.get(opts, :workspace_id)
@@ -191,10 +215,10 @@ defmodule Barkpark.Content.Schema do
   tenant-scoped lookup with the GLOBAL-schema fallback.
 
   THE ONE chokepoint every Envelope render/redact site resolves its schema
-  through. `get_schema/3` with a binary `:workspace_id` filters
-  `where workspace_id == ^ws` (`Barkpark.Content.Scope.scope_to_workspace/3`), so
-  a schema declared GLOBALLY (`workspace_id: nil`) never matches a document that
-  lives in a workspace. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
+  through. `get_schema/3` with a binary `:workspace_id` now falls back to the
+  shared `workspace_id IS NULL` row itself (`shared_fallback/4`), so the retry
+  below mostly re-reads what the first call found; it stays because it also
+  covers a project-pinned read with no workspace key. `Barkpark.Content.Envelope` is fail-OPEN on a nil schema
   (an undeclared field is public, for legacy parity), so a single scoped lookup
   that misses renders every `private` / `owner_only` / `readable_by` field of
   that type to whoever is reading. The retry — the same lookup with the tenant
@@ -405,7 +429,7 @@ defmodule Barkpark.Content.Schema do
            |> Map.put("dataset", dataset)
            |> Content.put_scope_attrs(opts) do
       base =
-        case name && get_schema_raw(name, dataset, opts) do
+        case name && do_get_schema_raw(name, dataset, opts) do
           {:ok, existing} ->
             if owned_by_other_workspace?(existing, attrs),
               do: %SchemaDefinition{},
@@ -465,7 +489,8 @@ defmodule Barkpark.Content.Schema do
   and an empty-type delete is byte-identical to the prior behaviour.
   """
   def delete_schema(name, dataset, opts \\ []) do
-    case get_schema(name, dataset, opts) do
+    # Strict scope: a workspace that only reads the shared row must not delete it.
+    case do_get_schema_raw(name, dataset, opts) do
       {:ok, schema} ->
         force? = Keyword.get(opts, :force, false)
         doc_count = count_documents_of_type(name, dataset, opts)
@@ -552,7 +577,14 @@ defmodule Barkpark.Content.Schema do
   and the row-read could read visibility from two different tenants.
   """
   def schema_public?(type, dataset, opts \\ []) do
+    scoped? = is_binary(Keyword.get(opts, :workspace_id))
+
     case get_schema(type, dataset, opts) do
+      # A workspace-scoped read only reaches a shared row through
+      # `shared_fallback/4`. Its `visibility` is the plugin's, not this
+      # workspace's choice, so it never opens the workspace's documents to
+      # anonymous readers (task-be5eaec4a5b9e524).
+      {:ok, %{workspace_id: nil}} when scoped? -> false
       {:ok, %{visibility: "public"}} -> true
       _ -> false
     end

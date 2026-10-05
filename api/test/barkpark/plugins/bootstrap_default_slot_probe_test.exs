@@ -97,8 +97,22 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
     {ws.id, project.id}
   end
 
+  # The tenant-owned rows. Bootstrap also installs a shared copy
+  # (workspace_id and dataset_id both NULL, task-be5eaec4a5b9e524); it is
+  # counted on its own in the "shared copy" test below.
   defp rows do
-    from(s in SchemaDefinition, where: s.name == ^SlotStub.schema_name())
+    from(s in SchemaDefinition,
+      where: s.name == ^SlotStub.schema_name(),
+      where: not (is_nil(s.workspace_id) and is_nil(s.dataset_id))
+    )
+    |> Repo.all()
+  end
+
+  defp shared_rows do
+    from(s in SchemaDefinition,
+      where: s.name == ^SlotStub.schema_name(),
+      where: is_nil(s.workspace_id) and is_nil(s.dataset_id)
+    )
     |> Repo.all()
   end
 
@@ -366,5 +380,38 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
     assert reloaded.cors_origins == []
     assert reloaded.desk_groups == []
     assert reloaded.list_preview == %{}
+  end
+
+  # ── S8 — the shared copy (task-be5eaec4a5b9e524) ────────────────────────
+
+  test "S8 one boot leaves the Default row AND one shared row; re-boots refresh it in place",
+       ctx do
+    assert {:ok, 1} = run_bootstrap()
+
+    assert [default_row] = rows()
+    assert default_row.workspace_id == ctx.default_ws.id
+    assert [shared] = shared_rows()
+    assert is_nil(shared.project_id)
+    assert shared.title == "Plugin Title"
+
+    assert {:ok, 1} = run_bootstrap()
+    assert Enum.map(rows(), & &1.id) == [default_row.id]
+    assert [again] = shared_rows()
+    assert again.id == shared.id
+  end
+
+  test "S8b a foreign NULL-dataset_id row does not block the shared copy", ctx do
+    orphan =
+      insert_row!(%{
+        workspace_id: ctx.foreign_ws.id,
+        project_id: ctx.foreign_project.id,
+        dataset_id: nil
+      })
+
+    assert {:ok, 1} = run_bootstrap()
+
+    assert [shared] = shared_rows()
+    assert shared.title == "Plugin Title"
+    assert Repo.get!(SchemaDefinition, orphan.id).title == "Pulled Title"
   end
 end

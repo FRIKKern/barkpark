@@ -63,7 +63,7 @@ defmodule BarkparkWeb.Studio.StudioPluginLinkEmptyStateTest do
       |> Barkpark.Content.SchemaDefinition.changeset(
         Map.merge(spec, %{visibility: "private", dataset: @dataset, fields: []})
       )
-      |> Repo.insert!()
+      |> Repo.insert!(on_conflict: :nothing)
     end
 
     :ok
