@@ -8,6 +8,8 @@ export default defineConfig({
   clean: true,
   target: 'node20',
   platform: 'node',
+  // release.ts resolves the platform package with createRequire(import.meta.url).
+  shims: true,
   outDir: 'dist',
   outExtension({ format }) {
     return {

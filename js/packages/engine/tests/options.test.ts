@@ -3,7 +3,7 @@ import os from 'node:os'
 import path from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { normalizeOptions, EngineOptionsError } from '../src/options'
-import { resolveRelease, EngineReleaseError, PROGRAMS } from '../src/release'
+import { resolveRelease, findPlatformRelease, platformPackage, EngineReleaseError, PROGRAMS } from '../src/release'
 import { loadOrCreateSecrets, redactor, releaseKeys } from '../src/secrets'
 
 describe('normalizeOptions', () => {
@@ -54,8 +54,53 @@ describe('resolveRelease', () => {
   }
   const good = { version: 1, commit: 'a'.repeat(40), platform: 'linux', arch: 'x64', postgres: { version: '15.18', extensions: [], programs: [...PROGRAMS] } }
 
-  it('says where a release comes from when none is given', () => {
-    expect(() => resolveRelease(null)).toThrow(/BARKPARK_ENGINE_RELEASE/)
+  const notInstalled = () => { throw Object.assign(new Error('Cannot find module'), { code: 'MODULE_NOT_FOUND' }) }
+  // A node_modules/<platform package>/ holding an engine folder, and a resolver that finds it.
+  const installed = (manifest: Record<string, unknown>) => {
+    const pkg = fs.mkdtempSync(path.join(os.tmpdir(), 'engine-platform-package-'))
+    fs.renameSync(fakeRelease(manifest), path.join(pkg, 'engine'))
+    fs.writeFileSync(path.join(pkg, 'package.json'), '{}')
+    const asked: string[] = []
+    const resolve = (specifier: string) => { asked.push(specifier); return path.join(pkg, 'package.json') }
+    return { pkg, resolve, asked }
+  }
+
+  it('says where a release comes from when none is given and no platform package is installed', () => {
+    const host = { platform: 'linux', arch: 'x64' }
+    expect(() => resolveRelease(null, host, notInstalled)).toThrow(/@barkpark\/engine-linux-x64 is not installed/)
+    expect(() => resolveRelease(null, host, notInstalled)).toThrow(/BARKPARK_ENGINE_RELEASE/)
+    expect(() => resolveRelease(null, { platform: 'linux', arch: 'ia32' }, notInstalled)).toThrow(/no platform package for linux-ia32/)
+  })
+
+  it('names the platform package after the machine', () => {
+    expect(platformPackage({ platform: 'darwin', arch: 'arm64' })).toBe('@barkpark/engine-darwin-arm64')
+    expect(findPlatformRelease({ platform: 'linux', arch: 'x64' }, notInstalled)).toBeNull()
+  })
+
+  it('takes the engine folder from the installed platform package when no release is given', () => {
+    const { pkg, resolve, asked } = installed(good)
+    const resolved = resolveRelease(null, { platform: 'linux', arch: 'x64' }, resolve)
+    expect(asked).toEqual(['@barkpark/engine-linux-x64/package.json'])
+    expect(resolved.root).toBe(path.join(pkg, 'engine'))
+    expect(resolved.bin).toBe(path.join(pkg, 'engine', 'bin', 'barkpark'))
+  })
+
+  it('prefers a named release over the platform package', () => {
+    const { resolve, asked } = installed(good)
+    const named = fakeRelease(good)
+    expect(resolveRelease(named, { platform: 'linux', arch: 'x64' }, resolve).root).toBe(named)
+    expect(asked).toEqual([])
+  })
+
+  it('checks a platform package folder like any other', () => {
+    const { resolve } = installed({ ...good, postgres: null })
+    expect(() => resolveRelease(null, { platform: 'linux', arch: 'x64' }, resolve)).toThrow(/--add-postgres/)
+  })
+
+  it('resolves the real platform package specifier through node resolution', () => {
+    // Nothing named @barkpark/engine-* is installed in this workspace, so the
+    // default resolver must answer null, not throw.
+    expect(findPlatformRelease({ platform: 'linux', arch: 'x64' })).toBeNull()
   })
 
   it('accepts a complete engine folder for this platform', () => {

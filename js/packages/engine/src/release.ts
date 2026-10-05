@@ -1,8 +1,10 @@
-// Find and check the engine folder to run. Today the caller names it (the `release`
-// option or BARKPARK_ENGINE_RELEASE). This is the one place that changes when the
-// folder comes from a platform package (@barkpark/engine-<platform>-<arch>) or from
-// `bp build`: resolveRelease gains those sources and returns the same shape.
+// Find and check the engine folder to run. The caller can name it (the `release`
+// option or BARKPARK_ENGINE_RELEASE). Otherwise it comes from the platform package
+// npm installed beside @barkpark/engine (@barkpark/engine-<platform>-<arch>, listed
+// as an optional dependency, so npm fetches only the one matching this machine).
+// `bp build` for a custom Barkpark will be one more source returning the same shape.
 import fs from 'node:fs'
+import { createRequire } from 'node:module'
 import path from 'node:path'
 
 export const MANIFEST = 'engine.json'
@@ -32,11 +34,44 @@ export class EngineReleaseError extends Error {
   readonly code = 'engine_release'
 }
 
-export function resolveRelease(release: string | null, host: { platform: string; arch: string } = process): ResolvedRelease {
-  if (release === null) {
-    throw new EngineReleaseError('No engine release was given. Pass `release` (a folder built by scripts/engine/build-release.mjs) or set BARKPARK_ENGINE_RELEASE.')
+type Host = { platform: string; arch: string }
+
+/** The platforms that have a platform package. */
+export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64'] as const
+
+/** The npm package that carries the engine folder for one platform. */
+export function platformPackage(host: Host): string {
+  return `@barkpark/engine-${host.platform}-${host.arch}`
+}
+
+/** Resolves a module specifier the way this package's own require would. */
+export type Resolve = (specifier: string) => string
+
+const resolveFromHere: Resolve = specifier => createRequire(import.meta.url).resolve(specifier)
+
+/** The engine folder inside the installed platform package, or null when none is installed. */
+export function findPlatformRelease(host: Host = process, resolve: Resolve = resolveFromHere): string | null {
+  let manifest: string
+  try {
+    manifest = resolve(`${platformPackage(host)}/package.json`)
+  } catch {
+    return null
   }
+  return path.join(path.dirname(manifest), 'engine')
+}
+
+export function resolveRelease(given: string | null, host: Host = process, resolve: Resolve = resolveFromHere): ResolvedRelease {
   if (host.platform !== 'darwin' && host.platform !== 'linux') throw new EngineReleaseError(`The engine runs on macOS and Linux for now, not ${host.platform}.`)
+  const release = given ?? findPlatformRelease(host, resolve)
+  if (release === null) {
+    const name = platformPackage(host)
+    const known = (PLATFORMS as readonly string[]).includes(`${host.platform}-${host.arch}`)
+    throw new EngineReleaseError(
+      known
+        ? `No engine folder was found. ${name} is not installed: npm installs it with @barkpark/engine unless optional dependencies are turned off. Or pass \`release\` (a folder built by scripts/engine/build-release.mjs) or set BARKPARK_ENGINE_RELEASE.`
+        : `No engine folder was found, and there is no platform package for ${host.platform}-${host.arch}. Pass \`release\` (a folder built by scripts/engine/build-release.mjs) or set BARKPARK_ENGINE_RELEASE.`,
+    )
+  }
   const bin = path.join(release, 'bin', 'barkpark')
   if (!fs.existsSync(bin) || !fs.existsSync(path.join(release, 'releases'))) {
     throw new EngineReleaseError(`${release} is not an engine folder: bin/barkpark or releases/ is missing.`)
