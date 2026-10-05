@@ -252,6 +252,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
   alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.StudioLive.DocActions
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.TokensGen
 
@@ -328,6 +329,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        filters: %{},
        filter_panel: nil,
        renaming_tab: nil,
+       # The header's inline title rename (Studio chrome, write-capable only);
+       # `renamed_title` shows a rename this socket made until the parent's
+       # `@doc` catches up with it.
+       renaming_title: false,
+       renamed_title: nil,
        # The tab-color picker popover (editable hosts): false = closed. It
        # colors the ACTIVE tab (@tab), so a tab switch closes it (below).
        tab_color_open: false,
@@ -450,6 +456,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   def update(assigns, socket) do
+    # A different title arriving on `@doc` is newer than this socket's own
+    # rename (a peer's, or the parent catching up), so the override yields.
+    socket =
+      case {socket.assigns[:doc], assigns[:doc]} do
+        {%{title: old}, %{title: new}} when old != new -> assign(socket, renamed_title: nil)
+        _ -> socket
+      end
+
     socket =
       assign(
         socket,
@@ -1577,6 +1591,47 @@ defmodule BarkparkWeb.Studio.SheetGrid do
        menu: nil
      )
      |> GridData.derive_editable()}
+  end
+
+  # ── the sheet's title (task-64d23dae8eed88e7) ───────────────────────────
+  #
+  # The title is written THROUGH the session: the session writes its own
+  # title on every persist, so a title saved beside it would be overwritten by
+  # the next debounce. Publish and Delete are not here — the header sends them
+  # untargeted to StudioLive, whose handlers flush or discard the session.
+  def handle_event("title-rename-start", _params, socket) do
+    {:noreply, assign(socket, renaming_title: socket.assigns.write_capable)}
+  end
+
+  def handle_event("title-rename-cancel", _params, socket) do
+    {:noreply, assign(socket, renaming_title: false)}
+  end
+
+  def handle_event("title-rename", %{"title" => title}, socket) do
+    socket = socket |> refresh_write_capable() |> assign(renaming_title: false)
+    title = String.trim(title)
+
+    cond do
+      not socket.assigns.write_capable ->
+        {:noreply, socket}
+
+      title == "" ->
+        {:noreply, assign(socket, notice: "a sheet needs a name — the old one was kept")}
+
+      true ->
+        case Session.set_title(
+               socket.assigns.slug,
+               socket.assigns.dataset,
+               title,
+               GridData.session_scope(socket)
+             ) do
+          :ok ->
+            {:noreply, assign(socket, renamed_title: title, status: "Renamed to #{title}")}
+
+          {:error, _} ->
+            {:noreply, assign(socket, notice: "the new name could not be saved — try again")}
+        end
+    end
   end
 
   def handle_event("notice-dismiss", _params, socket) do
@@ -2712,13 +2767,75 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             capability. A write-denied member is in Studio and keeps it — the
             wave-42 measurement found them staring at a headerless panel that
             called itself `sheet-reader`. --%>
-      <.document_header :if={@chrome == :studio} dataset={@dataset} title={@doc.title || @slug}>
+      <.document_header
+        :if={@chrome == :studio}
+        dataset={@dataset}
+        title={if @renaming_title, do: "", else: @renamed_title || @doc.title || @slug}
+      >
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
             <%= if @is_draft, do: "draft", else: "published" %>
           </span>
         </:status_pill>
+        <:presence>
+          <%!-- The rename form takes the title's place while it is open (the
+                header renders an empty title meanwhile). --%>
+          <form
+            :if={@renaming_title}
+            phx-submit="title-rename"
+            phx-target={@myself}
+            style="display: inline-flex; min-width: 0;"
+          >
+            <.bp_input
+              name="title"
+              value={@renamed_title || @doc.title || ""}
+              class="sheet-title-rename-input"
+              autocomplete="off"
+              aria-label="Sheet name"
+              phx-mounted={Phoenix.LiveView.JS.focus()}
+              phx-keydown="title-rename-cancel"
+              phx-key="Escape"
+              phx-target={@myself}
+              data-test-id="sheet-title-input"
+            />
+          </form>
+        </:presence>
         <:actions>
+          <button
+            :if={@write_capable and not @renaming_title}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="title-rename-start"
+            phx-target={@myself}
+            data-test-id="sheet-rename"
+          >
+            Rename
+          </button>
+          <%!-- Publish and Delete are NOT targeted at this component: they reach
+                StudioLive's own handlers and its Caps deny-gate, like every
+                other document action. Publish flushes the session first;
+                Delete discards it (handlers/doc.ex, handlers/delete.ex). --%>
+          <button
+            :if={@write_capable and @is_draft}
+            type="button"
+            class="btn btn-primary btn-sm"
+            phx-click="publish"
+            title={DocActions.publish_label("sheet")}
+            aria-label={DocActions.publish_label("sheet")}
+            data-test-id="sheet-publish"
+          >
+            <.icon name="send" size={14} /> Publish
+          </button>
+          <button
+            :if={@write_capable}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            style="color: var(--destructive);"
+            phx-click="delete-doc"
+            data-test-id="sheet-delete"
+          >
+            <.icon name="trash-2" size={14} /> Delete
+          </button>
           <%!-- AUTHORIZATION axis, and the header's ONE authority-bearing item.
                 `toggle-mode` flips @mode, but @editable is `mode == :edit and
                 write_capable`, so without the capability the toggle changes

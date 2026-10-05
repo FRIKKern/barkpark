@@ -438,6 +438,31 @@ defmodule Barkpark.Plugins.Sheets.Session do
   end
 
   @doc """
+  Rename the sheet through its session, resolving-or-starting it. The session
+  writes its own `title` on every persist, so a title written beside a live
+  session would be overwritten by the next debounce; this sets it in the
+  session and persists at once. `:ok`, or the persist's `{:error, reason}`
+  (the title is left unchanged).
+  """
+  @spec set_title(String.t(), String.t(), String.t(), scope()) :: :ok | {:error, term()}
+  def set_title(slug, dataset, title, workspace_id) when is_binary(title) do
+    call_session(slug, dataset, workspace_id, {:set_title, title})
+  end
+
+  @doc """
+  Stop a live session WITHOUT persisting its unflushed ops — the delete path.
+  `stop/3` would persist them, and that upsert recreates a sheet that was just
+  deleted. A no-op `:ok` when none is live; never starts one.
+  """
+  @spec discard(String.t(), String.t(), scope()) :: :ok
+  def discard(slug, dataset, workspace_id) do
+    case whereis(slug, dataset, workspace_id) do
+      nil -> :ok
+      pid -> safe_call(pid, :discard)
+    end
+  end
+
+  @doc """
   The session's in-memory content (authoritative while it lives).
   `{:error, :no_session}` when none is live — this never starts one.
   """
@@ -789,6 +814,22 @@ defmodule Barkpark.Plugins.Sheets.Session do
 
   def handle_call(:peek, _from, state) do
     {:reply, {:ok, state.content}, schedule_idle(state)}
+  end
+
+  # The title rides every persist (`persist_result/1`), so it is set HERE and
+  # persisted at once; on a failed persist the old title comes back, so the
+  # reply and the state agree.
+  def handle_call({:set_title, title}, _from, state) do
+    case persist_result(%{state | title: title, dirty?: true}) do
+      {:ok, state} -> {:reply, :ok, schedule_idle(state)}
+      {error, failed} -> {:reply, error, schedule_idle(%{failed | title: state.title})}
+    end
+  end
+
+  # Stop WITHOUT the terminate persist: the sheet is being deleted, and a
+  # persist after the delete would upsert it back into existence.
+  def handle_call(:discard, _from, state) do
+    {:stop, :normal, :ok, cancel_debounce(%{state | dirty?: false})}
   end
 
   # The real batch application — unchanged from the pre-ring path. Returns the

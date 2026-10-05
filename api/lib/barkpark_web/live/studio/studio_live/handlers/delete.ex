@@ -7,7 +7,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   import Phoenix.LiveView
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
 
   def delete_doc(socket) do
@@ -83,12 +85,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
 
   defp do_confirm_delete(params, socket, doc, type) do
     if doc && type do
-      case Content.delete_document(
-             doc.doc_id,
-             type,
-             socket.assigns.dataset,
-             Shared.hook_opts(socket)
-           ) do
+      case delete_open_doc(socket, doc, type) do
         {:error, {:halted, reason}} ->
           {:noreply,
            socket
@@ -117,5 +114,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     else
       {:noreply, socket}
     end
+  end
+
+  # A sheet's live session would persist its unflushed ops after the delete
+  # (debounce or terminate) and upsert the sheet back. Discard it on both
+  # sides of the delete: before, so nothing is pending; after, in case a
+  # collaborator's edit restarted it in between.
+  defp delete_open_doc(socket, doc, "sheet") do
+    slug = Content.published_id(doc.doc_id)
+    scope = GridData.session_scope(%{doc: doc})
+
+    :ok = Session.discard(slug, socket.assigns.dataset, scope)
+
+    result =
+      Content.delete_document(
+        doc.doc_id,
+        "sheet",
+        socket.assigns.dataset,
+        Shared.hook_opts(socket)
+      )
+
+    :ok = Session.discard(slug, socket.assigns.dataset, scope)
+    result
+  end
+
+  defp delete_open_doc(socket, doc, type) do
+    Content.delete_document(doc.doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
   end
 end

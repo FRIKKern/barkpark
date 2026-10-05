@@ -8,8 +8,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content
+  alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
+
+  # A sheet's cells live in its session, not in `editor_form`, and the session
+  # persists on a debounce. Flush it first so the published row carries the
+  # cells the editor last saw; a failed flush publishes nothing. The field-form
+  # validation below reads a form the sheet editor never shows, so it is
+  # skipped; the publish wall in `Content.publish_document` still runs.
+  def publish(%{assigns: %{editor_type: "sheet", editor_doc: %{} = doc}} = socket) do
+    slug = Content.published_id(doc.doc_id)
+
+    case Session.flush(slug, socket.assigns.dataset, GridData.session_scope(%{doc: doc})) do
+      :ok ->
+        publish_open_doc(socket)
+
+      {:error, _} ->
+        {:noreply,
+         put_flash(
+           socket,
+           :error,
+           gettext(
+             "The sheet's latest edits could not be saved, so it was not published. Try again."
+           )
+         )}
+    end
+  end
 
   def publish(socket) do
     doc = socket.assigns[:editor_doc]
