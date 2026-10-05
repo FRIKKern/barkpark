@@ -288,6 +288,19 @@ export interface UploadOptions {
   timeoutMs?: number
 }
 
+/** The `mediaAsset` document embedded in a v1 media response as `asset`. */
+export interface MediaAssetDocument {
+  _id?: string
+  _publishedId?: string
+  altText?: string
+  title?: string
+  caption?: string
+  tags?: string[]
+  /** Probed file facts. `width` / `height` are set for images once processed. */
+  fileInfo?: { url?: string; width?: number; height?: number; [key: string]: unknown }
+  [key: string]: unknown
+}
+
 /** A media asset returned by `client.uploadAsset()` (shape per the server's AssetResponse).
  *  Media responses key on `id` (NOT `_id`); the legacy `_id?` is kept for back-compat. */
 export interface MediaAsset {
@@ -313,6 +326,8 @@ export interface MediaAsset {
   visibility?: string
   assetDocId?: string
   url?: string
+  /** The asset's `mediaAsset` document (v1 routes); `null` when none exists. */
+  asset?: MediaAssetDocument | null
   /** Legacy id key — media responses use `id`, so this is typically undefined. */
   _id?: string
   [key: string]: unknown
@@ -1096,6 +1111,103 @@ export interface CommitOptions {
   timeoutMs?: number // per-call override
 }
 
+/**
+ * One PortableDoc block op, as `bp bulldocs patch` and Studio's block editor
+ * send it: `{op: <verb>, …}`. `append-block` takes `block`; `insert-after`
+ * takes `afterId` + `block`; `patch-block` / `replace-block` take `id` +
+ * `patch` / `block`; `remove-block` / `move-block` take `id`. The server owns
+ * the verb list and refuses an unknown verb with 422.
+ */
+export interface PaperOp {
+  op:
+    | 'append-block'
+    | 'insert-after'
+    | 'patch-block'
+    | 'replace-block'
+    | 'remove-block'
+    | 'move-block'
+    | 'patch-card-body'
+    | 'patch-table-cells'
+    | 'patch-table-structure'
+    | (string & {})
+  [key: string]: unknown
+}
+
+/** Receipt of `client.applyDocOp()`. Keys are the server's, unchanged. */
+export interface DocOpResult {
+  op_kind: string
+  block_id: string | null
+  block?: unknown
+  position?: number | null
+  /** The row the op wrote: `drafts.<id>` when a draft existed. */
+  written_doc_id: string
+  written_row_id?: string
+  /** The document's `_rev` after the op. Send it as the next `ifRev`. */
+  rev: string
+  /** True when the op changed nothing; the rev is unchanged. */
+  no_op?: boolean
+}
+
+/** Body of `client.publishPaper()`: native blocks (preferred) or legacy `body_html`. */
+export interface PaperPublishInput {
+  slug: string
+  blocks?: unknown[]
+  body_html?: string
+  title?: string
+  description?: string
+  tags?: unknown[]
+  style?: string
+  [key: string]: unknown
+}
+
+/** Receipt of `client.publishPaper()`. */
+export interface PaperPublishReceipt {
+  ok: true
+  slug: string
+  /** The paper's integer rev, sent as a string on this route. */
+  rev: string
+  title?: string
+  liveview_path: string
+  scoped_liveview_path?: string | null
+  warnings?: MutateWarning[]
+}
+
+/** Options for `client.applyPaperOps()`. */
+export interface PaperOpsOptions extends CommitOptions {
+  /** The paper's current integer `rev`. A stale value refuses the batch with 412. */
+  ifRev?: number
+  signal?: AbortSignal
+}
+
+/** Receipt of `client.applyPaperOps()`. */
+export interface PaperOpsReceipt {
+  ok: true
+  slug: string
+  op_count: number
+  /** The paper's integer rev after the batch. Send it as the next `ifRev`. */
+  rev: number
+  block_ids: string[]
+}
+
+/** Body of `client.proposePaperEdits()`: insert-only ops plus provenance. */
+export interface PaperProposal {
+  ops: PaperOp[]
+  source: { doc_id: string; agent?: string; [key: string]: unknown }
+}
+
+/** Receipt of `client.proposePaperEdits()`. */
+export interface PaperProposalReceipt {
+  ok: true
+  slug: string
+  draft_id: string
+  rev: number
+  applied_block_ids: string[]
+  skipped_block_ids: string[]
+  provenance?: unknown
+  /** How to approve: publish the draft through `/v1/data/mutate`. */
+  approve_via?: { mutate: unknown; endpoint: string }
+}
+
 /** Fluent single-document patch builder. Obtain via `client.patch(id, type)` or {@link createPatch}. */
 export interface PatchBuilder {
   /** Merge shallow field updates into the patch. System fields (_id, _rev, …) are rejected. */
@@ -1514,6 +1626,31 @@ export interface BarkparkClient {
   /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`.
    *  `opts` forwards retry / idempotencyKey / timeoutMs to the write. */
   discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
+  /** Apply one PortableDoc block op to a document, fenced on its current `_rev`
+   *  (`POST /v1/data/doc/:dataset/:type/:id/ops`). Edits `drafts.<id>` when it exists.
+   *  A stale `ifRev` throws `BarkparkConflictError` with `status: 412`. */
+  applyDocOp(
+    type: string,
+    id: string,
+    op: PaperOp,
+    ifRev: string,
+    opts?: CommitOptions & { signal?: AbortSignal },
+  ): Promise<DocOpResult>
+  /** Publish (create or replace) a paper (`POST /v1/plugins/bulldocs/papers`). Unfenced. */
+  publishPaper(
+    paper: PaperPublishInput,
+    opts?: CommitOptions & { signal?: AbortSignal },
+  ): Promise<PaperPublishReceipt>
+  /** Apply an atomic batch of block ops to a paper (`POST /v1/plugins/bulldocs/papers/:slug/ops`).
+   *  A stale `opts.ifRev` throws `BarkparkConflictError` with `status: 412`. */
+  applyPaperOps(slug: string, ops: PaperOp[], opts?: PaperOpsOptions): Promise<PaperOpsReceipt>
+  /** Propose insert-only edits to a paper's draft
+   *  (`POST /v1/plugins/bulldocs/papers/:slug/proposals`). */
+  proposePaperEdits(
+    slug: string,
+    proposal: PaperProposal,
+    opts?: CommitOptions & { signal?: AbortSignal },
+  ): Promise<PaperProposalReceipt>
   /** Open an SSE live-stream. Throws {@link BarkparkEdgeRuntimeError} in Workerd. */
   listen<T = BarkparkDocument>(
     type?: string,

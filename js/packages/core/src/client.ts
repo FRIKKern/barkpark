@@ -70,6 +70,7 @@ import type { DocsOperationOptions } from './docs'
 import { createPatch } from './patch'
 import { createTransaction } from './transaction'
 import { publishDoc, unpublishDoc, discardDraftDoc } from './publish'
+import { applyDocOp, publishPaper, applyPaperOps, proposePaperEdits } from './ops'
 import { imageUrl as buildImageUrl } from './image-url'
 import type { ImageRef, ImageUrlOptions } from './image-url'
 import { scopePrefix } from './scope'
@@ -605,6 +606,18 @@ export function createClient(config: BarkparkClientConfig): BarkparkClient {
     },
     async discardDraft(id: string, type: string, opts?: CommitOptions): Promise<MutateResult> {
       return discardDraftDoc(frozen, id, type, opts)
+    },
+    applyDocOp(type, id, op, ifRev, opts) {
+      return applyDocOp(frozen, type, id, op, ifRev, opts)
+    },
+    publishPaper(paper, opts) {
+      return publishPaper(frozen, paper, opts)
+    },
+    applyPaperOps(slug, ops, opts) {
+      return applyPaperOps(frozen, slug, ops, opts)
+    },
+    proposePaperEdits(slug, proposal, opts) {
+      return proposePaperEdits(frozen, slug, proposal, opts)
     },
     listen<T = BarkparkDocument>(type?: string, filter?: ListenFilter, opts?: ListenOptions): ListenHandle<T> {
       return createListenHandle<T>(frozen, type, filtersToRecord(filter), opts)
