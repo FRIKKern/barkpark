@@ -90,6 +90,21 @@ defmodule Barkpark.Plugins.SharedPluginSchemasTest do
              Content.resolve_schema(RuleStub.schema_name(), @dataset, ctx.opts)
   end
 
+  test "a shared row declaring public does not open anonymous reads in a workspace", ctx do
+    assert {:ok, 1} = install(RuleStub, ctx)
+    name = RuleStub.schema_name()
+
+    {1, _} =
+      Repo.update_all(where(SchemaDefinition, id: ^shared_row(name).id),
+        set: [visibility: "public"]
+      )
+
+    Barkpark.Content.WriteScope.reset_request_memo()
+
+    assert {:ok, %{visibility: "public"}} = Content.get_schema(name, @dataset, ctx.opts)
+    refute Content.schema_public?(name, @dataset, ctx.opts)
+  end
+
   test "the write door enforces a shared schema's rule in a workspace outside Default", ctx do
     assert {:ok, 1} = install(RuleStub, ctx)
     enforce_validation!()
@@ -204,7 +219,7 @@ defmodule Barkpark.Plugins.SharedPluginSchemasTest do
     assert {:ok, _} =
              Content.create_document(
                "mediaAsset",
-               %{"doc_id" => doc_id, "title" => "Cover", "altText" => %{"en" => "A dog"}},
+               %{"doc_id" => doc_id, "title" => "Cover", "altText" => %{"eng" => "A dog"}},
                @dataset,
                ctx.opts
              )
@@ -215,14 +230,14 @@ defmodule Barkpark.Plugins.SharedPluginSchemasTest do
                %{
                  "doc_id" => doc_id,
                  "title" => "Cover",
-                 "content" => %{"altText" => %{"en" => "A dog on a sofa"}}
+                 "content" => %{"altText" => %{"eng" => "A dog on a sofa"}}
                },
                @dataset,
                ctx.opts
              )
 
     assert {:ok, published} = Content.publish_document(doc_id, "mediaAsset", @dataset, ctx.opts)
-    assert published.content["altText"] == %{"en" => "A dog on a sofa"}
+    assert published.content["altText"] == %{"eng" => "A dog on a sofa"}
     assert published.workspace_id == Keyword.fetch!(ctx.opts, :workspace_id)
 
     # The Studio editor's own resolver: without the shared row the workspace

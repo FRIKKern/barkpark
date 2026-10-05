@@ -130,6 +130,11 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> unique_constraint([:name, :dataset],
       name: :schema_definitions_name_dataset_null_dataset_id_index
     )
+    # ...split by owner since 20261005210000: the index above now covers shared
+    # rows (workspace_id NULL) and this one each workspace's own rows.
+    |> unique_constraint([:name, :dataset],
+      name: :schema_definitions_ws_name_dataset_null_dataset_id_index
+    )
     # FK-abort containment (Felix W16). `workspace_id/project_id/dataset_id` are
     # real Postgres FKs (schema_definitions_<col>_fkey, migration
     # 20260527160000_cascade_content_on_scope_delete). `Content.upsert_schema/3`

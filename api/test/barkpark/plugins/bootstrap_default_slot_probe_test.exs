@@ -48,7 +48,6 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
   @moduletag :plugin_bootstrap
 
   import Ecto.Query
-  import ExUnit.CaptureLog
 
   alias Barkpark.Content
   alias Barkpark.Content.SchemaDefinition
@@ -401,16 +400,18 @@ defmodule Barkpark.Plugins.BootstrapDefaultSlotProbeTest do
     assert again.id == shared.id
   end
 
-  test "S8b a foreign NULL-dataset_id row holding the slot blocks only the shared copy", ctx do
-    insert_row!(%{
-      workspace_id: ctx.foreign_ws.id,
-      project_id: ctx.foreign_project.id,
-      dataset_id: nil
-    })
+  test "S8b a foreign NULL-dataset_id row does not block the shared copy", ctx do
+    orphan =
+      insert_row!(%{
+        workspace_id: ctx.foreign_ws.id,
+        project_id: ctx.foreign_project.id,
+        dataset_id: nil
+      })
 
-    log = capture_log(fn -> assert {:ok, 1} = run_bootstrap() end)
+    assert {:ok, 1} = run_bootstrap()
 
-    assert shared_rows() == []
-    assert log =~ "shared copy of schema"
+    assert [shared] = shared_rows()
+    assert shared.title == "Plugin Title"
+    assert Repo.get!(SchemaDefinition, orphan.id).title == "Pulled Title"
   end
 end

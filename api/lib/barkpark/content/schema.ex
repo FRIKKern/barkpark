@@ -159,7 +159,7 @@ defmodule Barkpark.Content.Schema do
       # workspace differently from an absent one); list opts riding along
       # (limit, perspective, caller context) do not change the row
       {:get_schema_raw, name, dataset, Keyword.fetch(opts, :workspace_id),
-       Keyword.fetch(opts, :project_id)},
+       Keyword.fetch(opts, :project_id), Keyword.get(opts, :shared_fallback, true)},
       fn -> do_get_schema_raw(name, dataset, opts) |> shared_fallback(name, dataset, opts) end,
       # the newest 8 rows: a request repeats ONE type; a corpus fold walks all
       8
@@ -177,9 +177,14 @@ defmodule Barkpark.Content.Schema do
   # Reads only. `upsert_schema/3`, `validate_schema/3` and `delete_schema/3`
   # stay on the strict `do_get_schema_raw/3`, so a tenant's write never updates
   # or deletes the shared row.
+  #
+  # `shared_fallback: false` turns it off for one read: `schema_public?/3`, the
+  # anonymous read gate, so a shared row declaring `visibility: "public"` never
+  # opens a workspace's documents to anonymous readers that workspace did not
+  # open itself.
   defp shared_fallback({:error, :not_found}, name, dataset, opts) do
-    case Keyword.get(opts, :workspace_id) do
-      ws when is_binary(ws) ->
+    case {Keyword.get(opts, :workspace_id), Keyword.get(opts, :shared_fallback, true)} do
+      {ws, true} when is_binary(ws) ->
         shared = opts |> Keyword.delete(:project_id) |> Keyword.put(:workspace_id, :shared_only)
         do_get_schema_raw(name, dataset, shared)
 
@@ -577,7 +582,7 @@ defmodule Barkpark.Content.Schema do
   and the row-read could read visibility from two different tenants.
   """
   def schema_public?(type, dataset, opts \\ []) do
-    case get_schema(type, dataset, opts) do
+    case get_schema(type, dataset, Keyword.put(opts, :shared_fallback, false)) do
       {:ok, %{visibility: "public"}} -> true
       _ -> false
     end

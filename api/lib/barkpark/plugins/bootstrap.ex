@@ -342,10 +342,9 @@ defmodule Barkpark.Plugins.Bootstrap do
   #
   # Written straight through the changeset, not `Content.upsert_schema/3`:
   # that path stamps the resolved write scope, which is the Default workspace.
-  # The partial unique index on `(name, dataset) WHERE dataset_id IS NULL`
-  # keeps this to one row. A legacy NULL-dataset_id row owned by a workspace
-  # holds that slot; the insert is then refused, logged, and the plugin's
-  # result is unchanged.
+  # The partial unique index on `(name, dataset) WHERE dataset_id IS NULL AND
+  # workspace_id IS NULL` keeps this to one row. A refused or raising write is
+  # logged and the plugin's result is unchanged.
   defp install_shared(plugin_name, attrs, dataset) do
     attrs =
       attrs
