@@ -979,7 +979,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     })
 
     // The mount point's chrome is TOKENISED, not a bare hex: on a dark
-    // `.bp-paper-surface` a literal #dde7e2 drew a light rule around a black
+    // `.bp-paper-surface` a literal #e2e6e5 drew a light rule around a black
     // terminal. Every sibling emitter (evidence figure, paper-link card,
     // section divider) already reads `var(--paper-rule, …)`; the cast was the
     // last bare literal in this file, and its Elixir twin
@@ -989,11 +989,11 @@ describe('PortableDoc — the type-keyed renderer', () => {
       const html = renderPortableDocument([
         { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec' },
       ])
-      expect(html).toContain('style="border:1px solid var(--paper-rule, #dde7e2);')
+      expect(html).toContain('style="border:1px solid var(--paper-rule, #e2e6e5);')
       // The negative leg: no BARE hex survives anywhere in the emitted block —
-      // `:#dde7e2` would match `border:1px solid #dde7e2` but never the
-      // `var(--paper-rule, #dde7e2)` fallback (which is preceded by a space).
-      expect(html).not.toContain(':#dde7e2')
+      // `:#e2e6e5` would match `border:1px solid #e2e6e5` but never the
+      // `var(--paper-rule, #e2e6e5)` fallback (which is preceded by a space).
+      expect(html).not.toContain(':#e2e6e5')
       expect(html).not.toContain('#55635e')
     })
 

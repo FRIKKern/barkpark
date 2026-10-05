@@ -726,7 +726,7 @@
     .bp-paper-editor-body > h2,
 .bp-paper-editor-body > .ProseMirror > h2 {
       margin-top: var(--bp-section-beat);
-      border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+      border-top: var(--bp-section-rule) solid var(--paper-rule);
       padding-top: var(--bp-section-gap);
       margin-inline: var(--bp-evidence-pull, 0px);
       width: var(--bp-evidence-width, 100%);

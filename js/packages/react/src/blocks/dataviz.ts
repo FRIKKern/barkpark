@@ -850,7 +850,7 @@ const ROUTE_START = '#2f9e63'
 const ROUTE_FINISH = '#c65a3f'
 const ROUTE_TRACK = 'var(--paper-accent, #1e5347)'
 const ROUTE_MUTED = '#55635e'
-const ROUTE_BORDER = '#dde7e2'
+const ROUTE_BORDER = '#e2e6e5'
 
 /** Google encoded-polyline decoder — the same drop-at-last-whole-pair contract
  * as the Elixir/Go twins: a malformed tail never invents a point. */

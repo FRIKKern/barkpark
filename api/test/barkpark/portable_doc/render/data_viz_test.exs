@@ -130,7 +130,7 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     }
 
     expected =
-      ~s|<div style="display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #dde7e2;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
+      ~s|<div style="display:inline-block;min-width:120px;background:#eaf1ee;border:1px solid #e2e6e5;border-radius:10px;padding:12px 14px;margin:8px 8px 8px 0;vertical-align:top">| <>
         ~s|<div style="font-family:ui-monospace,Menlo,monospace;font-size:24px;font-weight:700;color:#15211d;line-height:1.1">71 <span style="font-size:12px;font-weight:400;color:#55635e">blocks</span></div>| <>
         ~s|<div style="font-size:12px;color:#55635e;margin-top:2px">Completed</div>| <>
         ~s|<div style="font-size:12px;color:#15211d;margin-top:4px">Completed blocks.</div>| <>

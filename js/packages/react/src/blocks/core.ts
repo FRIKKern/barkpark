@@ -733,7 +733,7 @@ const code: Emit = (b) => {
 // an SDK-rendered document is the same document the reader renders. The § mark
 // paints the PAGE token (--paper-bg): it masks the hairline, it is not a fill.
 const divider: Emit = () =>
-  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">` +
+  `<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
   `<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;` +
   `background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>`
 
@@ -794,7 +794,7 @@ const diagram: Emit = (b) => {
   const source = str(b.source)
   const caption = str(b.caption)
   return (
-    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">` +
+    `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto">` +
     `<pre class="mermaid">${encodeMermaid(source)}</pre>` +
     articleFigcaption(caption) +
     `</figure>`
@@ -818,7 +818,7 @@ const asciicast: Emit = (b) => {
   const rowsAttr = rows !== undefined && rows >= 6 && rows <= 40 ? ` data-cast-rows="${rows}"` : ''
   return (
     `<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr}${rowsAttr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>` +
     articleFigcaption(caption) +
     `</figure>`
   )
@@ -923,7 +923,7 @@ function paperLinkCard(ref: PaperLinkRef): string {
       : `<span style="display:block;margin-top:0.7rem;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:0.75rem;letter-spacing:0.025em;color:var(--paper-ink-soft, #55635e)">${escapeHtml(metadataParts.join(' · '))}</span>`
 
   return (
-    `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #dde7e2);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
+    `<a data-paper-link-card href="${safeUrl(`/papers/${ref.slug}`)}" style="display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none">` +
     `<strong style="display:block;font-size:1.02rem;line-height:1.35;color:var(--paper-accent, #1e5347)">${escapeHtml(ref.title)}</strong>` +
     description +
     reason +
@@ -950,7 +950,7 @@ const paperLinks: Emit = (b) => {
       : `<p style="margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6">${escapeHtml(description)}</p>`
 
   return (
-    `<section data-paper-links aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)">` +
+    `<section data-paper-links aria-label="${escapeAttr(title)}" style="margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)">` +
     `<header style="margin:0 0 1.15rem"><h2 style="margin:0;font-size:1.15rem;line-height:1.25;color:var(--paper-ink, #17332d)">${escapeHtml(title)}</h2>${intro}</header>` +
     `<div style="display:grid;gap:0.85rem">${cards}</div></section>`
   )

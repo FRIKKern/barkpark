@@ -699,7 +699,7 @@ const failedBeforeF = failed;
 // un-ratcheted in silence. The map supplies the NUMBER; the directory listing
 // supplies the ROSTER. (Fixture themes are handed to derive() directly by tests
 // and never reach this loop, which reads design/themes/ off disk.)
-const OVERRIDE_COUNT_FROZEN = { evergreen: 82, ember: 3, fjord: 3, charple: 2, iris: 0 };
+const OVERRIDE_COUNT_FROZEN = { evergreen: 79, ember: 3, fjord: 3, charple: 2, iris: 0 };
 
 // Part F characterization GROUND TRUTH is design/tokens.json read STRAIGHT FROM
 // DISK — never the `tokens` singleton re-exported by emit.mjs. Since the w4 seam
