@@ -534,7 +534,7 @@ check("editor mark schemas match convert.js attrs", () => {
 check("contract exposes CONTRACT_VERSION", () => {
   assert.equal(typeof CONTRACT_VERSION, "string");
   assert.ok(CONTRACT_VERSION.length > 0, "non-empty");
-  assert.equal(CONTRACT_VERSION, "1.0.0");
+  assert.equal(CONTRACT_VERSION, "1.1.0");
 });
 
 // 17) blockToTiptap is editability-independent — the read-mode `editable`
