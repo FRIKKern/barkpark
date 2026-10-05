@@ -111,7 +111,7 @@ One PortableDoc block op on any document type. Body `{"op":{…},"ifRev":"<_rev>
 
 SSE mutation stream: a `/w/:ws/p/:proj` URL carries one project, a flat URL its workspace.
 
-**Narrowing:** `?types=a,b`; `?perspective=published` drops draft writes; `filter[f]=v1,v2`: equality (any of) on the redacted doc; else 400.
+**Narrowing:** `?types=a,b`; `?ids=a,b`; `?perspective=published` drops drafts; `filter[f]=v1,v2`: any-of equality on redacted doc; else 400.
 
 **Resuming:** `Last-Event-ID: <int>` (browsers: `?lastEventId=<int>`) replays later events oldest-first, then live.
 

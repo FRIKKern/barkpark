@@ -100,6 +100,14 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # state WHY — "no verb yet" is not a reason, it is the defect this guard
   # exists to find, and such a route belongs in @filed_gaps instead.
   @not_a_cli_surface %{
+    # ── Editor presence (task-32b73e85f89d4be7) ────────────────────────────
+    # A browser editing client holds the stream open while a document is on
+    # screen and posts the FIELD its cursor is in. A terminal has no open
+    # document and no focused field, so there is nothing for a verb to report.
+    {"GET", "/v1/data/presence/:*"} =>
+      "editor presence stream — an editing UI's live room, a terminal has no focused field",
+    {"POST", "/v1/data/presence/:*/focus"} =>
+      "editor field focus — moves an open presence stream's cursor; no CLI holds one",
     # ── Cloud member removal (owner ruling #26, 2026-10-03) ─────────────────
     # The control plane calls this with the stored instance admin token when a
     # person leaves the owning team: sessions revoked, seats dropped, owned
