@@ -94,13 +94,25 @@ defmodule BarkparkWeb.PresenceController do
       doc_id = blank_to_nil(params["documentId"])
       field = blank_to_nil(params["field"])
 
+      want = doc_id && DraftId.published_id(doc_id)
+      ref = make_ref()
+
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
         session_topic(topic, sid),
-        {:presence_focus, doc_id && DraftId.published_id(doc_id), field}
+        {:presence_focus, want, field, {self(), ref}}
       )
 
-      json(conn, %{result: %{sessionId: sid, documentId: doc_id, field: field}})
+      # The answer is the room entry READ BACK after the stream applied it,
+      # never the request echoed: a 200 means the room now says this.
+      with :ok <- await_applied(ref),
+           %{} = entry <- read_entry(topic, sid, want, field) do
+        json(conn, %{result: entry})
+      else
+        _ ->
+          {:error, status, code, message} = not_live()
+          ErrorResponse.emit_custom(conn, status, code, message, %{})
+      end
     else
       {:error, status, code, message} ->
         ErrorResponse.emit_custom(conn, status, code, message, %{})
@@ -114,7 +126,7 @@ defmodule BarkparkWeb.PresenceController do
       :sse_overloaded ->
         conn
 
-      {:presence_focus, doc_id, field} ->
+      {:presence_focus, doc_id, field, {from, ref}} ->
         Presence.update(
           self(),
           state.topic,
@@ -122,6 +134,7 @@ defmodule BarkparkWeb.PresenceController do
           &Map.merge(&1, %{doc_id: doc_id, field: field})
         )
 
+        send(from, {:presence_focus_applied, ref})
         loop(conn, state)
 
       %Phoenix.Socket.Broadcast{event: "presence_diff"} ->
@@ -183,6 +196,30 @@ defmodule BarkparkWeb.PresenceController do
   end
 
   defp frame(event, data), do: "event: #{event}\ndata: #{Jason.encode!(data)}\n\n"
+
+  @focus_apply_ms 2_000
+
+  defp await_applied(ref) do
+    receive do
+      {:presence_focus_applied, ^ref} -> :ok
+    after
+      @focus_apply_ms -> :timeout
+    end
+  end
+
+  # The session's entry as the Presence store holds it now, picked by the
+  # values just applied (a session open twice carries one meta per stream).
+  defp read_entry(topic, sid, doc_id, field) do
+    case Presence.get_by_key(topic, presence_key(sid)) do
+      %{metas: metas} ->
+        metas
+        |> Enum.map(&entry(presence_key(sid), &1))
+        |> Enum.find(&(&1.documentId == doc_id and &1.field == field))
+
+      _ ->
+        nil
+    end
+  end
 
   # ── Scope, identity, ownership ───────────────────────────────────────────
 

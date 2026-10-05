@@ -90,6 +90,16 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
 
     assert resp.status == 200
 
+    # The answer is the entry read back from the room, not the request echoed.
+    assert Jason.decode!(resp.resp_body)["result"] == %{
+             "sessionId" => "ann-1",
+             "name" => "Ann",
+             "documentId" => "p1",
+             "field" => "seo.metaTitle",
+             "client" => "api",
+             "color" => PresenceState.pick_color("ann-1")
+           }
+
     assert_receive %Phoenix.Socket.Broadcast{event: "presence_diff"}, 300
     assert System.monotonic_time(:millisecond) - started < 300
 
