@@ -33,8 +33,11 @@ defmodule BarkparkWeb.Studio.MediaLive do
 
   require Logger
 
+  alias Barkpark.Content
   alias Barkpark.Sharing
   alias BarkparkWeb.MediaVisibilityCopy
+  alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.StudioLive.Paths
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
@@ -47,7 +50,31 @@ defmodule BarkparkWeb.Studio.MediaLive do
        dataset: dataset,
        page_title: "Media Library"
      )
+     |> assign_asset_edit_path()
      |> assign_visibility_notice()}
+  end
+
+  # The explorer's "Edit metadata" button opens `<data-open-path>/<asset id>`,
+  # the asset's mediaAsset document, where alt text and caption are edited
+  # (task-aab4c14b96bc3af1). The in-desk explorer always passed the path; this
+  # tab never did, so the panel had no way to them. Offered only where the
+  # mediaAsset schema is installed for this scope: elsewhere that document
+  # cannot open, and a button into "could not open" is worse than none.
+  defp assign_asset_edit_path(socket) do
+    path =
+      case Content.resolve_schema(
+             "mediaAsset",
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+        {:ok, _schema} ->
+          Paths.studio_path(socket.assigns.scope_prefix, ["mediaAsset"], socket.assigns.dataset)
+
+        _ ->
+          nil
+      end
+
+    assign(socket, asset_edit_path: path)
   end
 
   @impl true
@@ -77,6 +104,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
           dataset={@dataset}
           scope-prefix={@scope_prefix}
           data-token={assigns[:api_token_raw] || ""}
+          data-open-path={@asset_edit_path}
         />
       </div>
     </div>
