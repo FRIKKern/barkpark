@@ -1,9 +1,9 @@
 <!-- doc-tier: human | canonical-for: chronicle-paper-generator | budget: 700tok -->
 # Barkpark Chronicle
 
+The Chronicle is Barkpark's living changelog rendered as native Papers. One first-parent Git scan projects the selected UTC date into the index plus every calendar day, ISO week, month, and year since the first recorded change. Quiet days are explicit Papers, never missing pages.
 
 A Claude routine rewrites each period's story daily, weekly and monthly, and keeps the README "What's new" block current: [ROUTINE.md](ROUTINE.md).
-The Chronicle is Barkpark's living changelog rendered as native Papers. One first-parent Git scan projects the selected UTC date into the index plus every calendar day, ISO week, month, and year since the first recorded change. Quiet days are explicit Papers, never missing pages.
 
 - `/papers/barkpark-chronicle`
 - `/papers/barkpark-changelog-YYYY-MM-DD`
