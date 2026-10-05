@@ -505,14 +505,31 @@ defmodule BarkparkWeb.SessionController do
           0
       end
 
+    # clear + renew, not `drop: true`: a dropped session deletes the cookie
+    # the flash rides in, so the receipt below never reached the next page.
+    # Clearing removes every credential key and renewing rotates the id.
     conn
-    |> configure_session(drop: true)
+    |> clear_session()
+    |> configure_session(renew: true)
     |> put_flash(:info, sign_out_flash(revoked))
-    |> redirect(to: "/studio")
+    |> redirect(to: after_sign_out_path())
+  end
+
+  # Where a signed-out browser lands. On a public-demo host /studio is open to
+  # anonymous visitors, so it stays there. Everywhere else /studio sends an
+  # anonymous browser on to /login through the DEFAULT workspace's Studio,
+  # and that hop lost the receipt and set `return_to` to a workspace the
+  # editor who just left may not belong to (task-429d3c7559ea8a3c). Landing
+  # on /login directly shows the receipt, and signing back in resolves the
+  # editor's own Studio.
+  defp after_sign_out_path do
+    if Application.get_env(:barkpark, :public_demo_studio, false) == true,
+      do: "/studio",
+      else: "/login"
   end
 
   # The receipt names what actually happened instead of asserting it. Both are
-  # successes — the cookie is dropped either way, so a benign double sign-out is
+  # successes — the session is cleared either way, so a benign double sign-out is
   # never an error — but "a live session was revoked" and "there was nothing
   # left to revoke" no longer arrive at the user as the same sentence over a
   # count nobody read (PDS-D523).
