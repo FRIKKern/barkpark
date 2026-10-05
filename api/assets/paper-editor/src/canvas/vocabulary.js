@@ -73,13 +73,30 @@ export function parseVocabulary(json) {
         .map((a) => (a && typeof a === "object" ? a.name : a))
         .filter((n) => typeof n === "string")
     : [];
+  const objects = objectEntries(parsed.of);
   return {
     styles: stringList(parsed.styles),
     lists: stringList(parsed.lists),
     marks: stringList(parsed.marks),
     annotations,
-    of: stringList(parsed.of),
+    of: [...stringList(parsed.of), ...objects.map((o) => o.name)],
+    objects,
   };
+}
+
+// Custom object blocks (task-96fce87b7b71c288): a `blocks.of` entry may be
+// `{name, title?, fields}` (Sanity's object array member). The server already
+// admits the name as a block type and checks the fields
+// (Barkpark.PortableDoc.FieldVocabulary); the canvas admits the same names.
+function objectEntries(of) {
+  if (!Array.isArray(of)) return [];
+  return of
+    .filter((e) => e && typeof e === "object" && !Array.isArray(e) && typeof e.name === "string" && e.name !== "")
+    .map((e) => ({
+      name: e.name,
+      title: typeof e.title === "string" && e.title !== "" ? e.title : e.name,
+      fields: Array.isArray(e.fields) ? e.fields : [],
+    }));
 }
 
 // Portable-doc block types the vocabulary admits.
@@ -172,8 +189,17 @@ export function transactionVetoesVocabulary(tr, state, vocab) {
 // Which slash rows to OFFER: the canvas's insertable items narrowed to the
 // vocabulary's block types. Compound "Starters" rows (whole subtrees) are never
 // offered inside a field. An absent vocabulary passes the items through intact.
+//
+// A declared object block with no canvas item of its own gets a row of its own,
+// marked `object: true`: the canvas inserts it as a verbatim block of that type
+// (index.js _insertObjectBlock), and the server checks its fields.
 export function slashItemsForVocabulary(items, vocab) {
   if (!vocab) return items;
   const types = allowedBlockTypes(vocab);
-  return (items || []).filter((it) => it && !it.compound && types.has(it.type));
+  const kept = (items || []).filter((it) => it && !it.compound && types.has(it.type));
+  const offered = new Set(kept.map((it) => it.type));
+  const objectRows = (vocab.objects || [])
+    .filter((o) => !offered.has(o.name))
+    .map((o) => ({ group: "Blocks", type: o.name, label: o.title, hint: "◇", desc: "custom block", object: true }));
+  return [...kept, ...objectRows];
 }
