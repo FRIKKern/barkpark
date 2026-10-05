@@ -210,8 +210,7 @@ MODE=report
 DEFAULT_LEDGER='chronicle-paper.yml|2026-09-23: nightly narrative digest, report class. Carries a pull_request arm, which is NOT a reader of a scheduled red (see the predicate above) — this row exists so that fact is recorded rather than mistaken for coverage. A late or failed chronicle costs one night of prose and gates nothing.
 landed-open-report.yml|2026-09-23: daily ledger digest. Its own header states a red here means THE READ FAILED and that findings exit 0 into the step summary, and it deliberately carries no push arm so it renders no check run anywhere. Accepted UNREAD: the digest is a convenience, and the ledger it reports on is queryable directly with bp.
 pds-scratch-round-trip.yml|2026-09-23: daily boot/verify/teardown of the PDS scratch target. Schedule + workflow_dispatch ONLY and its header measures the run at >10 min (two full compiles), calling a per-PR venue a WRONG build. So R2 is deliberately absent; R3 would be the right reader and is not yet wired.
-release-curator-draft.yml|2026-09-23: daily scan that opens or refreshes ONE draft GitHub Release for a human to bless. Schedule + workflow_dispatch by design (its header rules out a push arm as noise that would make the draft chase main). The draft is a standing invitation, not a safety net; a failed refresh costs a day.
-weekly-changelog.yml|2026-09-23: weekly changelog digest, report class. Carries a pull_request arm (not a reader of a scheduled red). A missed week costs a changelog entry and gates nothing.'
+release-curator-draft.yml|2026-09-23: daily scan that opens or refreshes ONE draft GitHub Release for a human to bless. Schedule + workflow_dispatch by design (its header rules out a push arm as noise that would make the draft chase main). The draft is a standing invitation, not a safety net; a failed refresh costs a day.'
 
 usage() { sed -n '2,150p' "$0" | sed 's/^# \{0,1\}//'; exit 2; }
 
