@@ -15,7 +15,7 @@ defmodule BarkparkWeb.Studio.MediaLiveEditMetadataTest do
 
   @dataset "production"
 
-  setup do
+  setup %{conn: conn} do
     raw = "media-edit-#{System.unique_integer([:positive])}"
 
     {:ok, _} =
@@ -27,7 +27,7 @@ defmodule BarkparkWeb.Studio.MediaLiveEditMetadataTest do
         Barkpark.TenancyFixtures.default_workspace_id!()
       )
 
-    {:ok, conn: Plug.Test.init_test_session(build_conn(), %{"api_token" => raw})}
+    {:ok, conn: Plug.Test.init_test_session(conn, %{"api_token" => raw})}
   end
 
   defp open_path(html) do
@@ -53,7 +53,7 @@ defmodule BarkparkWeb.Studio.MediaLiveEditMetadataTest do
 
   # A workspace other than Default has no mediaAsset schema today (plugin
   # schemas install into the Default scope only, task-be5eaec4a5b9e524).
-  test "without it, the explorer offers no Edit metadata" do
+  test "without it, the explorer offers no Edit metadata", %{conn: conn} do
     suffix = System.unique_integer([:positive])
 
     {:ok, ws} =
@@ -67,10 +67,13 @@ defmodule BarkparkWeb.Studio.MediaLiveEditMetadataTest do
     {:ok, _} =
       Barkpark.Auth.create_token(raw, "media-edit-ws", @dataset, ["read", "write"], ws.id)
 
-    conn = Plug.Test.init_test_session(build_conn(), %{"api_token" => raw})
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
-    assert {:error, _} =
-             Content.get_schema("mediaAsset", @dataset, workspace_id: ws.id, project_id: proj.id)
+    assert :error =
+             Content.resolve_schema("mediaAsset", @dataset,
+               workspace_id: ws.id,
+               project_id: proj.id
+             )
 
     {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/media")
 

@@ -62,7 +62,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
   # cannot open, and a button into "could not open" is worse than none.
   defp assign_asset_edit_path(socket) do
     path =
-      case Content.get_schema(
+      case Content.resolve_schema(
              "mediaAsset",
              socket.assigns.dataset,
              ScopeHelpers.scope_opts(socket)
