@@ -565,14 +565,51 @@ defmodule Barkpark.Content.SchemaDefinitionTest do
         name: "page",
         fields: [
           %{"name" => "title", "type" => "string"},
-          %{"name" => "body", "type" => "richText"}
+          %{"name" => "intro", "type" => "richText"}
         ]
       }
 
       assert SchemaDefinition.default_layout(schema) == [
                %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => false},
-               %{"kind" => "field", "name" => "body", "max" => 1, "enforce" => false},
+               %{"kind" => "field", "name" => "intro", "max" => 1, "enforce" => false},
                %{"kind" => "region", "name" => "body"}
+             ]
+    end
+
+    # task-9f230ad6d5b50fb0: a field named like the region never binds
+    # content.body a second time.
+    test "a richText field named body is edited by the region alone" do
+      for schema <- [
+            %SchemaDefinition{
+              name: "publication",
+              fields: [
+                %{"name" => "title", "type" => "string"},
+                %{"name" => "body", "type" => "richText"}
+              ]
+            },
+            %{
+              "name" => "publication",
+              "fields" => [
+                %{"name" => "title", "type" => "string"},
+                %{"name" => "body", "type" => "richText"}
+              ]
+            }
+          ] do
+        assert SchemaDefinition.default_layout(schema) == [
+                 %{"kind" => "field", "name" => "title", "max" => 1, "enforce" => false},
+                 %{"kind" => "region", "name" => "body"}
+               ]
+      end
+    end
+
+    test "a non-richText field named body keeps its entry and drops the region" do
+      schema = %SchemaDefinition{
+        name: "note",
+        fields: [%{"name" => "body", "type" => "text"}]
+      }
+
+      assert SchemaDefinition.default_layout(schema) == [
+               %{"kind" => "field", "name" => "body", "max" => 1, "enforce" => false}
              ]
     end
 
