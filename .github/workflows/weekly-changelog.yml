@@ -16,6 +16,12 @@ on:
         required: false
         default: false
         type: boolean
+  # The weekly changelog routine (changelog/ROUTINE.md) lands its editorial
+  # through a PR; the merge republishes exactly the weeks it changed.
+  push:
+    branches: [main]
+    paths:
+      - "changelog/editorial.json"
   pull_request:
     paths:
       - ".github/workflows/weekly-changelog.yml"
@@ -77,8 +83,44 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WEEK: ${{ steps.week.outputs.week }}
           BACKFILL_ALL: ${{ github.event.inputs.backfill_all || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
         run: |
-          if [ "$BACKFILL_ALL" = "true" ]; then
+          if [ "$EVENT_NAME" = "push" ]; then
+            # Republish only the editorial weeks this push added or changed. A
+            # before-sha git cannot read loads as {} and republishes every week:
+            # edits are idempotent, so over-publishing is safe and skipping is not.
+            if ! weeks_raw="$(python3 - "$BEFORE" <<'PY'
+          import json, subprocess, sys
+
+          def load(ref):
+              try:
+                  out = subprocess.run(
+                      ["git", "show", f"{ref}:changelog/editorial.json"],
+                      check=True, capture_output=True, text=True,
+                  ).stdout
+              except subprocess.CalledProcessError:
+                  return {}
+              return json.loads(out)
+
+          old, new = load(sys.argv[1]), load("HEAD")
+          for week in sorted(new):
+              if old.get(week) != new[week]:
+                  print(week)
+          PY
+            )"; then
+              echo "::error::could not diff changelog/editorial.json against $BEFORE"
+              exit 1
+            fi
+            weeks=()
+            while IFS= read -r week; do
+              [ -n "$week" ] && weeks+=("$week")
+            done <<< "$weeks_raw"
+            if [ "${#weeks[@]}" -eq 0 ]; then
+              echo "::notice::changelog/editorial.json changed no week's content; nothing to republish"
+              exit 0
+            fi
+          elif [ "$BACKFILL_ALL" = "true" ]; then
             if ! weeks_raw="$(python3 scripts/weekly-changelog.py --list-editorial-weeks)"; then
               echo "::error::--list-editorial-weeks exited non-zero; refusing a silent no-op backfill"
               exit 1
