@@ -16,6 +16,17 @@ on:
         required: false
         default: false
         type: boolean
+  # The weekly changelog routine (changelog/ROUTINE.md) lands its editorial
+  # through a PR; the merge republishes exactly the weeks editorial.json
+  # changed, and a push that changes no week's entry publishes nothing.
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/weekly-changelog.yml"
+      - "scripts/weekly-changelog.py"
+      - "scripts/weekly-changelog.test.py"
+      - "changelog/editorial.json"
+      - "CHANGELOG.md"
   pull_request:
     paths:
       - ".github/workflows/weekly-changelog.yml"
@@ -25,7 +36,7 @@ on:
       - "CHANGELOG.md"
 
 concurrency:
-  group: weekly-changelog-${{ github.event.inputs.week_start || 'previous' }}
+  group: weekly-changelog-${{ github.ref == 'refs/heads/main' && github.sha || github.ref }}-${{ github.event.inputs.week_start || 'previous' }}
   cancel-in-progress: false
 
 jobs:
@@ -77,6 +88,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           WEEK: ${{ steps.week.outputs.week }}
           BACKFILL_ALL: ${{ github.event.inputs.backfill_all || 'false' }}
+          EVENT_NAME: ${{ github.event_name }}
+          BEFORE: ${{ github.event.before }}
         run: |
           if [ "$BACKFILL_ALL" = "true" ]; then
             if ! weeks_raw="$(python3 scripts/weekly-changelog.py --list-editorial-weeks)"; then
@@ -95,6 +108,41 @@ jobs:
             fi
           else
             weeks=("$WEEK")
+          fi
+          if [ "$EVENT_NAME" = "push" ]; then
+            # Republish only the editorial weeks this push added or changed. A
+            # before-sha git cannot read loads as {} and republishes every week:
+            # edits are idempotent, so over-publishing is safe and skipping is not.
+            if ! weeks_raw="$(python3 - "$BEFORE" <<'PY'
+          import json, subprocess, sys
+
+          def load(ref):
+              try:
+                  out = subprocess.run(
+                      ["git", "show", f"{ref}:changelog/editorial.json"],
+                      check=True, capture_output=True, text=True,
+                  ).stdout
+              except subprocess.CalledProcessError:
+                  return {}
+              return json.loads(out)
+
+          old, new = load(sys.argv[1]), load("HEAD")
+          for week in sorted(new):
+              if old.get(week) != new[week]:
+                  print(week)
+          PY
+            )"; then
+              echo "::error::could not diff changelog/editorial.json against $BEFORE"
+              exit 1
+            fi
+            weeks=()
+            while IFS= read -r week; do
+              [ -n "$week" ] && weeks+=("$week")
+            done <<< "$weeks_raw"
+            if [ "${#weeks[@]}" -eq 0 ]; then
+              echo "::notice::changelog/editorial.json changed no week's content; nothing to republish"
+              exit 0
+            fi
           fi
 
           gh label create weekly-changelog \
