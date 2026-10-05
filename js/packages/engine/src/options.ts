@@ -13,7 +13,8 @@ export interface StartBarkparkOptions {
   port?: number
   /**
    * Engine folder built by scripts/engine/build-release.mjs. Defaults to the
-   * BARKPARK_ENGINE_RELEASE environment variable. Platform packages come later.
+   * BARKPARK_ENGINE_RELEASE environment variable, then to the engine folder in the
+   * installed @barkpark/engine-<platform>-<arch> package.
    */
   release?: string
   /** How long one boot may take before it counts as failed. Default 180 s. */

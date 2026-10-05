@@ -3,7 +3,9 @@ name: engine-release
 # Builds the Barkpark engine folder (scripts/engine/) for macOS arm64, Linux x64
 # and Linux arm64, uploads each as an artifact, then boots each artifact with the
 # @barkpark/engine integration test on a runner with no Elixir and no Postgres on
-# PATH and checks /status.json.
+# PATH and checks /status.json. The boot job then packs @barkpark/engine and the
+# platform package (scripts/engine/pack.mjs), npm installs both tarballs into a
+# scratch app and boots it with startBarkpark({ dataDir }) alone.
 #
 # WHY IT EXISTS: plan work for the App shape (task-03d94dbc4ad7b160, paper
 # /papers/the-engine-2026-10-05); no merge waits on it. It runs on pushes to main
@@ -123,7 +125,8 @@ jobs:
           if-no-files-found: error
 
   boot:
-    name: boot (${{ matrix.target }})
+    # The App shape's CI leg (docs/contracts/product-era.md); deploy.yml is Cloud's, compose-smoke.yml Solo's.
+    name: App shape boot (${{ matrix.target }})
     needs: build
     # Boot every platform whose build passed, even when another platform's build failed.
     if: ${{ !cancelled() }}
@@ -139,7 +142,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          sparse-checkout: js
+          sparse-checkout: |
+            js
+            scripts/engine
 
       - uses: pnpm/action-setup@v4
         with:
@@ -193,10 +198,46 @@ jobs:
           cat "$RUNNER_TEMP/report.json"
           { echo "### boot ${{ matrix.target }}"; echo; echo '```json'; cat "$RUNNER_TEMP/report.json"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
 
+      # The same engine folder, the way an app gets it: both packages from their npm
+      # tarballs into a scratch app, then startBarkpark({ dataDir }) and nothing else.
+      - name: Pack @barkpark/engine and its platform package
+        run: |
+          set -o pipefail  # tee below must not hide a failed pack
+          (cd js/packages/engine && pnpm build)
+          node scripts/engine/pack.mjs platform --engine "$RUNNER_TEMP/engine" --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/platform.json"
+          node scripts/engine/pack.mjs launcher --out "$RUNNER_TEMP/npm" | tee "$RUNNER_TEMP/launcher.json"
+
+      - name: npm install and one startBarkpark call
+        run: |
+          set -o pipefail  # tee below must not hide a failed boot
+          app="$RUNNER_TEMP/app"
+          mkdir -p "$app"
+          cd "$app"
+          echo '{ "name": "scratch-app", "version": "1.0.0", "private": true, "type": "module" }' > package.json
+          npm install --no-audit --no-fund "$(jq -r .tarball "$RUNNER_TEMP/launcher.json")" "$(jq -r .tarball "$RUNNER_TEMP/platform.json")"
+          cp "$GITHUB_WORKSPACE/scripts/engine/npm-boot-check.mjs" .
+          mkdir -p "$RUNNER_TEMP/npm-it"
+          env -u BARKPARK_ENGINE_RELEASE PATH="$TEST_PATH" TMPDIR="$RUNNER_TEMP/npm-it" node npm-boot-check.mjs | tee "$RUNNER_TEMP/npm-boot.json"
+          {
+            echo "### npm install + startBarkpark ${{ matrix.target }}"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| @barkpark/engine tarball | $(du -h "$(jq -r .tarball "$RUNNER_TEMP/launcher.json")" | cut -f1) |"
+            echo "| platform package tarball | $(du -h "$(jq -r .tarball "$RUNNER_TEMP/platform.json")" | cut -f1) |"
+            echo "| installed node_modules | $(du -sh node_modules | cut -f1) |"
+            echo
+            echo '```json'
+            cat "$RUNNER_TEMP/npm-boot.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Keep the data folder on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: engine-boot-logs-${{ matrix.target }}
-          path: ${{ runner.temp }}/it/barkpark-engine-it-*/logs
+          path: |
+            ${{ runner.temp }}/it/barkpark-engine-it-*/logs
+            ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
           if-no-files-found: ignore

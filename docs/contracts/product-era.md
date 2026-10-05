@@ -37,6 +37,7 @@ Core has two doors. The HTTP API serves everything outside the process. The plug
 | What | Managed Barkparks run by `cloud/` | One self-hosted box | Barkpark compiled into another app |
 | Run by | Control plane and `barkpark-agent` | The owner | The app, through `startBarkpark` |
 | Updates | Cloud self-update relay | `git pull` or a release | With the app version |
+| Proven in CI by | `deploy.yml` | `compose-smoke.yml` | `engine-release.yml` (`App shape boot`) |
 
 The installing door declares the shape in `BARKPARK_SHAPE` (`cloud`, `solo` or `app`; an unknown value refuses the boot). The Cloud provisioner writes `cloud`; `deploy.sh`, compose and `bin/barkpark` write `solo`. `/status.json` reports it as `shape`, or `null` when no door declared one. It is inventory: core code does not branch on it (`Barkpark.Shape`).
 
