@@ -108,6 +108,54 @@ check("the slash menu offers only the vocabulary's block types and never a compo
   assert.equal(slashItemsForVocabulary(items, null), items);
 });
 
+// task-96fce87b7b71c288: `{name, fields}` entries in blocks.of are custom object
+// blocks the server already admits; the canvas admits the same names.
+const WITH_OBJECTS = JSON.stringify({
+  styles: ["normal"],
+  of: [
+    "image",
+    { name: "callout", fields: [{ name: "tone", type: "string" }] },
+    { name: "factBox", title: "Faktaboks", fields: [{ name: "body", type: "text" }] },
+    { fields: [] },
+  ],
+});
+
+check("object entries in blocks.of are allowed block types", () => {
+  const v = parseVocabulary(WITH_OBJECTS);
+  assert.deepEqual(v.of, ["image", "callout", "factBox"]);
+  assert.deepEqual(
+    v.objects.map((o) => [o.name, o.title]),
+    [
+      ["callout", "callout"],
+      ["factBox", "Faktaboks"],
+    ],
+  );
+  assert.ok(allowedBlockTypes(v).has("factBox"));
+  const opaque = (t) => ({ type: "bpOpaque", attrs: { bpType: t, bpBlock: { type: t } } });
+  assert.equal(docVocabularyViolation(doc(para(text("a")), opaque("factBox")), v), null);
+  assert.equal(docVocabularyViolation(doc(opaque("banner")), v), "block type banner");
+  // inserting a declared object block into a clean doc is not vetoed
+  assert.equal(
+    transactionVetoesVocabulary(fakeTr(doc(para(text("a")), opaque("factBox"))), fakeState(doc(para(text("a")))), v),
+    false,
+  );
+});
+
+check("the slash menu offers a declared object block, once, as an object row", () => {
+  const v = parseVocabulary(WITH_OBJECTS);
+  const items = [
+    { type: "paragraph", label: "Paragraph" },
+    { type: "callout", label: "Callout" },
+  ];
+  const offered = slashItemsForVocabulary(items, v);
+  // callout has a canvas item already, so it is kept as that item, not doubled
+  assert.deepEqual(offered.map((i) => i.type), ["paragraph", "callout", "factBox"]);
+  const row = offered.find((i) => i.type === "factBox");
+  assert.equal(row.object, true);
+  assert.equal(row.label, "Faktaboks");
+  assert.equal(offered.find((i) => i.type === "callout").object, undefined);
+});
+
 if (failures > 0) {
   console.log(`\n${failures} failing check(s)`);
   process.exit(1);

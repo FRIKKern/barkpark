@@ -2992,6 +2992,10 @@ class BpPaperCanvas extends HTMLElement {
     }
     // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
     // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
+    if (item && item.object) {
+      this._insertObjectBlock(item.type);
+      return;
+    }
     if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
       this._insertViaServer(item.type, { replaceSlashLine: true });
       return;
@@ -3013,6 +3017,24 @@ class BpPaperCanvas extends HTMLElement {
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
     insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level });
+  }
+
+  // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
+  // line with a verbatim bpOpaque carry of `{type}`. runToOps inserts it as a new
+  // block (the opaque insert path), the server checks its declared fields.
+  _insertObjectBlock(type) {
+    const editor = this._editor;
+    if (!editor || !this._editable || typeof type !== "string" || type === "") return false;
+    const { state } = editor;
+    const nodeType = state.schema.nodes.bpOpaque;
+    if (!nodeType) return false;
+    const index = topLevelIndexAtSelection(editor);
+    let offset = 0;
+    for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
+    const line = state.doc.child(index);
+    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: { type } });
+    editor.view.dispatch(state.tr.replaceWith(offset, offset + line.nodeSize, node));
+    return true;
   }
 
   // ── paper masters (task-3b6e562e916c8ce4) ──────────────────────────────────
