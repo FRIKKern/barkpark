@@ -16,7 +16,7 @@
     "@barkpark/nextjs": "workspace:^"
   },
   "devDependencies": {
-    "next": "16.2.1",
+    "next": "16.3.8",
     "react": "^19.3.0",
     "react-dom": "^19.3.0",
     "@types/react": "^19",
