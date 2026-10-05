@@ -54,7 +54,7 @@ node scripts/engine/build-postgres.mjs --out /tmp/postgres
 node scripts/engine/build-release.mjs --add-postgres /tmp/engine /tmp/postgres
 ```
 
-`engine.json` in the folder names the commit, platform, Erlang, Elixir and Postgres versions, and the system libraries the release needs. On macOS the folder needs nothing outside the system; on Linux it needs glibc and OpenSSL 3 from the system. The `engine-release` workflow builds the folder for macOS arm64, Linux x64 and Linux arm64 on every push to main and boots each one on a runner with no Elixir or Postgres.
+`engine.json` in the folder names the commit, platform, Erlang, Elixir and Postgres versions, and the system libraries the release needs. On macOS the folder needs nothing outside the system. On Linux it uses the system's glibc, OpenSSL 3, libstdc++, libtinfo and zlib, as listed in `engine.json` under `sharedLibraries`. The `engine-release` workflow builds the folder for macOS arm64, Linux x64 and Linux arm64 on every push to main and boots each one on a runner with no Elixir or Postgres.
 
 ## Tests
 
