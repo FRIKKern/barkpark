@@ -582,13 +582,162 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
+  # image with declared subfields or `options.hotspot` (task-f0f51946d2de672d).
+  # The value is a URL string (legacy) or an object: `asset: {_ref}` (or the
+  # older `url`/`assetId`), optional `hotspot` {x,y,height,width} and `crop`
+  # {top,bottom,left,right}, each a number from 0 to 1, plus the declared
+  # subfields (`alt`, …) as siblings, walked like a composite's. A URL string
+  # has no subfields, so a required `alt` is reported on it. An image with
+  # neither declaration stays the leaf below, byte for byte.
+  defp walk_field(%Field{type: "image"} = f, value, path, level) do
+    if structured_image?(f),
+      do: walk_image(f, value, path, level),
+      else: walk_leaf(f, value, path, level)
+  end
+
+  # richText whose block vocabulary declares custom object blocks
+  # (task-152cacba913a4724): every block of such a type has its declared
+  # fields checked. Other blocks, and the field's own rules, are unchanged.
+  defp walk_field(%Field{type: "richText", raw: raw} = f, value, path, level) do
+    case object_block_types(raw) do
+      objects when map_size(objects) == 0 ->
+        walk_leaf(f, value, path, level)
+
+      objects ->
+        blocks = if is_list(value), do: value, else: []
+
+        walk_leaf(f, value, path, level) ++
+          (blocks
+           |> Enum.with_index()
+           |> Enum.flat_map(fn
+             {%{"type" => t} = block, idx} when is_map_key(objects, t) ->
+               object_block_findings(Map.fetch!(objects, t), block, "#{path}/#{idx}")
+
+             _ ->
+               []
+           end)
+           |> then(&shape(level, &1)))
+    end
+  end
+
   # primitive leaf — apply v1-style rules from raw["validation"]
-  defp walk_field(%Field{} = f, value, path, level) do
+  defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  defp walk_leaf(%Field{} = f, value, path, level) do
     rules = field_rules(f, level)
     msgs = validate_field(value, rules, f.raw || %{})
     msgs = apply_message(msgs ++ check_numeric_bounds(value, rules), rules)
     Enum.map(msgs, fn m -> {path, m} end)
   end
+
+  @doc """
+  The custom object blocks a richText field's vocabulary declares, as
+  `%{name => fields}`: the `{name, fields}` entries of `blocks.of`
+  (task-152cacba913a4724). String entries are built-in block types and are
+  not listed.
+  """
+  @spec object_block_types(map() | nil) :: %{String.t() => [map()]}
+  def object_block_types(%{"blocks" => %{"of" => of}}) when is_list(of) do
+    for %{"name" => name} = entry <- of, is_binary(name), into: %{} do
+      {name, Enum.filter(List.wrap(entry["fields"]), &is_map/1)}
+    end
+  end
+
+  def object_block_types(_), do: %{}
+
+  @doc """
+  Findings for ONE custom object block against its declared `fields`, as
+  `[{path, message}]`. Each field is walked like a composite's subfield (so
+  `validation` rules and nested shapes apply), and a string value must be in
+  the field's `options.list` when one is declared (Sanity's list shape:
+  strings or `{title, value}`).
+  """
+  @spec object_block_findings([map()], map(), String.t()) :: [{String.t(), String.t()}]
+  def object_block_findings(fields, block, path) when is_list(fields) and is_map(block) do
+    case SchemaDefinition.parse(%{"name" => "block", "fields" => fields}) do
+      {:ok, parsed} ->
+        Enum.flat_map(parsed.fields, fn %Field{} = child ->
+          value = fetch_field(block, child.name)
+          child_path = path <> "/" <> (child.name || "")
+
+          walk_field(child, value, child_path, :error) ++
+            list_option_findings(child, value, child_path)
+        end)
+
+      {:error, reason} ->
+        [{path, "the block's declared fields do not parse: #{inspect(reason)}"}]
+    end
+  end
+
+  defp list_option_findings(%Field{raw: %{"options" => %{"list" => list}}}, value, path)
+       when is_list(list) and is_binary(value) do
+    allowed =
+      Enum.map(list, fn
+        %{"value" => v} -> v
+        v -> v
+      end)
+
+    if value in allowed,
+      do: [],
+      else: [{path, "must be one of #{Enum.map_join(allowed, ", ", &to_string/1)}"}]
+  end
+
+  defp list_option_findings(_field, _value, _path), do: []
+
+  defp structured_image?(%Field{fields: [_ | _]}), do: true
+  defp structured_image?(%Field{raw: %{"options" => %{"hotspot" => true}}}), do: true
+  defp structured_image?(_), do: false
+
+  @image_rects %{
+    "hotspot" => ~w(x y height width),
+    "crop" => ~w(top bottom left right)
+  }
+
+  defp walk_image(%Field{} = f, value, path, level) do
+    rules = field_rules(f, level)
+
+    cond do
+      blank?(value) and required?(rules) ->
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
+
+      is_nil(value) ->
+        []
+
+      is_binary(value) ->
+        walk_image_fields(f, %{}, path, level)
+
+      not is_map(value) ->
+        shape(level, [{path, "expected an image URL or an image object"}])
+
+      true ->
+        rects =
+          Enum.flat_map(@image_rects, fn {key, sides} ->
+            image_rect_findings(Map.get(value, key), sides, path <> "/" <> key)
+          end)
+
+        shape(level, rects) ++ walk_image_fields(f, value, path, level)
+    end
+  end
+
+  defp walk_image_fields(%Field{fields: kids}, value, path, level) do
+    Enum.flat_map(kids || [], fn %Field{} = child ->
+      walk_field(child, fetch_field(value, child.name), path <> "/" <> (child.name || ""), level)
+    end)
+  end
+
+  defp image_rect_findings(nil, _sides, _path), do: []
+
+  defp image_rect_findings(rect, sides, path) when is_map(rect) do
+    Enum.flat_map(sides, fn side ->
+      case Map.get(rect, side) do
+        n when is_number(n) and n >= 0 and n <= 1 -> []
+        _ -> [{path <> "/" <> side, "must be a number from 0 to 1"}]
+      end
+    end)
+  end
+
+  defp image_rect_findings(_rect, sides, path),
+    do: [{path, "expected an object with #{Enum.join(sides, ", ")}"}]
 
   # The array's own length rule (v2 walker only; flat mode is frozen).
   defp check_list_bounds(list, rules) when is_list(list) do
