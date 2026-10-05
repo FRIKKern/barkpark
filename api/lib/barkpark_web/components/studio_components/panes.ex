@@ -555,6 +555,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         class="bp-doc-row-body"
         title={@doc_id}
         aria-label={@aria_label}
+        data-press-name={@title}
         aria-current={@selected && "true"}
         phx-click={@phx_click}
         phx-value-pane={@phx_value_pane}
