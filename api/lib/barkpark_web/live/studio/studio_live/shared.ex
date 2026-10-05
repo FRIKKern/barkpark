@@ -537,10 +537,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
           findings = validation_findings(schema, new_title, saved_doc.content, errs)
 
           panes =
-            PaneBuilder.update_title(
+            PaneBuilder.update_saved_row(
               socket.assigns.panes,
               Content.published_id(saved_doc.doc_id),
-              new_title
+              new_title,
+              saved_doc
             )
 
           # The cross-field rules read the WHOLE form, not just the posted

@@ -212,7 +212,7 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
     end
   end
 
-  describe "update_title/3" do
+  describe "update_saved_row/4" do
     test "updates only matching doc id" do
       panes = [
         %{
@@ -224,9 +224,31 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
         }
       ]
 
-      result = PaneBuilder.update_title(panes, "p1", "New")
+      result = PaneBuilder.update_saved_row(panes, "p1", "New", saved("drafts.p1"))
       assert hd(hd(result).items).title == "New"
-      assert Enum.at(hd(result).items, 1).title == "Other"
+      assert Enum.at(hd(result).items, 1) == %{type: :doc, id: "p2", title: "Other"}
+    end
+
+    test "a save that made a draft marks the row draft and updated just now" do
+      panes = [
+        %{
+          title: "Posts",
+          items: [
+            %{
+              type: :doc,
+              id: "p1",
+              title: "Old",
+              is_draft: false,
+              status: "published",
+              updated: "Updated 3m ago"
+            }
+          ]
+        }
+      ]
+
+      [row] = hd(PaneBuilder.update_saved_row(panes, "p1", "Old", saved("drafts.p1"))).items
+      assert row.is_draft
+      assert row.updated == "Updated just now"
     end
 
     test "preserves non-doc items unchanged" do
@@ -240,9 +262,12 @@ defmodule BarkparkWeb.Studio.PaneBuilderTest do
         }
       ]
 
-      result = PaneBuilder.update_title(panes, "p1", "New")
+      result = PaneBuilder.update_saved_row(panes, "p1", "New", saved("drafts.p1"))
       assert Enum.at(hd(result).items, 0) == %{type: :divider, id: "d"}
     end
+
+    defp saved(doc_id),
+      do: %{doc_id: doc_id, status: "published", updated_at: DateTime.utc_now()}
   end
 
   describe "list_preview row badge + meta" do
