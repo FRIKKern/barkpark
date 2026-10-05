@@ -1537,7 +1537,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   href={Paths.studio_path(@scope_prefix, [hit.type, hit.id], @dataset)}
                 >
                   <span class="pane-doc-title"><%= hit.title %></span>
-                  <span class="pane-doc-sub"><%= hit.type %></span>
+                  <span class="pane-doc-sub"><%= hit.type_title %></span>
                 </a>
               <% end %>
             <% end %>
