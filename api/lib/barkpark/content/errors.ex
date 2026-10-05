@@ -42,6 +42,8 @@ defmodule Barkpark.Content.Errors do
     "duplicate_of" =>
       "This publish near-duplicates an already-published document; the details.duplicate_of id names it. Extend that document — or, if this publish REPLACES it, declare content.supersedes with that id and republish.",
     "validation_failed" => "Fix the listed validation errors to match the schema, then resubmit.",
+    "document_referenced" =>
+      "Other documents still reference this one (details.referrers). Remove or repoint those references first, or repeat the delete with \"force\": true to delete anyway (the override is audited).",
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the delete with force to remove the schema and orphan them: `bp schema delete <name> --force`, or ?force=true over HTTP.",
     "invalid_filter" =>
@@ -1243,6 +1245,20 @@ defmodule Barkpark.Content.Errors do
   # of those docs 404s, since `schema_public?` is false). 409 Conflict; the
   # caller either deletes the documents first or repeats with `?force=true`. The
   # orphan `count` rides in `details` so the caller can gauge the blast radius.
+  # A `delete` mutation refused because other documents still reference the
+  # target (task-c8c22ee8076535fe; Sanity refuses the same delete). 409; the
+  # referrers ride in `details` (`id` + `type`, capped at 50) so the caller can
+  # fix them, and `"force": true` on the op overrides.
+  defp build({:error, {:document_referenced, id, referrers}}) when is_list(referrers),
+    do: %{
+      code: "document_referenced",
+      message:
+        "#{id} is referenced by #{length(referrers)} document(s); " <>
+          "remove those references, or set \"force\": true on the delete",
+      status: 409,
+      details: %{id: id, referrers: referrers}
+    }
+
   defp build({:error, {:schema_has_documents, count}}) when is_integer(count),
     do: %{
       code: "schema_has_documents",

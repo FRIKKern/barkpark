@@ -388,6 +388,7 @@ var codeExit = map[string]int{
 	"duplicate_of":                exitConflict, // 409, errors.ex:604
 	"idempotency_key_in_use":      exitConflict, // 409, errors.ex:515
 	"schema_has_documents":        exitConflict, // 409, errors.ex:696
+	"document_referenced":         exitConflict, // 409, delete refused: other docs reference it
 	"conflict_retry":              exitConflict, // 409, bulldocs_ingest_controller.ex:1117
 	"workspace_slug_conflict":     exitConflict, // 409, workspace_controller.ex:513
 	"import_constraint_violation": exitConflict, // 409, workspace_controller.ex:651
