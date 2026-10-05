@@ -904,6 +904,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, required: true
   attr :user_color, :string, required: true
+  # The signed-in account's email, shown ONLY here, in the viewer's own dialog:
+  # never on the avatar or in presence (task-9f31f04ab4882f7d). nil when the
+  # session has no account.
+  attr :account_label, :string, default: nil
   # The scoped `…/studio/_account` page (download or erase your data). nil on a
   # surface that cannot build a scoped path — the link is then not rendered.
   attr :account_path, :string, default: nil
@@ -932,6 +936,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div>
               <div style="font-weight: 600;"><%= @user_name %></div>
               <div class="text-xs text-muted">This is how others see you</div>
+              <div :if={@account_label} class="text-xs text-muted" data-test-id="profile-account">
+                Signed in as <%= @account_label %>
+              </div>
             </div>
           </div>
           <div class="form-group">
@@ -1003,6 +1010,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :delete_refs, :list, default: []
   attr :editor_doc, :map, default: nil
   attr :show_discard, :boolean, default: false
+  attr :account_label, :string, default: nil
 
   def studio_modals(assigns) do
     ~H"""
@@ -1010,6 +1018,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       show_profile={@show_profile}
       user_name={@user_name}
       user_color={@user_color}
+      account_label={@account_label}
       account_path={@account_path}
     />
     <.image_picker_modal
