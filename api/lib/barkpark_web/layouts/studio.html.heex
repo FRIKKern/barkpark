@@ -91,7 +91,11 @@
           <span class="bp-action-icon" aria-hidden="true"><.icon name="share-2" size={16} /></span>
         </button>
         <.studio_theme_toggle />
-        <%= if assigns[:api_token] do %>
+        <%!-- A token session (`:api_token`) OR an account session
+              (`:current_user`) can sign out; an anonymous public-demo socket
+              has neither and nothing to end. Keyed on the token alone, an
+              editor signed in with email + password had no Sign out. --%>
+        <%= if assigns[:api_token] || assigns[:current_user] do %>
           <.studio_signout_button />
         <% end %>
         <%!-- Sanity-style: the avatar sits at the far right edge. --%>
