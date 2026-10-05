@@ -3300,6 +3300,11 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :require_token])
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
+    # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
+    # POST moves a live stream's own focus; it writes no document, so it rides
+    # this read pipeline. Scoped only: the room is workspace + project.
+    get("/v1/data/presence/:dataset", PresenceController, :stream)
+    post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
     get("/v1/data/export/:dataset", ExportController, :export)
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
