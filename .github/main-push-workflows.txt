@@ -63,4 +63,5 @@
 .github/workflows/typedoc.yml	CONDITIONAL
 .github/workflows/vendored-assets.yml	CONDITIONAL
 .github/workflows/web-fork-drift.yml	CONDITIONAL
+.github/workflows/weekly-changelog.yml	CONDITIONAL
 .github/workflows/windows-smoke.yml	CONDITIONAL
