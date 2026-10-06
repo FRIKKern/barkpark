@@ -336,6 +336,26 @@ defmodule Barkpark.Content.TagRegistry do
     |> Scope.scope_to_workspace_including_global(workspace_id, project_id)
   end
 
+  @doc """
+  The registered tag names in scope, alphabetical: what the Studio Labels
+  editor offers as suggestions (task-3a5b9cda74564d1c). Same scope rules as
+  the publish gate (workspace plus the shared base vocabulary).
+  """
+  @spec registered_names(String.t(), keyword()) :: [String.t()]
+  def registered_names(dataset, opts \\ []) when is_binary(dataset) do
+    registered_tags_query(dataset, opts)
+    |> order_by([d], asc: d.doc_id)
+    |> limit(500)
+    |> select([d], d.doc_id)
+    |> Repo.all()
+  end
+
+  @doc "Whether `name` is a registered tag in scope (the publish gate's test)."
+  @spec registered?(String.t(), String.t(), keyword()) :: boolean()
+  def registered?(name, dataset, opts \\ []) when is_binary(name) and is_binary(dataset) do
+    MapSet.member?(registered_subset([name], dataset, opts), name)
+  end
+
   # ── legacy seed internals ─────────────────────────────────────────────────
 
   defp legacy_distinct_tags(dataset, opts) do

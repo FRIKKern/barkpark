@@ -1145,12 +1145,58 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           )
 
         true ->
-          content = doc_field(paper, :content) || %{}
-          existing = if is_list(content["tags"]), do: content["tags"], else: []
-          entry = %{"tag" => tag, "strength" => strength, "rationale" => rationale}
-          persist_paper_meta(socket, paper, Map.put(content, "tags", existing ++ [entry]))
+          case ensure_label_registered(socket, tag) do
+            {:ok, socket} ->
+              content = doc_field(paper, :content) || %{}
+              existing = if is_list(content["tags"]), do: content["tags"], else: []
+              entry = %{"tag" => tag, "strength" => strength, "rationale" => rationale}
+              persist_paper_meta(socket, paper, Map.put(content, "tags", existing ++ [entry]))
+
+            {:error, message} ->
+              put_flash(socket, :error, message)
+          end
       end
     end)
+  end
+
+  # task-3a5b9cda74564d1c (ruling: option b). A label must be a registered tag
+  # or the publish wall refuses it later. A registered one is added as it is; a
+  # workspace admin registers a new one inline (publishes a `type:tag` document
+  # named by it, the registry's own write); a member is told to pick from the
+  # suggestions or ask an admin, and nothing is added.
+  @label_name ~r/\A[a-z0-9]+(-[a-z0-9]+)*\z/
+  defp ensure_label_registered(socket, tag) do
+    dataset = socket.assigns.dataset
+    opts = Shared.hook_opts(socket)
+
+    cond do
+      Barkpark.Content.TagRegistry.registered?(tag, dataset, opts) ->
+        {:ok, socket}
+
+      not BarkparkWeb.Studio.Caps.admin_affordance?(socket.assigns[:caps]) ->
+        {:error,
+         "“#{tag}” is not a label in this workspace yet. Pick one from the suggestions, or ask an admin to add it."}
+
+      not Regex.match?(@label_name, tag) ->
+        {:error,
+         "A new label name uses lowercase letters, numbers and hyphens, like “product-news”."}
+
+      true ->
+        register_label(socket, tag, dataset, opts)
+    end
+  end
+
+  defp register_label(socket, tag, dataset, opts) do
+    with {:ok, _draft} <-
+           Content.create_document("tag", %{"doc_id" => tag, "title" => tag}, dataset, opts),
+         {:ok, _published} <- Content.publish_document(tag, "tag", dataset, opts) do
+      {:ok,
+       socket
+       |> assign_label_suggestions()
+       |> put_flash(:info, "Registered “#{tag}” as a label in this workspace.")}
+    else
+      _ -> {:error, "Could not register “#{tag}” as a label. Try again, or ask another admin."}
+    end
   end
 
   @doc false
@@ -1186,10 +1232,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           put_flash(socket, :error, "Publish blocked: #{reason}")
 
         {:error, {:label_spine, details}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(details)}")
+          put_flash(socket, :error, "Publish blocked: #{paper_wall_copy(details)}")
 
         {:error, {:unknown_tag, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(socket, :error, "Publish blocked: #{unknown_label_copy(payload, socket)}")
 
         {:error, {:duplicate_of, payload}} ->
           put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
@@ -1209,6 +1255,68 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       end
     end)
   end
+
+  # The wall's tag refusals in the sidebar's own words (task-3a5b9cda74564d1c):
+  # the UI calls them Labels and has no `{tag, strength, rationale}` anywhere.
+  # Every other refusal keeps the shared plain-language formatter.
+  @doc false
+  def paper_wall_copy(details) when is_list(details),
+    do: details |> Enum.map(&paper_wall_copy/1) |> Enum.join(" · ")
+
+  def paper_wall_copy(%{} = detail) do
+    field = Map.get(detail, :field) || Map.get(detail, "field")
+    rule = to_string(Map.get(detail, :rule) || Map.get(detail, "rule") || "")
+
+    cond do
+      field != "tags" ->
+        Shared.format_wall_details(detail)
+
+      rule =~ ~r/requires a `tags` array|at least \d+ tag/ ->
+        "a paper needs at least one label. Add one in the Labels section: a registered label, a strength from 1 to 100 and a short reason."
+
+      rule =~ "at most" ->
+        "Labels — " <> labels_words(rule) <> " Remove the weakest in the Labels section."
+
+      true ->
+        "Labels — " <> labels_words(rule)
+    end
+  end
+
+  def paper_wall_copy(other), do: Shared.format_wall_details(other)
+
+  defp labels_words(text) do
+    text
+    |> String.replace("`", "")
+    |> String.replace("{tag, strength, rationale}", "label with a strength and a reason")
+    |> String.replace("rationale", "reason")
+    |> String.replace(~r/\btags\b/, "labels")
+    |> String.replace(~r/\btag\b/, "label")
+  end
+
+  @doc false
+  def unknown_label_copy(%{unknown: unknown} = payload, socket) when is_list(unknown) do
+    suggestions = Map.get(payload, :suggestions, %{})
+
+    remedy =
+      if BarkparkWeb.Studio.Caps.admin_affordance?(socket.assigns[:caps]),
+        do: "register it from the Labels section, or pick a registered one",
+        else: "pick a registered one from the Labels suggestions, or ask an admin to add it"
+
+    names =
+      Enum.map_join(unknown, " · ", fn name ->
+        case Map.get(suggestions, name, []) do
+          [] ->
+            "“#{name}” is not a registered label"
+
+          near ->
+            "“#{name}” is not a registered label (did you mean #{Enum.map_join(near, ", ", &"“#{&1}”")}?)"
+        end
+      end)
+
+    names <> " — " <> remedy <> "."
+  end
+
+  def unknown_label_copy(payload, _socket), do: Shared.format_wall_details(payload)
 
   # One writer for both sidebar metadata fields: whole-content upsert on the
   # draft row, rev-fenced against a concurrent canvas save (the fence surfaces
@@ -2891,8 +2999,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # connected render only swaps `.is-open`-painted-as-strip for `.is-collapsed`,
   # which is the same geometry. The pref reaches the socket only via
   # connect_params (Mount.init), so on the static render it is always false.
-  defp assign_sidebar(socket, paper),
-    do: assign(socket, sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+  defp assign_sidebar(socket, paper) do
+    socket
+    |> assign(sidebar_assigns(paper, socket.assigns[:inspector_pref_closed] == true))
+    |> assign_label_suggestions()
+  end
+
+  # The registered labels the Labels editor offers (task-3a5b9cda74564d1c).
+  # Fail-open to no suggestions: a registry read error must not break the pane.
+  defp assign_label_suggestions(socket) do
+    names =
+      try do
+        Barkpark.Content.TagRegistry.registered_names(
+          socket.assigns.dataset,
+          Shared.hook_opts(socket)
+        )
+      rescue
+        _ -> []
+      end
+
+    assign(socket, sidebar_label_suggestions: names)
+  end
 
   defp sidebar_assigns(paper, pref_closed?) do
     # NORMALISED through `published_id/1`, and that is not cosmetic. Since the
