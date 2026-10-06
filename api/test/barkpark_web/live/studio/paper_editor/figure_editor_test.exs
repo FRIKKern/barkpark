@@ -381,7 +381,8 @@ defmodule BarkparkWeb.Studio.PaperEditor.FigureEditorTest do
       |> LazyHTML.text()
 
     assert footer =~ "6 words"
-    assert footer =~ "1 blocks"
+    assert footer =~ "1 block"
+    refute footer =~ "1 blocks"
   end
 
   test "footer treats a malformed non-map child as opaque" do

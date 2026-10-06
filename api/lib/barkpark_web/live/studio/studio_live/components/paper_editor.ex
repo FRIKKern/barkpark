@@ -582,9 +582,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             from the server-side block list (beta_doc_stats/1), refreshed on each
             persisted block op. --%>
       <footer class="bp-paper-footer" data-test-id="bp-paper-footer">
-        <span><%= @doc_stats.words %> words</span>
+        <span><%= ngettext("1 word", "%{count} words", @doc_stats.words) %></span>
         <span class="bp-paper-footer-sep">·</span>
-        <span><%= @doc_stats.blocks %> blocks</span>
+        <span><%= ngettext("1 block", "%{count} blocks", @doc_stats.blocks) %></span>
         <span
           :if={@canvas_eligible and @doc_type == "paper"}
           class="bp-paper-history-controls"
