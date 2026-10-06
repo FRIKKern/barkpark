@@ -5,11 +5,11 @@ import { TEST_BASE_URL, TEST_DATASET, resetFixtures } from './fixtures/handlers'
 import { createListenHandle } from '../src/listen'
 import type { BarkparkClientConfig, ListenEvent } from '../src/types'
 
-// listen('post') used to yield ARTICLE mutations too. The server's listen route
-// does not read `?types=` — it streams every type in scope — and the client
-// trusted it to (stranger walk against a local instance, 2026-09-30). The
-// requested type set is now applied client-side. These frames are the server's
-// real shape: a top-level `type` beside `result._type`.
+// listen('post') used to yield ARTICLE mutations too: the listen route did not
+// read `?types=` then (stranger walk against a local instance, 2026-09-30). The
+// server narrows by it now (task-684369333a0f0deb); the client-side filter stays
+// as a backstop for an older server. These frames are the server's real shape: a
+// top-level `type` beside `result._type`.
 
 const config: BarkparkClientConfig = {
   projectUrl: TEST_BASE_URL,
@@ -84,7 +84,7 @@ describe('listen(type): only the requested types reach the consumer', () => {
 
     expect(events.map((e) => e.type)).toEqual(['welcome', 'mutation', 'mutation'])
     expect(events.slice(1).map((e) => e.documentId)).toEqual(['drafts.post-2', 'drafts.post-4'])
-    // The param still rides the request, for a server that learns to filter.
+    // The server narrows by the param; the client filter is the backstop.
     expect(new URL(seen.urls[0]!).searchParams.get('types')).toBe('post')
   })
 
@@ -106,5 +106,26 @@ describe('listen(type): only the requested types reach the consumer', () => {
     serveFrames([noTop(1, 'article'), noTop(2, 'post')])
     const events = await take('post', 1)
     expect(events.map((e) => e.documentId)).toEqual(['drafts.post-2'])
+  })
+})
+
+describe('listen ids: the option rides the request as ?ids=', () => {
+  async function firstUrl(opts: Parameters<typeof createListenHandle>[3]): Promise<URL> {
+    const seen = serveFrames([WELCOME])
+    const handle = createListenHandle(config, 'post', undefined, opts)
+    await handle[Symbol.asyncIterator]().next()
+    handle.unsubscribe()
+    return new URL(seen.urls[0]!)
+  }
+
+  it('sends ids as one comma-separated param beside types', async () => {
+    const url = await firstUrl({ ids: ['post-1', 'post-2'] })
+    expect(url.searchParams.get('ids')).toBe('post-1,post-2')
+    expect(url.searchParams.get('types')).toBe('post')
+  })
+
+  it('sends no ids param when none or an empty list is given', async () => {
+    expect((await firstUrl(undefined)).searchParams.has('ids')).toBe(false)
+    expect((await firstUrl({ ids: [] })).searchParams.has('ids')).toBe(false)
   })
 })
