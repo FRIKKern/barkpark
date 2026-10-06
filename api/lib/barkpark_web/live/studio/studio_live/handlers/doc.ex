@@ -163,7 +163,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
             opts
           )
         end,
-        publish_success_message(socket.assigns[:editor_type])
+        publish_success_message(
+          socket.assigns[:editor_type],
+          socket.assigns[:editor_doc],
+          socket.assigns.dataset
+        )
       )
 
     # Publish moves the revision outside the editor's save path; tell the
@@ -171,14 +175,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
 
-  # Owner ruling #58 (2026-10-03): a published sheet is public — the
-  # `/sheets/:slug` reader serves it to anyone, whatever the schema's
-  # visibility (docs/contracts/plugin-http-api.md). The success flash says so.
+  # Owner ruling #58 (2026-10-03): a published sheet is public. The
+  # `/sheets/:slug` reader serves only the seeded Default workspace's
+  # `production` sheets (`Content.get_public_document/3`), so the flash names
+  # that page only where it exists; elsewhere it says what is true today
+  # (lead ruling on task-976a2df147626749). A scoped, share-gated sheet reader
+  # is the owner's decision.
   @doc false
-  def publish_success_message("sheet"),
-    do: "Published. Published sheets are public, so anyone can now read this one."
+  def publish_success_message("sheet", doc, dataset) do
+    slug = doc && Content.published_id(doc.doc_id)
 
-  def publish_success_message(_type), do: "Published"
+    if slug && public_sheet_reader?(doc, dataset) do
+      "Published. Published sheets are public, so anyone can now read this one at /sheets/#{slug}."
+    else
+      "Published. It is readable through the API under this workspace's sharing rules; " <>
+        "this workspace has no public page for sheets yet."
+    end
+  end
+
+  def publish_success_message(_type, _doc, _dataset), do: "Published"
+
+  defp public_sheet_reader?(%{workspace_id: ws_id}, dataset) when is_binary(ws_id) do
+    dataset == Barkpark.Content.Papers.paper_default_dataset() and
+      match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+  end
+
+  defp public_sheet_reader?(_doc, _dataset), do: false
 
   # ── [studio-tag-name-is-the-id] task-655768f4fa3c9fed ─────────────────────
   #

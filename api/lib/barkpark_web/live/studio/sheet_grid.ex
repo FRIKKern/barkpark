@@ -2826,6 +2826,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >
             <.icon name="send" size={14} /> {gettext("Publish")}
           </button>
+          <%!-- A published sheet is public (owner ruling #58), so the author can
+                take it back. Unpublish reaches StudioLive's own handler and
+                reference guard, which keeps the session's unsaved cells on the
+                new draft (task-3b3209373291e9fd). --%>
+          <button
+            :if={@write_capable and not @is_draft}
+            type="button"
+            class="btn btn-ghost btn-sm"
+            phx-click="unpublish"
+            data-test-id="sheet-unpublish"
+          >
+            <.icon name="archive" size={14} /> {gettext("Unpublish")}
+          </button>
           <%!-- History reaches StudioLive's own handler; its restore goes
                 through Sheets.Session.restore/4 so the live session cannot
                 overwrite the restored row (task-1eaa2c0dc6e60047). --%>
