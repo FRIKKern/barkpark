@@ -1001,6 +1001,14 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   defp preview_title(doc, schema),
     do: Barkpark.Content.TitleDerivation.preview_title(doc, schema)
 
+  @doc """
+  The desk row's title for `doc` under `schema`: its stored title, else the
+  schema's `list_preview` title field, else `Untitled <type> · <id tail>`.
+  Studio's paper header and its live row refresh use it too, so the three
+  surfaces name one document the same way (task-23bff317e617928e).
+  """
+  def display_title(doc, schema \\ nil), do: row_title(doc, schema)
+
   defp unnamed_row_title(doc) do
     gettext("Untitled %{type} · %{tail}", type: row_type_word(doc), tail: doc_id_tail(doc))
   end

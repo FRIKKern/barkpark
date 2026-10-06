@@ -2498,7 +2498,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       %{content: content} = fresh when is_map(content) ->
         blocks = Projection.read_blocks(content) || []
 
-        assign(socket,
+        socket
+        |> refresh_pane_title(paper, fresh)
+        |> assign(
           paper_doc: fresh,
           paper_canvas_retained:
             PaperCanvas.refresh_retained(socket.assigns[:paper_canvas_retained], slug, blocks),
@@ -2511,6 +2513,31 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         socket
     end
   end
+
+  # A canvas op can change the paper's title (the title block). The desk row
+  # was built by `rebuild_panes/1`, which an op does not run (it would reset
+  # the paper view), so the row kept the old title until a reload. Patch the
+  # one row in place (task-23bff317e617928e).
+  defp refresh_pane_title(socket, %{title: same}, %{title: same}), do: socket
+
+  defp refresh_pane_title(socket, _previous, %{doc_id: doc_id} = fresh) do
+    id = Content.published_id(doc_id)
+    title = BarkparkWeb.Studio.PaneBuilder.display_title(fresh)
+
+    panes =
+      Enum.map(socket.assigns[:panes] || [], fn
+        %{items: items} = pane when is_list(items) ->
+          %{pane | items: Enum.map(items, &retitle_row(&1, id, title))}
+
+        pane ->
+          pane
+      end)
+
+    assign(socket, panes: panes)
+  end
+
+  defp retitle_row(%{type: :doc, id: id} = row, id, title), do: %{row | title: title}
+  defp retitle_row(row, _id, _title), do: row
 
   @doc false
   def paper_top_level_blocks(socket) do

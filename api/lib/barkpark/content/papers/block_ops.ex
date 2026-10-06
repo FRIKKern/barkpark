@@ -1077,6 +1077,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
         # blocks and never drift. Threads the PRE-patch `blocks` as old_blocks so
         # an unbind (fieldName→nil) clears the now-orphaned content[fieldName].
         |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
+        |> sync_content_title()
 
       title = paper_title(content, slug)
 
@@ -1708,6 +1709,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           # Pre-patch `blocks` as old_blocks: a batch that unbinds a field
           # clears the orphan content[fieldName]; non-unbind ops ⇒ dropped == [].
           |> Projection.project(blocks, new_blocks, project_opts(render_opts, slug, doc))
+          |> sync_content_title()
 
         title = paper_title(content, slug)
 
@@ -5190,6 +5192,23 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp paper_title(content, slug) when is_map(content) do
     blank_to_nil(Map.get(content, "title")) || heading_title(Map.get(content, "blocks")) || slug
   end
+
+  defp title_block_text(blocks), do: Papers.Template.derive_title(%{}, blocks)["title"]
+
+  # Doctrine (pdd-t4): the row title IS the locked title block's text. A paper
+  # created with a `title` attribute also stores content["title"], which
+  # `paper_title/2` reads first, so a canvas edit of the title block never
+  # reached the row, the desk or the header (task-23bff317e617928e). An op
+  # keeps that stored field in step with the block; a paper whose content
+  # carries no "title" key keeps its shape.
+  defp sync_content_title(%{"title" => _} = content) do
+    case title_block_text(Map.get(content, "blocks")) do
+      nil -> content
+      text -> Map.put(content, "title", text)
+    end
+  end
+
+  defp sync_content_title(content), do: content
 
   @doc """
   The first heading block's PLAIN text, or `nil` when there is no heading with
