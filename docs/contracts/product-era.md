@@ -55,3 +55,7 @@ A fresh Barkpark carries no sample data, no shared token, no unused tables or pr
 - **The process freeze.** No new gate, census task, charter or watcher workflow lands without a named incident it answers. Name the incident in the PR.
 - **Security first.** A security P0 is worked the day it is filed.
 - **File under the goal map.** New product-era work goes under one of the root goal's branches.
+
+## Measuring "no plugin code inside core"
+
+`python3 scripts/plugin-code-in-core-census.py --ref origin/main` prints the plugin-domain code that still lives in core. The plugin roster is derived (files that `use Barkpark.Plugin`). It counts files and lines in core directories named for a plugin (`tasks`, `media`, `quiz`, `pulse`, `papers`, `content/papers`) with their top-level context files (`tasks.ex` …), the core files that call into each one, and plugin-named files in `api/lib/barkpark_web`. Baseline at `03c5c44b2`: 158 files, 78,670 lines; no core file names a plugin entry module. The criterion is met at 0.
