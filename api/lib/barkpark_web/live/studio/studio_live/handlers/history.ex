@@ -11,6 +11,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   def show_history(socket) do
     doc = socket.assigns[:editor_doc]
@@ -69,11 +70,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
 
     case restore_open_doc(socket, rev_id, type) do
       {:ok, _doc} ->
-        {:noreply,
-         socket
-         |> assign(show_history: false, revisions: [])
-         |> put_flash(:info, "Restored from history")
-         |> Shared.rebuild_panes()}
+        socket =
+          socket
+          |> assign(show_history: false, revisions: [])
+          |> put_flash(:info, "Restored from history")
+          |> Shared.rebuild_panes()
+
+        # The restore rewrote the draft's blocks and revision behind the open
+        # Beta editors (task-494fc7f91abd01bd).
+        {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Restore cancelled: #{reason}")}
