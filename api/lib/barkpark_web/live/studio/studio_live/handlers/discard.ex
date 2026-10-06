@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Discard do
 
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   def discard_draft(socket) do
     doc = socket.assigns[:editor_doc]
@@ -43,6 +44,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Discard do
            socket
            |> assign(show_discard: false)
            |> put_flash(:info, "Draft discarded")
+           |> Paper.push_published_blocks(pub_id, type)
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, _} ->
