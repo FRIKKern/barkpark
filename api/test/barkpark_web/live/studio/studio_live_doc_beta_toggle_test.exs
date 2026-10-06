@@ -193,6 +193,18 @@ defmodule BarkparkWeb.Studio.StudioLiveDocBetaToggleTest do
            "bp-overflow-menu.js no longer re-attaches a trigger a patch stripped"
   end
 
+  # task-c5144f8242efc71b: morphdom pairs id-less children by position, so a
+  # patch that changed the number of actions REWROTE the trigger into a server
+  # button (measured after Discard draft in Beta: two Deletes, no "•••"). Only
+  # an id the server never renders makes morphdom remove the trigger instead,
+  # which the re-attach above then undoes.
+  test "bp-overflow-menu keys its trigger so a patch cannot morph it into an action" do
+    js = File.read!(Path.join(:code.priv_dir(:barkpark), "static/assets/bp-overflow-menu.js"))
+
+    assert js =~ "btn.id = `bp-overflow-trigger-${++triggerSeq}`;",
+           "bp-overflow-menu.js builds its trigger without an id; morphdom can rewrite it"
+  end
+
   defp stored_blocks(doc_id) do
     {:ok, doc} = Content.get_document(doc_id, "post", @dataset)
     doc.content["blocks"]
