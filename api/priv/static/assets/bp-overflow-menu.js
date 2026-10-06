@@ -25,6 +25,8 @@
 // (reflow re-walks children every time).
 
 (function () {
+  let triggerSeq = 0;
+
   class BpOverflowMenu extends HTMLElement {
     constructor() {
       super();
@@ -83,6 +85,14 @@
 
     _buildTrigger() {
       const btn = document.createElement("button");
+      // task-c5144f8242efc71b — LiveView's morphdom pairs id-less children by
+      // POSITION. When a patch changed the number of actions (Discard draft:
+      // seven became six), it rewrote this node in place into a server
+      // button: `this._trigger` became a hidden "Delete", the row had two
+      // Deletes and no trigger, and `_reattachTrigger` saw nothing to do. An
+      // id the server never renders makes morphdom REMOVE the node instead,
+      // and the child-list observer puts it back untouched.
+      btn.id = `bp-overflow-trigger-${++triggerSeq}`;
       btn.type = "button";
       btn.className = "bp-overflow-trigger";
       btn.setAttribute("aria-haspopup", "menu");
