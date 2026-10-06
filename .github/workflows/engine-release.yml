@@ -41,6 +41,17 @@ on:
         options:
           - dry-run
           - publish
+      dist_tag:
+        # Passed as --tag to every npm publish. preview by default, as in release.yml:
+        # a pre-release on latest is what npm install resolves (ADR 0002).
+        description: "npm dist-tag to publish under"
+        required: true
+        default: preview
+        type: choice
+        options:
+          - preview
+          - next
+          - latest
 
 permissions:
   contents: read
@@ -306,7 +317,7 @@ jobs:
           done
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "launcher=${launcher[0]}" >> "$GITHUB_OUTPUT"
-          { echo "### npm ${{ inputs.npm }} $version"; echo; echo "| package | tarball |"; echo "|---|---|"; for f in barkpark-engine-*.tgz; do echo "| $(tar -xzOf "$f" package/package.json | jq -r .name) | $(du -h "$f" | cut -f1) |"; done; } >> "$GITHUB_STEP_SUMMARY"
+          { echo "### npm ${{ inputs.npm }} $version (dist-tag ${{ inputs.dist_tag }})"; echo; echo "| package | tarball |"; echo "|---|---|"; for f in barkpark-engine-*.tgz; do echo "| $(tar -xzOf "$f" package/package.json | jq -r .name) | $(du -h "$f" | cut -f1) |"; done; } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Refuse a real publish without its preconditions
         if: inputs.npm == 'publish'
@@ -324,10 +335,12 @@ jobs:
           VERSION: ${{ steps.check.outputs.version }}
           LAUNCHER: ${{ steps.check.outputs.launcher }}
           MODE: ${{ inputs.npm }}
+          DIST_TAG: ${{ inputs.dist_tag }}
         run: |
           set -euo pipefail
           cd "$RUNNER_TEMP/npm"
           if [ "$MODE" = publish ]; then flags=(--access public --provenance); else flags=(--access public --dry-run); fi
+          flags+=(--tag "$DIST_TAG")
           for target in darwin-arm64 linux-x64 linux-arm64; do
             npm publish "barkpark-engine-$target-$VERSION.tgz" "${flags[@]}"
           done
