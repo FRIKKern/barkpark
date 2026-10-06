@@ -119,9 +119,11 @@ export async function publishDoc(
 }
 
 /**
- * Unpublish (move back to draft) a published document.
+ * Unpublish a published document.
  *
- * Moves `{id}` → `drafts.{id}`. Returns the resulting {@link MutateResult}
+ * Deletes `{id}`. An existing `drafts.{id}` is kept unchanged, so unpublished
+ * edits survive; with no draft, one is created from the published content.
+ * Returns the resulting {@link MutateResult}
  * with `operation: 'unpublish'` plus any publish-wall `warnings` (see
  * {@link onlyResult}). Prefer `client.unpublish(id, type)`. `opts`
  * forwards retry / idempotencyKey / timeoutMs to the write request.

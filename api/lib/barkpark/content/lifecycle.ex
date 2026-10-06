@@ -876,7 +876,11 @@ defmodule Barkpark.Content.Lifecycle do
   end
 
   @doc """
-  Unpublish: move published doc back to draft, delete published version.
+  Unpublish: delete the published version and leave a draft behind.
+
+  Draft wins, as in Sanity (orchestrator ruling, task-02e8a5799d4f35e8): an
+  existing `drafts.<id>` is kept exactly as it is, so unpublished draft edits
+  survive. Only when no draft exists is one created from the published content.
 
   `opts` accepts `:source` and `:user_id`. Fires `:before_unpublish`
   (halt-capable) and `:after_unpublish` (async).
@@ -919,8 +923,9 @@ defmodule Barkpark.Content.Lifecycle do
           {:error, {:halted, reason}}
 
         :ok ->
-          # Create draft with published content. Inherit the published row's
-          # tenancy scope so an unpublish keeps workspace_id/project_id.
+          # A draft created from the published content when none exists.
+          # Inherit the published row's tenancy scope so an unpublish keeps
+          # workspace_id/project_id.
           draft_attrs =
             %{
               "doc_id" => did,
@@ -943,11 +948,13 @@ defmodule Barkpark.Content.Lifecycle do
             Broadcast.write_atomically(fn ->
               txn =
                 Repo.transaction(fn ->
+                  # Draft wins: an existing draft is the author's newer work and
+                  # is kept byte-for-byte. Overwriting it with the published
+                  # content silently destroyed unpublished edits.
                   {draft_result, prev_draft_rev} =
                     case Content.get_document(did, type, dataset, opts) do
                       {:ok, existing} ->
-                        {existing |> Document.changeset(draft_attrs) |> Repo.update(),
-                         existing.rev}
+                        {{:ok, existing}, existing.rev}
 
                       _ ->
                         {%Document{} |> Document.changeset(draft_attrs) |> Repo.insert(), nil}
