@@ -2600,6 +2600,24 @@ defmodule Barkpark.Content.Papers.BlockOps do
          dataset,
          opts
        ) do
+    with {:ok, saved, written_doc_id} <-
+           persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
+      {:ok,
+       %{
+         block: affected.block,
+         block_id: affected.block_id,
+         op_kind: Map.get(op, "op"),
+         position: affected.position,
+         written_doc_id: written_doc_id,
+         written_row_id: saved.id,
+         rev: saved.rev
+       }}
+    end
+  end
+
+  # The one write behind both document op paths: store the new block list,
+  # re-project it into the bound fields and upsert the draft.
+  defp persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
     content =
       (doc.content || %{})
       |> Map.put("blocks", new_blocks)
@@ -2625,27 +2643,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # Owner ruling #35 item 4: a bound block can set any content field, so the
     # op answers to the mutate door's guards (claim, close, plugin fences)
     # before it writes. See `Content.Mutations.ensure_content_write_guards/5`.
-    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts) do
-      upsert_document_block_op(type, attrs, op, affected, dataset, opts)
-    end
-  end
-
-  defp upsert_document_block_op(type, attrs, op, affected, dataset, opts) do
-    case Content.upsert_document(type, attrs, dataset, opts) do
-      {:ok, saved} ->
-        {:ok,
-         %{
-           block: affected.block,
-           block_id: affected.block_id,
-           op_kind: Map.get(op, "op"),
-           position: affected.position,
-           written_doc_id: attrs["doc_id"],
-           written_row_id: saved.id,
-           rev: saved.rev
-         }}
-
-      {:error, _} = err ->
-        err
+    with :ok <- Mutations.ensure_content_write_guards(type, doc, content, dataset, opts),
+         {:ok, saved} <- Content.upsert_document(type, attrs, dataset, opts) do
+      {:ok, saved, attrs["doc_id"]}
     end
   end
 
@@ -2660,6 +2660,92 @@ defmodule Barkpark.Content.Papers.BlockOps do
       rev: doc.rev,
       no_op: true
     }
+  end
+
+  @doc """
+  Apply an ordered batch of block ops to a document's block list in one write
+  — the batch twin of `apply_document_block_op/5`.
+
+  The ops fold in memory, each over the result of the one before, exactly as
+  `apply_paper_block_ops` folds a paper batch. Any op that fails stops the
+  fold and nothing is written, so the batch applies whole or not at all. The
+  revision fence, draft target, re-projection and the mutate door's guards are
+  the single-op path's.
+
+  Returns `{:ok, %{results, written_doc_id, written_row_id, rev}}`, where
+  `results` holds one `%{block, block_id, op_kind, position}` per op in order,
+  plus `no_op: true` when a fenced batch changed nothing.
+  """
+  @spec apply_document_block_ops(String.t(), String.t(), [map()], String.t(), keyword()) ::
+          {:ok, map()} | {:error, term()}
+  def apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []),
+    do:
+      Door.admit(fn ->
+        document_revless(opts, &admitted_apply_document_block_ops(doc_id, type, ops, dataset, &1))
+      end)
+
+  defp admitted_apply_document_block_ops(doc_id, type, ops, dataset, opts)
+       when is_binary(doc_id) and is_binary(type) and is_list(ops) and ops != [] do
+    with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         :ok <- reject_implicit_html_conversion(doc),
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- require_editor_ops_revision(ops, if_rev),
+         :ok <- check_document_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_document_blocks_for_edit(doc, type, dataset),
+         :ok <- preflight_table_editor_ops(blocks, ops),
+         {:ok, blocks} <- project_document_op_ids(blocks, if_rev),
+         {:ok, new_blocks, results} <- fold_document_ops(blocks, ops) do
+      if not is_nil(if_rev) and new_blocks == blocks do
+        {:ok,
+         %{
+           results: results,
+           written_doc_id: doc.doc_id,
+           written_row_id: doc.id,
+           rev: doc.rev,
+           no_op: true
+         }}
+      else
+        with {:ok, saved, written_doc_id} <-
+               persist_document_blocks(doc, doc_id, type, blocks, new_blocks, dataset, opts) do
+          {:ok,
+           %{
+             results: results,
+             written_doc_id: written_doc_id,
+             written_row_id: saved.id,
+             rev: saved.rev
+           }}
+        end
+      end
+    end
+  end
+
+  defp admitted_apply_document_block_ops(_doc_id, _type, _ops, _dataset, _opts),
+    do: {:error, :invalid_op}
+
+  # Ids are minted per op, as in `fold_paper_ops/3`, so each receipt names the
+  # id its block was stored with and the next op never meets an id-less block.
+  defp fold_document_ops(blocks, ops) do
+    Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, results} ->
+      with {:ok, applied_op} <- lower_editor_block_op(acc, op),
+           {:ok, patched} <- Patch.apply_patch(acc, applied_op),
+           next = ensure_block_ids(patched),
+           {:ok, affected} <- locate_paper_affected(applied_op, next) do
+        result = %{
+          block: affected.block,
+          block_id: affected.block_id,
+          op_kind: Map.get(op, "op"),
+          position: affected.position
+        }
+
+        {:cont, {:ok, next, [result | results]}}
+      else
+        {:error, _reason} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, folded, results} -> {:ok, folded, Enum.reverse(results)}
+      {:error, _reason} = err -> err
+    end
   end
 
   defp project_document_op_ids(blocks, nil), do: {:ok, blocks}

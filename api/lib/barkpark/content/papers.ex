@@ -2064,6 +2064,9 @@ defmodule Barkpark.Content.Papers do
   """
   defdelegate apply_document_block_op(doc_id, type, op, dataset, opts \\ []), to: BlockOps
 
+  @doc "Batch of document block ops, one write — `Barkpark.Content.Papers.BlockOps.apply_document_block_ops/5`."
+  defdelegate apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []), to: BlockOps
+
   defdelegate apply_document_block_op_once(
                 doc_id,
                 type,

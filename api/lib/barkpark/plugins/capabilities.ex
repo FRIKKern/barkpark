@@ -1203,7 +1203,7 @@ defmodule Barkpark.Plugins.Capabilities do
         "doc.op",
         "doc",
         "op",
-        "Apply one PortableDoc block op to a document, fenced on its current _rev.",
+        "Apply one PortableDoc block op, or a batch all or nothing, to a document, fenced on its current _rev.",
         "POST",
         "/v1/data/doc/:dataset/:type/:doc_id/ops",
         "write",
@@ -1215,7 +1215,7 @@ defmodule Barkpark.Plugins.Capabilities do
           flag(
             "file",
             "file",
-            "Body {\"op\": {...}, \"ifRev\": \"<_rev>\"} from a file or - for stdin."
+            "Body {\"op\": {...}, \"ifRev\": \"<_rev>\"} or {\"ops\": [...], \"ifRev\": ...} from a file or - for stdin."
           )
         ],
         writes: true,

@@ -1,7 +1,7 @@
 defmodule BarkparkWeb.DocumentOpsController do
   @moduledoc """
-  `POST /v1/data/doc/:dataset/:type/:doc_id/ops` — apply one PortableDoc block
-  op to any document type, over HTTP.
+  `POST /v1/data/doc/:dataset/:type/:doc_id/ops` — apply PortableDoc block ops
+  to any document type, over HTTP.
 
   The product-era core rule (docs/contracts/product-era.md): anything Studio can
   do, the API can do too. Studio's block editor writes a non-paper document by
@@ -9,7 +9,12 @@ defmodule BarkparkWeb.DocumentOpsController do
   HTTP caller could, so an app outside the Phoenix process could not edit the
   blocks Studio edits. This controller is the same call behind the write tier.
 
-  Body: `{"op": {...}, "ifRev": "<the document's current _rev>"}`.
+  Body: `{"op": {...}, "ifRev": "<the document's current _rev>"}` for one op,
+  or `{"ops": [...], "ifRev": ...}` for a batch. A batch folds in memory, each op
+  over the result of the one before, and lands in one write
+  (`Content.apply_document_block_ops/5`): one invalid op and nothing is written.
+  It answers `{"result": {"results": [one receipt per op], "rev", ...}}`; a
+  single op keeps its own receipt shape.
 
   - `ifRev` is required, as it is for Studio's editor: an op without a
     revision fence could overwrite a newer edit.
@@ -40,17 +45,18 @@ defmodule BarkparkWeb.DocumentOpsController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   def apply_op(conn, %{"dataset" => dataset, "type" => type, "doc_id" => doc_id} = params) do
-    op = params["op"]
+    body = op_body(params)
     if_rev = params["ifRev"]
     opts = [source: :api] ++ scope_opts(conn)
 
     cond do
-      not (is_map(op) and is_binary(op["op"])) ->
+      body == :malformed ->
         ErrorResponse.emit_custom(
           conn,
           :unprocessable_entity,
           "malformed_op",
-          "body must carry an op object naming a DocPatchOp in its \"op\" key"
+          "body must carry an op object naming a DocPatchOp in its \"op\" key, " <>
+            "or a non-empty \"ops\" list of them, not both"
         )
 
       not (is_binary(if_rev) and if_rev != "") ->
@@ -73,9 +79,20 @@ defmodule BarkparkWeb.DocumentOpsController do
         ErrorResponse.emit(conn, {:error, :not_found}, "no schema for type #{type}")
 
       true ->
-        run_op(conn, doc_id, type, op, dataset, opts ++ [if_rev: if_rev])
+        run_op(conn, doc_id, type, body, dataset, opts ++ [if_rev: if_rev])
     end
   end
+
+  defp op_body(%{"op" => op} = params) when not is_map_key(params, "ops"),
+    do: if(valid_op?(op), do: {:single, op}, else: :malformed)
+
+  defp op_body(%{"ops" => ops} = params) when not is_map_key(params, "op"),
+    do: if(valid_ops?(ops), do: {:batch, ops}, else: :malformed)
+
+  defp op_body(_params), do: :malformed
+
+  defp valid_op?(op), do: is_map(op) and is_binary(op["op"])
+  defp valid_ops?(ops), do: is_list(ops) and ops != [] and Enum.all?(ops, &valid_op?/1)
 
   def apply_field_ops(
         conn,
@@ -86,7 +103,7 @@ defmodule BarkparkWeb.DocumentOpsController do
     opts = [source: :api] ++ scope_opts(conn)
 
     cond do
-      not (is_list(ops) and ops != [] and Enum.all?(ops, &(is_map(&1) and is_binary(&1["op"])))) ->
+      not valid_ops?(ops) ->
         ErrorResponse.emit_custom(
           conn,
           :unprocessable_entity,
@@ -137,10 +154,16 @@ defmodule BarkparkWeb.DocumentOpsController do
   defp invalid_op(conn, message),
     do: ErrorResponse.emit_custom(conn, :unprocessable_entity, "invalid_op", message)
 
-  defp run_op(conn, doc_id, type, op, dataset, opts) do
+  defp run_op(conn, doc_id, type, body, dataset, opts) do
     target = edit_target(doc_id, type, dataset, opts)
 
-    case Content.apply_document_block_op(target, type, op, dataset, opts) do
+    result =
+      case body do
+        {:single, op} -> Content.apply_document_block_op(target, type, op, dataset, opts)
+        {:batch, ops} -> Content.apply_document_block_ops(target, type, ops, dataset, opts)
+      end
+
+    case result do
       {:ok, result} -> json(conn, %{result: result})
       error -> op_error_response(error, conn)
     end

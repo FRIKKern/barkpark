@@ -129,6 +129,29 @@ defmodule BarkparkWeb.DocumentOpsTaskGuardsTest do
     assert {:error, :not_found} = Content.get_document("drafts." <> id, "task", @dataset)
   end
 
+  test "a batch carrying a block bound to `claim` is refused whole" do
+    id = uniq("ops-claim-batch")
+    task = claimed_task!(id)
+
+    details =
+      scoped_conn()
+      |> as()
+      |> post(
+        "/v1/data/doc/#{@dataset}/task/#{id}/ops",
+        Jason.encode!(%{
+          "ops" => [
+            paragraph_op("harmless"),
+            bound_block("claim", %{"worker" => "attacker", "epoch" => 99})
+          ],
+          "ifRev" => task.rev
+        })
+      )
+      |> refusal()
+
+    assert [_message] = details["claim"]
+    no_draft_written(id)
+  end
+
   test "a block bound to `claim` cannot substitute the claim" do
     id = uniq("ops-claim")
     task = claimed_task!(id)
