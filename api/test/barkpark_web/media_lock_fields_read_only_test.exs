@@ -89,12 +89,42 @@ defmodule BarkparkWeb.MediaLockFieldsReadOnlyTest do
     assert resp.status == 200, resp.resp_body
   end
 
-  test "the Studio form shows the lock fields without an input", %{conn: conn, id: id} do
+  # Studio matches the server rule (#21536): display-only for a member, the
+  # ordinary input for an admin, who may still change a readOnly field.
+  defp metadata_tab(conn, id) do
     {:ok, view, _html} = live(conn, scoped_studio("/d/#{@dataset}/studio/mediaAsset/#{id}"))
-    html = view |> element(~s(button[phx-value-group="metadata"])) |> render_click()
+    view |> element(~s(button[phx-value-group="metadata"])) |> render_click()
+  end
+
+  defp member_conn(conn, ws_id) do
+    raw = "medialock-member-#{System.unique_integer([:positive])}"
+
+    {:ok, token} =
+      %Barkpark.Auth.ApiToken{}
+      |> Barkpark.Auth.ApiToken.changeset(%{
+        token_hash: Barkpark.Auth.ApiToken.hash_token(raw),
+        label: "medialock-member",
+        dataset: @dataset,
+        permissions: ["read", "write"]
+      })
+      |> Barkpark.Repo.insert()
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws_id, token.id, "member")
+    Plug.Test.init_test_session(conn, %{"api_token" => raw})
+  end
+
+  test "a member sees the lock fields without an input", %{conn: conn, id: id, ws_id: ws_id} do
+    html = metadata_tab(member_conn(conn, ws_id), id)
 
     assert html =~ ~s(data-readonly-field="checkedOutBy")
     refute html =~ ~s(name="doc[checkedOutBy]")
     refute html =~ ~s(name="doc[checkedOutAt]")
+  end
+
+  test "an admin keeps an input for a readOnly field", %{conn: conn, id: id} do
+    html = metadata_tab(Plug.Test.init_test_session(conn, %{"api_token" => @admin}), id)
+
+    assert html =~ ~s(name="doc[checkedOutBy]")
+    refute html =~ ~s(data-readonly-field="checkedOutBy")
   end
 end

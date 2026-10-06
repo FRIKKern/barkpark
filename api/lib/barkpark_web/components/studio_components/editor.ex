@@ -406,6 +406,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             doc_type={@doc_type}
             document_rev={@document_rev}
             form_gen={@form_gen}
+            schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
         <% end %>
         <%= if onix = onix_element(@field) do %>
@@ -470,6 +471,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             document_rev={@document_rev}
             form_gen={@form_gen}
             id_prefix={label_prefix}
+            schema_admin={BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(@parent_assigns, :caps))}
           />
         <% end %>
         <% end %>
