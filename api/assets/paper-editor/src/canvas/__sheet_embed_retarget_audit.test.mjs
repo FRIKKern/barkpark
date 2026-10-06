@@ -580,6 +580,7 @@ try {
     result.dispatchEvent(
       new window.MouseEvent("mousedown", { bubbles: true, cancelable: true }),
     );
+    result.dispatchEvent(new window.MouseEvent("click", { bubbles: true, cancelable: true }));
     canvas.flushPendingChanges();
     return batches.slice();
   };

@@ -137,6 +137,7 @@ class BpReferencePicker extends HTMLElement {
     change.textContent = this._t("change", "Change");
     change.addEventListener("click", () => this._switchToSearch());
     actions.appendChild(change);
+    this._changeButton = change;
 
     const remove = document.createElement("button");
     remove.type = "button";
@@ -160,12 +161,24 @@ class BpReferencePicker extends HTMLElement {
     input.className = "form-input bp-ref-search-input";
     input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
+    // A combobox over the listbox below (task-06efa9925540f212): the input
+    // announced as a plain textbox, arrows did nothing, and the options only
+    // answered mousedown, so a reference could not be chosen without a mouse.
+    input.setAttribute("role", "combobox");
+    input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
       if (e.key === "Escape") this._hideDropdown();
+      if (e.key === "ArrowDown") {
+        const first = this._options()[0];
+        if (first) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
     });
     wrap.appendChild(input);
 
@@ -174,11 +187,47 @@ class BpReferencePicker extends HTMLElement {
     dropdown.id = this._listId;
     dropdown.hidden = true;
     dropdown.setAttribute("role", "listbox");
+    // Arrows walk the options; Up from the first, and Escape, return to the
+    // input. Enter/Space are the options' own click.
+    dropdown.addEventListener("keydown", (e) => {
+      const options = this._options();
+      const at = options.indexOf(e.target);
+      if (at < 0) return;
+      if (e.key === "ArrowDown" && at < options.length - 1) {
+        e.preventDefault();
+        options[at + 1].focus();
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        (at > 0 ? options[at - 1] : input).focus();
+      } else if (e.key === "Escape") {
+        e.preventDefault();
+        this._hideDropdown();
+        input.focus();
+      }
+    });
     wrap.appendChild(dropdown);
+
+    // The result count, for a screen reader (the list itself is silent).
+    const status = document.createElement("div");
+    status.className = "bp-ref-status";
+    status.setAttribute("role", "status");
+    status.setAttribute("aria-live", "polite");
+    status.style.cssText =
+      "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;";
+    wrap.appendChild(status);
 
     this.appendChild(wrap);
     this._searchInput = input;
     this._dropdown = dropdown;
+    this._status = status;
+  }
+
+  _options() {
+    return this._dropdown ? Array.from(this._dropdown.querySelectorAll('[role="option"]')) : [];
+  }
+
+  _announce(text) {
+    if (this._status) this._status.textContent = text;
   }
 
   _switchToSearch() {
@@ -192,6 +241,8 @@ class BpReferencePicker extends HTMLElement {
     this._value = "";
     this._selectedTitle = "";
     this._render();
+    // Remove took the focused button with it: land on the search input.
+    if (this._searchInput) this._searchInput.focus();
     this._emit("");
   }
 
@@ -208,6 +259,8 @@ class BpReferencePicker extends HTMLElement {
     this._selectedType = doc.type || "";
     this._hideDropdown();
     this._render();
+    // The picked option is gone from the DOM; keep focus in the field.
+    if (this._changeButton) this._changeButton.focus();
     this._emit(this._value);
   }
 
@@ -387,8 +440,9 @@ class BpReferencePicker extends HTMLElement {
     if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
 
     this._dropdown.querySelectorAll(".bp-ref-suggest-item").forEach((btn) => {
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
+      // mousedown keeps focus in the picker; click (mouse, Enter, Space) acts.
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => {
         const section = btn.dataset.section;
         const idx = parseInt(btn.dataset.index, 10);
         let payload = null;
@@ -436,6 +490,7 @@ class BpReferencePicker extends HTMLElement {
       empty.className = "bp-ref-dropdown-empty";
       empty.textContent = this._t("no_matches", "No matches");
       this._dropdown.appendChild(empty);
+      this._announce(empty.textContent);
       this._dropdown.hidden = false;
       if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
       return;
@@ -461,15 +516,17 @@ class BpReferencePicker extends HTMLElement {
         badge.textContent = this._t("draft", "draft");
         btn.appendChild(badge);
       }
-      btn.addEventListener("mousedown", (e) => {
-        e.preventDefault();
-        this._select(doc);
-      });
+      btn.addEventListener("mousedown", (e) => e.preventDefault());
+      btn.addEventListener("click", () => this._select(doc));
       this._dropdown.appendChild(btn);
     }
 
     this._dropdown.hidden = false;
     if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
+    this._announce(
+      matches.length === 1 ? this._t("one_result", "1 result") :
+        this._t("n_results", "%{count} results").replace("%{count}", String(matches.length)),
+    );
   }
 
   _hideDropdown() {
