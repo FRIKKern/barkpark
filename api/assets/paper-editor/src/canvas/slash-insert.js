@@ -98,7 +98,13 @@ export const CANVAS_SLASH_TYPES = new Set([
 // re-partitioned run renders the new block with its own editor. They stay members of
 // CANVAS_SLASH_TYPES so the slash menu and the palette keep offering them
 // (task-f3c8acd1e09a0eda, owner ruling 2026-10-03 #56).
-export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage"]);
+//
+// Image and equation are boundary blocks too (not in PaperCanvas @canvas_types).
+// Inserted as canvas nodes, they re-rendered ~500 ms later as boundary editors
+// outside the canvas, dropping whatever the author had typed into the transient
+// node and leaving no focus (task-f92354b415b486f5). The server builds them, and
+// pushes `bp:focus-boundary` so the caret lands in the editor that persists.
+export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage", "image", "equation"]);
 
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
 // MIRRORING blocks.ex default_block/2 (the server clause a per-block bp-slash-insert

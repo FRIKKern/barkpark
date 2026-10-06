@@ -3134,6 +3134,43 @@
   }
 
   window.BarkparkPaperEditorReloadCanvasRecovery = bpPaperReloadCanvasRecovery;
+
+  // Focus the first control of the boundary editor for block `id`: the equation
+  // form (`equation-form-<id>`), an image picker (`paper-fld-<id>`) or a block
+  // editor WC (`paper-ed-<id>`) (task-f92354b415b486f5). The push can arrive a
+  // frame before its patch or before a WC paints its controls, so it retries for
+  // up to `tries` frames and then gives up quietly. Returns a promise of whether
+  // it focused something.
+  const BP_BOUNDARY_FOCUSABLE =
+    'textarea, input:not([type="hidden"]), select, [contenteditable="true"], button, [tabindex]:not([tabindex="-1"])';
+
+  function bpFocusBoundary(id, tries = 30) {
+    const doc = window.document;
+    const find = () => {
+      for (const prefix of ["equation-form-", "paper-fld-", "paper-ed-"]) {
+        const root = doc.getElementById(prefix + id);
+        const target = root && root.querySelector(BP_BOUNDARY_FOCUSABLE);
+        if (target && !target.disabled) return target;
+      }
+      return null;
+    };
+    return new Promise((resolve) => {
+      const attempt = (left) => {
+        const target = find();
+        if (target) {
+          target.focus();
+          resolve(doc.activeElement === target);
+        } else if (left > 0) {
+          (window.requestAnimationFrame || ((fn) => setTimeout(fn, 16)))(() => attempt(left - 1));
+        } else {
+          resolve(false);
+        }
+      };
+      attempt(tries);
+    });
+  }
+
+  window.BarkparkFocusBoundary = bpFocusBoundary;
   document.addEventListener("click", bpPaperReloadCanvasRecovery);
 
   function bpPaperBeforeElUpdated(fromEl, toEl) {
@@ -4072,7 +4109,7 @@
         // introduces one, so the canvas asks the server to insert it instead.
         this._onServerInsert = (e) => {
           const detail = e.detail || {};
-          if (!["terminal", "stage"].includes(detail.type)) return;
+          if (!["terminal", "stage", "image", "equation"].includes(detail.type)) return;
           this._exitCoordinator?.markDirty(this.el);
           this._opsQueue.push({
             kind: "slash",
@@ -4213,6 +4250,17 @@
           wc.focusBlock(payload && payload.id);
         };
         this.handleEvent("bp:focus-block", this._onFocusBlock);
+
+        // An image / equation the server built from a canvas pick renders as its
+        // own BOUNDARY editor outside the canvas (task-f92354b415b486f5): put the
+        // caret in its first control. Every run's hook hears the event; the
+        // lookup is by document id, so the first one to find it focuses it.
+        this._onFocusBoundary = (payload) => {
+          const id = payload && payload.id;
+          if (typeof id !== "string" || id === "") return;
+          window.BarkparkFocusBoundary?.(id);
+        };
+        this.handleEvent("bp:focus-boundary", this._onFocusBoundary);
 
         // t9 — LIVE TASK-BLOCK PREVIEW (parallel display channel). The server
         // resolves every query-carrying task block into id-keyed rows and pushes

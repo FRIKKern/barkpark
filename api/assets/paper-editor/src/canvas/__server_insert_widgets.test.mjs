@@ -96,15 +96,17 @@ function check(name, fn) {
 }
 
 try {
-  check("Terminal and Stage stay in the menu and are the server-insert types", () => {
+  check("Terminal, Stage, Image and Equation stay in the menu and are the server-insert types", () => {
     assert.ok(CANVAS_SERVER_INSERT_TYPES instanceof Set, "CANVAS_SERVER_INSERT_TYPES is exported");
-    assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["stage", "terminal"]);
+    assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["equation", "image", "stage", "terminal"]);
     for (const type of CANVAS_SERVER_INSERT_TYPES) {
       assert.ok(CANVAS_SLASH_TYPES.has(type), `${type} is still offered`);
     }
   });
 
-  for (const type of ["terminal", "stage"]) {
+  // image + equation: task-f92354b415b486f5 (they re-rendered as boundary
+  // editors and dropped what was typed into the transient canvas node).
+  for (const type of ["terminal", "stage", "image", "equation"]) {
     const canvas = await mount();
     const editor = canvas._editor;
     const events = [];
@@ -186,5 +188,5 @@ if (failures) {
   console.log(`\n${failures} check(s) failed`);
   process.exit(1);
 }
-console.log("\nserver_insert_widgets: Terminal and Stage picks go through the server insert");
+console.log("\nserver_insert_widgets: Terminal, Stage, Image and Equation picks go through the server insert");
 process.exit(0);
