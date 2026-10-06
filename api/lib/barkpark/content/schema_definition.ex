@@ -899,6 +899,26 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
+  # image — a leaf, unless it declares `fields` (task-f0f51946d2de672d).
+  # Sanity puts an image's own fields (`alt`, a caption) on the image object
+  # beside `asset`/`hotspot`/`crop`; declared here, they are validated like a
+  # composite's subfields. `options` (e.g. `hotspot: true`) stays in `raw`.
+  defp parse_field_type("image", f, plugin) do
+    case Map.get(f, "fields") do
+      nil ->
+        {:ok, %Field{}}
+
+      kids when is_list(kids) ->
+        case parse_fields(kids, plugin) do
+          {:ok, parsed} -> {:ok, %Field{fields: parsed}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:image_fields_must_be_list, Map.get(f, "name")}}
+    end
+  end
+
   # any other binary type-tag (string, slug, text, richText, image, select,
   # boolean, datetime, color, reference, array, …) is treated as a v1
   # leaf — parsed permissively, preserved verbatim in `raw`.
@@ -912,6 +932,15 @@ defmodule Barkpark.Content.SchemaDefinition do
   defp parse_validations(_), do: {:error, :validations_must_be_list}
 
   defp v2_shape?(%Field{type: t}) when t in @v2_field_types, do: true
+  # An image with declared subfields (or Sanity's `options.hotspot`) has a
+  # structure the v2 walker checks; a bare image stays a v1 leaf.
+  defp v2_shape?(%Field{type: "image", fields: [_ | _]}), do: true
+  # A richText vocabulary declaring custom object blocks (`blocks.of` entries
+  # shaped `{name, fields}`) has block fields the v2 walker checks.
+  defp v2_shape?(%Field{type: "richText", raw: %{"blocks" => %{"of" => of}}}) when is_list(of),
+    do: Enum.any?(of, &is_map/1)
+
+  defp v2_shape?(%Field{type: "image", raw: %{"options" => %{"hotspot" => true}}}), do: true
   defp v2_shape?(_), do: false
 
   defp localized_format_atom("plain"), do: :plain

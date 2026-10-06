@@ -24,12 +24,18 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
     * `marks`       → the inline node types allowed inside prose
                       (`text` is always allowed)
     * `annotations` → inline `link` (the only annotation portable-doc carries)
-    * `of`          → extra block types (`image`, `divider`, `code`, `diagram`)
+    * `of`          → extra block types (`image`, `divider`, `code`, `diagram`),
+                      or a custom object block `{"name": "callout", "fields": […]}`
+                      whose fields every block of that type must satisfy
+                      (task-152cacba913a4724; checked by
+                      `Content.Validation.object_block_findings/3`)
 
   The client enforces the same vocabulary calmly (slash menu + a
   `filterTransaction` veto); THIS module is the truth the write path checks,
   so a hand-rolled op cannot smuggle an out-of-vocabulary block into a field.
   """
+
+  alias Barkpark.Content.Validation
 
   @style_types %{"normal" => "paragraph", "blockquote" => "pullquote"}
   @heading_styles ~w(h1 h2 h3 h4 h5 h6)
@@ -97,7 +103,8 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
       marks: list_of_strings(v["marks"]),
       annotations:
         v["annotations"] |> List.wrap() |> Enum.map(&annotation_name/1) |> Enum.reject(&is_nil/1),
-      of: list_of_strings(v["of"])
+      of: list_of_strings(v["of"]) ++ Map.keys(Validation.object_block_types(%{"blocks" => v})),
+      objects: Validation.object_block_types(%{"blocks" => v})
     }
   end
 
@@ -174,12 +181,23 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
           "#{if block["ordered"], do: "numbered", else: "bulleted"} lists are not in this field's vocabulary"}}
 
       true ->
-        check_inlines(block, inlines)
+        with :ok <- check_object(block, vocab), do: check_inlines(block, inlines)
     end
   end
 
   defp check_block(_block, _types, _levels, _inlines, _vocab),
     do: {:error, {:out_of_vocabulary, "a block without a type"}}
+
+  # A custom object block's declared fields (task-152cacba913a4724).
+  defp check_object(%{"type" => type} = block, %{objects: objects})
+       when is_map_key(objects, type) do
+    case Validation.object_block_findings(Map.fetch!(objects, type), block, type) do
+      [] -> :ok
+      [{path, msg} | _] -> {:error, {:out_of_vocabulary, "#{path}: #{msg}"}}
+    end
+  end
+
+  defp check_object(_block, _vocab), do: :ok
 
   defp heading_level(%{"level" => l}) when is_integer(l), do: l
   defp heading_level(_), do: 1
