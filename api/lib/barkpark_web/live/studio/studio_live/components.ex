@@ -68,6 +68,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
+  attr(:public_reader, :boolean, default: false)
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
@@ -528,6 +529,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
+          public_reader={@public_reader}
         />
       </div>
     </div>
@@ -662,6 +664,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_used_by, :list, default: [])
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
+  # task-352b1074aba3f434: whether the anonymous reader serves this scope
+  # (`PaperCanvas.public_reader?/3`). Defaults false: never claim "Public"
+  # for a caller that did not say.
+  attr(:public_reader, :boolean, default: false)
 
   # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
   # and media editors deliberately have no inspector: see the ruling recorded at
@@ -884,9 +890,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           <div class="bp-doc-field">
             <span class="bp-doc-field__label">Visibility</span>
             <span class="bp-doc-field__val" data-test-id="sidebar-visibility">
-              {PaperCanvas.visibility_label(@status)}
+              {PaperCanvas.visibility_label(@status, @public_reader)}
             </span>
           </div>
+          <p
+            :if={@status == "published" and not @public_reader}
+            class="bp-doc-empty"
+            data-test-id="sidebar-visibility-why"
+          >
+            This workspace has no public page for papers, so only members and share-link holders can read it.
+          </p>
           <%!-- spd-bl-publish-affordance-triple — the description the publish
                 wall demands FIRST (LabelSpine fires on it before anything
                 else, and no amount of body authoring moves it). Draft-only:
@@ -1775,6 +1788,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           sidebar_collapsed={Map.get(assigns, :sidebar_collapsed)}
           sidebar_slug_draft={Map.get(assigns, :sidebar_slug_draft)}
           sidebar_slug_feedback={Map.get(assigns, :sidebar_slug_feedback)}
+          public_reader={
+            PaperCanvas.public_reader?(
+              Map.get(assigns, :current_workspace),
+              Map.get(assigns, :current_project),
+              @dataset
+            )
+          }
           workspace_label={
             case Map.get(assigns, :current_workspace) do
               %{name: name} when is_binary(name) and name != "" -> name

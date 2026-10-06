@@ -1332,12 +1332,42 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       assert PaperCanvas.paper_relations(nil) == []
     end
 
-    test "visibility is derived from publish status (papers publish to /papers/:slug)" do
-      assert PaperCanvas.visibility_label("published") == "Public"
+    test "visibility is derived from publish status AND whether the anonymous reader serves the scope" do
+      assert PaperCanvas.visibility_label("published", true) == "Public"
+      # task-352b1074aba3f434: published where no anonymous reader serves it.
+      assert PaperCanvas.visibility_label("published", false) == "Members only"
       # "Draft" only — never "not public": the public reader fetches by exact
       # doc_id with NO status filter, so a stronger claim could lie.
-      assert PaperCanvas.visibility_label("draft") == "Draft"
-      refute PaperCanvas.visibility_label("draft") =~ "public"
+      assert PaperCanvas.visibility_label("draft", true) == "Draft"
+      assert PaperCanvas.visibility_label("draft", false) == "Draft"
+      refute PaperCanvas.visibility_label("draft", true) =~ "public"
+    end
+
+    test "public_reader?/3: Default on the papers dataset, or a scope with a :papers share" do
+      {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      assert PaperCanvas.public_reader?(default_ws, default_proj, "production")
+
+      other_ws =
+        Barkpark.TenancyFixtures.create_workspace!("vis-#{System.unique_integer([:positive])}")
+
+      other_proj =
+        Barkpark.TenancyFixtures.create_project!(
+          other_ws,
+          "vis-p-#{System.unique_integer([:positive])}"
+        )
+
+      Barkpark.SharingFixtures.snapshot_shares!()
+      Barkpark.SharingFixtures.clear_shares!()
+      refute PaperCanvas.public_reader?(other_ws, other_proj, "production")
+
+      Barkpark.SharingFixtures.plant_shares!(
+        "#{other_ws.slug}/#{other_proj.slug}/production:papers:read"
+      )
+
+      assert PaperCanvas.public_reader?(other_ws, other_proj, "production")
+
+      refute PaperCanvas.public_reader?(nil, other_proj, "production")
+      refute PaperCanvas.public_reader?(other_ws, nil, "production")
     end
   end
 
@@ -1368,6 +1398,22 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       render_component(&Components.paper_metadata_sidebar/1, Map.merge(base, assigns))
     end
 
+    test "a published paper says Public only when the scope has an anonymous reader" do
+      published = draft_paper(%{status: "published"})
+
+      html = render_sidebar(%{paper_doc: published, public_reader: true})
+      assert html =~ ~r/data-test-id="sidebar-visibility"[^>]*>\s*Public\s*</
+      refute html =~ "sidebar-visibility-why"
+
+      html = render_sidebar(%{paper_doc: published, public_reader: false})
+      assert html =~ ~r/data-test-id="sidebar-visibility"[^>]*>\s*Members only\s*</
+      assert html =~ "only members and share-link holders can read it"
+
+      # Unthreaded callers never claim Public.
+      html = render_sidebar(%{paper_doc: published})
+      assert html =~ "Members only"
+    end
+
     test "renders all five sections, each with a tabbable aria-expanded toggle" do
       html = render_sidebar(%{})
       assert html =~ ~s(data-test-id="paper-metadata-sidebar")
@@ -1393,7 +1439,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
     end
 
     test "a PUBLISHED paper shows Public visibility" do
-      html = render_sidebar(%{paper_doc: draft_paper(%{status: "published"})})
+      # In a scope the anonymous reader serves (task-352b1074aba3f434 made the
+      # caller say so; unthreaded, the sidebar no longer claims Public).
+      html =
+        render_sidebar(%{paper_doc: draft_paper(%{status: "published"}), public_reader: true})
+
       assert html =~ "published"
       assert html =~ "Public"
     end
