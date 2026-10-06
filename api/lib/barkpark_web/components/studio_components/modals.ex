@@ -383,7 +383,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       >
         <div class="image-picker-header">
           <span id="airdrop-sheet-title" style="font-weight: 600; font-size: 14px;">
-            Share access<%= if @type, do: " · #{@type}", else: "" %>
+            Share access<%= if @type, do: " · #{BarkparkWeb.Studio.PaneBuilder.type_word(@type)}", else: "" %>
           </span>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="airdrop-close" aria-label="Close">×</button>
         </div>

@@ -68,7 +68,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          socket
          |> put_flash(
            :info,
-           "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
+           "That “+” already created an untitled #{BarkparkWeb.Studio.PaneBuilder.type_word(type)} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
          )
          |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))
          |> focus_new_doc(List.last(path))}

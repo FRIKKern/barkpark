@@ -1422,8 +1422,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
-                title={gettext("Share access to %{type}", type: pane.type_name)}
-                aria-label={gettext("Share access to %{type}", type: pane.type_name)}
+                title={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name))}
+                aria-label={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name))}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1443,8 +1443,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
                 phx-value-pane={"#{idx}"}
-                title={gettext("New %{type}", type: pane.type_name)}
-                aria-label={gettext("New %{type}", type: pane.type_name)}
+                title={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name))}
+                aria-label={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name))}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>

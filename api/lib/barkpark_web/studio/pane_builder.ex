@@ -1013,8 +1013,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     gettext("Untitled %{type} · %{tail}", type: row_type_word(doc), tail: doc_id_tail(doc))
   end
 
-  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type
+  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type_word(type)
   defp row_type_word(_), do: gettext("document")
+
+  @doc """
+  A schema name as words for Studio copy: `form_submission` → `form
+  submission` (task-6dfc55e961ffa137). Schema titles cannot stand in: they are
+  singular for some types and plural for others ("Ticket", "Form submissions").
+  """
+  def type_word(type) when is_binary(type), do: String.replace(type, ~r/[_-]+/, " ")
 
   # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
   # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
