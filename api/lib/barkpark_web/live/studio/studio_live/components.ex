@@ -1662,7 +1662,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
                     selected={item.id == pane[:selected]}
-                    selectable={pane[:type_name] != nil}
+                    selectable={pane[:type_name] != nil and Caps.admin_affordance?(@caps)}
                     checked={MapSet.member?(@selected_doc_ids, item.id)}
                   >
                     <:trailing :if={item_presences != []}>
