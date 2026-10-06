@@ -1910,7 +1910,13 @@
     async _uploadFiles(fileList) {
       const headers = { Accept: "application/json" };
       const tok = this._token();
+      // The same two credentials `_headers/2` sends (task-8cf148ac47fb34ae):
+      // a bearer when the page has one, otherwise the account-session
+      // header the cookie branch requires. Without it every account/SSO
+      // user's upload was refused 403 csrf_required. No Content-Type: the
+      // browser sets the multipart boundary.
       if (tok) headers["Authorization"] = "Bearer " + tok;
+      else headers["x-requested-with"] = "bp-asset-explorer";
 
       let failed = 0;
 
@@ -1933,7 +1939,7 @@
           if (!r.ok) {
             failed++;
             if (r.status === 401) {
-              this._toast("Upload blocked — sign in at /login with barkpark-dev-token");
+              this._toast("Upload blocked — your session has ended. Sign in again.");
             } else {
               this._toast("Upload failed (" + r.status + ")");
             }
