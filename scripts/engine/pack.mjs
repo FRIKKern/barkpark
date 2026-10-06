@@ -27,7 +27,7 @@ import { fileURLToPath } from 'node:url';
 const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const launcherDir = path.join(repo, 'js', 'packages', 'engine');
 // Keep in step with PLATFORMS in js/packages/engine/src/release.ts.
-export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64'];
+export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64', 'win32-x64'];
 const USAGE = 'usage: node scripts/engine/pack.mjs platform --engine <engine folder> --out <folder> [--version <v>]\n       node scripts/engine/pack.mjs launcher --out <folder> [--version <v>]';
 
 function fail(message, code = 2) { console.error(message); process.exit(code); } // pipe-exit-ok: one stderr line before anything is written to stdout
@@ -91,7 +91,10 @@ export function copyResolved(from, to) {
 }
 
 function npmPack(folder, out) {
-  return path.join(out, execFileSync('npm', ['pack', '--silent', '--pack-destination', out], { cwd: folder, encoding: 'utf8' }).trim().split('\n').pop());
+  // npm is npm.cmd on Windows, which only a shell runs; the destination is quoted for it.
+  const windows = process.platform === 'win32';
+  const args = ['pack', '--silent', '--pack-destination', windows ? `"${out}"` : out];
+  return path.join(out, execFileSync('npm', args, { cwd: folder, encoding: 'utf8', shell: windows }).trim().split('\n').pop().trim());
 }
 
 function packPlatform(opts, version) {

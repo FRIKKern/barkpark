@@ -16,8 +16,13 @@
 // OpenSSL and zlib are linked dynamically against the system's libssl.so.3,
 // libcrypto.so.3 and libz.so.1, the same OpenSSL the release's Erlang crypto uses.
 //
+// Windows: no build. The folder is cut from EnterpriseDB's binary zip for the same
+// version (the build the postgresql.org download page points Windows users at),
+// keeping bin/ (programs and the DLLs they load), lib/ and share/. EDB publishes no
+// checksum file, so the zip's sha256 is recorded in postgres.json, not verified.
+//
 // Lifted from Barkdown's scripts/build-runtime-postgres.mjs (ee50133b); the Linux
-// branch is new.
+// and Windows branches are new.
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -32,7 +37,7 @@ function fail(message, code = 2) { console.error(message); process.exit(code); }
 const argv = process.argv.slice(2);
 const opt = name => { const i = argv.indexOf(name); return i >= 0 ? argv[i + 1] : undefined; };
 if (argv.length % 2 !== 0 || argv.some((a, i) => i % 2 === 0 && !['--version', '--out'].includes(a))) fail('Usage: node scripts/engine/build-postgres.mjs [--version 15.18] [--out <folder>]');
-if (!['darwin', 'linux'].includes(process.platform)) fail('This script builds Postgres for macOS and Linux only.');
+if (!['darwin', 'linux', 'win32'].includes(process.platform)) fail('This script builds Postgres for macOS, Linux and Windows only.');
 const version = opt('--version') || '15.18';
 if (!/^\d+\.\d+$/.test(version)) fail('The version looks like 15.18.');
 const out = path.resolve(opt('--out') || path.join(repo, 'api', '_build', 'engine', `postgres-${version}-${process.platform}-${process.arch}`));
@@ -40,6 +45,30 @@ if (fs.existsSync(out) && fs.readdirSync(out).length) fail('The output folder is
 
 const work = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'barkpark-postgres-build-')));
 const sh = (command, args, options = {}) => execFileSync(command, args, { stdio: ['ignore', 'inherit', 'inherit'], ...options });
+
+if (process.platform === 'win32') {
+  if (process.arch !== 'x64') fail('EnterpriseDB publishes Windows binaries for x64 only.');
+  const url = `https://get.enterprisedb.com/postgresql/postgresql-${version}-1-windows-x64-binaries.zip`;
+  const zip = path.join(work, 'postgresql.zip');
+  sh('curl', ['-fsSL', '--retry', '3', '--max-time', '900', '-o', zip, url]);
+  const zipSha256 = crypto.createHash('sha256').update(fs.readFileSync(zip)).digest('hex');
+  // Windows 10 and later ship bsdtar as tar.exe, which reads zip archives.
+  sh('tar', ['-xf', zip, '-C', work]);
+  const pgsql = path.join(work, 'pgsql');
+  fs.mkdirSync(out, { recursive: true });
+  for (const dir of ['bin', 'lib', 'share']) fs.cpSync(path.join(pgsql, dir), path.join(out, dir), { recursive: true });
+  for (const dir of ['share/doc', 'lib/pgxs']) fs.rmSync(path.join(out, dir), { recursive: true, force: true });
+  for (const name of fs.readdirSync(path.join(out, 'lib'))) if (/\.(lib|a)$/i.test(name)) fs.rmSync(path.join(out, 'lib', name));
+  const missing = [...EXTENSIONS.map(e => `lib/${e}.dll`), ...EXTENSIONS.map(e => `share/extension/${e}.control`), 'bin/postgres.exe', 'bin/initdb.exe', 'bin/pg_ctl.exe'].filter(f => !fs.existsSync(path.join(out, f)));
+  if (missing.length) fail(`The EDB zip lacks ${missing.join(', ')}.`, 1);
+  fs.copyFileSync(path.join(pgsql, 'server_license.txt'), path.join(out, 'COPYRIGHT'));
+  fs.copyFileSync(path.join(pgsql, 'commandlinetools_3rd_party_licenses.txt'), path.join(out, 'THIRD-PARTY-LICENSES.txt'));
+  const mark = { version, source: url, zipSha256, extensions: EXTENSIONS, builtAt: new Date().toISOString(), platform: process.platform, arch: process.arch, opensslLinkage: 'bundled DLLs (EDB)' };
+  fs.writeFileSync(path.join(out, 'postgres.json'), JSON.stringify(mark, null, 2) + '\n');
+  fs.rmSync(work, { recursive: true, force: true });
+  console.log(`Cut Postgres ${version} for Windows x64 from ${url} at ${out}`);
+  process.exit(0);
+}
 const base = `https://ftp.postgresql.org/pub/source/v${version}/postgresql-${version}.tar.bz2`;
 const tarball = path.join(work, 'postgresql.tar.bz2');
 sh('curl', ['-fsSL', '--retry', '3', '--max-time', '600', '-o', tarball, base]);

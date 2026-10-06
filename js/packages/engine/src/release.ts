@@ -6,6 +6,7 @@
 import fs from 'node:fs'
 import { createRequire } from 'node:module'
 import path from 'node:path'
+import { exe, releaseScript } from './platform'
 
 export const MANIFEST = 'engine.json'
 /** The Postgres programs the engine runs; the build keeps exactly these. */
@@ -37,7 +38,7 @@ export class EngineReleaseError extends Error {
 type Host = { platform: string; arch: string }
 
 /** The platforms that have a platform package. */
-export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64'] as const
+export const PLATFORMS = ['darwin-arm64', 'linux-x64', 'linux-arm64', 'win32-x64'] as const
 
 /** The npm package that carries the engine folder for one platform. */
 export function platformPackage(host: Host): string {
@@ -61,7 +62,7 @@ export function findPlatformRelease(host: Host = process, resolve: Resolve = res
 }
 
 export function resolveRelease(given: string | null, host: Host = process, resolve: Resolve = resolveFromHere): ResolvedRelease {
-  if (host.platform !== 'darwin' && host.platform !== 'linux') throw new EngineReleaseError(`The engine runs on macOS and Linux for now, not ${host.platform}.`)
+  if (!['darwin', 'linux', 'win32'].includes(host.platform)) throw new EngineReleaseError(`The engine runs on macOS, Linux and Windows, not ${host.platform}.`)
   const release = given ?? findPlatformRelease(host, resolve)
   if (release === null) {
     const name = platformPackage(host)
@@ -72,9 +73,9 @@ export function resolveRelease(given: string | null, host: Host = process, resol
         : `No engine folder was found, and there is no platform package for ${host.platform}-${host.arch}. Pass \`release\` (a folder built by scripts/engine/build-release.mjs) or set BARKPARK_ENGINE_RELEASE.`,
     )
   }
-  const bin = path.join(release, 'bin', 'barkpark')
+  const bin = releaseScript(release, host.platform)
   if (!fs.existsSync(bin) || !fs.existsSync(path.join(release, 'releases'))) {
-    throw new EngineReleaseError(`${release} is not an engine folder: bin/barkpark or releases/ is missing.`)
+    throw new EngineReleaseError(`${release} is not an engine folder: ${path.relative(release, bin)} or releases/ is missing.`)
   }
   let manifest: EngineManifest
   try {
@@ -88,7 +89,7 @@ export function resolveRelease(given: string | null, host: Host = process, resol
   }
   if (!manifest.postgres) throw new EngineReleaseError(`${release} carries no Postgres. Add one with scripts/engine/build-release.mjs --add-postgres.`)
   const pgBin = path.join(release, 'postgres', 'bin')
-  const missing = PROGRAMS.filter(name => !fs.existsSync(path.join(pgBin, name)))
+  const missing = PROGRAMS.filter(name => !fs.existsSync(path.join(pgBin, exe(name, host.platform))))
   if (missing.length) throw new EngineReleaseError(`${pgBin} is missing ${missing.join(', ')}.`)
   return { root: release, bin, pgBin, manifest }
 }

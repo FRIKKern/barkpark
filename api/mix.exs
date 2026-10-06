@@ -107,11 +107,8 @@ defmodule Barkpark.MixProject do
       # Sheets plugin — xlsx import + export (pure-Elixir, no NIFs)
       {:xlsx_reader, "~> 0.8"},
       {:elixlsx, "~> 0.6"},
-      # Studio tmux console: forkpty(3) bindings for a real PTY. Ships in
-      # ALL envs — the console is on by default on every Studio (admin-gated,
-      # hard-refused on public-demo hosts). Precompiled NIFs cover the prod
-      # aarch64-linux / x86_64-linux targets (source-build fallback otherwise).
-      {:expty, "~> 0.2.1"},
+      # Studio tmux console: forkpty(3) bindings for a real PTY. Added
+      # conditionally; see expty_dep/0 (forkpty does not exist on Windows).
       # Security CI gates (fix-security-ci — task-a41fc4590b2c2eb1). Both are
       # analysis-only tooling, dev/test env + runtime:false so they NEVER ship
       # in the release. Sobelow = Phoenix-aware static analysis (XSS.Raw, SQL
@@ -119,7 +116,18 @@ defmodule Barkpark.MixProject do
       # dependency CVE scan against mix.lock. Wired in .github/workflows/security.yml.
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:mix_audit, "~> 2.1", only: [:dev, :test], runtime: false}
-    ] ++ image_dep()
+    ] ++ image_dep() ++ expty_dep()
+  end
+
+  # Studio tmux console: forkpty(3) bindings for a real PTY. Ships in ALL envs on
+  # macOS and Linux: the console is on by default on every Studio (admin-gated,
+  # hard-refused on public-demo hosts). Precompiled NIFs cover the prod
+  # aarch64-linux / x86_64-linux targets (source-build fallback otherwise).
+  # Windows has no forkpty, so the dep is left out there and
+  # BarkparkWeb.Studio.TmuxConsole.backend/0 answers nil: the console reports
+  # itself not enabled and the engine builds without it.
+  defp expty_dep do
+    if match?({:win32, _}, :os.type()), do: [], else: [{:expty, "~> 0.2.1"}]
   end
 
   # The :image dep pulls vix, whose libvips NIF has NO Windows prebuilt binary —
@@ -149,13 +157,19 @@ defmodule Barkpark.MixProject do
   defp releases do
     [
       barkpark: [
-        include_executables_for: [:unix],
+        # bin/barkpark on macOS and Linux, bin/barkpark.bat on Windows: the engine
+        # (js/packages/engine) runs whichever the build platform produced.
+        include_executables_for: release_executables(),
         # The release ships its own ERTS so a packaged install does not depend
         # on the host having a matching Erlang/Elixir on PATH.
         include_erts: true,
         steps: [:assemble]
       ]
     ]
+  end
+
+  defp release_executables do
+    if match?({:win32, _}, :os.type()), do: [:windows], else: [:unix]
   end
 
   # Aliases are shortcuts or tasks specific to the current project.

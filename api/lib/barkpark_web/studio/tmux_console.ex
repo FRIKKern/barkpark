@@ -16,6 +16,8 @@ defmodule BarkparkWeb.Studio.TmuxConsole do
        overridable by the enable flag.
     3. **Per-host opt-out.** `BARKPARK_TMUX_CONSOLE=0` (runtime.exs) disables
        it on a given host; `enabled?/0` also requires a compiled PTY backend.
+       A build without one (Windows, where `:expty` is not a dependency: see
+       `expty_dep/0` in mix.exs) reports the console as not enabled.
 
   The PTY backend module is read from config and invoked via `apply/3` (no
   static `ExPTY.*` reference), so the seam stays swappable — tests inject a
@@ -49,9 +51,19 @@ defmodule BarkparkWeb.Studio.TmuxConsole do
   # expose a shell, regardless of the enable flag.
   defp public_demo?, do: Application.get_env(:barkpark, :public_demo_studio, false) == true
 
-  @doc "The configured PTY backend module (e.g. `ExPTY`), or nil if none."
+  @doc """
+  The configured PTY backend module (e.g. `ExPTY`), or nil if none is configured
+  or the configured module is not in this build. config.exs names `ExPTY` on
+  every platform; on Windows the `:expty` dependency is left out, so the module
+  is absent and the console degrades to "not enabled" instead of crashing.
+  """
   @spec backend() :: module() | nil
-  def backend, do: Keyword.get(config(), :backend)
+  def backend do
+    case Keyword.get(config(), :backend) do
+      mod when is_atom(mod) and not is_nil(mod) -> if Code.ensure_loaded?(mod), do: mod
+      _ -> nil
+    end
+  end
 
   @doc "Shared tmux session name — one persistent session across reconnects."
   @spec session_name() :: String.t()

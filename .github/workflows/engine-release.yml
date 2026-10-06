@@ -6,7 +6,8 @@ name: engine-release
 # PATH and checks /status.json. The boot job then packs @barkpark/engine and the
 # platform package (scripts/engine/pack.mjs), npm installs both tarballs into a
 # scratch app and boots it with startBarkpark({ dataDir }) alone.
-# A workflow_dispatch run also runs the npm job on those same tarballs: dry-run by
+# A workflow_dispatch run can add Windows x64 (input windows), and also runs the
+# npm job on the macOS and Linux tarballs: dry-run by
 # default, a real publish only when the owner picks it (NPM_TOKEN, main, version
 # above 0.0.0).
 #
@@ -52,6 +53,17 @@ on:
           - preview
           - next
           - latest
+      windows:
+        # The Windows x64 jobs run on demand only (task-efbf914de2e8ab25): windows-latest
+        # minutes are scarce, and the leg is still being proven. There is no Windows-only
+        # choice: a skipped matrix job renders its name unexpanded on the head.
+        description: "Windows x64 build and boot"
+        required: true
+        default: "no"
+        type: choice
+        options:
+          - "no"
+          - also
 
 permissions:
   contents: read
@@ -273,6 +285,128 @@ jobs:
           path: |
             ${{ runner.temp }}/it/barkpark-engine-it-*/logs
             ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
+          if-no-files-found: ignore
+
+  # Windows x64, on demand (inputs.windows). The same engine folder and the same
+  # npm-install boot as the other platforms, with what differs on Windows: Postgres
+  # is cut from EnterpriseDB's binary zip, argon2's C compiles under MSVC, the
+  # release script is bin/barkpark.bat, and :expty (forkpty) is left out of the
+  # build, so the Studio terminal reports itself not enabled.
+  build-windows:
+    name: build (win32-x64)
+    if: github.event_name == 'workflow_dispatch' && inputs.windows == 'also'
+    runs-on: windows-latest
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+          filter: blob:none
+
+      - name: Setup BEAM (.tool-versions)
+        uses: erlef/setup-beam@v1
+        with:
+          version-file: .tool-versions
+          version-type: strict
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      # argon2_elixir builds its NIF with nmake and cl.exe.
+      - uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Postgres (EnterpriseDB binaries)
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          node scripts/engine/build-postgres.mjs --version $env:POSTGRES_VERSION --out "$env:RUNNER_TEMP\postgres"
+
+      - name: Build the release
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          mix local.hex --force
+          mix local.rebar --force
+          node scripts/engine/build-release.mjs --out "$env:RUNNER_TEMP\engine"
+          node scripts/engine/build-release.mjs --add-postgres "$env:RUNNER_TEMP\engine" "$env:RUNNER_TEMP\postgres"
+          Get-Content "$env:RUNNER_TEMP\engine\engine.json"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: engine-win32-x64
+          path: ${{ runner.temp }}/engine
+          retention-days: 14
+          if-no-files-found: error
+
+  boot-windows:
+    name: App shape boot (win32-x64)
+    needs: build-windows
+    runs-on: windows-latest
+    timeout-minutes: 30
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          sparse-checkout: |
+            js
+            scripts/engine
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          cache: pnpm
+          cache-dependency-path: js/pnpm-lock.yaml
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: engine-win32-x64
+          path: ${{ runner.temp }}/engine
+
+      - name: Pack @barkpark/engine and its platform package
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          Set-Location js
+          pnpm install --frozen-lockfile --filter @barkpark/engine
+          Set-Location packages/engine
+          pnpm build
+          Set-Location $env:GITHUB_WORKSPACE
+          node scripts/engine/pack.mjs platform --engine "$env:RUNNER_TEMP\engine" --out "$env:RUNNER_TEMP\npm" | Set-Content "$env:RUNNER_TEMP\platform.json"
+          node scripts/engine/pack.mjs launcher --out "$env:RUNNER_TEMP\npm" | Set-Content "$env:RUNNER_TEMP\launcher.json"
+          Get-Content "$env:RUNNER_TEMP\platform.json", "$env:RUNNER_TEMP\launcher.json"
+
+      # The runner image carries a Postgres and an Erlang; the engine never reaches
+      # them, because every child it starts gets a fixed system PATH (platform.ts).
+      - name: npm install and one startBarkpark call
+        run: |
+          $PSNativeCommandUseErrorActionPreference = $true
+          $launcher = (Get-Content "$env:RUNNER_TEMP\launcher.json" | ConvertFrom-Json).tarball
+          $platform = (Get-Content "$env:RUNNER_TEMP\platform.json" | ConvertFrom-Json).tarball
+          $app = "$env:RUNNER_TEMP\app"
+          New-Item -ItemType Directory -Force $app | Out-Null
+          Set-Location $app
+          '{ "name": "scratch-app", "version": "1.0.0", "private": true, "type": "module" }' | Set-Content package.json
+          npm install --no-audit --no-fund $launcher $platform
+          Copy-Item "$env:GITHUB_WORKSPACE\scripts\engine\npm-boot-check.mjs" .
+          New-Item -ItemType Directory -Force "$env:RUNNER_TEMP\npm-it" | Out-Null
+          Remove-Item Env:BARKPARK_ENGINE_RELEASE -ErrorAction SilentlyContinue
+          $env:TMP = "$env:RUNNER_TEMP\npm-it"
+          $env:TEMP = "$env:RUNNER_TEMP\npm-it"
+          node npm-boot-check.mjs
+
+      - name: Keep the data folder on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-boot-logs-win32-x64
+          path: ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
           if-no-files-found: ignore
 
   # On demand only, and only after every platform booted from its npm tarballs:
