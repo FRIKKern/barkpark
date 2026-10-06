@@ -3511,14 +3511,21 @@ defmodule BarkparkWeb.Router do
     post("/v1/media/:dataset/:id/undo-checkout", V1.MediaController, :undo_checkout)
   end
 
+  # The Media library's "New folder" (task-c09196a99fad3d3a), on the
+  # cookie-aware :scoped_media_mutate rather than :scoped_mutate, which stays
+  # token-only. Its own block so the upload block below keeps the exact bytes
+  # scaffy's ensure-router-zones template anchors on.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_media_mutate)
+
+    post("/v1/media/:dataset/collections", V1.MediaCollectionsController, :create)
+  end
+
   # Scoped v1 media — asset upload/update/delete. The :scoped_media_mutate
   # pipeline serves a member (membership) AND a :media-edit-token holder (P5).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through(:scoped_media_mutate)
 
-    # The Media library's "New folder" (task-c09196a99fad3d3a): on this
-    # cookie-aware pipeline, not :scoped_mutate, which stays token-only.
-    post("/v1/media/:dataset/collections", V1.MediaCollectionsController, :create)
     post("/v1/media/:dataset/upload", V1.MediaController, :upload)
     patch("/v1/media/:dataset/:id", V1.MediaController, :update)
     delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
