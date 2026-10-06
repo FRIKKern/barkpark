@@ -157,13 +157,19 @@ defmodule Barkpark.MixProject do
   defp releases do
     [
       barkpark: [
-        include_executables_for: [:unix],
+        # bin/barkpark on macOS and Linux, bin/barkpark.bat on Windows: the engine
+        # (js/packages/engine) runs whichever the build platform produced.
+        include_executables_for: release_executables(),
         # The release ships its own ERTS so a packaged install does not depend
         # on the host having a matching Erlang/Elixir on PATH.
         include_erts: true,
         steps: [:assemble]
       ]
     ]
+  end
+
+  defp release_executables do
+    if match?({:win32, _}, :os.type()), do: [:windows], else: [:unix]
   end
 
   # Aliases are shortcuts or tasks specific to the current project.
