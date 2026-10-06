@@ -191,6 +191,91 @@ mount `findSet`/`findState` return `{ query: "", count: 0, index: -1 }` and
 | `replaceCurrent(text)` | `state` after replacing the active match (read-only: unchanged `state`) |
 | `replaceAll(text)` | `{ replaced, ...state }`, one transaction (read-only: `replaced: 0`) |
 
+### Recipe: an HTTP host
+
+A host outside Phoenix (barkpark-studio, any SPA) saves the canvas over HTTP with
+the events and methods above. It adds no surface, so the contract version is
+unchanged. The canvas emits ops in the server's DocPatchOp shape (`{ op:
+"patch-block", id, patch }` …), and two routes take them as they are:
+
+| Route | Body | Success |
+|---|---|---|
+| `POST <scope>/v1/data/doc/:ds/:type/:id/ops` | `{ ops, ifRev }` | `{ result: { results, rev } }` |
+| `POST <scope>/v1/data/doc/:ds/:type/:id/fields/:field/ops` | `{ ops, ifRev }` | `{ result: { field, blocks, rev } }` |
+
+Both need a write token and `ifRev` (the document's `_rev`). Both apply the batch
+whole or not at all. A stale `ifRev` answers `412 precondition_failed` with
+`error.details.actual`, the current rev. Read the starting `blocks` and `_rev`
+with `GET <scope>/v1/data/doc/:ds/:type/:id?perspective=raw`; a document's blocks
+are `result.blocks`, a field's are `result[field]`. Seed `canvas.blocks` from
+that read and nothing else: a non-paper document's blocks are projected from its
+fields (ids such as `synth-body-p-3`), and an op naming any other id answers
+`422 invalid_op`.
+
+The host turns on `acknowledgedSaves`, so one batch is in flight at a time and
+edits made meanwhile wait. The answer's `rev` becomes the next `ifRev`. On a 412
+the batch is still in flight, so the host resends it as is, fenced on
+`details.actual`. Block ops are id-keyed, so the author's blocks land on the
+other writer's state, and everything else that writer did is kept.
+
+An HTTP answer is not an echo, and the canvas waits for one: a batch
+acknowledged without an echo stays on its awaiting list, and later
+`applyServerBlocks` snapshots queue behind it. So after each save, while the
+batch is still in flight, the host reads the document and hands its blocks back
+as the canvas's own echo, correlated by request id. That closes the save and
+brings in any other writer's blocks without touching the author's edit. Then it
+acknowledges. If that read fails the save still stands: `result.rev` is the
+fence. Any other refusal discards the batch. The edit stays on screen and goes
+out with the next batch.
+
+<!-- http-host:begin -->
+```js
+function connectCanvasOverHttp(canvas, { opsUrl, readUrl, readBlocks, rev, headers = {}, onError = () => {} }) {
+  let ifRev = rev;
+  let requests = 0;
+  canvas.acknowledgedSaves = true;
+  const send = (url, init = {}) =>
+    fetch(url, { credentials: "same-origin", ...init, headers: { "content-type": "application/json", ...headers } });
+  const post = (ops) => send(opsUrl, { method: "POST", body: JSON.stringify({ ops, ifRev }) });
+  const read = async () => {
+    const res = await send(readUrl).catch(() => null);
+    return res && res.ok ? (await res.json()).result : null;
+  };
+
+  const onOps = async (event) => {
+    const { ops, seq } = event.detail;
+    const requestId = `http-${++requests}`;
+    canvas.identifyOpsRequest(seq, requestId);
+    try {
+      let res = await post(ops);
+      for (let tries = 0; res.status === 412 && tries < 3; tries++) {
+        ifRev = (await res.json()).error.details.actual; // another writer moved it: fence on their rev
+        res = await post(ops); // still in flight, so resend the same batch
+      }
+      if (!res.ok) throw new Error(`ops refused: ${res.status}`);
+      ifRev = (await res.json()).result.rev;
+    } catch (error) {
+      canvas.discardInflightOps(seq); // the edit stays on screen and goes out with the next batch
+      onError(error);
+      return;
+    }
+    // The saved document is the canvas's own echo. Read it before acknowledging,
+    // so no newer edit can race the read.
+    const doc = await read();
+    if (doc) {
+      ifRev = doc._rev;
+      canvas.applyServerBlocks(readBlocks(doc), { mode: "own", requestId });
+    }
+    canvas.acknowledgeOps(seq, true);
+  };
+  canvas.addEventListener("bp-canvas-ops", onOps);
+  return () => canvas.removeEventListener("bp-canvas-ops", onOps);
+}
+```
+<!-- http-host:end -->
+
+`src/__canvas_http_host.test.mjs` runs this block against the real canvas.
+
 ## Invariants
 
 `convert.js` is pure and frozen; the patch-block op shape is stable; one TipTap
