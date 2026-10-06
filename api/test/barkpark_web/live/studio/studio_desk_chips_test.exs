@@ -120,6 +120,20 @@ defmodule BarkparkWeb.Studio.StudioDeskChipsTest do
 
   test "the bulk checkbox ACTIVATION path toggles selection through a mounted desk",
        %{conn: conn} do
+    # The row checkbox renders only for an admin (task-e10d059c7fb4976a: the
+    # bulk bar offers a member nothing but Clear), so this test seats one.
+    {_ws, _proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    {:ok, _} =
+      Barkpark.Auth.create_token(
+        "chips-admin",
+        "chips admin",
+        @dataset,
+        ["read", "write", "admin"],
+        Barkpark.TenancyFixtures.default_workspace_id!()
+      )
+
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => "chips-admin"})
     {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/post"))
 
     selector = ~s([data-test-id="doc-checkbox-chips-probe-post"])
