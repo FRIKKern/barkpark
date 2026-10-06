@@ -1891,6 +1891,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               </:status_pill>
               <:actions>
                 <.editor_mode_toggle mode={@editor_mode} beta_ok={beta_ok} />
+                <%!-- The same document actions Classic offers (Publish,
+                      History, Delete, …), so an editor can publish without
+                      leaving Beta (task-fc4102c1e2f9b606). The two that toggle a
+                      Classic-only panel are left out: Beta has no diff or
+                      content-preview pane to show. --%>
+                <bp-overflow-menu class="bp-overflow-menu" data-test-id="studio-beta-doc-actions">
+                  <%= for action <- beta_doc_actions(assigns) do %>
+                    <.doc_action_button
+                      action={action}
+                      editor_doc={@editor_doc}
+                      dataset={@dataset}
+                      admin?={Caps.admin_affordance?(@caps)}
+                      workspace_slug={beta_scope_slug(assigns, :current_workspace)}
+                      project_slug={beta_scope_slug(assigns, :current_project)}
+                    />
+                  <% end %>
+                </bp-overflow-menu>
               </:actions>
             </.document_header>
             <div class="editor-with-preview">
@@ -2274,6 +2291,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.
   # Returns [] when there is no schema/Expectation (no group shown).
+  # Classic's document actions, minus the two that toggle a Classic-only panel
+  # (task-fc4102c1e2f9b606).
+  @classic_panel_actions ~w(toggle-diff toggle-content-preview)
+
+  defp beta_doc_actions(assigns) do
+    assigns
+    |> DocActions.resolved_doc_actions()
+    |> Enum.reject(&(&1["name"] in @classic_panel_actions))
+  end
+
+  defp beta_scope_slug(assigns, key) do
+    case Map.get(assigns, key) do
+      %{slug: slug} when is_binary(slug) -> slug
+      _ -> ""
+    end
+  end
+
   defp beta_expected_fields(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
        when is_list(blocks) do
     Content.available_expected_fields(blocks, Content.resolve_expectation(schema), schema)
