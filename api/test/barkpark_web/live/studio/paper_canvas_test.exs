@@ -1103,8 +1103,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
 
     test "flag OFF (explicit opt-out): the shipped per-block list stays byte-free of any preview markup" do
       # The canvas is the default now (D7/D9), so OFF is an EXPLICIT opt-out —
-      # `delete_env` would leave the canvas ON. Pin the opt-out value.
-      System.put_env("BARKPARK_PAPER_CANVAS", "0")
+      # `delete_env` would leave the canvas ON. Pin the opt-out value, and
+      # RESTORE it on exit: this describe has no restoring setup, and a bare
+      # put_env left "0" behind for every later module (it red the boundary
+      # insert focus test under seed 601949).
+      BarkparkWeb.PaperEditorTestHelpers.pin_paper_canvas!("0")
 
       html = editor_html([task_list("t1")], %{"t1" => %{"block_id" => "t1", "snapshot" => []}})
       refute html =~ "paper-task-preview"

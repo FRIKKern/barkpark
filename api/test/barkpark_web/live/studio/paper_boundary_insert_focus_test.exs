@@ -23,6 +23,18 @@ defmodule BarkparkWeb.Studio.PaperBoundaryInsertFocusTest do
   @slug "2026-10-06-boundary-insert-focus-paper"
 
   setup %{conn: conn} do
+    # The canvas is the default editor; pin it, because a module that sets
+    # BARKPARK_PAPER_CANVAS=0 renders the paper without its canvas runs and
+    # this file's boundary-editor assertions then see a different page.
+    prev_canvas = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.delete_env("BARKPARK_PAPER_CANVAS")
+
+    on_exit(fn ->
+      if prev_canvas,
+        do: System.put_env("BARKPARK_PAPER_CANVAS", prev_canvas),
+        else: System.delete_env("BARKPARK_PAPER_CANVAS")
+    end)
+
     {:ok, _} =
       Content.upsert_schema(
         %{
