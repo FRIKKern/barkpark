@@ -107,9 +107,13 @@ defmodule Barkpark.Content.ShapeMigrations.FieldScan do
   field its governing schema classifies with `kind_fun`. `rewrite_fun` returns
   `{:rewrite, new_value}` or `:keep`.
 
-  Options: `apply:` (default `false`). Returns
-  `%{scanned, changed, applied?, rows}`; each row is
+  Options: `apply:` (default `false`) and `canonical_gate:` (default `true`).
+  Returns `%{scanned, changed, applied?, rows}`; each row is
   `%{doc_id, type, field, from, to}`.
+
+  `canonical_gate: false` is for a REPAIR, where the new value is the shape
+  every consumer already reads and the old one was a bug
+  (`StringifiedImages`); the flag only guards a move to a new shape.
   """
   @spec convert(
           (map() -> atom() | nil),
@@ -120,7 +124,8 @@ defmodule Barkpark.Content.ShapeMigrations.FieldScan do
   def convert(kind_fun, rewrite_fun, opts \\ []) do
     apply? = Keyword.get(opts, :apply, false)
 
-    if apply? and not CanonicalShapes.writes_enabled?() do
+    if apply? and Keyword.get(opts, :canonical_gate, true) and
+         not CanonicalShapes.writes_enabled?() do
       raise ArgumentError,
             "refusing to convert: canonical shape writes are off on this instance. " <>
               "Turn on BARKPARK_CANONICAL_SHAPE_WRITES (config :barkpark, " <>
