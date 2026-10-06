@@ -11,7 +11,7 @@ defmodule BarkparkWeb.V1.MediaController do
   alias Barkpark.Auth
   alias Barkpark.Content.Errors
   alias Barkpark.Media
-  alias Barkpark.Media.Storage.{Access, Checkout, MediaFile, Relations}
+  alias Barkpark.Media.Storage.{Access, Actor, Checkout, MediaFile, Relations}
   alias Barkpark.Media.Delivery.AssetResponse
   alias Barkpark.Media.WhereUsed
   alias Barkpark.Search.{MediaIntelligence, SurfaceConfigs, Synonyms}
@@ -398,6 +398,7 @@ defmodule BarkparkWeb.V1.MediaController do
         file
         |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
         |> Map.put(:visibilityNotice, visibility_notice(conn, dataset))
+        |> put_checkout_label(doc, conn)
 
       json(conn, %{
         result: asset,
@@ -556,14 +557,30 @@ defmodule BarkparkWeb.V1.MediaController do
     end
   end
 
+  # Who holds the checkout, as THIS viewer may see it (task-36a302b2e981d5e1):
+  # "you", a token's label, or "another editor" — never an email or a raw
+  # "user:<id>". The Studio media panel renders this instead of checkedOutBy.
+  defp put_checkout_label(asset, doc, conn) do
+    holder =
+      case doc do
+        %{content: %{} = content} -> Map.get(content, "checkedOutBy")
+        _ -> nil
+      end
+
+    Map.put(asset, :checkoutLabel, Actor.display(holder, Actor.of(conn)))
+  end
+
   def checkout(conn, %{"dataset" => dataset, "id" => id} = params) do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         actor <- actor_label(conn),
+         actor <- Actor.of(conn),
          {:ok, doc} <- Checkout.checkout(file, actor, dataset) do
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result:
+          file
+          |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+          |> put_checkout_label(doc, conn),
         syncTags: sync_tags(dataset, file.id)
       })
     else
@@ -579,11 +596,14 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         actor <- actor_label(conn),
+         actor <- Actor.of(conn),
          admin? <- admin?(conn),
          {:ok, doc} <- Checkout.undo_checkout(file, actor, dataset, admin?) do
       json(conn, %{
-        result: AssetResponse.render(file, doc, render_opts(conn, params, dataset: dataset)),
+        result:
+          file
+          |> AssetResponse.render(doc, render_opts(conn, params, dataset: dataset))
+          |> put_checkout_label(doc, conn),
         syncTags: sync_tags(dataset, file.id)
       })
     else
@@ -727,19 +747,6 @@ defmodule BarkparkWeb.V1.MediaController do
   # for an account session the equivalent human identity is the email, matching
   # `auth_controller.ex`'s existing `created_by: user.email`. "member" would name
   # nobody, which is strictly worse than the token path.
-  defp actor_label(conn) do
-    case conn.assigns[:api_token] do
-      %{label: label} when is_binary(label) and label != "" ->
-        label
-
-      _ ->
-        case conn.assigns[:current_user] do
-          %Barkpark.Accounts.User{email: email} when is_binary(email) and email != "" -> email
-          _ -> "api"
-        end
-    end
-  end
-
   # THE SIGNING SWITCH IS A PRINCIPAL TEST (task-d55b02001cf589f0).
   #
   # `appendRequestSecret` used to be the WHOLE condition, read straight off the

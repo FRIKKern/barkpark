@@ -190,37 +190,104 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
     end
   end
 
-  describe "actor_label attribution — the pipelines that keep it honest" do
-    # task-a32e13e37527d261, criterion 5. `actor_label/1` (in BOTH
-    # `V1.MediaController` and `Media.Storage.Access`) prefers the api_token's
-    # LABEL and has no :current_user arm — deliberately: `checkedOutBy` is
-    # user-visible and is compared for equality by `permission_set/2`, and what a
-    # human principal should be stamped as is a product decision nobody has made.
-    #
-    # It cannot misattribute TODAY only because the two callers of
-    # `actor_label/1` — checkout and undo_checkout — route on pipelines that do
-    # NOT carry `OptionalSessionToken`, so `:current_user` is never set there.
-    # Adding that plug to either would look like a harmless improvement and would
-    # start stamping a token's label onto a user's checkout lock.
-    #
-    # THIS TEST IS THE TRIPWIRE, not a behaviour assertion: it reads the router's
-    # own pipeline definition, so the day someone adds the plug it reds and sends
-    # them to the comment in access.ex instead of letting the attribution drift
-    # land silently.
-    test "neither :media_mutate nor :scoped_api carries OptionalSessionToken" do
-      source = File.read!("lib/barkpark_web/router.ex")
+  describe "the checkout lock names an account by id (task-36a302b2e981d5e1)" do
+    # Ruling (lead, run7 2026-10-06): a human principal is stamped by stable id,
+    # never email. ONE `Media.Storage.Actor` is used by the checkout routes and
+    # by the metadata-edit gate. This describe used to be a tripwire claiming
+    # an account session never reaches checkout. It does: the scoped routes
+    # carry it, and the old controller copy stamped the EMAIL while the gate's
+    # copy had no account arm, so an editor was locked out of metadata on an
+    # asset they had checked out themselves.
 
-      [{:media_mutate, ~r/pipeline :media_mutate do(.*?)\n  end/s}]
-      |> Enum.each(fn {name, re} ->
-        [_, body] = Regex.run(re, source)
+    defp checkout_post(conn, ws, proj, file_id, verb) do
+      conn
+      |> put_req_header("x-requested-with", "bp-media-picker")
+      |> post("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{file_id}/#{verb}")
+    end
 
-        refute body =~ "OptionalSessionToken",
-               "#{inspect(name)} gained OptionalSessionToken. checkout/undo_checkout route " <>
-                 "through it and call actor_label/1, which prefers a TOKEN's label — so a " <>
-                 "cookie-authenticated member's checkout would now be stamped with whatever " <>
-                 "token happened to ride along. Give actor_label/1 a :current_user arm " <>
-                 "(a product decision: email? display name? id?) before enabling this."
-      end)
+    defp asset_doc(file_id) do
+      {:ok, file} = Media.get_file(file_id, [])
+      Media.asset_doc_for_file(file, @ds, Media.Storage.MediaFile.scope_opts(file))
+    end
+
+    defp as_member(user, ws), do: %{assigns: %{current_user: user, current_workspace: ws}}
+
+    defp uploaded!(conn, ws, proj) do
+      upload = scoped_upload(conn, ws, proj)
+      assert upload.status in [200, 201], "fixture upload failed: #{upload.resp_body}"
+      Jason.decode!(upload.resp_body)["result"]["id"]
+    end
+
+    test "checkout stamps user:<id>, the holder may edit metadata, another member may not",
+         %{conn: conn, ws: ws, proj: proj} do
+      {user, conn} = account_session!(conn, ws, "member")
+      file_id = uploaded!(conn, ws, proj)
+
+      resp = checkout_post(conn, ws, proj, file_id, "checkout")
+      assert resp.status == 200, resp.resp_body
+      body = Jason.decode!(resp.resp_body)["result"]
+      assert body["checkoutLabel"] == "you"
+      refute resp.resp_body =~ user.email
+
+      doc = asset_doc(file_id)
+      assert doc.content["checkedOutBy"] == "user:" <> user.id
+
+      refute Barkpark.Media.Storage.Access.metadata_write_denied?(
+               as_member(user, ws),
+               "mediaAsset",
+               doc
+             ),
+             "the holder is locked out of their own checkout"
+
+      {other, other_conn} = account_session!(build_conn(), ws, "member")
+
+      assert Barkpark.Media.Storage.Access.metadata_write_denied?(
+               as_member(other, ws),
+               "mediaAsset",
+               doc
+             )
+
+      seen = other_conn |> get("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{file_id}")
+      assert Jason.decode!(seen.resp_body)["result"]["checkoutLabel"] == "another editor"
+      refute seen.resp_body =~ user.email
+    end
+
+    test "a legacy email-stamped checkout still belongs to that account and releases",
+         %{conn: conn, ws: ws, proj: proj} do
+      {user, conn} = account_session!(conn, ws, "member")
+      file_id = uploaded!(conn, ws, proj)
+
+      # A row written before the ruling: the controller stamped the email.
+      doc = asset_doc(file_id)
+
+      {:ok, _} =
+        Barkpark.Content.upsert_document(
+          "mediaAsset",
+          %{
+            "doc_id" => doc.doc_id,
+            "title" => doc.title,
+            "content" => Map.put(doc.content, "checkedOutBy", user.email)
+          },
+          @ds,
+          [source: :api] ++
+            Media.Storage.MediaFile.scope_opts(elem(Media.get_file(file_id, []), 1))
+        )
+
+      legacy = asset_doc(file_id)
+      assert legacy.content["checkedOutBy"] == user.email
+
+      refute Barkpark.Media.Storage.Access.metadata_write_denied?(
+               as_member(user, ws),
+               "mediaAsset",
+               legacy
+             )
+
+      label = conn |> get("/w/#{ws.slug}/p/#{proj.slug}/v1/media/#{@ds}/#{file_id}")
+      assert Jason.decode!(label.resp_body)["result"]["checkoutLabel"] == "you"
+
+      released = checkout_post(conn, ws, proj, file_id, "undo-checkout")
+      assert released.status == 200, released.resp_body
+      assert asset_doc(file_id).content["checkedOutBy"] in [nil, ""]
     end
   end
 

@@ -235,12 +235,9 @@ defmodule Barkpark.Media.WhereUsed do
     if count > length(ids), do: joined <> ",…(#{count - length(ids)} more)", else: joined
   end
 
-  # LOG-ONLY attribution, so it may carry the account arm that
-  # `Media.Storage.Access.actor_label/1` deliberately refuses. That sibling
-  # stamps `checkedOutBy`, which is USER-VISIBLE and compared for equality by
-  # `permission_set/2`, so guessing a human principal's label there would re-key
-  # existing lock comparisons. Nothing compares this string; it only has to name
-  # somebody to the operator reading the log.
+  # LOG-ONLY attribution, read by the operator, never compared. The lock stamp
+  # (`checkedOutBy`) is a different thing: `Media.Storage.Actor`, which names an
+  # account by "user:<id>", never by email (task-36a302b2e981d5e1).
   defp actor_label(%{assigns: assigns}) do
     case assigns[:api_token] do
       %{label: label} when is_binary(label) and label != "" ->
