@@ -1,13 +1,15 @@
 defmodule BarkparkWeb.Studio.StudioAccountIdentityTest do
   @moduledoc """
-  A signed-in editor sees their account on their own avatar, and that email
-  never leaves their own socket.
+  A signed-in editor's avatar, profile dialog and presence name agree, and the
+  account email stays inside the editor's own profile dialog
+  (task-9f31f04ab4882f7d, revising task-28aea4a555586ce6).
 
-  Found dogfooding: signed in as an editor, the avatar read "U" and its label
-  "User islf — open your profile" — the localStorage presence handle. The fix
-  is SELF-ONLY: presence meta goes to every socket in the presence room
-  (share-link and edit-share grant holders included), so the email must not
-  ride it. Other viewers keep seeing the handle.
+  Found dogfooding: the avatar read the email's "E" while the profile dialog
+  and every peer showed the generated presence name ("User 35ek"), so an
+  editor could not tell the name was theirs. Ruling (a): the avatar shows the
+  presence name; the email appears only in the profile dialog. Presence meta
+  goes to every socket in the presence room (share-link and edit-share grant
+  holders included), so the email never rides it.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -35,12 +37,33 @@ defmodule BarkparkWeb.Studio.StudioAccountIdentityTest do
     {email, Plug.Test.init_test_session(conn, %{"user_session" => raw})}
   end
 
-  test "a signed-in member's own avatar names their account", %{conn: conn} do
+  test "the avatar shows the presence name, never the email", %{conn: conn} do
     {email, conn} = signed_in_conn(conn)
-    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
+    {:ok, view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
 
-    assert html =~ "#{email} — open your profile"
-    refute html =~ ~r/User [0-9a-z]{4} — open your profile/
+    [label] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("button.presence-me-group")
+      |> LazyHTML.attribute("aria-label")
+
+    refute label =~ email
+    refute label =~ "@"
+    assert label =~ ~r/^User [0-9a-z]{4} — open your profile$/
+
+    # The profile dialog names the same presence name, and it alone shows the
+    # account (the viewer's own socket only).
+    profile = render_click(view, "show-profile", %{})
+
+    [account] =
+      profile
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(~s([data-test-id="profile-account"]))
+      |> Enum.map(&LazyHTML.text/1)
+
+    assert account =~ "Signed in as #{email}"
+    name = String.replace_suffix(label, " — open your profile", "")
+    assert profile =~ ~s(value="#{name}")
   end
 
   test "the email never enters presence, so another viewer on the topic never receives it", %{

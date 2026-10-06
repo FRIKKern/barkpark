@@ -620,19 +620,55 @@ defmodule Barkpark.Content.SchemaDefinition do
   the slash menu hides it at the cap but never blocks an insert), followed by
   one trailing `%{"kind" => "region", "name" => "body"}` free-content marker.
 
-  Fields without a usable string `name` are skipped (the region is always
-  appended regardless).
+  Fields without a usable string `name` are skipped. The region is appended
+  unless a non-`richText` field already owns its name (see below).
   """
+  #
+  # ONE BINDING PER KEY (task-9f230ad6d5b50fb0). A schema with a field named
+  # like the region (`body`) would otherwise bind `content.body` twice: a
+  # field row and the region below it, two editors writing two shapes. A
+  # `richText` body is edited by the region (the block editor; the stored
+  # value takes the `{html, blocks}` shape Classic already recognises), so its
+  # field entry is dropped. Any other `body` field keeps its entry and the
+  # region is dropped, so the stored value keeps the type the field declares.
   @spec default_layout(t() | Parsed.t() | map()) :: [map()]
   def default_layout(schema) do
+    names = field_names(schema)
+
+    region_field_type =
+      if @default_region_name in names, do: field_type(schema, @default_region_name)
+
     field_entries =
-      schema
-      |> field_names()
+      names
+      |> Enum.reject(&(&1 == @default_region_name and region_field_type == "richText"))
       |> Enum.map(fn name ->
         %{"kind" => "field", "name" => name, "max" => 1, "enforce" => false}
       end)
 
-    field_entries ++ [%{"kind" => "region", "name" => @default_region_name}]
+    region =
+      if region_field_type in [nil, "richText"],
+        do: [%{"kind" => "region", "name" => @default_region_name}],
+        else: []
+
+    field_entries ++ region
+  end
+
+  # The declared type of the top-level field `name`, as a string, or nil.
+  defp field_type(%__MODULE__{fields: fields}, name) when is_list(fields) do
+    Enum.find_value(fields, fn f ->
+      if (f["name"] || f[:name]) == name, do: to_string(f["type"] || f[:type] || "")
+    end)
+  end
+
+  defp field_type(%Parsed{fields: fields}, name) when is_list(fields) do
+    Enum.find_value(fields, fn f -> if f.name == name, do: to_string(f.type || "") end)
+  end
+
+  defp field_type(schema, name) when is_map(schema) do
+    case parse(schema) do
+      {:ok, parsed} -> field_type(parsed, name)
+      {:error, _} -> nil
+    end
   end
 
   @doc """

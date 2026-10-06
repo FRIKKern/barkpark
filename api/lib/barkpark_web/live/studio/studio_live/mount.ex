@@ -34,12 +34,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
         do: stored_name,
         else: "User #{String.slice(user_id, 0..3)}"
 
-    # SELF-ONLY account label (task-28aea4a555586ce6). The signed-in account's
-    # email names the viewer's OWN avatar ("<email> — open your profile")
-    # instead of "User islf". It is deliberately NOT the presence `name`:
-    # presence meta reaches every socket on the workspace topic, including
-    # share-link / edit-share grant holders, and an email must not travel
-    # there. Presence keeps the handle above.
+    # SELF-ONLY account label. The signed-in account's email, shown ONLY in the
+    # viewer's own profile dialog ("Signed in as <email>"). It is deliberately
+    # NOT the presence `name` and not the avatar: presence meta reaches every
+    # socket on the workspace topic, including share-link / edit-share grant
+    # holders, and the avatar must read the name peers see, so all three agree
+    # (task-9f31f04ab4882f7d, revising task-28aea4a555586ce6).
     account_label =
       case socket.assigns[:current_user] do
         %{email: email} when is_binary(email) and email != "" -> email

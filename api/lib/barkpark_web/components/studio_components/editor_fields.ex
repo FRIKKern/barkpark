@@ -316,9 +316,6 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   """
   attr :user_id, :string, required: true
   attr :user_name, :string, required: true
-  # The signed-in account (its email), shown ONLY on the viewer's own avatar —
-  # never in presence meta (task-28aea4a555586ce6). nil for anonymous/token.
-  attr :account_label, :string, default: nil
   attr :user_color, :string, required: true
   attr :presences, :list, default: []
   attr :editor_doc, :map, default: nil
@@ -368,7 +365,9 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           </div>
         <% end %>
       <% end %>
-      <% me = @account_label || @user_name %>
+      <%!-- The presence display name, the one peers see (task-9f31f04ab4882f7d).
+            The account email is shown only inside the profile dialog. --%>
+      <% me = @user_name %>
       <button type="button" class="presence-me-group" phx-click="show-profile"
               title={"#{me} — profile"} aria-label={me <> " — open your profile"}>
         <div class="presence-me-info">
