@@ -123,6 +123,72 @@ defmodule BarkparkWeb.MediaAssetSystemFieldsReadOnlyTest do
     assert same.status == 200, same.resp_body
   end
 
+  # The legitimate writers that are NOT server code (lead check on #21887):
+  # replication and a member's publish. Neither may be refused.
+  test "replication may write the file fields (source :sync is never refused)", ctx do
+    moved = Map.put(@file_info, "url", "/media/files/replicated.jpg")
+
+    assert {:ok, _} =
+             Content.apply_mutations(
+               [
+                 %{
+                   "createOrReplace" => %{
+                     "_id" => "drafts." <> ctx.id,
+                     "_type" => "mediaAsset",
+                     "title" => "Cover",
+                     "fileInfo" => moved,
+                     "mediaFileId" => "f-1"
+                   }
+                 }
+               ],
+               @dataset,
+               workspace_id: ctx.ws_id,
+               source: :sync
+             )
+
+    assert stored(ctx.id, ctx.ws_id)["fileInfo"]["url"] == "/media/files/replicated.jpg"
+  end
+
+  test "a member publishes an asset whose draft file fields differ from the published row",
+       ctx do
+    {:ok, _} = Content.publish_document(ctx.id, "mediaAsset", @dataset, workspace_id: ctx.ws_id)
+
+    # Processing (server code) updates the draft's dimensions after publish.
+    {:ok, _} =
+      Content.upsert_document(
+        "mediaAsset",
+        %{
+          "doc_id" => ctx.id,
+          "title" => "Cover",
+          "content" => %{
+            "fileInfo" => Map.put(@file_info, "width", "1200"),
+            "mediaFileId" => "f-1"
+          }
+        },
+        @dataset,
+        source: :worker,
+        workspace_id: ctx.ws_id
+      )
+
+    resp =
+      scoped_conn()
+      |> put_req_header("authorization", "Bearer #{@writer}")
+      |> put_req_header("content-type", "application/json")
+      |> post(
+        "/v1/data/mutate/#{@dataset}",
+        Jason.encode!(%{
+          "mutations" => [%{"publish" => %{"id" => ctx.id, "type" => "mediaAsset"}}]
+        })
+      )
+
+    assert resp.status == 200, resp.resp_body
+
+    {:ok, published} =
+      Content.get_document(ctx.id, "mediaAsset", @dataset, workspace_id: ctx.ws_id)
+
+    assert published.content["fileInfo"]["width"] == "1200"
+  end
+
   test "an admin keeps the write", ctx do
     resp = mutate_set(@admin, ctx.id, %{"bp_processing_status" => "failed"})
     assert resp.status == 200, resp.resp_body
