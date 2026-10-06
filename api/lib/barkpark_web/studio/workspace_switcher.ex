@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         type="button"
         class="scope-title bar-focusable"
         phx-click="scope-menu-toggle"
-        aria-haspopup="menu"
+        aria-controls="scope-menu"
         aria-expanded={if @menu, do: "true", else: "false"}
         title={scope_hint(@current_workspace, @current_project, @current_dataset)}
       >
@@ -67,14 +67,26 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         <span class="scope-title-caret" aria-hidden="true"><.icon name="chevron-down" size={13} /></span>
       </button>
 
-      <div :if={@menu} class="scope-menu" role="menu" aria-label="Switch workspace, project and dataset">
+      <%!-- A disclosure, not an ARIA menu (task-384cfa5a40d91e7f): it holds the
+            create forms' text inputs and is walked with Tab, so role=menu
+            promised arrow keys it never had. The state the classes paint is
+            exposed: aria-pressed on the previewed workspace/project,
+            aria-current on the scope you are in. --%>
+      <div
+        :if={@menu}
+        id="scope-menu"
+        class="scope-menu"
+        role="group"
+        aria-label="Switch workspace, project and dataset"
+      >
         <div class="scope-menu-col">
           <div class="scope-menu-col-title">Workspace</div>
           <div class="scope-menu-col-items">
             <button
               :for={ws <- @menu.workspaces}
               type="button"
-              role="menuitem"
+              aria-pressed={to_string(same?(@menu.ws, ws))}
+              aria-current={same?(@current_workspace, ws) && "true"}
               class={[
                 "scope-menu-item",
                 same?(@menu.ws, ws) && "is-previewed",
@@ -119,7 +131,8 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
             <button
               :for={p <- @menu.projects}
               type="button"
-              role="menuitem"
+              aria-pressed={to_string(same?(@menu.proj, p))}
+              aria-current={same?(@current_project, p) && "true"}
               class={[
                 "scope-menu-item",
                 same?(@menu.proj, p) && "is-previewed",
@@ -164,7 +177,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
             <button
               :for={ds <- @menu.datasets}
               type="button"
-              role="menuitem"
+              aria-current={current_dataset?(assigns, ds) && "true"}
               class={["scope-menu-item", current_dataset?(assigns, ds) && "is-current"]}
               phx-click="scope-open"
               phx-value-ws={@menu.ws && @menu.ws.slug}
