@@ -593,13 +593,14 @@ defmodule Barkpark.Content.Writer do
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
     new_id = generate_id(type)
     src_title = Map.get(doc, :title) || "Untitled"
-    src_content = clone_content(doc, type, dataset)
+    new_title = "#{src_title} (copy)"
+    src_content = doc |> clone_content(type, dataset) |> retitle_copy(src_title, new_title)
 
     create_document(
       type,
       %{
         "doc_id" => new_id,
-        "title" => "#{src_title} (copy)",
+        "title" => new_title,
         "status" => "draft",
         "content" => src_content
       },
@@ -607,6 +608,43 @@ defmodule Barkpark.Content.Writer do
       opts
     )
   end
+
+  # The copy's own title source must carry the copy's title. The row's title is
+  # re-derived from `content["title"]` on the next write, and a block write
+  # projects `content["title"]` from the stored block list (a field block bound
+  # to `title`, or a paper's locked title block), so a copy whose content still said the source
+  # title reverted to it on its first edit, and the desk showed two documents
+  # with the same name (task-970a40d1a252e649). Only a value that still equals the
+  # source title is changed.
+  defp retitle_copy(%{} = content, src_title, new_title) do
+    content
+    |> then(fn c ->
+      if Map.get(c, "title") == src_title, do: Map.put(c, "title", new_title), else: c
+    end)
+    |> then(fn c ->
+      case Map.get(c, "blocks") do
+        blocks when is_list(blocks) ->
+          Map.put(c, "blocks", Enum.map(blocks, &retitle_block(&1, src_title, new_title)))
+
+        _ ->
+          c
+      end
+    end)
+  end
+
+  defp retitle_copy(content, _src_title, _new_title), do: content
+
+  defp retitle_block(%{"role" => "title", "text" => text} = block, src_title, new_title)
+       when text == src_title,
+       do: Map.put(block, "text", new_title)
+
+  # A document's stored Beta block list binds the title field with its own
+  # value, which projects back onto content["title"] on the next block write.
+  defp retitle_block(%{"fieldName" => "title", "value" => value} = block, src_title, new_title)
+       when value == src_title,
+       do: Map.put(block, "value", new_title)
+
+  defp retitle_block(block, _src_title, _new_title), do: block
 
   # A sealed field is bound to its document (owner ruling #18 bind half), so a
   # copy written under a new id would be refused. Open the source's sealed
