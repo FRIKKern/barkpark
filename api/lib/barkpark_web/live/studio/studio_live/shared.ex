@@ -756,19 +756,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def do_unpublish(socket) do
     opts = hook_opts(socket)
+    previous_rev = socket.assigns[:editor_doc] && socket.assigns.editor_doc.rev
 
-    do_action(
-      socket,
-      fn doc, type ->
-        Content.unpublish_document(
-          Content.published_id(doc.doc_id),
-          type,
-          socket.assigns.dataset,
-          opts
-        )
-      end,
-      "Unpublished"
-    )
+    {:noreply, socket} =
+      do_action(
+        socket,
+        fn doc, type ->
+          Content.unpublish_document(
+            Content.published_id(doc.doc_id),
+            type,
+            socket.assigns.dataset,
+            opts
+          )
+        end,
+        "Unpublished"
+      )
+
+    # Unpublish moves the revision outside the editors' save path, like
+    # Publish; announce it or the next edit pauses (task-494fc7f91abd01bd).
+    {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
 
   @doc false

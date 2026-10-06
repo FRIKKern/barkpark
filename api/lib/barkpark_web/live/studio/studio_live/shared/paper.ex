@@ -1789,42 +1789,67 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
   @doc """
   After Discard draft in Beta, put the published version back into the open
-  block editors (task-a7a40aa124dd3c36).
-
-  The per-block editors are `phx-update="ignore"`, so the re-render after the
-  discard leaves them on the discarded text and their save lane on the draft's
-  revision: the next edit is refused as stale, and "Keep mine" would bring the
-  discarded text back. One `bp:block-update` per published block, carrying the
-  published revision and no request id, is an external update: with nothing
-  unsaved the editors adopt both.
-
-  A paper's blocks ride `paper_rev` and the canvas, not this path, so a paper
-  gets nothing; nor does Classic, which mounts no block editors.
+  block editors (task-a7a40aa124dd3c36). See `push_stored_doc/3`.
   """
   def push_published_blocks(socket, published_id, type) do
-    dataset = socket.assigns.dataset
-
     with :beta <- socket.assigns[:editor_mode],
          true <- is_binary(type) and type != "paper",
          {:ok, published} <-
-           Content.get_document(published_id, type, dataset, ScopeHelpers.scope_opts(socket)),
-         {raw, _synth?} when is_list(raw) <-
-           Content.resolve_blocks_for_edit(published, type, dataset),
-         {blocks, _synth?, nil, _table_ids} <- resolve_editor_blocks(published, type, dataset) do
-      blocks
-      |> Enum.reject(&(&1["type"] == "table"))
-      |> Enum.reduce(push_table_echo(socket, raw, published.rev), fn block, acc ->
-        push_event(acc, "bp:block-update", %{
-          block_id: block["id"],
-          block: block,
-          rev: published.rev,
-          request_id: nil
-        })
-      end)
+           Content.get_document(
+             published_id,
+             type,
+             socket.assigns.dataset,
+             ScopeHelpers.scope_opts(socket)
+           ) do
+      push_stored_doc(socket, published, type)
     else
       _ -> socket
     end
   end
+
+  @doc """
+  Put a document a header action just rewrote (Discard draft, history Restore)
+  into the open Beta editors: its blocks and its revision
+  (task-a7a40aa124dd3c36, task-494fc7f91abd01bd).
+
+  The per-block editors are `phx-update="ignore"`, so the re-render after the
+  action leaves them on the old text and their save lane on the old revision:
+  the next edit is refused as stale, and "Keep mine" would bring the old text
+  back. One `bp:block-update` per block, carrying the stored revision and no
+  request id, is an external update: with nothing unsaved the editors adopt
+  both. `bp:document-revision` also carries the revision, for a document whose
+  editors are all fields and get no block update.
+
+  A paper's blocks ride `paper_rev` and the canvas, not this path, so a paper
+  gets nothing; nor does Classic, which mounts no block editors.
+  """
+  def push_stored_doc(socket, %{doc_id: doc_id, rev: rev} = doc, type) do
+    dataset = socket.assigns.dataset
+
+    with :beta <- socket.assigns[:editor_mode],
+         true <- is_binary(type) and type != "paper",
+         {raw, _synth?} when is_list(raw) <- Content.resolve_blocks_for_edit(doc, type, dataset),
+         {blocks, _synth?, nil, _table_ids} <- resolve_editor_blocks(doc, type, dataset) do
+      blocks
+      |> Enum.reject(&(&1["type"] == "table"))
+      |> Enum.reduce(push_table_echo(socket, raw, rev), fn block, acc ->
+        push_event(acc, "bp:block-update", %{
+          block_id: block["id"],
+          block: block,
+          rev: rev,
+          request_id: nil
+        })
+      end)
+      |> push_event("bp:document-revision", %{
+        rev: rev,
+        document_key: "#{dataset}:#{type}:#{Content.published_id(doc_id)}"
+      })
+    else
+      _ -> socket
+    end
+  end
+
+  def push_stored_doc(socket, _doc, _type), do: socket
 
   @doc false
   def push_table_echo(socket, raw_blocks, rev, request_id \\ nil) do
