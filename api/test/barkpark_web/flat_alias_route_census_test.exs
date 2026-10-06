@@ -524,6 +524,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
          "Content.apply_document_block_op/5, so the document it edits is the " <>
          "pipeline-derived :current_workspace's, the same as MutateController.mutate."},
+    # DocumentOpsController.apply_field_ops
+    {"POST", "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into the schema read, the draft lookup and " <>
+         "Content.apply_field_block_ops/6, so the document it edits is the " <>
+         "pipeline-derived :current_workspace's, the same as apply_op."},
     # QueryController.index
     {"GET", "/v1/data/query/:dataset/:type"} =>
       {:workspace_derived,

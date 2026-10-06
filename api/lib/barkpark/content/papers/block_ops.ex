@@ -3069,7 +3069,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   (`FieldVocabulary.validate/2`) BEFORE anything is written — the client
   vetoes the same vocabulary calmly, this is the truth.
 
-  Returns `{:ok, %{field, blocks, written_doc_id}}` or `{:error, reason}`.
+  `opts[:if_rev]` fences the batch: a document whose `rev` differs answers
+  `{:error, {:rev_mismatch, %{expected, actual}}}` before any op runs, and the
+  same value fences the UPDATE itself (`Writer`'s rev-fenced update). The ops
+  fold in memory and land in one write, so a batch applies whole or not at all.
+
+  Returns `{:ok, %{field, blocks, written_doc_id, rev}}` or `{:error, reason}`.
   """
   @spec apply_field_block_ops(String.t(), String.t(), String.t(), [map()], String.t(), keyword()) ::
           {:ok, map()} | {:error, term()}
@@ -3082,6 +3087,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
        when is_binary(doc_id) and is_binary(type) and is_binary(field) and is_list(ops) do
     with {:ok, %Document{} = doc} <- Content.get_document(doc_id, type, dataset, opts),
+         :ok <- check_document_if_rev(doc, Keyword.get(opts, :if_rev)),
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
          {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
@@ -3112,8 +3118,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
       }
 
       case Content.upsert_document(type, attrs, dataset, opts) do
-        {:ok, _saved} ->
-          {:ok, %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"]}}
+        {:ok, saved} ->
+          {:ok,
+           %{field: field, blocks: new_blocks, written_doc_id: attrs["doc_id"], rev: saved.rev}}
 
         {:error, _} = err ->
           err
