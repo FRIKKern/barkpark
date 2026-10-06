@@ -168,13 +168,18 @@ defmodule BarkparkWeb.ShareMeta do
 
   # ── emission (pure) ─────────────────────────────────────────────────────────
 
+  # Rows stamped by the block-ops path before task-27265c623ef901d2 carry
+  # `/papers/drafts.<slug>`; the reader only serves the published id.
+  defp published_reader_path("/papers/drafts." <> slug), do: "/papers/" <> slug
+  defp published_reader_path(url), do: url
+
   defp build_meta(preview, page_title) do
     m = normalize(preview, page_title)
 
     title = clean(m["title"]) || clean(page_title) || @site_name
     og_type = og_type(m["type"])
     article? = og_type == "article"
-    url = absolutize(m["url"])
+    url = m["url"] |> published_reader_path() |> absolutize()
     description = clean(m["description"])
 
     {image_url, iw, ih, ialt, itype} = image_fields(m["image"], title)
