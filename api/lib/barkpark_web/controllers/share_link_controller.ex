@@ -249,7 +249,7 @@ defmodule BarkparkWeb.ShareLinkController do
       schema = Content.Papers.reader_schema(paper, "paper", link.dataset, scope(link))
 
       preview =
-        paper_preview(paper, Content.Papers.anonymous_content(paper, schema), link.ref_id)
+        paper_preview(paper, Content.Papers.anonymous_content(paper, schema), link)
 
       conn
       |> put_root_layout(html: {BarkparkWeb.Layouts, :bulldocs})
@@ -280,9 +280,11 @@ defmodule BarkparkWeb.ShareLinkController do
 
   # Preview manifest for the share-link static render (preview-contract pc-w2),
   # from the anonymous content (`Papers.anonymous_content/2`), never raw content.
-  defp paper_preview(paper, content, slug),
-    do:
-      BarkparkWeb.ShareMeta.manifest(content, "/papers/#{slug}", "paper", Map.get(paper, :title))
+  defp paper_preview(paper, content, %ShareLink{} = link) do
+    link = Barkpark.Repo.preload(link, [:workspace, :project])
+    path = BarkparkWeb.ShareMeta.paper_reader_path(link.workspace, link.project, link.ref_id)
+    BarkparkWeb.ShareMeta.manifest(content, path, "paper", Map.get(paper, :title))
+  end
 
   defp serve(conn, %ShareLink{kind: "doc"} = link) do
     case Content.get_document(link.ref_id, link.ref_type, link.dataset, scope(link)) do

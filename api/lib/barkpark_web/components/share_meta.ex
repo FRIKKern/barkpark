@@ -122,7 +122,10 @@ defmodule BarkparkWeb.ShareMeta do
     stamped = content["preview"]
 
     if is_map(stamped) do
-      stamped
+      # The write-time card stamps `/papers/<slug>`, but only the reader knows
+      # the path it serves: a non-Default workspace's paper is read at
+      # `/w/:ws/p/:proj/papers/:slug` (task-01a69b46651f43fc).
+      if is_binary(url) and url != "", do: Map.put(stamped, "url", url), else: stamped
     else
       read_time_manifest(content, url, doc_type, fallback_title) ||
         degraded_manifest(content, url, doc_type, fallback_title)
@@ -131,6 +134,22 @@ defmodule BarkparkWeb.ShareMeta do
 
   def manifest(_content, url, doc_type, fallback_title),
     do: degraded_manifest(%{}, url, doc_type, fallback_title)
+
+  @doc """
+  The reader path a paper's share card names (task-01a69b46651f43fc).
+  `/papers/<slug>` serves only the Default workspace's papers; any other
+  workspace's paper is read at its scoped `/w/:ws/p/:proj/papers/:slug`.
+  No workspace (or no slugs) falls back to `/papers/<slug>`.
+  """
+  @spec paper_reader_path(term(), term(), String.t()) :: String.t()
+  def paper_reader_path(%{id: ws_id, slug: ws_slug}, %{slug: proj_slug}, slug)
+      when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(slug) do
+    if match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace()),
+      do: "/papers/" <> slug,
+      else: "/w/#{ws_slug}/p/#{proj_slug}/papers/" <> slug
+  end
+
+  def paper_reader_path(_workspace, _project, slug) when is_binary(slug), do: "/papers/" <> slug
 
   defp read_time_manifest(content, url, doc_type, fallback_title) do
     if Code.ensure_loaded?(Barkpark.Preview) and
