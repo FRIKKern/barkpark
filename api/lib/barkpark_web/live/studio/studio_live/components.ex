@@ -131,7 +131,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # controls reds the inclusion arm.
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
-    title = (assigns.paper_doc && assigns.paper_doc.title) || slug || "Paper"
+    # The desk row's own spelling for an untitled paper, never the raw
+    # `drafts.<id>` (task-23bff317e617928e).
+    title =
+      if assigns.paper_doc,
+        do: BarkparkWeb.Studio.PaneBuilder.display_title(assigns.paper_doc),
+        else: "Paper"
 
     edit_blocks =
       case assigns.paper_doc do
