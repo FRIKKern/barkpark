@@ -20,6 +20,7 @@ import { acquireLease, type Lease } from './lease'
 import { createRuntimeRecord, stopProcessGroup, type RuntimeRecord } from './runtime-record'
 import { loadOrCreateSecrets, releaseKeys, redactor, type EngineSecrets } from './secrets'
 import { resolveRelease, type ResolvedRelease } from './release'
+import { exe, initdbLocale, launch, localeEnv, systemEnv } from './platform'
 
 export type EnginePhase = 'starting' | 'ready' | 'recovering' | 'stopping' | 'stopped' | 'failed'
 
@@ -45,7 +46,6 @@ export interface Barkpark {
   stop(): Promise<void>
 }
 
-const SYSTEM_PATH = '/usr/bin:/bin:/usr/sbin:/sbin'
 const DATABASE = 'barkpark'
 const sleep = (ms: number, signal?: AbortSignal) => new Promise<void>((resolve, reject) => {
   const timer = setTimeout(resolve, ms)
@@ -65,8 +65,9 @@ function freePort(port = 0): Promise<number> {
 
 interface RunResult { stdout: string; stderr: string }
 function run(file: string, args: string[], options: { env: NodeJS.ProcessEnv; timeout: number; signal?: AbortSignal }): Promise<RunResult> {
+  const l = launch(file, args, process.platform, options.env)
   return new Promise((resolve, reject) => {
-    execFile(file, args, { env: options.env, timeout: options.timeout, maxBuffer: 16 * 1024 * 1024, ...(options.signal ? { signal: options.signal } : {}) }, (error, stdout, stderr) => {
+    execFile(l.file, l.args, { env: options.env, timeout: options.timeout, maxBuffer: 16 * 1024 * 1024, windowsHide: true, ...(l.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}), ...(options.signal ? { signal: options.signal } : {}) }, (error, stdout, stderr) => {
       if (error) reject(Object.assign(error, { stdout: String(stdout), stderr: String(stderr) }))
       else resolve({ stdout: String(stdout), stderr: String(stderr) })
     })
@@ -112,15 +113,10 @@ class Engine {
     if (text) fs.appendFileSync(path.join(this.logDir, name), this.redact(text))
   }
 
-  private localeEnv(): NodeJS.ProcessEnv {
-    const locale = process.platform === 'darwin' ? 'en_US.UTF-8' : 'C.UTF-8'
-    return { LANG: locale, LC_ALL: locale }
-  }
-
   private async pg(tool: string, args: string[], timeout = 30_000, signal?: AbortSignal): Promise<RunResult> {
-    const env = { PATH: SYSTEM_PATH, ...this.localeEnv(), PGPASSWORD: this.secrets?.pgPassword ?? '' }
+    const env = { ...systemEnv(), ...localeEnv(), PGPASSWORD: this.secrets?.pgPassword ?? '' }
     try {
-      return await run(path.join(this.release.pgBin, tool), args, { env, timeout, ...(signal ? { signal } : {}) })
+      return await run(path.join(this.release.pgBin, exe(tool)), args, { env, timeout, ...(signal ? { signal } : {}) })
     } catch (error) {
       const e = error as Error & { stdout?: string; stderr?: string }
       throw new Error(`${tool} failed${signal?.aborted ? ' (cancelled)' : ''}: ${this.redact(String(e.stderr || e.stdout || e.message)).slice(-1500)}`)
@@ -199,7 +195,7 @@ class Engine {
     const staging = this.pgData + '.init'
     fs.rmSync(staging, { recursive: true, force: true })
     try {
-      const locale = this.localeEnv().LC_ALL!
+      const locale = initdbLocale()
       await this.pg('initdb', ['-D', staging, '-U', 'postgres', '--auth=scram-sha-256', '--pwfile=' + passwordFile, '-E', 'UTF8', '--locale=' + locale], 120_000, signal)
     } finally {
       fs.rmSync(passwordFile, { force: true })
@@ -213,7 +209,7 @@ class Engine {
   private releaseEnv(): NodeJS.ProcessEnv {
     const s = this.secrets!
     return {
-      PATH: SYSTEM_PATH, HOME: path.join(this.dataDir, 'home'), ...this.localeEnv(), ...releaseKeys(s.pgPassword),
+      ...systemEnv(), HOME: path.join(this.dataDir, 'home'), USERPROFILE: path.join(this.dataDir, 'home'), ...localeEnv(), ...releaseKeys(s.pgPassword),
       DATABASE_URL: `ecto://postgres:${encodeURIComponent(s.pgPassword)}@127.0.0.1:${this.pgPort}/${DATABASE}`, POOL_SIZE: '5',
       // The listen port and the public port are separate settings. Without PHX_PORT a
       // release assumes the scheme's standard port in every absolute URL it hands out,
@@ -263,7 +259,11 @@ class Engine {
     signal.throwIfAborted()
     fs.writeFileSync(path.join(this.dataDir, 'port'), String(this.port))
     this.childError = null
-    const child = spawn(this.release.bin, ['start'], { env: { ...env, PHX_SERVER: 'true' }, detached: true, stdio: ['ignore', 'pipe', 'pipe'] })
+    const serverEnv = { ...env, PHX_SERVER: 'true' }
+    const l = launch(this.release.bin, ['start'], process.platform, serverEnv)
+    // detached: on POSIX the server leads its own process group, which stopAll signals;
+    // on Windows it gets its own console, hidden.
+    const child = spawn(l.file, l.args, { env: serverEnv, detached: true, windowsHide: true, ...(l.windowsVerbatimArguments ? { windowsVerbatimArguments: true } : {}), stdio: ['ignore', 'pipe', 'pipe'] })
     this.child = child
     child.stdout?.on('data', (chunk: Buffer) => this.log('server.log', chunk.toString()))
     child.stderr?.on('data', (chunk: Buffer) => this.log('server.log', chunk.toString()))

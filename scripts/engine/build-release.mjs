@@ -14,7 +14,7 @@
 //
 // Layout of an engine folder:
 //   engine.json          manifest: commit, platform, arch, Erlang, Elixir, Postgres
-//   bin/barkpark         the release launcher (bin/migrate beside it)
+//   bin/barkpark         the release launcher (bin/barkpark.bat on Windows)
 //   erts-<version>/      the Erlang runtime the release carries
 //   lib/ releases/       compiled applications and boot files
 //   postgres/            bin/ lib/ share/ of the bundled Postgres
@@ -44,7 +44,10 @@ function addPostgres(engineArg, postgresArg) {
   const target = path.join(engine, 'postgres');
   if (fs.existsSync(target)) fail('This engine folder already carries a Postgres; nothing was overwritten.');
   fs.cpSync(postgres, target, { recursive: true, verbatimSymlinks: true });
-  const dropped = fs.readdirSync(path.join(target, 'bin')).filter(name => !PROGRAMS.includes(name));
+  // On Windows bin/ also holds the DLLs the programs load (libpq, OpenSSL, zlib, ICU):
+  // only programs are dropped there.
+  const program = name => process.platform === 'win32' ? (name.toLowerCase().endsWith('.exe') ? name.slice(0, -4) : null) : name;
+  const dropped = fs.readdirSync(path.join(target, 'bin')).filter(name => program(name) !== null && !PROGRAMS.includes(program(name)));
   for (const name of dropped) fs.rmSync(path.join(target, 'bin', name), { force: true });
   fs.rmSync(path.join(target, 'postgres.json'));
   const manifest = JSON.parse(fs.readFileSync(manifestFile, 'utf8'));
@@ -67,6 +70,10 @@ const filesUnder = dir => fs.readdirSync(dir, { withFileTypes: true }).flatMap(e
 // the list is recorded in engine.json and anything not found fails the build.
 // Returns the system libraries the release needs beyond the C library.
 export function selfContain(out) {
+  // Windows: the release's ERTS carries its own DLLs, and the argon2 NIF links the
+  // MSVC runtime (vcruntime140.dll), which Windows 10 and 11 ship. No check runs
+  // there yet; the Windows boot job on a clean runner is the check.
+  if (process.platform === 'win32') return ['vcruntime140.dll (MSVC runtime, from the system)'];
   const binaries = filesUnder(out).filter(file => {
     const head = Buffer.alloc(4), fd = fs.openSync(file, 'r');
     try { fs.readSync(fd, head, 0, 4, 0); } finally { fs.closeSync(fd); }
@@ -117,7 +124,8 @@ export function selfContain(out) {
 }
 
 function buildRelease(outArg) {
-  if (process.platform === 'win32') fail('The engine release is built on macOS and Linux only for now.');
+  // mix, elixir and erl are .bat/.cmd scripts on Windows, which only a shell runs.
+  const shell = process.platform === 'win32';
   const git = args => execFileSync('git', args, { cwd: repo, encoding: 'utf8' }).trim();
   const commit = git(['rev-parse', 'HEAD']);
   if (git(['status', '--porcelain', '--untracked-files=no'])) fail('The checkout has uncommitted changes. An engine folder is stamped with one commit; commit or stash first.');
@@ -131,15 +139,15 @@ function buildRelease(outArg) {
     BARKPARK_BUILD_COMMIT: commit.slice(0, 9), BARKPARK_BUILD_DATE: new Date().toISOString().replace(/\.\d+Z$/, 'Z'),
     CMAKE_POLICY_VERSION_MINIMUM: process.env.CMAKE_POLICY_VERSION_MINIMUM || '3.5',
   };
-  const mix = args => execFileSync('mix', args, { cwd: api, env, stdio: ['ignore', 'inherit', 'inherit'] });
+  const mix = args => execFileSync('mix', args, { cwd: api, env, stdio: ['ignore', 'inherit', 'inherit'], shell });
   mix(['deps.get', '--only', 'prod']);
   mix(['compile', '--force']);
   mix(['release', 'barkpark', '--overwrite', '--path', out]);
   const erts = fs.readdirSync(out).find(name => name.startsWith('erts-')) || null;
   if (!erts) fail('The release has no erts- folder; check include_erts in api/mix.exs.', 1);
   const sharedLibraries = selfContain(out);
-  const otp = execFileSync('erl', ['-noshell', '-eval', 'io:put_chars(erlang:system_info(otp_release)), halt().'], { encoding: 'utf8' }).trim();
-  const elixir = execFileSync('elixir', ['-e', 'IO.write(System.version())'], { encoding: 'utf8' }).trim();
+  const otp = execFileSync('erl', ['-noshell', '-eval', shell ? '"io:put_chars(erlang:system_info(otp_release)), halt()."' : 'io:put_chars(erlang:system_info(otp_release)), halt().'], { encoding: 'utf8', shell }).trim();
+  const elixir = execFileSync('elixir', ['-e', shell ? '"IO.write(System.version())"' : 'IO.write(System.version())'], { encoding: 'utf8', shell }).trim();
   const manifest = {
     version: 1, commit, builtAt: new Date().toISOString(), platform: process.platform, arch: process.arch,
     osRelease: os.release(), erts: erts.slice('erts-'.length), otp, elixir, sharedLibraries, postgres: null,
@@ -148,7 +156,7 @@ function buildRelease(outArg) {
   console.log(`Built Barkpark ${commit.slice(0, 9)} (OTP ${otp}, ${erts}) at ${out}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (path.resolve(process.argv[1] || '') === fileURLToPath(import.meta.url)) {
   const argv = process.argv.slice(2);
   if (argv[0] === '--add-postgres') addPostgres(argv[1], argv[2]);
   else if (argv.length === 0 || (argv[0] === '--out' && argv[1] && argv.length === 2)) buildRelease(argv[1]);

@@ -4,10 +4,11 @@
 // starts again. Proof is the process id together with its start time, so a recycled
 // id is never signalled. The database is addressed only through its data directory.
 //
-// Lifted from Barkdown's app/main/runtime-orphan.js (ee50133b), POSIX only.
+// Lifted from Barkdown's app/main/runtime-orphan.js (ee50133b). The platform
+// differences (start time, stopping a tree) live in platform.ts.
 import fs from 'node:fs'
 import path from 'node:path'
-import { execFileSync } from 'node:child_process'
+import { processStartedAt, signalTree } from './platform'
 import { processAlive } from './lease'
 
 export const RECORD = 'runtime-process.json'
@@ -33,25 +34,16 @@ export interface RuntimeRecordDeps {
 
 export interface ReclaimResult { reclaimed: boolean; server: boolean; database: boolean }
 
-export function processStartedAt(pid: number): string {
-  try {
-    return execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', timeout: 15_000, stdio: ['ignore', 'pipe', 'ignore'] }).trim()
-  } catch {
-    return ''
-  }
-}
+export { processStartedAt }
 
 const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 
-/** SIGTERM the group, wait up to 10 s, then SIGKILL and wait up to 5 s. */
+/** Ask the tree to stop, wait up to 10 s, then force it and wait up to 5 s. */
 export async function stopProcessGroup(pid: number, isAlive: (pid: number) => boolean = processAlive): Promise<void> {
-  const signal = (name: NodeJS.Signals) => {
-    try { process.kill(-pid, name) } catch (error) { if ((error as NodeJS.ErrnoException).code !== 'ESRCH') throw error }
-  }
-  signal('SIGTERM')
+  signalTree(pid, false)
   for (let waited = 0; waited < 10_000 && isAlive(pid); waited += 200) await sleep(200)
   if (isAlive(pid)) {
-    signal('SIGKILL')
+    signalTree(pid, true)
     for (let waited = 0; waited < 5_000 && isAlive(pid); waited += 200) await sleep(200)
   }
 }
