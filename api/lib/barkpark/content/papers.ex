@@ -1740,7 +1740,9 @@ defmodule Barkpark.Content.Papers do
 
     case content do
       %{"blocks" => blocks} ->
-        block_authority(blocks, "blocks")
+        blocks
+        |> block_authority("blocks")
+        |> drop_region_shadow(doc, type, dataset)
 
       %{"body" => %{"blocks" => blocks}} ->
         block_authority(blocks, "body.blocks")
@@ -1756,6 +1758,38 @@ defmodule Barkpark.Content.Papers do
 
       _ ->
         {synthesize_blocks(doc, type, dataset), true}
+    end
+  end
+
+  # A STORED block list written before task-9f230ad6d5b50fb0 can carry a bound
+  # field block for a richText field named like the body region (`body`): the
+  # old default layout derived both, so the document binds `content.body` twice
+  # and Beta shows a stale "body" row over the block editor
+  # (task-c60a40c9a0990c0d). Drop that block and report the list as
+  # synthesized, so the first block op persists the repaired list; views and
+  # ops read this same function, so their indexes agree. A body field of any
+  # other type keeps its block (it owns `content.body`; there is no region).
+  defp drop_region_shadow({blocks, false}, %Document{} = doc, type, dataset)
+       when type != @paper_type do
+    if Enum.any?(blocks, &region_shadow?/1) and richtext_body?(doc, type, dataset),
+      do: {Enum.reject(blocks, &region_shadow?/1), true},
+      else: {blocks, false}
+  end
+
+  defp drop_region_shadow(result, _doc, _type, _dataset), do: result
+
+  defp region_shadow?(%{"fieldName" => "body", "type" => "field-" <> _}), do: true
+  defp region_shadow?(_block), do: false
+
+  defp richtext_body?(doc, type, dataset) do
+    case doc_scoped_schema(doc, type, dataset) do
+      {:ok, %{fields: fields}} when is_list(fields) ->
+        Enum.any?(fields, fn f ->
+          (f["name"] || f[:name]) == "body" and to_string(f["type"] || f[:type]) == "richText"
+        end)
+
+      _ ->
+        false
     end
   end
 
