@@ -6,6 +6,7 @@ defmodule Barkpark.Media.Storage.Access do
   alias Barkpark.Accounts.User
   alias Barkpark.Auth
   alias Barkpark.Content.Document
+  alias Barkpark.Media.Storage.Actor
   alias Barkpark.Media.Storage.SignedUrl
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
@@ -159,7 +160,10 @@ defmodule Barkpark.Media.Storage.Access do
     auth = authenticated?(conn)
     admin = auth && admin?(conn)
     checked_out_by = checked_out_by(doc)
-    actor = actor_label(conn)
+    # The SAME actor checkout stamps (`Media.Storage.Actor`, task-36a302b2e981d5e1):
+    # an account is "user:<id>" (a legacy email stamp still matches it).
+    actor = Actor.of(conn)
+    holds? = Actor.holds?(actor, checked_out_by)
 
     base =
       case visibility(doc) do
@@ -175,13 +179,13 @@ defmodule Barkpark.Media.Storage.Access do
       end
 
     base =
-      if auth and (admin or checked_out_by in [nil, ""] or checked_out_by == actor) do
+      if auth and (admin or checked_out_by in [nil, ""] or holds?) do
         base ++ ["edit_metadata"]
       else
         base
       end
 
-    if checked_out_by not in [nil, ""] and checked_out_by != actor and not admin do
+    if checked_out_by not in [nil, ""] and not holds? and not admin do
       base -- ["edit_metadata", "use_original"]
     else
       base
@@ -389,29 +393,6 @@ defmodule Barkpark.Media.Storage.Access do
           _ ->
             false
         end
-    end
-  end
-
-  # DELIBERATELY NOT GIVEN AN ACCOUNT ARM — see the pin in
-  # account_session_media_write_test.exs ("actor_label attribution").
-  #
-  # `actor_label/1` names the actor in `checkedOutBy`, which is USER-VISIBLE and
-  # compared for equality by `permission_set/2`. What a human principal should be
-  # stamped as (email? display name? user id?) is a product decision nobody has
-  # made, and guessing it writes user-visible data and silently re-keys existing
-  # lock comparisons. So this stays token-only on purpose.
-  #
-  # It is not biting today: the only callers of the sibling
-  # `V1.MediaController.actor_label/1` are `checkout`/`undo_checkout`, routed on
-  # `:media_mutate` / `[:scoped_api, :media_mutate]`, NEITHER of which carries
-  # `OptionalSessionToken` — so `:current_user` is never set there. Adding that
-  # plug to either pipeline would look like a harmless improvement and would
-  # start stamping a token's label on a user's checkout. The test pins the
-  # pipelines so that change cannot land silently.
-  defp actor_label(conn) do
-    case conn.assigns[:api_token] do
-      %{label: label} when is_binary(label) and label != "" -> label
-      _ -> "api"
     end
   end
 

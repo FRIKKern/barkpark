@@ -67,6 +67,10 @@ defmodule BarkparkWeb.Components.FieldInputs do
   attr :form_gen, :integer, default: 0
   attr :doc_type, :string, default: "document"
   attr :document_rev, :string, default: nil
+  # Whether the viewer may change a `readOnly` schema field (an admin, as the
+  # server's #21536 rule). `false` renders such a field display-only; `nil`
+  # (a caller that does not say) keeps the ordinary input.
+  attr :schema_admin, :boolean, default: nil
   # Scoped-surface URL prefix ("/w/<ws>/p/<proj>", tsk-url-p2) — emitted as
   # the pickers' scope-prefix attribute so their fetches hit the scoped API
   # mirror. "" on the flat surface keeps every fetch byte-identical.
@@ -109,6 +113,25 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div data-readonly-field={@n} data-structured-value>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
       <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+    </div>
+    """
+  end
+
+  # A schema field declared `"readOnly": true` is shown, not edited, in the
+  # Classic form for a NON-admin (task-d483903133c370e1). No form input is
+  # rendered, so the save never posts it and the stored value survives
+  # byte-identical, the same way the structured-value clause above keeps a value
+  # it cannot show. It matches the server rule (#21536): the mutate door refuses
+  # a non-admin change and keeps an admin's. So an admin (`schema_admin: true`,
+  # from `Caps.admin_affordance?/1`) gets the ordinary input below, and a
+  # caller that does not say (`schema_admin` absent) keeps today's input too.
+  def input(%{field: %{"readOnly" => true, "name" => name}, schema_admin: false} = assigns) do
+    form = assigns[:editor_form] || %{}
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-schema-readonly>
+      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
     </div>
     """
   end

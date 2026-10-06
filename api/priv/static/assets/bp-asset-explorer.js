@@ -1601,7 +1601,11 @@
 
       if (isCheckedOut) {
         row.hidden = false;
-        row.innerHTML = this._statusBadge("Checked out by " + checkedOutBy, "lock");
+        // The server names the holder for THIS viewer (task-36a302b2e981d5e1):
+        // "you", a token's label, or "another editor". checkedOutBy itself is a
+        // stamp ("user:<id>", or a legacy email) and is never printed.
+        const who = detail && typeof detail.checkoutLabel === "string" ? detail.checkoutLabel : "";
+        row.innerHTML = this._statusBadge(who ? "Checked out by " + who : "Checked out", "lock");
         checkoutBtn.hidden = true;
         undoBtn.hidden = false;
       } else {
