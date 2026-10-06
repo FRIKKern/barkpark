@@ -25,7 +25,7 @@ Markers: **[public]** = no token (schema visibility) · **[token]** = any · **[
 
 ## 3. Document Envelope
 
-Payload under `result`, plus four outer keys: `schemaHash` (schema digest) · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header DIFFERS: a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
+Payload under `result`, plus four outer keys: `schemaHash` · `etag` (change token = doc `_rev`; send back as `ifMatch`) — the `ETag` header DIFFERS: a cache validator folding `schemaHash`, 304 only on anonymous unshaped reads (no `?fields`/`?expand`/`?resolve`/`?count`) · `ms` (int) · `syncTags` (string[] ISR cache-tag hints, e.g. `bp:ds:production:type:post`).
 
 **Read-envelope `syncTags` are metadata-only here** (webhook `sync_tags` are not; pin: `js/packages/core/tests/synctags-read-envelope-pin.test.ts`).
 
@@ -60,7 +60,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 
 One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` (§5a) and `?perspective=` (§4); `drafts` prefers the `drafts.` twin, else published, and `raw` prefers the exact id, else the twin — so a bare `_publishedId` reaches an unpublished doc under both, as `patch`/`publish`/`discardDraft`/`delete` do.
 
-**Read-after-write is immediate** (`cache-control: max-age=0, private, must-revalidate`; ETags include `_id:_rev`). Writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row; `published` and `bp task get` read the exact ID. Diagnose a missing write with one drafts read.
+**Read-after-write is immediate** (`cache-control: max-age=0, private, must-revalidate`; ETags include `_id:_rev`). Writes to `drafts.<id>` appear under `?perspective=drafts`, or `raw` without a published row; `published` and `bp task get` read the exact ID.
 
 ### 5a. Reference Expansion
 
@@ -101,11 +101,13 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
-Failures: §9. Searchable text (title + every `content` string) over Postgres' **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` (owner decision, persisted) skips the duplicate scan.
+Failures: §9. Searchable text (title + every `content` string) over Postgres' **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` skips the duplicate scan.
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
-One PortableDoc block op on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (use their Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
+One PortableDoc block op on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
+
+`…/fields/:field/ops`: `{"ops":[…],"ifRev"}` on one `editor: blocks` field, all or none; `result.rev` = new rev.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -150,7 +152,7 @@ All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x
 
 Core: `not_found` 404 (doc/schema/dataset/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
-`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503 (media/dedup outage)/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
+`halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
 
 Per endpoint: [api/error-codes.md](api/error-codes.md); source `Errors.known_codes/0`.
 

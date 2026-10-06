@@ -20,6 +20,16 @@ defmodule BarkparkWeb.DocumentOpsController do
   - Draft first: when `drafts.<doc_id>` exists the op edits the draft, as
     Studio's editor does and as `?perspective=raw` reads it. Otherwise it edits
     the document itself.
+
+  `POST /v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops` is the field
+  twin: Studio's field canvas (`handlers/field_blocks.ex`) edits one
+  block-editor `richText` field through `Content.apply_field_block_ops/6`, and
+  this route makes the same call. Body: `{"ops": [...], "ifRev": "<_rev>"}`.
+  The ops apply in order to `content[field]` and land in one write, so the
+  batch applies whole or not at all. The same `ifRev`, draft-first and
+  papers/sessions rules apply. A field that is missing or not a block-editor
+  field answers 422 `invalid_op`, as does a block outside the field's
+  vocabulary. Success: `{"result": {"field", "blocks", "written_doc_id", "rev"}}`.
   """
   use BarkparkWeb, :controller
 
@@ -67,13 +77,78 @@ defmodule BarkparkWeb.DocumentOpsController do
     end
   end
 
+  def apply_field_ops(
+        conn,
+        %{"dataset" => dataset, "type" => type, "doc_id" => doc_id, "field" => field} = params
+      ) do
+    ops = params["ops"]
+    if_rev = params["ifRev"]
+    opts = [source: :api] ++ scope_opts(conn)
+
+    cond do
+      not (is_list(ops) and ops != [] and Enum.all?(ops, &(is_map(&1) and is_binary(&1["op"])))) ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "malformed_op",
+          "body must carry a non-empty \"ops\" list, each entry naming a DocPatchOp in its \"op\" key"
+        )
+
+      not (is_binary(if_rev) and if_rev != "") ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "malformed_op",
+          "ifRev is required: read the document and send its current _rev"
+        )
+
+      Content.blocks_type?(type) ->
+        ErrorResponse.emit_custom(
+          conn,
+          :unprocessable_entity,
+          "invalid_op",
+          "#{type} documents take ops at /v1/plugins/bulldocs/#{type}s/:slug/ops"
+        )
+
+      not match?({:ok, _}, Content.get_schema(type, dataset, opts)) ->
+        ErrorResponse.emit(conn, {:error, :not_found}, "no schema for type #{type}")
+
+      true ->
+        target = edit_target(doc_id, type, dataset, opts)
+
+        Content.apply_field_block_ops(target, type, field, ops, dataset, opts ++ [if_rev: if_rev])
+        |> field_ops_response(conn)
+    end
+  end
+
+  defp field_ops_response({:ok, result}, conn), do: json(conn, %{result: result})
+
+  defp field_ops_response({:error, {:no_such_field, field}}, conn),
+    do: invalid_op(conn, "#{inspect(field)} is not a field of this type")
+
+  defp field_ops_response({:error, {:not_a_blocks_field, field}}, conn),
+    do: invalid_op(conn, "#{inspect(field)} is not a block-editor field (editor: blocks)")
+
+  defp field_ops_response({:error, {:out_of_vocabulary, why}}, conn),
+    do: invalid_op(conn, "not allowed in this field: #{why}")
+
+  defp field_ops_response(error, conn), do: op_error_response(error, conn)
+
+  defp invalid_op(conn, message),
+    do: ErrorResponse.emit_custom(conn, :unprocessable_entity, "invalid_op", message)
+
   defp run_op(conn, doc_id, type, op, dataset, opts) do
     target = edit_target(doc_id, type, dataset, opts)
 
     case Content.apply_document_block_op(target, type, op, dataset, opts) do
-      {:ok, result} ->
-        json(conn, %{result: result})
+      {:ok, result} -> json(conn, %{result: result})
+      error -> op_error_response(error, conn)
+    end
+  end
 
+  # The refusals both doors share: one envelope per reason, whichever route ran.
+  defp op_error_response(error, conn) do
+    case error do
       {:error, :not_found} ->
         ErrorResponse.emit(conn, {:error, :not_found})
 

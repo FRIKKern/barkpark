@@ -2617,6 +2617,9 @@ defmodule BarkparkWeb.Router do
     # One PortableDoc block op on any document type: the HTTP twin of the call
     # Studio's block editor makes in-process (docs/contracts/product-era.md).
     post("/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+    # The field twin: a batch of block ops on one block-editor richText field,
+    # the call Studio's field canvas makes in-process.
+    post("/doc/:dataset/:type/:doc_id/fields/:field/ops", DocumentOpsController, :apply_field_ops)
   end
 
   # ── Tasks API surface ───────────────────────────────────────────────────
@@ -3329,6 +3332,12 @@ defmodule BarkparkWeb.Router do
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+
+    post(
+      "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
+      DocumentOpsController,
+      :apply_field_ops
+    )
   end
 
   # Scoped admin reads (search insights/synonyms).
