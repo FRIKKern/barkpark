@@ -5301,6 +5301,67 @@
       else delete document.documentElement.dataset.inspectorPref;
     });
 
+    // task-92e2615cf6ec27e6: the server pushes `bp:focus-new-doc` after a "+"
+    // create. The editor for that id renders on the patch that follows, so
+    // wait for it (up to 4s), then focus its first field: a Classic input
+    // (`doc-field-<id>-<field>`) or a paper's title block. A paper canvas can
+    // re-mount its editor just after the first render and restore focus with
+    // its own default caret, so the caret is re-placed for a further second.
+    // Any key or pointer press from the user ends all of it.
+    window.bpFocusNewDoc = function (id) {
+      const prefix = "doc-field-" + id + "-";
+      const field = Array.from(document.querySelectorAll('[id^="doc-field-"]')).find(
+        (el) =>
+          el.id.startsWith(prefix) &&
+          /^(INPUT|TEXTAREA|SELECT)$/.test(el.tagName) &&
+          el.type !== "hidden" &&
+          !el.disabled &&
+          !el.readOnly &&
+          !el.closest("[hidden]")
+      );
+      if (field) {
+        field.focus();
+        return true;
+      }
+      const paper =
+        document.getElementById("paper-editor-drafts." + id) ||
+        document.getElementById("paper-editor-" + id);
+      if (!paper) return false;
+      // A bare focus() keeps ProseMirror's own caret, which sits in the body
+      // block; the canvas's focusBlock puts it in the title.
+      const title = paper.querySelector('[data-bp-role="title"][data-bp-id]');
+      const canvas = title && title.closest("bp-paper-canvas");
+      if (canvas && typeof canvas.focusBlock === "function") {
+        return canvas.focusBlock(title.dataset.bpId) === true;
+      }
+      const editable = paper.querySelector('[contenteditable="true"]');
+      if (!editable) return false;
+      editable.focus();
+      return true;
+    };
+    window.addEventListener("phx:bp:focus-new-doc", (e) => {
+      const id = e.detail && e.detail.id;
+      if (!id) return;
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const waitUntil = Date.now() + 4000;
+      let settleUntil = 0;
+      const attempt = () => {
+        if (interrupted) return;
+        if (window.bpFocusNewDoc(id) && !settleUntil) settleUntil = Date.now() + 1000;
+        const until = settleUntil || waitUntil;
+        if (Date.now() < until) {
+          setTimeout(attempt, 100);
+        } else {
+          document.removeEventListener("keydown", interrupt, { capture: true });
+          document.removeEventListener("pointerdown", interrupt, { capture: true });
+        }
+      };
+      attempt();
+    });
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
