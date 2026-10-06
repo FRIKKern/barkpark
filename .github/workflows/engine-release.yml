@@ -6,6 +6,9 @@ name: engine-release
 # PATH and checks /status.json. The boot job then packs @barkpark/engine and the
 # platform package (scripts/engine/pack.mjs), npm installs both tarballs into a
 # scratch app and boots it with startBarkpark({ dataDir }) alone.
+# A workflow_dispatch run also runs the npm job on those same tarballs: dry-run by
+# default, a real publish only when the owner picks it (NPM_TOKEN, main, version
+# above 0.0.0).
 #
 # WHY IT EXISTS: plan work for the App shape (task-03d94dbc4ad7b160, paper
 # /papers/the-engine-2026-10-05); no merge waits on it. It runs on pushes to main
@@ -27,6 +30,17 @@ on:
       - "js/pnpm-lock.yaml"
       - ".github/workflows/engine-release.yml"
   workflow_dispatch:
+    inputs:
+      npm:
+        # dry-run packs and checks all four packages and writes nothing to npm.
+        # publish is the owner's act: it needs NPM_TOKEN and a version above 0.0.0.
+        description: "npm publish of @barkpark/engine and its platform packages"
+        required: true
+        default: dry-run
+        type: choice
+        options:
+          - dry-run
+          - publish
 
 permissions:
   contents: read
@@ -232,6 +246,14 @@ jobs:
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+      # The tarballs the boot just installed are the ones the publish job ships.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: npm-${{ matrix.target }}
+          path: ${{ runner.temp }}/npm/*.tgz
+          retention-days: 14
+          if-no-files-found: error
+
       - name: Keep the data folder on failure
         if: failure()
         uses: actions/upload-artifact@v4
@@ -241,3 +263,72 @@ jobs:
             ${{ runner.temp }}/it/barkpark-engine-it-*/logs
             ${{ runner.temp }}/npm-it/barkpark-npm-boot-*/logs
           if-no-files-found: ignore
+
+  # On demand only, and only after every platform booted from its npm tarballs:
+  # publish the three platform packages first, then @barkpark/engine, so a fresh
+  # install never resolves an optional dependency the registry does not have yet.
+  npm:
+    name: npm publish (dry-run unless chosen)
+    needs: boot
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      id-token: write # npm provenance
+    steps:
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+          registry-url: https://registry.npmjs.org
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: npm-*
+          path: ${{ runner.temp }}/npm
+          merge-multiple: true
+
+      - name: Check the four packages agree
+        id: check
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npm"
+          ls -la
+          launcher=(barkpark-engine-[0-9]*.tgz)
+          [ "${#launcher[@]}" -eq 1 ] || { echo "::error::expected one @barkpark/engine tarball, found ${#launcher[@]}"; exit 1; }
+          version="$(tar -xzOf "${launcher[0]}" package/package.json | jq -r .version)"
+          for target in darwin-arm64 linux-x64 linux-arm64; do
+            f="barkpark-engine-$target-$version.tgz"
+            [ -f "$f" ] || { echo "::error::missing $f"; exit 1; }
+            [ "$(tar -xzOf "$f" package/package.json | jq -r .version)" = "$version" ] || { echo "::error::$f is not version $version"; exit 1; }
+            [ "$(tar -xzOf "${launcher[0]}" package/package.json | jq -r --arg n "@barkpark/engine-$target" '.optionalDependencies[$n]')" = "$version" ] \
+              || { echo "::error::@barkpark/engine does not depend on @barkpark/engine-$target@$version"; exit 1; }
+          done
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "launcher=${launcher[0]}" >> "$GITHUB_OUTPUT"
+          { echo "### npm ${{ inputs.npm }} $version"; echo; echo "| package | tarball |"; echo "|---|---|"; for f in barkpark-engine-*.tgz; do echo "| $(tar -xzOf "$f" package/package.json | jq -r .name) | $(du -h "$f" | cut -f1) |"; done; } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Refuse a real publish without its preconditions
+        if: inputs.npm == 'publish'
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+        run: |
+          [ "$GITHUB_REF" = refs/heads/main ] || { echo "::error::a real publish runs from main only, not $GITHUB_REF"; exit 1; }
+          [ -n "${NODE_AUTH_TOKEN:-}" ] || { echo "::error::repository secret NPM_TOKEN is not set"; exit 1; }
+          [ "$VERSION" != 0.0.0 ] || { echo "::error::version is 0.0.0; set a real version in js/packages/engine/package.json first"; exit 1; }
+
+      - name: npm publish (platform packages, then @barkpark/engine)
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+          VERSION: ${{ steps.check.outputs.version }}
+          LAUNCHER: ${{ steps.check.outputs.launcher }}
+          MODE: ${{ inputs.npm }}
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/npm"
+          if [ "$MODE" = publish ]; then flags=(--access public --provenance); else flags=(--access public --dry-run); fi
+          for target in darwin-arm64 linux-x64 linux-arm64; do
+            npm publish "barkpark-engine-$target-$VERSION.tgz" "${flags[@]}"
+          done
+          npm publish "$LAUNCHER" "${flags[@]}"

@@ -2801,7 +2801,17 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "Weekly changelog generator"
         --expect-unrendered "Publish weekly changelog"
         --expect-unrendered "verify"
-        --expect-unrendered "publish")
+        --expect-unrendered "publish"
+        # engine-release.yml (task-9c8d9e3ed15bdcc9): push-to-main (path-filtered) and
+        # workflow_dispatch only, so its job names render on main and never on a PR
+        # head; the rows land after the workflow (#21657) and the frozen fixture pair.
+        --expect-unrendered "build (darwin-arm64)"
+        --expect-unrendered "build (linux-x64)"
+        --expect-unrendered "build (linux-arm64)"
+        --expect-unrendered "App shape boot (darwin-arm64)"
+        --expect-unrendered "App shape boot (linux-x64)"
+        --expect-unrendered "App shape boot (linux-arm64)"
+        --expect-unrendered "npm publish (dry-run unless chosen)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"
      "${ACK_EX[@]}")
 
