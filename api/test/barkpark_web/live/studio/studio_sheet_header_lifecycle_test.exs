@@ -136,6 +136,37 @@ defmodule BarkparkWeb.Studio.StudioSheetHeaderLifecycleTest do
     assert %{"A1" => %{"v" => 42}} = cells(published)
   end
 
+  # task-3b3209373291e9fd: a published sheet is public, and the header had no
+  # way back. Unpublish keeps the cell typed after Publish (it lives only in
+  # the session) on the new draft, and a later edit persists to the draft
+  # without writing the published row back.
+  test "Unpublish keeps the session's cells on the draft and never resurrects the published row",
+       %{conn: conn} do
+    create_sheet!("hdr-unpub")
+    {view, target, _html} = open!(conn, "hdr-unpub")
+    type_cell!(target, "A1", "42")
+    html = view |> element(~s([data-test-id="sheet-publish"])) |> render_click()
+    assert html =~ ~s(data-test-id="sheet-unpublish")
+    refute html =~ ~s(data-test-id="sheet-publish")
+
+    type_cell!(target, "B1", "7")
+
+    refute Map.has_key?(cells(stored("hdr-unpub")), "B1"),
+           "the 60 s debounce should have kept B1 in the session before Unpublish"
+
+    html = view |> element(~s([data-test-id="sheet-unpublish"])) |> render_click()
+    assert html =~ ~s(data-test-id="sheet-publish")
+
+    assert stored("hdr-unpub") == nil, "Unpublish should remove the published row"
+    assert %{"A1" => %{"v" => 42}, "B1" => %{"v" => 7}} = cells(stored("drafts.hdr-unpub"))
+
+    type_cell!(with_target(view, "#sheet-grid-hdr-unpub"), "C1", "9")
+    :ok = Session.flush("hdr-unpub", @dataset, nil)
+
+    assert %{"C1" => %{"v" => 9}} = cells(stored("drafts.hdr-unpub"))
+    assert stored("hdr-unpub") == nil, "a later persist must not write the published row back"
+  end
+
   test "Rename writes the title through the session, and a later persist keeps it",
        %{conn: conn} do
     create_sheet!("hdr-rename")

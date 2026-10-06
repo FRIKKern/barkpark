@@ -761,14 +761,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     {:noreply, socket} =
       do_action(
         socket,
-        fn doc, type ->
-          Content.unpublish_document(
-            Content.published_id(doc.doc_id),
-            type,
-            socket.assigns.dataset,
-            opts
-          )
-        end,
+        fn doc, type -> unpublish_open_doc(doc, type, socket.assigns.dataset, opts) end,
         "Unpublished"
       )
 
@@ -776,6 +769,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     # Publish; announce it or the next edit pauses (task-494fc7f91abd01bd).
     {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
+
+  # A sheet's cells live in its session, which persists on a debounce, and
+  # Unpublish is offered only while no draft row exists. Flushing first (as
+  # Publish does) would create that draft, and `unpublish_document` then
+  # overwrites an existing draft with the published content, losing the cells.
+  # So read the live cells, unpublish, and put them on the new draft when they
+  # differ; the session's next persist writes the same draft
+  # (task-3b3209373291e9fd).
+  defp unpublish_open_doc(doc, "sheet", dataset, opts) do
+    slug = Content.published_id(doc.doc_id)
+    scope = BarkparkWeb.Studio.SheetGrid.GridData.session_scope(%{doc: doc})
+
+    live =
+      case Barkpark.Plugins.Sheets.Session.peek(slug, dataset, scope) do
+        {:ok, %{} = content} -> content
+        _ -> nil
+      end
+
+    with {:ok, _} = ok <- Content.unpublish_document(slug, "sheet", dataset, opts) do
+      keep_live_cells(ok, slug, live, dataset, opts)
+    end
+  end
+
+  defp unpublish_open_doc(doc, type, dataset, opts),
+    do: Content.unpublish_document(Content.published_id(doc.doc_id), type, dataset, opts)
+
+  defp keep_live_cells(ok, _slug, nil, _dataset, _opts), do: ok
+  defp keep_live_cells({:ok, %{content: live}} = ok, _slug, live, _dataset, _opts), do: ok
+
+  defp keep_live_cells(_ok, slug, live, dataset, opts),
+    do: Content.upsert_document("sheet", %{"doc_id" => slug, "content" => live}, dataset, opts)
 
   @doc false
   def do_action(socket, action, msg) do
