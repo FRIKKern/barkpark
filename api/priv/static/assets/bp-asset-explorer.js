@@ -189,7 +189,7 @@
         '<nav class="bp-ae-facets" hidden></nav>' +
         '<div class="bp-ae-sidebar-head">' +
         '<div class="bp-ae-sidebar-title bp-ae-collections-title">Collections</div>' +
-        '<button type="button" class="bp-ae-new-collection btn btn-sm" title="New folder">+</button>' +
+        '<button type="button" class="bp-ae-new-collection btn btn-sm" title="New folder" aria-label="New folder">+</button>' +
         "</div>" +
         '<nav class="bp-ae-collections"></nav>' +
         "</aside>" +
@@ -201,8 +201,8 @@
         "</div>" +
         '<div class="bp-ae-toolbar-pills"></div>' +
         '<div class="bp-ae-view-toggle" role="group" aria-label="Result view">' +
-        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view">Grid</button>' +
-        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="List view">List</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-grid is-active" data-view="grid" title="Grid view" aria-pressed="true">Grid</button>' +
+        '<button type="button" class="btn btn-sm bp-ae-view-btn bp-ae-view-list" data-view="list" title="List view" aria-pressed="false">List</button>' +
         "</div>" +
         '<select class="form-input bp-ae-sort text-sm" aria-label="Sort results">' +
         SORT_OPTIONS.map(
@@ -210,10 +210,10 @@
             '<option value="' + o.id + '">' + esc(o.label) + "</option>"
         ).join("") +
         "</select>" +
-        '<label class="btn btn-primary btn-sm bp-ae-upload">' +
-        "<span>Upload</span>" +
-        '<input type="file" multiple hidden />' +
-        "</label>" +
+        // A real button: a <label> around a `hidden` input takes no focus, so
+        // keyboard users could not upload at all (task-6553d48bdfa3035d).
+        '<button type="button" class="btn btn-primary btn-sm bp-ae-upload">Upload</button>' +
+        '<input type="file" class="bp-ae-upload-input" multiple hidden />' +
         '<span class="bp-ae-count text-sm text-muted"></span>' +
         '<label class="bp-ae-density-label text-sm text-muted">' +
         "Size" +
@@ -275,7 +275,8 @@
       this._emptyEl = this.querySelector(".bp-ae-empty");
       this._inspectorEmpty = this.querySelector(".bp-ae-inspector-empty");
       this._inspectorBody = this.querySelector(".bp-ae-inspector-body");
-      this._uploadInput = this.querySelector(".bp-ae-upload input");
+      this._uploadInput = this.querySelector(".bp-ae-upload-input");
+      this.querySelector(".bp-ae-upload").addEventListener("click", () => this._uploadInput.click());
       this._densityInput = this.querySelector(".bp-ae-density");
       this._toastEl = this.querySelector(".bp-ae-toast");
       this._modalEl = this.querySelector(".bp-ae-modal");
@@ -377,6 +378,7 @@
           this._viewMode = mode;
           this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.view === mode);
+            b.setAttribute("aria-pressed", String(b.dataset.view === mode));
           });
           this._syncToolbarChrome();
           this._savePrefs();
@@ -659,6 +661,7 @@
           this._viewMode = prefs.viewMode;
           this.querySelectorAll(".bp-ae-view-btn").forEach((b) => {
             b.classList.toggle("is-active", b.dataset.view === this._viewMode);
+            b.setAttribute("aria-pressed", String(b.dataset.view === this._viewMode));
           });
         }
         if (prefs.sort && SORT_OPTIONS.some((o) => o.id === prefs.sort)) {
@@ -951,6 +954,8 @@
         return (
           '<button type="button" class="bp-ae-filter' +
           active +
+          '" aria-pressed="' +
+          (active ? "true" : "false") +
           '" data-kind="' +
           f.id +
           '">' +
@@ -1001,6 +1006,8 @@
       let html =
         '<button type="button" class="bp-ae-collection' +
         allActive +
+        '" aria-pressed="' +
+        (allActive ? "true" : "false") +
         '" data-id="">All assets</button>';
       html += this._collections
         .map((col) => {
@@ -1009,6 +1016,8 @@
           return (
             '<button type="button" class="bp-ae-collection' +
             active +
+            '" aria-pressed="' +
+            (active ? "true" : "false") +
             '" data-id="' +
             esc(col.id) +
             '">' +
