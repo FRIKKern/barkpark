@@ -82,13 +82,13 @@
       "options": ["public", "token", "private"]
     },
     {
-      "name": "checkedOutBy",
+      "name": "checkedOutBy", "readOnly": true,
       "title": "Checked out by",
       "type": "string",
       "group": "metadata"
     },
     {
-      "name": "checkedOutAt",
+      "name": "checkedOutAt", "readOnly": true,
       "title": "Checked out at",
       "type": "string",
       "group": "metadata"

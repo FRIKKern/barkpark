@@ -113,6 +113,23 @@ defmodule BarkparkWeb.Components.FieldInputs do
     """
   end
 
+  # A schema field declared `"readOnly": true` is shown, never edited, in the
+  # Classic form (task-d483903133c370e1). No form input is rendered, so the
+  # Classic save never posts it and the stored value survives byte-identical,
+  # the same way the structured-value clause above keeps a value it cannot
+  # show. The server owns these fields (the media checkout lock, a ticket's
+  # key); the mutate door refuses a non-admin change to them (#21536).
+  def input(%{field: %{"readOnly" => true, "name" => name}} = assigns) do
+    form = assigns[:editor_form] || %{}
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-schema-readonly>
+      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
+    </div>
+    """
+  end
+
   def input(%{field: %{"type" => "select", "name" => name, "options" => opts} = f} = assigns)
       when is_list(opts) do
     val = scalar_text(Map.get(assigns.editor_form, name, ""))
