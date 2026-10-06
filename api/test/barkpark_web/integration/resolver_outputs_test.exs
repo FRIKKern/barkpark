@@ -201,6 +201,21 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
   # ── Block 3 — /studio/<dataset> HTML renders plugin contributions ────────
 
   describe "GET scoped /studio/production — Studio LiveView renders plugin contributions" do
+    # The plugin contributions asserted here are operator consoles (Bokbasen,
+    # Projects, Fleet: `auth: :ops` routes), which Studio leaves out for a
+    # viewer the `:ops` gate would refuse (task-f859c5f7f3a0f9f5). Look as an
+    # operator: an admin bearer seated in the Default workspace the scoped
+    # Studio mounts.
+    defp as_operator(conn) do
+      {ws, _project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      raw = "resolver-outputs-operator-#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Auth.create_token(raw, "operator", "production", ["read", "write", "admin"], ws.id)
+
+      Plug.Test.init_test_session(conn, %{"api_token" => raw})
+    end
+
     setup do
       # Studio chrome (studio_tabs, desk pane) is rendered by a LiveView
       # via the scoped live_session — the only Studio mount since the P3
@@ -215,6 +230,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
     test "the Bokbasen top-menu tab follows workspace enablement (off by default)",
          %{conn: conn} = ctx do
       if skip_unless_loaded(ctx) do
+        conn = as_operator(conn)
         # ssp-w1: onixedit declares default_enabled? false — its contributions
         # only surface for a workspace that enables it. Both directions pinned.
         {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
@@ -270,7 +286,7 @@ defmodule BarkparkWeb.Integration.ResolverOutputsTest do
       # Before this wave the plugin link had no chevron, so Projects/Pending
       # looked like a dead-end while its siblings advertised drill-through.
       if skip_unless_loaded(ctx) do
-        {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio"))
+        {:ok, _view, html} = live(as_operator(conn), scoped_studio("/d/production/studio"))
 
         [row] = Regex.run(~r{<a[^>]*nav-plugin-entry.*?</a>}s, html) || [nil]
         assert row, "expected a nav-plugin-entry <a> row in the rendered desk"
