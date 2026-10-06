@@ -348,6 +348,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     end
   end
 
+  # The copy's title, which is what the author recognises in the desk; the raw
+  # id only for a copy with no title (task-a69f860810cbcfc3).
+  defp duplicated_message(%{title: title}, _pub_id) when is_binary(title) and title != "",
+    do: "Duplicated as “#{title}”"
+
+  defp duplicated_message(_doc, pub_id), do: "Duplicated as #{pub_id}"
+
   def duplicate_doc(socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
@@ -361,7 +368,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
           {:noreply,
            socket
-           |> put_flash(:info, "Duplicated as #{pub_id}")
+           |> put_flash(:info, duplicated_message(new_doc, pub_id))
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, {:halted, reason}} ->

@@ -42,6 +42,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # — the same no-reload proof BulldocsLive uses, now inside the Studio. Read-only:
   # editing stays on the paper-ingest ops endpoint.
   attr(:paper_doc, :map, default: nil)
+  # Whether the open paper has a published row (the standalone reader's page).
+  attr(:paper_has_published, :boolean, default: false)
   attr(:paper_rev, :integer, default: 0)
   attr(:paper_html, :string, default: "")
   attr(:paper_block_mode, :boolean, default: false)
@@ -254,9 +256,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <.icon name={if @paper_edit_mode, do: "eye", else: "pencil"} size={14} />
             <%= if @paper_edit_mode, do: "View", else: "Edit" %>
           </button>
+          <%!-- The standalone reader serves PUBLISHED rows only, under the
+                published id. The link used the open row's id (`drafts.<id>`
+                for a draft), so it 404'd for every draft, even one with a
+                published version; and a never-published paper has no page
+                to open (task-a69f860810cbcfc3). --%>
           <a
-            :if={@slug}
-            href={Paths.paper_path(@scope_prefix, @slug)}
+            :if={@slug && (not @paper_draft? or @paper_has_published)}
+            href={Paths.paper_path(@scope_prefix, Barkpark.Content.published_id(@slug))}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
@@ -1728,6 +1735,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_canvas_resume_status={Map.get(assigns, :paper_canvas_resume_status, :none)}
           focus_on_mount={@focus_doc_on_open}
           paper_doc={@paper_doc}
+          paper_has_published={Map.get(assigns, :editor_has_published, false)}
           paper_rev={@paper_rev}
           paper_html={@paper_html}
           paper_block_mode={@paper_block_mode}
