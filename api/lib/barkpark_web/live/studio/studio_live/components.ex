@@ -69,6 +69,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   attr(:backlinks_linked, :list, default: [])
   attr(:backlinks_unlinked, :list, default: [])
   attr(:public_reader, :boolean, default: false)
+  attr(:sidebar_label_suggestions, :list, default: [])
   # t6 — WordPress-style metadata sidebar (doctrine Rule 4). All optional so the
   # call site can lean on the component's own defaults on first paint.
   attr(:sidebar_open, :boolean, default: true)
@@ -530,6 +531,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
           public_reader={@public_reader}
+          label_suggestions={@sidebar_label_suggestions}
+          label_admin?={@shares_admin?}
         />
       </div>
     </div>
@@ -668,6 +671,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # (`PaperCanvas.public_reader?/3`). Defaults false: never claim "Public"
   # for a caller that did not say.
   attr(:public_reader, :boolean, default: false)
+  # task-3a5b9cda74564d1c: the registered labels to suggest, and whether this
+  # viewer may register a new one (a workspace admin) or must ask for one.
+  attr(:label_suggestions, :list, default: [])
+  attr(:label_admin?, :boolean, default: false)
 
   # Rendered for PAPERS ONLY (the caller gates it on @paper_doc). Sheet, graph
   # and media editors deliberately have no inspector: see the ruling recorded at
@@ -1024,10 +1031,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               name="tag"
               required
               class="form-input"
-              placeholder="tag"
+              placeholder="label"
               aria-label="Tag name"
+              list="bp-label-suggestions"
+              autocomplete="off"
+              aria-describedby="bp-label-hint"
               data-test-id="sidebar-label-add-tag"
             />
+            <datalist id="bp-label-suggestions" data-test-id="sidebar-label-suggestions">
+              <option :for={name <- @label_suggestions} value={name} />
+            </datalist>
+            <p id="bp-label-hint" class="bp-doc-empty" data-test-id="sidebar-label-hint">
+              <%= cond do %>
+                <% @label_admin? and @label_suggestions == [] -> %>
+                  No labels are registered here yet. Type a new name (lowercase, hyphens) to register it.
+                <% @label_admin? -> %>
+                  Pick a registered label, or type a new name to register it.
+                <% @label_suggestions == [] -> %>
+                  No labels are registered here yet. Ask an admin to add a label.
+                <% true -> %>
+                  Pick a registered label. Ask an admin to add a label that isn't listed.
+              <% end %>
+            </p>
             <input
               type="number"
               name="strength"
@@ -1795,6 +1820,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               @dataset
             )
           }
+          sidebar_label_suggestions={Map.get(assigns, :sidebar_label_suggestions, [])}
           workspace_label={
             case Map.get(assigns, :current_workspace) do
               %{name: name} when is_binary(name) and name != "" -> name
