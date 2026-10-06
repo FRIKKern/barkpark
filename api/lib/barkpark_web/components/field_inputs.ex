@@ -96,6 +96,27 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # read-only JSON, richText renders block content read-only.
   @structured_value_types ~w(richText reference image array object slug)
 
+  # A schema field declared `"readOnly": true` is shown, not edited, in the
+  # Classic form for a NON-admin (task-d483903133c370e1). No form input is
+  # rendered, so the save never posts it and the stored value survives
+  # byte-identical, the same way the structured-value clause above keeps a value
+  # it cannot show. It matches the server rule (#21536): the mutate door refuses
+  # a non-admin change and keeps an admin's. So an admin (`schema_admin: true`,
+  # from `Caps.admin_affordance?/1`) gets the ordinary input below, and a
+  # caller that does not say (`schema_admin` absent) keeps today's input too.
+  # Declared before the structured-value clause so a readOnly composite (a
+  # map, like mediaAsset `fileInfo`) is display-only too (task-08b6c963d72ce983).
+  def input(%{field: %{"readOnly" => true, "name" => name}, schema_admin: false} = assigns) do
+    form = assigns[:editor_form] || %{}
+    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
+
+    ~H"""
+    <div data-readonly-field={@n} data-schema-readonly>
+      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
+    </div>
+    """
+  end
+
   # A SCALAR input handed a STRUCTURED stored value — a Sanity-shaped slug
   # `{"_type": "slug", "current": "…"}`, an object in a string field, a list in
   # a select — crashed the whole document route (`Phoenix.HTML.Safe not
@@ -113,25 +134,6 @@ defmodule BarkparkWeb.Components.FieldInputs do
     <div data-readonly-field={@n} data-structured-value>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
       <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
-    </div>
-    """
-  end
-
-  # A schema field declared `"readOnly": true` is shown, not edited, in the
-  # Classic form for a NON-admin (task-d483903133c370e1). No form input is
-  # rendered, so the save never posts it and the stored value survives
-  # byte-identical, the same way the structured-value clause above keeps a value
-  # it cannot show. It matches the server rule (#21536): the mutate door refuses
-  # a non-admin change and keeps an admin's. So an admin (`schema_admin: true`,
-  # from `Caps.admin_affordance?/1`) gets the ordinary input below, and a
-  # caller that does not say (`schema_admin` absent) keeps today's input too.
-  def input(%{field: %{"readOnly" => true, "name" => name}, schema_admin: false} = assigns) do
-    form = assigns[:editor_form] || %{}
-    assigns = assign(assigns, n: name, v: readonly_json(Map.get(form, name)))
-
-    ~H"""
-    <div data-readonly-field={@n} data-schema-readonly>
-      <output style="display:block;padding:6px 0;font-size:13px;opacity:0.75;"><%= @v %></output>
     </div>
     """
   end
