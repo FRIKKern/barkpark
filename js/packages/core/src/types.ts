@@ -1419,7 +1419,7 @@ export interface TransactionBuilder {
   ): TransactionBuilder
   /** Append a `publish` op (copies drafts.{id} → {id}). */
   publish(id: string, type: string): TransactionBuilder
-  /** Append an `unpublish` op (moves {id} → drafts.{id}). */
+  /** Append an `unpublish` op (deletes {id}; keeps drafts.{id}, else creates it from {id}). */
   unpublish(id: string, type: string): TransactionBuilder
   /** Append a `discardDraft` op (drops drafts.{id}, leaving the published {id}). */
   discardDraft(id: string, type: string): TransactionBuilder
@@ -1621,7 +1621,8 @@ export interface BarkparkClient {
   delete(id: string, type: string, opts?: CommitOptions): Promise<MutateEnvelope>
   /** Publish a draft. `opts` forwards retry / idempotencyKey / timeoutMs to the write. */
   publish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
-  /** Unpublish (move back to draft). `opts` forwards retry / idempotencyKey / timeoutMs. */
+  /** Unpublish: delete `{id}`, keeping an existing `drafts.{id}` (else one is created
+   *  from `{id}`). `opts` forwards retry / idempotencyKey / timeoutMs. */
   unpublish(id: string, type: string, opts?: CommitOptions): Promise<MutateResult>
   /** Discard a draft's unsaved edits — drops `drafts.{id}`, leaving the published `{id}`.
    *  `opts` forwards retry / idempotencyKey / timeoutMs to the write. */

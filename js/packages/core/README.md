@@ -191,7 +191,7 @@ await bp
   .commit()
 
 await bp.publish('p1', 'post')
-await bp.unpublish('p1', 'post') // published → draft
+await bp.unpublish('p1', 'post') // drop the published doc; an existing draft is kept
 await bp.discardDraft('p1', 'post') // drop the draft, keep the published doc
 
 // Block ops, fenced on a revision. A stale ifRev throws BarkparkConflictError with status 412:

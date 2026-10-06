@@ -335,9 +335,11 @@ defmodule Barkpark.Plugins.Github.MirrorJob do
   # MINT an issue for a task that was never published. This arm handles the
   # OPPOSITE history: a task that WAS published, WAS mirrored, and has since
   # been UNPUBLISHED — `Content.Lifecycle.unpublish_document/4` deletes the
-  # published row and copies its content (`content.github` INCLUDED) onto the
-  # draft, so `load_task/3` still finds the doc and `Link.get/1` still yields a
-  # live issue number, while `published?/3` is now false.
+  # published row and keeps the draft: an existing draft as it is, otherwise a
+  # new one copied from the published content (`content.github` INCLUDED). So
+  # `load_task/3`, which already reads the draft first, still finds the doc and
+  # `Link.get/1` yields the issue number the draft carries, while `published?/3`
+  # is now false.
   #
   # Cancelling there would leave that issue OPEN with no published row behind
   # it — the very orphan class the gate exists to prevent (D86 /

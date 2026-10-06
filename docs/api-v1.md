@@ -95,7 +95,7 @@ All three create kinds write the **draft** row. On a **published `task`** id, `c
 The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" } }`; missing `id`/`type` → 422 `validation_failed`:
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
-- **`unpublish`** — moves `<id>` back to `drafts.<id>`.
+- **`unpublish`** — deletes `<id>`; keeps `drafts.<id>`, else copies `<id>` there.
 - **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
 - **`delete`** — deletes `<id>` and `drafts.<id>` if they exist; honors `ifRevisionID`.
 
@@ -150,7 +150,7 @@ Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
-Core: `not_found` 404 (doc/schema/dataset/wksp) · `unauthorized` 401 · `forbidden` 403 (perm/membership/read-only) · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
+Core: `not_found` 404 (doc/schema/dataset/wksp) · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
 `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
 

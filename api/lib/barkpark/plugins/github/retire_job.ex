@@ -8,8 +8,9 @@ defmodule Barkpark.Plugins.Github.RetireJob do
   `MirrorJob` already retracts a withdrawn promise on the UNPUBLISH path: the
   publish gate's `retract/4` arm closes the issue `not_planned` when a
   previously-mirrored task loses its published row. That arm works because
-  `Lifecycle.unpublish_document/4` COPIES `content.github` onto the surviving
-  draft — the issue number is still readable.
+  unpublish leaves a draft behind (`Lifecycle.unpublish_document/4` keeps an
+  existing one and otherwise COPIES the published content, `content.github`
+  included) — the issue number is still readable.
 
   A hard delete has no surviving row. `Lifecycle.delete_document/4` removes the
   published AND the draft variant, so the next reconcile's `load_task/3` returns
