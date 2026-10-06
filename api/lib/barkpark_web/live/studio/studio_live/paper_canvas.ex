@@ -792,9 +792,31 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   doc_id with no status filter, so a non-published row at `doc_id = slug` is
   still publicly reachable and the stronger claim would lie.
   """
-  @spec visibility_label(term()) :: String.t()
-  def visibility_label("published"), do: "Public"
-  def visibility_label(_), do: "Draft"
+  @spec visibility_label(term(), boolean()) :: String.t()
+  def visibility_label(status, public_reader?)
+  def visibility_label("published", true), do: "Public"
+  # task-352b1074aba3f434: published in a scope the anonymous reader does not
+  # serve. "Public" was a promise nobody outside could see kept (403/404).
+  def visibility_label("published", _), do: "Members only"
+  def visibility_label(_, _), do: "Draft"
+
+  @doc """
+  Whether the anonymous paper reader serves this scope's published papers:
+  the Default workspace on the papers dataset (`/papers/:slug`), or a scope
+  carrying a `:papers` share (`RequireShareScope`). Fails closed on a missing
+  workspace or project.
+  """
+  @spec public_reader?(term(), term(), term()) :: boolean()
+  def public_reader?(%{id: ws_id, slug: ws_slug}, %{slug: proj_slug}, dataset)
+      when is_binary(ws_slug) and is_binary(proj_slug) and is_binary(dataset) do
+    default_papers? =
+      dataset == Barkpark.Content.Papers.paper_default_dataset() and
+        match?(%{id: ^ws_id}, Barkpark.Tenancy.get_default_workspace())
+
+    default_papers? or Barkpark.Sharing.shared?(ws_slug, proj_slug, dataset, :papers)
+  end
+
+  def public_reader?(_workspace, _project, _dataset), do: false
 
   @doc """
   Taxonomy labels for the sidebar Labels section — the paper's `content["tags"]`
