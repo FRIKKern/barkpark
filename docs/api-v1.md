@@ -105,9 +105,9 @@ Failures: §9. Searchable text (title + every `content` string) over Postgres' *
 
 ### 6a. `POST /w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops` [token]
 
-One PortableDoc block op on any document type. Body `{"op":{…},"ifRev":"<_rev>"}`, `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op` (Bulldocs ops routes); unknown type → `404`. Success: `{result}`.
+PortableDoc block ops on any document type. Body `{"op":{…},"ifRev":"<_rev>"}` or `"ops":[…]` (atomic, `result.results[]`); `ifRev` required; edits `drafts.<id>` if any. Stale rev → `412`; papers/sessions → `422 invalid_op`; unknown type → `404`. Success: `{result}`.
 
-`…/fields/:field/ops`: `{"ops":[…],"ifRev"}` on one `editor: blocks` field, all or none; `result.rev` = new rev.
+`…/fields/:field/ops`: `{"ops":[…],"ifRev"}` on one `editor: blocks` field, atomic; `result.rev` = new rev.
 
 ## 7. `GET /w/:workspace_slug/p/:project_slug/v1/data/listen/:dataset` [token]
 
@@ -150,7 +150,7 @@ Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
 
 All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
 
-Core: `not_found` 404 (doc/schema/dataset/wksp) · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
+Core: `not_found` 404 · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 
 `halted` 409 · `forbidden_field` 422 · `cors_forbidden`/`csrf_required` 403 · `webhook_not_found`/`event_not_found` 404 · `rev_mismatch`/`paper_exists`/`duplicate_task`/`duplicate_of`/`schema_has_documents`/`idempotency_key_in_use` 409 · `unsupported_if_match_for_batch` 400 · `workspace_scope_required`/`private_field_bound`/`searchable_text_too_large` 422/`document_too_large` 413 (§6) · `storage_unavailable` 503/`unsupported_media_type` 422/`payload_too_large` 413. Publish: `workspace_suspended`/`playground_expired` 403 · `quota_exceeded` 402 · `unknown_tag`/`label_spine`/`invalid_paper_structure`/`invalid_epic_paper_quality` 422. BPML create-on-push: `create_wall` 422 (violations in `details`) · `slug_mismatch` 422 (slug attr ≠ URL slug) · `paper_rev_unreadable` 422 (`content["rev"]` not an integer; absent = 0) · `auth_method_not_allowed` 403 (org `allowed_auth_methods` allow-list; NULL = all open; `social` ≠ `sso`), checked AFTER the credential.
 

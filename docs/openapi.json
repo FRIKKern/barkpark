@@ -8799,7 +8799,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Apply one PortableDoc block op to a document, fenced on its current _rev.",
+        "summary": "Apply one PortableDoc block op, or a batch all or nothing, to a document, fenced on its current _rev.",
         "tags": [
           "doc"
         ],
@@ -15215,7 +15215,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Apply one PortableDoc block op to a document, fenced on its current _rev.",
+        "summary": "Apply one PortableDoc block op, or a batch all or nothing, to a document, fenced on its current _rev.",
         "tags": [
           "doc"
         ],
