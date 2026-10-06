@@ -389,7 +389,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
          each finding under the subfield or row it names. --%>
     <% errors = own_findings(Map.get(@validation_errors, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_errors, field_name)) %>
     <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_warnings, field_name)) %>
-    <%= if self_titled?(type) do %>
+    <%!-- A readOnly composite shown to a non-admin takes the labelled row and
+         FieldInputs' display-only clause: the v2 renderer has no readOnly
+         path and would hand a member its subfield inputs
+         (task-08b6c963d72ce983). --%>
+    <% ro_display? = read_only_display?(@field, @parent_assigns) %>
+    <%= if self_titled?(type) and not ro_display? do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
       <div class={"editor-field editor-field-self-titled #{if errors != [], do: "has-error"} #{if warnings != [], do: "has-warning"}"}>
@@ -429,7 +434,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <% body_in_blocks? = classic_body_in_blocks?(@field, @parent_assigns) %>
       <.editor_field
         label={@field["title"] || field_name}
-        for={if body_in_blocks?, do: nil, else: FieldInputs.label_target(@field, @editor_form, label_prefix)}
+        for={if body_in_blocks? or ro_display?, do: nil, else: FieldInputs.label_target(@field, @editor_form, label_prefix)}
         required={required?}
         errors={errors}
         warnings={warnings}
@@ -457,7 +462,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             ><%= gettext("Edit the body in Beta") %></button>
           </div>
         <% else %>
-        <%= if PluginAdapter.v2?(@field) do %>
+        <%= if PluginAdapter.v2?(@field) and not ro_display? do %>
           <%= PluginAdapter.render(@parent_assigns, @field) %>
         <% else %>
           <FieldInputs.input
@@ -527,6 +532,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # — once in `<label class="editor-field-label">`, once in the legend.
   # See `barkpark-jwcb`.
   defp self_titled?(type), do: type in ~w(arrayOf composite localizedText)
+
+  # Whether a `readOnly` field renders display-only here: a non-admin viewer,
+  # the same rule FieldInputs and the server's mutate door apply (#21536).
+  defp read_only_display?(%{"readOnly" => true}, parent_assigns),
+    do: not BarkparkWeb.Studio.Caps.admin_affordance?(Map.get(parent_assigns, :caps))
+
+  defp read_only_display?(_field, _parent_assigns), do: false
 
   @doc """
   StudioLive editor column, extracted from StudioLive's former

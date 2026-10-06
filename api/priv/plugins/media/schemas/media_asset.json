@@ -4,8 +4,8 @@
   "icon": "🖼",
   "visibility": "private",
   "groups": [
-    { "name": "file", "title": "File", "icon": "file" },
     { "name": "metadata", "title": "Metadata", "icon": "tag" },
+    { "name": "file", "title": "File", "icon": "file" },
     { "name": "rights", "title": "Rights", "icon": "shield" }
   ],
   "deskGroups": [
@@ -22,13 +22,13 @@
   },
   "fields": [
     {
-      "name": "mediaFileId",
+      "name": "mediaFileId", "readOnly": true,
       "title": "Media file ID",
       "type": "string",
       "group": "file"
     },
     {
-      "name": "fileInfo",
+      "name": "fileInfo", "readOnly": true,
       "title": "File info",
       "type": "composite",
       "group": "file",
@@ -43,28 +43,28 @@
       ]
     },
     {
-      "name": "bp_asset_kind",
+      "name": "bp_asset_kind", "readOnly": true,
       "title": "Asset kind",
       "type": "select",
       "group": "file",
       "options": ["image", "video", "audio", "document", "other"]
     },
     {
-      "name": "bp_processing_status",
+      "name": "bp_processing_status", "readOnly": true,
       "title": "Processing status",
       "type": "select",
       "group": "file",
       "options": ["ready", "processing", "failed"]
     },
     {
-      "name": "bp_cdn_status",
+      "name": "bp_cdn_status", "readOnly": true,
       "title": "CDN status",
       "type": "select",
       "group": "file",
       "options": ["pending", "published", "failed", "skipped"]
     },
     {
-      "name": "bp_external_processing",
+      "name": "bp_external_processing", "readOnly": true,
       "title": "External processing",
       "type": "composite",
       "group": "file",
