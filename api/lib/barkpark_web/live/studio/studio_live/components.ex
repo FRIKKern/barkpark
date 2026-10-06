@@ -1614,7 +1614,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                         sibling in-desk row speaks aria-current="true". The full
                         selection vocabulary is documented ONCE, in
                         `StudioComponents.Panes`' moduledoc. --%>
+                  <%!-- An ops-gated destination is left out for a viewer the
+                        `:ops` gate would bounce (task-f859c5f7f3a0f9f5). --%>
                   <a
+                    :if={
+                      assigns[:ops_access?] != false or
+                        not BarkparkWeb.LiveAuth.ops_gated_path?(item.href)
+                    }
                     id={"plugin-link-#{item.id}"}
                     href={item.href}
                     class="pane-item nav-plugin-entry"

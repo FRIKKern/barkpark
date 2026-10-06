@@ -381,6 +381,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :current_path, :string, default: nil
   attr :admin?, :boolean, default: false
   attr :workspace_id, :string, default: nil
+  # Whether the viewer passes the `:ops` gate (`LiveAuth.ops_access?/2`). A
+  # tab to an ops-gated route is left out for a viewer who would be bounced
+  # with "Operator access required" (task-f859c5f7f3a0f9f5). Defaults to true,
+  # so a caller that does not say keeps every tab.
+  attr :ops?, :boolean, default: true
 
   def studio_tabs(assigns) do
     # `:workspace_id` threads the current workspace into the resolver ctx so
@@ -409,6 +414,11 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       catch
         _, _ -> baseline
       end
+
+    tabs =
+      if assigns[:ops?] == false,
+        do: Enum.reject(tabs, &BarkparkWeb.LiveAuth.ops_gated_path?(&1[:path])),
+        else: tabs
 
     assigns = assign(assigns, :tabs, tabs)
 

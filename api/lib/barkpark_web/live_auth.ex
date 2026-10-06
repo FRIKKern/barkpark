@@ -149,29 +149,40 @@ defmodule BarkparkWeb.LiveAuth do
       |> assign(:api_token_credential_present?, token_credential_present?)
       |> arm_session_teardown(session)
 
-    case raw do
-      nil ->
-        {:cont,
-         socket
-         |> assign(:api_token, nil)
-         |> assign(:api_token_raw, "")}
+    {:cont, socket} =
+      case raw do
+        nil ->
+          {:cont,
+           socket
+           |> assign(:api_token, nil)
+           |> assign(:api_token_raw, "")}
 
-      token ->
-        case Auth.verify_token(token) do
-          {:ok, api_token} ->
-            {:cont,
-             socket
-             |> assign(:api_token, api_token)
-             |> assign(:api_token_raw, token)
-             |> arm_revocation_teardown(api_token)}
+        token ->
+          case Auth.verify_token(token) do
+            {:ok, api_token} ->
+              {:cont,
+               socket
+               |> assign(:api_token, api_token)
+               |> assign(:api_token_raw, token)
+               |> arm_revocation_teardown(api_token)}
 
-          _ ->
-            {:cont,
-             socket
-             |> assign(:api_token, nil)
-             |> assign(:api_token_raw, "")}
-        end
-    end
+            _ ->
+              {:cont,
+               socket
+               |> assign(:api_token, nil)
+               |> assign(:api_token_raw, "")}
+          end
+      end
+
+    # Whether this viewer passes the `:ops` gate, once per mount, so the
+    # Studio chrome can leave out the links that gate refuses
+    # (task-f859c5f7f3a0f9f5).
+    {:cont,
+     assign(
+       socket,
+       :ops_access?,
+       ops_access?(socket.assigns[:api_token], socket.assigns[:current_user])
+     )}
   end
 
   # studio-user-login: resolve the account session (`user_session` cookie,
@@ -532,4 +543,48 @@ defmodule BarkparkWeb.LiveAuth do
 
   defp query_suffix(query) when is_binary(query) and query != "", do: "?" <> query
   defp query_suffix(_query), do: ""
+
+  @doc """
+  Whether a viewer would pass the `:ops` gate (`on_mount(:ops, …)`): a bearer holding `ops` or
+  `admin`, or an account that administers the Default workspace. The same two
+  arms as `authorize/4` + `authorize_user/3`, read from the credentials the
+  Studio already holds, so its chrome can leave out a link the gate refuses
+  (task-f859c5f7f3a0f9f5).
+  """
+  @spec ops_access?(Auth.ApiToken.t() | nil, Barkpark.Accounts.User.t() | nil) :: boolean()
+  def ops_access?(api_token, user) do
+    token_ops?(api_token) or default_workspace_admin?(user)
+  end
+
+  defp token_ops?(%Auth.ApiToken{} = token),
+    do: Enum.any?(["ops", "admin"], &Auth.has_permission?(token, &1))
+
+  defp token_ops?(_token), do: false
+
+  defp default_workspace_admin?(%Barkpark.Accounts.User{} = user) do
+    case Barkpark.Tenancy.get_default_workspace() do
+      %{id: ws_id} -> Barkpark.Tenancy.Auth.authorize(user, ws_id, :admin) == :ok
+      _ -> false
+    end
+  end
+
+  defp default_workspace_admin?(_user), do: false
+
+  @doc """
+  Whether `path` is a LiveView route behind the `:ops` gate, read from the
+  router's own live_session `on_mount` list, so any plugin's ops console
+  answers without a list of paths to keep in step.
+  """
+  @spec ops_gated_path?(String.t()) :: boolean()
+  def ops_gated_path?(path) when is_binary(path) do
+    case Phoenix.Router.route_info(BarkparkWeb.Router, "GET", path, "") do
+      %{phoenix_live_view: {_view, _action, _opts, %{extra: %{on_mount: hooks}}}} ->
+        Enum.any?(hooks, &match?(%{id: {BarkparkWeb.LiveAuth, :ops}}, &1))
+
+      _ ->
+        false
+    end
+  end
+
+  def ops_gated_path?(_path), do: false
 end
