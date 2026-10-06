@@ -175,6 +175,27 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     refute html =~ ~s(data-test-id="desk-search-hit")
   end
 
+  # task-0ad7fed4370a5978: the hits were silent to a screen reader. One status
+  # region stays in place for the whole search, so its text change is read.
+  test "the hit count is announced in a status region that lasts the whole search", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {view, _} = desk(conn, ws, proj)
+    count = ~s([data-test-id="desk-search-count"][role="status"])
+
+    type_in(view, "N")
+    assert has_element?(view, count), "the region must exist before hits arrive"
+    assert render(view |> element(count)) =~ ~r/>\s*<\/div>/
+
+    type_in(view, "nor")
+    assert view |> element(count) |> render() =~ "2 results"
+
+    type_in(view, "zzzzz")
+    refute view |> element(count) |> render() =~ "result"
+  end
+
   test "clearing the box brings the desk's own items back", %{conn: conn, ws: ws, proj: proj} do
     {view, before} = desk(conn, ws, proj)
     searching = type_in(view, "nor")

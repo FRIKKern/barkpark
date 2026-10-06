@@ -1533,6 +1533,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             class="pane-body"
             data-test-id="desk-search-results"
           >
+            <%!-- The two notices below announce themselves; a list of hits did
+                  not, so a screen reader heard nothing after typing. One region,
+                  present for the whole search, so its text change is announced
+                  (task-0ad7fed4370a5978). --%>
+            <div class="sr-only" role="status" data-test-id="desk-search-count"><%=
+              if String.length(String.trim(@desk_search)) >= 2 and @desk_search_hits != [],
+                do: ngettext("1 result", "%{count} results", length(@desk_search_hits))
+            %></div>
             <%= if String.length(String.trim(@desk_search)) < 2 do %>
               <div class="bp-pane-notice" role="status" data-test-id="desk-search-too-short">
                 <%= gettext("Type at least 2 characters") %>

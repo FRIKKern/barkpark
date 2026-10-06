@@ -59,6 +59,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="image-picker-title"
+        id="image-picker-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-image-picker"
         phx-key="escape"
       >
@@ -133,6 +135,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="shares-modal-title"
+        id="shares-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="shares-close"
         phx-key="escape"
       >
@@ -250,6 +254,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="item-share-title"
+        id="item-share-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="item-share-close"
         phx-key="escape"
       >
@@ -370,6 +376,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="airdrop-sheet-title"
+        id="airdrop-sheet-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="airdrop-close"
         phx-key="escape"
       >
@@ -423,6 +431,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 type="email"
                 name="grantee_email"
                 placeholder="person@example.com"
+                data-modal-focus
                 class="form-input"
                 autocomplete="off"
                 list="airdrop-email-options"
@@ -539,6 +548,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="access-panel-title"
+        id="access-panel-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="access-close"
         phx-key="escape"
       >
@@ -686,6 +697,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="ref-picker-title"
+        id="ref-picker-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-ref-picker"
         phx-key="escape"
       >
@@ -694,7 +707,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
           <button type="button" class="btn btn-ghost btn-sm" phx-click="close-ref-picker" aria-label="Close">×</button>
         </div>
         <div style="padding: 10px 16px; border-bottom: 1px solid var(--border-muted);">
-          <input type="text" placeholder="Search..." class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} />
+          <input type="text" placeholder="Search..." aria-label="Search documents" class="form-input" phx-keyup="ref-search" phx-debounce="200" value={@ref_search} data-modal-focus />
         </div>
         <div style="max-height: 400px; overflow-y: auto;">
           <% filtered = filter_ref_candidates(@ref_candidates, @ref_search) %>
@@ -744,6 +757,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="history-modal-title"
+        id="history-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-history"
         phx-key="escape"
       >
@@ -799,6 +814,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="delete-modal-title"
+        id="delete-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-delete"
         phx-key="escape"
       >
@@ -810,7 +827,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
           <%= if @delete_refs == [] do %>
             <p class="text-sm">Are you sure you want to delete <strong><%= @editor_doc && @editor_doc.title %></strong>? This action cannot be undone.</p>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+              <button class="btn btn-sm" phx-click="close-delete" data-modal-focus>Cancel</button>
               <button class="btn btn-destructive btn-sm" phx-click="confirm-delete">Delete</button>
             </div>
           <% else %>
@@ -829,7 +846,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               </div>
             </div>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-delete">Cancel</button>
+              <button class="btn btn-sm" phx-click="close-delete" data-modal-focus>Cancel</button>
               <button class="btn btn-destructive btn-sm" phx-click="confirm-delete" phx-value-disconnect="true">Disconnect references and delete</button>
             </div>
           <% end %>
@@ -864,6 +881,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="discard-modal-title"
+        id="discard-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-discard"
         phx-key="escape"
       >
@@ -877,7 +896,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             The published version will remain untouched.
           </p>
           <div class="delete-modal-actions">
-            <button class="btn btn-sm" phx-click="close-discard">Cancel</button>
+            <button class="btn btn-sm" phx-click="close-discard" data-modal-focus>Cancel</button>
             <button
               class="btn btn-destructive btn-sm"
               phx-click="confirm-discard"
@@ -921,6 +940,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
         role="dialog"
         aria-modal="true"
         aria-labelledby="profile-modal-title"
+        id="profile-modal-dialog"
+        phx-hook="ModalFocus"
         phx-window-keydown="close-profile"
         phx-key="escape"
       >
