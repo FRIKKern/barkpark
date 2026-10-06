@@ -239,7 +239,7 @@ defmodule BarkparkWeb.Integration.AccountSessionMediaWriteTest do
              ),
              "the holder is locked out of their own checkout"
 
-      {other, other_conn} = account_session!(build_conn(), ws, "member")
+      {other, other_conn} = account_session!(scoped_conn(), ws, "member")
 
       assert Barkpark.Media.Storage.Access.metadata_write_denied?(
                as_member(other, ws),
