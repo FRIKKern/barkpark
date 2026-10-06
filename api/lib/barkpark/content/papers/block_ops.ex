@@ -5693,7 +5693,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp paper_preview_opts(slug, scope) do
     %{
       media_scope: scope,
-      url: "/papers/#{slug}",
+      # The reader serves the PUBLISHED id; a body edit lands on the draft row,
+      # so the raw slug here was `drafts.<slug>` and the stored share card
+      # pointed at a page that never resolves (task-27265c623ef901d2). Same
+      # normalisation as Writer.maybe_put_preview_url/3.
+      url: "/papers/#{DraftId.published_id(slug)}",
       doc_type: @paper_type
     }
   end
