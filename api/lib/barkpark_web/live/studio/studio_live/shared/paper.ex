@@ -1329,6 +1329,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   @doc """
+  After Publish moves the open document to a new revision outside the editor's
+  save path, tell the open Beta editors that revision (task-904659f0c8145633).
+
+  A non-paper document's editors base every save on `data-document-rev`, which
+  the client's exit coordinator reads once and then advances only from save
+  replies. Publish changes the revision without a reply, so the next edit was
+  sent against the old one and paused for review. `bp:document-revision`
+  carries the new revision and the editor's `data-paper-doc-key`; with nothing
+  unsaved the coordinator adopts it, with unsaved edits it shows the usual
+  conflict.
+
+  A paper bases its saves on the streaming `paper_rev` counter instead, which
+  Publish does not move, so a paper gets nothing. No-op unless the revision
+  actually moved.
+  """
+  @spec push_document_revision(Phoenix.LiveView.Socket.t(), String.t() | nil) ::
+          Phoenix.LiveView.Socket.t()
+  def push_document_revision(socket, previous_rev) do
+    doc = socket.assigns[:editor_doc]
+    rev = doc_field(doc, :rev)
+    type = doc_field(doc, :type)
+
+    if is_binary(rev) and rev != previous_rev and is_binary(type) and type != "paper" do
+      key = "#{socket.assigns.dataset}:#{type}:#{Content.published_id(doc.doc_id)}"
+      push_event(socket, "bp:document-revision", %{rev: rev, document_key: key})
+    else
+      socket
+    end
+  end
+
+  @doc """
   The paper's STORED canvas runs as `%{run_id, blocks}` — the same partition
   `push_canvas_echo/2` sends — for a host that must resync a run to storage.
   """
@@ -2263,11 +2294,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         editor_mode:
           if(is_nil(identity_error), do: socket.assigns[:editor_mode] || :classic, else: :classic),
         editor_blocks_synth?: synth?,
-        editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema])
+        editor_form: Content.doc_to_form(fresh, socket.assigns[:editor_schema]),
+        editor_is_draft: Content.draft?(fresh.doc_id)
       )
+      |> assign_published_twin(doc, fresh)
       |> push_document_table_echo(request_id)
     else
       _ -> socket
+    end
+  end
+
+  # The first edit of a published document writes its draft. The header picks
+  # Publish and Discard draft from `editor_is_draft` and the published twin, as
+  # it does after a Classic save; without them a Beta author saw "draft" in the
+  # status and only Unpublish in the actions until a reload
+  # (task-904659f0c8145633).
+  defp assign_published_twin(socket, previous, fresh) do
+    if Content.draft?(fresh.doc_id) and not Content.draft?(previous.doc_id) do
+      assign(socket, editor_has_published: true, published_doc: previous)
+    else
+      socket
     end
   end
 
