@@ -952,6 +952,9 @@
         main.querySelector("[data-paper-doc-key]");
       let documentKey = initialCarrier?.dataset.paperDocKey || null;
       let confirmedRevision = bpPaperRevisionFrom(initialCarrier);
+      // The last revision the server announced with bp:document-revision; every
+      // member hears the same push, the coordinator observes it once.
+      let announcedRevision = null;
 
       const historyStack = (direction) => contextualHistory[direction];
       const historyPendingEntry = () => mutationQueue.find((entry) => entry.kind === "history");
@@ -1160,6 +1163,11 @@
         register(member) {
           members.add(member);
           member._bpPaperExitCoordinator = coordinator;
+          // Publish moves a non-paper document's revision outside the save path
+          // (no reply carries it); the server announces it so the next save is
+          // based on it instead of pausing for review (task-904659f0c8145633).
+          member.handleEvent?.("bp:document-revision", (payload) =>
+            coordinator._observeAnnouncedRevision(payload, member.el));
           const carrier = member.el.closest?.("[data-paper-doc-key]");
           const nextKey = carrier?.dataset.paperDocKey;
           if (nextKey && nextKey !== documentKey) {
@@ -1517,6 +1525,16 @@
         },
       };
 
+      coordinator._observeAnnouncedRevision = (payload, source) => {
+        const rev = payload?.rev;
+        if (rev == null || rev === announcedRevision) return false;
+        announcedRevision = rev;
+        return coordinator.observeRevision({
+          rev,
+          observedDocumentKey: payload.document_key,
+          source,
+        });
+      };
       coordinator._resolveWaiters = (entry, saved) => {
         const waiters = entry.waiters.splice(0);
         waiters.forEach((resolve) => resolve(saved));

@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   alias BarkparkWeb.ScopeHelpers
   alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
+  alias BarkparkWeb.Studio.StudioLive.Shared.Paper
 
   # A sheet's cells live in its session, not in `editor_form`, and the session
   # persists on a debounce. Flush it first so the published row carries the
@@ -149,19 +150,25 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
 
   defp publish_open_doc(socket) do
     opts = Shared.hook_opts(socket)
+    previous_rev = socket.assigns[:editor_doc] && socket.assigns.editor_doc.rev
 
-    Shared.do_action(
-      socket,
-      fn d, t ->
-        Content.publish_document(
-          Content.published_id(d.doc_id),
-          t,
-          socket.assigns.dataset,
-          opts
-        )
-      end,
-      publish_success_message(socket.assigns[:editor_type])
-    )
+    {:noreply, socket} =
+      Shared.do_action(
+        socket,
+        fn d, t ->
+          Content.publish_document(
+            Content.published_id(d.doc_id),
+            t,
+            socket.assigns.dataset,
+            opts
+          )
+        end,
+        publish_success_message(socket.assigns[:editor_type])
+      )
+
+    # Publish moves the revision outside the editor's save path; tell the
+    # open editors, or their next edit pauses for review.
+    {:noreply, Paper.push_document_revision(socket, previous_rev)}
   end
 
   # Owner ruling #58 (2026-10-03): a published sheet is public — the
