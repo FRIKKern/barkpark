@@ -22,3 +22,5 @@ Every list `result` carries `total` (grand total, stable across pages), `hasMore
 | `GET /v1/media/:ds/share/:token` | `hits` | *absent* | `collection` |
 
 Collection access: an anonymous or public-read caller lists and reads collections only when the `mediaCollection` schema is `visibility: "public"` (it ships private), and every collection payload drops fields the caller may not read, as `Envelope.redact/4` does for documents. A share view renders its `collection` for the anonymous reader.
+
+Folder create: `POST /v1/media/:ds/collections` `{"title"}` → `result` is the folder read back after the write. Bearer, or a member's cookie session with `x-requested-with`; write-gated.

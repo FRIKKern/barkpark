@@ -1847,28 +1847,20 @@
 
     async _createCollection(title) {
       if (!title) return;
-      const id = "col-" + Date.now().toString(36);
       try {
-        const r = await fetch(this._scopePrefix() + "/v1/data/mutate/" + encodeURIComponent(this._dataset()), {
+        // The media-scoped folder door (task-c09196a99fad3d3a). It used to be a
+        // create+publish batch on /v1/data/mutate, whose scoped pipeline is
+        // token-only, so an account (cookie) session got 403.
+        const r = await fetch(this._mediaBase() + "/collections", {
           method: "POST",
           credentials: "same-origin",
           headers: this._headers(true),
-          body: JSON.stringify({
-            mutations: [
-              {
-                create: {
-                  _type: "mediaCollection",
-                  _id: id,
-                  title: title,
-                  kind: "folder",
-                  slug: id
-                }
-              },
-              { publish: { id: id, type: "mediaCollection" } }
-            ]
-          })
+          body: JSON.stringify({ title: title })
         });
         if (!r.ok) throw new Error(String(r.status));
+        const data = await r.json();
+        const id = data && data.result && data.result.id;
+        if (!id) throw new Error("no id");
         this._toast("Collection created");
         this._collectionId = id;
         this._inspectorMode = "collection";

@@ -1681,6 +1681,22 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # The folder create (task-c09196a99fad3d3a). The Media library used to make
+      # a folder through the token-only document mutate door, so an account
+      # (cookie) session got 403; this media-scoped door serves both.
+      core_cmd(
+        "media.create-collection",
+        "media",
+        "create-collection",
+        "Create a media folder (a published mediaCollection of kind folder).",
+        "POST",
+        "/v1/media/:dataset/collections",
+        "write",
+        args: [arg("title", true, "string", "Folder title.")],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       core_cmd(
         "media.add-member",
         "media",
