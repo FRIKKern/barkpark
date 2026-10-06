@@ -203,7 +203,7 @@ defmodule BarkparkWeb.BulldocsLive do
     # the body's own schema, so a private description / excerpt / tag never
     # reaches the head. The goal rail below keys off the same view.
     anonymous_content = Content.Papers.anonymous_content(paper, paper_schema)
-    preview = paper_preview(paper, anonymous_content, slug)
+    preview = paper_preview(paper, anonymous_content, slug, socket.assigns)
 
     socket =
       socket
@@ -1126,11 +1126,15 @@ defmodule BarkparkWeb.BulldocsLive do
   # the not-found reader unfurls as a branded default card rather than blank.
   # From the anonymous content (`Papers.anonymous_content/2`), never raw
   # content; the row title stays the last title fallback, as before.
-  defp paper_preview(paper, anonymous_content, slug),
+  defp paper_preview(paper, anonymous_content, slug, assigns),
     do:
       BarkparkWeb.ShareMeta.manifest(
         anonymous_content,
-        "/papers/#{slug}",
+        BarkparkWeb.ShareMeta.paper_reader_path(
+          assigns[:current_workspace],
+          assigns[:current_project],
+          slug
+        ),
         "paper",
         Map.get(paper, :title)
       )
