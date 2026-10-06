@@ -5418,6 +5418,27 @@
         this._sync();
         window.addEventListener("resize", this._onResize);
       },
+      // KEEP THE KEYBOARD USER'S PLACE (task-6d3bd0c5d673c16f). Opening a
+      // document collapses the root pane into its strip, a <div> becoming a
+      // <button> under the same id (frozen markup, charter D55). morphdom
+      // cannot morph across tags, so it re-inserts the next pane column, and
+      // a moved node loses focus: Enter on a desk row left focus on <body>.
+      // Record the focused element before a patch and give it back after,
+      // only when it is still in the page and focus fell to <body>, so the
+      // deliberate phx-mounted focus targets (the document header at
+      // narrow/phone, a pane after expand-pane) are never overridden.
+      beforeUpdate() {
+        var a = document.activeElement;
+        this._focused = a && a !== document.body && this.el.contains(a) ? a : null;
+      },
+      updated() {
+        var f = this._focused;
+        this._focused = null;
+        var active = document.activeElement;
+        if (f && f.isConnected && (!active || active === document.body)) {
+          f.focus({ preventScroll: true });
+        }
+      },
       destroyed() {
         window.removeEventListener("resize", this._onResize);
         if (this._raf) window.cancelAnimationFrame(this._raf);
