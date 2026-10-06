@@ -5362,6 +5362,40 @@
       attempt();
     });
 
+    // task-e73be8429cfa08af: picking a dataset in the scope switcher navigates
+    // (push_navigate), and the new view left focus on <body>. A pick arms a
+    // one-shot flag; once the navigation lands, the scope trigger (now naming
+    // the new scope) takes focus. An ordinary page load never sees the flag.
+    const BP_SCOPE_FOCUS_KEY = "bp:focus-scope-after-switch";
+    document.addEventListener("click", (e) => {
+      if (!(e.target instanceof Element)) return;
+      if (!e.target.closest('#scope-menu [phx-click="scope-open"]')) return;
+      try { sessionStorage.setItem(BP_SCOPE_FOCUS_KEY, "1"); } catch (_) {}
+    }, true);
+    window.bpFocusScopeAfterSwitch = function () {
+      let armed = false;
+      try {
+        armed = sessionStorage.getItem(BP_SCOPE_FOCUS_KEY) === "1";
+        sessionStorage.removeItem(BP_SCOPE_FOCUS_KEY);
+      } catch (_) {}
+      if (!armed) return false;
+      // The navigation stops twice ("redirect", then the new view's "initial"
+      // join) and the header is re-rendered between them, so a trigger focused
+      // on the first is thrown away. Keep the CURRENT trigger focused for a
+      // second, but only while focus sits on <body>: a user who has moved on
+      // is never pulled back.
+      const until = Date.now() + 1000;
+      const settle = () => {
+        const trigger = document.querySelector(".scope-title");
+        const idle = !document.activeElement || document.activeElement === document.body;
+        if (trigger && idle) trigger.focus();
+        if (Date.now() < until) setTimeout(settle, 50);
+      };
+      settle();
+      return true;
+    };
+    window.addEventListener("phx:page-loading-stop", () => window.bpFocusScopeAfterSwitch());
+
     let Hooks = {};
 
     // SheetGrid — the Studio sheet grid editor's thin client half
