@@ -63,6 +63,7 @@
         scope_prefix={assigns[:scope_prefix] || ""}
         current_path={assigns[:current_path]}
         admin?={assigns[:shares_admin?] == true}
+        ops?={assigns[:ops_access?] != false}
         workspace_id={assigns[:current_workspace] && assigns[:current_workspace].id}
       />
     </:tabs>
