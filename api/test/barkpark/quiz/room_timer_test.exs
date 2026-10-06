@@ -22,6 +22,25 @@ defmodule Barkpark.Quiz.RoomTimerTest do
     %{pin: pin}
   end
 
+  # task-a1bc0e141b645b3f: an API publish can store time_limit "ten"; the room
+  # did round("ten" * 1000) and died with ArithmeticError on Start.
+  test "a question parsed from a non-numeric time_limit still starts", %{pin: pin} do
+    q =
+      Barkpark.Quiz.Content.to_question(
+        %{
+          "time_limit" => "ten",
+          "choices" => [%{"id" => "a", "label" => "A", "correct" => true}]
+        },
+        "quiz-string-time-limit"
+      )
+
+    Quiz.apply_question(pin, q)
+    Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
+    Quiz.start_question(pin)
+
+    assert_receive {:quiz, ^pin, {:phase, :question, %{time_limit: 20}}}
+  end
+
   test "the countdown auto-transitions :question → :reveal on expiry", %{pin: pin} do
     Phoenix.PubSub.subscribe(Barkpark.PubSub, Quiz.room_topic(pin))
     Quiz.join(pin, "p1", "Alice")

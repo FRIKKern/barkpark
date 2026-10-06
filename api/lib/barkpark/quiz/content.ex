@@ -82,11 +82,37 @@ defmodule Barkpark.Quiz.Content do
       id: id,
       prompt: Map.get(content, "prompt") || Map.get(content, "title") || "",
       image: Map.get(content, "image"),
-      time_limit: Map.get(content, "time_limit", 20),
+      time_limit: time_limit(Map.get(content, "time_limit")),
       choices: Enum.map(raw_choices, &%{id: &1["id"], label: &1["label"]}),
       answer: Enum.find_value(raw_choices, fn c -> if c["correct"], do: c["id"] end)
     }
   end
+
+  # The room multiplies this by 1000 and arms Process.send_after with it, so a
+  # string raises ArithmeticError and a negative raises ArgumentError — either
+  # kills the room for every player. Studio refuses to publish a non-number,
+  # but an API publish does not (task-a1bc0e141b645b3f), so the read coerces:
+  # a positive number passes, a numeric string parses, anything else is 20.
+  @default_time_limit 20
+
+  defp time_limit(n) when is_number(n) and n > 0, do: n
+
+  defp time_limit(s) when is_binary(s) do
+    s = String.trim(s)
+
+    case Integer.parse(s) do
+      {n, ""} ->
+        time_limit(n)
+
+      _ ->
+        case Float.parse(s) do
+          {n, ""} -> time_limit(n)
+          _ -> @default_time_limit
+        end
+    end
+  end
+
+  defp time_limit(_), do: @default_time_limit
 
   @doc """
   Load a published quiz by id and parse it into a question.
