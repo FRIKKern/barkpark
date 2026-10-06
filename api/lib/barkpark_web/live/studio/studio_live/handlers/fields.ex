@@ -70,7 +70,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
            :info,
            "That “+” already created an untitled #{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
          )
-         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
+         |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))
+         |> focus_new_doc(List.last(path))}
 
       :none ->
         create_new_document(type, pane_prefix(params, socket), socket)
@@ -123,7 +124,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
              at: System.monotonic_time(:millisecond)
            }
          )
-         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+         |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))
+         |> focus_new_doc(pub_id)}
 
       {:error, {:halted, reason}} ->
         {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
@@ -132,6 +134,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         {:noreply, put_flash(socket, :error, "Failed to create")}
     end
   end
+
+  # A create the user just made opens with the caret in its first field
+  # (task-92e2615cf6ec27e6). Without this, focus stayed on the "+", and a
+  # keyboard user tabbed through every list row to reach the form. The client
+  # half (`phx:bp:focus-new-doc` in root.html.heex) waits for this id's editor
+  # to render, since the push_patch above has not rendered it yet.
+  defp focus_new_doc(socket, id), do: push_event(socket, "bp:focus-new-doc", %{id: id})
 
   # See [plus-press-retry-coalesce] above. `{:ok, marker}` means: this press is
   # indistinguishable from a re-press of one whose answer never reached the
