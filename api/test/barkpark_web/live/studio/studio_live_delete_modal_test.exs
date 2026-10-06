@@ -108,7 +108,16 @@ defmodule BarkparkWeb.Studio.StudioLiveDeleteModalTest do
              "Deleted “Grace Hopper” and removed 3 references to it."
 
     assert Delete.deleted_sentence(doc, false, 3) == "Deleted “Grace Hopper”."
-    assert Delete.deleted_sentence(%{title: nil, doc_id: "x1"}, false, 0) == "Deleted “x1”."
+    # task-5443f7448d259c66: an untitled document is named as its desk row
+    # names it, never by its raw draft id.
+    assert Delete.deleted_sentence(
+             %{title: nil, doc_id: "drafts.ticket-4e956da749327770", type: "ticket"},
+             false,
+             0
+           ) == "Deleted “Untitled ticket · 4e956da749327770”."
+
+    assert Delete.deleted_sentence(%{title: "", doc_id: "x1", type: nil}, false, 0) ==
+             "Deleted “Untitled document · x1”."
   end
 
   test "a delete that fails flashes an error instead of silently navigating away",

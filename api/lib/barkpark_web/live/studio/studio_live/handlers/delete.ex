@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Session
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.SheetGrid.GridData
   alias BarkparkWeb.Studio.StudioLive.Shared
 
@@ -48,7 +49,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   # and how many references the disconnect removed.
   @doc false
   def deleted_sentence(doc, disconnected?, refs) do
-    title = if is_binary(doc.title) and doc.title != "", do: doc.title, else: doc.doc_id
+    # The desk row's own name for the document (task-5443f7448d259c66): an
+    # untitled draft used to be named by its raw `drafts.<type>-<hex>` id.
+    title = PaneBuilder.display_title(doc)
 
     cond do
       disconnected? and refs == 1 -> "Deleted “#{title}” and removed 1 reference to it."
