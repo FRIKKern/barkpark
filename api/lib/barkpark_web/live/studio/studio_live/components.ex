@@ -1435,6 +1435,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
+                phx-value-pane={"#{idx}"}
                 title={gettext("New %{type}", type: pane.type_name)}
                 aria-label={gettext("New %{type}", type: pane.type_name)}
               ><.icon name="plus" size={14} /></button>
@@ -1562,6 +1563,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   class="btn btn-primary btn-sm"
                   phx-click="new-document"
                   phx-value-type={pane.type_name}
+                  phx-value-pane={"#{idx}"}
                 >
                   <.icon name="plus" size={14} /> New document
                 </button>

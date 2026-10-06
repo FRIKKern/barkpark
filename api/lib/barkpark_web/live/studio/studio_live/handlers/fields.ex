@@ -31,7 +31,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   # retry of the old one.
   @create_retry_window_ms 30_000
 
-  def new_document(%{"type" => type}, socket) do
+  def new_document(%{"type" => type} = params, socket) do
     case retry_of_recent_create(socket, type) do
       {:ok, %{path: path}} ->
         # [plus-press-retry-coalesce] THE SECOND PRESS OF "+". spd-w18 measured
@@ -73,11 +73,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))}
 
       :none ->
-        create_new_document(type, socket)
+        create_new_document(type, pane_prefix(params, socket), socket)
     end
   end
 
-  defp create_new_document(type, socket) do
+  # The pressed pane's own address, the prefix `Handlers.Scope.select/2` uses
+  # for a row click (#35b). `nav_path ++ [id]` appended the new id after the
+  # OPEN document whenever one was open, so the walker kept the old document in
+  # the editor and the new one sat orphaned in the list
+  # (task-c06799c87b8d4964). A press with no pane index (none today) keeps the
+  # old formula.
+  defp pane_prefix(%{"pane" => pane}, socket) when is_binary(pane) do
+    with {idx, ""} when idx >= 0 <- Integer.parse(pane),
+         %{path: path} when is_list(path) <- Enum.at(socket.assigns[:panes] || [], idx) do
+      path
+    else
+      _ -> socket.assigns.nav_path
+    end
+  end
+
+  defp pane_prefix(_params, socket), do: socket.assigns.nav_path
+
+  defp create_new_document(type, prefix, socket) do
     # No hand-rolled `doc_id`: the old `"#{type}-#{:rand.uniform(999_999)}"`
     # drew from a 1M-value space, so on a populated dataset a collision landed
     # in the writer's UPDATE branch and SILENTLY overwrote an unrelated doc (or
@@ -93,7 +110,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          ) do
       {:ok, doc} ->
         pub_id = Content.published_id(doc.doc_id)
-        new_path = socket.assigns.nav_path ++ [pub_id]
+        new_path = prefix ++ [pub_id]
 
         {:noreply,
          socket
