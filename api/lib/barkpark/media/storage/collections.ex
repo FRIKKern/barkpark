@@ -240,6 +240,38 @@ defmodule Barkpark.Media.Storage.Collections do
   end
 
   @doc """
+  Create a published folder collection titled `title`.
+
+  The same create + publish batch the Media library used to send to the
+  document mutate door, applied through `Content.apply_mutations/3` so the
+  hooks, walls and caller context are the ones that door runs. The answer is
+  the folder READ BACK through `get/3` in the caller's scope, never the
+  request echoed (task-c09196a99fad3d3a).
+  """
+  @spec create_folder(String.t(), String.t(), keyword()) ::
+          {:ok, Document.t()} | {:error, term()}
+  def create_folder(title, dataset, opts \\ []) when is_binary(title) and is_binary(dataset) do
+    id = "col-" <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+
+    mutations = [
+      %{
+        "create" => %{
+          "_type" => @collection_type,
+          "_id" => id,
+          "title" => title,
+          "kind" => "folder",
+          "slug" => id
+        }
+      },
+      %{"publish" => %{"id" => id, "type" => @collection_type}}
+    ]
+
+    with {:ok, _} <- Content.apply_mutations(mutations, dataset, [source: :api] ++ opts) do
+      get(id, dataset, opts)
+    end
+  end
+
+  @doc """
   Search assets belonging to a collection.
 
   DELIBERATELY reaches the UNCLAMPED `fetch/3` rather than `get/3`, and that is

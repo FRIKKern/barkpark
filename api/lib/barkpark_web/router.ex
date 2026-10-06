@@ -3110,6 +3110,7 @@ defmodule BarkparkWeb.Router do
   scope "/v1/media", BarkparkWeb do
     pipe_through(:media_mutate)
 
+    post("/:dataset/collections", V1.MediaCollectionsController, :create)
     post("/:dataset/collections/:id/share", V1.MediaCollectionsController, :share)
     delete("/:dataset/collections/:id/share", V1.MediaCollectionsController, :revoke_share)
     post("/:dataset/collections/:id/members", V1.MediaCollectionsController, :add_member)
@@ -3515,6 +3516,9 @@ defmodule BarkparkWeb.Router do
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through(:scoped_media_mutate)
 
+    # The Media library's "New folder" (task-c09196a99fad3d3a): on this
+    # cookie-aware pipeline, not :scoped_mutate, which stays token-only.
+    post("/v1/media/:dataset/collections", V1.MediaCollectionsController, :create)
     post("/v1/media/:dataset/upload", V1.MediaController, :upload)
     patch("/v1/media/:dataset/:id", V1.MediaController, :update)
     delete("/v1/media/:dataset/:id", V1.MediaController, :delete)
