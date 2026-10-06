@@ -220,6 +220,64 @@ defmodule Barkpark.ContentStudioHelpersTest do
       assert refetched.title == "Source (copy)"
     end
 
+    # task-970a40d1a252e649: the copy's own title source carries the copy's
+    # title, or the next write re-derives the source title from it.
+    test "the copy's content title and paper title block carry the copy title" do
+      {:ok, src} =
+        Content.create_document(
+          @doc_type,
+          %{
+            "doc_id" => "c-retitle",
+            "title" => "Fjellet",
+            "content" => %{
+              "title" => "Fjellet",
+              "subtitle" => "Fjellet",
+              "blocks" => [
+                %{
+                  "id" => "tpl-title",
+                  "type" => "heading",
+                  "role" => "title",
+                  "text" => "Fjellet"
+                },
+                %{"id" => "h-2", "type" => "heading", "text" => "Fjellet"},
+                %{
+                  "id" => "synth-f-title-0",
+                  "type" => "field-string",
+                  "fieldName" => "title",
+                  "value" => "Fjellet"
+                }
+              ]
+            }
+          },
+          @dataset
+        )
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.title == "Fjellet (copy)"
+      assert copy.content["title"] == "Fjellet (copy)"
+
+      assert [
+               %{"text" => "Fjellet (copy)"},
+               %{"text" => "Fjellet"},
+               %{"fieldName" => "title", "value" => "Fjellet (copy)"}
+             ] = copy.content["blocks"]
+
+      # Only the title source changes: another field holding the same words stays.
+      assert copy.content["subtitle"] == "Fjellet"
+    end
+
+    test "a content title that differs from the row title is left alone" do
+      {:ok, src} =
+        Content.create_document(
+          @doc_type,
+          %{"doc_id" => "c-differs", "title" => "Row", "content" => %{"title" => "Field"}},
+          @dataset
+        )
+
+      assert {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)
+      assert copy.content["title"] == "Field"
+    end
+
     test "untitled source clones to 'Untitled (copy)'" do
       {:ok, src} =
         Content.create_document(
