@@ -55,7 +55,8 @@ on:
           - latest
       windows:
         # The Windows x64 jobs run on demand only (task-efbf914de2e8ab25): windows-latest
-        # minutes are scarce, and the leg is still being proven. only skips macOS and Linux.
+        # minutes are scarce, and the leg is still being proven. There is no Windows-only
+        # choice: a skipped matrix job renders its name unexpanded on the head.
         description: "Windows x64 build and boot"
         required: true
         default: "no"
@@ -63,7 +64,6 @@ on:
         options:
           - "no"
           - also
-          - only
 
 permissions:
   contents: read
@@ -74,7 +74,6 @@ env:
 jobs:
   build:
     name: build (${{ matrix.target }})
-    if: github.event_name != 'workflow_dispatch' || inputs.windows != 'only'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 60
     strategy:
@@ -167,7 +166,7 @@ jobs:
     name: App shape boot (${{ matrix.target }})
     needs: build
     # Boot every platform whose build passed, even when another platform's build failed.
-    if: ${{ !cancelled() && needs.build.result != 'skipped' }}
+    if: ${{ !cancelled() }}
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 30
     strategy:
@@ -295,7 +294,7 @@ jobs:
   # build, so the Studio terminal reports itself not enabled.
   build-windows:
     name: build (win32-x64)
-    if: github.event_name == 'workflow_dispatch' && inputs.windows != 'no'
+    if: github.event_name == 'workflow_dispatch' && inputs.windows == 'also'
     runs-on: windows-latest
     timeout-minutes: 90
     defaults:

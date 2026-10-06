@@ -2813,7 +2813,7 @@ ACK_EX=(--expect-unrendered "Dispatch (changed-path sets)"
         --expect-unrendered "App shape boot (linux-arm64)"
         --expect-unrendered "npm publish (dry-run unless chosen)"
         # engine-release.yml Windows jobs (task-efbf914de2e8ab25): workflow_dispatch
-        # with windows=also|only, so these names render on no PR head and no push.
+        # with windows=also, so these names render on no PR head and no push.
         --expect-unrendered "build (win32-x64)"
         --expect-unrendered "App shape boot (win32-x64)")
 ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task"

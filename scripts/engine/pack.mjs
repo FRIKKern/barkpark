@@ -91,7 +91,10 @@ export function copyResolved(from, to) {
 }
 
 function npmPack(folder, out) {
-  return path.join(out, execFileSync('npm', ['pack', '--silent', '--pack-destination', out], { cwd: folder, encoding: 'utf8' }).trim().split('\n').pop());
+  // npm is npm.cmd on Windows, which only a shell runs; the destination is quoted for it.
+  const windows = process.platform === 'win32';
+  const args = ['pack', '--silent', '--pack-destination', windows ? `"${out}"` : out];
+  return path.join(out, execFileSync('npm', args, { cwd: folder, encoding: 'utf8', shell: windows }).trim().split('\n').pop().trim());
 }
 
 function packPlatform(opts, version) {
