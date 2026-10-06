@@ -650,6 +650,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
   defp focus_new_block(socket, _block), do: socket
 
+  # An image or equation picked in the canvas is built here (it is not a
+  # canvas-run type) and renders as its own boundary editor outside the canvas.
+  # Put the caret in that editor, so what the author types next lands on the
+  # block (task-f92354b415b486f5). The hook focuses it once it is in the DOM.
+  @focus_boundary_types ~w(image equation)
+
+  defp focus_boundary_block(socket, %{"id" => id, "type" => type})
+       when is_binary(id) and type in @focus_boundary_types do
+    if socket.assigns[:last_paper_save_ok?] == true,
+      do: push_event(socket, "bp:focus-boundary", %{id: id}),
+      else: socket
+  end
+
+  defp focus_boundary_block(socket, _block), do: socket
+
   @doc """
   pdd-t20c: MATERIALIZE an optional ghost slot. The editor offers each absent
   optional declaration (featured / ingress) as a calm ghost in its enforced place;
@@ -754,12 +769,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   def paper_slash_insert(%{"type" => type} = params, socket) do
     new = Blocks.default_block(type, Blocks.new_block_id(params["request_id"]))
 
-    paper_reply(
-      Shared.paper_op(
-        socket,
-        write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
-      )
+    socket
+    |> Shared.paper_op(
+      write_meta(server_minted_block(Shared.slash_insert_op(params["afterId"], new)), params)
     )
+    |> focus_boundary_block(new)
+    |> paper_reply()
   end
 
   def paper_slash_insert(params, socket), do: failed_reply(socket, params)

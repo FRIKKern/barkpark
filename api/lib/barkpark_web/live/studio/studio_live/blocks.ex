@@ -4273,6 +4273,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   def default_block("diagram", id),
     do: %{"id" => id, "type" => "diagram", "source" => "", "caption" => ""}
 
+  # An image picked in the canvas slash menu (task-f92354b415b486f5): the same
+  # empty image the canvas used to insert itself, now built here because image is
+  # a boundary block, not a canvas-run type.
+  def default_block("image", id),
+    do: %{"id" => id, "type" => "image", "src" => "", "alt" => ""}
+
   def default_block("equation", id),
     do: %{"id" => id, "type" => "equation", "tex" => "", "display" => true}
 
