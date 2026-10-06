@@ -544,11 +544,40 @@ defmodule BarkparkWeb.Components.FieldInputs do
   # alt-text input the way Sanity does (`options.hotspot`), or flat:
   # {"type":"image","hotspot":true,"alt":true}. Absent → the picker renders
   # byte-identically (the attribute is omitted, not set to "false").
-  defp image_option?(field, key) do
-    flat = Map.get(field, key)
-    nested = get_in(field, ["options", key])
-    if flat == true or nested == true, do: true, else: nil
+  #
+  # Sanity also declares alt text as a SUBFIELD, `fields: [{name: "alt"}]`
+  # (task-6f2b84a0e32688ad, server side task-f0f51946d2de672d): the picker's alt
+  # input then edits that subfield, which sits on the image object as `alt`,
+  # beside the asset (docs/contracts/schema-v2.md "Stored value shapes").
+  defp image_option?(field, "alt" = key) do
+    if image_flag?(field, key) or declares_subfield?(field, "alt"), do: true, else: nil
   end
+
+  defp image_option?(field, key), do: if(image_flag?(field, key), do: true, else: nil)
+
+  defp image_flag?(field, key),
+    do: Map.get(field, key) == true or get_in(field, ["options", key]) == true
+
+  defp declares_subfield?(field, name) do
+    case Map.get(field, "fields") do
+      fields when is_list(fields) ->
+        Enum.any?(fields, &(is_map(&1) and (&1["name"] || &1[:name]) == name))
+
+      _ ->
+        false
+    end
+  end
+
+  @doc """
+  The picker attributes an image schema field asks for — `%{hotspot:, alt:}`,
+  each `true` or `nil` (omitted). Shared by the Classic input and Beta's
+  property rows so both offer the same controls.
+  """
+  @spec image_picker_flags(map() | nil) :: %{hotspot: true | nil, alt: true | nil}
+  def image_picker_flags(%{} = field),
+    do: %{hotspot: image_option?(field, "hotspot"), alt: image_option?(field, "alt")}
+
+  def image_picker_flags(_), do: %{hotspot: nil, alt: nil}
 
   # The picker's wire value is a STRING (a bare URL or a JSON object). A value
   # that was decoded into a map at the save boundary (Forms.coerce_field_value)

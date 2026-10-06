@@ -387,8 +387,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     <%!-- Only the field's OWN findings here; a composite / array subtree
          (Gyldendal parity E1.11) is handed to the component, which renders
          each finding under the subfield or row it names. --%>
-    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) %>
-    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) %>
+    <% errors = own_findings(Map.get(@validation_errors, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_errors, field_name)) %>
+    <% warnings = own_findings(Map.get(@validation_warnings, field_name, [])) ++ image_subfield_findings(@field, Map.get(@validation_warnings, field_name)) %>
     <%= if self_titled?(type) do %>
       <%!-- v2 structural types render their own <legend>; skip outer label,
            but keep error display + onix hint as inline rows below the field. --%>
@@ -1341,6 +1341,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # a leaf is a plain list; a composite / array node keeps its own under
   # `:__self__` and its subfields' under their names (rendered by the
   # component, never joined into the top-level line).
+  # An image field's declared subfields (Sanity's `alt`) have no inputs of
+  # their own in the form, the picker edits them, so their findings show under
+  # the image field, named by the subfield's title (task-6f2b84a0e32688ad).
+  defp image_subfield_findings(%{"type" => "image"} = field, %{} = tree) do
+    titles =
+      Map.new(List.wrap(field["fields"]), fn f -> {f["name"], f["title"] || f["name"]} end)
+
+    for {name, messages} <- tree, is_binary(name), is_list(messages), msg <- messages do
+      "#{Map.get(titles, name, name)}: #{msg}"
+    end
+  end
+
+  defp image_subfield_findings(_field, _tree), do: []
+
   defp own_findings(list) when is_list(list), do: list
   defp own_findings(%{__self__: list}) when is_list(list), do: list
   defp own_findings(_), do: []

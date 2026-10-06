@@ -26,6 +26,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Components.FieldInputs
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
@@ -2319,7 +2320,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # panel. [] when there is no schema/Expectation.
   defp beta_all_descriptors(%Barkpark.Content.SchemaDefinition{} = schema, blocks)
        when is_list(blocks) do
-    Content.all_expected_fields(blocks, Content.resolve_expectation(schema), schema)
+    fields = Map.new(schema.fields || [], &{&1["name"] || &1[:name], &1})
+
+    blocks
+    |> Content.all_expected_fields(Content.resolve_expectation(schema), schema)
+    # The image picker's controls (alt text, focal point) as the schema field
+    # declares them, so a Beta property row offers what Classic does
+    # (task-6f2b84a0e32688ad).
+    |> Enum.map(&Map.put(&1, :picker, FieldInputs.image_picker_flags(Map.get(fields, &1.name))))
   end
 
   defp beta_all_descriptors(_schema, _blocks), do: []

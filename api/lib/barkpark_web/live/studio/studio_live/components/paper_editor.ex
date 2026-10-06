@@ -1465,7 +1465,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           >×</button>
         </div>
         <.paper_block_fields
-          block={block}
+          block={with_picker_flags(block, descriptor)}
           dataset={@dataset}
           api_token_raw={@api_token_raw}
           scope_prefix={@scope_prefix}
@@ -4789,6 +4789,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
               data-token={@api_token_raw}
+              hotspot={get_in(@block, [:__picker, :hotspot])}
+              alt={get_in(@block, [:__picker, :alt])}
               data-test-id="paper-field-field-image"
             ></bp-media-picker>
           <% else %>
@@ -5353,4 +5355,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       _ -> nil
     end
   end
+
+  # The schema field's picker controls ride the RENDER copy of a property row's
+  # block under an atom key, never the stored block (task-6f2b84a0e32688ad).
+  defp with_picker_flags(block, %{picker: %{} = flags}) when is_map(block),
+    do: Map.put(block, :__picker, flags)
+
+  defp with_picker_flags(block, _descriptor), do: block
 end
