@@ -100,6 +100,9 @@ defmodule Barkpark.PluginFreeBootTest do
     # discard the live Sheets.Session before the lifecycle write.
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/delete.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/doc.ex"},
+    # A sheet's History restore goes through Sheets.Session.restore/4
+    # (task-1eaa2c0dc6e60047): the session would overwrite a row written beside it.
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/handlers/history.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/studio_live/shared.ex"}
   ]
 

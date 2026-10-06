@@ -463,6 +463,28 @@ defmodule Barkpark.Plugins.Sheets.Session do
   end
 
   @doc """
+  Replace the sheet from OUTSIDE the session — a revision restore
+  (task-1eaa2c0dc6e60047). A live session would treat the restored row as an
+  external write and overwrite it on its next persist, so: discard the session
+  (its unflushed edits are what the restore replaces), run `write`, discard
+  again (a collaborator's edit may have restarted it from the old row in
+  between), then start a fresh session from the restored row and announce it,
+  so every open grid sees a new epoch and refetches. Returns `write`'s result;
+  on an error nothing is restarted or announced.
+  """
+  @spec restore(String.t(), String.t(), scope(), (-> {:ok, term()} | {:error, term()})) ::
+          {:ok, term()} | {:error, term()}
+  def restore(slug, dataset, workspace_id, write) when is_function(write, 0) do
+    :ok = discard(slug, dataset, workspace_id)
+
+    with {:ok, _} = ok <- write.() do
+      :ok = discard(slug, dataset, workspace_id)
+      _ = call_session(slug, dataset, workspace_id, :announce_reload)
+      ok
+    end
+  end
+
+  @doc """
   The session's in-memory content (authoritative while it lives).
   `{:error, :no_session}` when none is live — this never starts one.
   """
@@ -824,6 +846,22 @@ defmodule Barkpark.Plugins.Sheets.Session do
       {:ok, state} -> {:reply, :ok, schedule_idle(state)}
       {error, failed} -> {:reply, error, schedule_idle(%{failed | title: state.title})}
     end
+  end
+
+  # A fresh incarnation (new epoch) loaded from a row written beside the old
+  # one: an empty delta stamped with this epoch makes every open grid refetch.
+  def handle_call(:announce_reload, _from, state) do
+    Phoenix.PubSub.broadcast(
+      Barkpark.PubSub,
+      topic(state.slug, state.dataset,
+        workspace_id: state.workspace_id,
+        project_id: state.project_id
+      ),
+      {:sheets_op,
+       %{sheet_id: state.slug, rev: state.rev, epoch: state.epoch, tab: 0, changed: %{}}}
+    )
+
+    {:reply, :ok, schedule_idle(state)}
   end
 
   # Stop WITHOUT the terminate persist: the sheet is being deleted, and a
