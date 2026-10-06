@@ -35,9 +35,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
         # spd-bl-focus-after-select — THE DECISION, bucket by bucket (full
         # write-up in studio_focus_after_select_test.exs):
-        #   wide/standard  -> nothing. The clicked row survives the patch
-        #                     (it re-renders wearing aria-current), so the
-        #                     browser never moves activeElement.
+        #   wide/standard  -> the clicked row survives the patch (it
+        #                     re-renders wearing aria-current), but its pane
+        #                     column is re-inserted when the root pane
+        #                     collapses into its strip, and a moved node
+        #                     loses focus. The #studio-panes hook
+        #                     (WidthBucket) gives it back after the patch
+        #                     (task-6d3bd0c5d673c16f), so nothing here.
         #   narrow/phone   -> the clicked row is DESTROYED (the pane strips
         #                     at narrow and hides at phone), so focus falls
         #                     to <body>. The strip is refused as a target —
