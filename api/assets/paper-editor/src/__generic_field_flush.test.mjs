@@ -29,6 +29,7 @@ const native = window.document.getElementById("native");
 const pushes = [];
 const replies = [];
 let saveResultHandler;
+const registeredEvents = [];
 let removedHandler;
 let documentRev = 1;
 const finishSave = (push, saved) => saveResultHandler({
@@ -39,10 +40,16 @@ const finishSave = (push, saved) => saveResultHandler({
 const formBridge = {
   ...hooks.BarkparkFieldBridge,
   el: formEl,
+  // The bridge registers its save-result handler; the exit coordinator it
+  // joins also registers `bp:document-revision` (#21868). Record each by
+  // name and route the one this test drives.
   handleEvent: (event, handler) => {
-    assert.equal(event, "bp:paper-field-save-result");
-    saveResultHandler = handler;
-    return "save-result-ref";
+    registeredEvents.push(event);
+    if (event === "bp:paper-field-save-result") {
+      saveResultHandler = handler;
+      return "save-result-ref";
+    }
+    return `${event}-ref`;
   },
   removeHandleEvent: (ref) => { removedHandler = ref; },
   pushEventTo: (target, event, payload) => {
@@ -53,6 +60,11 @@ const formBridge = {
 const pickerBridge = { ...hooks.BarkparkFieldBridge, el: bridgeEl };
 formBridge.mounted();
 pickerBridge.mounted();
+assert.ok(
+  registeredEvents.includes("bp:paper-field-save-result"),
+  "the field bridge listens for its save result",
+);
+assert.equal(typeof saveResultHandler, "function");
 let delegatedReaderClicks = 0;
 formEl.closest("main").addEventListener("click", () => { delegatedReaderClicks += 1; });
 
