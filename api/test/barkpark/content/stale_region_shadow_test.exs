@@ -82,6 +82,45 @@ defmodule Barkpark.Content.StaleRegionShadowTest do
     assert inspect(saved.content["body"]) =~ "Edited"
   end
 
+  # Ops address blocks by ID (`id` / `after`), never by index
+  # (Barkpark.PortableDoc.Patch), so dropping the shadow cannot shift an op onto
+  # a neighbour. Pinned on blocks AFTER the dropped one.
+  test "ops on blocks after the dropped one land on the block they name" do
+    schema!("shadowafter", "richText")
+
+    para = fn id, text ->
+      %{"id" => id, "type" => "paragraph", "content" => [%{"type" => "text", "value" => text}]}
+    end
+
+    stale = [
+      %{"id" => "f-title", "type" => "field-string", "fieldName" => "title", "value" => "T"},
+      %{"id" => "f-body", "type" => "field-text", "fieldName" => "body", "value" => "old string"},
+      para.("p-1", "One"),
+      para.("p-2", "Two")
+    ]
+
+    doc = doc!("shadowafter", stale, %{"html" => "<p>One</p><p>Two</p>"})
+
+    patch = %{
+      "op" => "patch-block",
+      "id" => "p-2",
+      "patch" => %{"content" => [%{"type" => "text", "value" => "Two edited"}]}
+    }
+
+    {:ok, _} = Content.apply_document_block_op(doc.doc_id, "shadowafter", patch, @dataset)
+
+    move = %{"op" => "move-block", "id" => "p-2", "after" => "f-title"}
+    {:ok, _} = Content.apply_document_block_op(doc.doc_id, "shadowafter", move, @dataset)
+
+    {:ok, saved} = Content.get_document(doc.doc_id, "shadowafter", @dataset)
+    blocks = saved.content["blocks"]
+
+    assert Enum.map(blocks, & &1["id"]) == ["f-title", "p-2", "p-1"]
+    text = fn id -> hd(Enum.find(blocks, &(&1["id"] == id))["content"])["value"] end
+    assert text.("p-2") == "Two edited"
+    assert text.("p-1") == "One"
+  end
+
   test "a text body keeps its field block (it owns content.body; no region)" do
     schema!("shadowtx", "text")
     doc = doc!("shadowtx", @stale, "old string")
