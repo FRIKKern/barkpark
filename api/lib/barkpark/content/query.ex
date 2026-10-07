@@ -517,7 +517,8 @@ defmodule Barkpark.Content.Query do
     ids = [pub_id, Barkpark.Content.draft_id(pub_id)]
     ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
 
-    Barkpark.Content.list_schemas(dataset, opts)
+    opts
+    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
     |> Enum.flat_map(fn schema ->
       predicate =
         (schema.fields || [])

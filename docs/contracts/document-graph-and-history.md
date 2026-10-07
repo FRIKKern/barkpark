@@ -7,7 +7,7 @@ All routes here are **[token]**; anonymous callers get `404`, never an empty `20
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Live schema-declared refs (draft and published) plus projected plugin edges: `{result:{backlinks:[<docs>],count:N}}`, one card per source. Accepts bare ids and `{_ref:id}`. Scope/visibility-filtered; hidden sources omitted. Public graph readers remain published-only.
+Live schema-declared refs (draft and published) plus projected plugin edges: `{result:{backlinks:[<docs>],count:N}}`, one card per source. Accepts bare ids and `{_ref:id}`. Source/field visibility applies to both paths. Public graph readers remain published-only.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`.
 

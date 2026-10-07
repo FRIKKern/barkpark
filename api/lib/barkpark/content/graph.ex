@@ -1407,8 +1407,13 @@ defmodule Barkpark.Content.Graph do
         []
 
       _ ->
+        dataset = Keyword.fetch!(opts, :dataset)
+        schemas = Content.list_schemas(dataset, opts)
+        schemas_by_type = Map.new(schemas, &{&1.name, &1})
+        ctx = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
+
         live =
-          Content.Query.list_reference_holders(id, Keyword.fetch!(opts, :dataset), opts)
+          Content.Query.list_reference_holders(id, dataset, Keyword.put(opts, :schemas, schemas))
           |> Enum.map(fn src ->
             %{
               from_id: src.id,
@@ -1425,7 +1430,16 @@ defmodule Barkpark.Content.Graph do
             }
           end)
 
-        (live ++ reverse_referencers(id, opts))
+        # An older indexed edge must not restore a private reference that the
+        # live read hid. Plugin kinds without a declared field keep their policy.
+        projected =
+          reverse_referencers(id, opts)
+          |> Enum.filter(fn row ->
+            Envelope.field_readable?(Map.get(schemas_by_type, row.type), row.via_field, ctx)
+          end)
+          |> Enum.map(&Map.update!(&1, :from_doc_id, fn id -> Content.published_id(id) end))
+
+        (live ++ projected)
         |> Enum.uniq_by(&{&1.type, Content.published_id(&1.from_doc_id)})
     end
   end

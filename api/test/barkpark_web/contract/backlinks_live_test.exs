@@ -50,9 +50,9 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     doc
   end
 
-  defp backlinks(id) do
+  defp backlinks(id, token \\ "backlinks-live-token") do
     scoped_conn()
-    |> put_req_header("authorization", "Bearer backlinks-live-token")
+    |> put_req_header("authorization", "Bearer " <> token)
     |> get("/v1/data/backlinks/#{@ds}/#{id}")
     |> json_response(200)
     |> Map.fetch!("result")
@@ -82,6 +82,16 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     draft!("private", %{"secret" => "target"})
     assert %{"count" => 2, "backlinks" => rows} = backlinks("target")
     assert Enum.sort(Enum.map(rows, & &1["from_doc_id"])) == ["array", "object"]
+
+    # An older projection must not reintroduce a field the live read hides.
+    {:ok, _} = Content.publish_document("private", "article", @ds)
+    {:ok, _} = Content.add_edge("private", "target", "secret", dataset: @ds)
+    assert %{"count" => 2, "backlinks" => rows} = backlinks("target")
+    assert Enum.sort(Enum.map(rows, & &1["from_doc_id"])) == ["array", "object"]
+
+    Auth.create_token("backlinks-admin", "admin", @ds, ["read", "admin"])
+    assert %{"count" => 3, "backlinks" => admin_rows} = backlinks("target", "backlinks-admin")
+    assert Enum.any?(admin_rows, &(&1["from_doc_id"] == "private"))
   end
 
   test "draft and published twins plus two projected edges produce one card" do
@@ -99,6 +109,20 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     {:ok, _} = Content.add_edge("source", "target", "reviewer", dataset: @ds)
     assert %{"count" => 1, "backlinks" => [row]} = backlinks("target")
     assert row["title"] == "Draft title"
+  end
+
+  test "projected plugin links without a schema field remain visible" do
+    draft!("plugin-source", %{})
+
+    {:ok, _} =
+      Content.add_edge("plugin-source", "target", "plugin-link",
+        dataset: @ds,
+        plugin_source: "example"
+      )
+
+    assert %{"count" => 1, "backlinks" => [row]} = backlinks("target")
+    assert row["from_doc_id"] == "plugin-source"
+    assert row["plugin_source"] == "example"
   end
 
   test "live holders obey tenant, owner and grant scope", %{target: target} do
