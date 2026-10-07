@@ -10,12 +10,16 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     Auth.create_token("backlinks-live-token", "read", @ds, ["read"])
 
     {:ok, _} =
-      Content.upsert_schema(%{"name" => "person", "visibility" => "public", "fields" => []}, @ds)
+      Content.upsert_schema(
+        %{"name" => "person", "title" => "Person", "visibility" => "public", "fields" => []},
+        @ds
+      )
 
     {:ok, _} =
       Content.upsert_schema(
         %{
           "name" => "article",
+          "title" => "Article",
           "visibility" => "public",
           "fields" => [
             %{"name" => "author", "type" => "reference", "refType" => "person"},

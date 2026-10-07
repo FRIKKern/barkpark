@@ -1,13 +1,13 @@
 <!-- doc-tier: agent | canonical-for: document-graph-and-history | budget: 650tok -->
 # Document graph + history read surfaces
 
-The `/v1/data` reads layered on the document store: backlinks, related, tags, counts and revision history. Split out of [api-v1.md](../api-v1.md) §5b/§5c. Envelope, auth markers and error codes: that doc §3, §2, §9.
+The `/v1/data` graph and history reads. Envelope, auth markers and errors: [api-v1.md](../api-v1.md) §3, §2, §9.
 
 All routes here are **[token]**; anonymous callers get `404`, never an empty `200`.
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id` (a bare id or `{_ref: id}`): `{result:{backlinks:[<docs>], count:N}}`. Reads live draft and published schema-declared references plus projected plugin edges, one card per logical source document. Scope/visibility-filtered; out-of-tenant/hidden omitted. Public graph readers retain their published lens.
+Live schema-declared refs (draft and published) plus projected plugin edges: `{result:{backlinks:[<docs>],count:N}}`, one card per source. Accepts bare ids and `{_ref:id}`. Scope/visibility-filtered; hidden sources omitted. Public graph readers remain published-only.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`.
 
