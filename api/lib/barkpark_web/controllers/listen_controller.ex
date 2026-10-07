@@ -205,8 +205,16 @@ defmodule BarkparkWeb.ListenController do
   @doc false
   def format_event(ev, dataset) do
     pub_id = Content.published_id(ev.doc_id)
+    {ws_slug, project_slug} = scope_slugs(Map.get(ev, :workspace_id), Map.get(ev, :project_id))
+    scoped = "bp:ws:#{ws_slug}:p:#{project_slug}:ds:#{dataset}"
 
+    # The webhook's tag set (Webhooks.Dispatcher.build_payload/6): scoped doc:
+    # and type: tags, then the legacy flat pair. A consumer that tags scoped
+    # reads (the Next SDK with workspace + project set) can revalidate from
+    # either channel. task-0951e10cb60b409c.
     sync_tags = [
+      "#{scoped}:doc:#{pub_id}",
+      "#{scoped}:type:#{ev.type}",
       "bp:ds:#{dataset}:doc:#{pub_id}",
       "bp:ds:#{dataset}:type:#{ev.type}"
     ]
@@ -244,8 +252,28 @@ defmodule BarkparkWeb.ListenController do
       doc_id: msg.doc_id,
       rev: msg.rev,
       previous_rev: Map.get(msg, :previous_rev),
+      workspace_id: Map.get(msg, :workspace_id),
+      project_id: Map.get(msg, :project_id),
       document: result
     }
+  end
+
+  # `Tenancy.resolve_scope_slugs/2`, memoised for the life of this stream's
+  # process: a stream sees few workspace/project pairs, and two lookups per
+  # event per listener would add up. nil ids resolve to "default", as on the
+  # webhook path.
+  defp scope_slugs(workspace_id, project_id) do
+    key = {__MODULE__, :scope_slugs, workspace_id, project_id}
+
+    case Process.get(key) do
+      nil ->
+        slugs = Barkpark.Tenancy.resolve_scope_slugs(workspace_id, project_id)
+        Process.put(key, slugs)
+        slugs
+
+      slugs ->
+        slugs
+    end
   end
 
   # --- Subscriber backpressure (Barkpark scar: unbounded BEAM mailbox) ---

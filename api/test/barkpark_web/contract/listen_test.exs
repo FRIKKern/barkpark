@@ -57,14 +57,16 @@ defmodule BarkparkWeb.Contract.ListenTest do
     payload = Jason.decode!(json)
 
     assert is_list(payload["syncTags"])
-    assert length(payload["syncTags"]) == 2
+    # Scoped + flat doc:/type:, the webhook sync_tags set (task-0951e10cb60b409c).
+    assert length(payload["syncTags"]) == 4
 
     Enum.each(payload["syncTags"], fn tag ->
       assert is_binary(tag)
-      assert Regex.match?(~r/^bp:ds:rep:(doc:|type:)/, tag)
+      assert Regex.match?(~r/^bp:(ws:[^:]+:p:[^:]+:)?ds:rep:(doc:|type:)/, tag)
     end)
 
     assert "bp:ds:rep:doc:s1" in payload["syncTags"]
     assert "bp:ds:rep:type:post" in payload["syncTags"]
+    assert Enum.any?(payload["syncTags"], &String.ends_with?(&1, ":ds:rep:doc:s1"))
   end
 end
