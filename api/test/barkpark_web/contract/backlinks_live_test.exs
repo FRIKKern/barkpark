@@ -68,6 +68,7 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     for id <- ["target", "drafts.target"] do
       assert %{"count" => 1, "backlinks" => [row]} = backlinks(id)
       assert row["from_doc_id"] == "source"
+      assert row["via_field"] == "author"
       assert row["description"] == nil
     end
 
@@ -82,6 +83,9 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     draft!("private", %{"secret" => "target"})
     assert %{"count" => 2, "backlinks" => rows} = backlinks("target")
     assert Enum.sort(Enum.map(rows, & &1["from_doc_id"])) == ["array", "object"]
+
+    assert Map.new(rows, &{&1["from_doc_id"], &1["via_field"]}) ==
+             %{"array" => "people", "object" => "reviewer"}
 
     # An older projection must not reintroduce a field the live read hides.
     {:ok, _} = Content.publish_document("private", "article", @ds)

@@ -1419,10 +1419,10 @@ defmodule Barkpark.Content.Graph do
             type: src.type,
             rev: src.rev,
             updated_at: src.updated_at,
-            description: src.content["description"],
-            event_type: src.content["event_type"],
+            description: src.description,
+            event_type: src.event_type,
             kind: "references",
-            via_field: "references",
+            via_field: src.via_field,
             plugin_source: nil
           }
         end)
