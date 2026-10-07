@@ -7,7 +7,7 @@ All routes here are **[token]**; anonymous callers get `404`, never an empty `20
 
 ## Backlinks — `GET /v1/data/backlinks/:dataset/:id` [token]
 
-Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id` (a bare id or `{_ref: id}`): `{result:{backlinks:[<docs>], count:N}}`. Scope/visibility-filtered; out-of-tenant/hidden omitted.
+Inbound refs (reverse of [api-v1.md](../api-v1.md) §5a) — docs referencing `:id` (a bare id or `{_ref: id}`): `{result:{backlinks:[<docs>], count:N}}`. Reads live draft and published schema-declared references plus projected plugin edges, one card per logical source document. Scope/visibility-filtered; out-of-tenant/hidden omitted. Public graph readers retain their published lens.
 
 Related — `GET /v1/data/related/:dataset/:id` (`?limit=`, ≤50): weighted-tag overlap + backlinks → `{result:{related:[{doc_id,type,title,score,sources,shared_tags}],count:N}}`.
 

@@ -416,7 +416,7 @@ defmodule BarkparkWeb.QueryController do
 
   @doc """
   Inbound references — the documents that reference `:id` (Sanity's
-  `*[references($id)]`). Wraps `Content.Graph.reverse_referencers/2`, which is
+  `*[references($id)]`). Wraps `Content.Graph.backlinks/2`, which is
   FAIL-CLOSED: a referencing source the caller can't see (out-of-tenant,
   owner-scoped to another user, unpublished-to-anon) is dropped entirely — never
   stubbed — so backlinks never leak the existence of an unreadable link. Scoping
@@ -434,7 +434,7 @@ defmodule BarkparkWeb.QueryController do
 
         backlinks =
           id
-          |> Content.Graph.reverse_referencers(opts)
+          |> Content.Graph.backlinks(opts)
           |> redact_backlink_content(dataset, opts)
 
         json(conn, %{

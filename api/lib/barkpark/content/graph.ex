@@ -1395,6 +1395,41 @@ defmodule Barkpark.Content.Graph do
     end
   end
 
+  @doc """
+  Authenticated used-in cards: live schema-declared references plus projected plugin
+  edges. Drafts and recent writes do not depend on the published edge index.
+  One card per logical source document, preferring a referring draft's title.
+  Public readers continue to use `reverse_referencers/2` unchanged.
+  """
+  def backlinks(id, opts) do
+    case resolve_doc(id, Keyword.fetch!(opts, :dataset), opts) do
+      nil ->
+        []
+
+      _ ->
+        live =
+          Content.Query.list_reference_holders(id, Keyword.fetch!(opts, :dataset), opts)
+          |> Enum.map(fn src ->
+            %{
+              from_id: src.id,
+              from_doc_id: Content.published_id(src.doc_id),
+              title: src.title || src.doc_id,
+              type: src.type,
+              rev: src.rev,
+              updated_at: src.updated_at,
+              description: src.content["description"],
+              event_type: src.content["event_type"],
+              kind: "references",
+              via_field: "references",
+              plugin_source: nil
+            }
+          end)
+
+        (live ++ reverse_referencers(id, opts))
+        |> Enum.uniq_by(&{&1.type, Content.published_id(&1.from_doc_id)})
+    end
+  end
+
   # The map `reverse_referencers/2` reads a source's card fields from. See its
   # @doc: the public reader (`published_only: true`) gets the anonymous Envelope
   # render under the handed schema, or nothing for a type it holds no schema
