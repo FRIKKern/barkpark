@@ -34,7 +34,7 @@ Three tags per touched document: `bp:ds:<dataset>:{_all|doc:<id>|type:<type>}` �
 Same suffixes emitted under scoped prefix `bp:ws:<ws>:p:<project>:ds:<dataset>`;
 legacy flat `bp:ds:*` retained for back-compat; unscoped mutations resolve
 `<ws>`/`<project>` to `default` (`build_payload/6` via `Tenancy.resolve_scope_slugs/2`).
-Dispatcher `sync_tags` carries only `doc:` + `type:` (scoped + flat) — **no `:_all`**;
+Dispatcher `sync_tags` and SSE `syncTags` carry only `doc:` + `type:` (scoped + flat) — **no `:_all`**;
 handler reconstructs `_all` from payload and augments `doc:`/`type:` from
 `dataset`/`doc_id`/`type` — additive (Set-deduped); when `sync_tags` absent,
 field-derived tags are the only source. All six events
