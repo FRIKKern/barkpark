@@ -17,9 +17,9 @@ import (
 )
 
 // Owner ruling #49 (task-229252f441569e57): `bp export` is a backup, so its
-// help must say how to restore one and with what semantics — drafts vs
-// published rows, existing ids, batch size — until `bp import` exists.
-func TestRunExportHelpDocumentsTheRestoreRecipe(t *testing.T) {
+// help must say how to restore one. Since task-e84e879b0b84b6f9 that is
+// `bp import`, and the manual jq recipe is gone from the help.
+func TestRunExportHelpPointsAtImport(t *testing.T) {
 	var so, se bytes.Buffer
 	out := newWriter(&so, &se)
 
@@ -30,16 +30,19 @@ func TestRunExportHelpDocumentsTheRestoreRecipe(t *testing.T) {
 	help := so.String()
 	for _, want := range []string{
 		"RESTORE",
-		"no `bp import` yet",
+		"bp import <file>",
+		"--dry-run",
 		"createOrReplace + publish",
-		"stays a draft",
-		"OVERWRITES",
-		"empty dataset",
-		"1000 mutations",
-		"bp doc mutate --file",
+		"stays a",
+		"--overwrite",
 	} {
 		if !strings.Contains(help, want) {
 			t.Errorf("export --help does not mention %q:\n%s", want, help)
+		}
+	}
+	for _, gone := range []string{"no `bp import` yet", "bp doc mutate --file", "jq -c"} {
+		if strings.Contains(help, gone) {
+			t.Errorf("export --help still carries the manual recipe (%q):\n%s", gone, help)
 		}
 	}
 }

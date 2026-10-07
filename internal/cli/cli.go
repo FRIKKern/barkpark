@@ -204,6 +204,11 @@ func Execute(args []string) int {
 		// as NDJSON (one document per line) for backup: `bp export > backup.ndjson`.
 		// A built-in because the response is a streamed NDJSON body.
 		return runExport(out, g, ctx, rest[1:])
+	case "import":
+		// `bp import <file.ndjson>` — restore a `bp export` backup into the
+		// active dataset in batches under the mutate limits. A built-in because
+		// it reads a local file and writes many mutate batches.
+		return runImport(out, g, ctx, rest[1:])
 	case "tasks":
 		// `bp tasks` — the live portrait task board (internal/taskboard). A built-in
 		// because it is a full-screen interactive TUI, not a manifest JSON verb.
