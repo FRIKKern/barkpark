@@ -246,6 +246,8 @@ jobs:
       # diff, and the per-PR path never caught it either; the push:main arm
       # fires on the next api/ merge and main-red-owner.yml owns the red.
       locks: ${{ steps.sets.outputs.locks }}
+      # The Sobelow gate's own inputs; see the set's comment in the loop below.
+      sobelow_gate: ${{ steps.sets.outputs.sobelow_gate }}
     steps:
       - uses: actions/checkout@v7
         with:
@@ -277,6 +279,7 @@ jobs:
             echo "event '$event' is not a pull_request — the security path sets are true."
             echo "api=true" >> "$GITHUB_OUTPUT"
             echo "locks=true" >> "$GITHUB_OUTPUT"
+            echo "sobelow_gate=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -333,6 +336,7 @@ jobs:
             echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching api=true and running the WHOLE security suite rather than skipping it — a skip here would green a gate nothing measured. Cost: the full Sobelow + mix-audit run."
             echo "api=true" >> "$GITHUB_OUTPUT"
             echo "locks=true" >> "$GITHUB_OUTPUT"
+            echo "sobelow_gate=true" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
@@ -380,12 +384,38 @@ jobs:
           # whole of it, and they are severe alone.
           api=false
           locks=false
+          sobelow_gate=false
           # One NUL-terminated record per path (`-d ''`), so a path holding a
           # NEWLINE reaches the case arms whole.
           while IFS= read -r -d '' f; do
             [ -n "$f" ] || continue
             case "$f" in
               api/* | .github/workflows/security.yml) api=true ;;
+            esac
+            # THE SOBELOW GATE'S OWN INPUTS (task-7d13174d1e8ef0a9). The two
+            # steps gated on this set re-prove the gate's configuration, not
+            # the diff's code, and each reads only these paths:
+            #   * the fresh-finding guard plants a String.to_atom probe at
+            #     api/lib/barkpark/sobelow_fresh_finding_guard.ex and runs
+            #     `mix sobelow --skip --exit Low`. What can change its verdict:
+            #     the probe path existing, the skip baseline (.sobelow-skips),
+            #     a .sobelow-conf, Sobelow's version and any `sobelow` alias
+            #     (mix.exs, mix.lock), the script, and this workflow's
+            #     toolchain and step wiring (with breaker-capture.sh).
+            #   * the reconcile regenerates the baseline and uploads it for
+            #     review. Off this set it runs only when the Sobelow step
+            #     itself fails, which is when a reviewer needs it.
+            # No other api/ change can disarm either one, and the Sobelow step
+            # still scans every api head.
+            case "$f" in
+              api/.sobelow-skips | api/.sobelow-conf \
+              | api/mix.exs | api/mix.lock \
+              | api/lib/barkpark/sobelow_fresh_finding_guard.ex \
+              | api/scripts/sobelow-fresh-finding-guard.sh \
+              | api/scripts/sobelow-baseline-reconcile.sh \
+              | api/scripts/sobelow-baseline-setdiff.sh \
+              | .github/workflows/security.yml \
+              | scripts/breaker-capture.sh) sobelow_gate=true ;;
             esac
             # THE LOCK SET — mix-audit's OWN inputs, and nothing else. Every
             # entry is a file whose contents can change what the two CVE oracles
@@ -424,9 +454,18 @@ jobs:
               ;;
           esac
 
-          echo "verdict: api=${api} locks=${locks}"
+          case "${sobelow_gate}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict sobelow_gate=${sobelow_gate}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: api=${api} locks=${locks} sobelow_gate=${sobelow_gate}"
           echo "api=${api}" >> "$GITHUB_OUTPUT"
           echo "locks=${locks}" >> "$GITHUB_OUTPUT"
+          echo "sobelow_gate=${sobelow_gate}" >> "$GITHUB_OUTPUT"
 
   gate-shape:
     # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher, the
@@ -547,7 +586,10 @@ jobs:
       - name: Reconcile baseline on the pinned CI toolchain
         id: s3
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        if: always()
+        # Runs when the gate's inputs changed (the dispatcher's sobelow_gate
+        # set, true on every non-PR event), or when the Sobelow step failed and
+        # a reviewer needs the reconciled baseline. task-7d13174d1e8ef0a9.
+        if: always() && (needs.changes.outputs.sobelow_gate == 'true' || steps.s2.outcome == 'failure')
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/sobelow-baseline-reconcile.sh "${{ runner.temp }}/sobelow-baseline-reconcile"
@@ -568,7 +610,9 @@ jobs:
       - name: Prove a fresh String.to_atom finding still reds
         id: s5
         continue-on-error: true  # main-red breaker: the Decide step below owns the verdict
-        if: always()
+        # Runs when the gate's inputs changed (the dispatcher's sobelow_gate
+        # set, true on every non-PR event). task-7d13174d1e8ef0a9.
+        if: always() && needs.changes.outputs.sobelow_gate == 'true'
         run: |
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/sobelow-fresh-finding-guard.sh
@@ -587,8 +631,14 @@ jobs:
           if [ -z "${BREAKER_CAPTURE_ARMED:-}" ] && [ -f "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" ]; then exec bash "$GITHUB_WORKSPACE/scripts/breaker-capture.sh" "$0"; fi  # main-red breaker: capture this step's error block
           bash scripts/sobelow-baseline-staleness-check.sh --verify-tokens deps/sobelow
 
+      # A skipped proof is never silent: this names what was not re-run and why.
+      - name: Announce the gate-input skip (task-7d13174d1e8ef0a9)
+        if: always() && needs.changes.outputs.sobelow_gate != 'true'
+        run: |
+          echo "::notice title=Sobelow gate self-proofs skipped::SKIPPED: no Sobelow gate input changed, so the fresh-finding guard did not re-run and the baseline reconcile ran only if Sobelow failed (reconcile: ${{ steps.s3.outcome }}). Inputs: api/.sobelow-skips api/.sobelow-conf api/mix.exs api/mix.lock api/lib/barkpark/sobelow_fresh_finding_guard.ex api/scripts/sobelow-fresh-finding-guard.sh api/scripts/sobelow-baseline-reconcile.sh api/scripts/sobelow-baseline-setdiff.sh .github/workflows/security.yml scripts/breaker-capture.sh. Both run on every push to main that runs this job."
+
       - name: Upload reconciled Sobelow baseline for human review
-        if: always()
+        if: always() && steps.s3.outcome != 'skipped'
         uses: actions/upload-artifact@v4
         with:
           name: sobelow-baseline-otp-${{ matrix.otp }}-elixir-${{ matrix.elixir }}
