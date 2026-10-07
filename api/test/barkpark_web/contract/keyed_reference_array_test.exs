@@ -81,6 +81,11 @@ defmodule BarkparkWeb.Contract.KeyedReferenceArrayTest do
     {:ok, published} = Content.get_document("post-1", "post", @ds)
     assert published.content["categories"] == items
 
+    live = scoped_conn() |> authed() |> get("/v1/data/backlinks/#{@ds}/cat-a")
+
+    assert [%{"from_doc_id" => "post-1", "via_field" => "categories"}] =
+             Jason.decode!(live.resp_body)["result"]["backlinks"]
+
     assert {:ok, %{added: 2}} = Projector.upsert_record(published)
 
     resp = scoped_conn() |> authed() |> get("/v1/data/backlinks/#{@ds}/cat-a")

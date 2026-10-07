@@ -520,13 +520,14 @@ defmodule Barkpark.Content.Query do
     opts
     |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
     |> Enum.flat_map(fn schema ->
-      predicate =
+      {predicate, via_field} =
         (schema.fields || [])
         |> Enum.filter(
           &(is_binary(&1["name"]) and
               Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
         )
-        |> Enum.reduce(dynamic(false), fn field, acc ->
+        |> Enum.reverse()
+        |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
           name = field["name"]
           # Match the two core reference shapes without treating ordinary text
           # or hidden fields as links. Nested plugin links stay on the graph arm.
@@ -566,7 +567,11 @@ defmodule Barkpark.Content.Query do
                 dynamic(false)
             end
 
-          dynamic([d], ^acc or ^matches)
+          {dynamic([d], ^acc or ^matches),
+           dynamic(
+             [d],
+             fragment("CASE WHEN ? THEN ?::text ELSE ? END", ^matches, ^name, ^selected_field)
+           )}
         end)
 
       schema.name
@@ -578,14 +583,16 @@ defmodule Barkpark.Content.Query do
       |> order_by([d], desc: fragment("? LIKE 'drafts.%'", d.doc_id), asc: d.doc_id)
       # Return only card fields, not every matching document's content payload.
       |> select([d], %{
-        d
-        | content:
-            fragment(
-              "jsonb_build_object('description', ?->'description', 'event_type', ?->'event_type')",
-              d.content,
-              d.content
-            )
+        id: d.id,
+        doc_id: d.doc_id,
+        title: d.title,
+        type: d.type,
+        rev: d.rev,
+        updated_at: d.updated_at,
+        description: fragment("?->'description'", d.content),
+        event_type: fragment("?->'event_type'", d.content)
       })
+      |> select_merge(^%{via_field: via_field})
       |> Repo.all()
     end)
   end
