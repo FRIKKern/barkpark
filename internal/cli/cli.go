@@ -19,6 +19,7 @@
 package cli
 
 import (
+	"errors"
 	"os"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
@@ -69,7 +70,10 @@ func Execute(args []string) int {
 	g, rest, err := parseGlobals(args)
 	if err != nil {
 		out.userErr("%v", err)
-		usageTop(out)
+		var valErr *flagValueError
+		if !errors.As(err, &valErr) {
+			usageTop(out)
+		}
 		return exitUsage
 	}
 	out.applyGlobals(g)
