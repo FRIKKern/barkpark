@@ -1395,6 +1395,54 @@ defmodule Barkpark.Content.Graph do
     end
   end
 
+  @doc """
+  Authenticated used-in cards: live schema-declared references plus projected plugin
+  edges. Drafts and recent writes do not depend on the published edge index.
+  One card per logical source document, preferring a referring draft's title.
+  Public readers continue to use `reverse_referencers/2` unchanged.
+  """
+  def backlinks(id, opts) do
+    with %Document{} = target <- resolve_doc(id, Keyword.fetch!(opts, :dataset), opts),
+         {:ok, _} <- Map.fetch(docs_by_id([target.id], opts), target.id) do
+      dataset = Keyword.fetch!(opts, :dataset)
+      schemas = Content.list_schemas(dataset, opts)
+      schemas_by_type = Map.new(schemas, &{&1.name, &1})
+      ctx = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
+
+      live =
+        Content.Query.list_reference_holders(id, dataset, Keyword.put(opts, :schemas, schemas))
+        |> Enum.map(fn src ->
+          %{
+            from_id: src.id,
+            from_doc_id: Content.published_id(src.doc_id),
+            title: src.title || src.doc_id,
+            type: src.type,
+            rev: src.rev,
+            updated_at: src.updated_at,
+            description: src.content["description"],
+            event_type: src.content["event_type"],
+            kind: "references",
+            via_field: "references",
+            plugin_source: nil
+          }
+        end)
+
+      # An older indexed edge must not restore a private reference that the
+      # live read hid. Plugin kinds without a declared field keep their policy.
+      projected =
+        reverse_referencers(id, opts)
+        |> Enum.filter(fn row ->
+          Envelope.field_readable?(Map.get(schemas_by_type, row.type), row.via_field, ctx)
+        end)
+        |> Enum.map(&Map.update!(&1, :from_doc_id, fn id -> Content.published_id(id) end))
+
+      (live ++ projected)
+      |> Enum.uniq_by(&{&1.type, Content.published_id(&1.from_doc_id)})
+    else
+      _ -> []
+    end
+  end
+
   # The map `reverse_referencers/2` reads a source's card fields from. See its
   # @doc: the public reader (`published_only: true`) gets the anonymous Envelope
   # render under the handed schema, or nothing for a type it holds no schema
