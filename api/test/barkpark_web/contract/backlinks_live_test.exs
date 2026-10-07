@@ -153,5 +153,27 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
              "target",
              Keyword.put(opts, :caller_context, CallerContext.anonymous())
            ) == []
+
+    Repo.update_all(from(d in Content.Document, where: d.id == ^source.id), set: [owner_id: nil])
+    owner_id = Ecto.UUID.generate()
+
+    Repo.update_all(from(d in Content.Document, where: d.id == ^target.id),
+      set: [owner_id: owner_id]
+    )
+
+    # A readable source cannot reveal relationships to an unreadable target.
+    assert Graph.backlinks(
+             "target",
+             Keyword.put(opts, :caller_context, CallerContext.anonymous())
+           ) == []
+
+    assert [%{from_doc_id: "source"}] =
+             Graph.backlinks(
+               "target",
+               Keyword.put(opts, :caller_context, %CallerContext{
+                 principal_type: :user,
+                 user_id: owner_id
+               })
+             )
   end
 end
