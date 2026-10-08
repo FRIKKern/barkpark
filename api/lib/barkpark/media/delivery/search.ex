@@ -589,8 +589,11 @@ defmodule Barkpark.Media.Delivery.Search do
     |> exclude(:order_by)
     |> exclude(:limit)
     |> exclude(:offset)
-    |> group_by([_m, d], fragment("?->>'bp_visibility'", d.content))
-    |> select([m, d], {fragment("?->>'bp_visibility'", d.content), count(m.id, :distinct)})
+    |> group_by([_m, d], fragment("COALESCE(?->>'bp_visibility', 'public')", d.content))
+    |> select(
+      [m, d],
+      {fragment("COALESCE(?->>'bp_visibility', 'public')", d.content), count(m.id, :distinct)}
+    )
     |> Repo.all()
     |> facet_values()
   end
@@ -747,7 +750,8 @@ defmodule Barkpark.Media.Delivery.Search do
            idx + 1}
 
         {:visibility, value}, {parts, params, idx} ->
-          {parts ++ ["AND d.content->>'bp_visibility' = $#{idx}"], params ++ [value], idx + 1}
+          {parts ++ ["AND COALESCE(d.content->>'bp_visibility', 'public') = $#{idx}"],
+           params ++ [value], idx + 1}
 
         {:collection, value}, {parts, params, idx} ->
           {parts ++ ["AND d.content->>'collection' = $#{idx}"], params ++ [value], idx + 1}
@@ -1132,8 +1136,16 @@ defmodule Barkpark.Media.Delivery.Search do
   defp maybe_filter_visibility(query, nil), do: query
   defp maybe_filter_visibility(query, ""), do: query
 
+  # An asset with no stored visibility IS public (`Access.visibility/1`), so the
+  # filter and the facet below read the same COALESCE the clamp does
+  # (task-f6f3e95109f87705). Read bare, `visibility=public` matched nothing on a
+  # dataset whose assets predate the field.
   defp maybe_filter_visibility(query, visibility) when is_binary(visibility) do
-    where(query, [_m, d], fragment("?->>? = ?", d.content, "bp_visibility", ^visibility))
+    where(
+      query,
+      [_m, d],
+      fragment("COALESCE(?->>?, 'public') = ?", d.content, "bp_visibility", ^visibility)
+    )
   end
 
   # THE UNAUTHENTICATED READ CLAMP (task-27d5fdba100d2bc6 item 3).
