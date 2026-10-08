@@ -112,8 +112,8 @@ function momentumHtml(rows: Block[]): string {
   return (
     `<div class="bp-momentum"><div class="bp-momentum__row">` +
     `<span class="bp-momentum__i">${glyphHtml('progress')}<b>${prog}</b> in flight</span>` +
-    `<span class="bp-momentum__i bp-g--ready">${glyphChar('ready')} <b>${ready}</b> ready</span>` +
-    `<span class="bp-momentum__i bp-g--done">${glyphChar('done')} <b>${done}</b> done</span>` +
+    `<span class="bp-momentum__i bp-g--ready">${glyphHtml('ready')}<b>${ready}</b> ready</span>` +
+    `<span class="bp-momentum__i bp-g--done">${glyphHtml('done')}<b>${done}</b> done</span>` +
     `<span class="bp-momentum__grow"></span>` +
     `<span class="bp-momentum__pct">${pct}%</span></div>` +
     `<div class="bp-momentum__track"><span class="bp-momentum__fill" style="width:${pct}%"></span></div></div>`
