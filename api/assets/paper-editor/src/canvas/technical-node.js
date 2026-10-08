@@ -52,6 +52,7 @@ import { DEBOUNCE_MS } from "../contract.js";
 import { wireAtomAccessibility, readerPaintClass } from "./embed-node.js";
 import { wireFiletreeInline } from "./filetree-inline.js";
 import { wireDiffInline } from "./diff-inline.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAMES. Like bpCode / bpDiagram the node name differs from the
 // portable-doc bpType ("diff" / "filetree"): run-convert.js maps block.type → node
@@ -271,12 +272,12 @@ function createTechnicalNode(bpType) {
           const label = document.createElement("label");
           label.className = "bp-canvas-technical-field";
           const labelText = document.createElement("span");
-          labelText.textContent = meta.label;
+          labelText.textContent = t(meta.label);
           const input = document.createElement("input");
           input.type = "text";
           input.className = "bp-canvas-technical-meta";
-          input.placeholder = meta.placeholder;
-          input.setAttribute("aria-label", `${bpType} ${meta.label}`);
+          input.placeholder = t(meta.placeholder);
+          input.setAttribute("aria-label", `${bpType} ${t(meta.label)}`);
           input.setAttribute("contenteditable", "false");
           label.appendChild(labelText);
           label.appendChild(input);

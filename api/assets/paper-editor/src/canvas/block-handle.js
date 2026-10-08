@@ -8,6 +8,7 @@
 // runToOps diff turns it into patch/insert/remove/move ops with no new wire
 // shapes. The handle is purely additive: read-mode canvases never mount it.
 import { Selection, TextSelection, NodeSelection } from "@tiptap/pm/state";
+import { t, te } from "../i18n.js";
 
 // Six-dot braille cell: reads as a drag grip without letter-spacing tricks.
 const GRIP = "⠿";
@@ -197,7 +198,7 @@ export class BlockHandle {
     this._el = document.createElement("div");
     this._el.className = "bp-block-handle";
     this._el.style.display = "none";
-    this._el.innerHTML = `<button type="button" class="bp-block-handle__btn bp-block-handle__add" title="Add a block below (click)" aria-label="Add a block below">+</button><button type="button" class="bp-block-handle__btn bp-block-handle__grip" title="Drag to move · click for options" aria-label="Block options">${GRIP}</button>`;
+    this._el.innerHTML = `<button type="button" class="bp-block-handle__btn bp-block-handle__add" title="${te("Add a block below (click)")}" aria-label="${te("Add a block below")}">+</button><button type="button" class="bp-block-handle__btn bp-block-handle__grip" title="${te("Drag to move · click for options")}" aria-label="${te("Block options")}">${GRIP}</button>`;
     this._drop = document.createElement("div");
     this._drop.className = "bp-block-drop";
     this._drop.style.display = "none";
@@ -385,14 +386,16 @@ export class BlockHandle {
     const menu = document.createElement("div");
     menu.className = "bp-block-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "Block options");
+    menu.setAttribute("aria-label", t("Block options"));
     const node = this._editor.state.doc.child(index);
     const prose = ["paragraph", "heading", "bulletList", "orderedList"].includes(node.type.name);
     // A role=menu owns menuitems, grouped (axe aria-required-children): each
     // visible heading names its role=group, and the heading itself is hidden
     // from the tree so it is not read twice.
-    const item = (label, glyph, action, extra = "") => `<button type="button" role="menuitem" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph" aria-hidden="true">${glyph}</span>${label}</button>`;
-    const group = (title, items) => `<div role="group" aria-label="${title}"><div class="bp-block-menu__group" aria-hidden="true">${title}</div>${items.join("")}</div>`;
+    // Labels are English keys, shown in the viewer's language (escaped: a
+    // translation is text, never markup).
+    const item = (label, glyph, action, extra = "") => `<button type="button" role="menuitem" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph" aria-hidden="true">${glyph}</span>${te(label)}</button>`;
+    const group = (title, items) => `<div role="group" aria-label="${te(title)}"><div class="bp-block-menu__group" aria-hidden="true">${te(title)}</div>${items.join("")}</div>`;
     menu.innerHTML = [
       prose ? group("Turn into", TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind))) : "",
       group("Block", [

@@ -11,6 +11,7 @@
 // aria-invalid, and is not sent — the same rule the value input follows.
 
 import { toFieldNumber } from "./field-node.js";
+import { t } from "../i18n.js";
 
 export const FIELD_SETTINGS_TYPES = new Set(["field-select", "field-number"]);
 
@@ -73,7 +74,7 @@ function settingInput(labelText, testId) {
   const label = document.createElement("label");
   label.className = "bp-canvas-field-setting";
   const span = document.createElement("span");
-  span.textContent = labelText;
+  span.textContent = t(labelText);
   const input = document.createElement("input");
   input.className = "bp-canvas-field-setting-input";
   input.setAttribute("data-test-id", testId);
@@ -98,7 +99,7 @@ export function buildFieldSettings({ fieldType, editor, write, current }) {
   disclosure.setAttribute("contenteditable", "false");
   const summary = document.createElement("summary");
   summary.className = "bp-canvas-field-settings-toggle";
-  summary.textContent = fieldType === "field-select" ? "Edit options" : "Edit number";
+  summary.textContent = fieldType === "field-select" ? t("Edit options") : t("Edit number");
   const fields = document.createElement("div");
   fields.className = "bp-canvas-field-settings-fields";
   disclosure.append(summary, fields);
@@ -151,7 +152,7 @@ export function buildFieldSettings({ fieldType, editor, write, current }) {
   } else {
     const list = document.createElement("div");
     list.className = "bp-canvas-field-settings-options";
-    const add = settingButton("Add option", "paper-field-setting-add-option");
+    const add = settingButton(t("Add option"), "paper-field-setting-add-option");
     fields.append(list, add);
     const rowsOf = () =>
       [...list.children].map((row) => ({
@@ -175,9 +176,9 @@ export function buildFieldSettings({ fieldType, editor, write, current }) {
     const renumber = () => {
       [...list.children].forEach((row, i) => {
         const n = i + 1;
-        row.querySelector("[data-option-part='value']").setAttribute("aria-label", `Option ${n} value`);
-        row.querySelector("[data-option-part='label']").setAttribute("aria-label", `Option ${n} label`);
-        row.querySelector("button").setAttribute("aria-label", `Remove option ${n}`);
+        row.querySelector("[data-option-part='value']").setAttribute("aria-label", t("Option %{n} value", { n }));
+        row.querySelector("[data-option-part='label']").setAttribute("aria-label", t("Option %{n} label", { n }));
+        row.querySelector("button").setAttribute("aria-label", t("Remove option %{n}", { n }));
       });
     };
     const addRow = (opt) => {
@@ -187,15 +188,15 @@ export function buildFieldSettings({ fieldType, editor, write, current }) {
       value.type = "text";
       value.className = "bp-canvas-field-setting-input";
       value.setAttribute("data-option-part", "value");
-      value.placeholder = "value";
+      value.placeholder = t("value");
       value.value = opt && opt.value != null ? String(opt.value) : "";
       const label = document.createElement("input");
       label.type = "text";
       label.className = "bp-canvas-field-setting-input";
       label.setAttribute("data-option-part", "label");
-      label.placeholder = "label";
+      label.placeholder = t("label");
       label.value = opt && opt.label != null ? String(opt.label) : "";
-      const remove = settingButton("Remove", "paper-field-setting-remove-option");
+      const remove = settingButton(t("Remove"), "paper-field-setting-remove-option");
       remove.addEventListener("click", () => {
         const next = row.nextElementSibling || row.previousElementSibling;
         row.remove();

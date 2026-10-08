@@ -65,6 +65,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 // path into the harness.
 import { canvasScope } from "./field-node.js";
 import { safeUrl } from "../safe-url.js";
+import { t } from "../i18n.js";
 
 // The BINARY priority collapse the reader performs (walk.ex button/2): primary iff
 // =="primary", else secondary. Used for the priority-select display; the WRITE path
@@ -289,19 +290,19 @@ export const Card = Node.create({
       const actionLabelInput = document.createElement("input");
       actionLabelInput.type = "text";
       actionLabelInput.className = "bp-canvas-card__input";
-      actionLabelInput.placeholder = "action label";
+      actionLabelInput.placeholder = t("action label");
       actionLabelInput.setAttribute("data-test-id", "paper-card-action-label-create");
 
       const actionLabelControl = document.createElement("button");
       actionLabelControl.type = "button";
       actionLabelControl.className = "bp-canvas-card__input";
-      actionLabelControl.textContent = "Edit action label";
+      actionLabelControl.textContent = t("Edit action label");
       actionLabelControl.setAttribute("data-test-id", "paper-card-action-label-control");
 
       const actionHrefInput = document.createElement("input");
       actionHrefInput.type = "url";
       actionHrefInput.className = "bp-canvas-card__input";
-      actionHrefInput.placeholder = "action href";
+      actionHrefInput.placeholder = t("action href");
       actionHrefInput.setAttribute("data-test-id", "paper-card-action-href");
 
       // ACTION priority (the action-node.js editor, third control): a BINARY select the
@@ -341,7 +342,7 @@ export const Card = Node.create({
       mediaPaint.setAttribute("contenteditable", "false");
       mediaPaint.setAttribute("aria-haspopup", "dialog");
       mediaPaint.setAttribute("data-test-id", "paper-card-media-control");
-      mediaPaint.textContent = "Change image";
+      mediaPaint.textContent = t("Change image");
       const syncMediaPaintBounds = () => {
         if (mediaPaint.hidden) return;
         mediaPaint.style.left = `${mediaImg.offsetLeft}px`;
@@ -365,7 +366,7 @@ export const Card = Node.create({
       const titleEl = document.createElement("span");
       titleEl.setAttribute("data-test-id", "paper-card-title");
       titleEl.setAttribute("role", "textbox");
-      titleEl.setAttribute("aria-label", "Card title");
+      titleEl.setAttribute("aria-label", t("Card title"));
       titleEl.setAttribute("aria-multiline", "false");
       titleEl.tabIndex = 0;
       titleEl.style.cursor = "text";
@@ -386,7 +387,7 @@ export const Card = Node.create({
       const actionLabelHost = document.createElement("span");
       actionLabelHost.setAttribute("data-test-id", "paper-card-action-label");
       actionLabelHost.setAttribute("role", "textbox");
-      actionLabelHost.setAttribute("aria-label", "Card action label");
+      actionLabelHost.setAttribute("aria-label", t("Card action label"));
       actionLabelHost.setAttribute("aria-multiline", "false");
       actionLabelHost.tabIndex = 0;
       actionLabelHost.style.cursor = "text";
@@ -518,7 +519,7 @@ export const Card = Node.create({
         if (!hasAction && actionLabelInput.value !== label &&
             document.activeElement !== actionLabelInput) actionLabelInput.value = label;
         actionLabelControl.hidden = !hasAction;
-        actionLabelControl.textContent = "Edit action label";
+        actionLabelControl.textContent = t("Edit action label");
         actionLabelControl.disabled = !editable;
         if (actionHrefInput.value !== href && document.activeElement !== actionHrefInput) {
           actionHrefInput.value = href;

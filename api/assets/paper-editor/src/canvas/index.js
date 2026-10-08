@@ -239,6 +239,7 @@ import {
 // ProseMirror doc — so runToOps emits an insert-after carrying the reconstructed
 // block and the S4a echo stamps the server id. See _maybeSlash / _chooseSlash below.
 import { SlashMenu, SLASH_ITEMS, readExpectedItems, readMasterItems } from "../slash-menu.js";
+import { t, loadStringsFrom } from "../i18n.js";
 // The DOM-free tone normalizer (note→info, warn→warning, error→danger, …) shared
 // with the per-block `> [!type]` callout shorthand. Reused VERBATIM so the canvas
 // shorthand maps tones identically. See _maybeCalloutShorthand below.
@@ -770,6 +771,8 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editor || this._mountFailure) return; // double-mount guard
 
     ensureStyles();
+    // The canvas's own words in the viewer's Studio language (task-addade22d350314a).
+    loadStringsFrom(this);
 
     // Upgrade-safe property reclaim: a host may set `el.blocks = [...]` (or, for
     // P4, `el.wikilinkSource = …` / `el.tagSource = …`) BEFORE the custom-element
@@ -899,11 +902,12 @@ class BpPaperCanvas extends HTMLElement {
           includeChildren: false,
           showOnlyWhenEditable: true,
           placeholder: ({ node }) => {
-            if (isLockedTitle(node)) return PLACEHOLDER.title;
+            // contract.js holds the English (import-free); shown translated.
+            if (isLockedTitle(node)) return t(PLACEHOLDER.title);
             if (node.type.name === "heading") {
-              return PLACEHOLDER.heading(node.attrs && node.attrs.level);
+              return t("Heading %{level}", { level: (node.attrs && node.attrs.level) || 1 });
             }
-            return PLACEHOLDER[node.type.name] || PLACEHOLDER.paragraph;
+            return t(PLACEHOLDER[node.type.name] || PLACEHOLDER.paragraph);
           },
         }),
         // The empty locked title reads "Title" wherever the caret is (owner ruling
@@ -922,7 +926,7 @@ class BpPaperCanvas extends HTMLElement {
                     if (isLockedTitle(node) && node.content.size === 0) {
                       decorations.push(Decoration.node(pos, pos + node.nodeSize, {
                         class: "is-empty",
-                        "data-placeholder": PLACEHOLDER.title,
+                        "data-placeholder": t(PLACEHOLDER.title),
                       }));
                     }
                   });
@@ -3289,7 +3293,7 @@ class BpPaperCanvas extends HTMLElement {
     if (!this._editor || !this._editable) return;
     if (isFigureSingletonCanvas(this)) {
       this._showFigureConstraint(
-        "Markdown source is unavailable inside a Figure because it could create extra blocks.",
+        t("Markdown source is unavailable inside a Figure because it could create extra blocks."),
       );
       return;
     }
@@ -3341,7 +3345,7 @@ class BpPaperCanvas extends HTMLElement {
     const ta = document.createElement("textarea");
     ta.className = "bp-canvas-source";
     ta.value = md0;
-    ta.setAttribute("aria-label", "Markdown source");
+    ta.setAttribute("aria-label", t("Markdown source"));
     ta.spellcheck = false;
     ta.autocapitalize = "off";
     ta.autocomplete = "off";

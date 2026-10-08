@@ -38,6 +38,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpStage` (its portable-doc bpType stays "stage"). No
 // StarterKit collision. Keep aligned with run-convert.js:CANVAS_STAGE_NODE_NAME and
@@ -181,7 +182,7 @@ export const Stage = Node.create({
       srcCheckbox.type = "checkbox";
       srcCheckbox.setAttribute("data-test-id", "paper-stage-source");
       const srcText = document.createElement("span");
-      srcText.textContent = "source";
+      srcText.textContent = t("source");
       srcLabel.appendChild(srcCheckbox);
       srcLabel.appendChild(srcText);
 
