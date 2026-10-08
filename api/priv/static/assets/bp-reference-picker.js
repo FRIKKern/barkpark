@@ -168,6 +168,10 @@ class BpReferencePicker extends HTMLElement {
     input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
+    // A host that shows the field's label beside the picker names the search
+    // after it (the Paper canvas field node view).
+    const fieldLabel = this.getAttribute("data-field-label");
+    if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
