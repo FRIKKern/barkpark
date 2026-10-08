@@ -29,6 +29,8 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
               "type" => "arrayOf",
               "of" => %{"type" => "reference", "refType" => "person"}
             },
+            %{"name" => "mainImage", "type" => "image"},
+            %{"name" => "gallery", "type" => "arrayOf", "of" => %{"type" => "image"}},
             %{"name" => "details", "type" => "object"},
             %{"name" => "secret", "type" => "reference", "private" => true},
             %{"name" => "description", "type" => "string", "private" => true}
@@ -96,6 +98,39 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
     Auth.create_token("backlinks-admin", "admin", @ds, ["read", "admin"])
     assert %{"count" => 3, "backlinks" => admin_rows} = backlinks("target", "backlinks-admin")
     assert Enum.any?(admin_rows, &(&1["from_doc_id"] == "private"))
+  end
+
+  test "an image field's asset ref is found; a reference-shaped reads of its own asset are not" do
+    # task-94891b81179a0855: an image field stores {asset: {_ref}, hotspot,
+    # crop} — one level deeper than a reference field's bare {_ref} — and was
+    # invisible to backlinks entirely before this fix.
+    draft!("scalar-image", %{
+      "mainImage" => %{
+        "asset" => %{"_ref" => "target"},
+        "hotspot" => %{"x" => 0.5, "y" => 0.5}
+      }
+    })
+
+    draft!("gallery-image", %{
+      "gallery" => [
+        %{"asset" => %{"_ref" => "target"}},
+        %{"asset" => %{"_ref" => "other-asset"}}
+      ]
+    })
+
+    # Controls: a plain reference field naming the SAME id, and an image
+    # field whose asset ref points elsewhere, must not be mistaken for a hit.
+    draft!("unrelated-image", %{"mainImage" => %{"asset" => %{"_ref" => "other-asset"}}})
+
+    assert %{"count" => 2, "backlinks" => rows} = backlinks("target")
+
+    assert Enum.sort(Enum.map(rows, & &1["from_doc_id"])) == [
+             "gallery-image",
+             "scalar-image"
+           ]
+
+    assert Map.new(rows, &{&1["from_doc_id"], &1["via_field"]}) ==
+             %{"scalar-image" => "mainImage", "gallery-image" => "gallery"}
   end
 
   test "draft and published twins plus two projected edges produce one card" do

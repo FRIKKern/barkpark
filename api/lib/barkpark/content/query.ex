@@ -563,6 +563,36 @@ defmodule Barkpark.Content.Query do
                   )
                 )
 
+              # An `image` field's stored shape is `{asset: {_ref}, hotspot:
+              # {...}, crop: {...}}` (docs/contracts/schema-v2.md) — one level
+              # deeper than a `reference` field's bare `{_ref}`, so it needs
+              # its own path rather than falling through to the `true` arm
+              # below (task-94891b81179a0855: an image field's asset ref was
+              # invisible to backlinks and media relations entirely).
+              field["type"] == "image" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "?->?->'asset'->>'_ref' = ?",
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
+              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "image" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "jsonb_typeof(?->?) = 'array' AND ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text)))",
+                    d.content,
+                    ^name,
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
               true ->
                 dynamic(false)
             end
