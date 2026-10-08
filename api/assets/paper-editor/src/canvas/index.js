@@ -1277,6 +1277,7 @@ class BpPaperCanvas extends HTMLElement {
       },
     });
 
+    this._restSelectionOffAtom();
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
     // mirrors ../index.js's bp-ready.
     this.dispatchEvent(
@@ -3842,6 +3843,7 @@ class BpPaperCanvas extends HTMLElement {
         tr.delete(position, position + removed.nodeSize);
       }
       if (tr.docChanged) this._editor.view.dispatch(tr);
+      this._restSelectionOffAtom();
       this._consumePendingFocus();
       return;
     }
@@ -3853,7 +3855,26 @@ class BpPaperCanvas extends HTMLElement {
         return true;
       })
       .run();
+    this._restSelectionOffAtom();
     this._consumePendingFocus();
+  }
+
+  // A canvas at rest must not hold a NodeSelection on a whole block. A fresh doc (or one
+  // replaced by setContent) starts with the selection on block 0, and when that block is
+  // an atom (a bound field-string title) a click whose DOM selection never reached the
+  // editor state left it there, so the first keystroke REPLACED the bound block — a data
+  // loss (task-f24549dea0618da2). While the editor is unfocused, move such a selection to
+  // the first text position; with no text block, leave it. Selection-only: no doc change,
+  // no ops, no history.
+  _restSelectionOffAtom() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed) return;
+    const { state, view } = editor;
+    if (!(state.selection instanceof NodeSelection)) return;
+    if (view && typeof view.hasFocus === "function" && view.hasFocus()) return;
+    const text = TextSelection.findFrom(state.doc.resolve(0), 1, true);
+    if (!text) return;
+    view.dispatch(state.tr.setSelection(text).setMeta("addToHistory", false));
   }
 
   // Put the caret in the top-level block `id` and focus the editor. The host
@@ -4072,6 +4093,7 @@ class BpPaperCanvas extends HTMLElement {
       } finally {
         this._programmaticApply = false;
       }
+      this._restSelectionOffAtom();
       this._verifyPainted("seed");
       this._consumePendingFocus();
     }
