@@ -20,7 +20,17 @@ defmodule Barkpark.Content.Forms do
   """
 
   alias Barkpark.Content
-  alias Barkpark.Content.{CanonicalShapes, Document, DraftId, Labels, PortableText, SlugValue}
+
+  alias Barkpark.Content.{
+    CanonicalShapes,
+    Document,
+    DraftId,
+    Labels,
+    PatchLock,
+    PortableText,
+    SlugValue
+  }
+
   alias Barkpark.PortableDoc.{Projection, Synthesis}
 
   # Set on a field of a plugin-owned type: keep the value's stored shape
@@ -935,10 +945,33 @@ defmodule Barkpark.Content.Forms do
   in StudioLive (`handle_event "autosave"`, `handle_info :autosave_form`,
   `save_doc/3`).
   """
+  # task-324b4d00706a6cfb: N callers racing the SAME never-yet-drafted
+  # published doc converge one at a time once the draft-fork retry (below)
+  # kicks in — each round, every loser re-reads the latest row and re-merges,
+  # so at most one of the remaining contenders can land per round. A bound of
+  # 5 (the old rev_mismatch-only budget, sized for ordinary contention between
+  # a couple of editors) starves a wider race before every field lands.
+  @max_attempts 30
+
   @spec upsert_draft(Document.t(), String.t(), map() | nil, map(), String.t(), keyword()) ::
           {:ok, Document.t(), map()} | {:error, term()}
-  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []),
-    do: upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, 5)
+  def upsert_draft(base_doc, type, schema, params, dataset, opts \\ []) do
+    # The per-document advisory lock (task-324b4d00706a6cfb, shared with
+    # `mutations.ex`'s SDK `patch` ops — same lock class/key, so the two
+    # serialize against EACH OTHER too). Held for the whole read-merge-write
+    # sequence below, including every retry: the second caller racing this
+    # document waits here until the first commits or rolls back, so it always
+    # merges onto the real result, never a snapshot the first is still
+    # writing over. Without this, two callers can both see no draft, both
+    # merge onto the same published base, and the later write wins outright —
+    # or, if the race lands between THIS function's read and
+    # `Content.upsert_document`'s own internal re-read, the second caller's
+    # write can take an UNFENCED update branch and silently overwrite the
+    # first caller's fields with no error from either side.
+    PatchLock.with_lock(base_doc.doc_id, dataset, opts, fn ->
+      upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, @max_attempts)
+    end)
+  end
 
   # Read the CURRENT draft (else the published row, else the snapshot), merge
   # the author's changes onto it, and write fenced on the rev just read. A
@@ -952,9 +985,37 @@ defmodule Barkpark.Content.Forms do
       {:error, {:rev_mismatch, _}} when attempts > 1 ->
         upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
 
+      # The draft-fork race (task-324b4d00706a6cfb): `current` above read NO
+      # draft (a first patch on a published doc), so this attempt's INSERT
+      # carried the author's change merged onto the PUBLISHED snapshot. A
+      # second caller racing the SAME fork won the insert in between —
+      # `Content.upsert_document`'s unique-constraint error on `doc_id` is
+      # the only signal of that, there being no row to rev-fence against yet.
+      # Re-reading `current` now finds the winner's draft, so the retry
+      # re-merges this author's change ONTO IT (not a blind overwrite of it)
+      # via the SAME `classic_save_content` merge every retry already runs.
+      {:error, %Ecto.Changeset{} = changeset} when attempts > 1 ->
+        if draft_fork_conflict?(changeset) do
+          upsert_draft_attempt(base_doc, type, schema, params, dataset, opts, attempts - 1)
+        else
+          {:error, changeset}
+        end
+
       other ->
         other
     end
+  end
+
+  # Whether a changeset's error is the `(doc_id, type, dataset_id)`
+  # unique constraint `Document.changeset/2` names
+  # (`documents_doc_id_type_dataset_id_index`) — the shape a losing
+  # concurrent draft fork produces, and the only one worth a merge-and-retry.
+  # Any other changeset error (a real validation failure) passes through.
+  defp draft_fork_conflict?(%Ecto.Changeset{errors: errors}) do
+    Enum.any?(errors, fn
+      {:doc_id, {_msg, opts}} -> Keyword.get(opts, :constraint) == :unique
+      _ -> false
+    end)
   end
 
   defp current_doc(base_doc, type, dataset, opts) do
