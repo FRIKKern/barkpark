@@ -264,6 +264,24 @@ class BpMediaPicker extends HTMLElement {
     }
   }
 
+  // A translated string bound for an HTML attribute or text.
+  _attr(text) {
+    return String(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  }
+
+  // The paper editor's image fields swap the drop target's copy for their own
+  // through CSS (`content: attr(data-label-*)`, bp-paper-editor-shell.css), on
+  // the empty AND the broken card. The words ride here so they are the
+  // viewer's language, not the stylesheet's.
+  _labelAttrs() {
+    return (
+      ' data-label-short="' + this._attr(this._t("add_short", "+ Add image")) + '"' +
+      ' data-label-add="' + this._attr(this._t("add_an_image", "Add an image")) + '"' +
+      ' data-label-featured="' + this._attr(this._t("add_featured", "Add a featured image")) + '"' +
+      ' data-label-hint="' + this._attr(this._t("drop_hint", "Drop a file, click to upload, or browse the library")) + '"'
+    );
+  }
+
   _t(key, fallback) {
     const strings = this._strings || {};
     return typeof strings[key] === "string" ? strings[key] : fallback;
@@ -751,7 +769,7 @@ class BpMediaPicker extends HTMLElement {
       this._meta.url || (this._isReferenceMode() ? "" : bpParseMediaValue(this._value).url);
     if (this._isReferenceMode() && !url && this._meta.assetId) {
       this._previewEl.innerHTML =
-        '<div class="bp-mp-empty" role="button" tabindex="0">Asset ' +
+        '<div class="bp-mp-empty" role="button" tabindex="0">' + this._attr(this._t("asset", "Asset")) + " " +
         this._meta.assetId.replace(/</g, "") +
         "</div>";
       this._setClearVisible(true);
@@ -762,7 +780,7 @@ class BpMediaPicker extends HTMLElement {
       const hotspot = this._wantsHotspot();
       const safeAlt = (this._meta.alt || "").replace(/"/g, "&quot;");
       this._previewEl.innerHTML =
-        (hotspot ? '<div class="bp-mp-hotspot" title="Click the image to set its focal point">' : "") +
+        (hotspot ? '<div class="bp-mp-hotspot" title="' + this._attr(this._t("focal", "Click the image to set its focal point")) + '">' : "") +
         '<img class="bp-mp-preview-img" src="' + safeUrl + '" alt="' + safeAlt + '" />' +
         (hotspot ? '<span class="bp-mp-focal" aria-hidden="true" hidden></span></div>' : "");
       if (hotspot) this._renderFocalMarker();
@@ -774,17 +792,18 @@ class BpMediaPicker extends HTMLElement {
         if (!img.isConnected) return;
         this._previewEl.innerHTML =
           '<div class="bp-mp-empty bp-mp-broken" role="button" tabindex="0" aria-label="' +
-          this._t("replace", "Replace image") +
-          '">' +
-          this._t("broken", "Image unavailable — drop a file, or click to replace") +
+          this._attr(this._t("replace", "Replace image")) +
+          '"' + this._labelAttrs() + ">" +
+          this._attr(this._t("broken", "Image unavailable — drop a file, or click to replace")) +
           "</div>";
       });
       this._setClearVisible(true);
     } else {
       const label = this._busy ? this._t("uploading", "Uploading…") : this._t("empty", "No image selected — drop a file, or click to upload");
       this._previewEl.innerHTML =
-        '<div class="bp-mp-empty" role="button" tabindex="0" aria-label="Add image">' +
-        label +
+        '<div class="bp-mp-empty" role="button" tabindex="0" aria-label="' + this._attr(this._t("add", "Add image")) + '"' +
+        this._labelAttrs() + ">" +
+        this._attr(label) +
         "</div>";
       this._setClearVisible(false);
     }
