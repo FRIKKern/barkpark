@@ -186,6 +186,16 @@ export function transactionVetoesVocabulary(tr, state, vocab) {
   return before == null;
 }
 
+// The block a quote gesture (`> `, the slash menu's Quote) makes in this canvas. A
+// field's `blockquote` STYLE is the portable-doc `pullquote` block (STYLE_TYPES, and the
+// server's FieldVocabulary), so a field that admits the pullquote and not the plain
+// blockquote gets a pullquote; everywhere else the plain quote (task-071f8c843336d12e).
+export function quoteTypeFor(vocab) {
+  if (!vocab) return "blockquote";
+  const types = allowedBlockTypes(vocab);
+  return !types.has("blockquote") && types.has("pullquote") ? "pullquote" : "blockquote";
+}
+
 // Which slash rows to OFFER: the canvas's insertable items narrowed to the
 // vocabulary's block types. Compound "Starters" rows (whole subtrees) are never
 // offered inside a field. An absent vocabulary passes the items through intact.
@@ -196,7 +206,11 @@ export function transactionVetoesVocabulary(tr, state, vocab) {
 export function slashItemsForVocabulary(items, vocab) {
   if (!vocab) return items;
   const types = allowedBlockTypes(vocab);
-  const kept = (items || []).filter((it) => it && !it.compound && types.has(it.type));
+  const quoteAs = quoteTypeFor(vocab);
+  const kept = (items || [])
+    .filter((it) => it && !it.compound && (types.has(it.type) || (it.type === "blockquote" && quoteAs === "pullquote")))
+    // The Quote row stays a Quote row; the pick makes the block the field admits.
+    .map((it) => (it.type === "blockquote" && quoteAs === "pullquote" ? { ...it, quoteAs } : it));
   const offered = new Set(kept.map((it) => it.type));
   const objectRows = (vocab.objects || [])
     .filter((o) => !offered.has(o.name))

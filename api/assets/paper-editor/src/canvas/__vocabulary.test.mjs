@@ -10,6 +10,7 @@ import {
   docVocabularyViolation,
   transactionVetoesVocabulary,
   slashItemsForVocabulary,
+  quoteTypeFor,
 } from "./vocabulary.js";
 
 let failures = 0;
@@ -154,6 +155,22 @@ check("the slash menu offers a declared object block, once, as an object row", (
   assert.equal(row.object, true);
   assert.equal(row.label, "Faktaboks");
   assert.equal(offered.find((i) => i.type === "callout").object, undefined);
+});
+
+// task-071f8c843336d12e: a field's blockquote STYLE is the pullquote block.
+check("a quote gesture makes the block the field admits", () => {
+  assert.equal(quoteTypeFor(null), "blockquote", "a paper canvas keeps the plain quote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal", "blockquote"] })), "pullquote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal"], of: ["blockquote"] })), "blockquote");
+  assert.equal(quoteTypeFor(parseVocabulary({ styles: ["normal"] })), "blockquote", "no quote admitted: the veto decides");
+});
+check("the slash menu keeps its Quote row in a field with the blockquote style, as a pullquote pick", () => {
+  const items = [{ type: "paragraph" }, { type: "blockquote", label: "Quote" }, { type: "callout" }];
+  const offered = slashItemsForVocabulary(items, parseVocabulary({ styles: ["normal", "blockquote"] }));
+  assert.deepEqual(offered.map((i) => i.type), ["paragraph", "blockquote"]);
+  assert.equal(offered[1].quoteAs, "pullquote");
+  assert.equal(offered[1].label, "Quote");
+  assert.deepEqual(slashItemsForVocabulary(items, parseVocabulary({ styles: ["normal"] })).map((i) => i.type), ["paragraph"]);
 });
 
 if (failures > 0) {

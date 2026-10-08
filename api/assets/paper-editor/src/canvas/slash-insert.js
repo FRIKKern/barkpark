@@ -106,6 +106,16 @@ export const CANVAS_SLASH_TYPES = new Set([
 // pushes `bp:focus-boundary` so the caret lands in the editor that persists.
 export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage", "image", "equation"]);
 
+// Image and equation go to the server ONLY when the host builds blocks there: Barkpark's
+// own LiveView marks its editor `data-server-insert` (bp-paper-editor-hooks.js). An
+// embedder that follows EMBED-CONTRACT (bp-server-insert covers terminal and stage) and a
+// field canvas whose ops route takes an image block get the canvas node instead — sent
+// to the server, the pick removed its "/" line and inserted nothing (task-9c04bcc87b3da42f).
+export const HOST_BUILT_INSERT_TYPES = new Set(["image", "equation"]);
+export function serverBuildsInsert(type, hostBuilds) {
+  return CANVAS_SERVER_INSERT_TYPES.has(type) && (!HOST_BUILT_INSERT_TYPES.has(type) || Boolean(hostBuilds));
+}
+
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
 // MIRRORING blocks.ex default_block/2 (the server clause a per-block bp-slash-insert
 // would build). The canvas inserts the NODE for this block directly, so the block

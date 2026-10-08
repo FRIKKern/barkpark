@@ -257,6 +257,7 @@ import {
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
   CANVAS_SERVER_INSERT_TYPES,
+  serverBuildsInsert,
   masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
@@ -310,6 +311,7 @@ import { transactionVetoesLock, isLockedTitle } from "./locks.js";
 import { transactionVetoesConstraints, parseConstraints } from "./constraints.js";
 import {
   parseVocabulary,
+  quoteTypeFor,
   transactionVetoesVocabulary,
   slashItemsForVocabulary,
 } from "./vocabulary.js";
@@ -2780,6 +2782,25 @@ class BpPaperCanvas extends HTMLElement {
   // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
   // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
   // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  // Replace the caret's top-level block with an empty quote of `type` (blockquote, or
+  // pullquote in a field that admits only that), keeping its id so the save is a
+  // same-id replace-block, not remove + insert. The caret lands inside the quote.
+  _replaceTopBlockWithQuote(type) {
+    const { state, view } = this._editor;
+    const $from = state.selection.$from;
+    if ($from.depth < 1) return false;
+    const start = $from.before(1);
+    const end = $from.after(1);
+    const nodeType = state.schema.nodes[type];
+    if (!nodeType) return false;
+    const quoteNode = nodeType.create({ bpId: $from.node(1).attrs.bpId || null, bpType: type });
+    let tr = state.tr.replaceWith(start, end, quoteNode);
+    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
   _maybeBlockShorthand() {
     if (!this._editable || !this._editor) return false;
     const { selection } = this._editor.state;
@@ -2796,19 +2817,8 @@ class BpPaperCanvas extends HTMLElement {
       // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
       // quote; the pullquote stays article chrome, reached from the slash menu). The callout
       // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
-      const { state, view } = this._editor;
-      const start = $from.before(1);
-      const end = $from.after(1);
-      // Keep the block's id so the save is a same-id replace-block, not remove + insert.
-      const quoteNode = state.schema.nodes.blockquote
-        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
-        : null;
-      if (!quoteNode) return false;
-      let tr = state.tr.replaceWith(start, end, quoteNode);
-      try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
-      view.dispatch(tr);
-      this._editor.commands.focus();
-      return true;
+      // In a field whose vocabulary has the blockquote STYLE that block is a pullquote.
+      return this._replaceTopBlockWithQuote(quoteTypeFor(parseVocabulary(this.getAttribute("data-vocabulary"))));
     }
     if (!divider && !code) return false;
     if (code) {
@@ -3004,7 +3014,12 @@ class BpPaperCanvas extends HTMLElement {
       this._insertObjectBlock(item.type);
       return;
     }
-    if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
+    // A field's Quote row makes the block the field admits (vocabulary.js quoteTypeFor).
+    if (item && item.quoteAs === "pullquote") {
+      this._replaceTopBlockWithQuote("pullquote");
+      return;
+    }
+    if (item && !item.fieldName && serverBuildsInsert(item.type, this._hostBuildsInserts())) {
       this._insertViaServer(item.type, { replaceSlashLine: true });
       return;
     }
@@ -3124,9 +3139,15 @@ class BpPaperCanvas extends HTMLElement {
   // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
   // caret's block and anchors on it when it is confirmed. The editor is blurred so
   // the server echo carrying the new block renders at once.
+  // Does the host build blocks on the server? Barkpark's LiveView hook marks the editor
+  // (or an ancestor) `data-server-insert`; a plain embedder does not (see slash-insert.js).
+  _hostBuildsInserts() {
+    return Boolean(this.closest && this.closest("[data-server-insert]"));
+  }
+
   _insertViaServer(type, { replaceSlashLine = false } = {}) {
     const editor = this._editor;
-    if (!editor || !this._editable || !CANVAS_SERVER_INSERT_TYPES.has(type)) return false;
+    if (!editor || !this._editable || !serverBuildsInsert(type, this._hostBuildsInserts())) return false;
     const index = topLevelIndexAtSelection(editor);
     const liveIds = [];
     editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
@@ -3181,6 +3202,7 @@ class BpPaperCanvas extends HTMLElement {
       onToggleSource: () => this.toggleSourceMode(),
       // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
+      serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({
