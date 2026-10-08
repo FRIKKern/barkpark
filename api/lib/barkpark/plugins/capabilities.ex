@@ -1227,6 +1227,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.disconnect",
+        "doc",
+        "disconnect",
+        "Remove every reference to a document from the documents that hold one, and list which documents and fields changed. Full members with write only.",
+        "POST",
+        "/v1/data/disconnect/:dataset/:doc_id",
+        "write",
+        args: [arg("doc_id", true, "string", "The referenced document's id.")],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.op",
         "doc",
         "op",
@@ -1895,6 +1908,32 @@ defmodule Barkpark.Plugins.Capabilities do
         ],
         flags: [
           flag("file", "file", "Body {\"requestId\": \"<uuid>\"} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── paper member-token batch block ops (task-7ee817f37630d669, P1).
+      # Member token, scoped `/w/:workspace_slug/p/:project_slug` — the same
+      # ifRev-fenced op path (`Content.apply_paper_block_ops_once/6`) and the
+      # same write gate the masters routes above already carry, so an
+      # external Studio can save a paper's own block list, not just insert a
+      # master into one.
+      core_cmd(
+        "paper.apply-ops",
+        "paper",
+        "apply-ops",
+        "Apply an ifRev-fenced batch of block ops to paper :slug, atomically.",
+        "POST",
+        "/v1/papers/:slug/ops",
+        "write",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"ops\": [...], \"ifRev\": <rev>, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
         ],
         writes: true,
         default_output: "minimal",

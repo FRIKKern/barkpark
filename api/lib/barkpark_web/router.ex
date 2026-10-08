@@ -2624,6 +2624,8 @@ defmodule BarkparkWeb.Router do
     # The field twin: a batch of block ops on one block-editor richText field,
     # the call Studio's field canvas makes in-process.
     post("/doc/:dataset/:type/:doc_id/fields/:field/ops", DocumentOpsController, :apply_field_ops)
+    # Remove every reference to a document (the unpublish guard's disconnect).
+    post("/disconnect/:dataset/:doc_id", DisconnectController, :create)
   end
 
   # ── Tasks API surface ───────────────────────────────────────────────────
@@ -3355,6 +3357,7 @@ defmodule BarkparkWeb.Router do
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+    post("/v1/data/disconnect/:dataset/:doc_id", DisconnectController, :create)
 
     post(
       "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
@@ -3368,6 +3371,13 @@ defmodule BarkparkWeb.Router do
     post("/v1/papers/:slug/masters/:master_id/insert", PaperMastersController, :insert)
     post("/v1/papers/:slug/masters/blocks/:block_id/pin", PaperMastersController, :pin)
     post("/v1/papers/:slug/masters/blocks/:block_id/detach", PaperMastersController, :detach)
+
+    # Member-token, ifRev-fenced batch block ops for a paper's own block list
+    # (task-7ee817f37630d669, P1) — the write DocumentOpsController refuses
+    # for type "paper" (that route stays :ingest-only), now reachable with a
+    # member token through the same scoped-mutate write gate the masters
+    # routes above already ride.
+    post("/v1/papers/:slug/ops", PaperOpsController, :apply_op)
   end
 
   # Scoped admin reads (search insights/synonyms).
