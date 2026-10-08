@@ -4145,6 +4145,9 @@
           sendNextOps();
         };
         this.el.addEventListener("bp-server-insert", this._onServerInsert);
+        // This host builds image and equation blocks on the server too (slash-insert.js
+        // HOST_BUILT_INSERT_TYPES); an embedder without the mark gets canvas nodes.
+        this.el.setAttribute("data-server-insert", "");
         // "Save as master" from the canvas block menu: a new paper_master
         // document, not a paper op — a plain reply-event, reported on the footer.
         this._onSaveMaster = (e) => {

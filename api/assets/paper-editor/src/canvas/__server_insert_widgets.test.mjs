@@ -60,9 +60,11 @@ const BLOCKS = [
   { id: "p-b", type: "paragraph", content: [{ type: "text", value: "Beta" }] },
 ];
 
-async function mount() {
+async function mount({ hostBuilds = false } = {}) {
   const editorRoot = document.createElement("div");
   editorRoot.className = "bp-paper-editor";
+  // Barkpark's LiveView hook marks its editor; a plain embedder does not.
+  if (hostBuilds) editorRoot.setAttribute("data-server-insert", "");
   const canvas = document.createElement("bp-paper-canvas");
   canvas.blocks = JSON.parse(JSON.stringify(BLOCKS));
   editorRoot.appendChild(canvas);
@@ -107,7 +109,8 @@ try {
   // image + equation: task-f92354b415b486f5 (they re-rendered as boundary
   // editors and dropped what was typed into the transient canvas node).
   for (const type of ["terminal", "stage", "image", "equation"]) {
-    const canvas = await mount();
+    // terminal + stage go to the host by contract; image + equation when it builds them.
+    const canvas = await mount({ hostBuilds: type === "image" || type === "equation" });
     const editor = canvas._editor;
     const events = [];
     canvas.addEventListener("bp-canvas-ops", (e) => events.push(["ops", e.detail.ops]));
@@ -161,6 +164,33 @@ try {
     check("Insert Stage from the palette asks the server, anchored on the caret's block", () => {
       assert.deepEqual(inserts, [{ type: "stage", after_id: "p-b" }]);
       assert.deepEqual(nodeTypes(editor), ["paragraph", "paragraph"], "no local stage node, no block removed");
+    });
+    canvas.closest(".bp-paper-editor").remove();
+  }
+
+  // ── an embedder that does not build on the server: image + equation land in the
+  // canvas (task-9c04bcc87b3da42f — the pick removed "/" and inserted nothing).
+  for (const type of ["image", "equation"]) {
+    const canvas = await mount();
+    const editor = canvas._editor;
+    const inserts = [];
+    canvas.addEventListener("bp-server-insert", (e) => inserts.push(e.detail));
+    typeSlashAfterFirst(editor, `/${type}`);
+    const row = canvas._slash?.isOpen() ? canvas._slash._items.find((item) => item.type === type) : null;
+    if (row) canvas._chooseSlash(row);
+    check(`without data-server-insert, /${type} inserts the ${type} node in the canvas`, () => {
+      assert.ok(row, `a ${type} row`);
+      assert.equal(inserts.length, 0, "no server insert request");
+      assert.equal(nodeTypes(editor).length, 3, "the run gained a block in place of the slash line");
+      assert.ok(!editor.state.doc.textContent.includes(`/${type}`), "the slash query text is gone");
+    });
+    canvas._openPalette();
+    const cmd = (canvas._palette?._baseItems || []).find((c) => c.id === `insert-${type}`);
+    if (cmd) canvas._choosePaletteCommand(cmd);
+    check(`without data-server-insert, Insert ${type} from the palette inserts locally too`, () => {
+      assert.ok(cmd, `an insert-${type} command`);
+      assert.equal(inserts.length, 0, "still no server insert request");
+      assert.equal(nodeTypes(editor).length, 4, "the palette added another block");
     });
     canvas.closest(".bp-paper-editor").remove();
   }
