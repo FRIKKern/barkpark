@@ -910,8 +910,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     names = Enum.map(presences, &Map.get(&1, :name, "User"))
 
     case names do
-      [one] -> "#{one} is editing"
-      many -> "#{Enum.join(many, ", ")} are editing"
+      [one] -> gettext("%{name} is editing", name: one)
+      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
     end
   end
 
