@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   History panel + revision restore + profile edit. Behaviour-preserving
   extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -113,20 +115,45 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
     do: Content.restore_revision(rev_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
 
   def show_profile(socket) do
-    {:noreply, assign(socket, show_profile: true)}
+    {:noreply, assign(socket, show_profile: true, profile_error: nil)}
   end
 
   def close_profile(socket) do
-    {:noreply, assign(socket, show_profile: false)}
+    {:noreply, assign(socket, show_profile: false, profile_error: nil)}
   end
 
   def preview_profile(%{"name" => name, "color" => color}, socket) do
     {:noreply, assign(socket, user_name: name, user_color: color)}
   end
 
+  # A signed-in account saves the name as its display name (task-8d8dabe8b693031d),
+  # the same Accounts door PATCH /v1/auth/display-name uses, so it follows the
+  # account and names its media checkout locks. The browser keeps a copy either
+  # way: it is the name of a session without an account, and the color is
+  # per-browser only.
   def save_profile(%{"name" => name, "color" => color}, socket) do
-    socket = assign(socket, user_name: name, user_color: color, show_profile: false)
-    socket = push_event(socket, "save-identity", %{name: name, color: color})
-    {:noreply, Shared.track_presence(socket)}
+    case save_display_name(socket.assigns[:current_user], name) do
+      {:ok, user} ->
+        socket =
+          socket
+          |> assign(user_name: name, user_color: color, show_profile: false, profile_error: nil)
+          |> then(fn s -> if user, do: assign(s, current_user: user), else: s end)
+          |> push_event("save-identity", %{name: name, color: color})
+
+        {:noreply, Shared.track_presence(socket)}
+
+      {:error, _changeset} ->
+        {:noreply,
+         assign(socket,
+           user_name: name,
+           user_color: color,
+           profile_error: gettext("Use at most 80 characters.")
+         )}
+    end
   end
+
+  defp save_display_name(%Barkpark.Accounts.User{} = user, name),
+    do: Barkpark.Accounts.update_display_name(user, %{display_name: name})
+
+  defp save_display_name(_no_account, _name), do: {:ok, nil}
 end

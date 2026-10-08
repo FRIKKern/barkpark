@@ -1,0 +1,103 @@
+defmodule BarkparkWeb.Studio.ProfileDisplayNameTest do
+  @moduledoc """
+  task-8d8dabe8b693031d: a signed-in editor sets their account's display name
+  in the Studio profile dialog. The dialog's Name field writes it through the
+  same `Accounts.update_display_name/2` door as `PATCH /v1/auth/display-name`,
+  so the name follows the account to every browser, names the editor in
+  presence, and names their media checkout locks
+  (`Media.Storage.Actor.display/2`).
+  """
+  use BarkparkWeb.ConnCase, async: false
+
+  import Phoenix.LiveViewTest
+
+  alias Barkpark.Accounts
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  @dataset "production"
+
+  defp register! do
+    email = "studio-dname-#{System.unique_integer([:positive])}@example.com"
+    {:ok, user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+    {:ok, _} =
+      TenancyAuth.create_membership(
+        Barkpark.TenancyFixtures.default_workspace_id!(),
+        user.id,
+        "member",
+        "user"
+      )
+
+    user
+  end
+
+  defp session_conn(conn, user) do
+    {:ok, raw} = Accounts.create_user_session_token(user)
+    Plug.Test.init_test_session(conn, %{"user_session" => raw})
+  end
+
+  defp open_studio(conn), do: live(conn, scoped_studio("/d/#{@dataset}/studio"))
+
+  test "saving the profile name sets the account's display name, and a new session shows it", %{
+    conn: conn
+  } do
+    user = register!()
+    {:ok, view, _} = open_studio(session_conn(conn, user))
+
+    profile = render_click(view, "show-profile", %{})
+    assert profile =~ "Saved to your account"
+
+    render_submit(view, "save-profile", %{"name" => "  Ingrid Ness  ", "color" => "#3b82f6"})
+
+    assert Accounts.get_user(user.id).display_name == "Ingrid Ness"
+    refute render(view) =~ "profile-modal-dialog"
+
+    # A fresh session (another browser, no stored name) reads the account's name.
+    {:ok, _view2, html2} = open_studio(session_conn(build_conn_scoped(), user))
+    assert html2 =~ "Ingrid Ness — open your profile"
+    refute html2 =~ ~r/User [0-9a-z]{4} — open your profile/
+  end
+
+  test "a name over 80 characters is refused in the dialog and nothing is saved", %{conn: conn} do
+    user = register!()
+    {:ok, view, _} = open_studio(session_conn(conn, user))
+    render_click(view, "show-profile", %{})
+
+    html =
+      render_submit(view, "save-profile", %{
+        "name" => String.duplicate("x", 81),
+        "color" => "#3b82f6"
+      })
+
+    assert html =~ ~s(data-test-id="profile-name-error")
+    assert html =~ "Use at most 80 characters."
+    assert html =~ ~s(aria-invalid="true")
+    assert html =~ "profile-modal-dialog"
+    assert Accounts.get_user(user.id).display_name == nil
+  end
+
+  test "a blank name clears the account's display name", %{conn: conn} do
+    user = register!()
+    {:ok, user} = Accounts.update_display_name(user, %{display_name: "Ola"})
+    {:ok, view, html} = open_studio(session_conn(conn, user))
+    assert html =~ "Ola — open your profile"
+
+    render_click(view, "show-profile", %{})
+    render_submit(view, "save-profile", %{"name" => "   ", "color" => "#3b82f6"})
+
+    assert Accounts.get_user(user.id).display_name == nil
+  end
+
+  test "a session without an account still saves its name in the browser only", %{conn: conn} do
+    {:ok, view, _} = open_studio(conn)
+    render_click(view, "show-profile", %{})
+    refute render(view) =~ "Saved to your account"
+
+    render_submit(view, "save-profile", %{"name" => "Gjest", "color" => "#3b82f6"})
+
+    assert_push_event(view, "save-identity", %{name: "Gjest"})
+    refute render(view) =~ "profile-modal-dialog"
+  end
+
+  defp build_conn_scoped, do: scoped_conn()
+end

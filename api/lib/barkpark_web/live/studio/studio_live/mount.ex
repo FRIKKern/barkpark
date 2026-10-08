@@ -29,10 +29,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     stored_name = connect_params["user_name"]
     stored_color = connect_params["user_color"]
 
+    # A signed-in account's display name is the name peers see; it wins over
+    # the per-browser name, so it follows the account to every browser
+    # (task-8d8dabe8b693031d). Without an account, the browser's own name.
     user_name =
-      if stored_name && stored_name != "",
-        do: stored_name,
-        else: "User #{String.slice(user_id, 0..3)}"
+      case socket.assigns[:current_user] do
+        %{display_name: name} when is_binary(name) and name != "" ->
+          name
+
+        _ ->
+          if stored_name && stored_name != "",
+            do: stored_name,
+            else: "User #{String.slice(user_id, 0..3)}"
+      end
 
     # SELF-ONLY account label. The signed-in account's email, shown ONLY in the
     # viewer's own profile dialog ("Signed in as <email>"). It is deliberately
@@ -150,6 +159,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       user_color: user_color,
       presences: [],
       show_profile: false,
+      profile_error: nil,
       # ── Capability map (airdrop-grants ag-studio-capability-hide) ─────
       # `caps` = %{read, write, admin} for the mounted desk: membership ∪
       # active grants (grants never confer admin). It DRIVES the `:if`

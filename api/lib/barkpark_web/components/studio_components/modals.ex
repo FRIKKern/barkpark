@@ -994,6 +994,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   # The scoped `…/studio/_account` page (download or erase your data). nil on a
   # surface that cannot build a scoped path — the link is then not rendered.
   attr :account_path, :string, default: nil
+  # Why the last save of the name was refused (too long), shown under the field.
+  attr :profile_error, :string, default: nil
 
   def profile_modal(assigns) do
     ~H"""
@@ -1027,8 +1029,31 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             </div>
           </div>
           <div class="form-group">
-            <label class="form-label"><%= gettext("Name") %></label>
-            <input type="text" name="name" value={@user_name} class="form-input" autofocus phx-debounce="200" />
+            <label class="form-label" for="profile-name-input"><%= gettext("Name") %></label>
+            <input
+              type="text"
+              id="profile-name-input"
+              name="name"
+              value={@user_name}
+              class="form-input"
+              maxlength="80"
+              autofocus
+              phx-debounce="200"
+              aria-describedby={
+                cond do
+                  @profile_error -> "profile-name-error"
+                  @account_label -> "profile-name-hint"
+                  true -> nil
+                end
+              }
+              aria-invalid={if @profile_error, do: "true"}
+            />
+            <div :if={@account_label && !@profile_error} id="profile-name-hint" class="text-xs text-muted">
+              <%= gettext("Saved to your account: others see it in Studio and on media you check out.") %>
+            </div>
+            <div :if={@profile_error} id="profile-name-error" class="text-xs" role="alert" data-test-id="profile-name-error">
+              <%= @profile_error %>
+            </div>
           </div>
           <div class="form-group">
             <label class="form-label"><%= gettext("Color") %></label>
@@ -1096,6 +1121,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :editor_doc, :map, default: nil
   attr :show_discard, :boolean, default: false
   attr :account_label, :string, default: nil
+  attr :profile_error, :string, default: nil
 
   def studio_modals(assigns) do
     ~H"""
@@ -1105,6 +1131,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       user_color={@user_color}
       account_label={@account_label}
       account_path={@account_path}
+      profile_error={@profile_error}
     />
     <.image_picker_modal
       image_picker_field={@image_picker_field}
