@@ -323,6 +323,7 @@ import {
 // a patch-block for that block (the existing prose patch path).
 import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
+import { OpaqueMark } from "../opaque-mark.js";
 
 // How long a focusBlock(id) for a block that has not arrived yet stays armed.
 const PENDING_FOCUS_MS = 5000;
@@ -945,6 +946,8 @@ class BpPaperCanvas extends HTMLElement {
         Highlight.configure({ HTMLAttributes: { class: "bp-highlight" } }),
         Subscript,
         Superscript,
+        // A stored flat mark with no editor (smallcaps, annotations) — carried verbatim.
+        OpaqueMark,
         ReaderTextAlign.configure({ types: ["heading", "paragraph"], alignments: ["left", "center", "right"], defaultAlignment: "left" }),
         // Checklist: the list block with task:true (convert.js listToTiptap). `[ ] ` typed at the
         // start of a paragraph wraps it; the checkbox is a native control whose toggle is an
