@@ -339,10 +339,10 @@ defmodule Barkpark.SelfUpdate.Runner do
           # `os_pid` rides the spawn itself: `Port.info(port, :os_pid)`
           # returns `nil` once the child has already exited (confirmed: a
           # trivial/fast child can die before this process is scheduled
-          # again), so it must be read here, not later — a `nil` os_pid
-          # makes `matching_deploy_status/1`'s guard refuse to match and the
-          # failure silently falls back to `source: "exit_code"` (seen on
-          # CI: task-5ce2d1ba1fc78838, a migrate failure misreported this way).
+          # again), so it must be read here, not later (task-5ce2d1ba1fc78838).
+          # Even here a child can beat us on a loaded box; a `nil` os_pid then
+          # matches on `ts` alone (`matching_deploy_status/1`,
+          # task-fe3e406164766598) instead of falling back to "exit_code".
           {:ok, port, os_pid} ->
             # Watchdog: force-close a run that outlives the deadline so `running?`
             # can't wedge true (and block every future trigger) until a BEAM restart.
@@ -764,6 +764,19 @@ defmodule Barkpark.SelfUpdate.Runner do
   defp matching_deploy_status(%{os_pid: pid, started_at: %DateTime{} = started_at})
        when is_integer(pid) do
     with %{"pid" => ^pid, "ts" => ts} = record <- read_deploy_status(),
+         {:ok, at, _} <- DateTime.from_iso8601(to_string(ts)),
+         true <- DateTime.compare(at, DateTime.truncate(started_at, :second)) != :lt do
+      record
+    else
+      _ -> nil
+    end
+  end
+
+  # The child exited before `Port.info/2` could name its pid (a fast failure on
+  # a loaded box: task-fe3e406164766598). Only one run exists at a time, so a
+  # record stamped no earlier than this run's start is this run's.
+  defp matching_deploy_status(%{os_pid: nil, started_at: %DateTime{} = started_at}) do
+    with %{"ts" => ts} = record <- read_deploy_status(),
          {:ok, at, _} <- DateTime.from_iso8601(to_string(ts)),
          true <- DateTime.compare(at, DateTime.truncate(started_at, :second)) != :lt do
       record
