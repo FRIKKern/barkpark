@@ -3227,6 +3227,26 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/tags/:dataset/:tag", QueryController, :tag_docs)
   end
 
+  # Per-account prefs (task-7d2a48dbf7e4bf34) — NOT public: a member identity
+  # is required, but the controller enforces that itself
+  # (`UserPrefController.resolve_user_id/1`, 403 `no_user_identity` on an
+  # anonymous caller or an un-owned shared token) rather than a route-level
+  # `:require_token`, because that plug re-verifies ONLY the bearer header
+  # and would refuse a legitimate account-session (cookie) caller —
+  # `ResolveWorkspace`'s membership gate and `:scoped_api`'s own
+  # `x-requested-with` CSRF check on the cookie branch (non-GET) are the
+  # gates this route needs, and both already run on plain `:scoped_api`.
+  # Self-scoped data (the caller's OWN prefs), so no `:require_write`
+  # either — unlike `:scoped_mutate`, nothing here is workspace-shared
+  # content.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_api)
+
+    get("/v1/prefs/:dataset/:key", UserPrefController, :show)
+    put("/v1/prefs/:dataset/:key", UserPrefController, :update)
+    delete("/v1/prefs/:dataset/:key", UserPrefController, :delete)
+  end
+
   scope "/w/:workspace_slug/p/:project_slug/v1", BarkparkWeb do
     pipe_through([:cycle_fleet_capability, :scoped_api, :require_token])
 

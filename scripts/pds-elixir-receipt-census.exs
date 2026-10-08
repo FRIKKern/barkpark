@@ -569,11 +569,11 @@ defmodule PDS.Census do
   # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
   # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 116,
-    ast: 107,
+    textual: 118,
+    ast: 109,
     phantom: 9,
     consumer: 4,
-    emitted: 103,
+    emitted: 105,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -742,7 +742,16 @@ defmodule PDS.Census do
     # (13) did NOT move, which is the signature of an added site rather than a
     # reclassified one. DERIVED BY THE INSTRUMENT: the `derived` half of this census's own
     # D448-DRIFT-REFUSES line, run from the repo root on this commit's tree.
-    write: 53,
+    #
+    # RE-DERIVED AGAIN 2026-10-08 (task-7d2a48dbf7e4bf34, PUT+DELETE
+    # /v1/prefs/:dataset/:key): textual 116 -> 118, ast 107 -> 109, emitted
+    # 103 -> 105, write-routed 53 -> 55. TWO new emitted sites —
+    # UserPrefController.update/2 and delete/2's `ok: true` arms — both land
+    # in the WRITE class: they reach Barkpark.UserPrefs.put/5 and delete/4,
+    # which call Repo.insert/1 and Repo.delete_all/1 directly. `read` (37),
+    # `phantom` (9), `consumer` (4) and `unrouted` (13) did NOT move — two
+    # added sites, not a reclassification.
+    write: 55,
     read: 37,
     unrouted: 13
   }
@@ -3003,7 +3012,26 @@ defmodule PDS.Census do
          ~S|test "delete (200 receipt) renders the ROW Repo.delete removed — nickname and " <>|},
       attestation:
         "mutation: revert the receipt to the bare success map — `mix test api/test/barkpark_web/controllers/webauthn_controller_test.exs` — the test `delete (200 receipt) renders the ROW Repo.delete removed — nickname and created_at are store fields the request never carried` — reds on created_at being nil",
-    }
+    },
+    # barkpark_web/controllers/user_pref_controller.ex — task-7d2a48dbf7e4bf34
+    %{key: {"api/lib/barkpark_web/controllers/user_pref_controller.ex",
+            "BarkparkWeb.UserPrefController.update/2", "43197058", "40851440"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited: PUT /v1/prefs/:dataset/:key is the first door on the new " <>
+        "Barkpark.UserPrefs.put/5 primitive. The cited tests " <>
+        "(user_pref_controller_test.exs, several PUT-then-GET round-trip cases) drive the " <>
+        "route, then certify the post-condition through a SECOND route (GET on the same " <>
+        "key), never a direct Repo read — same honest limit as AuthController." <>
+        "update_display_name/2 above, same reason: unjudged_other, not a weaker test."},
+    %{key: {"api/lib/barkpark_web/controllers/user_pref_controller.ex",
+            "BarkparkWeb.UserPrefController.delete/2", "133250656", "17468236"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited: DELETE /v1/prefs/:dataset/:key on the same new primitive " <>
+        "(Barkpark.UserPrefs.delete/4). The cited test drives DELETE then certifies via a " <>
+        "second GET that the value cleared to nil — same unjudged_other basis as update/2 " <>
+        "above."}
   ]
 
 
@@ -11864,7 +11892,13 @@ defmodule PDS.Census do
   # (BarkparkWeb.AuthController.update_display_name/2) is a new routed-write member, now
   # disposed through its own register row (UNJUDGED, added above) rather than excluded —
   # one arrival, no exclusion added.
-  @derived_disposition_pin %{count: 85, fp: "118961623"}
+  # Re-derived 2026-10-08 (task-7d2a48dbf7e4bf34): `elixir scripts/pds-elixir-receipt-census.exs`
+  # printed `DERIVED PIN count 87 fp 21248959`. PUT and DELETE
+  # /v1/prefs/:dataset/:key (UserPrefController.update/2, delete/2) are two new
+  # routed-write members, now disposed through their own register rows
+  # (UNJUDGED, added above) rather than excluded — two arrivals, no exclusion
+  # added.
+  @derived_disposition_pin %{count: 87, fp: "21248959"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm
