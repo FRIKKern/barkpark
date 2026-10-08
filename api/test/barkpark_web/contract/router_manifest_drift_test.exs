@@ -361,9 +361,10 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/plugins/pulse/:*/recent"} => @census_task,
     {"GET", "/v1/plugins/pulse/:*/stats"} => @census_task,
 
-    # BarkparkWeb.QueryController (6)
+    # BarkparkWeb.QueryController (7)
     {"GET", "/v1/preview/backlinks/:*/:*"} => @census_task,
     {"GET", "/v1/preview/doc/:*/:*/:*"} => @census_task,
+    {"GET", "/v1/preview/locations/:*/:*"} => @census_task,
     {"GET", "/v1/preview/query/:*/:*"} => @census_task,
     {"GET", "/v1/preview/related/:*/:*"} => @census_task,
     {"GET", "/v1/preview/tags/:*"} => @census_task,

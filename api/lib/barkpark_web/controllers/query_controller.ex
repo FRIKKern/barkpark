@@ -9,6 +9,7 @@ defmodule BarkparkWeb.QueryController do
   alias Barkpark.Content.DraftId
   alias Barkpark.Content.Envelope
   alias Barkpark.Content.Expand
+  alias Barkpark.Content.PreviewLocations
   alias Barkpark.Content.Scope
   alias Barkpark.Repo
   alias BarkparkWeb.AnonPerspective
@@ -439,6 +440,40 @@ defmodule BarkparkWeb.QueryController do
 
         json(conn, %{
           result: %{backlinks: backlinks, count: length(backlinks)},
+          syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
+        })
+      end)
+    else
+      {:error, :not_found}
+    end
+  end
+
+  @doc """
+  "Used on N pages" (Studio J62, task-c5d5e045e7efcc96): backlinks/2's own
+  list, resolved into readable consumer-site URLs via each backlink's own
+  schema desk.preview template. Byte-identical scoping/auth to backlinks/2
+  -- same Content.Graph.backlinks/2 call (live + indexed reference holders,
+  deduplicated, field-visibility filtered), same preview-or-token gate, so
+  this can never surface more than backlinks already does. A backlink whose
+  type declares no template, or whose template needs :slug and the document
+  has none, is OMITTED -- never emitted with a guessed/wrong URL
+  (PreviewLocations.resolve/4).
+  """
+  def locations(conn, %{"dataset" => dataset, "id" => id} = params) do
+    if preview?(conn) or authed?(conn) do
+      read_region(:locations, "locations/2 (dataset=#{inspect(dataset)} id=#{inspect(id)})", fn ->
+        opts = [dataset: dataset] ++ scope_opts(conn)
+        backlinks = Content.Graph.backlinks(id, opts)
+
+        url_scope = %{
+          workspace_slug: params["workspace_slug"],
+          project_slug: params["project_slug"]
+        }
+
+        locations = PreviewLocations.resolve(backlinks, dataset, opts, url_scope)
+
+        json(conn, %{
+          result: %{locations: locations, count: length(locations)},
           syncTags: ["bp:ds:#{dataset}:backlinks:#{id}"]
         })
       end)

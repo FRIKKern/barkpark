@@ -2388,6 +2388,7 @@ defmodule BarkparkWeb.Router do
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/locations/:dataset/:id", QueryController, :locations)
     # Related documents — shared weighted tags fused with inbound references
     # (authoring-excellence D68–D71 / manifest `doc.related`). Token/preview
     # only (existence-hiding, like backlinks); tenancy fail-closed via
@@ -2426,6 +2427,7 @@ defmodule BarkparkWeb.Router do
     get("/query/:dataset/:type", QueryController, :index)
     get("/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/locations/:dataset/:id", QueryController, :locations)
     get("/related/:dataset/:id", QueryController, :related)
     get("/tags/:dataset", QueryController, :tag_browse)
     get("/tags/:dataset/:tag", QueryController, :tag_docs)
@@ -3222,6 +3224,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/v1/preview/locations/:dataset/:id", QueryController, :locations)
     get("/v1/preview/related/:dataset/:id", QueryController, :related)
     get("/v1/preview/tags/:dataset", QueryController, :tag_browse)
     get("/v1/preview/tags/:dataset/:tag", QueryController, :tag_docs)
@@ -3312,6 +3315,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/query/:dataset/:type", QueryController, :index)
     get("/v1/data/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/data/backlinks/:dataset/:id", QueryController, :backlinks)
+    get("/v1/data/locations/:dataset/:id", QueryController, :locations)
     get("/v1/data/related/:dataset/:id", QueryController, :related)
     get("/v1/data/tags/:dataset", QueryController, :tag_browse)
     get("/v1/data/tags/:dataset/:tag", QueryController, :tag_docs)
