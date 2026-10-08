@@ -59,7 +59,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   # operator allowlist armed, an `:admin` that is not the operator (a
   # global-admin token, or an admin of the Default workspace) is refused. With
   # the allowlist unset, `permits?/1` admits every admin, as the plug does.
-  @operator_refusal "Plugin administration requires the platform operator."
+  defp operator_refusal, do: gettext("Plugin administration requires the platform operator.")
 
   @impl true
   def mount(%{"dataset" => dataset}, _session, socket) do
@@ -67,12 +67,12 @@ defmodule BarkparkWeb.Admin.PluginsLive do
       {:ok,
        socket
        |> assign(
-         page_title: "Plugins",
+         page_title: gettext("Plugins"),
          dataset: dataset,
          plugins: load_plugin_rows()
        )}
     else
-      {:ok, socket |> put_flash(:error, @operator_refusal) |> redirect(to: "/studio")}
+      {:ok, socket |> put_flash(:error, operator_refusal()) |> redirect(to: "/studio")}
     end
   end
 
@@ -85,14 +85,14 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   def handle_event(event, params, socket) when event in ~w(reload-plugin reload-all) do
     if operator?(socket),
       do: reload(event, params, socket),
-      else: {:noreply, put_flash(socket, :error, @operator_refusal)}
+      else: {:noreply, put_flash(socket, :error, operator_refusal())}
   end
 
   def handle_event("refresh", _params, socket) do
     {:noreply,
      socket
      |> assign(plugins: load_plugin_rows())
-     |> put_flash(:info, "Refreshed.")}
+     |> put_flash(:info, gettext("Refreshed."))}
   end
 
   # Fall-through: a stale/unknown phx event must not FunctionClauseError-crash
@@ -109,16 +109,21 @@ defmodule BarkparkWeb.Admin.PluginsLive do
     flash =
       case {schemas_result, seed_result} do
         {{:ok, n}, :ok} ->
-          {:info, "Reloaded #{name}: #{n} schema(s), seeds re-run."}
+          {:info, gettext("Reloaded %{name}: %{n} schema(s), seeds re-run.", name: name, n: n)}
 
         {{:ok, n}, {:error, _}} ->
-          {:info, "Reloaded #{name}: #{n} schema(s); some seeds errored — see card."}
+          {:info,
+           gettext("Reloaded %{name}: %{n} schema(s); some seeds errored — see card.",
+             name: name,
+             n: n
+           )}
 
         {{:error, :unknown_plugin}, _} ->
-          {:error, "Plugin #{name} is not registered."}
+          {:error, gettext("Plugin %{name} is not registered.", name: name)}
 
         {{:error, reason}, _} ->
-          {:error, "Reload failed for #{name}: #{inspect(reason)}"}
+          {:error,
+           gettext("Reload failed for %{name}: %{reason}", name: name, reason: inspect(reason))}
       end
 
     {kind, msg} = flash
@@ -135,8 +140,12 @@ defmodule BarkparkWeb.Admin.PluginsLive do
 
     {kind, msg} =
       case bootstrap_result do
-        {:ok, n} -> {:info, "Reloaded all plugins: #{n} schema(s), seeds re-run."}
-        {:error, errors} -> {:error, "Reload-all completed with errors: #{inspect(errors)}"}
+        {:ok, n} ->
+          {:info, gettext("Reloaded all plugins: %{n} schema(s), seeds re-run.", n: n)}
+
+        {:error, errors} ->
+          {:error,
+           gettext("Reload-all completed with errors: %{errors}", errors: inspect(errors))}
       end
 
     {:noreply,
@@ -165,10 +174,10 @@ defmodule BarkparkWeb.Admin.PluginsLive do
     ~H"""
     <div class="bp-plugins-admin" data-test-id="plugins-admin">
       <div class="bp-plugins-header">
-        <h1 class="h1">Plugins</h1>
+        <h1 class="h1">{gettext("Plugins")}</h1>
         <div class="bp-plugins-actions">
           <button type="button" class="btn btn-sm" phx-click="refresh" data-test-action="refresh">
-            Refresh
+            {gettext("Refresh")}
           </button>
           <button
             type="button"
@@ -176,20 +185,19 @@ defmodule BarkparkWeb.Admin.PluginsLive do
             phx-click="reload-all"
             data-test-action="reload-all"
           >
-            Reload all plugins
+            {gettext("Reload all plugins")}
           </button>
         </div>
       </div>
 
       <p class="bp-plugins-meta text-muted">
-        Registered plugins for dataset <strong>{@dataset}</strong>.
-        Reload re-runs <code>register_schemas/1</code> + codelist seeders in-process —
-        no Phoenix restart required.
+        {gettext("Registered plugins for dataset")} <strong>{@dataset}</strong>.
+        {gettext("Reload re-runs")} <code>register_schemas/1</code> {gettext("+ codelist seeders in-process — no Phoenix restart required.")}
       </p>
 
       <%= if @plugins == [] do %>
         <p class="bp-plugins-empty" data-test-id="plugins-empty">
-          No plugins registered.
+          {gettext("No plugins registered.")}
         </p>
       <% else %>
         <div class="bp-plugin-cards" data-test-id="plugin-cards">
@@ -210,7 +218,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
                       class="btn btn-sm"
                       data-test-action="open-settings"
                     >
-                      Settings
+                      {gettext("Settings")}
                     </.link>
                   <% end %>
                   <button
@@ -220,18 +228,18 @@ defmodule BarkparkWeb.Admin.PluginsLive do
                     phx-value-name={row.name}
                     data-test-action="reload-plugin"
                   >
-                    Reload this plugin
+                    {gettext("Reload this plugin")}
                   </button>
                 </div>
               </header>
 
               <dl class="bp-plugin-rows">
                 <div class="bp-plugin-row">
-                  <dt>Module</dt>
+                  <dt>{gettext("Module")}</dt>
                   <dd><code>{inspect(row.module)}</code></dd>
                 </div>
                 <div class="bp-plugin-row">
-                  <dt>Manifest</dt>
+                  <dt>{gettext("Manifest")}</dt>
                   <dd>
                     <%= if row.manifest_description do %>
                       <span class="bp-plugin-desc">{row.manifest_description}</span>
@@ -243,7 +251,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
               </dl>
 
               <div class="bp-plugin-callbacks">
-                <h3 class="h3">Callbacks implemented</h3>
+                <h3 class="h3">{gettext("Callbacks implemented")}</h3>
                 <ul class="bp-callback-list" data-test-id="callback-list">
                   <%= for cb <- row.callbacks do %>
                     <li
@@ -263,11 +271,11 @@ defmodule BarkparkWeb.Admin.PluginsLive do
 
               <div class="bp-plugin-runs">
                 <div class="bp-plugin-run-row" data-test-id="last-bootstrap">
-                  <span class="bp-plugin-run-label">Last bootstrap:</span>
+                  <span class="bp-plugin-run-label">{gettext("Last bootstrap:")}</span>
                   <span class="bp-plugin-run-value">{row.last_bootstrap}</span>
                 </div>
                 <div class="bp-plugin-run-row" data-test-id="last-seed">
-                  <span class="bp-plugin-run-label">Last codelist seed:</span>
+                  <span class="bp-plugin-run-label">{gettext("Last codelist seed:")}</span>
                   <span class="bp-plugin-run-value">{row.last_seed}</span>
                 </div>
               </div>
@@ -488,7 +496,7 @@ defmodule BarkparkWeb.Admin.PluginsLive do
   defp callback_class(:implemented), do: "bp-callback-impl"
   defp callback_class(:default), do: "bp-callback-default"
 
-  defp format_entry(nil, _kind), do: "never"
+  defp format_entry(nil, _kind), do: gettext("never")
 
   defp format_entry(%{at: at, result: result}, _kind) do
     mark =

@@ -31,7 +31,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   alias Barkpark.Tenancy.Membership
   alias BarkparkWeb.Plugs.RequirePlatformOperator
 
-  @operator_only "The organization admin portal is reserved for the platform operator on this instance."
+  defp operator_only,
+    do:
+      gettext(
+        "The organization admin portal is reserved for the platform operator on this instance."
+      )
 
   @impl true
   def mount(params, _session, socket) do
@@ -54,7 +58,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
       if connected?(socket) do
         load(socket)
       else
-        assign(socket, page_title: "Organization Admin", orgs: [], recent_audit: [], minted: %{})
+        assign(socket,
+          page_title: gettext("Organization Admin"),
+          orgs: [],
+          recent_audit: [],
+          minted: %{}
+        )
       end
 
     {:ok, socket}
@@ -78,7 +87,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   def handle_event(event, params, socket) do
     if operator?(socket) and still_admin?(socket),
       do: do_event(event, params, socket),
-      else: {:noreply, put_flash(socket, :error, @operator_only)}
+      else: {:noreply, put_flash(socket, :error, operator_only())}
   end
 
   # The mount gate (`LiveAuth :admin`) is the only admin check, and
@@ -110,7 +119,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
       )
 
   defp refuse_mount(socket),
-    do: {:ok, socket |> put_flash(:error, @operator_only) |> redirect(to: "/studio")}
+    do: {:ok, socket |> put_flash(:error, operator_only()) |> redirect(to: "/studio")}
 
   defp do_event("mint_scim", %{"org" => org_id}, socket) do
     if Map.has_key?(socket.assigns.minted, org_id) do
@@ -122,7 +131,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
            socket |> assign(minted: Map.put(socket.assigns.minted, org_id, plaintext)) |> load()}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "could not mint SCIM token")}
+          {:noreply, put_flash(socket, :error, gettext("could not mint SCIM token"))}
       end
     end
   end
@@ -135,7 +144,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         {:noreply, load(socket)}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "could not update the MFA requirement")}
+        {:noreply, put_flash(socket, :error, gettext("could not update the MFA requirement"))}
     end
   end
 
@@ -149,10 +158,10 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
 
       case Tenancy.set_organization_session_policy(org_id, policy) do
         {:ok, _org} ->
-          {:noreply, socket |> put_flash(:info, "Session policy updated.") |> load()}
+          {:noreply, socket |> put_flash(:info, gettext("Session policy updated.")) |> load()}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "could not update the session policy")}
+          {:noreply, put_flash(socket, :error, gettext("could not update the session policy"))}
       end
     else
       :error ->
@@ -160,7 +169,7 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
          put_flash(
            socket,
            :error,
-           "Enter a positive whole number of seconds, or leave blank for no limit."
+           gettext("Enter a positive whole number of seconds, or leave blank for no limit.")
          )}
     end
   end
@@ -171,10 +180,12 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
   defp do_event("set_allowed_auth_methods", %{"org" => org_id} = params, socket) do
     case Tenancy.set_organization_allowed_auth_methods(org_id, methods_param(params["methods"])) do
       {:ok, _org} ->
-        {:noreply, socket |> put_flash(:info, "Allowed sign-in methods updated.") |> load()}
+        {:noreply,
+         socket |> put_flash(:info, gettext("Allowed sign-in methods updated.")) |> load()}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "could not update the allowed sign-in methods")}
+        {:noreply,
+         put_flash(socket, :error, gettext("could not update the allowed sign-in methods"))}
     end
   end
 
@@ -207,19 +218,19 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
     end
   end
 
-  defp policy_label(nil), do: "no limit"
+  defp policy_label(nil), do: gettext("no limit")
   defp policy_label(seconds) when is_integer(seconds), do: "#{seconds}s"
 
   # NULL renders as the zero-tax default, not as an empty list.
-  defp methods_label(nil), do: "every method"
-  defp methods_label([]), do: "none — every member is locked out"
+  defp methods_label(nil), do: gettext("every method")
+  defp methods_label([]), do: gettext("none — every member is locked out")
   defp methods_label(methods) when is_list(methods), do: Enum.join(methods, ", ")
 
   defp load(socket) do
     orgs = Enum.map(Tenancy.list_organizations(), &org_status/1)
 
     assign(socket,
-      page_title: "Organization Admin",
+      page_title: gettext("Organization Admin"),
       orgs: orgs,
       recent_audit: Audit.recent(20),
       minted: socket.assigns[:minted] || %{}
@@ -257,13 +268,13 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
           below is unchanged, so the reading measure is too. --%>
     <.studio_page_scroll>
     <div class="org-admin" style="max-width: 920px; margin: 0 auto; padding: 24px; font-family: var(--font);">
-      <h1 class="h1" style="margin-bottom: 4px;">Organization Admin</h1>
+      <h1 class="h1" style="margin-bottom: 4px;">{gettext("Organization Admin")}</h1>
       <p class="text-sm" style="color: var(--fg-muted); margin-top: 0;">
-        Configure enterprise SSO and directory sync, and review activity — per organization.
+        {gettext("Configure enterprise SSO and directory sync, and review activity — per organization.")}
       </p>
 
       <.bp_card :if={@orgs == []}>
-        <p style="margin: 0; color: var(--fg-muted);">No organizations yet.</p>
+        <p style="margin: 0; color: var(--fg-muted);">{gettext("No organizations yet.")}</p>
       </.bp_card>
 
       <.bp_card :for={o <- @orgs} data-org={o.org.slug}>
@@ -276,54 +287,54 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
               class={"badge #{if o.oidc?, do: "badge-active", else: "badge-muted"}"}
               data-oidc={to_string(o.oidc?)}
             >
-              OIDC {if o.oidc?, do: "on", else: "off"}
+              OIDC {if o.oidc?, do: gettext("on"), else: gettext("off")}
             </span>
             <span
               class={"badge #{if o.saml?, do: "badge-active", else: "badge-muted"}"}
               data-saml={to_string(o.saml?)}
             >
-              SAML {if o.saml?, do: "on", else: "off"}
+              SAML {if o.saml?, do: gettext("on"), else: gettext("off")}
             </span>
           </div>
 
           <div class="org-admin-status-group" data-panel="members">
-            <span class="org-admin-status-label">Members</span>
+            <span class="org-admin-status-label">{gettext("Members")}</span>
             <span class="badge badge-muted">{o.members}</span>
           </div>
 
           <div class="org-admin-status-group" data-panel="scim">
-            <span class="org-admin-status-label">SCIM tokens</span>
+            <span class="org-admin-status-label">{gettext("SCIM tokens")}</span>
             <span class="badge badge-muted">{length(o.scim_tokens)}</span>
           </div>
 
           <div class="org-admin-status-group" data-panel="mfa">
-            <span class="org-admin-status-label">Require MFA</span>
+            <span class="org-admin-status-label">{gettext("Require MFA")}</span>
             <span
               class={"badge #{if o.org.require_mfa, do: "badge-active", else: "badge-muted"}"}
               data-require-mfa={to_string(o.org.require_mfa)}
             >
-              {if o.org.require_mfa, do: "on", else: "off"}
+              {if o.org.require_mfa, do: gettext("on"), else: gettext("off")}
             </span>
           </div>
 
           <div class="org-admin-status-group" data-panel="session-policy">
-            <span class="org-admin-status-label">Session policy</span>
+            <span class="org-admin-status-label">{gettext("Session policy")}</span>
             <span
               class={"badge #{if o.org.session_idle_timeout_seconds, do: "badge-active", else: "badge-muted"}"}
               data-idle-timeout={to_string(o.org.session_idle_timeout_seconds)}
             >
-              idle {policy_label(o.org.session_idle_timeout_seconds)}
+              {gettext("idle %{limit}", limit: policy_label(o.org.session_idle_timeout_seconds))}
             </span>
             <span
               class={"badge #{if o.org.session_absolute_lifetime_seconds, do: "badge-active", else: "badge-muted"}"}
               data-absolute-lifetime={to_string(o.org.session_absolute_lifetime_seconds)}
             >
-              max {policy_label(o.org.session_absolute_lifetime_seconds)}
+              {gettext("max %{limit}", limit: policy_label(o.org.session_absolute_lifetime_seconds))}
             </span>
           </div>
 
           <div class="org-admin-status-group" data-panel="allowed-auth-methods">
-            <span class="org-admin-status-label">Sign-in methods</span>
+            <span class="org-admin-status-label">{gettext("Sign-in methods")}</span>
             <span
               class={"badge #{if o.org.allowed_auth_methods, do: "badge-active", else: "badge-muted"}"}
               data-allowed-auth-methods={
@@ -343,11 +354,11 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             class="btn btn-sm"
             phx-click="mint_scim"
             phx-value-org={o.org.id}
-            phx-disable-with="Minting..."
+            phx-disable-with={gettext("Minting...")}
             disabled={Map.has_key?(@minted, o.org.id)}
             data-mint-scim={o.org.slug}
           >
-            Mint SCIM token
+            {gettext("Mint SCIM token")}
           </button>
           <button
             type="button"
@@ -357,7 +368,9 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             phx-value-to={to_string(not o.org.require_mfa)}
             data-toggle-require-mfa={o.org.slug}
           >
-            {if o.org.require_mfa, do: "Stop requiring MFA", else: "Require MFA org-wide"}
+            {if o.org.require_mfa,
+              do: gettext("Stop requiring MFA"),
+              else: gettext("Require MFA org-wide")}
           </button>
         </div>
 
@@ -369,37 +382,38 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
         >
           <input type="hidden" name="org" value={o.org.id} />
           <label class="text-sm" style="display: flex; flex-direction: column; gap: 4px;">
-            Idle timeout (seconds)
+            {gettext("Idle timeout (seconds)")}
             <input
               type="number"
               name="idle"
               min="1"
               step="1"
               inputmode="numeric"
-              placeholder="no limit"
+              placeholder={gettext("no limit")}
               value={o.org.session_idle_timeout_seconds}
               data-idle-input
             />
           </label>
           <label class="text-sm" style="display: flex; flex-direction: column; gap: 4px;">
-            Absolute lifetime (seconds)
+            {gettext("Absolute lifetime (seconds)")}
             <input
               type="number"
               name="absolute"
               min="1"
               step="1"
               inputmode="numeric"
-              placeholder="no limit"
+              placeholder={gettext("no limit")}
               value={o.org.session_absolute_lifetime_seconds}
               data-absolute-input
             />
           </label>
           <button type="submit" class="btn btn-sm" data-save-session-policy={o.org.slug}>
-            Save session policy
+            {gettext("Save session policy")}
           </button>
           <p class="text-sm" style="width: 100%; margin: 0; color: var(--fg-muted);">
-            Blank = no limit. Governed users are logged out once a session sits idle past the
-            idle timeout, or reaches the absolute lifetime — strictest across a user's orgs wins.
+            {gettext(
+              "Blank = no limit. Governed users are logged out once a session sits idle past the idle timeout, or reaches the absolute lifetime — strictest across a user's orgs wins."
+            )}
           </p>
         </form>
 
@@ -425,24 +439,26 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
             {m}
           </label>
           <button type="submit" class="btn btn-sm" data-save-allowed-auth-methods={o.org.slug}>
-            Save sign-in methods
+            {gettext("Save sign-in methods")}
           </button>
           <p class="text-sm" style="width: 100%; margin: 0; color: var(--fg-muted);">
-            Nothing checked = no policy: every method stays open. Checking some makes the list
-            exhaustive — a member signing in with anything else is refused. SSO-only is
-            <code>sso</code> alone; <code>social</code> (consumer Google/GitHub/Microsoft) is a
-            SEPARATE door from enterprise <code>sso</code>. Strictest across a user's orgs wins.
+            {gettext(
+              "Nothing checked = no policy: every method stays open. Checking some makes the list exhaustive — a member signing in with anything else is refused."
+            )}
+            {gettext("SSO-only is")} <code>sso</code> {gettext("alone;")}
+            <code>social</code> {gettext("(consumer Google/GitHub/Microsoft) is a SEPARATE door from enterprise")}
+            <code>sso</code>. {gettext("Strictest across a user's orgs wins.")}
           </p>
         </form>
 
         <p :if={@minted[o.org.id]} data-minted-token class="org-admin-token">
-          Copy this token now — it won't be shown again:<br />{@minted[o.org.id]}
+          {gettext("Copy this token now — it won't be shown again:")}<br />{@minted[o.org.id]}
         </p>
       </.bp_card>
 
       <.bp_card aria-labelledby="audit-heading">
-        <.bp_section_header id="audit-heading" title="Recent activity" />
-        <p :if={@recent_audit == []} style="margin: 0; color: var(--fg-muted);">No activity yet.</p>
+        <.bp_section_header id="audit-heading" title={gettext("Recent activity")} />
+        <p :if={@recent_audit == []} style="margin: 0; color: var(--fg-muted);">{gettext("No activity yet.")}</p>
         <ul :if={@recent_audit != []} data-audit-log class="org-admin-audit">
           <li :for={e <- @recent_audit}>
             <span class="org-admin-audit-action">{e.action}</span>
@@ -453,33 +469,33 @@ defmodule BarkparkWeb.Studio.OrgAdminLive do
       </.bp_card>
 
       <.bp_card aria-labelledby="trust-heading">
-        <.bp_section_header id="trust-heading" title="Trust and legal">
-          The security, compliance, and legal documents behind this deployment — each one click away.
+        <.bp_section_header id="trust-heading" title={gettext("Trust and legal")}>
+          {gettext("The security, compliance, and legal documents behind this deployment — each one click away.")}
         </.bp_section_header>
         <ul data-trust-panel class="org-admin-trust" style="list-style: none; margin: 0; padding: 0; display: grid; gap: 8px;">
           <li>
             <a href="/papers/soc2-controls-mapping" data-trust-link="soc2">
-              SOC 2 controls mapping
+              {gettext("SOC 2 controls mapping")}
             </a>
           </li>
           <li>
             <a href="/papers/vulnerability-disclosure-policy" data-trust-link="vdp">
-              Vulnerability disclosure policy
+              {gettext("Vulnerability disclosure policy")}
             </a>
           </li>
           <li>
             <a href="/papers/dpa-template" data-trust-link="dpa">
-              Data Processing Agreement (DPA) template
+              {gettext("Data Processing Agreement (DPA) template")}
             </a>
           </li>
           <li>
             <a href="/papers/support-tiers" data-trust-link="support">
-              Support tiers and SLA targets
+              {gettext("Support tiers and SLA targets")}
             </a>
           </li>
           <li>
             <a href="/status" data-trust-link="status">
-              Service status page
+              {gettext("Service status page")}
             </a>
           </li>
         </ul>
