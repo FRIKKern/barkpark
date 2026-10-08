@@ -2025,6 +2025,35 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     refute select =~ "Number format class"
   end
 
+  # task-028c354f7f24fb65: the filter and conditional-format dialogs never took
+  # focus, and closing them dropped it; each now focuses its first control when
+  # it opens and hands focus back to the button that opened it.
+  test "the filter and CF dialogs take focus and return it to their trigger", %{conn: conn} do
+    create_sheet!("sg-dialog-focus", [%{"name" => "Sheet 1", "cells" => %{"A1" => %{"v" => 1}}}])
+    {view, target, _html} = open!(conn, "sg-dialog-focus")
+    grid = "sheet-grid-sg-dialog-focus"
+
+    funnel = view |> element(~s([data-test-id="sheet-filter-funnel-1"])) |> render()
+    assert funnel =~ ~s(id="#{grid}-filter-funnel-1")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+    assert_push_event(view, "bp:sheet-focus-first", %{id: form_id})
+    assert form_id == "#{grid}-filter-form-1"
+    assert has_element?(view, "form##{form_id}")
+    panel = view |> element(~s([data-test-id="sheet-filter-panel"])) |> render()
+    assert panel =~ ~r/phx-window-keydown="[^"]*filter-close[^"]*#{grid}-filter-funnel-1/
+
+    close = view |> element(~s([data-test-id="sheet-filter-close"])) |> render()
+    assert close =~ ~r/phx-click="[^"]*filter-close[^"]*#{grid}-filter-funnel-1/
+
+    render_click(target, "cf-open", %{})
+    assert_push_event(view, "bp:sheet-focus-first", %{id: cf_id})
+    assert cf_id == "#{grid}-cf-panel"
+    cf = view |> element(~s([data-test-id="sheet-cf-panel"])) |> render()
+    assert cf =~ ~s(id="#{cf_id}")
+    assert cf =~ ~r/phx-window-keydown="[^"]*cf-close[^"]*#{grid}-cf-btn/
+  end
+
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
     create_sheet!("sg-tab-announce", [
       %{"name" => "T0", "cells" => %{}},
