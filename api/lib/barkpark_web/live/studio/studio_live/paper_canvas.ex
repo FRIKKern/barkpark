@@ -48,6 +48,8 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   `Components.PaperEditor.paper_block_editor/1`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   # Exactly the block kinds S0's run-convert.js treats as PROSE (PROSE_TYPES):
   # the ones a single ProseMirror document can hold as native textblock siblings,
   # giving cross-block caret / selection / split / merge for free.
@@ -784,16 +786,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   @spec slug_feedback(term()) :: {:ok | :warn | :danger, String.t()}
   def slug_feedback(slug) when is_binary(slug) do
     cond do
-      slug == "" -> {:warn, "Slug is required"}
-      sidebar_slug_valid?(slug) -> {:ok, "Looks good"}
-      slug =~ ~r/[A-Z]/ -> {:danger, "Lowercase only — no capitals"}
-      slug =~ ~r/\s/ -> {:danger, "No spaces — use hyphens"}
-      slug =~ ~r/(^-|-$|--)/ -> {:warn, "No leading, trailing, or doubled hyphens"}
-      true -> {:danger, "Only lowercase letters, numbers, and hyphens"}
+      slug == "" -> {:warn, gettext("Slug is required")}
+      sidebar_slug_valid?(slug) -> {:ok, gettext("Looks good")}
+      slug =~ ~r/[A-Z]/ -> {:danger, gettext("Lowercase only — no capitals")}
+      slug =~ ~r/\s/ -> {:danger, gettext("No spaces — use hyphens")}
+      slug =~ ~r/(^-|-$|--)/ -> {:warn, gettext("No leading, trailing, or doubled hyphens")}
+      true -> {:danger, gettext("Only lowercase letters, numbers, and hyphens")}
     end
   end
 
-  def slug_feedback(_), do: {:danger, "Only lowercase letters, numbers, and hyphens"}
+  def slug_feedback(_), do: {:danger, gettext("Only lowercase letters, numbers, and hyphens")}
 
   @doc """
   Reader visibility derived from publish status (papers publish to
@@ -804,11 +806,11 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   """
   @spec visibility_label(term(), boolean()) :: String.t()
   def visibility_label(status, public_reader?)
-  def visibility_label("published", true), do: "Public"
+  def visibility_label("published", true), do: gettext("Public")
   # task-352b1074aba3f434: published in a scope the anonymous reader does not
   # serve. "Public" was a promise nobody outside could see kept (403/404).
-  def visibility_label("published", _), do: "Members only"
-  def visibility_label(_, _), do: "Draft"
+  def visibility_label("published", _), do: gettext("Members only")
+  def visibility_label(_, _), do: gettext("Draft")
 
   @doc """
   Whether the anonymous paper reader serves this scope's published papers:
