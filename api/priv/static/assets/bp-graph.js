@@ -50,6 +50,12 @@
   /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
   // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
   // monochrome, generous void. Beauty through restraint.
+  // "1 connection", "2 connections" — the accessible names and the focus
+  // announcement said "1 connections" (task-880a2d3f48ccbfcb).
+  function connectionCount(n) {
+    return n === 1 ? "1 connection" : n + " connections";
+  }
+
   var ACCENT = "#9a8cff";
   var ACCENT_RGB = [154, 140, 255];
   var A11Y_RING = "#60A5FA";
@@ -2833,7 +2839,7 @@
             n.type === "task" && n.status ? ". Status: " + n.status : "";
           div.setAttribute(
             "aria-label",
-            n.title + ". " + n.type + statusPart + ". " + nb + " connections."
+            n.title + ". " + n.type + statusPart + ". " + connectionCount(nb) + "."
           );
         }
         div.addEventListener("focus", function () {
@@ -2880,7 +2886,7 @@
         }
         var cc = nbNames.length;
         liveRegion.textContent =
-          "Focused: " + n.title + ". Connected to: " + nbNames.slice(0, 5).join(", ") + ". " + cc + " connections.";
+          "Focused: " + n.title + ". Connected to: " + nbNames.slice(0, 5).join(", ") + ". " + connectionCount(cc) + ".";
       }, 80);
     }
 
