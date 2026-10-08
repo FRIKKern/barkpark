@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:ok,
        socket
        |> assign(
-         page_title: "chat",
+         page_title: gettext("chat"),
          # The task reader (task-ed873c9ae56685b7): every ledger read this view
          # makes goes through `ChatTaskSeam`, resolved ONCE for the viewer's
          # workspace. nil = the tasks plugin is off for this workspace (or not
@@ -408,7 +408,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       # the truthful scope over the session-resolving redirect.
       {:ok,
        socket
-       |> put_flash(:error, "No Studio Chat provider is enabled on this instance.")
+       |> put_flash(:error, gettext("No Studio Chat provider is enabled on this instance."))
        |> redirect(to: ReturnTo.sanitize(params["return_to"]) || "/studio")}
     end
   end
@@ -439,7 +439,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             {:noreply,
              socket
              |> reset_to_new_chat()
-             |> put_flash(:error, "That chat is no longer available.")}
+             |> put_flash(:error, gettext("That chat is no longer available."))}
 
           session ->
             {:noreply, load_stored_session(socket, session)}
@@ -1127,7 +1127,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
          put_flash(
            socket,
            :error,
-           "That chat has a recorded runtime ledger and can't be deleted — archive it instead."
+           gettext(
+             "That chat has a recorded runtime ledger and can't be deleted — archive it instead."
+           )
          )}
 
       _ok_or_noop ->
@@ -2306,12 +2308,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <%= for img <- user_images(@message) do %>
               <div :if={img[:missing]} class="text-xs text-dim" style="border: 1px dashed var(--border-muted); border-radius: 10px; padding: 14px 18px;">
-                attachment missing
+                <%= gettext("attachment missing") %>
               </div>
               <img
                 :if={img[:data_uri]}
                 src={img.data_uri}
-                alt="attachment"
+                alt={gettext("attachment")}
                 style="max-width: 220px; max-height: 220px; border-radius: 10px; border: 1px solid var(--border-muted);"
               />
             <% end %>
@@ -2338,7 +2340,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             class="text-xs text-dim"
             style="font-family: var(--font-mono); padding-left: 22px;"
           >
-            ⧗ queued
+            ⧗ <%= gettext("queued") %>
           </div>
         </div>
       <% :assistant -> %>
@@ -2393,7 +2395,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >{ChatToolRenderer.settle_glyph(@message)}</span>
           <span style="min-width: 0; overflow-wrap: anywhere;">
             <span style="font-weight: 650;" data-gutter-text>{@message[:spawn_label] || @message.text}</span>
-            <span class="text-dim" style="margin-left: 6px; opacity: 0.7;">agent</span>
+            <span class="text-dim" style="margin-left: 6px; opacity: 0.7;"><%= gettext("agent") %></span>
           </span>
         </div>
         <div :if={!@message[:spawn?]} class="text-xs" style="font-family: var(--font-mono); display: flex; gap: 6px;">
@@ -2426,7 +2428,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <details>
               <summary style="cursor: pointer; list-style: none;">
                 ⎿ <%= tool_output_head(@message.output) %>
-                <span style="opacity: 0.7;">… +<%= tool_output_lines(@message.output) - 1 %> lines</span>
+                <span style="opacity: 0.7;">… <%= ngettext("+%{count} line", "+%{count} lines", tool_output_lines(@message.output) - 1) %></span>
               </summary>
               <pre style="margin: 4px 0 0; padding: 6px 8px; background: var(--muted-surface); border-radius: 6px; overflow-x: auto; font-size: 11px; line-height: 1.5; white-space: pre-wrap;" data-gutter-text><%= @message.output %></pre>
             </details>
@@ -2450,7 +2452,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         >
           <div style="flex: 1; min-width: 0;">
             <div class="text-sm" style="font-weight: 600;">
-              Allow <%= @message.tool_name %>?
+              <%= gettext("Allow %{tool}?", tool: @message.tool_name) %>
             </div>
             <div class="text-xs text-dim" style="font-family: var(--font-mono); overflow-wrap: anywhere;">
               <%= @message.text %>
@@ -2462,7 +2464,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-click="approve"
             phx-value-rid={@message.request_id}
           >
-            Allow
+            <%= gettext("Allow") %>
           </button>
           <button
             type="button"
@@ -2470,7 +2472,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             phx-click="deny"
             phx-value-rid={@message.request_id}
           >
-            Deny
+            <%= gettext("Deny") %>
           </button>
         </div>
         <div
@@ -2496,9 +2498,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
               class="text-xs text-dim"
               style="text-transform: uppercase; letter-spacing: 0.06em; font-weight: 600;"
             >
-              proposed plan
+              <%= gettext("proposed plan") %>
             </span>
-            <span class="text-xs text-dim" style="margin-left: auto;">plan ready</span>
+            <span class="text-xs text-dim" style="margin-left: auto;"><%= gettext("plan ready") %></span>
           </div>
           <div
             class="text-sm"
@@ -2522,7 +2524,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               class="text-xs text-dim"
               style="font-style: italic;"
             >
-              (the plan has no text)
+              <%= gettext("(the plan has no text)") %>
             </div>
           </div>
           <button
@@ -2534,8 +2536,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
             style="margin-top: 6px; padding: 2px 9px;"
           >
             <%= if MapSet.member?(@plan_expanded, @message.id),
-              do: "Show less",
-              else: "Show full plan" %>
+              do: gettext("Show less"),
+              else: gettext("Show full plan") %>
           </button>
           <div style="display: flex; gap: 8px; margin-top: 10px;">
             <button
@@ -2544,7 +2546,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               phx-click="plan-approve"
               phx-value-rid={@message.request_id}
             >
-              Approve plan
+              <%= gettext("Approve plan") %>
             </button>
             <button
               type="button"
@@ -2552,7 +2554,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               phx-click="plan-keep"
               phx-value-rid={@message.request_id}
             >
-              Keep planning
+              <%= gettext("Keep planning") %>
             </button>
           </div>
         </div>
@@ -2569,7 +2571,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             rel="noopener"
             style="margin-left: 6px; text-decoration: none; color: var(--accent);"
           >
-            → published as Paper
+            → <%= gettext("published as Paper") %>
           </a>
         </div>
       <% :thinking -> %>
@@ -2718,7 +2720,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         </span>
         <span data-turn-fold-label style="font-weight: 650;"><%= @label %></span>
         <span style="opacity: 0.7;">
-          · <%= length(@rows) %> <%= if length(@rows) == 1, do: "step", else: "steps" %>
+          · <%= ngettext("%{count} step", "%{count} steps", length(@rows)) %>
         </span>
         <span :if={@files_changed != []} data-turn-files-changed style="opacity: 0.7;">
           · <%= ChatToolRenderer.files_changed_label(@files_changed) %>
@@ -2782,7 +2784,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <span style="min-width: 0; overflow-wrap: anywhere; flex: 1;">
           <span style="font-weight: 650;">Agent(<%= agent_headline(@agent) %>)</span>
           <span :if={@kids != []} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-            · <%= length(@kids) %> <%= if length(@kids) == 1, do: "step", else: "steps" %>
+            · <%= ngettext("%{count} step", "%{count} steps", length(@kids)) %>
           </span>
         </span>
         <button
@@ -2794,7 +2796,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           aria-expanded={to_string(@expanded)}
           style="flex: none; padding: 1px 8px; opacity: 0.8;"
         >
-          <%= if @expanded, do: "collapse", else: "expand" %>
+          <%= if @expanded, do: gettext("collapse"), else: gettext("expand") %>
         </button>
       </div>
 
@@ -2807,7 +2809,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         data-agent-running={@agent[:tool_use_id]}
         style="font-family: var(--font-mono); color: var(--primary); padding-left: 16px; overflow-wrap: anywhere;"
       >
-        Running: <%= @agent[:task_progress] || "…" %>
+        <%= gettext("Running: %{progress}", progress: @agent[:task_progress] || "…") %>
       </div>
 
       <%!-- The nested child trace, one level (charter D46): each child renders
@@ -3024,7 +3026,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         data-test-id="chat-palette"
         role="dialog"
         aria-modal="true"
-        aria-label="Jump to a chat"
+        aria-label={gettext("Jump to a chat")}
         style="position: fixed; inset: 0; z-index: 60; display: flex; align-items: flex-start; justify-content: center; padding: 12vh 16px 16px; background: rgba(0, 0, 0, 0.38);"
       >
         <%!-- click-away sits on the CARD, never the full-screen overlay:
@@ -3042,8 +3044,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
             role="combobox"
             aria-expanded="true"
             aria-controls="chat-palette-list"
-            aria-label="Filter chats by title"
-            placeholder="Jump to a chat…"
+            aria-label={gettext("Filter chats by title")}
+            placeholder={gettext("Jump to a chat…")}
             data-test-id="chat-palette-input"
             style="flex: none; width: 100%; box-sizing: border-box; padding: 12px 14px; border: none; border-bottom: 1px solid var(--border-muted); background: transparent; color: var(--text); font-size: 14px; outline: none;"
           />
@@ -3051,7 +3053,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <ul
             id="chat-palette-list"
             role="listbox"
-            aria-label="Chats"
+            aria-label={gettext("Chats")}
             style="flex: 1; min-height: 0; overflow-y: auto; list-style: none; margin: 0; padding: 6px;"
           >
             <li
@@ -3088,7 +3090,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             class="text-xs text-dim"
             style="flex: none; padding: 7px 12px; border-top: 1px solid var(--border-muted);"
           >
-            ↑↓ move · Enter open · Esc close · ⌘/Ctrl+1–9 jump
+            <%= gettext("↑↓ move · Enter open · Esc close · ⌘/Ctrl+1–9 jump") %>
           </div>
         </div>
       </div>
@@ -3096,14 +3098,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
       <aside style="width: 280px; flex: none; border-right: 1px solid var(--border-muted); display: flex; flex-direction: column; min-height: 0;">
         <div style="display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--border-muted); flex: none;">
           <span class="h3" style="display: flex; align-items: center; gap: 8px; flex: 1;">
-            <.icon name="message-circle" size={15} /> chats
+            <.icon name="message-circle" size={15} /> <%= gettext("chats") %>
           </span>
           <.link
             patch={ReturnTo.with_return_to(@chat_base_path, @return_to)}
             class="btn btn-primary text-xs"
             style="display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px;"
           >
-            <.icon name="plus" size={13} /> New
+            <.icon name="plus" size={13} /> <%= gettext("New") %>
           </.link>
         </div>
 
@@ -3123,7 +3125,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             class="text-dim"
             style="padding: 2px 4px 4px; font-size: 10px; text-transform: uppercase; letter-spacing: 0.06em;"
           >
-            Inbox
+            <%= gettext("Inbox") %>
           </div>
           <div
             :if={strip == []}
@@ -3131,7 +3133,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             style="padding: 0 4px 4px;"
             data-test-id="chat-strip-empty"
           >
-            All quiet — nothing waiting on you.
+            <%= gettext("All quiet — nothing waiting on you.") %>
           </div>
           <.link
             :for={e <- strip}
@@ -3165,11 +3167,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
             data-test-id="chat-archived-empty"
           >
             <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
-              No archived chats
+              <%= gettext("No archived chats") %>
             </div>
             <p style="margin: 0;">
-              Archived chats rest here. Archive one from its <span aria-hidden="true">⋯</span>
-              menu to tuck it away without deleting it — it stays fully resumable.
+              <%= gettext("Archived chats rest here. Archive one from its") %> <span aria-hidden="true">⋯</span>
+              <%= gettext("menu to tuck it away without deleting it — it stays fully resumable.") %>
             </p>
           </div>
 
@@ -3180,15 +3182,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
             data-test-id="chat-empty"
           >
             <div class="text-sm" style="font-weight: 600; color: var(--text); margin-bottom: 6px;">
-              No chats yet
+              <%= gettext("No chats yet") %>
             </div>
             <p style="margin: 0 0 8px;">
-              This is your remembered agent workspace. Provider and execution location
-              are stored with every conversation — reopen one to pick up exactly where
-              you left off. Admins only.
+              <%= gettext("This is your remembered agent workspace. Provider and execution location are stored with every conversation — reopen one to pick up exactly where you left off. Admins only.") %>
             </p>
             <p style="margin: 0;">
-              Try: <em>“Walk the studio LiveViews and sketch how a request flows.”</em>
+              <%= gettext("Try:") %> <em><%= gettext("“Walk the studio LiveViews and sketch how a request flows.”") %></em>
             </p>
           </div>
 
@@ -3212,7 +3212,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     class="bp-chat-rename-input"
                     autocomplete="off"
                     autofocus
-                    aria-label={"Rename #{s.title}"}
+                    aria-label={gettext("Rename %{title}", title: s.title)}
                     phx-blur="session-rename"
                     phx-value-id={s.id}
                     phx-keydown="session-rename-cancel"
@@ -3302,7 +3302,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     style="margin-top: 1px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"
                     data-test-id={"chat-epic-#{s.id}"}
                   >
-                    ↳ <%= eg.title %> · <%= eg.slices_done %>/<%= eg.slices_total %> slices<%= if eg.wave_status, do: " · #{eg.wave_status}" %>
+                    ↳ <%= eg.title %> · <%= gettext("%{done}/%{total} slices", done: eg.slices_done, total: eg.slices_total) %><%= if eg.wave_status, do: " · #{eg.wave_status}" %>
                   </div>
                 </.link>
 
@@ -3313,7 +3313,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   phx-value-id={s.id}
                   aria-haspopup="menu"
                   aria-expanded={to_string(@open_menu_session == s.id)}
-                  aria-label={"Actions for #{s.title}"}
+                  aria-label={gettext("Actions for %{title}", title: s.title)}
                   data-test-id={"chat-session-menu-#{s.id}"}
                 >
                   ⋯
@@ -3323,7 +3323,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   :if={@open_menu_session == s.id}
                   class="bp-chat-menu"
                   role="menu"
-                  aria-label={"Actions for #{s.title}"}
+                  aria-label={gettext("Actions for %{title}", title: s.title)}
                   phx-click-away="session-menu-close"
                   data-test-id={"chat-session-menu-list-#{s.id}"}
                 >
@@ -3335,7 +3335,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     data-test-id={"chat-session-rename-#{s.id}"}
                   >
-                    Rename
+                    <%= gettext("Rename") %>
                   </button>
                   <button
                     :if={@show_archived}
@@ -3346,7 +3346,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     data-test-id={"chat-session-unarchive-#{s.id}"}
                   >
-                    Unarchive
+                    <%= gettext("Unarchive") %>
                   </button>
                   <button
                     :if={not @show_archived}
@@ -3357,7 +3357,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     data-test-id={"chat-session-archive-#{s.id}"}
                   >
-                    Archive
+                    <%= gettext("Archive") %>
                   </button>
                   <button
                     type="button"
@@ -3367,7 +3367,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     phx-value-id={s.id}
                     data-test-id={"chat-session-delete-#{s.id}"}
                   >
-                    Delete
+                    <%= gettext("Delete") %>
                   </button>
                 </div>
               <% end %>
@@ -3385,7 +3385,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             style="display: inline-flex; align-items: center; gap: 5px; background: transparent; border: none; cursor: pointer; padding: 4px 6px;"
           >
             <.icon name={if @show_archived, do: "arrow-left", else: "archive"} size={12} />
-            <%= if @show_archived, do: "Back to active chats", else: "Show archived" %>
+            <%= if @show_archived, do: gettext("Back to active chats"), else: gettext("Show archived") %>
           </button>
         </div>
       </aside>
@@ -3429,7 +3429,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           data-mismatch={to_string(f.mismatch?)}
           style={f.mismatch? && "color: var(--warn);"}
         >
-          <%= if f.mismatch?, do: "⚠ " %><%= f.name %> <%= ContextIdentity.Field.display(f) %>
+          <%= if f.mismatch?, do: "⚠ " %><%= context_field_text(f) %>
         </span>
       </div>
 
@@ -3439,8 +3439,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       >
         <div style="display: flex; flex-direction: column; gap: 10px; max-width: 860px; width: 100%; margin: 0 auto;">
           <p :if={@messages == [] and @streaming == nil} class="text-sm text-dim">
-            An agent chat backed by <code><%= @provider %></code> on the selected execution
-            location. Plan mode can read approved files, but cannot edit or execute anything.
+            <%= gettext("An agent chat backed by") %> <code><%= @provider %></code> <%= gettext("on the selected execution location. Plan mode can read approved files, but cannot edit or execute anything.") %>
           </p>
 
           <div
@@ -3514,7 +3513,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 phx-update="ignore"
                 data-words={spinner_words_json()}
                 data-rotate-ms={spinner_rotate_ms()}
-              ><%= @thinking_pulse.word %>…</span> ~<%= @thinking_pulse.tokens %> tokens
+              ><%= @thinking_pulse.word %>…</span> <%= gettext("~%{count} tokens", count: @thinking_pulse.tokens) %>
             </span>
             <span :if={@thinking_pulse.text not in [nil, ""]} style="white-space: pre-wrap;" data-gutter-text>{@thinking_pulse.text}</span>
           </div>
@@ -3536,7 +3535,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               style="padding: 4px 0; font-style: italic;"
               data-streaming-capped
             >
-              live preview truncated — the full response arrives on completion
+              <%= gettext("live preview truncated — the full response arrives on completion") %>
             </div>
             <%= if !@streaming[:capped] do %>
               <%= case StreamTail.classify(@streaming) do %>
@@ -3561,7 +3560,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           >
             <span class="bp-chat-spinner" aria-hidden="true"></span>
             <span>
-              <span :if={@status == :interrupting}>stopping…</span>
+              <span :if={@status == :interrupting}><%= gettext("stopping…") %></span>
               <span
                 :if={@status != :interrupting}
                 id="chat-turn-word"
@@ -3586,7 +3585,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 phx-update="ignore"
                 data-started-at={@turn_started_at_ms}
               ></span>
-              · Stop to interrupt
+              · <%= gettext("Stop to interrupt") %>
             </span>
           </div>
         </div>
@@ -3608,11 +3607,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
           <span style="color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
             {t.title}
           </span>
-          <span :if={t.total > 0} title="acceptance criteria met">{t.met}/{t.total} ✓</span>
+          <span :if={t.total > 0} title={gettext("acceptance criteria met")}>{t.met}/{t.total} ✓</span>
           <span
             :if={t.now not in [nil, ""]}
             style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; opacity: 0.85;"
-            title="the claim's pulse now-line"
+            title={gettext("the claim's pulse now-line")}
           >
             · {t.now}
           </span>
@@ -3623,7 +3622,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           class="text-xs text-dim"
           style="font-family: var(--font-mono); padding: 2px 0;"
         >
-          +{map_size(@hand_tasks) - 3} more claims
+          {gettext("+%{count} more claims", count: map_size(@hand_tasks) - 3)}
         </div>
       </div>
       <.hand_agent_tasks rail={@rail} hand_epic={@hand_epic} hand_tasks={@hand_tasks} />
@@ -3633,9 +3632,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
             claim-first prompt — the ledger writes stay in the agent's hands. --%>
       <div :if={@task_picker != nil} data-role="chat-task-picker" style="flex: none; padding: 6px 16px 0;">
         <div style="border: 1px solid var(--border); border-radius: 10px; padding: 8px 12px; display: flex; flex-direction: column; gap: 4px;">
-          <div class="text-xs text-dim" style="font-family: var(--font-mono);">ready tasks</div>
+          <div class="text-xs text-dim" style="font-family: var(--font-mono);"><%= gettext("ready tasks") %></div>
           <div :if={@task_picker == []} class="text-xs text-dim">
-            Nothing ready — file new work with /task new &lt;wish&gt;.
+            <%= gettext("Nothing ready — file new work with /task new <wish>.") %>
           </div>
           <div
             :for={t <- @task_picker}
@@ -3655,7 +3654,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               style="width: auto; padding: 0 8px; font-size: 0.72rem; font-family: var(--font-mono);"
               phx-click="hand_task"
               phx-value-id={t.id}
-              title="Claim-first: Claude claims it, reads the brief, stamps evidence, closes"
+              title={gettext("Claim-first: Claude claims it, reads the brief, stamps evidence, closes")}
             >
               Hand to Claude
             </button>
@@ -3723,7 +3722,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 class="btn"
                 phx-click="cancel_upload"
                 phx-value-ref={entry.ref}
-                aria-label="Remove attachment"
+                aria-label={gettext("Remove attachment")}
                 style="padding: 0 6px; line-height: 1;"
               >
                 ×
@@ -3778,7 +3777,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 class="bp-composer-menu"
                 phx-update="ignore"
                 role="listbox"
-                aria-label="Slash commands"
+                aria-label={gettext("Slash commands")}
                 hidden
               >
               </ul>
@@ -3803,7 +3802,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 style="display: inline-flex; align-items: center;"
               >
                 <span class="bp-select bp-select-strong">
-                  <select name="provider" aria-label="Provider">
+                  <select name="provider" aria-label={gettext("Provider")}>
                     <option :for={p <- StudioChat.Session.providers()} value={p} selected={p == @provider}>
                       <%= String.capitalize(p) %>
                     </option>
@@ -3816,14 +3815,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 style="display: inline-flex; align-items: center;"
               >
                 <span class="bp-select">
-                  <select name="execution_host_id" aria-label="Registered host">
-                    <option value="">Choose local hardware…</option>
+                  <select name="execution_host_id" aria-label={gettext("Registered host")}>
+                    <option value=""><%= gettext("Choose local hardware…") %></option>
                     <option
                       :for={host <- @execution_hosts}
                       value={host.id}
                       selected={host.id == @execution_host_id}
                     >
-                      <%= host.name %><%= if host.online, do: " · online", else: " · offline" %>
+                      <%= host.name %><%= if host.online, do: " · " <> gettext("online"), else: " · " <> gettext("offline") %>
                     </option>
                   </select>
                 </span>
@@ -3834,10 +3833,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 style="display: inline-flex; align-items: center;"
               >
                 <span class="bp-select">
-                  <select name="execution_target" aria-label="Execution target">
-                    <option value="managed" selected={@execution_target == "managed"}>Managed</option>
+                  <select name="execution_target" aria-label={gettext("Execution target")}>
+                    <option value="managed" selected={@execution_target == "managed"}><%= gettext("Managed") %></option>
                     <option value="registered_host" selected={@execution_target == "registered_host"}>
-                      Registered host
+                      <%= gettext("Registered host") %>
                     </option>
                   </select>
                 </span>
@@ -3856,7 +3855,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 :if={Map.get(Runtime.capabilities(@provider), :mode_switch, false)}
                 class="mode-toggle"
                 role="tablist"
-                aria-label="Session mode"
+                aria-label={gettext("Session mode")}
               >
                 <button
                   type="button"
@@ -3866,7 +3865,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   phx-click="set-mode"
                   phx-value-mode="plan"
                 >
-                  ◇ Plan
+                  ◇ <%= gettext("Plan") %>
                 </button>
                 <button
                   type="button"
@@ -3876,7 +3875,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   phx-click="set-mode"
                   phx-value-mode="auto"
                 >
-                  ▶ Autopilot
+                  ▶ <%= gettext("Autopilot") %>
                 </button>
                 <button
                   :if={mode_segment(@mode) in [:other, :bypass]}
@@ -3889,7 +3888,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     (mode_segment(@mode) == :bypass && "mode-tab-bypass") || "mode-tab-other"
                   ]}
                 >
-                  <%= mode_label(@mode) %>
+                  <%= mode_word(@mode) %>
                 </button>
               </div>
               <%!-- Model picker (wave 5): the choice is intent — it rides the next
@@ -3900,10 +3899,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <span class="bp-select bp-select-strong">
                 <select
                   name="model"
-                  aria-label="Model"
+                  aria-label={gettext("Model")}
                 >
                   <option value="default" selected={@model_choice == "default"}>
-                    Model
+                    <%= gettext("Model") %>
                   </option>
                   <option :for={m <- Runtime.capabilities(@provider).models} value={m} selected={m == @model_choice}>
                     <%= model_label(m) %>
@@ -3914,7 +3913,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                   :if={@init && @init.model}
                   class="text-xs text-dim"
                   style="font-family: var(--font-mono);"
-                  title="The answering model, as reported by the CLI"
+                  title={gettext("The answering model, as reported by the CLI")}
                 >
                   <%= @init.model %>
                 </span>
@@ -3928,10 +3927,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 <span class="bp-select">
                 <select
                   name="effort"
-                  aria-label="Reasoning effort"
+                  aria-label={gettext("Reasoning effort")}
                 >
                   <option value="default" selected={@effort_choice == "default"}>
-                    Effort
+                    <%= gettext("Effort") %>
                   </option>
                   <option :for={e <- Runtime.capabilities(@provider).efforts} value={e} selected={e == @effort_choice}>
                     <%= effort_label(e) %>
@@ -3957,9 +3956,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 type="button"
                 class="bp-iconbtn"
                 phx-click="toggle-task-picker"
-                aria-label="Barkpark tasks — hand ready work to Claude"
+                aria-label={gettext("Barkpark tasks — hand ready work to Claude")}
                 aria-expanded={to_string(@task_picker != nil)}
-                title="Barkpark tasks"
+                title={gettext("Barkpark tasks")}
               >
                 <.icon name="check-square" size={16} />
               </button>
@@ -3969,8 +3968,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <label
                 for={@uploads.attachments.ref}
                 class="bp-iconbtn"
-                aria-label="Attach an image"
-                title="Attach an image"
+                aria-label={gettext("Attach an image")}
+                title={gettext("Attach an image")}
               >
                 <.icon name="image" size={16} />
               </label>
@@ -3986,8 +3985,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 class="bp-iconbtn"
                 phx-click="stop_turn"
                 disabled={@status == :interrupting}
-                aria-label="Stop the current turn"
-                title={if @status == :interrupting, do: "Stopping…", else: "Stop (esc)"}
+                aria-label={gettext("Stop the current turn")}
+                title={if @status == :interrupting, do: gettext("Stopping…"), else: gettext("Stop (esc)")}
                 style="color: var(--danger);"
               >
                 <span style="display: inline-block; width: 9px; height: 9px; background: currentColor; border-radius: 2px;"></span>
@@ -3997,7 +3996,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
                 type="submit"
                 form="chat-composer-form"
                 class="bp-iconbtn bp-iconbtn-primary"
-                aria-label="Send message"
+                aria-label={gettext("Send message")}
               >
                 <.icon name="send" size={14} />
               </button>
@@ -4015,7 +4014,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           style="display: flex; align-items: center; gap: 8px; padding: 0 14px 10px; font-family: var(--font-mono); opacity: 0.75;"
         >
           <span class="bp-chat-spinner" aria-hidden="true"></span>
-          <span>checking <%= String.capitalize(@provider) %> readiness…</span>
+          <span><%= gettext("checking %{provider} readiness…", provider: String.capitalize(@provider)) %></span>
         </div>
         <%!-- bp-lane banner: task hands offline, chat still live (charter D2 —
               named state + next step, never a silent Logger line). --%>
@@ -4035,7 +4034,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <div
           :if={@arming_bypass}
           role="alertdialog"
-          aria-label="Arm bypass permissions"
+          aria-label={gettext("Arm bypass permissions")}
           style="max-width: 860px; margin: 10px auto 0; padding: 12px 14px; border: 1px solid var(--danger); border-radius: 8px; background: hsl(var(--danger-hsl) / 0.08);"
         >
           <%!-- Honest reopen affordance (charter D55): a remembered bypass
@@ -4047,13 +4046,13 @@ defmodule BarkparkWeb.Studio.ChatLive do
             class="text-xs"
             style="color: var(--danger); font-weight: 600; margin: 0 0 4px;"
           >
-            ⚠ Bypass disarmed — re-arm to enable. This session remembers bypassPermissions, but arming never survives a reopen.
+            ⚠ <%= gettext("Bypass disarmed — re-arm to enable. This session remembers bypassPermissions, but arming never survives a reopen.") %>
           </p>
           <p class="text-xs" style="color: var(--danger); font-weight: 600; margin: 0 0 4px;">
-            ⚠ Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.
+            ⚠ <%= gettext("Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards.") %>
           </p>
           <p class="text-xs text-dim" style="margin: 0 0 8px;">
-            Type <strong>bypass</strong> to confirm, then Arm. It takes effect on the next spawn, not the running turn.
+            <%= pgettext("verb", "Type") %> <strong>bypass</strong> <%= gettext("to confirm, then Arm. It takes effect on the next spawn, not the running turn.") %>
           </p>
           <%!-- phx-submit rides along so Enter in the confirm input ARMS (server-guarded
                 on the exact word) instead of falling through to a native form submit
@@ -4069,7 +4068,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               value={@bypass_confirm}
               autocomplete="off"
               placeholder="bypass"
-              aria-label="Type bypass to confirm"
+              aria-label={gettext("Type bypass to confirm")}
               class="text-xs"
               style="flex: 0 1 160px; padding: 4px 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-family: var(--font-mono);"
             />
@@ -4078,19 +4077,19 @@ defmodule BarkparkWeb.Studio.ChatLive do
               phx-click="arm-bypass"
               disabled={String.trim(@bypass_confirm || "") != "bypass"}
               class="btn"
-              aria-label="Arm bypass permissions"
+              aria-label={gettext("Arm bypass permissions")}
               style={"padding: 4px 12px; font-weight: 600; color: var(--danger); border-color: var(--danger);" <> if(String.trim(@bypass_confirm || "") != "bypass", do: " opacity: 0.5; cursor: not-allowed;", else: "")}
             >
-              Arm bypass
+              <%= gettext("Arm bypass") %>
             </button>
             <button
               type="button"
               phx-click="cancel-arm-bypass"
               class="btn text-xs text-dim"
-              aria-label="Cancel"
+              aria-label={gettext("Cancel")}
               style="padding: 4px 10px;"
             >
-              Cancel
+              <%= gettext("Cancel") %>
             </button>
           </form>
         </div>
@@ -4159,79 +4158,95 @@ defmodule BarkparkWeb.Studio.ChatLive do
           type="button"
           class="btn text-xs"
           phx-click="readiness-recheck"
-          aria-label="Re-check readiness"
+          aria-label={gettext("Re-check readiness")}
           style="padding: 4px 12px;"
         >
-          Re-check
+          <%= gettext("Re-check") %>
         </button>
       </div>
     </div>
     """
   end
 
-  defp readiness_title(:no_binary, "claude"), do: "Claude Code isn't installed on this host"
-  defp readiness_title(:no_binary, provider), do: "#{provider_name(provider)} isn't installed"
+  defp readiness_title(:no_binary, "claude"),
+    do: gettext("Claude Code isn't installed on this host")
+
+  defp readiness_title(:no_binary, provider),
+    do: gettext("%{provider} isn't installed", provider: provider_name(provider))
 
   defp readiness_title(:not_logged_in, "claude"),
-    do: "Claude Code isn't logged in on this host"
+    do: gettext("Claude Code isn't logged in on this host")
 
   defp readiness_title(:not_logged_in, provider),
-    do: "#{provider_name(provider)} isn't logged in on this execution host"
+    do:
+      gettext("%{provider} isn't logged in on this execution host",
+        provider: provider_name(provider)
+      )
 
-  defp readiness_title(:no_task_hands, _provider), do: "Task hands are offline"
+  defp readiness_title(:no_task_hands, _provider), do: gettext("Task hands are offline")
 
   defp readiness_title(:task_token_expired, _provider),
-    do: "The chat's task credential expired"
+    do: gettext("The chat's task credential expired")
 
   defp readiness_title(:task_token_rearmed, _provider),
-    do: "Task hands re-armed — restart to hand them over"
+    do: gettext("Task hands re-armed — restart to hand them over")
 
-  defp readiness_title(_, _provider), do: "Checking readiness"
+  defp readiness_title(_, _provider), do: gettext("Checking readiness")
 
   # :no_binary reuses the spawn-error copy VERBATIM (the card is that copy's
   # first live surface — it was dead code until this slice).
-  defp readiness_body(:no_binary, "claude"), do: spawn_error_text(:binary_not_found)
+  defp readiness_body(:no_binary, "claude"),
+    do:
+      gettext(
+        "The `claude` binary is not installed on this host. Install Claude Code and run `claude auth login`."
+      )
 
   defp readiness_body(:no_binary, provider),
-    do: "The #{provider_name(provider)} runtime is not available on the selected execution host."
+    do:
+      gettext("The %{provider} runtime is not available on the selected execution host.",
+        provider: provider_name(provider)
+      )
 
   defp readiness_body(:not_logged_in, "claude"),
     do:
-      "The `claude` binary is installed, but it has no credentials. " <>
-        "Log in on this host, then Re-check — the composer unlocks in place, no reload."
+      gettext(
+        "The `claude` binary is installed, but it has no credentials. Log in on this host, then Re-check — the composer unlocks in place, no reload."
+      )
 
   defp readiness_body(:not_logged_in, provider),
     do:
-      "#{provider_name(provider)} is installed but has no usable local credentials. " <>
-        "Authenticate on the execution host, then Re-check."
+      gettext(
+        "%{provider} is installed but has no usable local credentials. Authenticate on the execution host, then Re-check.",
+        provider: provider_name(provider)
+      )
 
   defp readiness_body(:no_task_hands, _provider),
     do:
-      "Barkpark refused to mint this session's task credential — the agent can chat, " <>
-        "but its bp task tools are offline. Check that your admin token has write " <>
-        "access to this workspace, then Re-check."
+      gettext(
+        "Barkpark refused to mint this session's task credential — the agent can chat, but its bp task tools are offline. Check that your admin token has write access to this workspace, then Re-check."
+      )
 
   defp readiness_body(:task_token_expired, _provider),
     do:
-      "This session's minted Barkpark task token has expired and Barkpark could not " <>
-        "mint a replacement, so its bp task tools are offline. The chat itself still " <>
-        "works. Start a new session to mint fresh task hands."
+      gettext(
+        "This session's minted Barkpark task token has expired and Barkpark could not mint a replacement, so its bp task tools are offline. The chat itself still works. Start a new session to mint fresh task hands."
+      )
 
   defp readiness_body(:task_token_rearmed, _provider),
     do:
-      "This session's task credential was about to expire, so Barkpark minted a fresh " <>
-        "one and revoked the old. The new credential is already wired into this " <>
-        "session's MCP config; the running agent's shell still holds the retired one " <>
-        "until the session restarts — a live process's environment cannot be rewritten."
+      gettext(
+        "This session's task credential was about to expire, so Barkpark minted a fresh one and revoked the old. The new credential is already wired into this session's MCP config; the running agent's shell still holds the retired one until the session restarts — a live process's environment cannot be rewritten."
+      )
 
-  defp readiness_body(_, provider), do: "Checking #{provider_name(provider)} readiness…"
+  defp readiness_body(_, provider),
+    do: gettext("Checking %{provider} readiness…", provider: provider_name(provider))
 
   defp readiness_step(:not_logged_in, "claude"), do: "claude auth login"
   defp readiness_step(:not_logged_in, "codex"), do: "codex login"
 
   # The named next step for a re-armed session: the MCP lane already has the
   # fresh credential; the Bash lane is re-armed by the next spawn.
-  defp readiness_step(:task_token_rearmed, _provider), do: "Restart this session"
+  defp readiness_step(:task_token_rearmed, _provider), do: gettext("Restart this session")
   defp readiness_step(_, _provider), do: nil
 
   defp provider_name("claude"), do: "Claude Code"
@@ -4254,7 +4269,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
     >
       <div class="text-xs text-dim" style="display: flex; align-items: center; gap: 6px; margin-bottom: 6px; opacity: 0.75;">
         <span aria-hidden="true">▚</span>
-        <span>agents · <%= map_size(@rail) %></span>
+        <span><%= gettext("agents · %{count}", count: map_size(@rail)) %></span>
       </div>
 
       <.rail_entry
@@ -4323,7 +4338,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           aria-expanded={to_string(@open)}
           style="flex: none; padding: 1px 8px; opacity: 0.8;"
         >
-          <%= if @open, do: "collapse", else: "expand" %>
+          <%= if @open, do: gettext("collapse"), else: gettext("expand") %>
         </button>
       </div>
 
@@ -4363,16 +4378,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <span style={"min-width: 0; flex: 1; color: #{rail_phase_color(@phase.status)};"}>
           <span style="font-weight: 600;"><%= @phase.title %></span>
           <span :if={@phase.status == :done} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-            · <%= @phase.total %> <%= pluralize(@phase.total, "agent") %> · <%= StudioChat.format_tokens(@phase.tokens) %> tok
+            · <%= ngettext("%{count} agent", "%{count} agents", @phase.total) %> · <%= StudioChat.format_tokens(@phase.tokens) %> tok
           </span>
           <span
             :if={@phase.status == :done and @phase.failed > 0}
             style="margin-left: 6px; color: var(--danger);"
           >
-            · <%= @phase.failed %> failed
+            · <%= gettext("%{count} failed", count: @phase.failed) %>
           </span>
           <span :if={@phase.status == :skipped} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
-            · skipped
+            · <%= gettext("skipped") %>
           </span>
         </span>
       </div>
@@ -4480,7 +4495,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
             <% {:pair, kind, rest} -> %>
               <span class="text-dim" style="opacity: 0.7;"><%= kind %>:</span><span style="font-weight: 600;"><%= rest %></span>
             <% {:bare, label} -> %>
-              <span><%= label || "agent" %></span>
+              <span><%= label || gettext("agent") %></span>
           <% end %>
           <span :if={@node["model"]} class="text-dim" style="margin-left: 6px; opacity: 0.7;">
             <%= StudioChat.model_family(@node["model"]) %>
@@ -4499,7 +4514,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           aria-expanded={to_string(@detail_open?)}
           style="flex: none; padding: 0 6px; opacity: 0.7;"
         >
-          <%= if @detail_open?, do: "hide", else: "detail" %>
+          <%= if @detail_open?, do: gettext("hide"), else: gettext("detail") %>
         </button>
       </div>
 
@@ -4535,7 +4550,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           class="btn text-xs"
           style="padding: 0 6px;"
         >
-          open session
+          <%= gettext("open session") %>
         </.link>
       </div>
       <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
@@ -4543,7 +4558,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           class="text-xs"
           style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn);"
         >
-          attempt <%= @detail["attempt"] %>
+          <%= gettext("attempt %{n}", n: @detail["attempt"]) %>
         </span>
       </div>
 
@@ -4552,7 +4567,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         class="text-dim"
         style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
       >
-        <span style="font-weight: 600; opacity: 0.7;">about</span>
+        <span style="font-weight: 600; opacity: 0.7;"><%= gettext("about") %></span>
         <%= @detail["promptPreview"] %>
       </div>
 
@@ -4579,7 +4594,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         class="text-dim"
         style="opacity: 0.85; white-space: pre-wrap; overflow-wrap: anywhere;"
       >
-        <span style="font-weight: 600; opacity: 0.7;">done</span>
+        <span style="font-weight: 600; opacity: 0.7;"><%= gettext("done") %></span>
         <%= agent_result_preview(@detail["resultPreview"]) %>
       </div>
     </div>
@@ -4620,7 +4635,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         class="text-xs text-dim"
         style="font-family: var(--font-mono); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;"
       >
-        <span class="bp-skel-dot"></span> rendering <%= StreamTail.skeleton_label(@kind) %>…
+        <span class="bp-skel-dot"></span> <%= gettext("rendering %{kind}…", kind: StreamTail.skeleton_label(@kind)) %>
       </div>
       <%= case @kind do %>
         <% "chart" -> %>
@@ -6128,10 +6143,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # Images on a message map (live or replayed); older/other user rows have none.
   defp user_images(message), do: Map.get(message, :images, []) || []
 
-  defp upload_error_label(:too_large), do: "Image is larger than 3 MB."
-  defp upload_error_label(:not_accepted), do: "Only PNG, JPEG, GIF, or WebP images."
-  defp upload_error_label(:too_many_files), do: "Up to 4 images per message."
-  defp upload_error_label(_), do: "That file could not be attached."
+  defp upload_error_label(:too_large), do: gettext("Image is larger than 3 MB.")
+  defp upload_error_label(:not_accepted), do: gettext("Only PNG, JPEG, GIF, or WebP images.")
+  defp upload_error_label(:too_many_files), do: gettext("Up to 4 images per message.")
+  defp upload_error_label(_), do: gettext("That file could not be attached.")
 
   # Append to the store when a session row exists; `:no_store` when this chat is
   # still unsaved (a pre-first-send draft), otherwise the append result verbatim
@@ -7067,9 +7082,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       style="border: 1px solid var(--border-muted); border-left: 3px solid var(--primary); border-radius: 8px; padding: 12px 14px; display: flex; flex-direction: column; gap: 14px;"
     >
       <div style="display: flex; align-items: baseline; justify-content: space-between; gap: 8px;">
-        <div class="text-sm" style="font-weight: 600;">The agent is asking you</div>
+        <div class="text-sm" style="font-weight: 600;"><%= gettext("The agent is asking you") %></div>
         <div :if={length(@message.questions) > 1} class="text-xs text-dim" style="white-space: nowrap;">
-          <%= answered_count(@message.questions, @form) %>/<%= length(@message.questions) %> answered
+          <%= gettext("%{done}/%{total} answered", done: answered_count(@message.questions, @form), total: length(@message.questions)) %>
         </div>
       </div>
 
@@ -7110,7 +7125,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
         <input
           type="text"
-          placeholder={if q.multi, do: "Custom answer (comma-separated)…", else: "Custom answer…"}
+          placeholder={if q.multi, do: gettext("Custom answer (comma-separated)…"), else: gettext("Custom answer…")}
           value={Map.get(@form.custom, qidx, "")}
           phx-keyup="question-custom"
           phx-debounce="300"
@@ -7123,7 +7138,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
       <div style="display: flex; gap: 8px; justify-content: flex-end;">
         <button type="button" class="btn" phx-click="question-dismiss" phx-value-rid={@message.request_id}>
-          Dismiss
+          <%= gettext("Dismiss") %>
         </button>
         <button
           type="button"
@@ -7131,7 +7146,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           phx-click="question-submit"
           phx-value-rid={@message.request_id}
         >
-          Answer
+          <%= gettext("Answer") %>
         </button>
       </div>
     </div>
@@ -7156,9 +7171,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
     do:
       "text-align: left; padding: 6px 10px; border-radius: 8px; cursor: pointer; border: 1px solid var(--border-muted); background: transparent;"
 
-  defp question_outcome_label(:allowed), do: "✓ answered"
-  defp question_outcome_label(:canceled), do: "✗ canceled"
-  defp question_outcome_label(_), do: "✗ dismissed"
+  defp question_outcome_label(:allowed), do: "✓ " <> gettext("answered")
+  defp question_outcome_label(:canceled), do: "✗ " <> gettext("canceled")
+  defp question_outcome_label(_), do: "✗ " <> gettext("dismissed")
 
   # ── proposed-plan card construction (charter D34) ──────────────────────────
 
@@ -7211,9 +7226,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp plan_title(_), do: "Proposed plan"
 
-  defp plan_outcome_label(:allowed), do: "✓ plan approved"
-  defp plan_outcome_label(:canceled), do: "✗ canceled"
-  defp plan_outcome_label(_), do: "✗ kept planning"
+  defp plan_outcome_label(:allowed), do: "✓ " <> gettext("plan approved")
+  defp plan_outcome_label(:canceled), do: "✗ " <> gettext("canceled")
+  defp plan_outcome_label(_), do: "✗ " <> gettext("kept planning")
 
   # ── progressive streaming render ────────────────────────────────────────
   # Blocks render the moment they complete, not when the whole message ends.
@@ -7856,7 +7871,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
   # The row's one-line label: the background task's description, else its type.
   defp rail_label(entry) do
     row = entry["row"] || %{}
-    row["description"] || row["task_type"] || "agent"
+    row["description"] || row["task_type"] || gettext("agent")
   end
 
   # The leading glyph by entry lifecycle: a running cycle shows its kind glyph
@@ -7885,44 +7900,52 @@ defmodule BarkparkWeb.Studio.ChatLive do
   end
 
   defp rail_header_summary(%{"status" => "completed"}, %{summary: s}) do
-    "#{s.phases_run} of #{s.phase_total} phases" <>
+    gettext("%{run} of %{total} phases", run: s.phases_run, total: s.phase_total) <>
       skipped_part(s.skipped) <>
-      " · #{s.agents_total} #{pluralize(s.agents_total, "agent")}" <>
+      " · " <>
+      ngettext("%{count} agent", "%{count} agents", s.agents_total) <>
       failed_part(s.failed) <> " · #{StudioChat.format_tokens(s.tokens)} tok"
   end
 
   defp rail_header_summary(%{"status" => "interrupted"}, %{summary: s}) do
     where =
       case s.active do
-        %{index: i, title: t} -> "interrupted in #{t} (#{i}/#{s.phase_total})"
-        _ -> "interrupted"
+        %{index: i, title: t} ->
+          gettext("interrupted in %{phase} (%{index}/%{total})",
+            phase: t,
+            index: i,
+            total: s.phase_total
+          )
+
+        _ ->
+          gettext("interrupted")
       end
 
-    "#{where} · #{s.running} running · #{s.done} done · #{StudioChat.format_tokens(s.tokens)} tok"
+    "#{where} · " <>
+      gettext("%{running} running · %{done} done", running: s.running, done: s.done) <>
+      " · #{StudioChat.format_tokens(s.tokens)} tok"
   end
 
   defp rail_header_summary(_entry, %{summary: s}) do
     head =
       case s.active do
         %{index: i, title: t} -> "#{t} #{i}/#{s.phase_total}"
-        _ -> "starting"
+        _ -> gettext("starting")
       end
 
-    "#{head} · #{s.running} running · #{s.done} done" <>
+    "#{head} · " <>
+      gettext("%{running} running · %{done} done", running: s.running, done: s.done) <>
       failed_part(s.failed) <> " · #{StudioChat.format_tokens(s.tokens)} tok"
   end
 
   defp skipped_part(0), do: ""
-  defp skipped_part(n), do: " · #{n} skipped"
+  defp skipped_part(n), do: " · " <> gettext("%{count} skipped", count: n)
   defp failed_part(0), do: ""
-  defp failed_part(n), do: " · #{n} failed"
+  defp failed_part(n), do: " · " <> gettext("%{count} failed", count: n)
 
-  defp pluralize(1, word), do: word
-  defp pluralize(_, word), do: word <> "s"
-
-  defp rail_status_label("completed"), do: "done"
-  defp rail_status_label("interrupted"), do: "interrupted"
-  defp rail_status_label(_), do: "running"
+  defp rail_status_label("completed"), do: gettext("done")
+  defp rail_status_label("interrupted"), do: gettext("interrupted")
+  defp rail_status_label(_), do: gettext("running")
 
   # The rail speaks the lifecycle palette (charter D60): a settled cycle is
   # --life-done, a live one --life-in_progress, an interrupted one --life-blocked.
@@ -8017,6 +8040,72 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp mode_label("default"), do: "ask (legacy)"
   defp mode_label(other), do: other
 
+  # The mode chip's word in the viewer's language. mode_label/1 stays English:
+  # it also writes the :system transcript notes ("Permission mode → …").
+  defp mode_word("plan"), do: gettext("Plan")
+  defp mode_word("acceptEdits"), do: gettext("accept edits")
+  defp mode_word("auto"), do: gettext("Autopilot")
+  defp mode_word("dontAsk"), do: gettext("don't ask")
+  defp mode_word("manual"), do: gettext("manual approve")
+  defp mode_word("bypassPermissions"), do: gettext("bypass · dangerous")
+  defp mode_word("default"), do: gettext("ask (legacy)")
+  defp mode_word(other), do: mode_label(other)
+
+  # The context band in the viewer's language. Values (host names, the server
+  # URL, slugs, paths) stay data; the field name, the absence marker and the
+  # note's sentence are words. ContextIdentity keeps its canonical English
+  # vocabulary, which the CLI band shares.
+  defp context_field_text(%ContextIdentity.Field{} = f) do
+    base =
+      case f do
+        %{status: :set, value: value} when is_binary(value) and value != "" -> value
+        %{absent: absent} when is_binary(absent) and absent != "" -> context_marker(absent)
+        _ -> context_marker(ContextIdentity.unknown_marker())
+      end
+
+    [context_name(f.name), base, context_note(f)]
+    |> Enum.reject(&(&1 in [nil, ""]))
+    |> Enum.join(" ")
+  end
+
+  defp context_name("host"), do: gettext("host")
+  defp context_name("server"), do: gettext("server")
+  defp context_name("workspace"), do: gettext("workspace")
+  defp context_name("project"), do: gettext("project")
+  defp context_name("dataset"), do: gettext("dataset")
+  defp context_name("repo"), do: gettext("repo")
+  defp context_name(name), do: name
+
+  defp context_marker(marker) do
+    cond do
+      marker == ContextIdentity.unset_marker() -> gettext("(not set)")
+      marker == ContextIdentity.unknown_marker() -> gettext("(unknown)")
+      marker == ContextIdentity.no_repo_marker() -> gettext("(not a git repo)")
+      marker == ContextIdentity.server_local_marker() -> gettext("(server-local)")
+      true -> marker
+    end
+  end
+
+  defp context_note(%{note_kind: :last_report_from, note_arg: arg}),
+    do: gettext("— the last report came from %{host}", host: inspect(to_string(arg)))
+
+  defp context_note(%{note_kind: :viewer_scoped_to, note_arg: arg}),
+    do: gettext("— the viewer is scoped to %{workspace}", workspace: inspect(to_string(arg)))
+
+  defp context_note(%{note_kind: :mount_substitutes, note_arg: arg}),
+    do: gettext("— the chat mount substitutes %{dataset}", dataset: inspect(to_string(arg)))
+
+  defp context_note(%{note_kind: :scope_names, note_arg: arg}),
+    do: gettext("— the scope names %{dataset}", dataset: inspect(to_string(arg)))
+
+  defp context_note(%{note_kind: :cwd_without_repo_root, note_arg: arg}),
+    do:
+      gettext("— %{dir} on the execution host, which reports no repository root",
+        dir: inspect(to_string(arg))
+      )
+
+  defp context_note(%{note: note}), do: note
+
   # Which toggle segment a raw permission mode lights up (the presentation
   # projection — the raw vocabulary/wire/DB stay untouched): plan ⇒ Plan,
   # auto ⇒ Autopilot, armed bypass ⇒ the danger segment, anything else (a
@@ -8028,8 +8117,8 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp mode_segment(_), do: :other
 
   # Effort tiers render verbatim in the picker (charter D48 — "Fable · high").
-  defp effort_label(nil), do: "default"
-  defp effort_label("default"), do: "default"
+  defp effort_label(nil), do: gettext("default")
+  defp effort_label("default"), do: gettext("default")
   defp effort_label(e), do: e
 
   # The "(was ~N tokens)" tail on a compaction line — only when the CLI reports a
@@ -8039,14 +8128,14 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   # The one-word status rendered in the cockpit (beside the context ring) —
   # the honest session-state affordance; tests assert these exact words.
-  defp status_label(:new), do: "new chat"
-  defp status_label(:resumable), do: "resumable"
-  defp status_label(:starting), do: "starting"
-  defp status_label(:ready), do: "ready"
-  defp status_label(:working), do: "working"
-  defp status_label(:thinking), do: "working"
-  defp status_label(:interrupting), do: "stopping…"
-  defp status_label(:offline), do: "offline"
+  defp status_label(:new), do: gettext("new chat")
+  defp status_label(:resumable), do: gettext("resumable")
+  defp status_label(:starting), do: gettext("starting")
+  defp status_label(:ready), do: gettext("ready")
+  defp status_label(:working), do: gettext("working")
+  defp status_label(:thinking), do: gettext("working")
+  defp status_label(:interrupting), do: gettext("stopping…")
+  defp status_label(:offline), do: gettext("offline")
 
   # A turn is in flight while the model works or while we're aborting it — both
   # states show Stop, never Send (there is no queue; the only in-turn control
@@ -8062,21 +8151,26 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp start_turn_clock(socket),
     do: assign(socket, turn_started_at_ms: System.system_time(:millisecond))
 
-  defp approval_outcome_label(:allowed), do: "✓ allowed"
-  defp approval_outcome_label(:canceled), do: "✗ canceled"
-  defp approval_outcome_label(_), do: "✗ denied"
+  defp approval_outcome_label(:allowed), do: "✓ " <> gettext("allowed")
+  defp approval_outcome_label(:canceled), do: "✗ " <> gettext("canceled")
+  defp approval_outcome_label(_), do: "✗ " <> gettext("denied")
 
   # The idle/ready clause teaches the composer's verbs (charter D44) — never a
   # mic, never @-mentions. The keyboard affordances (D42) live HERE in the
   # placeholder, not in a footer row: visible from the very first mount, gone
   # the moment you type. Degraded states keep their honest, specific copy.
-  @idle_placeholder "Plan, build… · / for commands · ↵ to send · esc to interrupt"
-  defp composer_placeholder(:new), do: @idle_placeholder
-  defp composer_placeholder(:resumable), do: "Message Claude to resume this chat…"
-  defp composer_placeholder(:offline), do: "Send a message to resume this session…"
-  defp composer_placeholder(:thinking), do: "Claude is working — esc or Stop to interrupt…"
-  defp composer_placeholder(:interrupting), do: "Stopping…"
-  defp composer_placeholder(_), do: @idle_placeholder
+  defp idle_placeholder,
+    do: gettext("Plan, build… · / for commands · ↵ to send · esc to interrupt")
+
+  defp composer_placeholder(:new), do: idle_placeholder()
+  defp composer_placeholder(:resumable), do: gettext("Message Claude to resume this chat…")
+  defp composer_placeholder(:offline), do: gettext("Send a message to resume this session…")
+
+  defp composer_placeholder(:thinking),
+    do: gettext("Claude is working — esc or Stop to interrupt…")
+
+  defp composer_placeholder(:interrupting), do: gettext("Stopping…")
+  defp composer_placeholder(_), do: idle_placeholder()
 
   # ── slash-command menu (charter D36a/D36b) ──────────────────────────────
 
@@ -8182,10 +8276,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
   defp strip_badge(:working), do: "badge-chat-working"
   defp strip_badge(_needs_you_kind), do: "badge-chat-approval"
 
-  defp strip_label(:pending_approval), do: "approve"
-  defp strip_label(:awaiting_input), do: "answer"
-  defp strip_label(:plan_ready), do: "plan ready"
-  defp strip_label(:working), do: "running"
+  defp strip_label(:pending_approval), do: gettext("approve")
+  defp strip_label(:awaiting_input), do: gettext("answer")
+  defp strip_label(:plan_ready), do: gettext("plan ready")
+  defp strip_label(:working), do: gettext("running")
 
   # Session → tokenized pill. The live overlay wins over the stored row (wave
   # 5): a Recorder that says "working" right now beats a row the sidebar has
@@ -8276,11 +8370,11 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp age_label(_), do: nil
 
-  defp age_words(s) when s < 60, do: "now"
-  defp age_words(s) when s < 3_600, do: "#{div(s, 60)}m"
-  defp age_words(s) when s < 86_400, do: "#{div(s, 3_600)}h"
-  defp age_words(s) when s < 604_800, do: "#{div(s, 86_400)}d"
-  defp age_words(s), do: "#{div(s, 604_800)}w"
+  defp age_words(s) when s < 60, do: gettext("now")
+  defp age_words(s) when s < 3_600, do: gettext("%{n}m", n: div(s, 60))
+  defp age_words(s) when s < 86_400, do: gettext("%{n}h", n: div(s, 3_600))
+  defp age_words(s) when s < 604_800, do: gettext("%{n}d", n: div(s, 86_400))
+  defp age_words(s), do: gettext("%{n}w", n: div(s, 604_800))
 
   defp session_stamp(%{last_active_at: t}) when not is_nil(t), do: age_label(t)
   defp session_stamp(%{inserted_at: t}), do: age_label(t)
