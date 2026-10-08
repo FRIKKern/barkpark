@@ -3032,6 +3032,43 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/v1/auth/token": {
+      "get": {
+        "operationId": "auth.token",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Describe the token sent as the bearer: its permissions, tier, dataset, workspace and seat — no session or admin token needed.",
+        "tags": [
+          "auth"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/media/{dataset}/collections": {
       "get": {
         "operationId": "media.collections",

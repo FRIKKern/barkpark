@@ -3335,6 +3335,17 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       core_cmd(
+        "auth.token",
+        "auth",
+        "token",
+        "Describe the token sent as the bearer: its permissions, tier, dataset, workspace and seat — no session or admin token needed.",
+        "GET",
+        "/v1/auth/token",
+        "read",
+        writes: false,
+        default_output: "json"
+      ),
+      core_cmd(
         "auth.logout",
         "auth",
         "logout",
