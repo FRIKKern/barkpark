@@ -1184,8 +1184,8 @@
        MUST stay BYTE-IDENTICAL with assets/paper-editor/src/styles.css (mirror-check). */
     .bp-canvas-figure { margin: var(--bp-air-figure, 1.6rem) 0 0; margin-inline: var(--bp-evidence-pull, 0px); width: var(--bp-evidence-width, 100%); max-width: none; box-sizing: border-box; }
     .bp-canvas-figure-caption { margin: 0.8rem 0 0; }
-    .bp-canvas-figure-caption-input,
-    input.bp-canvas-diagram-caption {
+    input.bp-canvas-diagram-caption,
+    .bp-canvas-figure-caption-input {
       display: block; width: 100%; box-sizing: border-box;
       border: none; background: transparent; padding: 0; margin: 0;
       color: var(--paper-ink-soft, #6a6a6a);
