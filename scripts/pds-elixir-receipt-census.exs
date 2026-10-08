@@ -929,6 +929,16 @@ defmodule PDS.Census do
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
+    # THE FOUR PAPER-MASTERS WRITES (task-2dc7b441443f3aaf). Each answers the op
+    # receipt `Content.apply_paper_block_ops_once/6` returns (`slug`, `opCount`,
+    # `rev`, `blockIds` — a store-derived position and row-id array), or the
+    # saved master document (`docId`, `rev`, `title`), never an `ok: true`
+    # literal this lens keys on — same class and same reasoning as the
+    # member-admin rows above.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters", "BarkparkWeb.PaperMastersController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/:master_id/insert", "BarkparkWeb.PaperMastersController", :insert, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/pin", "BarkparkWeb.PaperMastersController", :pin, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/detach", "BarkparkWeb.PaperMastersController", :detach, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a

@@ -628,6 +628,21 @@ const CANVAS_SLASH_ITEMS = [
   })),
 ];
 
+// The first control a person can type into or press inside a node view, or null.
+function focusableControlIn(dom) {
+  if (!dom || typeof dom.querySelectorAll !== "function") return null;
+  // Something to type into first (a picker's search, a field's input); a button only
+  // when the node view has nothing else (a Boolean toggle, a picker's Choose).
+  for (const selector of ['input:not([type="hidden"]), select, textarea, [contenteditable="true"]', 'button, [tabindex]:not([tabindex="-1"])']) {
+    for (const el of dom.querySelectorAll(selector)) {
+      if (el.disabled || el.readOnly || el.getAttribute("aria-hidden") === "true") continue;
+      if (el.closest && el.closest('[hidden], [aria-hidden="true"]')) continue;
+      return el;
+    }
+  }
+  return null;
+}
+
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
     return ["editable"];
@@ -3902,6 +3917,18 @@ class BpPaperCanvas extends HTMLElement {
     }
     this._pendingFocus = null;
     const { state, view } = this._editor;
+    // A field block (String, Select, Date & time, the Image/Reference pickers…) is an
+    // atom whose node view holds its own control: a TextSelection lands BESIDE it, so
+    // focus the control instead (task-13abe9408c006c96). An atom with no control — a
+    // divider — falls through to the caret as before.
+    const node = state.doc.nodeAt(pos);
+    if (node && node.isAtom && !node.isTextblock) {
+      const control = focusableControlIn(view.nodeDOM(pos));
+      if (control) {
+        control.focus();
+        return true;
+      }
+    }
     let selection;
     try {
       selection = TextSelection.near(state.doc.resolve(pos + 1));

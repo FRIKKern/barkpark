@@ -1798,6 +1798,108 @@ defmodule Barkpark.Plugins.Capabilities do
       # `scoped_prefix` is set ONLY where router.ex actually mounts a
       # `/w/:workspace_slug/p/:project_slug` mirror — settings, synonym-preview
       # and promote have none.
+      # ── paper masters over HTTP (task-2dc7b441443f3aaf). Member token,
+      # scoped `/w/:workspace_slug/p/:project_slug` — the same checks the
+      # Studio canvas's save/insert/pin/detach events get in-process
+      # (Barkpark.Plugins.Bulldocs.Masters).
+      core_cmd(
+        "paper.masters",
+        "paper",
+        "masters",
+        "The masters an author may insert into paper :slug.",
+        "GET",
+        "/v1/papers/:slug/masters",
+        "read",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.save-master",
+        "paper",
+        "save-master",
+        "Save a block of paper :slug as a master, published immediately.",
+        "POST",
+        "/v1/papers/:slug/masters",
+        "write",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"blockId\": \"...\", \"title\": \"...\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.insert-master",
+        "paper",
+        "insert-master",
+        "Insert master :master_id into paper :slug, detached (a copy) or linked (follows latest).",
+        "POST",
+        "/v1/papers/:slug/masters/:master_id/insert",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("master_id", true, "string", "Master document id.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"mode\": \"detached\"|\"linked\", \"afterId\": \"...\"|null, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.pin-master",
+        "paper",
+        "pin-master",
+        "Pin (or unpin) linked instance :block_id in paper :slug to the master's latest published revision.",
+        "POST",
+        "/v1/papers/:slug/masters/blocks/:block_id/pin",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("block_id", true, "string", "Linked instance block id.")
+        ],
+        flags: [
+          flag(
+            "file",
+            "file",
+            "Body {\"pin\": true|false, \"requestId\": \"<uuid>\"} from a file or - for stdin."
+          )
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "paper.detach-master",
+        "paper",
+        "detach-master",
+        "Detach linked instance :block_id in paper :slug to a plain, no-longer-following copy.",
+        "POST",
+        "/v1/papers/:slug/masters/blocks/:block_id/detach",
+        "write",
+        args: [
+          arg("slug", true, "string", "Paper slug."),
+          arg("block_id", true, "string", "Linked instance block id.")
+        ],
+        flags: [
+          flag("file", "file", "Body {\"requestId\": \"<uuid>\"} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # ── paper access trail (edit-on-the-link slice 4, task-e99a8e946f80f52c).
       # Behind `:flat_admin_api` (RequireToken + RequireAdmin) -> tier "admin",
       # the same pipeline the media/documents search-config blocks below ride.

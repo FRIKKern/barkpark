@@ -646,11 +646,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # Any other added block takes the caret too (task-44f900b38fac79e9): a text
   # block in the canvas run through `focusBlock/1`, a block that renders as its
   # own boundary editor through `bp:focus-boundary`. An atom or field node view
-  # inside the run gets neither — the canvas would put the caret beside it.
+  # inside the run gets neither — the canvas would put the caret beside it —
+  # except a field block (String, Select, Date & time, the Image/Reference
+  # pickers…): its node view holds its own control, and the canvas focuses that
+  # control on bp:focus-block (task-13abe9408c006c96).
+  @focus_field_types ~w(field-string field-slug field-text field-boolean field-select
+                        field-datetime field-color field-image field-reference)
+
   defp focus_new_block(%{assigns: %{last_paper_save_ok?: true}} = socket, %{"id" => id} = block)
        when is_binary(id) do
     cond do
       PaperCanvas.caret_block?(block) -> push_event(socket, "bp:focus-block", %{id: id})
+      block["type"] in @focus_field_types -> push_event(socket, "bp:focus-block", %{id: id})
       not PaperCanvas.canvas?(block) -> push_event(socket, "bp:focus-boundary", %{id: id})
       true -> socket
     end
