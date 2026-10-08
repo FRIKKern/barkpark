@@ -71,7 +71,7 @@ defmodule BarkparkWeb.WebhookControllerTest do
       %{
         "name" => "Test-send Hook",
         "url" => "http://example.test/hook",
-        "events" => ["patch"],
+        "events" => ["discardDraft"],
         "secret" => "s0"
       }
       |> Map.merge(Map.delete(attrs, "dataset"))

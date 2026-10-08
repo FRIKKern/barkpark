@@ -58,8 +58,9 @@ defmodule BarkparkWeb.WebhookCreateSecretTest do
     |> post("/v1/webhooks/test", Jason.encode!(body))
   end
 
-  # "patch" never auto-dispatches, so creating the hook fires nothing on its own.
-  @base %{"name" => "Hook", "url" => "http://example.test/hook", "events" => ["patch"]}
+  # "discardDraft" never auto-dispatches here, so creating the hook fires
+  # nothing on its own (no draft is discarded in this file's tests).
+  @base %{"name" => "Hook", "url" => "http://example.test/hook", "events" => ["discardDraft"]}
 
   test "no secret → the 201 returns a generated secret once, and deliveries are signed with it",
        %{conn: conn} do

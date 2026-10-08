@@ -63,7 +63,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       %{
         "name" => "Hook",
         "url" => "http://example.test/hook",
-        "events" => ["patch"],
+        "events" => ["discardDraft"],
         "secret" => "s0"
       }
       |> Map.merge(Map.delete(attrs, "dataset"))
@@ -148,7 +148,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
           "name" => "Clamp",
           "url" => "http://example.test/hook",
           "dataset" => "test",
-          "events" => ["patch"]
+          "events" => ["discardDraft"]
         })
 
       # 101 deliveries so 25 (default) and 100 (max) are both strictly below the
@@ -363,7 +363,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
           Jason.encode!(%{
             "name" => "Scoped hook",
             "url" => "http://example.test/scoped",
-            "events" => ["patch"],
+            "events" => ["discardDraft"],
             "secret" => "scoped-secret"
           })
         )
