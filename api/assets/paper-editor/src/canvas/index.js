@@ -76,6 +76,7 @@ import {
   reconcileServerEcho,
   docToBlocks,
   hasOverlappingOps,
+  pendingUploadIndexes,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
@@ -1694,7 +1695,14 @@ class BpPaperCanvas extends HTMLElement {
     }
 
     this._debounceBaselineBlocks = null;
-    const ops = runToOps(diffBaseline, stableDoc, { preserveNewIds: true });
+    // A picture still uploading, or whose upload failed, is not sent (run-convert.js
+    // pendingUploadIndexes). stableDoc keeps it above so ids materialize by position.
+    const held = pendingUploadIndexes(nextDoc, diffBaseline);
+    // Indexes are top-level positions in the live doc; they apply only while the
+    // round-trip kept one top-level node per live node (otherwise nothing is held).
+    const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
+    const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
+    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true });
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
