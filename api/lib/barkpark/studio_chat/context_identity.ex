@@ -89,7 +89,17 @@ defmodule Barkpark.StudioChat.ContextIdentity do
     disagree — the disagreement, in text.
     """
 
-    defstruct name: nil, status: :unknown, value: nil, absent: nil, note: nil, mismatch?: false
+    # `note_kind` + `note_arg` carry the note as data (which sentence, and its
+    # raw value) so a surface can word it in the viewer's language; `note`
+    # stays the canonical English text.
+    defstruct name: nil,
+              status: :unknown,
+              value: nil,
+              absent: nil,
+              note: nil,
+              note_kind: nil,
+              note_arg: nil,
+              mismatch?: false
 
     @type status :: :set | :unset | :unknown
     @type t :: %__MODULE__{
@@ -98,6 +108,8 @@ defmodule Barkpark.StudioChat.ContextIdentity do
             value: String.t() | nil,
             absent: String.t() | nil,
             note: String.t() | nil,
+            note_kind: atom() | nil,
+            note_arg: String.t() | nil,
             mismatch?: boolean()
           }
 
@@ -187,7 +199,13 @@ defmodule Barkpark.StudioChat.ContextIdentity do
         field
 
       {nil, reporter} ->
-        %{field | mismatch?: true, note: "— the last report came from #{quoted(reporter)}"}
+        %{
+          field
+          | mismatch?: true,
+            note: "— the last report came from #{quoted(reporter)}",
+            note_kind: :last_report_from,
+            note_arg: reporter
+        }
 
       {lease, reporter} when reporter in [nil, lease] ->
         %{field | status: :set, value: lease, absent: nil}
@@ -199,7 +217,9 @@ defmodule Barkpark.StudioChat.ContextIdentity do
             value: lease,
             absent: nil,
             mismatch?: true,
-            note: "— the last report came from #{quoted(reporter)}"
+            note: "— the last report came from #{quoted(reporter)}",
+            note_kind: :last_report_from,
+            note_arg: reporter
         }
     end
   end
@@ -230,7 +250,12 @@ defmodule Barkpark.StudioChat.ContextIdentity do
         %{field | status: :set, value: session_ws}
 
       {viewer_ws, nil} ->
-        %{field | note: "— the viewer is scoped to #{quoted(viewer_ws)}"}
+        %{
+          field
+          | note: "— the viewer is scoped to #{quoted(viewer_ws)}",
+            note_kind: :viewer_scoped_to,
+            note_arg: viewer_ws
+        }
 
       {viewer_ws, session_ws} when session_ws == viewer_ws ->
         %{field | status: :set, value: session_ws}
@@ -241,7 +266,9 @@ defmodule Barkpark.StudioChat.ContextIdentity do
           | status: :set,
             value: session_ws,
             mismatch?: true,
-            note: "— the viewer is scoped to #{quoted(viewer_ws)}"
+            note: "— the viewer is scoped to #{quoted(viewer_ws)}",
+            note_kind: :viewer_scoped_to,
+            note_arg: viewer_ws
         }
     end
   end
@@ -269,7 +296,13 @@ defmodule Barkpark.StudioChat.ContextIdentity do
         field
 
       {nil, substituted} ->
-        %{field | mismatch?: true, note: "— the chat mount substitutes #{quoted(substituted)}"}
+        %{
+          field
+          | mismatch?: true,
+            note: "— the chat mount substitutes #{quoted(substituted)}",
+            note_kind: :mount_substitutes,
+            note_arg: substituted
+        }
 
       {scoped, actual} when actual in [nil, scoped] ->
         %{field | status: :set, value: scoped}
@@ -280,7 +313,9 @@ defmodule Barkpark.StudioChat.ContextIdentity do
           | status: :set,
             value: actual,
             mismatch?: true,
-            note: "— the scope names #{quoted(scoped)}"
+            note: "— the scope names #{quoted(scoped)}",
+            note_kind: :scope_names,
+            note_arg: scoped
         }
     end
   end
@@ -302,7 +337,9 @@ defmodule Barkpark.StudioChat.ContextIdentity do
           field
           | status: :unknown,
             absent: @unknown,
-            note: "— #{quoted(dir)} on the execution host, which reports no repository root"
+            note: "— #{quoted(dir)} on the execution host, which reports no repository root",
+            note_kind: :cwd_without_repo_root,
+            note_arg: dir
         }
 
       {dir, _managed} ->
