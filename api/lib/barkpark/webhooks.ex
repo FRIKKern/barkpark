@@ -1020,18 +1020,31 @@ defmodule Barkpark.Webhooks do
   negative/zero limit clamps up to 1, and an oversized limit clamps down to
   #{@max_delivery_limit}. Callers therefore cannot under- or over-fetch by
   passing a garbage page size.
+
+  `opts[:offset]` (default 0) walks past that many rows on the same total
+  order, so a caller probing `has_more` by fetching one row past its page
+  (limit: N+1, offset: k*N) can see it (task-fb4cf8323a9795e5) — the clamp
+  ceiling below is `@max_delivery_limit + 1` for exactly that reason: a
+  :limit of `@max_delivery_limit + 1` is the `+1` probe at the page-size
+  ceiling, not a garbage oversized request, and must not be clamped back down
+  to `@max_delivery_limit` (which would erase the has_more signal at the
+  ceiling). The caller still owns clamping the USER-FACING page size to
+  `1..#{@max_delivery_limit}` before adding the `+1` — `WebhookController`'s
+  `parse_limit/1` does that.
   """
   def list_deliveries(endpoint_id, opts \\ []) do
     limit = clamp_limit(Keyword.get(opts, :limit))
+    offset = opts |> Keyword.get(:offset, 0) |> max(0)
 
     Delivery
     |> where([d], d.endpoint_id == ^endpoint_id)
     |> order_by([d], desc: d.inserted_at, desc: d.id)
     |> limit(^limit)
+    |> offset(^offset)
     |> Repo.all()
   end
 
-  defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_delivery_limit)
+  defp clamp_limit(n) when is_integer(n), do: n |> max(1) |> min(@max_delivery_limit + 1)
   defp clamp_limit(_), do: @default_delivery_limit
 
   # Repo.delete(struct, stale_error_field: :id) turns a would-be
