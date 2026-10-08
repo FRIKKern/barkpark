@@ -169,7 +169,9 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
       assert Enum.any?(Jason.decode!(index.resp_body)["schemas"], &(&1["name"] == "post"))
 
       show =
-        build_conn() |> authed(raw) |> get("/w/role-gate-b/p/default/v1/schemas/#{@dataset}/post")
+        scoped_conn()
+        |> authed(raw)
+        |> get("/w/role-gate-b/p/default/v1/schemas/#{@dataset}/post")
 
       assert show.status == 200
       assert Jason.decode!(show.resp_body)["schema"]["name"] == "post"
@@ -179,7 +181,7 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
       assert schema_upsert(conn, raw, "rw_member_schema").status == 403
 
       del =
-        build_conn()
+        scoped_conn()
         |> authed(raw)
         |> delete("/w/role-gate-b/p/default/v1/schemas/#{@dataset}/post")
 
