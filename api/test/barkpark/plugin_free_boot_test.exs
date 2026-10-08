@@ -92,6 +92,7 @@ defmodule Barkpark.PluginFreeBootTest do
   @coupling_studio_ui [
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/cells.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/file_io.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/filter.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/geometry.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/grid_data.ex"},

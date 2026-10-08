@@ -170,5 +170,6 @@ lib/barkpark_web/controllers/workspace_controller.ex	deliver_bundle
 lib/barkpark_web/controllers/workspace_controller.ex	spill_body
 lib/barkpark_web/layouts.ex	paper_stylesheet
 lib/barkpark_web/live/studio/chat_live.ex	consume_attachments
+lib/barkpark_web/live/studio/sheet_grid.ex	read_import_upload
 lib/barkpark_web/plugs/idempotency.ex	replay
 lib/barkpark_web/router/plugins.ex	public_root_session_name
