@@ -342,88 +342,88 @@ msgstr "så stien kunne ikke følges til et dokument"
 msgid "you asked for"
 msgstr "du ba om"
 
-#: lib/barkpark_web/studio_locale.ex:60
+#: lib/barkpark_web/studio_locale.ex:71
 #, elixir-autogen, elixir-format
 msgid "Browse library"
 msgstr "Bla i mediebiblioteket"
 
-#: lib/barkpark_web/studio_locale.ex:78
+#: lib/barkpark_web/studio_locale.ex:89
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr "Endre"
 
-#: lib/barkpark_web/studio_locale.ex:72
+#: lib/barkpark_web/studio_locale.ex:83
 #, elixir-autogen, elixir-format
 msgid "Close"
 msgstr "Lukk"
 
-#: lib/barkpark_web/studio_locale.ex:70
+#: lib/barkpark_web/studio_locale.ex:81
 #, elixir-autogen, elixir-format
 msgid "Media library"
 msgstr "Mediebibliotek"
 
-#: lib/barkpark_web/studio_locale.ex:65
+#: lib/barkpark_web/studio_locale.ex:76
 #, elixir-autogen, elixir-format
 msgid "No image selected — drop a file, or click to upload"
 msgstr "Ingen bilde valgt — slipp en fil her, eller klikk for å laste opp"
 
-#: lib/barkpark_web/studio_locale.ex:80
+#: lib/barkpark_web/studio_locale.ex:92
 #, elixir-autogen, elixir-format
 msgid "No matches"
 msgstr "Ingen treff"
 
-#: lib/barkpark_web/studio_locale.ex:79
+#: lib/barkpark_web/studio_locale.ex:91
 #, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr "Fjern"
 
-#: lib/barkpark_web/studio_locale.ex:64
+#: lib/barkpark_web/studio_locale.ex:75
 #, elixir-autogen, elixir-format
 msgid "Remove image"
 msgstr "Fjern bilde"
 
-#: lib/barkpark_web/studio_locale.ex:69
+#: lib/barkpark_web/studio_locale.ex:80
 #, elixir-autogen, elixir-format
 msgid "Right-click for image options"
 msgstr "Høyreklikk for bildevalg"
 
-#: lib/barkpark_web/studio_locale.ex:84
+#: lib/barkpark_web/studio_locale.ex:96
 #, elixir-autogen, elixir-format
 msgid "Search %{types}…"
 msgstr "Søk i %{types}…"
 
-#: lib/barkpark_web/studio_locale.ex:71
+#: lib/barkpark_web/studio_locale.ex:82
 #, elixir-autogen, elixir-format
 msgid "Search assets…"
 msgstr "Søk i medier…"
 
-#: lib/barkpark_web/studio_locale.ex:59
+#: lib/barkpark_web/studio_locale.ex:70
 #, elixir-autogen, elixir-format
 msgid "Upload file"
 msgstr "Last opp fil"
 
-#: lib/barkpark_web/studio_locale.ex:68
+#: lib/barkpark_web/studio_locale.ex:79
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
 msgstr "Laster opp…"
 
-#: lib/barkpark_web/studio_locale.ex:85
+#: lib/barkpark_web/studio_locale.ex:97
 #, elixir-autogen, elixir-format
 msgid "documents"
 msgstr "dokumenter"
 
 #: lib/barkpark_web/components/studio_components/editor.ex:800
-#: lib/barkpark_web/studio_locale.ex:81
+#: lib/barkpark_web/studio_locale.ex:93
 #, elixir-autogen, elixir-format
 msgid "draft"
 msgstr "utkast"
 
-#: lib/barkpark_web/studio_locale.ex:62
+#: lib/barkpark_web/studio_locale.ex:73
 #, elixir-autogen, elixir-format
 msgid "Alt text"
 msgstr "Alt-tekst"
 
-#: lib/barkpark_web/studio_locale.ex:63
+#: lib/barkpark_web/studio_locale.ex:74
 #, elixir-autogen, elixir-format
 msgid "Describe the image for people who cannot see it"
 msgstr "Beskriv bildet for dem som ikke kan se det"
@@ -433,12 +433,12 @@ msgstr "Beskriv bildet for dem som ikke kan se det"
 msgid "Title"
 msgstr "Tittel"
 
-#: lib/barkpark_web/studio_locale.ex:61
+#: lib/barkpark_web/studio_locale.ex:72
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr "Last opp"
 
-#: lib/barkpark_web/studio_locale.ex:101
+#: lib/barkpark_web/studio_locale.ex:113
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr "Har ikke riktig format"
@@ -448,27 +448,27 @@ msgstr "Har ikke riktig format"
 msgid "Fix validation errors before publishing"
 msgstr "Rett valideringsfeilene før du publiserer"
 
-#: lib/barkpark_web/studio_locale.ex:112
+#: lib/barkpark_web/studio_locale.ex:124
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr "Må være minst %{min}"
 
-#: lib/barkpark_web/studio_locale.ex:106
+#: lib/barkpark_web/studio_locale.ex:118
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr "Må være minst %{min} tegn"
 
-#: lib/barkpark_web/studio_locale.ex:115
+#: lib/barkpark_web/studio_locale.ex:127
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr "Kan være høyst %{max}"
 
-#: lib/barkpark_web/studio_locale.ex:109
+#: lib/barkpark_web/studio_locale.ex:121
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr "Kan være høyst %{max} tegn"
 
-#: lib/barkpark_web/studio_locale.ex:98
+#: lib/barkpark_web/studio_locale.ex:110
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr "Påkrevd"
@@ -624,7 +624,7 @@ msgid "Imported %{rows} rows into the new tab %{name}"
 msgstr "Importerte %{rows} rader til den nye fanen %{name}"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3070
-#: lib/barkpark_web/studio_locale.ex:66
+#: lib/barkpark_web/studio_locale.ex:77
 #, elixir-autogen, elixir-format
 msgid "Replace image"
 msgstr "Bytt bilde"
@@ -691,7 +691,7 @@ msgstr "Utvidelser"
 msgid "Select %{item}"
 msgstr "Velg %{item}"
 
-#: lib/barkpark_web/studio_locale.ex:67
+#: lib/barkpark_web/studio_locale.ex:78
 #, elixir-autogen, elixir-format
 msgid "Image unavailable — drop a file, or click to replace"
 msgstr "Bildet er ikke tilgjengelig — slipp en fil her, eller klikk for å bytte"
@@ -1372,3 +1372,8 @@ msgstr "SEK (kr)"
 #, elixir-autogen, elixir-format
 msgid "USD ($)"
 msgstr "USD ($)"
+
+#: lib/barkpark_web/studio_locale.ex:90
+#, elixir-autogen, elixir-format
+msgid "Cancel"
+msgstr "Avbryt"

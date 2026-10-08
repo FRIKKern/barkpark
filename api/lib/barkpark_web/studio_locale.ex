@@ -87,6 +87,7 @@ defmodule BarkparkWeb.StudioLocale do
   def component_strings(:reference) do
     Jason.encode!(%{
       "change" => gettext("Change"),
+      "cancel" => gettext("Cancel"),
       "remove" => gettext("Remove"),
       "no_matches" => gettext("No matches"),
       "draft" => gettext("draft"),
