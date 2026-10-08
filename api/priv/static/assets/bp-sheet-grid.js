@@ -154,6 +154,12 @@
       // input on the common ancestor so both the grid (inside el) and the bar
       // (a sibling) are covered; cell/td lookups still go through this.el.
       this.root = (this.el.closest && this.el.closest(".sheet-editor")) || this.el;
+      // A popover dialog (filter, conditional formatting) takes focus when it
+      // opens (task-028c354f7f24fb65): the server names the element and the
+      // first form control inside it gets focus once the patch lands.
+      if (typeof this.handleEvent === "function") {
+        this.handleEvent("bp:sheet-focus-first", (payload) => this._focusFirstIn(payload && payload.id));
+      }
       // Function autocomplete: the server stamps the whole function vocabulary
       // on this element (data-fns), space-joined. _fn holds the live dropdown
       // state ({token,start,items,idx,navigated}); _menuEl is its rendered node.
@@ -375,6 +381,13 @@
         if (!(e.target === this.el || (this.el.contains && this.el.contains(e.target)))) return;
         // Name box / formula bar / tab-rename inputs keep native behaviour.
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        // Header controls INSIDE the grid element — the filter funnel, the
+        // column / row menu buttons — and anything in a popover dialog keep
+        // native keys too: Enter/Space on a focused funnel opened the cell
+        // editor (or typed a space into it) instead of the filter
+        // (task-028c354f7f24fb65). The grid wrapper itself never matches.
+        if (e.target !== this.el && e.target.closest &&
+            e.target.closest("button, a[href], [role='dialog']")) return;
 
         // WCAG 2.1.2 escape hatch: Tab normally walks the selection (a keyboard
         // trap — focus can never leave the grid). Escape arms a one-shot so the
@@ -592,7 +605,11 @@
         // nest INSIDE the th, so a naive closest("th") would steal their
         // clicks — the three guards keep them working.
         const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
-        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu"))) {
+        // The filter funnel and its popover live in the header cell too; a
+        // click there opens / drives the filter and must not select the column
+        // and pull focus to the grid (task-028c354f7f24fb65).
+        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu") ||
+                    e.target.closest(".sheet-filter-funnel") || e.target.closest(".sheet-popover"))) {
           this.el.focus({ preventScroll: true });
           // A header click is a click-away: commit any open cell editor / dirty
           // bar to the still-active cell before the whole-row/col selection.
@@ -674,7 +691,8 @@
         if (!th) return;
         // Menu button, resize handle, and open menu nest INSIDE the th — the
         // same guards _onClick uses keep their mousedowns out of the drag.
-        if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu")) return;
+        if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu") ||
+            e.target.closest(".sheet-filter-funnel") || e.target.closest(".sheet-popover")) return;
         // POINT ROUTING for headers (Decision 4): a header click while the caret
         // expects a reference inserts a whole-column (B:B) / whole-row (3:3) ref
         // and drag-extends it; otherwise falls through to the whole-row/col
@@ -1092,6 +1110,22 @@
       // (cell-click, nav, tab-switch) — derive the presence frame from the
       // fresh DOM; the throttle + dedupe keep remote-delta re-renders quiet.
       this._presencePing();
+    },
+
+    _focusFirstIn(id, tries = 30) {
+      if (typeof id !== "string" || id === "" || typeof document === "undefined" || !document.getElementById) return;
+      const box = document.getElementById(id);
+      // A form control first (the dialog's Close button is earlier in the DOM
+      // but is not where the user starts), then any control.
+      const target = box && box.querySelector &&
+        (box.querySelector("form select, form input:not([type='hidden']), form textarea") ||
+          box.querySelector("select, input:not([type='hidden']), textarea, button"));
+      if (target && target.focus) {
+        target.focus();
+      } else if (tries > 0) {
+        const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+        raf(() => this._focusFirstIn(id, tries - 1));
+      }
     },
 
     // Focus the first context-menu item and nudge the menu back on-screen if the

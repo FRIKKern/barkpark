@@ -1522,7 +1522,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # from the current selection (Excel's "apply to" default).
   def handle_event("cf-open", _params, socket) do
     panel = if socket.assigns.cf_panel, do: nil, else: cf_new_form(socket)
-    {:noreply, assign(socket, cf_panel: panel)}
+
+    {:noreply,
+     socket
+     |> assign(cf_panel: panel)
+     |> focus_first_in(panel && "#{socket.assigns.id}-cf-panel")}
   end
 
   def handle_event("cf-close", _params, socket) do
@@ -1602,7 +1606,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("filter-open", %{"col" => col}, socket) do
     col = to_int(col)
     panel = filter_open_form(socket.assigns.filters, col)
-    {:noreply, assign(socket, filter_panel: panel, menu: nil)}
+
+    {:noreply,
+     socket
+     |> assign(filter_panel: panel, menu: nil)
+     |> focus_first_in("#{socket.assigns.id}-filter-form-#{col}")}
   end
 
   def handle_event("filter-close", _params, socket) do
@@ -1784,6 +1792,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp import_error_text(:too_many_files), do: gettext("Choose one file.")
   defp import_error_text(other), do: gettext("The upload failed (%{reason}).", reason: other)
+
+  # task-028c354f7f24fb65: a popover dialog takes focus when it opens. The hook
+  # (`bp:sheet-focus-first` in bp-sheet-grid.js) focuses the first control of
+  # the element with this id once the patch has put it in the DOM.
+  defp focus_first_in(socket, nil), do: socket
+  defp focus_first_in(socket, id), do: push_event(socket, "bp:sheet-focus-first", %{id: id})
+
+  # task-028c354f7f24fb65: closing a popover dialog (Escape, ×, Apply) hands
+  # focus back to the button that opened it instead of dropping it on <body>.
+  defp close_and_refocus(event, target, trigger_id) do
+    event
+    |> Phoenix.LiveView.JS.push(target: target)
+    |> Phoenix.LiveView.JS.focus(to: "#" <> trigger_id)
+  end
 
   defp send_ops(socket, ops) do
     refs = for %{"ref" => ref} <- ops, do: ref
@@ -3259,6 +3281,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             aria-haspopup="dialog"
             aria-expanded={to_string(@cf_panel != nil)}
             title="Conditional formatting"
+            id={"#{@id}-cf-btn"}
             data-test-id="sheet-cf-btn"
           >Cond. format</button>
 
@@ -3267,11 +3290,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-popover sheet-cf-panel"
             role="dialog"
             aria-label="Conditional formatting rules"
+            id={"#{@id}-cf-panel"}
+            phx-window-keydown={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")}
+            phx-key="Escape"
             data-test-id="sheet-cf-panel"
           >
             <div class="sheet-cf-head">
               <span class="sheet-cf-title">Conditional formatting</span>
-              <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-close" phx-target={@myself} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
             </div>
 
             <%!-- Existing rules for THIS tab (raw stored list). Honest empty state. --%>
@@ -3931,6 +3957,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   )
               }
               title="Filter this column"
+              id={"#{@id}-filter-funnel-#{c}"}
               data-active={to_string(Map.has_key?(@filters, c))}
               data-test-id={"sheet-filter-funnel-#{c}"}
             ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
@@ -3940,16 +3967,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               class="sheet-popover sheet-filter-panel"
               role="dialog"
               aria-label={"Filter column " <> Geometry.col_letters(c)}
-              phx-window-keydown="filter-close"
+              phx-window-keydown={close_and_refocus("filter-close", @myself, "#{@id}-filter-funnel-#{c}")}
               phx-key="Escape"
-              phx-target={@myself}
               data-test-id="sheet-filter-panel"
             >
               <div class="sheet-filter-head">
                 <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("filter-close", @myself, "#{@id}-filter-funnel-#{c}")} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
               </div>
-              <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+              <form id={"#{@id}-filter-form-#{c}"} class="sheet-filter-form" phx-submit={close_and_refocus("filter-apply", @myself, "#{@id}-filter-funnel-#{c}")} phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
                 <input type="hidden" name="col" value={c} />
                 <label class="sheet-filter-field">
                   <span>Show rows where</span>

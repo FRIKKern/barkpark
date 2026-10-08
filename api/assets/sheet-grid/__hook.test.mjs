@@ -1247,6 +1247,53 @@ for (const key of ["Enter", " ", "Tab"]) {
   });
 }
 
+// task-028c354f7f24fb65: a HEADER button inside the grid element (the filter
+// funnel, a column menu button) or a control in a popover dialog must keep
+// native keys too. Enter on the funnel opened the cell editor and Space typed
+// a space into it, so the filter could not be opened by keyboard.
+function inGridControlKey(key, selector) {
+  const e = keydown(key);
+  e.target = {
+    _inGrid: true,
+    matches: () => false,
+    closest: (sel) => (sel === "button, a[href], [role='dialog']" ? { selector } : null),
+  };
+  return e;
+}
+
+for (const key of ["Enter", " ", "Tab"]) {
+  check(`in-grid header button ${key === " " ? "Space" : key} keeps native behaviour`, () => {
+    const h = mountHook();
+    const e = inGridControlKey(key, "button");
+    h.el.dispatch("keydown", e);
+    assert.deepEqual(h._pushed, [], `${key} on a header button must not drive the grid key map`);
+    assert.equal(e.prevented, false);
+  });
+}
+
+check("bp:sheet-focus-first focuses the dialog's first FORM control, not its Close button", () => {
+  const h = mountHook();
+  const focused = [];
+  const ctl = (name) => ({ name, focus() { focused.push(name); } });
+  const close = ctl("close");
+  const op = ctl("op");
+  const box = {
+    querySelector(sel) {
+      return sel.startsWith("form ") ? op : close;
+    },
+  };
+  const saved = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === "dlg" ? box : null);
+  try {
+    h._focusFirstIn("dlg");
+    h._focusFirstIn("");
+    h._focusFirstIn(undefined);
+  } finally {
+    sandbox.document.getElementById = saved;
+  }
+  assert.deepEqual(focused, ["op"]);
+});
+
 // Regression guard: the SAME keys with an in-grid target still behave exactly
 // as before — the scope guard only rejects out-of-grid targets.
 check("grid Enter still edit-starts, Tab still navs, Space still seeds (scope-guard regression pin)", () => {
