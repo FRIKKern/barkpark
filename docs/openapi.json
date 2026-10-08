@@ -105,6 +105,7 @@
               "code": {
                 "enum": [
                   "ambiguous_dataset",
+                  "bad_request",
                   "batch_too_large",
                   "blob_path_conflict",
                   "bpml",
@@ -155,6 +156,7 @@
                   "invalid_op",
                   "invalid_paper",
                   "invalid_paper_structure",
+                  "invalid_pref",
                   "invalid_proposal",
                   "invalid_request_id",
                   "invalid_state_report",
@@ -168,6 +170,7 @@
                   "mfa_required",
                   "missing_slug",
                   "missing_source",
+                  "no_user_identity",
                   "not_found",
                   "owner_only",
                   "paper_exists",

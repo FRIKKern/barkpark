@@ -348,7 +348,20 @@ defmodule Barkpark.Content.Errors do
                          # caller who is not the instance owner — permanent; the
                          # way out is the cloud profile or a registered host
                          # (task-6ca882967fd95dda, StudioChat.HostExecution).
-                         "host_execution_not_permitted"
+                         "host_execution_not_permitted",
+                         # Per-account prefs (task-7d2a48dbf7e4bf34) —
+                         # user_pref_controller.ex. `no_user_identity` (403): a
+                         # shared/admin-minted token with no owner has no
+                         # account to key a per-user pref by (its own
+                         # route-specific hint wins over any default here).
+                         # `invalid_pref` (422): the changeset's own field
+                         # errors, carried verbatim via emit_fields/3 (a map,
+                         # not a string — emit_custom's `message` guard
+                         # requires one). `bad_request` (422): the PUT body's
+                         # `value` key was missing or not an object.
+                         "no_user_identity",
+                         "invalid_pref",
+                         "bad_request"
                        ])
 
   def to_envelope(reason), do: to_envelope(reason, nil)
