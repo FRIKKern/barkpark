@@ -6,21 +6,7 @@
    "fixture": "diagram",
    "text": "Diagram caption text for parity",
    "axis": "backgroundColor",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "backgroundColor",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFamily",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
+   "reason": "Diagram caption ground: the reader's figure sits on --paper-bg-deep, the editor's caption input on the canvas ground."
   },
   {
    "surface": "canvas",
@@ -104,21 +90,7 @@
    "fixture": "diagram",
    "text": "Diagram caption text for parity",
    "axis": "backgroundColor",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "backgroundColor",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFamily",
-   "reason": "Diagram source and caption now take the reader's type; left: the editor shell's --paper-font-mono token lists a different stack than the reader's, and the reader's figure sits on --paper-bg-deep while the editor's popover sits on --paper-bg."
+   "reason": "Diagram caption ground: the reader's figure sits on --paper-bg-deep, the editor's caption input on the canvas ground."
   },
   {
    "surface": "liveview",
