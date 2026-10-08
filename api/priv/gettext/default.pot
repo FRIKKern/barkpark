@@ -86,6 +86,8 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:892
 #: lib/barkpark_web/layouts/bulldocs.html.heex:2282
+#: lib/barkpark_web/live/studio/settings_live.ex:1069
+#: lib/barkpark_web/live/studio/settings_live.ex:1100
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3151
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3420
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
@@ -766,6 +768,7 @@ msgid "browsing"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/panes.ex:644
+#: lib/barkpark_web/live/studio/settings_live.ex:943
 #, elixir-autogen, elixir-format
 msgid "Plugins"
 msgstr ""
@@ -1846,6 +1849,8 @@ msgid "Revoke this link"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:1082
+#: lib/barkpark_web/live/studio/settings_live.ex:1049
+#: lib/barkpark_web/live/studio/settings_live.ex:1090
 #, elixir-autogen, elixir-format
 msgid "Save"
 msgstr ""
@@ -6127,4 +6132,492 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:519
 #, elixir-autogen, elixir-format
 msgid "value"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1082
+#, elixir-autogen, elixir-format
+msgid "%{plugin} settings"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:854
+#, elixir-autogen, elixir-format
+msgid "Applies to the reader, Studio and emailed papers — light/dark mode stays a separate switch."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:899
+#, elixir-autogen, elixir-format
+msgid "Chat execution profile"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:715
+#, elixir-autogen, elixir-format
+msgid "Chat turns for this workspace now run in the cloud sandbox."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:718
+#, elixir-autogen, elixir-format
+msgid "Chat turns for this workspace now run on the self-hosted runner."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:911
+#: lib/barkpark_web/live/studio/settings_live.ex:918
+#, elixir-autogen, elixir-format
+msgid "Cloud"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1338
+#, elixir-autogen, elixir-format
+msgid "Could not save plugin settings."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:251
+#, elixir-autogen, elixir-format
+msgid "Could not save the Studio language."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:703
+#, elixir-autogen, elixir-format
+msgid "Could not save the execution profile."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:639
+#, elixir-autogen, elixir-format
+msgid "Could not save the workspace theme."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:771
+#, elixir-autogen, elixir-format
+msgid "Credentials are global to the installation, not per-workspace."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1097
+#, elixir-autogen, elixir-format
+msgid "Delete settings for %{plugin}?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1066
+#, elixir-autogen, elixir-format
+msgid "Delete settings for this plugin?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:462
+#, elixir-autogen, elixir-format
+msgid "Deleted %{plugin}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1065
+#: lib/barkpark_web/live/studio/settings_live.ex:1096
+#, elixir-autogen, elixir-format
+msgid "Deleting..."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:990
+#, elixir-autogen, elixir-format
+msgid "Disabled"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:278
+#, elixir-autogen, elixir-format
+msgid "Disabled %{plugin} for this workspace."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:994
+#, elixir-autogen, elixir-format
+msgid "Enable %{plugin} for this workspace"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:989
+#, elixir-autogen, elixir-format
+msgid "Enabled"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:280
+#, elixir-autogen, elixir-format
+msgid "Enabled %{plugin} for this workspace."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1295
+#, elixir-autogen, elixir-format
+msgid "Enabled — no content types in this workspace yet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1298
+#, elixir-autogen, elixir-format
+msgid "Enabled — types registered, no documents yet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:769
+#, elixir-autogen, elixir-format
+msgid "Encrypted JSON store. Values are masked on load — click Reveal to fetch unmasked (audited)."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:743
+#, elixir-autogen, elixir-format
+msgid "Everything here writes to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1027
+#, elixir-autogen, elixir-format
+msgid "Installed plugins always keep their schemas, routes and background jobs registered — these controls decide only what THIS workspace surfaces."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1523
+#, elixir-autogen, elixir-format
+msgid "Invalid JSON: %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1519
+#, elixir-autogen, elixir-format
+msgid "JSON must be an object at the top level."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:796
+#, elixir-autogen, elixir-format
+msgid "Load"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:70
+#, elixir-autogen, elixir-format
+msgid "Main structure"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1659
+#, elixir-autogen, elixir-format
+msgid "Missing or invalid: %{fields}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1528
+#, elixir-autogen, elixir-format
+msgid "Missing settings_json."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:310
+#, elixir-autogen, elixir-format
+msgid "Moved %{plugin} to %{placement}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:952
+#, elixir-autogen, elixir-format
+msgid "No plugins are installed on this server."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:413
+#: lib/barkpark_web/live/studio/settings_live.ex:440
+#, elixir-autogen, elixir-format
+msgid "No settings to reveal."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1417
+#, elixir-autogen, elixir-format
+msgid "No settings yet for %{plugin} — fill in and Save."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1451
+#, elixir-autogen, elixir-format
+msgid "No settings yet for %{plugin} — start with {} and Save."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:480
+#: lib/barkpark_web/live/studio/settings_live.ex:927
+#: lib/barkpark_web/live/studio/settings_live.ex:948
+#: lib/barkpark_web/live/studio/settings_live.ex:1342
+#, elixir-autogen, elixir-format
+msgid "No workspace in scope to configure."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:643
+#: lib/barkpark_web/live/studio/settings_live.ex:880
+#, elixir-autogen, elixir-format
+msgid "No workspace in scope to theme."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:255
+#, elixir-autogen, elixir-format
+msgid "No workspace in scope."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:465
+#, elixir-autogen, elixir-format
+msgid "Nothing to delete."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:856
+#, elixir-autogen, elixir-format
+msgid "One theme ships today; more land as the compiler emits them."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:912
+#, elixir-autogen, elixir-format
+msgid "Only an owner or admin of this workspace can change it, and a flip takes effect on the workspace's next chat turn."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:779
+#, elixir-autogen, elixir-format
+msgid "Only the installation admin can view or change plugin credentials, because they are shared by every workspace on this installation."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1001
+#, elixir-autogen, elixir-format
+msgid "Placement"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1004
+#, elixir-autogen, elixir-format
+msgid "Placement of %{plugin}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:767
+#, elixir-autogen, elixir-format
+msgid "Plugin credentials"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:585
+#, elixir-autogen, elixir-format
+msgid "Plugin credentials are installation-wide — viewing or managing them requires installation-admin authority."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:598
+#, elixir-autogen, elixir-format
+msgid "Plugin credentials are installation-wide — viewing or managing them requires the platform operator."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:786
+#, elixir-autogen, elixir-format
+msgid "Plugin name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:71
+#, elixir-autogen, elixir-format
+msgid "Plugins folder"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1058
+#: lib/barkpark_web/live/studio/settings_live.ex:1127
+#, elixir-autogen, elixir-format
+msgid "Reveal"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:437
+#, elixir-autogen, elixir-format
+msgid "Revealed %{field} (audited)."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:410
+#, elixir-autogen, elixir-format
+msgid "Revealed (audited)."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:922
+#, elixir-autogen, elixir-format
+msgid "Run this workspace's chat turns in the cloud sandbox"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1483
+#: lib/barkpark_web/live/studio/settings_live.ex:1512
+#, elixir-autogen, elixir-format
+msgid "Saved %{plugin}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:858
+#, elixir-autogen, elixir-format
+msgid "Saved server-side and stamped on the first byte — no flash."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1046
+#: lib/barkpark_web/live/studio/settings_live.ex:1090
+#, elixir-autogen, elixir-format
+msgid "Saving..."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:874
+#, elixir-autogen, elixir-format
+msgid "Schema titles and descriptions are never translated — they are yours."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:488
+#, elixir-autogen, elixir-format
+msgid "Scope changed — nothing was saved. Reloaded this workspace's settings."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:910
+#: lib/barkpark_web/live/studio/settings_live.ex:919
+#, elixir-autogen, elixir-format
+msgid "Self-hosted"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:812
+#, elixir-autogen, elixir-format
+msgid "Status:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:865
+#, elixir-autogen, elixir-format
+msgid "Studio language"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:239
+#, elixir-autogen, elixir-format
+msgid "Studio language set to %{locale}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:744
+#, elixir-autogen, elixir-format
+msgid "Switch workspace from the top bar to configure another."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:873
+#, elixir-autogen, elixir-format
+msgid "The language of the Studio chrome (buttons, cards, row fallbacks) for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:853
+#, elixir-autogen, elixir-format
+msgid "The theme identity for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:845
+#, elixir-autogen, elixir-format
+msgid "Theme"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:733
+#, elixir-autogen, elixir-format
+msgid "Theme, plugins and credentials for"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:748
+#, elixir-autogen, elixir-format
+msgid "Theme, plugins and credentials for this workspace."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:72
+#, elixir-autogen, elixir-format
+msgid "Top menu only"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:956
+#, elixir-autogen, elixir-format
+msgid "Turn a plugin off to keep this workspace clean, or move where it lands in the Desk Structure. Disabling never deletes content — its document types move to the …Rest folder, still fully readable."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:686
+#, elixir-autogen, elixir-format
+msgid "Unknown execution profile."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:246
+#, elixir-autogen, elixir-format
+msgid "Unknown locale %{locale}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:289
+#: lib/barkpark_web/live/studio/settings_live.ex:321
+#, elixir-autogen, elixir-format
+msgid "Unknown plugin %{plugin}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:636
+#, elixir-autogen, elixir-format
+msgid "Unknown theme %{theme}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:909
+#, elixir-autogen, elixir-format
+msgid "Where %{workspace}'s Studio chat turns run."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:124
+#: lib/barkpark_web/live/studio/settings_live.ex:730
+#, elixir-autogen, elixir-format
+msgid "Workspace Settings"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:832
+#, elixir-autogen, elixir-format
+msgid "Workspace theme"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:632
+#, elixir-autogen, elixir-format
+msgid "Workspace theme set to %{theme}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:529
+#, elixir-autogen, elixir-format
+msgid "You need to be an owner or admin of this workspace to change its %{thing}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:664
+#, elixir-autogen, elixir-format
+msgid "You need to be an owner or admin of this workspace to change its execution profile."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:978
+#, elixir-autogen, elixir-format
+msgid "default"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:792
+#, elixir-autogen, elixir-format
+msgid "e.g. onixedit, bokbasen"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:812
+#, elixir-autogen, elixir-format
+msgid "empty"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:812
+#, elixir-autogen, elixir-format
+msgid "loaded"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:513
+#, elixir-autogen, elixir-format
+msgid "locale"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:812
+#, elixir-autogen, elixir-format
+msgid "masked"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1379
+#, elixir-autogen, elixir-format
+msgid "off by default · %{placement}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:1378
+#, elixir-autogen, elixir-format
+msgid "on by default · %{placement}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:515
+#, elixir-autogen, elixir-format
+msgid "plugin placement"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:514
+#, elixir-autogen, elixir-format
+msgid "plugins"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:812
+#, elixir-autogen, elixir-format
+msgid "revealed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:911
+#, elixir-autogen, elixir-format
+msgid "routes each turn into an isolated cloud sandbox."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:512
+#, elixir-autogen, elixir-format
+msgid "theme"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/settings_live.ex:910
+#, elixir-autogen, elixir-format
+msgid "uses this instance's runner;"
 msgstr ""
