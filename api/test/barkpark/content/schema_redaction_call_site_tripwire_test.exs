@@ -82,7 +82,6 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
     # -- unscoped (2-arity, or an explicit `[]`): scope_to_workspace_or_global/3
     #    with a nil workspace is the deliberate global read, so the global row
     #    already resolves and no fallback is needed.
-    "barkpark/media.ex:patch_asset_metadata" => "unscoped 2-arity existence check",
     "barkpark/tenancy.ex:pulled_schema_row" => "unscoped 2-arity provenance guard",
     "barkpark/tasks/board.ex:field_visibility_gate" => "explicit [] — unscoped global read",
     "barkpark/plugins/tasks.ex:task_schema_present?" => "unscoped 2-arity presence probe",
