@@ -4163,9 +4163,27 @@ export function docToBlocks(doc) {
 //   3. moves permute the running list — now exactly nextSeq's id SET in some
 //      order — into nextSeq ORDER. An already-correct subsequence emits nothing.
 //   4. interior patches mutate surviving prose content in place (order-free).
+// A pasted or dropped picture is not a block until its upload gives it a src: while it
+// uploads, or after the upload failed, a NEW top-level image node with no src stays in
+// the canvas (its badge says why) and out of the ops. Emitted, the host saved an empty
+// image block that outlived the error on reload (task-797f973032044a56). The upload
+// flags are transient attrs, so this reads the LIVE doc (before docToBlocks drops them)
+// and answers top-level indexes. An image the server already holds is never held back.
+export function pendingUploadIndexes(liveDoc, prevBlocks) {
+  const held = new Set();
+  const known = new Set((prevBlocks || []).map((b) => b && b.id).filter((id) => id != null));
+  ((liveDoc && liveDoc.content) || []).forEach((node, i) => {
+    if (!node || node.type !== CANVAS_IMAGE_NODE_NAME) return;
+    const a = node.attrs || {};
+    if (a.src || (!a.uploading && !a.uploadError)) return;
+    if (a.bpId != null && known.has(a.bpId)) return;
+    held.add(i);
+  });
+  return held;
+}
+
 export function runToOps(prevBlocks, nextDoc, options = {}) {
   const prev = prevBlocks || [];
-  const nextNodes = (nextDoc && nextDoc.content) || [];
 
   // prev id → index, and the block.
   const prevIndex = new Map();
@@ -4177,6 +4195,8 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
       prevById.set(id, block);
     }
   });
+
+  const nextNodes = (nextDoc && nextDoc.content) || [];
 
   // ── 0) BUILD nextSeq: every next node gets a KNOWN id (existing or minted) ──
   //
