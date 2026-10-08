@@ -6,56 +6,7 @@
    "fixture": "diagram",
    "text": "Diagram caption text for parity",
    "axis": "backgroundColor",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "backgroundColor",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFamily",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFeatureSettings",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontSize",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "letterSpacing",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "lineHeight",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "textRendering",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+   "reason": "Diagram caption ground: the reader's figure sits on --paper-bg-deep, the editor's caption input on the canvas ground."
   },
   {
    "surface": "canvas",
@@ -104,56 +55,7 @@
    "fixture": "diagram",
    "text": "Diagram caption text for parity",
    "axis": "backgroundColor",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "backgroundColor",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFamily",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontFeatureSettings",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "fontSize",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "letterSpacing",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "lineHeight",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "diagram",
-   "text": "graph LR A-->B",
-   "axis": "textRendering",
-   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+   "reason": "Diagram caption ground: the reader's figure sits on --paper-bg-deep, the editor's caption input on the canvas ground."
   },
   {
    "surface": "liveview",
