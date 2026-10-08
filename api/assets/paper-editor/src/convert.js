@@ -55,6 +55,15 @@ function flatMarkToTiptap(mark) {
   }
 }
 
+// An unknown flat mark rides as a bpOpaqueMark (./opaque-mark.js) holding the stored
+// mark and its leaf's whole `marks` array verbatim, so a save writes both back.
+const OPAQUE_MARK = "bpOpaqueMark";
+function opaqueMarkToTiptap(mark, leafMarks) {
+  if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
+    typeof mark.type !== "string" || mark.type === "") return null;
+  return { type: OPAQUE_MARK, attrs: { mark: deepCloneJson(mark), leaf: deepCloneJson(leafMarks) } };
+}
+
 // Walk one portable-doc inline node, accumulating active marks, and push the
 // resulting flat TipTap text nodes into `out`.
 function inlineToTiptapNodes(node, marks, out) {
@@ -67,7 +76,8 @@ function inlineToTiptapNodes(node, marks, out) {
       // touched block keeps — what the reader paints.
       const text = coerceInlineText(node.value) || coerceInlineText(node.text);
       if (text.length === 0) return;
-      const own = Array.isArray(node.marks) ? node.marks.map(flatMarkToTiptap).filter(Boolean) : [];
+      const own = Array.isArray(node.marks)
+        ? node.marks.map((m) => flatMarkToTiptap(m) || opaqueMarkToTiptap(m, node.marks)).filter(Boolean) : [];
       const all = [...marks, ...own];
       const tnode = { type: "text", text };
       if (all.length) tnode.marks = all.map((m) => ({ ...m }));
@@ -340,9 +350,10 @@ const LEAF_KINDS = ["code", "blockref", "tag", "valueref"];
 // value-leaf (if any), then wrap the remaining marks from inner to outer.
 function tiptapTextNodeToPd(tnode) {
   const text = tnode.text || "";
+  const { flat, rest } = opaqueLeafMarks(tnode.marks || []);
   // Collect wrappers, ordered outer→inner per MARK_ORDER.
   const wrappers = [];
-  (tnode.marks || []).forEach((m) => {
+  rest.forEach((m) => {
     const w = markToPd(m);
     if (w) wrappers.push(w);
   });
@@ -356,6 +367,7 @@ function tiptapTextNodeToPd(tnode) {
   const nestW = wrappers.filter((w) => !LEAF_KINDS.includes(w.kind));
 
   let node = leafNode(leaf, text);
+  if (flat) node.marks = flat;
 
   // Wrap from inner-most non-leaf mark outward.
   for (let i = nestW.length - 1; i >= 0; i--) {
@@ -371,6 +383,32 @@ function tiptapTextNodeToPd(tnode) {
     }
   }
   return node;
+}
+
+// A run holding bpOpaqueMarks came from a text leaf whose flat `marks` named a mark
+// the canvas has no editor for. Rebuild that leaf's `marks` in its stored order and
+// spelling: each opaque mark verbatim, and each known one the run still carries.
+// The run's other marks (outer wrappers, marks added since) wrap as usual.
+function opaqueLeafMarks(marks) {
+  const opaque = marks.filter((m) => m.type === OPAQUE_MARK && m.attrs && m.attrs.mark);
+  if (!opaque.length) return { flat: null, rest: marks };
+  const stored = opaque.map((m) => m.attrs.leaf).find(Array.isArray) || [];
+  const same = (run, known) => run.type === known.type &&
+    (known.type !== "link" || ((run.attrs && run.attrs.href) || "") === known.attrs.href);
+  const used = new Set();
+  const flat = [];
+  stored.forEach((entry) => {
+    const known = flatMarkToTiptap(entry);
+    const hit = known ? marks.find((m) => same(m, known))
+      : opaque.find((m) => jsonEqual(m.attrs.mark, entry));
+    if (!hit) return;
+    flat.push(deepCloneJson(entry));
+    used.add(hit);
+  });
+  opaque.forEach((m) => {
+    if (!used.has(m)) flat.push(deepCloneJson(m.attrs.mark));
+  });
+  return { flat, rest: marks.filter((m) => !used.has(m) && m.type !== OPAQUE_MARK) };
 }
 
 // The value-leaf node for a flat text run: `code` → value from text; `blockref`
