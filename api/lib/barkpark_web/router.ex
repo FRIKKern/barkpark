@@ -1282,6 +1282,14 @@ defmodule BarkparkWeb.Router do
     get("/login/magic", SessionController, :magic_request_form)
     get("/auth/magic/:token", SessionController, :magic)
 
+    # Landing page for the emailed confirmation link (task-bd5e1aa94cf67a18):
+    # AuthController.register/2 mails /auth/confirm/<token>, which 404'd in a
+    # browser before this — only the JSON POST /v1/auth/verify-email existed.
+    # GET renders a "Confirm email" button and never consumes the token (so a
+    # mail-scanner's link-prefetch can't burn it); POST is the only consumer.
+    get("/auth/confirm/:token", SessionController, :confirm_form)
+    post("/auth/confirm/:token", SessionController, :confirm_submit)
+
     # dwb-7 one-click Studio entry: consume a single-use login ticket, set the
     # session api_token (no paste), redirect to /studio. Minted by
     # POST /v1/auth/login-tickets (LoginTicketController). See SessionController.ticket/2.

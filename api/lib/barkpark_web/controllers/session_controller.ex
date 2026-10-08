@@ -407,6 +407,53 @@ defmodule BarkparkWeb.SessionController do
 
   def reset_submit(conn, _params), do: redirect(conn, to: "/login/reset")
 
+  @doc """
+  Landing page for the emailed confirmation link (`GET /auth/confirm/:token`,
+  task-bd5e1aa94cf67a18). `AuthController.register/2` mails
+  `build_url("/auth/confirm/", token)`, but nothing served that path in a
+  browser — only the JSON `POST /v1/auth/verify-email` existed — so a new
+  account could never confirm from the email it was told to open.
+
+  Same GET-never-consumes shape as `reset_form/2`: this renders a page with a
+  "Confirm email" button that POSTs to the same path. A GET alone proves
+  nothing — an email-scanner's link-prefetch (Outlook Safe Links, Google's
+  image/link proxies) fires a plain GET at every URL in a message within
+  seconds of delivery, and a GET that consumed the token would burn it before
+  the real recipient ever clicked.
+  """
+  def confirm_form(conn, %{"token" => token}) when is_binary(token) do
+    conn
+    |> no_store()
+    |> render(:confirm, page_title: "Confirm your email", token: token, result: nil)
+  end
+
+  @doc """
+  Confirms the account (`POST /auth/confirm/:token`) — the only action that
+  consumes the token. `Accounts.confirm_user/1` is already single-use (the
+  token row is deleted in the same transaction that stamps `confirmed_at`),
+  so a reused link lands on the same `:error` arm as an expired or unknown
+  one — no oracle distinguishing the three, same anti-enumeration posture as
+  the rest of this module. Never a 500: `confirm_user/1` fails soft to
+  `:error` on anything it cannot resolve.
+  """
+  def confirm_submit(conn, %{"token" => token}) when is_binary(token) do
+    conn = no_store(conn)
+
+    case Barkpark.Accounts.confirm_user(token) do
+      {:ok, _user} ->
+        render(conn, :confirm, page_title: "Email confirmed", token: token, result: :ok)
+
+      :error ->
+        render(conn, :confirm,
+          page_title: "Confirmation link expired",
+          token: token,
+          result: :error
+        )
+    end
+  end
+
+  def confirm_submit(conn, _params), do: redirect(conn, to: "/login")
+
   defp password_error(changeset) do
     changeset
     |> Ecto.Changeset.traverse_errors(fn {msg, opts} ->
