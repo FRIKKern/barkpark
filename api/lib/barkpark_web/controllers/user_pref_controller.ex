@@ -16,6 +16,7 @@ defmodule BarkparkWeb.UserPrefController do
   use BarkparkWeb, :controller
 
   alias Barkpark.UserPrefs
+  alias BarkparkWeb.ErrorResponse
 
   def show(conn, %{"dataset" => dataset, "key" => key}) do
     with {:ok, user_id} <- resolve_user_id(conn),
@@ -24,7 +25,7 @@ defmodule BarkparkWeb.UserPrefController do
       json(conn, %{key: key, dataset: dataset, value: value})
     else
       {:ws, _} ->
-        error(conn, 404, "not_found", "no workspace resolved for this route")
+        not_found(conn)
 
       {:error, :no_user} ->
         no_user_error(conn)
@@ -38,28 +39,35 @@ defmodule BarkparkWeb.UserPrefController do
       json(conn, %{ok: true, key: key, dataset: dataset, value: pref.value})
     else
       {:ws, _} ->
-        error(conn, 404, "not_found", "no workspace resolved for this route")
+        not_found(conn)
 
       {:error, :no_user} ->
         no_user_error(conn)
 
       {:error, %Ecto.Changeset{} = changeset} ->
-        error(conn, 422, "invalid_pref", changeset_errors(changeset))
+        # emit_fields/3, not emit_custom/5: the changeset's own traversed
+        # errors are a MAP (field => messages), not the string emit_custom's
+        # `message` guard requires — this is exactly the "a minority carry no
+        # string message" case that verb exists for.
+        ErrorResponse.emit_fields(conn, 422, %{
+          code: "invalid_pref",
+          message: changeset_errors(changeset)
+        })
     end
   end
 
   def update(conn, %{"dataset" => _dataset, "key" => _key}) do
-    error(conn, 422, "bad_request", "value must be a JSON object")
+    ErrorResponse.emit_custom(conn, 422, "bad_request", "value must be a JSON object")
   end
 
   def delete(conn, %{"dataset" => dataset, "key" => key}) do
     with {:ok, user_id} <- resolve_user_id(conn),
          {:ws, %{id: ws_id}} <- {:ws, conn.assigns[:current_workspace]} do
-      :ok = UserPrefs.delete(user_id, ws_id, dataset, key)
+      {:ok, _count} = UserPrefs.delete(user_id, ws_id, dataset, key)
       json(conn, %{ok: true})
     else
       {:ws, _} ->
-        error(conn, 404, "not_found", "no workspace resolved for this route")
+        not_found(conn)
 
       {:error, :no_user} ->
         no_user_error(conn)
@@ -79,23 +87,18 @@ defmodule BarkparkWeb.UserPrefController do
     end
   end
 
+  defp not_found(conn),
+    do: ErrorResponse.emit_custom(conn, 404, "not_found", "no workspace resolved for this route")
+
   defp no_user_error(conn) do
-    error(
+    ErrorResponse.emit_custom(
       conn,
       403,
       "no_user_identity",
       "this token has no owning account to key a per-user pref by",
+      %{},
       "sign in as an account, or use a personal access token minted via POST /v1/auth/tokens"
     )
-  end
-
-  defp error(conn, status, code, message, hint \\ nil) do
-    body = %{error: %{code: code, message: message}}
-    body = if hint, do: put_in(body, [:error, :hint], hint), else: body
-
-    conn
-    |> put_status(status)
-    |> json(body)
   end
 
   defp changeset_errors(changeset) do

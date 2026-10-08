@@ -43,9 +43,9 @@ defmodule Barkpark.UserPrefsTest do
     ws = create_workspace!("ctx-#{System.unique_integer([:positive])}")
     user = user!()
     {:ok, _} = UserPrefs.put(user.id, ws.id, @dataset, "k", %{"a" => 1})
-    assert :ok = UserPrefs.delete(user.id, ws.id, @dataset, "k")
+    assert {:ok, 1} = UserPrefs.delete(user.id, ws.id, @dataset, "k")
     assert UserPrefs.get(user.id, ws.id, @dataset, "k") == nil
-    assert :ok = UserPrefs.delete(user.id, ws.id, @dataset, "k")
+    assert {:ok, 0} = UserPrefs.delete(user.id, ws.id, @dataset, "k")
   end
 
   test "scoped independently by user, workspace, dataset and key" do

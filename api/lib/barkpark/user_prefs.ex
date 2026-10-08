@@ -55,10 +55,18 @@ defmodule Barkpark.UserPrefs do
     )
   end
 
-  @doc "Delete one named value. Idempotent — deleting an absent key is `:ok`."
-  @spec delete(binary(), binary(), String.t(), String.t()) :: :ok
+  @doc """
+  Delete one named value. Idempotent — deleting an absent key is `{:ok, 0}`.
+
+  Returns the row count, not a bare `:ok` (pds-bl-sentinel-ok-returner-population:
+  a callee that performs a Repo write and throws the result away one frame
+  below its caller can never report failure upward). There is no failure mode
+  today — `delete_all` on this table cannot itself error — but the count is a
+  real signal a caller may want (idempotent no-op vs an actual row removed).
+  """
+  @spec delete(binary(), binary(), String.t(), String.t()) :: {:ok, non_neg_integer()}
   def delete(user_id, workspace_id, dataset, key) do
-    {_count, _} =
+    {count, _} =
       Repo.delete_all(
         from p in UserPref,
           where:
@@ -66,6 +74,6 @@ defmodule Barkpark.UserPrefs do
               p.dataset == ^dataset and p.key == ^key
       )
 
-    :ok
+    {:ok, count}
   end
 end
