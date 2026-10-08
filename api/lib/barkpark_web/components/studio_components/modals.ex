@@ -300,7 +300,9 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                   </button>
                 <% else %>
                   <span class="item-share-url item-share-url-hidden">
-                    Link is active. Regenerate to copy a new URL.
+                    Link is active. Its address is shown only when the link is
+                    created: to share it again, create a new link, and revoke
+                    this one if it should stop working.
                   </span>
                 <% end %>
                 <button
