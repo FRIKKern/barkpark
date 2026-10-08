@@ -1733,3 +1733,22 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
 
 [data-bp-paste-notice]::-webkit-scrollbar { display: none; }
 [data-bp-paste-notice]:focus-visible { outline: 2px solid var(--paper-ink-soft, currentColor); outline-offset: 2px; }
+
+/* An inline node the editor carries verbatim but cannot edit (a `chip`, or a
+ * type from a newer writer; task-a110126ce9111388). Inert: one selectable unit,
+ * shown with its own label, kept byte-exact on save. */
+.bp-inline-opaque {
+  display: inline-block;
+  padding: 0 0.4em;
+  border: 1px solid var(--paper-rule);
+  border-radius: 999px;
+  background: var(--paper-bg-deep);
+  color: var(--paper-ink-soft);
+  white-space: nowrap;
+  cursor: default;
+  user-select: none;
+}
+.ProseMirror-selectednode.bp-inline-opaque {
+  outline: 2px solid var(--paper-accent);
+  outline-offset: 1px;
+}

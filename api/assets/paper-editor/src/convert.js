@@ -181,11 +181,30 @@ function inlineToTiptapNodes(node, marks, out) {
       });
       return;
     }
+    // `chip` is a reader-known inline (render/inline.ex) the editor has no UI
+    // for yet (inline objects: task-85fee859cf3bfef6): carried verbatim.
+    case "chip":
+      out.push(inlineOpaqueNode(node, marks));
+      return;
     default:
-      // Unknown inline type: render its children if any, else drop.
+      // Any other typed inline node the editor does not know is carried VERBATIM
+      // as an inert atom (task-a110126ce9111388). It used to render its children
+      // or, childless, DROP — and the first save of its paragraph then deleted it
+      // from the stored document. Only a node with no type at all still falls
+      // back to its children.
+      if (typeof node.type === "string" && node.type !== "") {
+        out.push(inlineOpaqueNode(node, marks));
+        return;
+      }
       (node.children || []).forEach((c) => inlineToTiptapNodes(c, marks, out));
       return;
   }
+}
+
+function inlineOpaqueNode(node, marks) {
+  const atom = { type: "bpInlineOpaque", attrs: { node: deepCloneJson(node) } };
+  if (marks.length) atom.marks = marks.map((m) => ({ ...m }));
+  return atom;
 }
 
 // Match the list readers: arrays, encoded arrays, content-first maps, then text.
@@ -402,8 +421,35 @@ function pdKindToMark(kind) {
 // round-trips through these two, never a reinvented inline serializer.
 export function tiptapInlineToPd(content) {
   return (content || [])
-    .filter((n) => n.type === "text" || n.type === "hardBreak")
-    .map(n => tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n));
+    .filter((n) => n.type === "text" || n.type === "hardBreak" || n.type === "bpInlineOpaque")
+    .map((n) => {
+      if (n.type === "bpInlineOpaque") return inlineOpaqueToPd(n);
+      return tiptapTextNodeToPd(n.type === "hardBreak" ? { ...n, type: "text", text: "\n" } : n);
+    });
+}
+
+// The stored node back, byte-exact, inside the wrappers its marks name (the
+// same wrapping tiptapTextNodeToPd gives a text run).
+function inlineOpaqueToPd(atom) {
+  let node = deepCloneJson((atom.attrs && atom.attrs.node) || {});
+  const wrappers = (atom.marks || []).map(markToPd).filter((w) => w && !LEAF_KINDS.includes(w.kind));
+  wrappers.sort(
+    (a, b) => MARK_ORDER.indexOf(pdKindToMark(a.kind)) - MARK_ORDER.indexOf(pdKindToMark(b.kind)),
+  );
+  for (let i = wrappers.length - 1; i >= 0; i--) {
+    const w = wrappers[i];
+    if (w.kind === "link") {
+      node = { type: "link", href: w.href, children: [node] };
+    } else if (w.kind === "wikilink") {
+      const wrapped = { type: "wikilink", target: w.target, children: [node] };
+      if (w.alias != null) wrapped.alias = w.alias;
+      if (w.docId != null) wrapped.docId = w.docId;
+      node = wrapped;
+    } else {
+      node = { type: w.kind, children: [node] };
+    }
+  }
+  return node;
 }
 
 // ── block ⇄ TipTap document ────────────────────────────────────────────────
