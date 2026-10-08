@@ -1287,6 +1287,46 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.actions",
+        "doc",
+        "actions",
+        "List a document's resolved actions (built-in + schema-declared, plugin-filtered by live state).",
+        "GET",
+        "/v1/data/doc/:dataset/:type/:doc_id/actions",
+        "admin",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is read when it exists.")
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "doc.run-action",
+        "doc",
+        "run-action",
+        "Run one of a document's resolved actions by name, dry-run or real.",
+        "POST",
+        "/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+        "admin",
+        args: [
+          arg("type", true, "string", "Document type (schema name)."),
+          arg("doc_id", true, "string", "Document id; drafts.<id> is edited when it exists."),
+          arg("name", true, "string", "The action's name, as doc.actions lists it.")
+        ],
+        flags: [
+          flag(
+            "mode",
+            "string",
+            "\"dryrun\" (preview, no side effects) or \"real\". Required."
+          )
+        ],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.publish",
         "doc",
         "publish",

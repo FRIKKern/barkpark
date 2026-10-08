@@ -3433,6 +3433,27 @@ defmodule BarkparkWeb.Router do
     get("/v1/schemas/:dataset/:name", SchemaController, :show)
   end
 
+  # Scoped document actions (task-bd311f4b5ea2b3b8) — the schema-declared
+  # action registry `BarkparkWeb.Studio.StudioLive.DocActions` resolves today
+  # ONLY through the LiveView socket (`DocActions.dispatch_action/5`,
+  # `studio_live.ex`); GET /v1/schemas carries just the schema's STATIC
+  # `actions` array, never the resolver-filtered live list (OnixEdit hides
+  # publish_to_bokbasen while a submission is pending, a state that never
+  # reaches this flat array). :scoped_admin, the SAME tier Studio's own editor
+  # mount requires, is "admin tier as in LiveView" from the row — not a new
+  # tier invented for this route.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    get("/v1/data/doc/:dataset/:type/:doc_id/actions", DocumentActionsController, :index)
+
+    post(
+      "/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+      DocumentActionsController,
+      :dispatch
+    )
+  end
+
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
