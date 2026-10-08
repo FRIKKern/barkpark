@@ -44,6 +44,20 @@ defmodule Barkpark.Content.CreateKeepsGivenBlocksTest do
         @dataset
       )
 
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "note",
+          "title" => "Notes",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "title" => "Title", "type" => "string"},
+            %{"name" => "kicker", "title" => "Kicker", "type" => "string"}
+          ]
+        },
+        @dataset
+      )
+
     :ok
   end
 
@@ -92,5 +106,39 @@ defmodule Barkpark.Content.CreateKeepsGivenBlocksTest do
 
     assert Enum.any?(doc.content["blocks"], &(&1["fieldName"] == "kicker"))
     assert doc.content["kicker"] == "New story"
+  end
+
+  # task-b43256e0d9d90733: a flat-shape mutate create stored the blocks only; the
+  # bound fields, body and preview waited for the first patch.
+  for type <- ["story", "note"] do
+    test "a mutate createOrReplace on #{type} projects its blocks into the fields" do
+      id = "#{unquote(type)}-#{System.unique_integer([:positive])}"
+
+      blocks = [
+        %{"id" => "f-kicker", "type" => "field-string", "fieldName" => "kicker", "value" => "K"},
+        para("p-1", "Body text.")
+      ]
+
+      {:ok, _} =
+        Barkpark.Content.Mutations.apply_mutations(
+          [
+            %{
+              "createOrReplace" => %{
+                "_id" => id,
+                "_type" => unquote(type),
+                "title" => "T",
+                "blocks" => blocks
+              }
+            }
+          ],
+          @dataset
+        )
+
+      {:ok, doc} = Content.get_document("drafts." <> id, unquote(type), @dataset)
+
+      assert doc.content["kicker"] == "K"
+      assert doc.content["body"]["blocks"] |> Enum.map(& &1["id"]) == ["p-1"]
+      assert is_map(doc.content["preview"])
+    end
   end
 end

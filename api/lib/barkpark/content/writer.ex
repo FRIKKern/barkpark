@@ -797,11 +797,13 @@ defmodule Barkpark.Content.Writer do
         # in `create_document/4` runs BEFORE this step; `apply_initial_values`
         # can deep-merge a schema-declared `content["blocks"]` that lacks ids
         # AFTER it. Re-run the SAME chokepoint so the final block list is always
-        # id-bearing. (No projection on this v1 path, so there is no body-mirror
-        # to keep in sync.) Additive + idempotent.
+        # id-bearing. Additive + idempotent. A create that carries a block list
+        # then projects it, as a patch does: bound fields, body and preview are
+        # stored at birth, not after the first save (task-b43256e0d9d90733).
         attrs
         |> apply_initial_values(type, dataset)
         |> maybe_ensure_block_ids()
+        |> maybe_project_document_content(dataset)
     end
   end
 
