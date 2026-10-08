@@ -147,7 +147,7 @@ defmodule BarkparkWeb.ReaderLocaleTest do
     assert en =~ ~s(<html lang="en")
 
     with_default_locale("nb-NO", fn ->
-      nb = build_conn() |> get("/sheets/#{slug}") |> html_response(200)
+      nb = scoped_conn() |> get("/sheets/#{slug}") |> html_response(200)
       assert nb =~ ~s(<html lang="nb-NO")
       refute nb =~ ~s(<html lang="en")
     end)
