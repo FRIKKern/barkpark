@@ -1470,6 +1470,55 @@ defmodule Barkpark.Tasks.CloseTest do
       assert reloaded.rev == claimed.rev, "rev untouched on refusal"
     end
 
+    # task-9da6b9544b747bba — a claim map outlives its lease. A row whose map
+    # names worker-A with a lease that ran out days ago is held by NOBODY, so the
+    # refusal must not say "held by worker-A". Same gate, same code, same
+    # override; only the sentence changes.
+    test "a foreign close on a LAPSED claim says nobody holds it, not 'held by'",
+         %{scope: scope} do
+      doc_id = uniq("holder-lapsed")
+      task = mk_task!(doc_id, scope)
+
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      foreign_patch_content!(task.id, %{
+        "claim" => Map.put(claimed.content["claim"], "ts_iso", "2026-01-01T00:00:00Z")
+      })
+
+      assert {:error, {:not_holder, "worker-A", :lapsed} = reason} =
+               Close.close(task.id, "worker-B", observed_epoch: epoch, lifecycle_status: "done")
+
+      alias BarkparkWeb.TasksController.Params
+      assert Params.reason_to_string(reason) == "not_holder:worker-A"
+      hint = Params.criteria_hint(reason, :close)
+      assert hint =~ "expired"
+      assert hint =~ "nobody holds"
+      refute hint =~ "is held by"
+      assert hint =~ "holder_override"
+
+      # The override still lands it, recorded.
+      assert {:ok, _} =
+               Close.close(task.id, "worker-B",
+                 observed_epoch: epoch,
+                 lifecycle_status: "done",
+                 holder_override: "lane A lapsed days ago"
+               )
+    end
+
+    test "a foreign close on a LIVE claim still says it is held", %{scope: scope} do
+      doc_id = uniq("holder-live")
+      task = mk_task!(doc_id, scope)
+      assert {:ok, claimed} = Tasks.claim_by_id(doc_id, "worker-A", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      assert {:error, {:not_holder, "worker-A"} = reason} =
+               Close.close(task.id, "worker-B", observed_epoch: epoch, lifecycle_status: "done")
+
+      assert BarkparkWeb.TasksController.Params.criteria_hint(reason, :close) =~
+               ~s(is held by "worker-A")
+    end
+
     test "arm 2 — the holder closes its own claim", %{scope: scope} do
       doc_id = uniq("holder-self")
       task = mk_task!(doc_id, scope)
