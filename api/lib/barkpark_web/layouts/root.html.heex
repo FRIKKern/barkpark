@@ -1903,6 +1903,10 @@
       padding: 2px 0; font-size: var(--text-sm); color: var(--fg);
     }
     .bp-desk-search-input:focus { outline: none; box-shadow: none; }
+    /* The input stays borderless (a pane row, not a form), so keyboard focus
+       shows on the row instead: its hairline takes the focus colour, doubled
+       by an inset line so it reads as a state, not a border (WCAG 2.4.7). */
+    .bp-desk-search:focus-within { border-bottom-color: var(--ring); box-shadow: inset 0 -1px 0 var(--ring); }
     .bp-desk-search-input::placeholder { color: var(--fg-muted); }
     /* The pane's own clear button is the one clear control; hide the native
        type="search" cancel glyph that rendered a second x beside it. */

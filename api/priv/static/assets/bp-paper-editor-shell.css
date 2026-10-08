@@ -1266,6 +1266,9 @@
      * `.bp-field` / `.bp-field__l` / `.bp-field__v`. */
     .bp-canvas-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; padding: 0.36rem 0; }
     .bp-canvas-field-label { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); }
+    /* The label is its own editing surface (role=textbox, tabindex 0): a keyboard
+       user needs to see they are on it (WCAG 2.4.7). Same cue as the scaffold control. */
+    .bp-canvas-field-label[role="textbox"]:focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
     .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select) { box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--paper-ink); font-family: inherit; font-size: 0.98rem; line-height: 1.5; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
     .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):hover { border-bottom-color: var(--paper-rule); }
     .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):focus { outline: none; border-bottom-color: var(--paper-ink-soft); }
