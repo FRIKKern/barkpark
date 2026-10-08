@@ -803,12 +803,29 @@ defmodule Barkpark.Content.Writer do
         attrs
         |> apply_initial_values(type, dataset)
         |> maybe_ensure_block_ids()
-        |> maybe_project_document_content(dataset)
+        |> maybe_project_created_content(dataset)
     end
   end
 
   defp scaffold_or_initial_values(attrs, type, dataset),
     do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset))
+
+  # Project-on-create, with one difference from a patch: a `body` the caller
+  # sent is kept. An importer that carries a rendered body beside blocks the
+  # projection cannot render (Sanity-shaped `_type`/`children`) would otherwise
+  # lose its text at birth.
+  defp maybe_project_created_content(attrs, dataset) do
+    given_body = attrs |> Map.get("content") |> body_given()
+    attrs = maybe_project_document_content(attrs, dataset)
+
+    case given_body do
+      {:ok, body} -> put_in(attrs, ["content", "body"], body)
+      :error -> attrs
+    end
+  end
+
+  defp body_given(%{"body" => body}), do: {:ok, body}
+  defp body_given(_content), do: :error
 
   # Build the scaffold block list from the schema's Expectation + provided
   # values, persist it under content["blocks"], and project. The row title
@@ -859,6 +876,12 @@ defmodule Barkpark.Content.Writer do
       |> Map.merge(fills)
       |> Map.put("blocks", blocks)
       |> Projection.project(blocks, doc_render_opts(dataset, schema.name, attrs))
+
+    content =
+      case body_given(provided) do
+        {:ok, body} -> Map.put(content, "body", body)
+        :error -> content
+      end
 
     Map.put(attrs, "content", content)
   end

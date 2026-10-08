@@ -14,6 +14,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   (fully qualified) plus `Enum`/`String`/`Map`/`MapSet` built-ins.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.ScopeHelpers
 
@@ -369,10 +370,10 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
             The account email is shown only inside the profile dialog. --%>
       <% me = @user_name %>
       <button type="button" class="presence-me-group" phx-click="show-profile"
-              title={"#{me} — profile"} aria-label={me <> " — open your profile"}>
+              title={gettext("%{name} — profile", name: me)} aria-label={gettext("%{name} — open your profile", name: me)}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= me %></span>
-          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || "Untitled", else: "browsing"), 24) %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || gettext("Untitled"), else: gettext("browsing")), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
           <%= String.first(me) %>

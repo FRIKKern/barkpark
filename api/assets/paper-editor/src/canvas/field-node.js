@@ -531,14 +531,18 @@ export const Field = Node.create({
       applyLockCue(dom, node);
 
       // The human label (a non-PM, non-editable caption beside the control).
-      const labelEl = document.createElement("label");
-      labelEl.className = "bp-canvas-field-label";
-      labelEl.textContent = (node.attrs && node.attrs.label) || "";
-      const label = mountFieldLabel(labelEl, { editor, getPos });
-
       // Build the native control for this field type. The control is the EDIT
       // island — PM never manages it (stopEvent / ignoreMutation below).
       const control = buildControl(fieldType, node);
+
+      const labelEl = document.createElement("label");
+      labelEl.className = "bp-canvas-field-label";
+      labelEl.textContent = (node.attrs && node.attrs.label) || "";
+      const label = mountFieldLabel(labelEl, {
+        editor,
+        getPos,
+        onName: (text) => nameControl(control, text),
+      });
       control.classList.add("bp-canvas-field-control");
       control.setAttribute("contenteditable", "false");
       control.setAttribute("data-test-id", "paper-field-" + fieldType);
@@ -659,6 +663,14 @@ export const Field = Node.create({
   },
 });
 
+// Name a value control after its field label; an empty label leaves it unnamed
+// rather than named "".
+export function nameControl(el, text) {
+  if (!el) return;
+  if (text) el.setAttribute("aria-label", text);
+  else el.removeAttribute("aria-label");
+}
+
 // ── the field LABEL, edited where it reads ──────────────────────────────────────
 //
 // The label is the caption the reader paints above the field (block `label`). In
@@ -667,8 +679,14 @@ export const Field = Node.create({
 // that changed), Enter commits instead of breaking. An absent label stays absent
 // until the author types one. The surface is outside ProseMirror (the node view
 // already stops its events), so it never splits or mutates the run.
-export function mountFieldLabel(labelEl, { editor, getPos }) {
+export function mountFieldLabel(labelEl, { editor, getPos, onName }) {
   let timer = null;
+  // The value control's accessible name is the visible label (WCAG 4.1.2): the
+  // label is an editable caption, not a <label for>, so the node view names its
+  // control through onName — on paint and on every keystroke in the label.
+  const name = () => {
+    if (typeof onName === "function") onName((labelEl.textContent || "").replace(/\s+/g, " ").trim());
+  };
   const editable = () => !!(editor && editor.isEditable);
   const sync = () => {
     if (editable()) {
@@ -700,6 +718,7 @@ export function mountFieldLabel(labelEl, { editor, getPos }) {
     }).run();
   };
   const onInput = () => {
+    name();
     if (timer) clearTimeout(timer);
     timer = setTimeout(commit, DEBOUNCE_MS);
   };
@@ -715,8 +734,10 @@ export function mountFieldLabel(labelEl, { editor, getPos }) {
     paint(n) {
       sync();
       const next = (n.attrs && n.attrs.label) || "";
-      if (labelEl.ownerDocument.activeElement === labelEl) return;
-      if (labelEl.textContent !== next) labelEl.textContent = next;
+      if (labelEl.ownerDocument.activeElement !== labelEl && labelEl.textContent !== next) {
+        labelEl.textContent = next;
+      }
+      name();
     },
     flush: commit,
     destroy() {
@@ -770,12 +791,24 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // discovery. Keep the already-stored value visible, but do not mount either
   // picker WC (both issue independent HTTP browse requests when upgraded).
   if (!scope.pickerBrowse) return buildPickerReadOnlyView(node, fieldType);
-  const label = mountFieldLabel(labelEl, { editor, getPos });
+  let picker = null;
+  // The reference picker builds its search input when it renders, so the label
+  // rides an attribute it reads then, and names the input already there.
+  const label = mountFieldLabel(labelEl, {
+    editor,
+    getPos,
+    onName: (text) => {
+      if (!picker) return;
+      if (text) picker.setAttribute("data-field-label", text);
+      else picker.removeAttribute("data-field-label");
+      nameControl(picker.querySelector(".bp-ref-search-input"), text);
+    },
+  });
 
   // The picker WC — the EDIT island PM does NOT manage. Seed value + scope as
   // ATTRIBUTES, mirroring the per-block <bp-media-picker>/<bp-reference-picker> render
   // EXACTLY (value / dataset / data-token / ref-type / scope-prefix).
-  const picker = document.createElement(tag);
+  picker = document.createElement(tag);
   picker.className = "bp-canvas-field-control";
   picker.setAttribute("contenteditable", "false");
   picker.setAttribute("data-test-id", "paper-field-" + fieldType);

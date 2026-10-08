@@ -773,8 +773,10 @@ class BpMediaPicker extends HTMLElement {
         // A stale image's error must not overwrite a newer preview.
         if (!img.isConnected) return;
         this._previewEl.innerHTML =
-          '<div class="bp-mp-empty bp-mp-broken" role="button" tabindex="0" aria-label="Replace image">' +
-          "Image unavailable — drop a file, or click to replace" +
+          '<div class="bp-mp-empty bp-mp-broken" role="button" tabindex="0" aria-label="' +
+          this._t("replace", "Replace image") +
+          '">' +
+          this._t("broken", "Image unavailable — drop a file, or click to replace") +
           "</div>";
       });
       this._setClearVisible(true);

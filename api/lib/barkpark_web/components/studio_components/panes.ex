@@ -32,6 +32,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       that makes `aria-selected` meaningful.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Phoenix.LiveView.JS
 
@@ -197,6 +198,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       |> assign(:col_class, col_class)
       |> assign(:role_attr, assigns[:data_role] && to_string(assigns[:data_role]))
       |> assign(:priority_attr, assigns[:data_priority] && to_string(assigns[:data_priority]))
+      |> assign(:title, chrome_title(assigns.title))
 
     ~H"""
     <%= if @collapsed do %>
@@ -208,8 +210,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         data-priority={@priority_attr}
         phx-click={@phx_click}
         phx-value-idx={@phx_value_idx}
-        title={"Back to #{@title}"}
-        aria-label={"Back to #{@title}"}
+        title={gettext("Back to %{pane}", pane: @title)}
+        aria-label={gettext("Back to %{pane}", pane: @title)}
         aria-controls={@controls}
       >
         <%!-- PHRASING CONTENT ONLY. This is a <button>, whose HTML5 content
@@ -540,7 +542,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
           role="checkbox"
           class="bp-doc-checkbox"
           aria-checked={to_string(@checked)}
-          aria-label={"Select #{@title}"}
+          aria-label={gettext("Select %{item}", item: @title)}
           phx-click="toggle-doc-checkbox"
           phx-value-id={@phx_value_id}
           data-test-id={"doc-checkbox-#{@phx_value_id}"}
@@ -621,4 +623,12 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
   end
+
+  # The desk's own folder names come from `Barkpark.Structure`, which also feeds
+  # the TUI and /v1/structure, so they stay English there and are translated
+  # here, at display (task-33bcb0b4415bc528). Schema titles pass through: they
+  # are already the content owner's words.
+  defp chrome_title("Structure"), do: gettext("Structure")
+  defp chrome_title("Plugins"), do: gettext("Plugins")
+  defp chrome_title(title), do: title
 end

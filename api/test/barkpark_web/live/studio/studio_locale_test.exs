@@ -130,4 +130,34 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     assert html =~ "Structure"
     assert Tenancy.workspace_locale(default_ws) == "en"
   end
+
+  # task-33bcb0b4415bc528: the top bar, panes and profile chrome stayed English
+  # around the translated parts.
+  test "the nb-NO top bar, profile and presence chrome are Norwegian", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, editor(ws, proj))
+
+    assert html =~ ~s(aria-label="Logg ut")
+    assert html =~ ~s(aria-label="Bytt mellom mørkt og lyst tema")
+    assert html =~ "Bytt arbeidsområde — Locale Twin"
+    assert html =~ "— åpne profilen din"
+    assert html =~ "Tilbake til Struktur"
+    # The media picker's broken-image card reads the stamped strings too.
+    assert html =~ "Bildet er ikke tilgjengelig — slipp en fil her, eller klikk for å bytte"
+    assert html =~ "Bytt bilde"
+    refute html =~ ~s(aria-label="Sign out")
+    refute html =~ "Switch scope —"
+    refute html =~ "open your profile"
+  end
+
+  test "the default workspace keeps the English top bar", %{conn: conn} do
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, html} = live(conn, desk(default_ws, default_proj))
+
+    assert html =~ ~s(aria-label="Sign out")
+    assert html =~ "Switch scope —"
+  end
 end

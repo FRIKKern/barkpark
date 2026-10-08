@@ -638,7 +638,8 @@ defmodule Barkpark.Content.Mutations do
   # and falls through to it. Order: setIfMissing fills absent defaults → set
   # merges (overriding) → inc/dec adjust the merged numeric values →
   # append/prepend extend list fields → unset removes. Promoted/system fields
-  # (title/status/_id/_type/_rev) stay protected throughout; malformed ops (a
+  # (title/status/_id/_type/_rev) stay protected in `content`; an unset of
+  # `title` clears the title COLUMN, as `set {title: ""}` does; malformed ops (a
   # non-map setIfMissing/inc/dec/append/prepend, a non-list unset, a non-numeric
   # delta, non-list append/prepend items) are ignored, not fatal.
   defp apply_one(%{"patch" => %{"id" => id, "type" => type} = patch}, dataset, opts)
@@ -657,6 +658,14 @@ defmodule Barkpark.Content.Mutations do
          protected = patch_protected_keys(patch, type, dataset, opts),
          {:ok, applied} <- apply_patch_ops(existing.content || %{}, patch, protected) do
       set_fields = Map.get(patch, "set", %{})
+      # The title is a row column, so an `unset` of it never reached the row:
+      # unsetting clears it exactly as `set {title: ""}` does (task-a50bcf53bee78a53).
+      # A `set` of the title in the same patch wins.
+      title =
+        if not Map.has_key?(set_fields, "title") and
+             "title" in list_or_empty(Map.get(patch, "unset")),
+           do: "",
+           else: set_fields["title"]
 
       merged =
         applied
@@ -666,11 +675,11 @@ defmodule Barkpark.Content.Mutations do
         # overwritten back to the stale block value on the way to the row. Update
         # the block projection reads FROM; projection stays its sole writer. A
         # document with no block list is byte-identical. See BoundFieldSync.
-        |> BoundFieldSync.sync(existing.content || %{}, set_fields["title"])
+        |> BoundFieldSync.sync(existing.content || %{}, title)
 
       attrs = %{
         "doc_id" => id,
-        "title" => set_fields["title"] || existing.title,
+        "title" => title || existing.title,
         "content" => merged
       }
 

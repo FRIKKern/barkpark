@@ -847,7 +847,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
                         Visibility.visible?(field, @editor_form) do %>
                   <.studio_field_renderer
-                    field={field}
+                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
@@ -910,8 +910,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     names = Enum.map(presences, &Map.get(&1, :name, "User"))
 
     case names do
-      [one] -> "#{one} is editing"
-      many -> "#{Enum.join(many, ", ")} are editing"
+      [one] -> gettext("%{name} is editing", name: one)
+      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
     end
   end
 

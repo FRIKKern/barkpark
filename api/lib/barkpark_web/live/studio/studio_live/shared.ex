@@ -1526,10 +1526,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         do: nil,
         else: socket |> empty_editor_state_for(panes) |> triage_not_found(socket)
 
+    # A newly opened document starts in the editor its type declares
+    # (`desk.editor`, task-d80fe8cbfdc9cbcc) when it can be edited as blocks.
     editor_mode =
-      if same_doc? and is_nil(editor_blocks_identity_error),
-        do: socket.assigns[:editor_mode] || :classic,
-        else: :classic
+      cond do
+        not is_nil(editor_blocks_identity_error) -> :classic
+        same_doc? -> socket.assigns[:editor_mode] || :classic
+        freeform_default?(new_schema) and editor_doc != nil and editor_blocks != [] -> :beta
+        true -> :classic
+      end
 
     socket =
       assign(socket,
@@ -2066,6 +2071,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   @doc false
   def next_form_gen(socket, true), do: (socket.assigns[:editor_form_gen] || 0) + 1
   def next_form_gen(socket, false), do: socket.assigns[:editor_form_gen] || 0
+
+  defp freeform_default?(%{desk: %{} = desk}),
+    do: Map.get(desk, "editor", Map.get(desk, :editor)) == "freeform"
+
+  defp freeform_default?(_schema), do: false
 
   @doc false
   def beta_editable?(socket) do

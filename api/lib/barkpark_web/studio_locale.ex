@@ -63,6 +63,8 @@ defmodule BarkparkWeb.StudioLocale do
       "alt_placeholder" => gettext("Describe the image for people who cannot see it"),
       "remove" => gettext("Remove image"),
       "empty" => gettext("No image selected — drop a file, or click to upload"),
+      "replace" => gettext("Replace image"),
+      "broken" => gettext("Image unavailable — drop a file, or click to replace"),
       "uploading" => gettext("Uploading…"),
       "options" => gettext("Right-click for image options"),
       "library" => gettext("Media library"),

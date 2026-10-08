@@ -73,7 +73,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
   def editor_mode_toggle(assigns) do
     ~H"""
-    <div class="editor-mode-toggle" role="group" aria-label="Editor mode" data-test-id="editor-mode-toggle">
+    <div class="editor-mode-toggle" role="group" aria-label={gettext("Editor mode")} data-test-id="editor-mode-toggle">
       <button
         type="button"
         class={"btn btn-sm " <> if(@mode == :classic, do: "btn-primary", else: "btn-ghost")}
@@ -3067,7 +3067,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         data-test-id="paper-card-image-focus"
                         aria-controls={card_image_dom_id(@id) <> "-trigger"}
                         phx-click={contextual_panel_focus(card_image_dom_id(@id) <> "-trigger")}
-                      >Replace image</button>
+                      >{gettext("Replace image")}</button>
                     <% else %>
                       <label class="bp-paper-edit-fieldlabel" for={"card-media-src-" <> @id}>Media source</label>
                       <input id={"card-media-src-" <> @id} type="text" name="card-media-src" class="bp-paper-edit-text" value={state.media_src} />
