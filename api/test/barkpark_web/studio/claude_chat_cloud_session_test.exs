@@ -470,8 +470,8 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   # only once the Session process has exited and the Registry has reaped it.
   defp session_gone?(sid), do: Registry.lookup(Barkpark.StudioChat.SessionRegistry, sid) == []
 
-  # Poll a session row until `pred` holds, or the same ~10s ceiling
-  # `assert_recorder_gone/2` uses elapses (task-38ab22218252aa45).
+  # Poll a session row until `pred` holds, or a ~30s ceiling elapses
+  # (task-38ab22218252aa45, widened at task-dad9a71f6dcd2f08 — see below).
   #
   # `assert_recorder_gone` proves the Recorder's LAST `handle_info` call has
   # RETURNED — `{:claude_chat_event, bp_sandbox}`'s `Repo.update()` is
@@ -487,13 +487,49 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
   # an outcome that is NEVER true still fails loudly, naming the value this
   # test actually saw (every call site keeps its own `assert`/`match?` after
   # calling this, so a genuine regression still reds with an honest diff).
-  defp wait_for_session(sid, pred, tries \\ 1000) do
+  #
+  # WIDENED at task-dad9a71f6dcd2f08: this helper's OWN original 1000x10ms
+  # (~10s) bound still timed out once in CI (job 113449840671, #22154) —
+  # AFTER `assert_recorder_gone` had already confirmed the process gone, so
+  # this is the gap this helper exists to close, recurring past its own
+  # fix. `shared: true` sandbox mode (data_case.ex) means a committed write
+  # is visible to every connection in the SAME transaction with NO
+  # replication-style lag, so a genuine COMMIT-VISIBILITY delay should never
+  # need more than one scheduler tick — the 10s margin was never about the
+  # write being slow to propagate, it is about THIS test process getting
+  # SCHEDULED to look again under host-level (not just BEAM-level)
+  # contention, which `Process.sleep/1`'s floor-not-ceiling semantics do not
+  # bound. Tripled to 3000 tries as the next increment in this fix's own
+  # escalation lineage (10s was once ~2s), and the timeout case now reports
+  # elapsed wall-clock time explicitly — not a confirmed root-cause fix
+  # (reproduction under load did not trigger the race locally), but a
+  # widened, honestly-labeled safety margin plus the diagnostic the NEXT
+  # recurrence needs to tell "genuinely never arrived" apart from "arrived
+  # outside even this margin."
+  defp wait_for_session(sid, pred, tries \\ 3000) do
+    started_at = System.monotonic_time(:millisecond)
+    wait_for_session(sid, pred, tries, started_at)
+  end
+
+  defp wait_for_session(sid, pred, tries, started_at) do
     session = StudioChat.get_session(sid)
 
     cond do
-      pred.(session) -> session
-      tries <= 0 -> session
-      true -> Process.sleep(10) && wait_for_session(sid, pred, tries - 1)
+      pred.(session) ->
+        session
+
+      tries <= 0 ->
+        elapsed = System.monotonic_time(:millisecond) - started_at
+
+        IO.warn(
+          "wait_for_session/2 timed out after #{elapsed}ms waiting on #{inspect(sid)} — " <>
+            "last observed: #{inspect(session)}"
+        )
+
+        session
+
+      true ->
+        Process.sleep(10) && wait_for_session(sid, pred, tries - 1, started_at)
     end
   end
 

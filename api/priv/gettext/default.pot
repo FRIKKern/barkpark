@@ -275,7 +275,7 @@ msgstr ""
 msgid "Sign in with token"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/nav.ex:538
+#: lib/barkpark_web/components/studio_components/nav.ex:560
 #: lib/barkpark_web/components/studio_components/panes.ex:633
 #, elixir-autogen, elixir-format
 msgid "Structure"
@@ -1718,6 +1718,7 @@ msgid "May"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:736
+#: lib/barkpark_web/components/studio_components/nav.ex:482
 #, elixir-autogen, elixir-format
 msgid "Media"
 msgstr ""
@@ -1730,6 +1731,8 @@ msgid "Name"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:145
+#: lib/barkpark_web/layouts/studio.html.heex:89
+#: lib/barkpark_web/layouts/studio.html.heex:90
 #, elixir-autogen, elixir-format
 msgid "Network shares"
 msgstr ""
@@ -6017,6 +6020,77 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:526
 #, elixir-autogen, elixir-format
 msgid "warn or info card"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:483
+#, elixir-autogen, elixir-format
+msgid "API"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:485
+#, elixir-autogen, elixir-format
+msgid "Connectors"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:455
+#: lib/barkpark_web/components/studio_components/nav.ex:456
+#, elixir-autogen, elixir-format
+msgid "Disabled in this workspace"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:488
+#, elixir-autogen, elixir-format
+msgid "Fleet"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:492
+#, elixir-autogen, elixir-format
+msgid "Form submissions"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:487
+#, elixir-autogen, elixir-format
+msgid "Projects"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:491
+#, elixir-autogen, elixir-format
+msgid "Quizzes"
+msgstr ""
+
+#: lib/barkpark_web/layouts/studio.html.heex:82
+#, elixir-autogen, elixir-format
+msgid "Run all"
+msgstr ""
+
+#: lib/barkpark_web/layouts/studio.html.heex:82
+#, elixir-autogen, elixir-format
+msgid "Running…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:486
+#, elixir-autogen, elixir-format
+msgid "Settings"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:484
+#, elixir-autogen, elixir-format
+msgid "Style"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:490
+#, elixir-autogen, elixir-format
+msgid "Tasks"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:489
+#, elixir-autogen, elixir-format
+msgid "Tickets"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:493
+#, elixir-autogen, elixir-format
+msgid "chat"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:332

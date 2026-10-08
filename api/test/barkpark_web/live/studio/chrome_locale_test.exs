@@ -71,4 +71,31 @@ defmodule BarkparkWeb.Studio.ChromeLocaleTest do
     assert conn |> get(path) |> html_response(200) =~ ~s(<html lang="en")
     assert render_live(conn, path) =~ ~s(aria-label="Sign out")
   end
+
+  # task-8b19712a6e210fe5: the top-menu tab names (the accessible name of an
+  # icon-only tab) and the Network shares button read English in nb-NO.
+  test "the nb-NO top menu names its tabs in Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    html = render_live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/media")
+
+    assert html =~ ~s(aria-label="Innstillinger")
+    assert html =~ ~s(aria-label="Nettverksdelinger")
+    refute html =~ ~s(aria-label="Settings")
+    refute html =~ ~s(aria-label="Network shares")
+  end
+
+  test "the default workspace's top menu keeps the English tab names", %{conn: conn} do
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    html =
+      render_live(
+        conn,
+        "/w/#{default_ws.slug}/p/#{default_proj.slug}/d/#{@dataset}/studio/media"
+      )
+
+    assert html =~ ~s(aria-label="Settings")
+  end
+
+  test "an unknown plugin tab label reads as written" do
+    assert BarkparkWeb.StudioComponents.Nav.tab_label("Bokbasen") == "Bokbasen"
+  end
 end
