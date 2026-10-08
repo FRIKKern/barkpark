@@ -416,7 +416,10 @@ defmodule Barkpark.Plugins.Github do
   """
   @impl Barkpark.Plugin
   def lifecycle_hooks do
-    %{after_delete: [&Barkpark.Plugins.Github.RetireJob.enqueue_for_deleted/1]}
+    %{
+      after_delete: [&Barkpark.Plugins.Github.RetireJob.enqueue_for_deleted/1],
+      after_unpublish: [&Barkpark.Plugins.Github.RetireJob.enqueue_for_unpublished/1]
+    }
   end
 
   @doc """
