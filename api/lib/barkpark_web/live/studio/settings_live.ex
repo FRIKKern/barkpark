@@ -80,7 +80,8 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # in the StudioLive catch-all and trips studio-link-lint).
   @impl true
   def mount(_params, _session, socket) do
-    {:ok, assign_page(socket)}
+    {:ok,
+     socket |> assign_page() |> assign(credentials_authority?: credentials_authority?(socket))}
   end
 
   # Re-derive the URL-bound view on every scoped patch. A scope switch fired
@@ -525,6 +526,18 @@ defmodule BarkparkWeb.Studio.SettingsLive do
   # a mask-strength tweak — the leak is a SCOPE MISMATCH (mount authorizes
   # workspace-admin-of-the-URL, the store is installation-global), and only an
   # authority check closes a scope mismatch.
+  # The same two checks `guard_installation_admin/2` makes, asked once at
+  # mount so the page shows the credential editor only to someone it can work
+  # for (task-65e83bfe222337f0). A workspace admin without installation
+  # authority got the full editor and learned on submit that every action is
+  # refused. The handlers keep their own guard: this decides display only.
+  defp credentials_authority?(socket) do
+    principal = socket.assigns[:api_token] || socket.assigns[:current_user]
+
+    installation_admin?(principal) and
+      BarkparkWeb.Plugs.RequirePlatformOperator.permits?(principal)
+  end
+
   defp guard_installation_admin(socket, fun) do
     principal = socket.assigns[:api_token] || socket.assigns[:current_user]
 
@@ -710,11 +723,23 @@ defmodule BarkparkWeb.Studio.SettingsLive do
 
       <.bp_card aria-labelledby="credentials-heading">
         <.bp_section_header id="credentials-heading" title="Plugin credentials">
-          Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
-          to fetch unmasked (audited). Credentials are global to the installation,
-          not per-workspace.
+          <%= if @credentials_authority? do %>
+            Encrypted JSON store. Values are masked on load — click <em>Reveal</em>
+            to fetch unmasked (audited).
+          <% end %>
+          Credentials are global to the installation, not per-workspace.
         </.bp_section_header>
 
+        <p
+          :if={not @credentials_authority?}
+          style="color: var(--fg-muted); margin: 0;"
+          data-test-id="settings-credentials-no-authority"
+        >
+          Only the installation admin can view or change plugin credentials, because
+          they are shared by every workspace on this installation.
+        </p>
+
+        <%= if @credentials_authority? do %>
         <form phx-change="update_name" phx-submit="load" style="margin-bottom: 16px;">
           <.bp_field_row label="Plugin name" for="plugin_name" required>
             <div style="display: flex; gap: 8px;">
@@ -744,6 +769,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
         <p style="margin-top: 16px; color: var(--fg-muted); font-size: 13px;">
           Status: {if @loaded?, do: "loaded", else: "empty"} · {if @masked, do: "masked", else: "revealed"}
         </p>
+        <% end %>
       </.bp_card>
     </div>
     </.studio_page_scroll>
