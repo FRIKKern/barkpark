@@ -939,6 +939,12 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/:master_id/insert", "BarkparkWeb.PaperMastersController", :insert, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/pin", "BarkparkWeb.PaperMastersController", :pin, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/detach", "BarkparkWeb.PaperMastersController", :detach, :status_only_receipt},
+    # THE MEMBER-TOKEN PAPER BATCH OPS WRITE (task-7ee817f37630d669, P1). Answers
+    # the SAME minimal op receipt (`slug`, `opCount`, `rev`, `blockIds`) the
+    # masters rows above and the :ingest-tier `POST .../papers/:slug/ops`
+    # answer — a store-derived position/row-id array, never an `ok: true`
+    # literal — so it is the SAME class and the SAME reasoning.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/ops", "BarkparkWeb.PaperOpsController", :apply_op, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
@@ -1157,6 +1163,7 @@ defmodule PDS.Census do
     {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open, :status_only_receipt},
     {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/v1/data/disconnect/:dataset/:doc_id", "BarkparkWeb.DisconnectController", :create, :status_only_receipt},
     {:post, "/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
     {:post, "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
@@ -1225,6 +1232,7 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/disconnect/:dataset/:doc_id", "BarkparkWeb.DisconnectController", :create, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/ops", "BarkparkWeb.DocumentOpsController", :apply_op, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},

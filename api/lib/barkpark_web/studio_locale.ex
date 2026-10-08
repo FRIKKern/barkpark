@@ -49,6 +49,17 @@ defmodule BarkparkWeb.StudioLocale do
     locale
   end
 
+  @doc """
+  Put the locale of the workspace that OWNS a public document (the paper
+  reader, the public sheet): its language is the page's language, so a screen
+  reader speaks the text in the voice it was written in. Takes the workspace
+  when the caller already loaded it, else looks it up by id; an unknown or
+  missing workspace reads as the default locale.
+  """
+  @spec put_owner(Tenancy.Workspace.t() | term(), String.t() | nil) :: String.t()
+  def put_owner(%Tenancy.Workspace{} = workspace, _workspace_id), do: put(workspace)
+  def put_owner(_workspace, workspace_id), do: put(Tenancy.get_workspace_by_id(workspace_id))
+
   @doc "Put a locale by its BCP-47 name (used by the login page's return_to resolution)."
   @spec put_named(String.t() | nil) :: String.t()
   def put_named(locale) do

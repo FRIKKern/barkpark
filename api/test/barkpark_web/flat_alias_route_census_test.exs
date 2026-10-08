@@ -524,6 +524,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # DisconnectController.create
+    {"POST", "/v1/data/disconnect/:dataset/:doc_id"} =>
+      {:workspace_derived,
+       "workspace-derived: ScopeHelpers.scope_opts(conn) scopes both the referencer scan " <>
+         "(Edges.referencing_fields/3) and Content.disconnect_references/3 to the caller's " <>
+         "workspace; grant-narrowed and share-link callers are refused (task-0bc05ce5cdefd8dc)."},
     # DocumentOpsController.apply_op
     {"POST", "/v1/data/doc/:dataset/:type/:doc_id/ops"} =>
       {:workspace_derived,

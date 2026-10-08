@@ -152,6 +152,15 @@ defmodule Barkpark.Content.Edges do
   defp denied_sources(nil, _doc_id, _pub_id, _dataset, _opts), do: []
 
   defp denied_sources(guard, doc_id, pub_id, dataset, opts) when is_function(guard, 2) do
+    doc_id
+    |> referencing_sources(pub_id, dataset, opts)
+    |> Enum.reject(fn {id, type} -> guard.(type, id) end)
+  end
+
+  # `{doc_id, type}` of every document that references `pub_id`, from the same
+  # three probes the disconnect acts on (inbound edges, the scalar scan, the
+  # arrayOf document scan).
+  defp referencing_sources(doc_id, pub_id, dataset, opts) do
     edge_refs =
       Barkpark.Content.Graph.reverse_referencers(pub_id, [dataset: dataset] ++ opts)
       |> Enum.map(fn ref -> {ref[:from_doc_id] || ref[:from_id], ref[:type]} end)
@@ -162,7 +171,32 @@ defmodule Barkpark.Content.Edges do
     (edge_refs ++ scalar_refs ++ find_array_referencing_docs(pub_id, dataset, opts))
     |> Enum.reject(fn {id, type} -> is_nil(id) or is_nil(type) end)
     |> Enum.uniq()
-    |> Enum.reject(fn {id, type} -> guard.(type, id) end)
+  end
+
+  @doc """
+  The documents that reference `doc_id`, each with the fields that hold the
+  reference — what `disconnect_references/3` would rewrite
+  (task-0bc05ce5cdefd8dc). Read before the disconnect so the HTTP door can say
+  which documents and fields changed. The scalar scan shares
+  `find_referencing_docs/3`'s 1,000-row cap.
+  """
+  @spec referencing_fields(String.t(), String.t(), keyword()) :: [
+          %{id: String.t(), type: String.t(), fields: [String.t()]}
+        ]
+  def referencing_fields(doc_id, dataset, opts \\ []) do
+    pub_id = DraftId.published_id(doc_id)
+
+    for {id, type} <- referencing_sources(doc_id, pub_id, dataset, opts),
+        {:ok, doc} <- [Content.get_document(id, type, dataset, opts)],
+        fields =
+          doc
+          |> extract_edges(dangling: :skip)
+          |> Enum.filter(&(&1.to_id == pub_id))
+          |> Enum.map(& &1.field)
+          |> Enum.uniq(),
+        fields != [] do
+      %{id: id, type: type, fields: fields}
+    end
   end
 
   defp strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard) do
@@ -229,7 +263,7 @@ defmodule Barkpark.Content.Edges do
   defp find_array_referencing_docs(pub_id, dataset, opts) do
     for schema <- Content.list_schemas(dataset, opts),
         field <- schema.fields || [],
-        get_in(field, ["of", "type"]) == "reference",
+        reference_array?(field),
         doc <-
           Barkpark.Content.Query.list_array_reference_holders(
             schema.name,
@@ -241,6 +275,16 @@ defmodule Barkpark.Content.Edges do
         uniq: true,
         do: {doc.doc_id, schema.name}
   end
+
+  # An arrayOf whose element is a reference. `of` is a map, or — Sanity's
+  # shape — a list of element types; `get_in/2` on the list raised, so a schema
+  # declared that way crashed every disconnect (and the unpublish guard).
+  defp reference_array?(%{"of" => %{"type" => "reference"}}), do: true
+
+  defp reference_array?(%{"of" => of}) when is_list(of),
+    do: Enum.any?(of, &match?(%{"type" => "reference"}, &1))
+
+  defp reference_array?(_field), do: false
 
   # Repeatedly scan + disconnect scalar referencers until none remain. Bounded:
   # `attempted` tracks every {doc_id, type} we have already tried to strip, and
@@ -344,7 +388,7 @@ defmodule Barkpark.Content.Edges do
         field["type"] == "reference" and targets?(value, target_pub_id) ->
           Map.delete(acc, name)
 
-        get_in(field, ["of", "type"]) == "reference" and is_list(value) ->
+        reference_array?(field) and is_list(value) ->
           kept = Enum.reject(value, &targets?(&1, target_pub_id))
 
           if kept == value, do: acc, else: Map.put(acc, name, kept)

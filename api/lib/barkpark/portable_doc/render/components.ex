@@ -1764,8 +1764,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
       ~s|<div class="bp-momentum"><div class="bp-momentum__row">| <>
         ~s|<span class="bp-momentum__i">#{glyph_html("progress")}<b>#{prog}</b> in flight</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--ready">#{glyph_char("ready")} <b>#{ready}</b> ready</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--done">#{glyph_char("done")} <b>#{done}</b> done</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--ready">#{glyph_html("ready")}<b>#{ready}</b> ready</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--done">#{glyph_html("done")}<b>#{done}</b> done</span>| <>
         ~s|<span class="bp-momentum__grow"></span>| <>
         ~s|<span class="bp-momentum__pct">#{pct}%</span></div>| <>
         ~s|<div class="bp-momentum__track"><span class="bp-momentum__fill" style="width:#{pct}%"></span></div></div>|

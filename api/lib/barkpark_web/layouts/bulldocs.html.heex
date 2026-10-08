@@ -7,7 +7,7 @@
       the no-JS fallback, so reader-dark-parity stays green. This attribute
       only selects WHICH theme. Omitted for the default (evergreen) theme, so a
       default paper is byte-identical to before this feature. --%>
-<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -2021,22 +2021,34 @@
     }
   </style>
 </head>
-<body>
+<body
+  data-bp-t-open-image={gettext("Open enlarged image")}
+  data-bp-t-go-to={gettext("Go to %{title}")}
+  data-bp-t-chapter={gettext("chapter")}
+  data-bp-t-light-mode={gettext("Light mode")}
+  data-bp-t-dark-mode={gettext("Dark mode")}
+  data-bp-t-reader-view={gettext("Reader view")}
+  data-bp-t-tui-view={gettext("TUI view")}
+  data-bp-t-email-view={gettext("Email view")}
+  data-bp-t-rendering={gettext("rendering…")}
+  data-bp-t-editor-failed-title={gettext("Editor failed to load. Reload the page to try again.")}
+  data-bp-t-editor-failed={gettext("Editor failed to load. Your paper is still readable; reload to try editing again.")}
+>
   {@inner_content}
 
-  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label="Enlarged paper image">
+  <dialog id="bp-image-lightbox" class="bp-image-lightbox" aria-label={gettext("Enlarged paper image")}>
     <button
       type="button"
       class="bp-image-lightbox__close"
-      aria-label="Close enlarged image"
+      aria-label={gettext("Close enlarged image")}
     >×</button>
     <div class="bp-image-lightbox__stage">
-      <div class="bp-image-lightbox__toolbar" aria-label="Image size">
+      <div class="bp-image-lightbox__toolbar" aria-label={gettext("Image size")}>
         <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="actual" aria-pressed="false">100%</button>
-        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="fit" aria-pressed="false">Fit image</button>
-        <span class="bp-image-lightbox__hint">Drag or scroll to inspect</span>
+        <button type="button" class="bp-image-lightbox__mode" data-bp-lightbox-view="fit" aria-pressed="false">{gettext("Fit image")}</button>
+        <span class="bp-image-lightbox__hint">{gettext("Drag or scroll to inspect")}</span>
       </div>
-      <div class="bp-image-lightbox__viewport" tabindex="0" aria-label="Scrollable enlarged image">
+      <div class="bp-image-lightbox__viewport" tabindex="0" aria-label={gettext("Scrollable enlarged image")}>
         <div class="bp-image-lightbox__canvas">
           <img class="bp-image-lightbox__image" src="" alt="" />
         </div>
@@ -2068,7 +2080,7 @@
         images.filter(isEligible).forEach(function (image) {
           image.tabIndex = 0;
           image.setAttribute("role", "button");
-          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + "Open enlarged image");
+          image.setAttribute("aria-label", (image.alt ? image.alt + ". " : "") + (document.body.dataset.bpTOpenImage || "Open enlarged image"));
         });
       }
 
@@ -2185,7 +2197,7 @@
           card.dataset.bpChapterTarget = target.id;
           card.tabIndex = 0;
           card.setAttribute("role", "link");
-          card.setAttribute("aria-label", "Go to " + (title ? title.textContent.trim() : "chapter"));
+          card.setAttribute("aria-label", (document.body.dataset.bpTGoTo || "Go to %{title}").replace("%{title}", title ? title.textContent.trim() : (document.body.dataset.bpTChapter || "chapter")));
         });
       }
 
@@ -2256,74 +2268,74 @@
   <div id="bp-mailapp" aria-live="polite">
     <div class="bp-mail-bar">
       <span class="bp-mail-dots" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span class="bp-mail-title"><b>Barkpark Mail</b> · Inbox<span class="bp-mail-unread" id="bp-mail-unread"> (1)</span></span>
+      <span class="bp-mail-title"><b>Barkpark Mail</b> · {gettext("Inbox")}<span class="bp-mail-unread" id="bp-mail-unread"> (1)</span></span>
       <span style="width:52px" aria-hidden="true"></span>
     </div>
     <div class="bp-mail-toolbar">
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Back to inbox" aria-label="Back — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Back to inbox")} aria-label={gettext("Back — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>
       </button>
       <span class="bp-mail-tooldiv" aria-hidden="true"></span>
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Archive" aria-label="Archive — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Archive")} aria-label={gettext("Archive — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 8v13H3V8M1 3h22v5H1zM10 12h4"/></svg>
       </button>
-      <button type="button" class="bp-mail-tool" data-mail-exit title="Delete" aria-label="Delete — return to the reader">
+      <button type="button" class="bp-mail-tool" data-mail-exit title={gettext("Delete")} aria-label={gettext("Delete — return to the reader")}>
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>
       </button>
       <span class="bp-mail-toolsp" aria-hidden="true"></span>
-      <button type="button" class="bp-mail-tool" id="bp-mail-star" title="Star" aria-label="Star this message" aria-pressed="false">
+      <button type="button" class="bp-mail-tool" id="bp-mail-star" title={gettext("Star")} aria-label={gettext("Star this message")} aria-pressed="false">
         <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>
       </button>
     </div>
     <div class="bp-mail-head">
       <div class="bp-mail-subjrow">
         <span class="bp-mail-dot" aria-hidden="true"></span>
-        <h2 class="bp-mail-subject" id="bp-mail-subject">Paper</h2>
+        <h2 class="bp-mail-subject" id="bp-mail-subject">{gettext("Paper")}</h2>
       </div>
       <div class="bp-mail-fromrow">
         <span class="bp-mail-avatar" aria-hidden="true">BP</span>
         <div class="bp-mail-who">
           <div class="bp-mail-fromline"><b>Barkpark Papers</b> <span class="bp-mail-addr">&lt;papers@barkpark.cloud&gt;</span></div>
-          <div class="bp-mail-toline">to me ▾</div>
+          <div class="bp-mail-toline">{gettext("to me")} ▾</div>
         </div>
         <span class="bp-mail-date" id="bp-mail-date"></span>
       </div>
     </div>
     <div class="bp-mail-bodywrap">
-      <iframe id="bp-mail-frame" title="This paper rendered as the email subscribers receive"></iframe>
+      <iframe id="bp-mail-frame" title={gettext("This paper rendered as the email subscribers receive")}></iframe>
     </div>
     <div class="bp-mail-foot">
       <a class="bp-mail-btn" id="bp-mail-reply" href="#">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="9 17 4 12 9 7"/><path d="M20 18v-2a4 4 0 0 0-4-4H4"/></svg>
-        Reply
+        {gettext("Reply")}
       </a>
       <a class="bp-mail-btn" id="bp-mail-forward" href="#">
         <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polyline points="15 17 20 12 15 7"/><path d="M4 18v-2a4 4 0 0 1 4-4h12"/></svg>
-        Forward
+        {gettext("Forward")}
       </a>
-      <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">View in browser ↗</a>
+      <a class="bp-mail-browser" id="bp-mail-browser" href="#" target="_blank" rel="noopener">{gettext("View in browser")} ↗</a>
     </div>
   </div>
   <%!-- CSP layer-2: every control is bound via addEventListener in the nonced
         IIFEs below, never through an inline onclick. --%>
-  <div class="bp-view-controls" role="group" aria-label="Paper view controls">
+  <div class="bp-view-controls" role="group" aria-label={gettext("Paper view controls")}>
     <button
       type="button"
       class="bp-view-toggle"
       aria-pressed="false"
-      aria-label="Toggle terminal (TUI) view"
+      aria-label={gettext("Toggle terminal (TUI) view")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">TUI view</span>
+      <span class="bp-vt-label">{gettext("TUI view")}</span>
     </button>
     <button
       type="button"
       class="bp-view-toggle bp-view-toggle--email"
       aria-pressed="false"
-      aria-label="Toggle email view"
+      aria-label={gettext("Toggle email view")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">Email view</span>
+      <span class="bp-vt-label">{gettext("Email view")}</span>
     </button>
     <%!-- Dark/light mode pill. CSP layer-2: handler bound in the nonced IIFE
           below, never an inline onclick. aria-pressed mirrors "dark mode on";
@@ -2332,10 +2344,10 @@
       type="button"
       class="bp-view-toggle bp-mode-toggle"
       aria-pressed="false"
-      aria-label="Switch between dark and light mode"
+      aria-label={gettext("Switch between dark and light mode")}
     >
       <span class="bp-vt-dot" aria-hidden="true"></span>
-      <span class="bp-vt-label">Mode</span>
+      <span class="bp-vt-label">{gettext("Mode")}</span>
     </button>
   </div>
   <script nonce={assigns[:csp_nonce]}>
@@ -2350,7 +2362,7 @@
       var last = mode();
       function paint() {
         var m = mode();
-        if (label) label.textContent = m === "dark" ? "Light mode" : "Dark mode";
+        if (label) label.textContent = m === "dark" ? (document.body.dataset.bpTLightMode || "Light mode") : (document.body.dataset.bpTDarkMode || "Dark mode");
         btn.setAttribute("aria-pressed", m === "dark" ? "true" : "false");
       }
       // Broadcast only on an EFFECTIVE change — consumers that bake colors in
@@ -2392,9 +2404,9 @@
       function setLabels(mode) {
         var tui = mode === "tui", email = mode === "email";
         if (btn) btn.setAttribute("aria-pressed", tui ? "true" : "false");
-        if (label) label.textContent = tui ? "Reader view" : "TUI view";
+        if (label) label.textContent = tui ? (document.body.dataset.bpTReaderView || "Reader view") : (document.body.dataset.bpTTuiView || "TUI view");
         if (emailBtn) emailBtn.setAttribute("aria-pressed", email ? "true" : "false");
-        if (emailLabel) emailLabel.textContent = email ? "Reader view" : "Email view";
+        if (emailLabel) emailLabel.textContent = email ? (document.body.dataset.bpTReaderView || "Reader view") : (document.body.dataset.bpTEmailView || "Email view");
       }
 
       function currentSlug() {
@@ -2597,7 +2609,8 @@
         // pin the CSS grid width + the "$ bp paper view <slug>" prompt line
         document.documentElement.style.setProperty("--bp-cols", TUI_COLS);
         if (slug) out.setAttribute("data-slug", slug);
-        out.innerHTML = '<div class="bp-tui-loading">rendering…</div>';
+        out.innerHTML = '<div class="bp-tui-loading"></div>';
+        out.firstChild.textContent = document.body.dataset.bpTRendering || "rendering…";
         try {
           if (!slug) throw new Error("no paper slug in the URL");
           var blocksP = fetchBlocks(slug);
@@ -3180,7 +3193,7 @@
         if (failed) {
           toggle.setAttribute("aria-disabled", "true");
           toggle.removeAttribute("aria-busy");
-          toggle.title = "Editor failed to load. Reload the page to try again.";
+          toggle.title = document.body.dataset.bpTEditorFailedTitle || "Editor failed to load. Reload the page to try again.";
         } else {
           toggle.setAttribute("aria-busy", "true");
         }
@@ -3193,7 +3206,7 @@
 
       const message = document.createElement("p");
       message.setAttribute("role", "alert");
-      message.textContent = "Editor failed to load. Your paper is still readable; reload to try editing again.";
+      message.textContent = document.body.dataset.bpTEditorFailed || "Editor failed to load. Your paper is still readable; reload to try editing again.";
       (document.getElementById("paper-edit-bar") || document.body).appendChild(message);
       console.error("Barkpark public editor assets failed to load", error);
     }

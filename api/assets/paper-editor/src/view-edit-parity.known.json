@@ -33,57 +33,29 @@
    "surface": "canvas",
    "fixture": "task-list",
    "text": "○",
-   "axis": "fontFamily",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "○",
    "axis": "fontSize",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "fontWeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "canvas",
    "fixture": "task-list",
    "text": "○",
    "axis": "lineHeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontFamily",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "canvas",
    "fixture": "task-list",
    "text": "✓",
    "axis": "fontSize",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "canvas",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontWeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "canvas",
    "fixture": "task-list",
    "text": "✓",
    "axis": "lineHeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "liveview",
@@ -530,57 +502,29 @@
    "surface": "liveview",
    "fixture": "task-list",
    "text": "○",
-   "axis": "fontFamily",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "○",
    "axis": "fontSize",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "○",
-   "axis": "fontWeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "liveview",
    "fixture": "task-list",
    "text": "○",
    "axis": "lineHeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontFamily",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "liveview",
    "fixture": "task-list",
    "text": "✓",
    "axis": "fontSize",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "task-list",
-   "text": "✓",
-   "axis": "fontWeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "liveview",
    "fixture": "task-list",
    "text": "✓",
    "axis": "lineHeight",
-   "reason": "Canvas fleet chip glyph: the editor's status glyph span.bp-g is editor chrome (monospace 600), the reader's momentum icon is body type. Follow-up."
+   "reason": "Task-list glyph pairing: the reader's first \u25cb/\u2713 is the momentum header's bp-g (0.78rem row), the editor's is a list row's bp-g; same glyph rule, different row size."
   },
   {
    "surface": "liveview",
