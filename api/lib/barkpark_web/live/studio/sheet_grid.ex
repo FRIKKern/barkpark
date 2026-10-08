@@ -3212,7 +3212,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 {"datetime", "Datetime"},
                 {"checkbox", "Checkbox"}
               ]}
-              aria-label="Number format class"
+              aria-label="Number format"
               data-test-id="sheet-fmt-select"
             />
           </form>

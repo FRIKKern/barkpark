@@ -2015,6 +2015,16 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   defp attr_id(html),
     do: html |> then(&Regex.run(~r/\sid="([^"]+)"/, &1, capture: :all_but_first)) |> List.first()
 
+  # task-880a2d3f48ccbfcb: the select was named "Number format class".
+  test "the number-format select is labelled Number format", %{conn: conn} do
+    create_sheet!("sg-fmt-label", [%{"name" => "Sheet 1", "cells" => %{}}])
+    {view, _target, _html} = open!(conn, "sg-fmt-label")
+
+    select = view |> element(~s([data-test-id="sheet-fmt-select"])) |> render()
+    assert select =~ ~s(aria-label="Number format")
+    refute select =~ "Number format class"
+  end
+
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
     create_sheet!("sg-tab-announce", [
       %{"name" => "T0", "cells" => %{}},

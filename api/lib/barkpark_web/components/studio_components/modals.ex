@@ -774,12 +774,23 @@ defmodule BarkparkWeb.StudioComponents.Modals do
             <div class="history-item">
               <div class="history-item-info">
                 <div class="history-item-action">
-                  <span class={"history-action-badge history-action-#{rev.action}"}><%= rev.action %></span>
+                  <span class={"history-action-badge history-action-#{rev.action}"}><%= history_action_label(rev.action) %></span>
                   <span class="history-item-title"><%= rev.title || "Untitled" %></span>
                 </div>
                 <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
               </div>
-              <button class="btn btn-sm" phx-click="restore-revision" phx-value-id={rev.id} data-confirm="Restore this version? Current changes will be overwritten.">Restore</button>
+              <%!-- Every row's button said only "Restore", so a screen reader's
+                    button list was thirty identical names
+                    (task-880a2d3f48ccbfcb). --%>
+              <button
+                class="btn btn-sm"
+                phx-click="restore-revision"
+                phx-value-id={rev.id}
+                aria-label={"Restore the version from #{format_history_time(rev.inserted_at)} (#{history_action_label(rev.action)})"}
+                data-confirm="Restore this version? Current changes will be overwritten."
+              >
+                Restore
+              </button>
             </div>
           <% end %>
         </div>
@@ -787,6 +798,21 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <% end %>
     """
   end
+
+  # The stored action is a code ("discardDraft" rendered as DISCARDDRAFT
+  # under the badge's uppercase style); show what happened in words.
+  @history_action_labels %{
+    "create" => "Created",
+    "update" => "Edited",
+    "publish" => "Published",
+    "unpublish" => "Unpublished",
+    "discardDraft" => "Draft discarded",
+    "delete" => "Deleted",
+    "restore" => "Restored"
+  }
+
+  defp history_action_label(action),
+    do: Map.get(@history_action_labels, action) || to_string(action)
 
   defp format_history_time(dt) do
     Calendar.strftime(dt, "%b %d, %Y at %H:%M:%S")
