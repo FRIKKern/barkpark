@@ -829,7 +829,17 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
              "unaccounted :api_token writer: #{String.trim(line)}"
     end
 
-    assert source =~ "Auth.verify_token(token)"
+    # Ruling #16 rework half (task-57f23825b18ab55d): the direct
+    # `Auth.verify_token(token)` call this pin used to require moved OUT of
+    # this file — every `:api_token` write's value now comes from
+    # `Auth.resolve_session_credential/2`, which itself resolves to either
+    # `Auth.verify_token/1` (the legacy raw-cookie arm) or
+    # `Auth.verify_token_session/1` (the new revocable-session arm), both in
+    # `Barkpark.Auth` and both returning only `{:ok, %ApiToken{}, raw}` or
+    # `:error` (pinned in auth_token_session_test.exs). The property this
+    # test exists to catch — a write of anything OTHER than a real verified
+    # ApiToken, e.g. a CallerContext — still has nowhere to hide.
+    assert source =~ "Auth.resolve_session_credential("
   end
 
   # ── COST: PDS-D634's one-load property, preserved and quoted ────────────────

@@ -1,11 +1,18 @@
 defmodule BarkparkWeb.SessionController do
   @moduledoc """
   Browser-facing session controller. Lets a human paste their raw API
-  token via `GET /login`, stores it in `session["api_token"]` on success,
-  and clears the session via `POST /logout`.
+  token via `GET /login`, mints a revocable `Barkpark.Auth.TokenSession` on
+  success and stores only its opaque id in `session["api_token_session"]`,
+  and clears it via `POST /logout`.
 
   This is the canonical browser entry point for admin LiveViews; see
   `BarkparkWeb.LiveAuth` for the on_mount that consumes the session key.
+
+  Ruling #16 rework half (task-57f23825b18ab55d): a cookie minted BEFORE this
+  change still carries the raw token directly under the legacy
+  `session["api_token"]` key and keeps working until it expires or the user
+  signs out — `Barkpark.Auth.resolve_session_credential/2` is the one place
+  that tolerates both shapes.
   """
   use BarkparkWeb, :controller
 
@@ -42,15 +49,15 @@ defmodule BarkparkWeb.SessionController do
     put_locale_for(return_to)
     trimmed = String.trim(raw_token)
 
-    case Barkpark.Auth.verify_token(trimmed) do
-      {:ok, _api_token} ->
-        conn
-        |> configure_session(renew: true)
-        |> put_session("api_token", trimmed)
-        |> put_flash(:info, "Signed in.")
-        |> redirect(to: return_to)
-
-      {:error, :unauthorized} ->
+    with {:ok, api_token} <- Barkpark.Auth.verify_token(trimmed),
+         {:ok, session_id} <- Barkpark.Auth.create_token_session(trimmed, api_token) do
+      conn
+      |> configure_session(renew: true)
+      |> put_session("api_token_session", session_id)
+      |> put_flash(:info, "Signed in.")
+      |> redirect(to: return_to)
+    else
+      _ ->
         conn
         |> put_flash(:error, "Invalid API token.")
         |> render(:new, new_assigns(return_to))
@@ -97,10 +104,10 @@ defmodule BarkparkWeb.SessionController do
   Consume a single-use login ticket (dwb-7 "Studio one-click entry").
 
   `GET /login/ticket/:ticket` — atomically consumes the ticket (single-use +
-  60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), drops the bound
-  RAW api_token into `session["api_token"]` exactly like `create/2` does for a
-  pasted token, and redirects to `/studio`. One click, no paste, works from a
-  fresh browser.
+  60s TTL, enforced in `Barkpark.Auth.consume_login_ticket/1`), mints a
+  `Barkpark.Auth.TokenSession` for the bound RAW api_token exactly like
+  `create/2` does for a pasted token, and redirects to `/studio`. One click,
+  no paste, works from a fresh browser.
 
   Consuming on GET is the magic-link tradeoff: mitigated by single-use + short
   TTL + `Cache-Control: no-store` (no proxy/history reuse) + `Referrer-Policy:
@@ -133,12 +140,22 @@ defmodule BarkparkWeb.SessionController do
         |> put_flash(:info, "Signed in.")
         |> redirect(to: @default_return_to)
 
-      {:ok, api_token} when is_binary(api_token) ->
-        conn
-        |> configure_session(renew: true)
-        |> put_session("api_token", api_token)
-        |> put_flash(:info, "Signed in.")
-        |> redirect(to: @default_return_to)
+      {:ok, raw_api_token} when is_binary(raw_api_token) ->
+        case Barkpark.Auth.verify_token(raw_api_token) do
+          {:ok, api_token} ->
+            {:ok, session_id} = Barkpark.Auth.create_token_session(raw_api_token, api_token)
+
+            conn
+            |> configure_session(renew: true)
+            |> put_session("api_token_session", session_id)
+            |> put_flash(:info, "Signed in.")
+            |> redirect(to: @default_return_to)
+
+          {:error, :unauthorized} ->
+            conn
+            |> put_flash(:error, "This sign-in link is invalid or has expired.")
+            |> redirect(to: "/login")
+        end
 
       {:error, :invalid} ->
         conn
@@ -493,12 +510,29 @@ defmodule BarkparkWeb.SessionController do
 
   def delete(conn, _params) do
     # Revoke the account session server-side (not just the cookie) — parity
-    # with DELETE /v1/auth/logout; the API-token session key needs no
-    # revocation (dropping the cookie is the whole grant).
-    revoked =
+    # with DELETE /v1/auth/logout.
+    user_revoked =
       case get_session(conn, "user_session") do
         token when is_binary(token) and token != "" ->
           {:ok, n} = Barkpark.Accounts.revoke_user_session_token(token)
+          n
+
+        _ ->
+          0
+      end
+
+    # Ruling #16 rework half (task-57f23825b18ab55d): a token sign-in now
+    # mints a revocable `Barkpark.Auth.TokenSession` holding the encrypted raw
+    # bearer, so logout DELETES that row — a copied `_barkpark_key` cookie
+    # stops authenticating the instant the user signs out, not merely when
+    # the cookie itself expires or the token is separately revoked. The
+    # legacy `session["api_token"]` key (a cookie minted before this change)
+    # still needs no server-side revocation: dropping the cookie IS the whole
+    # grant for that one-release transition case, same as before.
+    token_session_revoked =
+      case get_session(conn, "api_token_session") do
+        session_id when is_binary(session_id) and session_id != "" ->
+          {:ok, n} = Barkpark.Auth.revoke_token_session(session_id)
           n
 
         _ ->
@@ -511,7 +545,7 @@ defmodule BarkparkWeb.SessionController do
     conn
     |> clear_session()
     |> configure_session(renew: true)
-    |> put_flash(:info, sign_out_flash(revoked))
+    |> put_flash(:info, sign_out_flash(user_revoked + token_session_revoked))
     |> redirect(to: after_sign_out_path())
   end
 
