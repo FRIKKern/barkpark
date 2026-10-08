@@ -12,7 +12,7 @@
 // what it reads. NO trigger/autocomplete UI here (that is the Phase-3 task).
 // `inclusive:false` keeps a leaf mark from bleeding onto adjacent typed text.
 
-import { Mark } from "@tiptap/core";
+import { Mark, Node } from "@tiptap/core";
 
 export function internalLinkMark(name, attrs) {
   return Mark.create({
@@ -73,5 +73,69 @@ export const Valueref = internalLinkMark("valueref", {
       attrs.children == null
         ? {}
         : { "data-valueref-children": JSON.stringify(attrs.children) },
+  },
+});
+
+// bpInlineOpaque — an inline node the editor has no UI for (a `chip`, or any
+// type a newer writer stored), carried VERBATIM (task-a110126ce9111388). Before
+// it, convert.js dropped a childless unknown inline node on load, so the first
+// save of its paragraph deleted it from the stored document. It is an inert
+// ATOM: the whole stored node rides the `node` attr and is written back
+// byte-exact; the author can select or delete it as one unit but cannot type
+// into it, so no edit can silently vanish on save. The attr is JSON-encoded
+// through its DOM attribute so a DOM serialize -> parse (copy/paste) keeps it.
+export function inlineOpaqueLabel(node) {
+  if (!node || typeof node !== "object") return "";
+  if (typeof node.text === "string" && node.text !== "") return node.text;
+  const plain = (n) => {
+    if (!n || typeof n !== "object") return "";
+    if (typeof n.value === "string") return n.value;
+    if (typeof n.text === "string") return n.text;
+    return Array.isArray(n.children) ? n.children.map(plain).join("") : "";
+  };
+  const text = Array.isArray(node.children) ? node.children.map(plain).join("") : "";
+  return text !== "" ? text : `[${typeof node.type === "string" ? node.type : "inline"}]`;
+}
+
+export const InlineOpaque = Node.create({
+  name: "bpInlineOpaque",
+  inline: true,
+  group: "inline",
+  atom: true,
+  selectable: true,
+  draggable: false,
+  addAttributes() {
+    return {
+      node: {
+        default: null,
+        parseHTML: (el) => {
+          const raw = el.getAttribute("data-bp-inline-opaque");
+          if (!raw) return null;
+          try {
+            return JSON.parse(raw);
+          } catch {
+            return null;
+          }
+        },
+        renderHTML: (attrs) =>
+          attrs.node == null ? {} : { "data-bp-inline-opaque": JSON.stringify(attrs.node) },
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "span[data-bp-inline-opaque]" }];
+  },
+  renderHTML({ node, HTMLAttributes }) {
+    const stored = node.attrs.node;
+    return [
+      "span",
+      {
+        ...HTMLAttributes,
+        class: "bp-inline-opaque",
+        contenteditable: "false",
+        "data-bp-inline-type": stored && typeof stored.type === "string" ? stored.type : "",
+      },
+      inlineOpaqueLabel(stored),
+    ];
   },
 });
