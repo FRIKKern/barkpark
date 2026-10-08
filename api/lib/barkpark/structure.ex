@@ -162,11 +162,16 @@ defmodule Barkpark.Structure do
 
     schema_map = Map.new(schemas, &{&1.name, &1})
 
+    # The `deskStructure` document is read ONCE per build: its `items` declare
+    # the MAIN tier (`declared_desk/3`) and its `title` names the root, as
+    # Sanity's `S.list().title('Innhold')` does (task-9eafad70d2249770).
+    desk_doc = fetch_desk_doc(dataset, opts)
+
     %Node{
       id: "root",
-      title: "Structure",
+      title: desk_root_title(desk_doc),
       type: :list,
-      items: build_desk_items(schema_map, dataset, opts)
+      items: build_desk_items(schema_map, dataset, Keyword.put(opts, :desk_doc, desk_doc))
     }
   end
 
@@ -1083,11 +1088,38 @@ defmodule Barkpark.Structure do
 
   @desk_structure_type "deskStructure"
 
-  defp declared_desk(_schemas, dataset, opts) do
+  # The published `deskStructure` document, or nil. A read that raises degrades
+  # to the default desk with a logged reason — never a blank desk.
+  defp fetch_desk_doc(dataset, opts) do
     scope = Keyword.take(opts, [:workspace_id])
 
     case Content.get_document(@desk_structure_type, @desk_structure_type, dataset, scope) do
-      {:ok, %{content: %{"items" => items}}} when is_list(items) and items != [] ->
+      {:ok, doc} -> doc
+      _ -> nil
+    end
+  rescue
+    e ->
+      Logger.warning(
+        "deskStructure for #{dataset} could not be read (#{Exception.message(e)}) — using the default desk"
+      )
+
+      nil
+  end
+
+  defp desk_root_title(%{content: %{"title" => title}}) when is_binary(title) do
+    case String.trim(title) do
+      "" -> "Structure"
+      trimmed -> trimmed
+    end
+  end
+
+  defp desk_root_title(_doc), do: "Structure"
+
+  defp declared_desk(_schemas, dataset, opts) do
+    scope = Keyword.take(opts, [:workspace_id])
+
+    case Keyword.get(opts, :desk_doc) do
+      %{content: %{"items" => items}} when is_list(items) and items != [] ->
         ctx = %{dataset: dataset, scope: scope}
 
         nodes =
@@ -1106,7 +1138,7 @@ defmodule Barkpark.Structure do
           {:ok, nodes}
         end
 
-      {:ok, _} ->
+      %{} ->
         Logger.warning("deskStructure for #{dataset} has no items list — using the default desk")
         :none
 
