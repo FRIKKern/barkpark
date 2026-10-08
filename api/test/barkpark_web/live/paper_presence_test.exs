@@ -297,5 +297,15 @@ defmodule BarkparkWeb.PaperPresenceTest do
       assert PaperPresence.display(%{label: nil, id: "0123456789abcdef"}) == "01234567"
       assert PaperPresence.display(%{label: nil, id: nil}) == "someone"
     end
+
+    # task-a4a7d0465c57fd1e: the share link id read as "65371907" on the page.
+    test "a share-link presence without a label reads Link visitor, not its id" do
+      share = %{kind: "share", label: nil, id: "65371907-49af-47a7-b109-39349fc322f5"}
+      assert PaperPresence.display(share) == "Link visitor"
+      assert PaperPresence.display(%{share | label: "Kari"}) == "Kari"
+
+      assert PaperPresence.display(%{kind: "user", label: nil, id: "0123456789abcdef"}) ==
+               "01234567"
+    end
   end
 end

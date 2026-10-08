@@ -150,6 +150,11 @@ defmodule BarkparkWeb.PaperPresence do
   @spec display(map()) :: String.t()
   def display(%{label: label}) when is_binary(label) and label != "", do: label
 
+  # A share link carries no name, and its id means nothing to a reader: the
+  # strip used to print "65371907" for someone reading through a link — the
+  # visitor's own browser included (task-a4a7d0465c57fd1e).
+  def display(%{kind: "share"}), do: "Link visitor"
+
   def display(%{id: id}) when is_binary(id) and id != "", do: String.slice(id, 0, 8)
 
   def display(_presence), do: "someone"
