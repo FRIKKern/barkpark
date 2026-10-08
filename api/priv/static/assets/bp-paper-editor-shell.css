@@ -361,7 +361,7 @@
       font-style: italic;
       font-size: 1.2rem;
       color: var(--paper-ink-soft);
-      border-left: 3px solid var(--paper-reading-accent);
+      border-left: 3px solid var(--paper-rule);
       border-bottom: 0;
       margin: 1.6rem 0;
       padding: 0.2rem 0 0.2rem 1.2rem;
@@ -798,7 +798,7 @@
     .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
     .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
     .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
