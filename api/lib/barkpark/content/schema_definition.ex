@@ -493,8 +493,17 @@ defmodule Barkpark.Content.SchemaDefinition do
       :options,
       # composite
       :fields,
-      # arrayOf
+      # arrayOf — single-shape (legacy, unchanged): :of is a %Field{}.
       :of,
+      # arrayOf — several NAMED member types (task-b3ebbd3ab1575e2a): a
+      # `name => %Field{}` map, mutually exclusive with :of (parse_field_type
+      # sets exactly one of the two, never both). nil/empty for every
+      # existing schema, so a schema that never used this stays
+      # byte-identical. Each array item is discriminated by its own
+      # `"_type"` key against this map's keys, mirroring Sanity's object
+      # arrays — the whole point of this field (post.links: externalLink |
+      # docLink).
+      :of_types,
       :ordered,
       # codelist
       :codelist_id,
@@ -862,7 +871,12 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  # arrayOf — `ordered: true|false` flag, single `of` shape descriptor
+  # arrayOf — `ordered: true|false` flag, plus EITHER a single `of` shape
+  # descriptor (legacy) OR a list of several NAMED member types
+  # (task-b3ebbd3ab1575e2a: `of: [{"name": "externalLink", ...}, {"name":
+  # "docLink", ...}]`, Sanity's object-array shape). The two are mutually
+  # exclusive by the cond's own ordering: a list routes to
+  # `parse_array_of_types/4` before the single-map branch is ever reached.
   defp parse_field_type("arrayOf", f, plugin) do
     of = Map.get(f, "of")
     ordered = Map.get(f, "ordered", false)
@@ -871,6 +885,9 @@ defmodule Barkpark.Content.SchemaDefinition do
     cond do
       not is_boolean(ordered) ->
         {:error, {:array_ordered_must_be_boolean, name}}
+
+      is_list(of) ->
+        parse_array_of_types(of, ordered, name, plugin)
 
       is_nil(of) or not is_map(of) ->
         {:error, {:array_missing_of, name}}
@@ -956,6 +973,64 @@ defmodule Barkpark.Content.SchemaDefinition do
   end
 
   defp parse_field_type(_, _, _), do: {:error, :field_type_must_be_string}
+
+  # The several-named-member-types `of: [...]` branch of
+  # parse_field_type("arrayOf", ...) above — kept out of that clause group so
+  # the `parse_field_type/3` clauses themselves stay contiguous.
+  #
+  # `of: []` is the SAME shape-less declaration `of: null`/`of: {}` already
+  # refuses — an array with no member type is not a valid descriptor either
+  # way, and treating an empty list as "no types" rather than silently
+  # parsing to an empty map keeps the error message's reason consistent.
+  defp parse_array_of_types([], _ordered, name, _plugin), do: {:error, {:array_missing_of, name}}
+
+  defp parse_array_of_types(list, ordered, name, plugin) do
+    with {:ok, pairs} <- parse_array_of_type_members(list, name, plugin),
+         :ok <- ensure_unique_member_names(pairs, name) do
+      {:ok, %Field{ordered: ordered, of_types: Map.new(pairs)}}
+    end
+  end
+
+  defp parse_array_of_type_members(list, array_name, plugin) do
+    Enum.reduce_while(list, {:ok, []}, fn entry, {:ok, acc} ->
+      case parse_array_of_type_member(entry, array_name, plugin) do
+        {:ok, pair} -> {:cont, {:ok, [pair | acc]}}
+        {:error, _} = err -> {:halt, err}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      err -> err
+    end
+  end
+
+  defp parse_array_of_type_member(entry, array_name, plugin) when is_map(entry) do
+    case Map.get(entry, "name") || Map.get(entry, :name) do
+      member_name when is_binary(member_name) and member_name != "" ->
+        item_raw = Map.put(stringify(entry), "name", array_name <> "[" <> member_name <> "]")
+
+        case parse_field(item_raw, plugin) do
+          {:ok, child} -> {:ok, {member_name, child}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:array_of_type_missing_name, array_name}}
+    end
+  end
+
+  defp parse_array_of_type_member(_entry, array_name, _plugin),
+    do: {:error, {:array_of_type_missing_name, array_name}}
+
+  defp ensure_unique_member_names(pairs, array_name) do
+    names = Enum.map(pairs, &elem(&1, 0))
+
+    if length(Enum.uniq(names)) == length(names) do
+      :ok
+    else
+      {:error, {:array_of_type_names_not_unique, array_name}}
+    end
+  end
 
   defp parse_validations(v) when is_list(v), do: {:ok, v}
   defp parse_validations(_), do: {:error, :validations_must_be_list}
