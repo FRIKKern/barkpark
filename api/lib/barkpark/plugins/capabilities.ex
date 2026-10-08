@@ -2637,6 +2637,48 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "pref.get",
+        "pref",
+        "get",
+        "Read one named per-account pref (task-7d2a48dbf7e4bf34) in the active --workspace/--dataset. value is null when unset. Identity is the caller's account session or a personal access token's owner.",
+        "GET",
+        "/v1/prefs/:dataset/:key",
+        "read",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
+        writes: false,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.set",
+        "pref",
+        "set",
+        "Set one named per-account pref (task-7d2a48dbf7e4bf34) — an upsert, never an append. Capped at 16KB.",
+        "PUT",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
+        flags: [
+          flag("file", "file", "Body {\"value\": {...}} from a file or - for stdin.")
+        ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "pref.rm",
+        "pref",
+        "rm",
+        "Delete one named per-account pref (task-7d2a48dbf7e4bf34). Idempotent — deleting an absent key is still ok.",
+        "DELETE",
+        "/v1/prefs/:dataset/:key",
+        "write",
+        args: [arg("key", true, "string", "Pref name, e.g. recent_searches.")],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "workspace.member-rm",
         "workspace",
         "member-rm",

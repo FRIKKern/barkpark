@@ -89,6 +89,11 @@ var codeExit = map[string]int{
 	"forbidden_field": exitAuth,
 	"cors_forbidden":  exitAuth,
 	"csrf_required":   exitAuth,
+	// Per-account prefs (task-7d2a48dbf7e4bf34): a shared/admin-minted token
+	// with no owning account has no "user" to key a pref by. The credential
+	// itself is fine for every OTHER route; here it just can't authenticate
+	// THIS one — same bucket `forbidden` already uses for that shape.
+	"no_user_identity": exitAuth,
 	// The cloud control plane's team gate: the caller's login has no ACTIVE TEAM.
 	// Deliberately NOT the auth bucket even though it now arrives as a 403 — exit 3
 	// means "your credential is bad", and here the credential is fine; the fix is
@@ -114,8 +119,18 @@ var codeExit = map[string]int{
 	// empty body (usually a mislabeled content-type Plug.Parsers already ate).
 	// Absent from this table they fell to the exit-1 unknown-code bucket, which
 	// reads as "unexpected" for what is a plainly invalid payload (PDS-D52).
-	"invalid_path":        exitValidation,
-	"empty_body":          exitValidation,
+	"invalid_path": exitValidation,
+	"empty_body":   exitValidation,
+	// Per-account prefs (task-7d2a48dbf7e4bf34). "bad_request" is also emitted
+	// at 400 by auth_controller.ex/webauthn_controller.ex (the DOMINANT shape)
+	// and only here at 422 — same bucket either way, since the semantics are
+	// "the request itself is malformed", not "the value failed a business
+	// rule" (that's invalid_pref, below). exitUsage matches `malformed`'s own
+	// bucket for the identical reason.
+	"bad_request": exitUsage,
+	// A changeset's own field errors (invalid key/value shape for the
+	// stored JSON) — a validation bucket, not a credential one.
+	"invalid_pref":        exitValidation,
 	"rev_mismatch":        exitConflict,
 	"paper_exists":        exitConflict,
 	"precondition_failed": exitConflict,
