@@ -939,6 +939,12 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/:master_id/insert", "BarkparkWeb.PaperMastersController", :insert, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/pin", "BarkparkWeb.PaperMastersController", :pin, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/masters/blocks/:block_id/detach", "BarkparkWeb.PaperMastersController", :detach, :status_only_receipt},
+    # THE MEMBER-TOKEN PAPER BATCH OPS WRITE (task-7ee817f37630d669, P1). Answers
+    # the SAME minimal op receipt (`slug`, `opCount`, `rev`, `blockIds`) the
+    # masters rows above and the :ingest-tier `POST .../papers/:slug/ops`
+    # answer — a store-derived position/row-id array, never an `ok: true`
+    # literal — so it is the SAME class and the SAME reasoning.
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/papers/:slug/ops", "BarkparkWeb.PaperOpsController", :apply_op, :status_only_receipt},
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
