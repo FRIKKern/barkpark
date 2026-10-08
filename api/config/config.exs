@@ -454,6 +454,21 @@ config :barkpark, Oban,
        # static `default` queue; the worker bounds one tick by construction
        # (`PreviewToken.sweep_batch/1`).
        {"43 * * * *", Barkpark.PreviewToken.Sweeper},
+       # task-781cc7f06c5f4335 — GC for `token_sessions` (ruling #16 rework
+       # half, task-57f23825b18ab55d's browser token-sign-in sessions). A live
+       # row holds a Cloak-encrypted raw bearer — the same retention concern
+       # `LoginTicketSweeper` documents for `login_tickets` — and logout
+       # already DELETES the row it names, so what this worker reaps is the
+       # population logout never reaches: a session that expired naturally
+       # (no explicit sign-out) or a row some other path flagged `revoked_at`
+       # without deleting it. Hourly, not per-minute, because the retention
+       # FLOOR is the 30-day default validity, not the cadence — see
+       # `Barkpark.Auth.TokenSessionSweeper`'s moduledoc. Offset from both
+       # `:17` and `:43` so this hourly GC's range delete never opens in the
+       # same tick as the idempotency or preview-token sweeps. Runs on the
+       # static `default` queue; the worker bounds one tick by construction
+       # (`Auth.sweep_token_sessions_batch/1`).
+       {"50 * * * *", Barkpark.Auth.TokenSessionSweeper},
        # perfect-plan-build W2c (D28) — two-stage TTL reaper for ephemeral
        # playground workspaces: Stage 1 suspends at `expires_at`, Stage 2
        # swept-deletes at `expires_at + 24h` grace. Tenancy is core (not a
