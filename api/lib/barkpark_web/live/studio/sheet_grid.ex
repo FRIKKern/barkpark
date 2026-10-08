@@ -1801,6 +1801,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   # task-028c354f7f24fb65: closing a popover dialog (Escape, ×, Apply) hands
   # focus back to the button that opened it instead of dropping it on <body>.
+  # Where a closed filter hands focus: the grid when the funnel is not a Tab
+  # stop (an editable grid opens the filter from Alt+Down, task-5201a73e33535129),
+  # else the funnel itself.
+  defp filter_return_id(id, _col, true), do: "#{id}-grid"
+  defp filter_return_id(id, col, _editable), do: "#{id}-filter-funnel-#{col}"
+
   defp close_and_refocus(event, target, trigger_id) do
     event
     |> Phoenix.LiveView.JS.push(target: target)
@@ -3096,7 +3102,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </:actions>
       </.document_header>
 
-      <div :if={@editable} class="sheet-toolbar" data-test-id="sheet-toolbar">
+      <%!-- role="toolbar": ONE Tab stop for the formatting controls, arrow keys
+            inside (the SheetToolbar hook, task-5201a73e33535129). The name box
+            and formula bar stay ordinary Tab stops. --%>
+      <div
+        :if={@editable}
+        id={"#{@id}-toolbar"}
+        class="sheet-toolbar"
+        role="toolbar"
+        aria-label="Sheet formatting"
+        phx-hook="SheetToolbar"
+        data-test-id="sheet-toolbar"
+      >
         <form phx-submit="name-jump" phx-target={@myself}>
           <input
             name="ref"
@@ -3593,6 +3610,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           Press Escape then Tab to leave the grid.
           <%= if @editable do %>
             F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+            Alt+Down opens the column filter, Alt+Shift+Down the column menu, and
+            Shift+F10 the cell menu.
           <% else %>
             Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.
           <% end %>
@@ -3903,6 +3922,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="col"
                 phx-value-index={c}
@@ -3943,6 +3963,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <button
               type="button"
               class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
+              tabindex={@editable && "-1"}
               phx-click="filter-open"
               phx-value-col={c}
               phx-target={@myself}
@@ -3967,15 +3988,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               class="sheet-popover sheet-filter-panel"
               role="dialog"
               aria-label={"Filter column " <> Geometry.col_letters(c)}
-              phx-window-keydown={close_and_refocus("filter-close", @myself, "#{@id}-filter-funnel-#{c}")}
+              phx-window-keydown={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))}
               phx-key="Escape"
               data-test-id="sheet-filter-panel"
             >
               <div class="sheet-filter-head">
                 <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("filter-close", @myself, "#{@id}-filter-funnel-#{c}")} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
               </div>
-              <form id={"#{@id}-filter-form-#{c}"} class="sheet-filter-form" phx-submit={close_and_refocus("filter-apply", @myself, "#{@id}-filter-funnel-#{c}")} phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+              <form id={"#{@id}-filter-form-#{c}"} class="sheet-filter-form" phx-submit={close_and_refocus("filter-apply", @myself, filter_return_id(@id, c, @editable))} phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
                 <input type="hidden" name="col" value={c} />
                 <label class="sheet-filter-field">
                   <span>Show rows where</span>
@@ -4052,6 +4073,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="row"
                 phx-value-index={r}

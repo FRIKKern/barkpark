@@ -2041,10 +2041,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert form_id == "#{grid}-filter-form-1"
     assert has_element?(view, "form##{form_id}")
     panel = view |> element(~s([data-test-id="sheet-filter-panel"])) |> render()
-    assert panel =~ ~r/phx-window-keydown="[^"]*filter-close[^"]*#{grid}-filter-funnel-1/
+    # The funnel is no Tab stop in an editable grid (task-5201a73e33535129), so
+    # a closed filter hands focus back to the grid it was opened from.
+    assert panel =~ ~r/phx-window-keydown="[^"]*filter-close[^"]*#{grid}-grid&quot;/
 
     close = view |> element(~s([data-test-id="sheet-filter-close"])) |> render()
-    assert close =~ ~r/phx-click="[^"]*filter-close[^"]*#{grid}-filter-funnel-1/
+    assert close =~ ~r/phx-click="[^"]*filter-close[^"]*#{grid}-grid&quot;/
 
     render_click(target, "cf-open", %{})
     assert_push_event(view, "bp:sheet-focus-first", %{id: cf_id})
@@ -2052,6 +2054,30 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     cf = view |> element(~s([data-test-id="sheet-cf-panel"])) |> render()
     assert cf =~ ~s(id="#{cf_id}")
     assert cf =~ ~r/phx-window-keydown="[^"]*cf-close[^"]*#{grid}-cf-btn/
+  end
+
+  # task-5201a73e33535129: leaving the sheet by keyboard took ~70 Tabs.
+  test "the toolbar is one Tab stop and the header controls are not Tab stops", %{conn: conn} do
+    create_sheet!("sg-tab-stops", [%{"name" => "Sheet 1", "cells" => %{"A1" => %{"v" => 1}}}])
+    {view, _target, html} = open!(conn, "sg-tab-stops")
+
+    toolbar = view |> element(~s([data-test-id="sheet-toolbar"])) |> render()
+    assert toolbar =~ ~s(role="toolbar")
+    assert toolbar =~ ~s(phx-hook="SheetToolbar")
+    assert toolbar =~ ~s(id="sheet-grid-sg-tab-stops-toolbar")
+
+    menu_btns =
+      Regex.scan(~r/<button[^>]*class="sheet-head-menu-btn"[^>]*>/, html) |> List.flatten()
+
+    funnels =
+      Regex.scan(~r/<button[^>]*class="sheet-filter-funnel[^"]*"[^>]*>/, html) |> List.flatten()
+
+    assert menu_btns != [] and funnels != []
+    assert Enum.all?(menu_btns ++ funnels, &(&1 =~ ~s(tabindex="-1")))
+
+    instructions = view |> element("#sheet-grid-sg-tab-stops-grid-instructions") |> render()
+    assert instructions =~ "Alt+Down opens the column filter"
+    assert instructions =~ "Shift+F10"
   end
 
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
