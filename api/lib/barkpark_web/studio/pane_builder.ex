@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   use Gettext, backend: BarkparkWeb.Gettext
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
+  alias Barkpark.Content.PreviewText
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   @doc """
@@ -461,7 +462,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           active_desk: nil,
           filter_error: filter_error,
           has_more: has_more,
-          items: doc_items(docs, schema),
+          items: doc_items(docs, schema, dataset, opts),
           selected: Enum.at(rest, 0)
         }
 
@@ -539,7 +540,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           active_desk: active_group && Map.get(active_group, "name"),
           filter_error: filter_error,
           has_more: has_more,
-          items: doc_items(docs, schema),
+          items: doc_items(docs, schema, dataset, opts),
           selected: Enum.at(rest, 0)
         }
 
@@ -653,7 +654,8 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           active_desk: nil,
           filter_error: filter_error,
           tree_level: level,
-          items: doc_items([doc], schema) ++ [divider] ++ doc_items(children, schema),
+          items:
+            doc_items([doc] ++ children, schema, dataset, opts) |> List.insert_at(1, divider),
           selected: rest |> Enum.at(0) |> then(&(&1 && Content.published_id(&1)))
         }
 
@@ -919,9 +921,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # as before (post/page back-compat lock). Generic by construction: PaneBuilder
   # never branches on the document type; the declaration/manifest is the switch.
 
-  defp doc_items(docs, schema) do
+  defp doc_items(docs, schema, dataset, opts) do
     preview = schema_list_preview(schema)
     media_field = preview_field(Map.get(preview, "media"))
+    subtitle = Map.get(preview, "subtitle")
+    targets = subtitle_targets(docs, subtitle, dataset, opts)
 
     Enum.map(docs, fn doc ->
       pub_id = Content.published_id(doc.doc_id)
@@ -943,7 +947,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         # subtitle fallback so a row is never a bare mono id; the render picks
         # `meta || updated`. Threading updated_at only READS a field already on
         # every Document — no /v1/structure wire change.
-        meta: row_meta(doc, Map.get(preview, "meta")),
+        meta: subtitle_meta(doc, subtitle, targets) || row_meta(doc, Map.get(preview, "meta")),
         updated: relative_updated(doc)
       }
     end)
@@ -1062,6 +1066,69 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # paper/sheet/form — declare none) read the write-time manifest description.
   # Identical priority to the Go TUI's `rowMeta` (listpreview_render_test.go
   # pins it there; pane_builder_test.exs pins it here).
+  # `list_preview.subtitle` (task-f3203617ae4cf03e): a path, `ref.field` through
+  # one reference, `|date`, and parts with a fallback — `PreviewText`. The
+  # referenced documents of a whole page load in ONE scoped read.
+  defp subtitle_meta(_doc, nil, _targets), do: nil
+
+  defp subtitle_meta(doc, spec, targets) do
+    PreviewText.format(spec, fn path ->
+      case String.split(path, ".", parts: 2) do
+        [field] ->
+          content_value(doc, field)
+
+        [ref, rest] ->
+          with id when is_binary(id) <- ref_id(content_value(doc, ref)),
+               %{} = target <- Map.get(targets, id) do
+            target_value(target, rest)
+          else
+            _ -> nil
+          end
+      end
+    end)
+  end
+
+  defp subtitle_targets(docs, spec, dataset, opts) do
+    case PreviewText.refs(spec) do
+      [] ->
+        %{}
+
+      refs ->
+        ids =
+          for doc <- docs,
+              ref <- refs,
+              id = ref_id(content_value(doc, ref)),
+              is_binary(id),
+              uniq: true,
+              do: id
+
+        found =
+          Content.get_documents_by_ids(
+            ids ++ Enum.map(ids, &("drafts." <> &1)),
+            dataset,
+            scope(opts)
+          )
+
+        # The published row wins; a draft-only target still names itself.
+        Map.new(ids, fn id -> {id, found[id] || found["drafts." <> id]} end)
+    end
+  end
+
+  defp ref_id(%{"_ref" => id}) when is_binary(id), do: Content.published_id(id)
+  defp ref_id(id) when is_binary(id) and id != "", do: Content.published_id(id)
+  defp ref_id(_), do: nil
+
+  defp target_value(target, "title"), do: target.title || content_value(target, "title")
+
+  defp target_value(target, path) do
+    path
+    |> String.split(".")
+    |> Enum.reduce(Map.get(target, :content), fn
+      key, %{} = map -> Map.get(map, key)
+      _key, _ -> nil
+    end)
+  end
+
   defp row_meta(doc, nil), do: manifest_description(doc)
   defp row_meta(doc, spec), do: preview_value(doc, spec)
 

@@ -115,6 +115,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
+    |> validate_desk_editor()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -286,6 +287,34 @@ defmodule Barkpark.Content.SchemaDefinition do
 
           other ->
             add_error(changeset, :desk, "orderings must be a list, got #{inspect(other)}")
+        end
+
+      _ ->
+        changeset
+    end
+  end
+
+  # `desk.editor` — the editor a type's documents open in: "freeform" (the
+  # block editor) or "classic" (the schema form, also the default when absent).
+  # The toggle still switches either way (task-d80fe8cbfdc9cbcc).
+  @desk_editors ~w(freeform classic)
+
+  defp validate_desk_editor(changeset) do
+    case get_change(changeset, :desk) do
+      %{} = desk ->
+        case Map.get(desk, "editor", Map.get(desk, :editor)) do
+          nil ->
+            changeset
+
+          editor when editor in @desk_editors ->
+            changeset
+
+          other ->
+            add_error(
+              changeset,
+              :desk,
+              "editor must be \"freeform\" or \"classic\", got #{inspect(other)}"
+            )
         end
 
       _ ->
