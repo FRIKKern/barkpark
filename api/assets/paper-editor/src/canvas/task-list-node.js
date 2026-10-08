@@ -50,6 +50,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility, readerPaintClass } from "./embed-node.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpTaskList`; the portable-doc `bpType` stays "task-list"
 // (run-convert.js maps a block.type "task-list" WITH a query to this node and back).
@@ -222,8 +223,8 @@ export const TaskList = Node.create({
       const titleInput = document.createElement("input");
       titleInput.type = "text";
       titleInput.className = "bp-canvas-tasklist-title";
-      titleInput.placeholder = "Task list title";
-      titleInput.setAttribute("aria-label", "task list title");
+      titleInput.placeholder = t("Task list title");
+      titleInput.setAttribute("aria-label", t("task list title"));
       titleInput.setAttribute("contenteditable", "false");
 
       // The QUERY island: the PRIMARY editable datum (the filter label). Shown with a
@@ -231,8 +232,8 @@ export const TaskList = Node.create({
       const queryInput = document.createElement("input");
       queryInput.type = "text";
       queryInput.className = "bp-canvas-tasklist-query";
-      queryInput.placeholder = "filter (e.g. proj:x)";
-      queryInput.setAttribute("aria-label", "task list query filter");
+      queryInput.placeholder = t("filter (e.g. proj:x)");
+      queryInput.setAttribute("aria-label", t("task list query filter"));
       queryInput.setAttribute("contenteditable", "false");
 
       dom.appendChild(titleInput);
@@ -247,7 +248,7 @@ export const TaskList = Node.create({
       body.setAttribute("data-bp-fleet-body", "");
       const chip = document.createElement("div");
       chip.className = "bp-canvas-readonly-chip";
-      chip.textContent = "Task list";
+      chip.textContent = t("Task list");
       body.appendChild(chip);
       dom.appendChild(body);
 

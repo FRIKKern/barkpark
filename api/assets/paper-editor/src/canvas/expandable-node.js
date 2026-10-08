@@ -19,6 +19,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { BP_SECTION_CONTENT } from "./section-node.js";
+import { t } from "../i18n.js";
 
 export const BP_EXPANDABLE_NODE_NAME = "bpExpandable";
 const BP_TYPE = "expandable";
@@ -97,10 +98,10 @@ export const Expandable = Node.create({
       const summaryEl = document.createElement("input");
       summaryEl.type = "text";
       summaryEl.className = "bp-expandable__summary";
-      summaryEl.placeholder = "Summary";
+      summaryEl.placeholder = t("Summary");
       summaryEl.spellcheck = false;
       summaryEl.setAttribute("data-test-id", "paper-expandable-summary");
-      summaryEl.setAttribute("aria-label", "toggle summary");
+      summaryEl.setAttribute("aria-label", t("toggle summary"));
       summaryEl.setAttribute("contenteditable", "false");
 
       const body = document.createElement("div");

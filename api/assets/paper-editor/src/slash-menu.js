@@ -11,6 +11,8 @@
 // (Text / Basic fields / Media & reference / Structured). Every `type` here
 // resolves to a default_block/2 clause on the server.
 
+import { t, te } from "./i18n.js";
+
 export const SLASH_ITEMS = [
   // group: the optgroup label shown as a section header in the popup.
   // type:  the block type passed to default_block/2 on the server.
@@ -289,10 +291,13 @@ export class SlashMenu {
       this._items = this._allItems;
       return;
     }
+    // The haystack carries the English words AND the viewer's shown words, so
+    // "/heading" and "/overskrift" both find Heading in a Norwegian Studio.
+    const shown = (s) => (s ? t(s) : "");
     const matched = this._allItems.filter((it) => {
       const hay = `${it.label || ""} ${it.type || ""} ${it.desc || ""} ${
         it.group || ""
-      }`.toLowerCase();
+      } ${shown(it.label)} ${shown(it.desc)} ${shown(it.group)}`.toLowerCase();
       return hay.includes(q);
     });
     // Rank what matched so the block the author NAMED comes first: "/section" +
@@ -302,8 +307,9 @@ export class SlashMenu {
     // by its best row), and the original order breaks ties.
     const rank = (it) => {
       const label = (it.label || "").toLowerCase();
-      if (label.startsWith(q)) return 0;
-      if (label.includes(q)) return 1;
+      const label2 = shown(it.label).toLowerCase();
+      if (label.startsWith(q) || label2.startsWith(q)) return 0;
+      if (label.includes(q) || label2.includes(q)) return 1;
       if ((it.type || "").toLowerCase().includes(q)) return 2;
       return 3;
     };
@@ -385,7 +391,7 @@ export class SlashMenu {
     // `.paper-slash-popover__head`). Sits above the scrollable row list.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-slash-eyebrow";
-    eyebrow.textContent = this._eyebrow;
+    eyebrow.textContent = t(this._eyebrow);
     this._el.appendChild(eyebrow);
 
     // Optional query-input hook — a no-op for the slash menu (its query is the typed
@@ -403,7 +409,7 @@ export class SlashMenu {
     if (this._items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-slash-empty";
-      empty.textContent = this._emptyText || "No blocks match";
+      empty.textContent = t(this._emptyText || "No blocks match");
       list.appendChild(empty);
     }
 
@@ -414,7 +420,7 @@ export class SlashMenu {
         lastGroup = item.group;
         const header = document.createElement("div");
         header.className = "bp-slash-group";
-        header.textContent = item.group;
+        header.textContent = t(item.group);
         // Stamp the EXPECTED group header so its CSS picks up the accent.
         if (isExpected) header.dataset.expected = "";
         list.appendChild(header);
@@ -439,12 +445,12 @@ export class SlashMenu {
 
       const label = document.createElement("span");
       label.className = "bp-slash-label";
-      label.textContent = item.label;
+      label.textContent = t(item.label);
 
       // Right-aligned muted description.
       const desc = document.createElement("span");
       desc.className = "bp-slash-desc";
-      desc.textContent = item.desc || "";
+      desc.textContent = item.desc ? t(item.desc) : "";
 
       row.appendChild(hint);
       row.appendChild(label);
@@ -471,9 +477,9 @@ export class SlashMenu {
     foot.className = "bp-slash-foot";
     foot.innerHTML =
       this._footHtml ||
-      "<kbd>↵</kbd> insert <span class=\"bp-slash-foot-sep\">·</span> " +
-        "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-        "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+      `<kbd>↵</kbd> ${te("insert")} <span class="bp-slash-foot-sep">·</span> ` +
+        `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+        `<span class="bp-slash-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`;
     this._el.appendChild(foot);
   }
 

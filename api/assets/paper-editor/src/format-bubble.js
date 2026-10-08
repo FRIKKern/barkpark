@@ -16,6 +16,8 @@
 // convert.js; this module only adds the visible affordance and never touches
 // the patch-block op shape, the slash menu, or the keyboard path.
 
+import { t } from "./i18n.js";
+
 export class FormatBubble {
   constructor({ editor }) {
     this._editor = editor;
@@ -142,8 +144,8 @@ export class FormatBubble {
     const input = document.createElement("input");
     input.type = "url";
     input.className = "bp-paper-format__link-input";
-    input.placeholder = "Paste link, ↵ to apply";
-    input.setAttribute("aria-label", "Link URL");
+    input.placeholder = t("Paste link, ↵ to apply");
+    input.setAttribute("aria-label", t("Link URL"));
     // mousedown.preventDefault would block caret entry into the input, so we
     // only stop the editor's blur-close on the bubble container (below).
     input.addEventListener("keydown", (e) => {
@@ -178,7 +180,7 @@ export class FormatBubble {
     const remove = document.createElement("button");
     remove.type = "button";
     remove.className = "bp-paper-format__link-remove";
-    remove.textContent = "Remove";
+    remove.textContent = t("Remove");
     remove.addEventListener("click", () => {
       this._editor.chain().focus().extendMarkRange("link").unsetLink().run();
       this._closeLinkRow(false);
@@ -219,8 +221,8 @@ export class FormatBubble {
     btn.type = "button";
     btn.className = `bp-paper-format__btn ${modClass}`;
     btn.textContent = glyph;
-    btn.title = title;
-    btn.setAttribute("aria-label", title);
+    btn.title = t(title);
+    btn.setAttribute("aria-label", t(title));
     btn.setAttribute("aria-pressed", "false");
     // The toolbar's mousedown guard preserves the selection. Activate on click
     // so Enter, Space, and assistive-technology activation work as well as a

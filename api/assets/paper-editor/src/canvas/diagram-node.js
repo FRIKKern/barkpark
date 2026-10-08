@@ -78,6 +78,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpDiagram`, NOT `diagram`. UNLIKE code (whose name had to
 // dodge the StarterKit inline `code` MARK) there is NO StarterKit collision for
@@ -244,7 +245,7 @@ export const Diagram = Node.create({
       disclosure.setAttribute("contenteditable", "false");
       const summary = document.createElement("summary");
       summary.className = "bp-canvas-diagram-editor-toggle";
-      summary.textContent = "Edit diagram";
+      summary.textContent = t("Edit diagram");
       disclosure.appendChild(summary);
       const fields = document.createElement("div");
       fields.className = "bp-canvas-diagram-fields";
@@ -255,11 +256,11 @@ export const Diagram = Node.create({
       const sourceLabel = document.createElement("label");
       sourceLabel.className = "bp-canvas-diagram-field";
       const sourceLabelText = document.createElement("span");
-      sourceLabelText.textContent = "Mermaid source";
+      sourceLabelText.textContent = t("Mermaid source");
       const area = document.createElement("textarea");
       area.className = "bp-canvas-diagram-area";
       area.setAttribute("spellcheck", "false");
-      area.setAttribute("aria-label", "Mermaid source");
+      area.setAttribute("aria-label", t("Mermaid source"));
       area.setAttribute("contenteditable", "false");
       // Face and ground come from .bp-canvas-diagram-area (the reader's pre tokens).
       area.style.width = "100%";
@@ -284,16 +285,16 @@ export const Diagram = Node.create({
       const captionInput = document.createElement("input");
       captionInput.type = "text";
       captionInput.className = "bp-canvas-diagram-caption";
-      captionInput.placeholder = "caption";
+      captionInput.placeholder = t("caption");
       // Accessible name that survives the resting-chrome hide (a placeholder is
       // only a fallback name, and it's invisible while the control is hidden).
-      captionInput.setAttribute("aria-label", "diagram caption");
+      captionInput.setAttribute("aria-label", t("diagram caption"));
       captionInput.setAttribute("contenteditable", "false");
 
       const captionLabel = document.createElement("label");
       captionLabel.className = "bp-canvas-diagram-field";
       const captionLabelText = document.createElement("span");
-      captionLabelText.textContent = "Caption";
+      captionLabelText.textContent = t("Caption");
       captionLabel.appendChild(captionLabelText);
       captionLabel.appendChild(captionInput);
 
@@ -314,7 +315,7 @@ export const Diagram = Node.create({
         if (editor.isEditable) {
           figcaption.setAttribute("contenteditable", "plaintext-only");
           figcaption.setAttribute("role", "textbox");
-          figcaption.setAttribute("aria-label", "Diagram caption");
+          figcaption.setAttribute("aria-label", t("Diagram caption"));
           figcaption.setAttribute("aria-multiline", "false");
           figcaption.tabIndex = 0;
         } else {

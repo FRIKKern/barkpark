@@ -24,6 +24,7 @@
 // the slash menu does (default_block parity, asserted in __smoke.mjs).
 
 import { SlashMenu } from "../slash-menu.js";
+import { t as tr, te } from "../i18n.js";
 import { topLevelIndexAtSelection, turnTopLevelInto } from "./block-handle.js";
 import { closeHistory } from "@tiptap/pm/history";
 import { TextSelection, NodeSelection } from "@tiptap/pm/state";
@@ -429,7 +430,7 @@ export function buildCommandRegistry(editor, opts) {
     if (!meta) continue;
     cmds.push({
       id: `insert-${type}`,
-      label: `Insert ${meta.label}`,
+      label: tr("Insert %{block}", { block: tr(meta.label) }),
       group: "Insert",
       hint: meta.hint,
       // Insert the default node EXACTLY like the slash pick. Honors the same top-
@@ -450,7 +451,7 @@ export function buildCommandRegistry(editor, opts) {
   for (const c of CANVAS_COMPOUND_INSERTS) {
     cmds.push({
       id: `compound-${c.kind}`,
-      label: `Insert ${c.label}`,
+      label: tr("Insert %{block}", { block: tr(c.label) }),
       group: "Starters",
       hint: c.hint,
       run: (ed) => insertCompoundAtSelection(ed, c.kind),
@@ -466,7 +467,7 @@ export function buildCommandRegistry(editor, opts) {
   for (const p of CANVAS_SECTION_PRESETS) {
     cmds.push({
       id: `preset-${p.kind}`,
-      label: `Insert ${p.label}`,
+      label: tr("Insert %{block}", { block: tr(p.label) }),
       group: "Presets",
       hint: p.hint,
       run: (ed) => insertSectionPresetAtSelection(ed, p.kind),
@@ -478,7 +479,7 @@ export function buildCommandRegistry(editor, opts) {
     if (!editorHasCommand(editor, f.cmd)) continue;
     cmds.push({
       id: f.id,
-      label: `Format ${f.label}`,
+      label: tr("Format %{mark}", { mark: tr(f.label) }),
       group: "Format",
       hint: f.hint,
       run: (ed) => ed.chain().focus()[f.cmd]().run(),
@@ -488,7 +489,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editor && editorHasCommand(editor, "toggleUnderline")) {
     cmds.push({
       id: "format-underline",
-      label: "Format Underline",
+      label: tr("Format %{mark}", { mark: tr("Underline") }),
       group: "Format",
       hint: "U",
       run: (ed) => ed.chain().focus().toggleUnderline().run(),
@@ -497,7 +498,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editor && editorHasCommand(editor, "toggleHighlight")) {
     cmds.push({
       id: "format-highlight",
-      label: "Format Highlight",
+      label: tr("Format %{mark}", { mark: tr("Highlight") }),
       group: "Format",
       hint: "H",
       run: (ed) => ed.chain().focus().toggleHighlight().run(),
@@ -507,7 +508,7 @@ export function buildCommandRegistry(editor, opts) {
   if (editorHasCommand(editor, "unsetAllMarks")) {
     cmds.push({
       id: "format-clear",
-      label: "Clear formatting",
+      label: tr("Clear formatting"),
       group: "Format",
       hint: "⌫",
       run: (ed) => ed.chain().focus().unsetAllMarks().run(),
@@ -532,7 +533,7 @@ export function buildCommandRegistry(editor, opts) {
     if (!editorHasCommand(editor, t.need)) continue;
     cmds.push({
       id: t.id,
-      label: `Turn into ${t.label}`,
+      label: tr("Turn into %{block}", { block: tr(t.label) }),
       group: "Turn into",
       hint: t.hint,
       run: t.run,
@@ -546,7 +547,7 @@ export function buildCommandRegistry(editor, opts) {
   if (opts && typeof opts.onToggleSource === "function") {
     cmds.push({
       id: "view-toggle-source",
-      label: "Toggle Markdown source",
+      label: tr("Toggle Markdown source"),
       group: "View",
       hint: "</>",
       run: () => opts.onToggleSource(),
@@ -578,7 +579,10 @@ export function fuzzyMatch(query, hay) {
 export function fuzzyFilterCommands(commands, query) {
   const q = (query || "").trim();
   if (!q) return commands.slice();
-  return commands.filter((c) => fuzzyMatch(q, `${c.label || ""} ${c.group || ""}`));
+  // The group is matched in English and as shown (the label is built shown).
+  return commands.filter((c) =>
+    fuzzyMatch(q, `${c.label || ""} ${c.group || ""} ${c.group ? tr(c.group) : ""}`),
+  );
 }
 
 // ── the popup ────────────────────────────────────────────────────────────────
@@ -604,9 +608,9 @@ export class CommandPalette extends SlashMenu {
       extraClass: "bp-cmd-palette",
       emptyText: "No commands match",
       footHtml:
-        "<kbd>↵</kbd> run <span class=\"bp-slash-foot-sep\">·</span> " +
-        "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-        "<span class=\"bp-slash-foot-sep\">·</span> <kbd>esc</kbd> dismiss",
+        `<kbd>↵</kbd> ${te("run")} <span class="bp-slash-foot-sep">·</span> ` +
+        `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+        `<span class="bp-slash-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`,
       // Fuzzy over the WHOLE registry by label+group (no doc text consumed).
       filter: (allItems, query) => fuzzyFilterCommands(allItems, query),
       // The palette's items are the static registry — never EXPECTED-augmented.
@@ -650,8 +654,8 @@ export class CommandPalette extends SlashMenu {
       const input = document.createElement("input");
       input.className = "bp-cmd-input";
       input.type = "text";
-      input.setAttribute("placeholder", "Type a command…");
-      input.setAttribute("aria-label", "Command palette filter");
+      input.setAttribute("placeholder", tr("Type a command…"));
+      input.setAttribute("aria-label", tr("Command palette filter"));
       input.autocomplete = "off";
       input.spellcheck = false;
       // Live fuzzy re-filter. Update the query, re-filter, re-render the rows. We
