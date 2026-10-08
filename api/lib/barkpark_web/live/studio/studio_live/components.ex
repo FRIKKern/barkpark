@@ -1959,6 +1959,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               data-token={Map.get(assigns, :api_token_raw, "")}
               data-kind-filter={@media_kind_filter || "all"}
               data-open-path={Paths.studio_path(assigns[:scope_prefix] || "", @nav_path, @dataset)}
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:asset_explorer)}
             />
           </div>
         </div>

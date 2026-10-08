@@ -95,6 +95,158 @@ defmodule BarkparkWeb.StudioLocale do
     })
   end
 
+  # The media library's words (bp-asset-explorer), keyed by their English: the
+  # component looks each text up and falls back to the key. %{name} slots are
+  # handed through verbatim and filled client-side, like :reference's
+  # %{types}. Lowercase keys are the codes it shows as words: asset kinds,
+  # processing states and visibility.
+  def component_strings(:asset_explorer) do
+    Jason.encode!(%{
+      "%{count} assets" => gettext("%{count} assets", count: "%{count}"),
+      "%{count} assets match" => gettext("%{count} assets match", count: "%{count}"),
+      "%{count} searches" => gettext("%{count} searches", count: "%{count}"),
+      "%{loaded} in %{name}" =>
+        gettext("%{loaded} in %{name}", loaded: "%{loaded}", name: "%{name}"),
+      "%{what} copied" => gettext("%{what} copied", what: "%{what}"),
+      "1 asset" => gettext("1 asset"),
+      "1 asset matches" => gettext("1 asset matches"),
+      "Add selected to folder" => gettext("Add selected to folder"),
+      "Add to collection" => gettext("Add to collection"),
+      "Add to collection…" => gettext("Add to collection…"),
+      "Added to collection" => gettext("Added to collection"),
+      "All" => gettext("All"),
+      "All assets" => gettext("All assets"),
+      "Asset checked out" => gettext("Asset checked out"),
+      "Audio" => gettext("Audio"),
+      "audio" => gettext("audio"),
+      "Best match" => gettext("Best match"),
+      "Cancel" => gettext("Cancel"),
+      "Check out" => gettext("Check out"),
+      "Checked out" => gettext("Checked out"),
+      "Checked out by %{who}" => gettext("Checked out by %{who}", who: "%{who}"),
+      "Checkout failed" => gettext("Checkout failed"),
+      "Checkout released" => gettext("Checkout released"),
+      "Clear all" => gettext("Clear all"),
+      "Collection created" => gettext("Collection created"),
+      "Collection name" => gettext("Collection name"),
+      "Collection: %{value}" => gettext("Collection: %{value}", value: "%{value}"),
+      "Collections" => gettext("Collections"),
+      "Copy" => gettext("Copy"),
+      "Copy link" => gettext("Copy link"),
+      "Could not add to collection" => gettext("Could not add to collection"),
+      "Could not create collection" => gettext("Could not create collection"),
+      "Couldn't load your media library — the request failed." =>
+        gettext("Couldn't load your media library — the request failed."),
+      "Create folder" => gettext("Create folder"),
+      "document" => gettext("document"),
+      "Document" => gettext("Document"),
+      "Documents" => gettext("Documents"),
+      "Edit metadata" => gettext("Edit metadata"),
+      "Enter a collection name" => gettext("Enter a collection name"),
+      "failed" => gettext("failed"),
+      "Filtered search" => gettext("Filtered search"),
+      "Find assets…  (/ to focus)" => gettext("Find assets…  (/ to focus)"),
+      "Folder" => gettext("Folder"),
+      "Folder collections hold curated sets of assets." =>
+        gettext("Folder collections hold curated sets of assets."),
+      "Format" => gettext("Format"),
+      "Generate link" => gettext("Generate link"),
+      "Grid" => gettext("Grid"),
+      "Grid view" => gettext("Grid view"),
+      "image" => gettext("image"),
+      "Images" => gettext("Images"),
+      "Kind" => gettext("Kind"),
+      "Kind: %{value}" => gettext("Kind: %{value}", value: "%{value}"),
+      "Library" => gettext("Library"),
+      "Link" => gettext("Link"),
+      "List" => gettext("List"),
+      "List view" => gettext("List view"),
+      "Load more" => gettext("Load more"),
+      "Load more · %{count} remaining" =>
+        gettext("Load more · %{count} remaining", count: "%{count}"),
+      "Loading assets…" => gettext("Loading assets…"),
+      "Locked" => gettext("Locked"),
+      "Name" => gettext("Name"),
+      "New folder" => gettext("New folder"),
+      "Newest first" => gettext("Newest first"),
+      "No assets match" => gettext("No assets match"),
+      "No assets match these filters — try removing one or search for something broader." =>
+        gettext(
+          "No assets match these filters — try removing one or search for something broader."
+        ),
+      "No assets yet — upload a file to get started." =>
+        gettext("No assets yet — upload a file to get started."),
+      "No folders yet — click + to create one." =>
+        gettext("No folders yet — click + to create one."),
+      "No matches before" => gettext("No matches before"),
+      "Oldest first" => gettext("Oldest first"),
+      "Open file" => gettext("Open file"),
+      "Original" => gettext("Original"),
+      "Other" => gettext("Other"),
+      "other" => gettext("other"),
+      "Popular" => gettext("Popular"),
+      "Preview" => gettext("Preview"),
+      "private" => gettext("private"),
+      "Processing" => gettext("Processing"),
+      "processing" => gettext("processing"),
+      "public" => gettext("public"),
+      "Public share link" => gettext("Public share link"),
+      "ready" => gettext("ready"),
+      "Recent" => gettext("Recent"),
+      "Recently updated" => gettext("Recently updated"),
+      "Refine" => gettext("Refine"),
+      "Relations" => gettext("Relations"),
+      "Release" => gettext("Release"),
+      "Release failed" => gettext("Release failed"),
+      "Remove failed" => gettext("Remove failed"),
+      "Remove from collection" => gettext("Remove from collection"),
+      "Removed from collection" => gettext("Removed from collection"),
+      "Result view" => gettext("Result view"),
+      "Retry" => gettext("Retry"),
+      "Revoke" => gettext("Revoke"),
+      "Revoke failed" => gettext("Revoke failed"),
+      "Rotate link" => gettext("Rotate link"),
+      "Search assets" => gettext("Search assets"),
+      "Search: %{value}" => gettext("Search: %{value}", value: "%{value}"),
+      "Select an asset or collection" => gettext("Select an asset or collection"),
+      "Share link" => gettext("Share link"),
+      "Share link created" => gettext("Share link created"),
+      "Share link failed" => gettext("Share link failed"),
+      "Share link revoked" => gettext("Share link revoked"),
+      "Showing %{loaded} of %{total} assets" =>
+        gettext("Showing %{loaded} of %{total} assets", loaded: "%{loaded}", total: "%{total}"),
+      "Showing %{loaded} of %{total} in %{name}" =>
+        gettext("Showing %{loaded} of %{total} in %{name}",
+          loaded: "%{loaded}",
+          name: "%{name}",
+          total: "%{total}"
+        ),
+      "Size" => gettext("Size"),
+      "Smart collection" => gettext("Smart collection"),
+      "Sort results" => gettext("Sort results"),
+      "Status" => gettext("Status"),
+      "Tags" => gettext("Tags"),
+      "This folder is empty — upload files or add assets from All assets." =>
+        gettext("This folder is empty — upload files or add assets from All assets."),
+      "Thumb" => gettext("Thumb"),
+      "Thumbnail" => gettext("Thumbnail"),
+      "Updated" => gettext("Updated"),
+      "Upload" => gettext("Upload"),
+      "Upload blocked — your session has ended. Sign in again." =>
+        gettext("Upload blocked — your session has ended. Sign in again."),
+      "Upload complete" => gettext("Upload complete"),
+      "Upload failed (%{status})" => gettext("Upload failed (%{status})", status: "%{status}"),
+      "Upload failed — check that the API is running" =>
+        gettext("Upload failed — check that the API is running"),
+      "Use Refine or clear filters to broaden" =>
+        gettext("Use Refine or clear filters to broaden"),
+      "Video" => gettext("Video"),
+      "video" => gettext("video"),
+      "Video preview" => gettext("Video preview"),
+      "Visibility" => gettext("Visibility")
+    })
+  end
+
   def component_strings(:reference) do
     Jason.encode!(%{
       "change" => gettext("Change"),

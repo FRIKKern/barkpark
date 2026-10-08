@@ -31,6 +31,9 @@ async function run(token, status = 200) {
     _scopePrefix: () => "/w/agency/p/default",
     _dataset: () => "production",
     _toast: (m) => toasts.push(m),
+    // The toasts read through the explorer's strings hook (task-2bc7975ad3bdb737);
+    // this host stamps no strings, so they read the English.
+    _t: Explorer.prototype._t,
     _setStatus: () => {},
     _loadAssets: async () => {},
   };
