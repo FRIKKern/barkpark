@@ -3364,6 +3364,84 @@ check("tab rename: a blur to nothing (click on empty space) moves no focus", () 
   sandbox.document.activeElement = null;
 });
 
+// ── Sheet download: phx:bp:sheet-download saves the pushed file ─────────────
+// task-da387f54432114d8. The server pushes {filename, mime, data(base64)}; the
+// handler must decode the bytes exactly and click a temporary <a download>.
+
+function withDownloadStubs(fn) {
+  const made = [];
+  const appended = [];
+  const revoked = [];
+  const saved = {
+    atob: sandbox.atob, Blob: sandbox.Blob, URL: sandbox.URL, document: sandbox.document,
+  };
+  sandbox.atob = (b64) => Buffer.from(b64, "base64").toString("binary");
+  sandbox.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts.type; } };
+  sandbox.URL = {
+    createObjectURL(blob) { made.push(blob); return "blob:test/" + made.length; },
+    revokeObjectURL(url) { revoked.push(url); },
+  };
+  sandbox.document = {
+    activeElement: null,
+    body: { appendChild(el) { appended.push(el); } },
+    createElement(tag) {
+      const el = { tag, style: {}, clicked: 0, removed: false };
+      el.click = () => { el.clicked++; };
+      el.remove = () => { el.removed = true; };
+      return el;
+    },
+  };
+  timers.length = 0;
+  try {
+    fn({ made, appended, revoked });
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+}
+
+check("sheet download: the pushed payload is saved byte-for-byte under its file name", () => {
+  withDownloadStubs(({ made, appended, revoked }) => {
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x80]);
+    sandbox.window.BarkparkSheetDownload({
+      filename: "Budsjett 2027.xlsx", mime: "application/x-test", data: bytes.toString("base64"),
+    });
+    assert.equal(made.length, 1);
+    assert.equal(made[0].type, "application/x-test");
+    assert.deepEqual(Array.from(made[0].parts[0]), Array.from(bytes));
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].tag, "a");
+    assert.equal(appended[0].download, "Budsjett 2027.xlsx");
+    assert.equal(appended[0].href, "blob:test/1");
+    assert.equal(appended[0].clicked, 1);
+    assert.equal(appended[0].removed, true);
+    timers.forEach((t) => t());
+    assert.deepEqual(revoked, ["blob:test/1"]);
+  });
+});
+
+// Other checks reset window._listeners, so the wiring is checked on a fresh
+// load of the shipped file.
+check("sheet download: loading the file listens for phx:bp:sheet-download", () => {
+  const fresh = { window: { _listeners: {}, addEventListener(t, fn) { (this._listeners[t] ||= []).push(fn); } }, document: {} };
+  vm.createContext(fresh);
+  vm.runInContext(
+    fs.readFileSync(new URL("../../priv/static/assets/bp-sheet-grid.js", import.meta.url), "utf8"),
+    fresh,
+  );
+  assert.equal((fresh.window._listeners["phx:bp:sheet-download"] || []).length, 1);
+});
+
+check("sheet download: a payload without data or a file name saves nothing", () => {
+  withDownloadStubs(({ made, appended }) => {
+    const save = sandbox.window.BarkparkSheetDownload;
+    assert.equal(save({ filename: "x.csv" }), false);
+    assert.equal(save({ data: "YQ==" }), false);
+    assert.equal(save(undefined), false);
+    assert.equal(made.length, 0);
+    assert.equal(appended.length, 0);
+  });
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
