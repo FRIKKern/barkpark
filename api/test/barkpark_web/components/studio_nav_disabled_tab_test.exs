@@ -91,6 +91,21 @@ defmodule BarkparkWeb.StudioComponents.NavDisabledTabTest do
              "the disabled tab must not render as an <a> at all"
     end
 
+    # task-aa4f50a406951fae: the reason is built from the registry's
+    # `enabled_in` data in the viewer's language, not the English sentence.
+    test "in nb-NO the disabled tab's reason is Norwegian and names the enabling workspace", %{
+      disabling: disabling,
+      enabling: enabling
+    } do
+      Gettext.put_locale(BarkparkWeb.Gettext, "nb_NO")
+      on_exit(fn -> Gettext.put_locale(BarkparkWeb.Gettext, "en") end)
+
+      html = render_tabs(disabling)
+
+      assert html =~ "Slått av i dette arbeidsområdet — slått på i #{enabling.name}"
+      refute html =~ "Disabled in this workspace"
+    end
+
     test "CONTROL: the enabling workspace renders a plain enabled link", %{enabling: enabling} do
       html = render_tabs(enabling)
 

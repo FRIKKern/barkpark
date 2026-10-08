@@ -452,8 +452,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             class="studio-tab studio-tab-disabled"
             aria-disabled="true"
             style="opacity:0.45;cursor:not-allowed;"
-            title={"#{tab_label(tab.label)} — #{tab[:reason] || gettext("Disabled in this workspace")}"}
-            aria-label={"#{tab_label(tab.label)} — #{tab[:reason] || gettext("Disabled in this workspace")}"}
+            title={"#{tab_label(tab.label)} — #{disabled_reason(tab)}"}
+            aria-label={"#{tab_label(tab.label)} — #{disabled_reason(tab)}"}
             data-test-id="top-menu-tab-disabled"
           ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></span>
         <% else %>
@@ -492,6 +492,15 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   def tab_label("Form submissions"), do: gettext("Form submissions")
   def tab_label("chat"), do: gettext("chat")
   def tab_label(label), do: label
+
+  # A disabled tab's reason in the viewer's language. The registry sends the
+  # enabling workspace as data (`enabled_in`, task-aa4f50a406951fae) beside its
+  # English `reason` sentence; the sentence is the fallback for an entry that
+  # carries no `enabled_in`.
+  defp disabled_reason(%{enabled_in: workspace}) when is_binary(workspace) and workspace != "",
+    do: gettext("Disabled in this workspace — enabled in %{workspace}", workspace: workspace)
+
+  defp disabled_reason(tab), do: tab[:reason] || gettext("Disabled in this workspace")
 
   @doc """
   The canonical Studio nav model: the host's built-in top-menu tabs in
