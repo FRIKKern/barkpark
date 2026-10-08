@@ -47,15 +47,15 @@
   // a hand edit inside the marker is deleted by the next regeneration and reds
   // design/check.mjs. Non-colour constants (alphas, radii, fade multipliers, the
   // font stack) stay hand-written OUTSIDE the marker.
-  /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
-  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
-  // monochrome, generous void. Beauty through restraint.
   // "1 connection", "2 connections" — the accessible names and the focus
   // announcement said "1 connections" (task-880a2d3f48ccbfcb).
   function connectionCount(n) {
     return n === 1 ? "1 connection" : n + " connections";
   }
 
+  /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
+  // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
+  // monochrome, generous void. Beauty through restraint.
   var ACCENT = "#9a8cff";
   var ACCENT_RGB = [154, 140, 255];
   var A11Y_RING = "#60A5FA";
