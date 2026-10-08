@@ -225,6 +225,7 @@ func TestPaginatedArmKeepsTheStrictKeyTest(t *testing.T) {
 var objectReadCommands = map[string]string{
 	"access.show":                  "single grant object (access_controller.ex)",
 	"auth.me":                      "flat identity map, no row array (auth_controller.ex)",
+	"auth.token":                   "the bearer's own description, one object, no row array (token_self_controller.ex)",
 	"chat.get_attachment":          "single attachment object — id, media_type, byte_size, base64 data; never a row array (chat_attachment_controller.ex)",
 	"chat.get_session":             "single session object (chat_controller.ex)",
 	"codelist.show":                "values is a nested array, not the top-level row set; codelistId/name/description/issue are metadata (codelist_controller.ex)",
