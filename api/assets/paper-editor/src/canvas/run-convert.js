@@ -3020,8 +3020,15 @@ function fieldNodeToPatch(node, prevNode) {
   const patch = {};
   if (canonicalJSON(value) !== canonicalJSON(normalizeFieldValue(prev.bpType || bpType, prev.value))) patch.value = value;
   if ((attrs.label ?? null) !== (prev.label ?? null)) patch.label = attrs.label ?? null;
+  // Config edited in the field's settings disclosure: a select's options, a number's
+  // min / max / step / unit. Each rides only when it changed.
+  for (const k of FIELD_SETTINGS_CONFIG) {
+    if (canonicalJSON(attrs[k] ?? null) !== canonicalJSON(prev[k] ?? null)) patch[k] = attrs[k] ?? null;
+  }
   return Object.keys(patch).length ? patch : { value };
 }
+
+const FIELD_SETTINGS_CONFIG = ["options", ...FIELD_NUMBER_CONFIG];
 
 // True when a field node's VALUE changed (the only mutable datum). Canonical
 // (key-order-insensitive) compare of the normalized value, so a value edit flips it
@@ -3035,7 +3042,9 @@ function fieldNodeChanged(prevNode, nextNode) {
 function stableFieldKey(node) {
   const a = (node && node.attrs) || {};
   const bpType = a.bpType || "field-string";
-  return canonicalJSON({ value: normalizeFieldValue(bpType, a.value), label: a.label ?? null });
+  const key = { value: normalizeFieldValue(bpType, a.value), label: a.label ?? null };
+  for (const k of FIELD_SETTINGS_CONFIG) key[k] = a[k] ?? null;
+  return canonicalJSON(key);
 }
 
 // ── action ⇄ canvas control-atom node (editable-action) ──────────────────────

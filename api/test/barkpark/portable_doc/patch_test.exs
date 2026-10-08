@@ -492,11 +492,52 @@ defmodule Barkpark.PortableDoc.PatchTest do
       end
 
       assert {:error, {:invalid_op, _}} = Patch.apply_patch(doc, number_patch(%{"max" => 4}))
+
+      assert {:error, {:invalid_op, _}} =
+               Patch.apply_patch(doc, number_patch(%{"min" => 8, "max" => 3}))
     end
 
     test "a label-only patch is not checked", %{doc: doc} do
       assert {:ok, %{"blocks" => [%{"label" => "Pages", "value" => 5}]}} =
                Patch.apply_patch(doc, number_patch(%{"label" => "Pages"}))
+    end
+  end
+
+  describe "patch-block on field-select — the options list" do
+    # The canvas settings disclosure saves a select's options through this op.
+    setup do
+      field = %{
+        "id" => "s",
+        "type" => "field-select",
+        "value" => "a",
+        "options" => [%{"value" => "a", "label" => "Alpha"}]
+      }
+
+      %{doc: doc_with([field])}
+    end
+
+    defp options_patch(options),
+      do: %{"op" => "patch-block", "id" => "s", "patch" => %{"options" => options}}
+
+    test "stores a list of {value, label?} options", %{doc: doc} do
+      options = [%{"value" => "a", "label" => "Alpha"}, %{"value" => "b"}]
+
+      assert {:ok, %{"blocks" => [%{"options" => ^options, "value" => "a"}]}} =
+               Patch.apply_patch(doc, options_patch(options))
+    end
+
+    test "refuses options the reader cannot look up", %{doc: doc} do
+      for bad <- [
+            "a",
+            [%{"label" => "No value"}],
+            [%{"value" => ""}],
+            ["a"],
+            [%{"value" => "a"}, %{"value" => "a"}],
+            [%{"value" => "a", "label" => 1}]
+          ] do
+        assert match?({:error, {:invalid_op, _}}, Patch.apply_patch(doc, options_patch(bad))),
+               "#{inspect(bad)} should be refused"
+      end
     end
   end
 

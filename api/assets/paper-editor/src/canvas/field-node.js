@@ -108,6 +108,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { FIELD_SETTINGS_TYPES, buildFieldSettings } from "./field-settings.js";
 
 // The TipTap node NAME is `bpField` (the canvas naming convention, like
 // bpCode/bpDiagram). The portable-doc `bpType` is the specific field-* kind
@@ -311,12 +312,37 @@ const DEBOUNCED_FIELD_TYPES = new Set([
   "field-text",
 ]);
 
-const NUMBER_CONFIG_KEYS = ["min", "max", "step", "unit"];
+// Keep a number input's min / max / step on the node's config, so an edit made
+// in the settings disclosure bounds the value input without rebuilding it.
+function paintNumberBounds(control, attrs) {
+  for (const key of ["min", "max"]) {
+    const next = attrs[key] != null ? String(attrs[key]) : null;
+    if (control.getAttribute(key) === next) continue;
+    if (next == null) control.removeAttribute(key);
+    else control.setAttribute(key, next);
+  }
+  const step = attrs.step != null ? String(attrs.step) : "any";
+  if (control.getAttribute("step") !== step) control.setAttribute("step", step);
+}
 
-function numberConfigChanged(a, b) {
-  return NUMBER_CONFIG_KEYS.some(
-    (k) => ((a.attrs && a.attrs[k]) ?? null) !== ((b.attrs && b.attrs[k]) ?? null),
-  );
+// Rebuild a select's <option>s when the node's options list changed.
+function paintSelectOptions(select, options, value) {
+  const list = Array.isArray(options) ? options : [];
+  const painted = [...select.options].map((o) => [o.value, o.textContent]);
+  const wanted = list.map((opt) => {
+    const ov = opt && opt.value != null ? String(opt.value) : "";
+    return [ov, opt && opt.label != null ? String(opt.label) : ov];
+  });
+  if (JSON.stringify(painted) === JSON.stringify(wanted)) return;
+  select.replaceChildren();
+  const current = value == null ? "" : String(value);
+  for (const [ov, text] of wanted) {
+    const o = document.createElement("option");
+    o.value = ov;
+    o.textContent = text;
+    if (ov === current) o.selected = true;
+    select.appendChild(o);
+  }
 }
 
 // A field-number config attr (min / max / step): a number or null, carried on
@@ -608,20 +634,26 @@ export const Field = Node.create({
       control.setAttribute("data-test-id", "paper-field-" + fieldType);
 
       dom.appendChild(labelEl);
+      dom.appendChild(control);
       // field-number shows its unit (if any) after the input, as quiet text. The
-      // input and unit share the row's value column.
-      const unit = node.attrs && node.attrs.unit;
-      if (fieldType === "field-number" && unit) {
-        const valueEl = document.createElement("span");
-        valueEl.className = "bp-canvas-field-value";
-        const unitEl = document.createElement("span");
-        unitEl.className = "bp-canvas-field-unit";
-        unitEl.textContent = unit;
-        valueEl.append(control, unitEl);
-        dom.appendChild(valueEl);
-      } else {
-        dom.appendChild(control);
-      }
+      // input and unit share the row's value column. Painted in place (paintUnit)
+      // so a unit edited in the settings disclosure keeps the control's focus.
+      let valueEl = null;
+      const paintUnit = (unit) => {
+        if (fieldType !== "field-number") return;
+        if (unit && !valueEl) {
+          valueEl = document.createElement("span");
+          valueEl.className = "bp-canvas-field-value";
+          const unitEl = document.createElement("span");
+          unitEl.className = "bp-canvas-field-unit";
+          control.replaceWith(valueEl);
+          valueEl.append(control, unitEl);
+        } else if (!unit && valueEl) {
+          valueEl.replaceWith(control);
+          valueEl = null;
+        }
+        if (valueEl && valueEl.lastChild.textContent !== unit) valueEl.lastChild.textContent = unit;
+      };
 
       // Paint the control from the node's current attrs. Re-run on every update()
       // so an external attr change (an echo, an undo) reflects. Guard against
@@ -635,6 +667,11 @@ export const Field = Node.create({
           if (control.checked !== checked) control.checked = checked;
           control.disabled = !editable;
         } else {
+          if (fieldType === "field-select") paintSelectOptions(control, n.attrs.options, value);
+          if (fieldType === "field-number") {
+            paintNumberBounds(control, n.attrs);
+            paintUnit(n.attrs.unit);
+          }
           const str = value == null ? "" : String(value);
           if (control.value !== str) control.value = str;
           // select / color / datetime / text / string controls: lock when read-only.
@@ -645,7 +682,33 @@ export const Field = Node.create({
           }
         }
         label.paint(n);
+        if (settings) settings.paint(n);
       };
+
+      // The quiet CONFIG disclosure (a select's options, a number's range + unit).
+      const settings = FIELD_SETTINGS_TYPES.has(fieldType)
+        ? buildFieldSettings({
+            fieldType,
+            editor,
+            current: () => {
+              const pos = typeof getPos === "function" ? getPos() : null;
+              return pos == null ? null : editor.state.doc.nodeAt(pos);
+            },
+            write: (config) => {
+              const pos = getPos();
+              const cur = pos == null ? null : editor.state.doc.nodeAt(pos);
+              if (!cur) return;
+              editor
+                .chain()
+                .command(({ tr }) => {
+                  tr.setNodeMarkup(pos, undefined, { ...cur.attrs, ...config });
+                  return true;
+                })
+                .run();
+            },
+          })
+        : null;
+      if (settings) dom.appendChild(settings.dom);
 
       paint(node);
 
@@ -719,8 +782,6 @@ export const Field = Node.create({
           if (updated.type.name !== BP_FIELD_NODE_NAME) return false;
           const nextType = (updated.attrs && updated.attrs.bpType) || "field-string";
           if (nextType !== fieldType) return false; // type swap → full rebuild
-          // A number field whose min/max/step/unit changed needs a fresh control.
-          if (fieldType === "field-number" && numberConfigChanged(node, updated)) return false;
           paint(updated);
           return true;
         },
@@ -739,6 +800,7 @@ export const Field = Node.create({
         destroy: () => {
           if (writeTimer) clearTimeout(writeTimer);
           label.destroy();
+          if (settings) settings.destroy();
           control.removeEventListener(eventName, scheduleWrite);
           dom.removeEventListener("bp-flush-node", flushPending);
         },
