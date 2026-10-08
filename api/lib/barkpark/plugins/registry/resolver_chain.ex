@@ -359,7 +359,13 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
       # disabled-here-but-enabled-elsewhere entry carries `true` + the
       # human sentence naming the workspace that DOES enable it.
       disabled: false,
-      reason: nil
+      reason: nil,
+      # task-aa4f50a406951fae: `enabled_in` carries the SAME fact `reason`
+      # composes into a sentence, as data — nil here, the enabling
+      # workspace's label on the disabled-elsewhere arm below. Always
+      # present, same invariant as disabled/reason, so a translating reader
+      # never has to branch on whether the key exists.
+      enabled_in: nil
     }
   end
 
@@ -441,7 +447,13 @@ defmodule Barkpark.Plugins.Registry.ResolverChain do
           |> normalize_top_menu_entry()
           |> Map.merge(%{
             disabled: true,
-            reason: "Disabled in this workspace — enabled in #{workspace_label}"
+            # task-aa4f50a406951fae: `reason` stays a finished English sentence
+            # (kept one release for any reader still on it, additive-only
+            # change) — `enabled_in` carries the SAME fact as data, so a
+            # translating reader (Studio's nav.ex) can compose its own
+            # sentence instead of displaying this one verbatim.
+            reason: "Disabled in this workspace — enabled in #{workspace_label}",
+            enabled_in: workspace_label
           })
         end
     end
