@@ -219,6 +219,53 @@ defmodule BarkparkWeb.SessionPagesTest do
     end
   end
 
+  describe "emailed confirmation link landing (task-bd5e1aa94cf67a18)" do
+    test "GET renders a confirm button WITHOUT consuming the token", %{conn: conn} do
+      user = register!("confirmlanding@example.com")
+      refute user.confirmed_at
+      {:ok, raw} = Accounts.build_email_token(user, "confirm")
+
+      html = conn |> get("/auth/confirm/#{raw}") |> html_response(200)
+      assert html =~ "Confirm your email"
+      assert html =~ "/auth/confirm/#{raw}"
+
+      # Rendering must not have consumed the token — confirm still works.
+      assert {:ok, confirmed} = Accounts.confirm_user(raw)
+      assert confirmed.confirmed_at
+    end
+
+    test "POST with a valid token confirms the account and shows success", %{conn: conn} do
+      user = register!("confirmflow@example.com")
+      {:ok, raw} = Accounts.build_email_token(user, "confirm")
+
+      html = conn |> post("/auth/confirm/#{raw}") |> html_response(200)
+      assert html =~ "Email confirmed"
+      assert html =~ "/login"
+
+      reloaded = Accounts.get_user(user.id)
+      assert reloaded.confirmed_at
+    end
+
+    test "a reused token is refused with a clear message, not a 500", %{conn: conn} do
+      user = register!("confirmreuse@example.com")
+      {:ok, raw} = Accounts.build_email_token(user, "confirm")
+
+      first = conn |> post("/auth/confirm/#{raw}")
+      assert first.status == 200
+      assert first.resp_body =~ "Email confirmed"
+
+      # html_response/2 itself asserts the status: a 500 (or any non-200)
+      # fails HERE, before any body text is inspected.
+      second = conn |> post("/auth/confirm/#{raw}") |> html_response(200)
+      assert second =~ "expired"
+    end
+
+    test "an unknown token is refused with a clear message, not a 500", %{conn: conn} do
+      html = conn |> post("/auth/confirm/not-a-real-token") |> html_response(200)
+      assert html =~ "expired"
+    end
+  end
+
   describe "magic-link request page" do
     test "renders the request form", %{conn: conn} do
       html = conn |> get("/login/magic") |> html_response(200)
