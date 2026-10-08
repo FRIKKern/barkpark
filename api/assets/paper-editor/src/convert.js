@@ -36,7 +36,8 @@ function coerceInlineText(value) {
 // reader folds in inline.ex apply_mark/3) → the TipTap mark the canvas edits. A mark
 // the canvas has no editor for returns null and is left out of the projection.
 function flatMarkToTiptap(mark) {
-  const type = mark && typeof mark === "object" ? mark.type : null;
+  // BPML stores a mark as a bare string ("code"); the editor stores {type}.
+  const type = typeof mark === "string" ? mark : mark && typeof mark === "object" ? mark.type : null;
   switch (type) {
     case "bold": case "strong": return { type: "bold" };
     case "italic": case "em": return { type: "italic" };
@@ -59,8 +60,9 @@ function flatMarkToTiptap(mark) {
 // mark and its leaf's whole `marks` array verbatim, so a save writes both back.
 const OPAQUE_MARK = "bpOpaqueMark";
 function opaqueMarkToTiptap(mark, leafMarks) {
-  if (!mark || typeof mark !== "object" || Array.isArray(mark) ||
-    typeof mark.type !== "string" || mark.type === "") return null;
+  const named = typeof mark === "string" ? mark !== "" :
+    mark && typeof mark === "object" && !Array.isArray(mark) && typeof mark.type === "string" && mark.type !== "";
+  if (!named) return null;
   return { type: OPAQUE_MARK, attrs: { mark: deepCloneJson(mark), leaf: deepCloneJson(leafMarks) } };
 }
 
