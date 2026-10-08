@@ -77,8 +77,8 @@ name: security
 #     per-class — `grep -v '^[[:space:]]*$' api/.sobelow-skips |
 #                  sed 's/:.*//' | sort | uniq -c`
 #
-#     census: total=9
-#     census: Config.CSRF=6
+#     census: total=10
+#     census: Config.CSRF=7
 #     census: Config.HTTPS=1
 #     census: XSS.Raw=2
 #
