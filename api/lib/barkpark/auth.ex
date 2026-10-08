@@ -7,9 +7,17 @@ defmodule Barkpark.Auth do
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Auth.LoginTicket
   alias Barkpark.Auth.TokenExpiry
+  alias Barkpark.Auth.TokenSession
   alias Barkpark.Sharing
   alias Barkpark.Tenancy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+
+  # Ruling #16 rework half (task-57f23825b18ab55d) — default validity of a
+  # browser token-session row, in days. Mirrors `Accounts.UserSession`'s own
+  # 30-day default; the underlying api_token's own `expires_at`/`revoked_at`
+  # are re-checked on every `verify_token_session/1` call regardless, so this
+  # is a ceiling on an otherwise-forgotten row, not the only revocation path.
+  @token_session_default_validity_days 30
 
   # dwb-7 login-ticket TTL: 60s. A one-time handoff URL is used immediately
   # (control plane mints it, browser opens it), so the window is deliberately
@@ -462,6 +470,170 @@ defmodule Barkpark.Auth do
   end
 
   def broadcast_socket_teardown(_token), do: :ok
+
+  # ── Browser token sessions (ruling #16 rework half, task-57f23825b18ab55d) ─
+  #
+  # A token sign-in used to store the RAW api_token in the Phoenix session, so
+  # logging out cleared the cookie but left the token itself (and any copy of
+  # the cookie made beforehand) valid until the token was separately revoked.
+  # This mints a server-side row instead — the cookie carries only its opaque
+  # session id — so logout can actually kill it. See `TokenSession`'s
+  # moduledoc and the creating migration for why logout DELETES the row
+  # rather than only flagging `revoked_at`.
+
+  @doc """
+  Mint a browser token-session for `api_token`, binding `raw_token` (the
+  bearer the caller just verified). Returns the one-time opaque session id —
+  the ONLY thing the caller may put in the cookie.
+  """
+  @spec create_token_session(binary(), ApiToken.t()) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_token_session(raw_token, %ApiToken{} = api_token) when is_binary(raw_token) do
+    plaintext = "bpts_" <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
+    now = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+    expires = DateTime.add(now, @token_session_default_validity_days * 24 * 3600, :second)
+
+    %TokenSession{}
+    |> TokenSession.changeset(%{
+      api_token_id: api_token.id,
+      session_hash: TokenSession.hash_token(plaintext),
+      raw_token: raw_token,
+      expires_at: expires,
+      last_used_at: now
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _} -> {:ok, plaintext}
+      {:error, cs} -> {:error, cs}
+    end
+  end
+
+  @doc """
+  Resolve a browser token-session's opaque session id to its live
+  `%ApiToken{}` and the raw bearer it was minted with. Returns `:error` for
+  an unknown, revoked, or expired session row, OR one whose underlying
+  api_token is itself no longer live.
+
+  THE UNDERLYING TOKEN'S LIVENESS IS RE-CHECKED BY CALLING `verify_token/1`
+  ON THE DECRYPTED RAW BEARER — not by re-reading the preloaded `ApiToken`
+  struct's fields against a second, hand-written copy of `verify_token/1`'s
+  WHERE clause. Two copies of "is this api_token still live" (kind == "api",
+  not revoked, not expired) can drift: a future change to `verify_token/1`'s
+  checks (a new revocation signal, a new kind) would silently NOT apply to a
+  session-cookie-minted caller unless this function's own copy were updated
+  in lockstep, and nothing would catch the gap. Calling `verify_token/1`
+  itself makes that impossible by construction — there is exactly one place
+  that decides whether an api_token is live, and both the legacy raw-cookie
+  arm of `resolve_session_credential/2` and this one route through it
+  (pinned in `CapsAuthorizationParityTest`, both hops).
+  """
+  @spec verify_token_session(binary()) :: {:ok, ApiToken.t(), binary()} | :error
+  def verify_token_session(plaintext) when is_binary(plaintext) do
+    hash = TokenSession.hash_token(plaintext)
+    now = DateTime.utc_now()
+
+    query =
+      from s in TokenSession,
+        where: s.session_hash == ^hash and is_nil(s.revoked_at),
+        where: is_nil(s.expires_at) or s.expires_at > ^now
+
+    case Repo.one(query) do
+      %TokenSession{raw_token: raw, last_used_at: prev} ->
+        case verify_token(raw) do
+          {:ok, token} ->
+            maybe_touch_token_session_last_used(hash, prev, now)
+            {:ok, token, raw}
+
+          {:error, :unauthorized} ->
+            :error
+        end
+
+      nil ->
+        :error
+    end
+  end
+
+  def verify_token_session(_), do: :error
+
+  @token_session_last_used_throttle_seconds 60
+
+  defp maybe_touch_token_session_last_used(hash, prev, now) do
+    stale? =
+      is_nil(prev) or
+        DateTime.diff(now, prev, :second) > @token_session_last_used_throttle_seconds
+
+    if stale? do
+      stamped = DateTime.truncate(now, :microsecond)
+
+      from(s in TokenSession, where: s.session_hash == ^hash)
+      |> Repo.update_all(set: [last_used_at: stamped])
+
+      :ok
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  Delete a browser token-session by its opaque session id (idempotent).
+  Called at logout — a DELETE, not a `revoked_at` flag: the row holds an
+  encrypted-at-rest raw bearer, so leaving it readable (even flagged) keeps a
+  live credential retained, the same lesson `Barkpark.Auth.LoginTicket`'s
+  moduledoc already states. Returns `{:ok, n}`, the number of rows actually
+  removed (0 for an unknown/already-gone session id — not an error).
+  """
+  @spec revoke_token_session(binary()) :: {:ok, non_neg_integer()}
+  def revoke_token_session(plaintext) when is_binary(plaintext) do
+    hash = TokenSession.hash_token(plaintext)
+    {deleted, _} = from(s in TokenSession, where: s.session_hash == ^hash) |> Repo.delete_all()
+    {:ok, deleted}
+  end
+
+  def revoke_token_session(_), do: {:ok, 0}
+
+  @doc """
+  True when EITHER the new session-id key or the legacy raw-token key holds a
+  non-blank string — independent of whether either actually verifies. Lets a
+  caller distinguish "no explicit browser credential was presented" (where a
+  configured dev-browser fallback may still apply) from "a credential was
+  presented but is dead" (where it must not silently fall through to the dev
+  fallback — that would reopen the provenance hole `LiveAuth`'s
+  `:fetch_api_token` moduledoc already documents).
+  """
+  @spec session_credential_present?(term(), term()) :: boolean()
+  def session_credential_present?(session_id, legacy_raw) do
+    present?(session_id) or present?(legacy_raw)
+  end
+
+  defp present?(v), do: is_binary(v) and v != ""
+
+  @doc """
+  Resolve a browser session's api-token credential: the new revocable
+  session id (`session_id`) if present and live, else the legacy raw bearer
+  (`legacy_raw`) — a cookie minted before this change, tolerated for one
+  release (ruling #16 rework half). Returns `{:ok, ApiToken.t(), raw ::
+  binary()}` (the raw bearer, needed for `data-token=`) or `:error`.
+
+  This is the ONE resolver every browser-session read call-site funnels
+  through (`LiveAuth`, `OptionalSessionToken`, `RequireBearerOrSessionToken`,
+  `PaperViewer`) — so there is exactly one place that knows the session
+  cookie's two possible shapes, not N copies of a fallback chain.
+  """
+  @spec resolve_session_credential(term(), term()) :: {:ok, ApiToken.t(), binary()} | :error
+  def resolve_session_credential(session_id, _legacy_raw)
+      when is_binary(session_id) and session_id != "" do
+    verify_token_session(session_id)
+  end
+
+  def resolve_session_credential(_session_id, legacy_raw)
+      when is_binary(legacy_raw) and legacy_raw != "" do
+    case verify_token(legacy_raw) do
+      {:ok, token} -> {:ok, token, legacy_raw}
+      _ -> :error
+    end
+  end
+
+  def resolve_session_credential(_session_id, _legacy_raw), do: :error
 
   # ── Token rotation (task-e78edcc2145ed3df) ──────────────────────────────
 

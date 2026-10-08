@@ -62,6 +62,11 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   import Plug.Conn
   alias Barkpark.Auth
 
+  # Ruling #16 rework half (task-57f23825b18ab55d): "`session["api_token"]`"
+  # above is the LEGACY shape — a cookie minted before a revocable session row
+  # existed. `token_from_session/1` now tries `session["api_token_session"]`
+  # (the current shape) first, via `Barkpark.Auth.resolve_session_credential/2`.
+
   def init(opts), do: opts
 
   def call(conn, _opts) do
@@ -103,9 +108,12 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   end
 
   defp token_from_session(conn) do
-    case get_session(conn, "api_token") do
-      raw when is_binary(raw) and raw != "" -> verify(raw)
-      _ -> nil
+    case Auth.resolve_session_credential(
+           get_session(conn, "api_token_session"),
+           get_session(conn, "api_token")
+         ) do
+      {:ok, token, _raw} -> {:ok, token}
+      :error -> nil
     end
   end
 

@@ -1,0 +1,30 @@
+<div class="bp-auth">
+  <.auth_styles />
+  <div class="bp-auth-card">
+    <.auth_brand />
+
+    <%= case @result do %>
+      <% :ok -> %>
+        <h1 class="bp-auth-title">Email confirmed</h1>
+        <p class="bp-auth-sub">Your account is confirmed — you're all set.</p>
+        <a class="bp-auth-btn" href={~p"/login"}>Sign in</a>
+      <% :error -> %>
+        <h1 class="bp-auth-title">Confirmation link expired</h1>
+        <p class="bp-auth-sub">
+          This confirmation link is invalid, expired, or has already been used.
+        </p>
+        <a class="bp-auth-btn bp-auth-btn-quiet" href={~p"/login"}>Back to sign in</a>
+      <% nil -> %>
+        <h1 class="bp-auth-title">Confirm your email</h1>
+        <p class="bp-auth-sub">Click below to confirm your account.</p>
+
+        <.form :let={_f} for={%{}} as={:confirm} action={~p"/auth/confirm/#{@token}"} method="post">
+          <button type="submit" class="bp-auth-btn">Confirm email</button>
+        </.form>
+
+        <p class="bp-auth-foot">
+          <a href={~p"/login"}>Back to sign in</a>
+        </p>
+    <% end %>
+  </div>
+</div>

@@ -64,24 +64,39 @@ defmodule BarkparkWeb.SessionControllerTest do
     end
   end
 
+  # Ruling #16 rework half (task-57f23825b18ab55d): a successful login no
+  # longer puts the raw bearer in the session — it mints a
+  # `Barkpark.Auth.TokenSession` and stores only its opaque id under
+  # `session["api_token_session"]`. These assertions resolve that id back to
+  # the same api_token/raw-bearer pair via `Auth.resolve_session_credential/2`
+  # rather than comparing the cookie's contents to the raw token directly —
+  # the whole point is that the cookie no longer CAN be compared that way.
+  defp assert_session_resolves_to(conn, expected_raw) do
+    session_id = get_session(conn, "api_token_session")
+    assert is_binary(session_id)
+
+    assert {:ok, %Barkpark.Auth.ApiToken{}, ^expected_raw} =
+             Auth.resolve_session_credential(session_id, nil)
+  end
+
   describe "POST /login (success)" do
     test "valid token sets session and redirects to /studio by default", %{conn: conn} do
       conn = post(conn, "/login", %{"token" => @valid_token})
       assert redirected_to(conn, 302) == "/studio"
-      assert get_session(conn, "api_token") == @valid_token
+      assert_session_resolves_to(conn, @valid_token)
     end
 
     test "valid token + safe return_to redirects to that path", %{conn: conn} do
       conn = post(conn, "/login", %{"token" => @valid_token, "return_to" => "/studio/test/page"})
 
       assert redirected_to(conn, 302) == "/studio/test/page"
-      assert get_session(conn, "api_token") == @valid_token
+      assert_session_resolves_to(conn, @valid_token)
     end
 
     test "open-redirect attempt is rejected (//evil.com)", %{conn: conn} do
       conn = post(conn, "/login", %{"token" => @valid_token, "return_to" => "//evil.com"})
       assert redirected_to(conn, 302) == "/studio"
-      assert get_session(conn, "api_token") == @valid_token
+      assert_session_resolves_to(conn, @valid_token)
     end
 
     # task-5ab7e3e4d678ec4c: browsers read `\` as `/` and drop tab/CR/LF, so
@@ -103,8 +118,24 @@ defmodule BarkparkWeb.SessionControllerTest do
       padded = "  " <> @valid_token <> "  \n"
       conn = post(conn, "/login", %{"token" => padded})
       assert redirected_to(conn, 302) == "/studio"
-      # Session stores the trimmed value, not the padded one.
-      assert get_session(conn, "api_token") == @valid_token
+      # The minted session resolves to the TRIMMED value, not the padded one.
+      assert_session_resolves_to(conn, @valid_token)
+    end
+
+    test "the session cookie never contains the raw API token, even decrypted server-side",
+         %{conn: conn} do
+      logged_in = post(conn, "/login", %{"token" => @valid_token})
+
+      # Round-trip through the REAL wire cookie (Set-Cookie -> Cookie) and
+      # decrypt it exactly as the server would on the next request — not the
+      # in-process conn.private shortcut.
+      rehydrated = recycle(logged_in) |> get("/login")
+      session = Plug.Conn.get_session(rehydrated)
+
+      refute @valid_token in Map.values(session)
+      assert is_binary(session["api_token_session"])
+      refute session["api_token_session"] == @valid_token
+      refute Map.has_key?(session, "api_token")
     end
   end
 
@@ -114,6 +145,7 @@ defmodule BarkparkWeb.SessionControllerTest do
       body = html_response(conn, 200)
       assert body =~ "Invalid API token."
       assert get_session(conn, "api_token") == nil
+      assert get_session(conn, "api_token_session") == nil
       # The token must NOT be reflected back in the rendered HTML.
       refute body =~ @invalid_token
     end
@@ -123,6 +155,7 @@ defmodule BarkparkWeb.SessionControllerTest do
       body = html_response(conn, 200)
       assert body =~ "Token is required."
       assert get_session(conn, "api_token") == nil
+      assert get_session(conn, "api_token_session") == nil
     end
   end
 
@@ -130,7 +163,7 @@ defmodule BarkparkWeb.SessionControllerTest do
     test "clears the session and redirects to /studio", %{conn: conn} do
       # Seed a logged-in session by going through the real login flow.
       logged_in = post(conn, "/login", %{"token" => @valid_token})
-      assert get_session(logged_in, "api_token") == @valid_token
+      assert_session_resolves_to(logged_in, @valid_token)
 
       # POST /logout while carrying the session cookie forward.
       logged_out =
@@ -144,6 +177,40 @@ defmodule BarkparkWeb.SessionControllerTest do
       # so a fresh request after recycle() should see an empty session.
       next = recycle(logged_out) |> get("/login")
       assert get_session(next, "api_token") == nil
+      assert get_session(next, "api_token_session") == nil
+    end
+
+    # The criterion this PR exists for (ruling #16 rework half,
+    # task-57f23825b18ab55d): BEFORE this change, a token sign-in stored the
+    # RAW bearer directly in the session, and logout's only effect was
+    # `configure_session(drop: true)` — it dropped THIS browser's cookie but
+    # revoked nothing server-side. A cookie copied before logout (a stolen
+    # device, a backed-up browser profile) kept authenticating forever, right
+    # up until the underlying api_token was separately revoked. Now logout
+    # deletes the `TokenSession` row the cookie's opaque id names, so a copied
+    # cookie's session id stops resolving the instant the real session signs
+    # out — proven here by resolving the SAME session id, read from a COPY of
+    # the cookie taken before logout, through the real `/login` + `/logout`
+    # HTTP flow.
+    test "after sign-in and logout, replaying a COPIED cookie no longer authenticates",
+         %{conn: conn} do
+      logged_in = post(conn, "/login", %{"token" => @valid_token})
+      copied_cookie_session_id = get_session(logged_in, "api_token_session")
+      assert is_binary(copied_cookie_session_id)
+
+      # The copy currently resolves (sanity: the later refusal is the
+      # logout's doing, not a setup mistake).
+      assert {:ok, _token, @valid_token} =
+               Auth.resolve_session_credential(copied_cookie_session_id, nil)
+
+      # The REAL browser signs out, on an independent lineage carrying the
+      # same cookie.
+      signed_out = recycle(logged_in) |> post("/logout")
+      assert redirected_to(signed_out, 302) == "/studio"
+
+      # REPLAY: the copy made before logout still carries that exact session
+      # id. It must no longer resolve to anything live.
+      assert Auth.resolve_session_credential(copied_cookie_session_id, nil) == :error
     end
 
     # PDS-D523: the sign-out receipt used to say "Signed out." over a revoke

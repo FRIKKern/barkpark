@@ -189,7 +189,8 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
                  # disabled/reason pair, so nav.ex reads ONE shape. An entry the
                  # workspace surfaces is the `false`/`nil` half.
                  disabled: false,
-                 reason: nil
+                 reason: nil,
+                 enabled_in: nil
                }
              ],
              "expected B to mutate A's contribution; got: #{inspect(ours)}"
@@ -217,7 +218,8 @@ defmodule Barkpark.Plugins.RegistryResolverTest do
                  # disabled/reason pair, so nav.ex reads ONE shape. An entry the
                  # workspace surfaces is the `false`/`nil` half.
                  disabled: false,
-                 reason: nil
+                 reason: nil,
+                 enabled_in: nil
                }
              ],
              "expected A's tab unmodified when A fires last; got: #{inspect(ours)}"

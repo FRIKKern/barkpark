@@ -122,13 +122,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #   * epic_assignment_runtime_attempts  → epic_assignments (assignment_id)
   #   * epic_assignment_tasks             → epic_assignments (assignment_id)
   #   * epic_benchmark_attempts           → epic_benchmark_experiments (experiment_id)
+  #   * token_sessions                    → api_tokens (api_token_id), task-cfb6ca3f5ffaf099's
+  #     sibling task-57f23825b18ab55d: a revocable browser session row, NOT NULL
+  #     FK to the E1-pinned `api_tokens`, so it travels in the owning workspace's
+  #     bundle the same way `webhook_deliveries` rides its `webhooks` parent.
   @pinned_e2 ~w(
     chat_runtime_usage_receipts content_edges cycle_build_plans
     cycle_release_gate_captures cycle_release_gate_consumptions
     cycle_release_paper_candidates cycle_release_public_smokes datasets
     epic_assignment_results epic_assignment_runtime_attempts epic_assignment_tasks
     epic_benchmark_attempts plugin_doc_state role_permissions task_edges
-    webhook_deliveries
+    token_sessions webhook_deliveries
   )
 
   # E3 tables that carry a `doc_id` → filtered by a (doc_id, dataset) semi-join.
@@ -251,7 +255,8 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     "epic_assignment_tasks" =>
       {"JOIN epic_assignments ea ON ea.id = t.assignment_id", "ea.workspace_id"},
     "epic_benchmark_attempts" =>
-      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"}
+      {"JOIN epic_benchmark_experiments ee ON ee.id = t.experiment_id", "ee.workspace_id"},
+    "token_sessions" => {"JOIN api_tokens at ON at.id = t.api_token_id", "at.workspace_id"}
   }
 
   # ── Connector-credential exclusion (an EXPLICIT deny, not a namespace accident)
@@ -684,7 +689,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
   #     audit_export_sinks (plaintext `secret` sink column), share_links,
   #     shares (access-granting registry — copying would silently re-open
   #     public surfaces on the target), registered_chat_hosts,
-  #     preview_token_jti.
+  #     preview_token_jti, token_sessions (task-57f23825b18ab55d — holds a
+  #     Cloak-encrypted RAW api_token, decryptable at rest; more sensitive than
+  #     api_tokens itself, which only ever stores a hash).
   #   * PII / conversation / audit trails: audit_events, paper_access_log
   #     (who read which paper and when, identified where the reader could
   #     identify them — the same trail shape as audit_events and denied for the
@@ -741,7 +748,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     revisions search_intel_events
     secrets secrets_audit
     share_links shares sync_cursors sync_dead_letters sync_push_conflicts
-    sync_push_cursors sync_push_doc_revs webhook_deliveries webhooks
+    sync_push_cursors sync_push_doc_revs token_sessions webhook_deliveries webhooks
     workspace_invitations workspace_memberships
   )
 

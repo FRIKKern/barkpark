@@ -131,13 +131,42 @@ try {
     assert.equal(en._t("Library"), "Library");
     assert.equal(en._t("%{count} assets", { count: 3 }), "3 assets");
   });
+
+  // task-8d8dabe8b693031d: the lock badge names the holder with the server's
+  // fixed words ("you", "another editor") or a display name. The fixed words
+  // read in the viewer's language; a name reads as written.
+  function lockBadge(el, label) {
+    const body = window.document.createElement("div");
+    body.innerHTML =
+      '<div class="bp-ae-checkout-row"></div><button class="bp-ae-checkout"></button><button class="bp-ae-undo-checkout"></button>';
+    el._inspectorBody = body;
+    el._assetDetail = { asset: { checkedOutBy: "user:1" }, checkoutLabel: label };
+    el._updateCheckoutUI(null);
+    return body.querySelector(".bp-ae-checkout-row").textContent.trim();
+  }
+
+  check("the lock holder's fixed words are translated, a display name is not", () => {
+    const lock = {
+      "Checked out by %{who}": "Sjekket ut av %{who}",
+      you: "deg",
+      "another editor": "en annen redaktør",
+    };
+    nb._strings = null;
+    nb.setAttribute("data-strings", JSON.stringify({ ...NB, ...lock }));
+    assert.match(lockBadge(nb, "you"), /Sjekket ut av deg/);
+    assert.match(lockBadge(nb, "another editor"), /Sjekket ut av en annen redaktør/);
+    assert.match(lockBadge(nb, "Kari Admin"), /Sjekket ut av Kari Admin/);
+    en._strings = null;
+    en.removeAttribute("data-strings");
+    assert.match(lockBadge(en, "you"), /Checked out by you/);
+  });
 } catch (e) {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.message}`);
 } finally {
-  if (ran !== 8) {
+  if (ran !== 9) {
     failures += 1;
-    console.log(`FAIL  ran ${ran} of 8 checks`);
+    console.log(`FAIL  ran ${ran} of 9 checks`);
   }
   dom.window.close();
   if (failures > 0) {

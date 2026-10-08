@@ -108,6 +108,13 @@ defmodule BarkparkWeb.LiveAuthTargetWorkspaceTest do
 
   defp as_token(conn, raw), do: Plug.Test.init_test_session(conn, %{"api_token" => raw})
 
+  # Ruling #16 rework half (task-57f23825b18ab55d): the NEW cookie shape —
+  # an opaque TokenSession id rather than the raw bearer.
+  defp as_token_session(conn, raw, tok) do
+    {:ok, session_id} = Auth.create_token_session(raw, tok)
+    Plug.Test.init_test_session(conn, %{"api_token_session" => session_id})
+  end
+
   # ── (a) token outsider: rejected at mount ─────────────────────────────────
 
   describe "token outsider — flat global admin, member-only of the target" do
@@ -126,6 +133,29 @@ defmodule BarkparkWeb.LiveAuthTargetWorkspaceTest do
       refute TenancyAuth.workspace_admin?(tok, ws_b.id)
 
       assert {:error, {:redirect, %{to: "/studio"}}} = live(as_token(conn, raw), path)
+    end
+
+    # Ruling #16 rework half (task-57f23825b18ab55d) guardrail: the new
+    # revocable-session cookie shape must not change tenancy isolation.
+    # `resolve_session_credential/2` hands every caller back the SAME
+    # `%ApiToken{}` a raw bearer would — the scoped_admin gate's workspace_b
+    # membership check runs identically either way, so a flat-admin-but-
+    # workspace-B-outsider is rejected via a minted token-session exactly as
+    # it is via the legacy raw cookie, proven above.
+    test "cross-workspace isolation is UNCHANGED via the new token-session cookie", %{
+      conn: conn,
+      ws_b: ws_b,
+      default_ws: default_ws,
+      connectors_path: path
+    } do
+      {raw, tok} = token_outsider!(ws_b)
+
+      assert Auth.has_permission?(tok, "admin")
+      assert TenancyAuth.workspace_admin?(tok, default_ws.id)
+      refute TenancyAuth.workspace_admin?(tok, ws_b.id)
+
+      assert {:error, {:redirect, %{to: "/studio"}}} =
+               live(as_token_session(conn, raw, tok), path)
     end
 
     test "is REJECTED at mount of SettingsLive — and writes nothing", %{
@@ -192,6 +222,28 @@ defmodule BarkparkWeb.LiveAuthTargetWorkspaceTest do
       assert html =~ ~s(data-test-id="connector-card-telegram")
 
       assert {:ok, _view, html} = live(as_token(conn, raw), settings_path)
+      assert html =~ "Workspace Settings"
+    end
+
+    # Ruling #16 rework half (task-57f23825b18ab55d) guardrail, the ALLOW
+    # half: a legit target-workspace admin mounts identically whether their
+    # browser carries the legacy raw cookie (above) or the new token-session
+    # cookie — isolation is unchanged in BOTH directions, not just the deny.
+    test "the SAME ws-B admin TOKEN mounts both surfaces via the new token-session cookie", %{
+      conn: conn,
+      ws_b: ws_b,
+      connectors_path: connectors_path,
+      settings_path: settings_path
+    } do
+      {raw, tok} = legit_target_admin_token!(ws_b)
+
+      refute Auth.has_permission?(tok, "admin")
+      assert TenancyAuth.workspace_admin?(tok, ws_b.id)
+
+      assert {:ok, _view, html} = live(as_token_session(conn, raw, tok), connectors_path)
+      assert html =~ ~s(data-test-id="connector-card-telegram")
+
+      assert {:ok, _view, html} = live(as_token_session(conn, raw, tok), settings_path)
       assert html =~ "Workspace Settings"
     end
 

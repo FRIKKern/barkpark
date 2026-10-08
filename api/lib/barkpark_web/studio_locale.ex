@@ -124,6 +124,9 @@ defmodule BarkparkWeb.StudioLocale do
       "Check out" => gettext("Check out"),
       "Checked out" => gettext("Checked out"),
       "Checked out by %{who}" => gettext("Checked out by %{who}", who: "%{who}"),
+      # The fixed holder words Media.Storage.Actor.display/2 sends.
+      "you" => gettext("you"),
+      "another editor" => gettext("another editor"),
       "Checkout failed" => gettext("Checkout failed"),
       "Checkout released" => gettext("Checkout released"),
       "Clear all" => gettext("Clear all"),

@@ -2155,6 +2155,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         user_color={@user_color}
         account_label={assigns[:account_label]}
         account_path={account_path(assigns)}
+        profile_error={assigns[:profile_error]}
         image_picker_field={@image_picker_field}
         uploads={@uploads}
         media_files={@media_files}
