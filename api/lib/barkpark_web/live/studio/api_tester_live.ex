@@ -93,7 +93,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
 
     if endpoint == nil do
       # Stale id from a prior dataset — leave the current selection intact.
-      {:noreply, put_flash(socket, :error, "Unknown endpoint")}
+      {:noreply, put_flash(socket, :error, gettext("Unknown endpoint"))}
     else
       # Seed form state lazily if this is the first time selecting this endpoint
       form_state =
@@ -177,7 +177,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   # with the form's token. Only an admin principal (fresh Caps.derive) may fire
   # it — a non-admin member is denied here, mirroring the Studio caps deny-gate.
   defp deny_run(socket),
-    do: put_flash(socket, :error, "Admin access required to run API requests.")
+    do: put_flash(socket, :error, gettext("Admin access required to run API requests."))
 
   defp do_run(socket) do
     endpoint = Endpoints.find(socket.assigns.dataset, socket.assigns.selected_id)
@@ -603,7 +603,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           <div class="api-col-body">
             <%= cond do %>
               <% @endpoint == nil -> %>
-                <.pane_empty message="Select an endpoint on the left." />
+                <.pane_empty message={gettext("Select an endpoint on the left.")} />
               <% @endpoint.kind == :reference -> %>
                 <%= render_reference(assigns, @endpoint.render_key) %>
               <% true -> %>
@@ -613,14 +613,14 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
           </div>
         </.pane_column>
 
-        <.pane_column title="Response" marker_class="api-col-response" last>
+        <.pane_column title={gettext("Response")} marker_class="api-col-response" last>
           <:header_actions>
             <%= if @scenario_results != [] do %>
               <div class="api-response-meta">
-                <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> pass</span>
-                <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> fail</span>
-                <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> error</span>
-                <span class="badge badge-verdict-unverified"><%= Enum.count(@scenario_results, &(&1.result.verdict == :unverified)) %> unverified</span>
+                <span class="badge badge-verdict-pass"><%= Enum.count(@scenario_results, &(&1.result.verdict == :pass)) %> {gettext("pass")}</span>
+                <span class="badge badge-verdict-fail"><%= Enum.count(@scenario_results, &(&1.result.verdict == :fail)) %> {gettext("fail")}</span>
+                <span class="badge badge-verdict-error"><%= Enum.count(@scenario_results, &(&1.result.verdict == :error)) %> {gettext("error")}</span>
+                <span class="badge badge-verdict-unverified"><%= Enum.count(@scenario_results, &(&1.result.verdict == :unverified)) %> {gettext("unverified")}</span>
               </div>
             <% else %>
               <%= if @last_result do %>
@@ -660,7 +660,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
               <%= if @last_result do %>
                 <.response_view result={@last_result} />
               <% else %>
-                <.pane_empty message="No response yet. Click Run." />
+                <.pane_empty message={gettext("No response yet. Click Run.")} />
               <% end %>
             <% end %>
           </div>
@@ -825,10 +825,10 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
   defp render_verdict_badge(%{verdict: verdict}) do
     label =
       case verdict do
-        :pass -> "Pass"
-        :fail -> "Fail"
-        :error -> "Error"
-        :unverified -> "Unverified"
+        :pass -> gettext("Pass")
+        :fail -> gettext("Fail")
+        :error -> gettext("Error")
+        :unverified -> gettext("Unverified")
       end
 
     class = "badge badge-verdict-#{verdict}"

@@ -68,7 +68,7 @@ defmodule BarkparkWeb.Studio.AccountLive do
 
     {:ok,
      assign(socket,
-       page_title: "Your data",
+       page_title: gettext("Your data"),
        export_path: @export_path,
        export_filename: @export_filename,
        # The raw cookie value, kept server-side only (never rendered) so the
@@ -97,19 +97,22 @@ defmodule BarkparkWeb.Studio.AccountLive do
 
     cond do
       not match?(%User{}, socket.assigns[:current_user]) ->
-        {:noreply, assign(socket, erase_error: "Sign in with your account to erase it.")}
+        {:noreply, assign(socket, erase_error: gettext("Sign in with your account to erase it."))}
 
       not acknowledged? ->
         {:noreply,
          assign(socket,
            erase_error:
-             "Tick the box to confirm you understand what erasure does. Nothing was erased."
+             gettext(
+               "Tick the box to confirm you understand what erasure does. Nothing was erased."
+             )
          )}
 
       not is_binary(password) or password == "" ->
         {:noreply,
          assign(socket,
-           erase_error: "Enter your current password to erase your account. Nothing was erased."
+           erase_error:
+             gettext("Enter your current password to erase your account. Nothing was erased.")
          )}
 
       true ->
@@ -128,33 +131,37 @@ defmodule BarkparkWeb.Studio.AccountLive do
        |> assign(erased?: true, erase_error: nil)
        |> put_flash(
          :info,
-         "Your account was erased. Every session was signed out, so sign-in is required again."
+         gettext(
+           "Your account was erased. Every session was signed out, so sign-in is required again."
+         )
        )
        |> redirect(to: "/login")}
     else
       {:session, _} ->
         {:noreply,
          socket
-         |> put_flash(:error, "Your session has ended. Sign in again to continue.")
+         |> put_flash(:error, gettext("Your session has ended. Sign in again to continue."))
          |> redirect(to: "/login")}
 
       {:password, {:error, :reauth_rate_limited}} ->
         {:noreply,
          assign(socket,
            erase_error:
-             "Too many password attempts. Wait a minute and try again. Nothing was erased."
+             gettext(
+               "Too many password attempts. Wait a minute and try again. Nothing was erased."
+             )
          )}
 
       {:password, {:error, :invalid_password}} ->
         {:noreply,
          assign(socket,
-           erase_error: "That password is not correct. Nothing was erased."
+           erase_error: gettext("That password is not correct. Nothing was erased.")
          )}
 
       {:erase, _error} ->
         {:noreply,
          assign(socket,
-           erase_error: "Erasure failed and nothing was changed. Try again in a moment."
+           erase_error: gettext("Erasure failed and nothing was changed. Try again in a moment.")
          )}
     end
   end
@@ -172,25 +179,27 @@ defmodule BarkparkWeb.Studio.AccountLive do
         class="account-live"
         style="max-width: 720px; margin: 32px auto; padding: 0 24px; font-family: var(--font);"
       >
-        <h1 class="h1" style="margin-bottom: 4px;">Your data</h1>
+        <h1 class="h1" style="margin-bottom: 4px;">{gettext("Your data")}</h1>
 
         <%= cond do %>
           <% match?(%User{}, @current_user) -> %>
             <p style="color: var(--fg-muted); margin-top: 0;">
-              Download or erase the personal data Barkpark holds for
+              {gettext("Download or erase the personal data Barkpark holds for")}
               <strong data-test-id="account-email">{@current_user.email}</strong>.
             </p>
             {render_export_section(assigns)}
             {render_erase_section(assigns)}
           <% @api_token -> %>
             <p role="status" data-test-id="account-token-only" style="color: var(--fg-muted);">
-              You are signed in with an API token, which is not an account, so there is no
-              personal data to download or erase. <a href="/login">Sign in with your account</a>
-              to manage your data.
+              {gettext(
+                "You are signed in with an API token, which is not an account, so there is no personal data to download or erase."
+              )} <a href="/login">{gettext("Sign in with your account")}</a>
+              {gettext("to manage your data.")}
             </p>
           <% true -> %>
             <p role="status" data-test-id="account-signed-out" style="color: var(--fg-muted);">
-              <a href="/login">Sign in with your account</a> to download or erase your data.
+              <a href="/login">{gettext("Sign in with your account")}</a>
+              {gettext("to download or erase your data.")}
             </p>
         <% end %>
       </div>
@@ -201,10 +210,10 @@ defmodule BarkparkWeb.Studio.AccountLive do
   defp render_export_section(assigns) do
     ~H"""
     <.bp_card aria-labelledby="export-heading">
-      <.bp_section_header id="export-heading" title="Download your data">
-        A JSON file with your account details, sign-in sessions, pending email links,
-        workspace memberships and the audit events you performed. It contains no password,
-        session token or two-factor secret.
+      <.bp_section_header id="export-heading" title={gettext("Download your data")}>
+        {gettext(
+          "A JSON file with your account details, sign-in sessions, pending email links, workspace memberships and the audit events you performed. It contains no password, session token or two-factor secret."
+        )}
       </.bp_section_header>
 
       <a
@@ -213,7 +222,7 @@ defmodule BarkparkWeb.Studio.AccountLive do
         class="btn btn-primary"
         data-test-id="account-export"
       >
-        Download my data
+        {gettext("Download my data")}
       </a>
     </.bp_card>
     """
@@ -222,24 +231,22 @@ defmodule BarkparkWeb.Studio.AccountLive do
   defp render_erase_section(assigns) do
     ~H"""
     <.bp_card aria-labelledby="erase-heading">
-      <.bp_section_header id="erase-heading" title="Erase your account">
-        Erasure cannot be undone. Download your data first if you want a copy.
+      <.bp_section_header id="erase-heading" title={gettext("Erase your account")}>
+        {gettext("Erasure cannot be undone. Download your data first if you want a copy.")}
       </.bp_section_header>
 
       <ul data-test-id="erase-consequences" style="margin: 0 0 16px; padding-left: 20px; color: var(--fg);">
-        <li>Your email address is replaced with an anonymous placeholder, and your password, two-factor secret and recovery codes are deleted.</li>
-        <li>Every sign-in session is revoked, on every device, including this one. You are signed out immediately.</li>
-        <li>Pending email links stop working and you are removed from every workspace.</li>
+        <li>{gettext("Your email address is replaced with an anonymous placeholder, and your password, two-factor secret and recovery codes are deleted.")}</li>
+        <li>{gettext("Every sign-in session is revoked, on every device, including this one. You are signed out immediately.")}</li>
+        <li>{gettext("Pending email links stop working and you are removed from every workspace.")}</li>
         <li>
-          Personal access tokens you own are revoked, and your passkeys and social sign-in links
-          are removed.
+          {gettext("Personal access tokens you own are revoked, and your passkeys and social sign-in links are removed.")}
         </li>
         <li>
-          Machine tokens you created as a workspace admin stay with that workspace.
+          {gettext("Machine tokens you created as a workspace admin stay with that workspace.")}
         </li>
         <li>
-          Your account is pseudonymised, not deleted: the audit log keeps its records of what this
-          account did, attributed to the anonymous placeholder.
+          {gettext("Your account is pseudonymised, not deleted: the audit log keeps its records of what this account did, attributed to the anonymous placeholder.")}
         </li>
       </ul>
 
@@ -250,11 +257,11 @@ defmodule BarkparkWeb.Studio.AccountLive do
             name="acknowledge"
             value="true"
             checked={@acknowledged?}
-            label="I understand that erasing my account cannot be undone."
+            label={gettext("I understand that erasing my account cannot be undone.")}
           />
         </div>
 
-        <.bp_field_row label="Current password" for={"erase-password-#{@attempt}"} required>
+        <.bp_field_row label={gettext("Current password")} for={"erase-password-#{@attempt}"} required>
           <.bp_input
             id={"erase-password-#{@attempt}"}
             name="password"
@@ -276,10 +283,10 @@ defmodule BarkparkWeb.Studio.AccountLive do
         <button
           type="submit"
           class="btn btn-destructive"
-          phx-disable-with="Erasing…"
+          phx-disable-with={gettext("Erasing…")}
           disabled={@erased?}
         >
-          Erase my account
+          {gettext("Erase my account")}
         </button>
       </form>
     </.bp_card>
