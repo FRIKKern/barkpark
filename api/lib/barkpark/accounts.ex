@@ -229,6 +229,20 @@ defmodule Barkpark.Accounts do
     end
   end
 
+  @doc """
+  Set (or clear, with `nil`/blank) an account's display name
+  (task-cfb6ca3f5ffaf099). Not security-sensitive — no reauth, no session
+  revocation. `Media.Storage.Actor.display/2` reads it to name another
+  account's checkout-lock holder instead of the generic "another editor".
+  """
+  @spec update_display_name(User.t(), map()) ::
+          {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def update_display_name(%User{} = user, attrs) do
+    user
+    |> User.display_name_changeset(attrs)
+    |> Repo.update()
+  end
+
   # Owner ruling #34 item 1 (2026-10-03, task-d9e8f02056e39763): ONE per-user
   # budget for every door that re-checks a signed-in user's current password —
   # erase (JSON and Studio), password change, TOTP enrol/verify/disable, passkey

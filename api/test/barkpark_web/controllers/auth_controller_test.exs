@@ -164,6 +164,74 @@ defmodule BarkparkWeb.AuthControllerTest do
       assert conn |> get("/v1/auth/me") |> json_response(401)
     end
 
+    test "/me reports display_name: nil until it's set (task-cfb6ca3f5ffaf099)", %{conn: conn} do
+      token = login_token(conn, "alice@example.com")
+      authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end
+
+      assert authed.()
+             |> get("/v1/auth/me")
+             |> json_response(200)
+             |> get_in(["user", "display_name"]) ==
+               nil
+
+      resp =
+        authed.()
+        |> json_conn()
+        |> patch("/v1/auth/display-name", Jason.encode!(%{display_name: "Alex Rivera"}))
+        |> json_response(200)
+
+      assert resp == %{"ok" => true, "display_name" => "Alex Rivera"}
+
+      assert authed.()
+             |> get("/v1/auth/me")
+             |> json_response(200)
+             |> get_in(["user", "display_name"]) ==
+               "Alex Rivera"
+    end
+
+    test "PATCH /v1/auth/display-name needs no reauth and a blank value clears it", %{conn: conn} do
+      token = login_token(conn, "alice@example.com")
+
+      authed = fn ->
+        scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+      end
+
+      authed.()
+      |> patch("/v1/auth/display-name", Jason.encode!(%{display_name: "Alex"}))
+      |> json_response(200)
+
+      resp =
+        authed.()
+        |> patch("/v1/auth/display-name", Jason.encode!(%{display_name: "   "}))
+        |> json_response(200)
+
+      assert resp == %{"ok" => true, "display_name" => nil}
+    end
+
+    test "PATCH /v1/auth/display-name 422s over 80 chars", %{conn: conn} do
+      token = login_token(conn, "alice@example.com")
+
+      authed = fn ->
+        scoped_conn() |> put_req_header("authorization", "Bearer #{token}") |> json_conn()
+      end
+
+      too_long = String.duplicate("a", 81)
+
+      resp =
+        authed.()
+        |> patch("/v1/auth/display-name", Jason.encode!(%{display_name: too_long}))
+        |> json_response(422)
+
+      assert resp["error"]["code"] == "invalid_display_name"
+    end
+
+    test "PATCH /v1/auth/display-name without a session is 401", %{conn: conn} do
+      assert conn
+             |> json_conn()
+             |> patch("/v1/auth/display-name", Jason.encode!(%{display_name: "Alex"}))
+             |> json_response(401)
+    end
+
     test "logout revokes the session bearer", %{conn: conn} do
       token = login_token(conn, "alice@example.com")
       authed = fn -> scoped_conn() |> put_req_header("authorization", "Bearer #{token}") end

@@ -64,6 +64,45 @@ defmodule Barkpark.AccountsTest do
     end
   end
 
+  describe "update_display_name/2 (task-cfb6ca3f5ffaf099)" do
+    test "sets a trimmed display name" do
+      user = user_fixture()
+
+      assert {:ok, updated} =
+               Accounts.update_display_name(user, %{display_name: "  Alex Rivera  "})
+
+      assert updated.display_name == "Alex Rivera"
+    end
+
+    test "a blank string clears it back to nil, not an empty string" do
+      user = user_fixture()
+      {:ok, user} = Accounts.update_display_name(user, %{display_name: "Alex Rivera"})
+      assert {:ok, cleared} = Accounts.update_display_name(user, %{display_name: "   "})
+      assert is_nil(cleared.display_name)
+    end
+
+    test "nil clears it too" do
+      user = user_fixture()
+      {:ok, user} = Accounts.update_display_name(user, %{display_name: "Alex Rivera"})
+      assert {:ok, cleared} = Accounts.update_display_name(user, %{display_name: nil})
+      assert is_nil(cleared.display_name)
+    end
+
+    test "rejects a name over 80 chars" do
+      user = user_fixture()
+      too_long = String.duplicate("a", 81)
+      assert {:error, changeset} = Accounts.update_display_name(user, %{display_name: too_long})
+      assert "should be at most 80 character(s)" in errors_on(changeset).display_name
+    end
+
+    test "never touches the password or email" do
+      user = user_fixture()
+      {:ok, updated} = Accounts.update_display_name(user, %{display_name: "Alex Rivera"})
+      assert updated.hashed_password == user.hashed_password
+      assert updated.email == user.email
+    end
+  end
+
   describe "get_user_by_email_and_password/2" do
     test "returns the user only on a correct password" do
       user = user_fixture(%{email: "login@example.com"})

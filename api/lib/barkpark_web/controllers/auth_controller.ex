@@ -267,9 +267,28 @@ defmodule BarkparkWeb.AuthController do
         id: user.id,
         email: user.email,
         confirmed: not is_nil(user.confirmed_at),
-        mfa: user.totp_enabled
+        mfa: user.totp_enabled,
+        display_name: user.display_name
       }
     })
+  end
+
+  @doc """
+  Self-service display name (task-cfb6ca3f5ffaf099). Not security-sensitive —
+  unlike `change_password/2`/`erase/2` above, no reauth is required. A blank
+  or missing `display_name` clears it back to the `"another editor"` fallback
+  `Media.Storage.Actor.display/2` renders for an unset name.
+  """
+  def update_display_name(conn, params) do
+    user = conn.assigns.current_user
+
+    case Accounts.update_display_name(user, %{display_name: Map.get(params, "display_name")}) do
+      {:ok, updated} ->
+        json(conn, %{ok: true, display_name: updated.display_name})
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        error(conn, 422, "invalid_display_name", changeset_errors(cs))
+    end
   end
 
   @doc """

@@ -569,11 +569,11 @@ defmodule PDS.Census do
   # line on the rebased PR tree (pds_elixir_census_test.exs, strict runner), amended in
   # the same commit as the change that moved them (PDS-D448a).
   @rederived %{
-    textual: 115,
-    ast: 106,
+    textual: 116,
+    ast: 107,
     phantom: 9,
     consumer: 4,
-    emitted: 102,
+    emitted: 103,
     # RE-DERIVED BY RUN AT PDS-D480/PDS-D480a, IN THE SAME COMMIT AS THE LENS CHANGE THAT
     # MOVED THEM (PDS-D448a). Three lens repairs, all three proven to fire before any
     # count was quoted: the callee/`seen` clause-collapse pair (57/16/22 -> 60/15/20 on
@@ -733,7 +733,16 @@ defmodule PDS.Census do
     # same run; lens unchanged. DERIVED BY THE INSTRUMENT: the `derived` half of this census's
     # own D448-DRIFT-REFUSES line on this commit's tree. Engine printed live by that run:
     # Elixir 1.20.2 · Erlang/OTP 29 (erts 17.0.3) · aarch64-apple-darwin24.6.0
-    write: 52,
+    #
+    # RE-DERIVED AGAIN 2026-10-08 (task-cfb6ca3f5ffaf099, PATCH /v1/auth/display-name):
+    # textual 115 -> 116, ast 106 -> 107, emitted 102 -> 103, write-routed 52 -> 53. ONE
+    # new emitted site — AuthController.update_display_name/2's `ok: true` success arm —
+    # lands in the WRITE class: it reaches `Accounts.update_display_name/2`, which calls
+    # `Repo.update/1` directly. `read` (37), `phantom` (9), `consumer` (4) and `unrouted`
+    # (13) did NOT move, which is the signature of an added site rather than a
+    # reclassified one. DERIVED BY THE INSTRUMENT: the `derived` half of this census's own
+    # D448-DRIFT-REFUSES line, run from the repo root on this commit's tree.
+    write: 53,
     read: 37,
     unrouted: 13
   }
@@ -1499,7 +1508,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{610, 610}],
+      basis_spans: [{629, 629}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1517,7 +1526,7 @@ defmodule PDS.Census do
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
           "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
           "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
-          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37.",
+          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1526,7 +1535,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{625, 630}],
+      basis_spans: [{644, 649}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1545,7 +1554,7 @@ defmodule PDS.Census do
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
           "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
           "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
-          "`anti-enumeration` now on :548).",
+          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1656,13 +1665,17 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{636, 658}],
+      basis_spans: [{655, 677}],
       basis_token: "why it must merge",
       class: "PURE-ECHO",
       confirmation: "declared",
       basis:
         "the in-code ruling at :556-578, added by #18899 — the `{:error, changeset}` " <>
-          "mint-failure arm, token `WHY IT MUST MERGE` on :565.",
+          "mint-failure arm, token `WHY IT MUST MERGE` on :565. RE-ANCHORED again " <>
+          "2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new " <>
+          "def above this one, was inserted whole (+17), and me/2 above it grew by one " <>
+          "field (+1) — span slid :636-658 -> :655-677, the token `WHY IT MUST MERGE` " <>
+          "now on :672.",
       why:
         "A SECOND ROW ON A KEY THAT ALREADY HAS ONE, DELIBERATELY. The site carries TWO " <>
           "independent declarations now: the @doc's anti-enumeration contract (the NO-OP-ACK " <>
@@ -2138,6 +2151,19 @@ defmodule PDS.Census do
         "question is unjudged; the receipt-vs-OBSERVABLE-BEHAVIOUR question is answered and " <>
         "answered well. Upgrading this row to end_to_end needs one Repo read of " <>
         "hashed_password beside the existing assertions, not a better argument."},
+    # barkpark_web/controllers/auth_controller.ex:282
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.update_display_name/2", "6362529", "126656458"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "AUTHORED, not inherited (task-cfb6ca3f5ffaf099): PATCH /v1/auth/display-name is a " <>
+        "new door on the new Accounts.update_display_name/2 primitive. Same shape as " <>
+        "change_password/2 above, same honest limit: the cited test (auth_controller_test.exs " <>
+        "`/me reports display_name: nil until it's set`) drives the route, then certifies the " <>
+        "post-condition through a SECOND route (GET /v1/auth/me), asserting the field reads " <>
+        "nil before and the new value after. It does not read the stored row directly, so " <>
+        "end_to_end's @repo_tokens falsifier would be REFUSED here — unjudged_other is the " <>
+        "honest basis, not a weaker test."},
     # barkpark_web/controllers/auth_controller.ex:329
     %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
@@ -11820,7 +11846,12 @@ defmodule PDS.Census do
   # `elixir scripts/pds-elixir-receipt-census.exs` printed count 84 fp 103207718.
   # The create-only Paper route reaches the existing UNJUDGED receipt, now /5;
   # both prior ingest routes remain disposed through the register. No exclusion was added.
-  @derived_disposition_pin %{count: 84, fp: "103207718"}
+  # Re-derived 2026-10-08 (task-cfb6ca3f5ffaf099): `elixir scripts/pds-elixir-receipt-census.exs`
+  # printed `DERIVED PIN count 85 fp 118961623`. PATCH /v1/auth/display-name
+  # (BarkparkWeb.AuthController.update_display_name/2) is a new routed-write member, now
+  # disposed through its own register row (UNJUDGED, added above) rather than excluded —
+  # one arrival, no exclusion added.
+  @derived_disposition_pin %{count: 85, fp: "118961623"}
 
   # ONE DERIVATION, READ TWICE — the printed pair and the compared pair are this function,
   # so the value a maintainer copies out of the report cannot differ from the value the arm
