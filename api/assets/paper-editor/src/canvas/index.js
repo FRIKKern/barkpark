@@ -256,6 +256,7 @@ import {
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
   CANVAS_SERVER_INSERT_TYPES,
+  serverBuildsInsert,
   masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
@@ -2996,7 +2997,7 @@ class BpPaperCanvas extends HTMLElement {
       this._insertObjectBlock(item.type);
       return;
     }
-    if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
+    if (item && !item.fieldName && serverBuildsInsert(item.type, this._hostBuildsInserts())) {
       this._insertViaServer(item.type, { replaceSlashLine: true });
       return;
     }
@@ -3116,9 +3117,15 @@ class BpPaperCanvas extends HTMLElement {
   // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
   // caret's block and anchors on it when it is confirmed. The editor is blurred so
   // the server echo carrying the new block renders at once.
+  // Does the host build blocks on the server? Barkpark's LiveView hook marks the editor
+  // (or an ancestor) `data-server-insert`; a plain embedder does not (see slash-insert.js).
+  _hostBuildsInserts() {
+    return Boolean(this.closest && this.closest("[data-server-insert]"));
+  }
+
   _insertViaServer(type, { replaceSlashLine = false } = {}) {
     const editor = this._editor;
-    if (!editor || !this._editable || !CANVAS_SERVER_INSERT_TYPES.has(type)) return false;
+    if (!editor || !this._editable || !serverBuildsInsert(type, this._hostBuildsInserts())) return false;
     const index = topLevelIndexAtSelection(editor);
     const liveIds = [];
     editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
@@ -3173,6 +3180,7 @@ class BpPaperCanvas extends HTMLElement {
       onToggleSource: () => this.toggleSourceMode(),
       // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
+      serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({

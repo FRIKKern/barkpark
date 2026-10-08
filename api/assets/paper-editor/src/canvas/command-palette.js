@@ -434,7 +434,8 @@ export function buildCommandRegistry(editor, opts) {
       // level-prose guard (degrades safely inside a callout body / list item).
       // Terminal and Stage are built by the SERVER (CANVAS_SERVER_INSERT_TYPES): the
       // canvas passes `opts.onServerInsert`, which hands the pick to the host.
-      run: CANVAS_SERVER_INSERT_TYPES.has(type) && opts && typeof opts.onServerInsert === "function"
+      run: opts && typeof opts.onServerInsert === "function" &&
+        (typeof opts.serverBuilds === "function" ? opts.serverBuilds(type) : CANVAS_SERVER_INSERT_TYPES.has(type))
         ? () => opts.onServerInsert(type)
         : (ed) => insertSlashTypeAtSelection(ed, type),
     });
