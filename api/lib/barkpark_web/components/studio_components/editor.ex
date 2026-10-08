@@ -847,7 +847,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
                         Visibility.visible?(field, @editor_form) do %>
                   <.studio_field_renderer
-                    field={field}
+                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
