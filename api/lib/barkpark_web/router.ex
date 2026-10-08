@@ -3323,6 +3323,10 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    # Paper masters, member-token read half (task-2dc7b441443f3aaf) — the
+    # masters an author may insert into paper :slug. Writes (save/insert/
+    # pin/detach) ride the scoped-mutate pipeline below.
+    get("/v1/papers/:slug/masters", PaperMastersController, :index)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the
@@ -3349,6 +3353,13 @@ defmodule BarkparkWeb.Router do
       DocumentOpsController,
       :apply_field_ops
     )
+
+    # Paper masters, write half (task-2dc7b441443f3aaf) — save/insert/pin/
+    # detach, the same checks the Studio canvas's events get in-process.
+    post("/v1/papers/:slug/masters", PaperMastersController, :create)
+    post("/v1/papers/:slug/masters/:master_id/insert", PaperMastersController, :insert)
+    post("/v1/papers/:slug/masters/blocks/:block_id/pin", PaperMastersController, :pin)
+    post("/v1/papers/:slug/masters/blocks/:block_id/detach", PaperMastersController, :detach)
   end
 
   # Scoped admin reads (search insights/synonyms).
