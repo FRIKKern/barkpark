@@ -368,6 +368,9 @@ export class SlashMenu {
       ? `bp-slash-menu ${this._extraClass}`
       : "bp-slash-menu";
     el.setAttribute("role", "listbox");
+    // A listbox needs an accessible name (axe aria-input-field-name); the
+    // eyebrow already says what the list is.
+    el.setAttribute("aria-label", this._eyebrow || "Insert block");
     el.style.display = "none";
     document.body.appendChild(el);
     this._el = el;

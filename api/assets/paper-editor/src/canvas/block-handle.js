@@ -218,10 +218,34 @@ export class BlockHandle {
     this._el.querySelector(".bp-block-handle__add").addEventListener("click", () => this._add());
     const grip = this._el.querySelector(".bp-block-handle__grip");
     grip.addEventListener("pointerdown", (e) => this._startDrag(e));
+
+    // A touch screen has no hover, so the handle never appeared there and a touch
+    // author had no Duplicate / Move / Delete for a block (task-be754bd628311c5f).
+    // There it follows the CARET: the block the author is in shows its handle.
+    this._touch = typeof window !== "undefined" && typeof window.matchMedia === "function" &&
+      window.matchMedia("(hover: none)").matches;
+    this._onSelection = () => this._followCaret();
+    if (this._touch && editor && typeof editor.on === "function") {
+      this._el.classList.add("bp-block-handle--touch");
+      editor.on("selectionUpdate", this._onSelection);
+      editor.on("focus", this._onSelection);
+    }
+  }
+
+  _followCaret() {
+    if (this._drag || this._menu || !this._editor || this._editor.isDestroyed) return;
+    const index = topLevelIndexAtSelection(this._editor);
+    if (index === -1) { this.hide(); return; }
+    this._index = index;
+    this._reposition();
   }
 
   destroy() {
     this._closeMenu();
+    if (this._touch && this._editor && typeof this._editor.off === "function") {
+      this._editor.off("selectionUpdate", this._onSelection);
+      this._editor.off("focus", this._onSelection);
+    }
     this._host.removeEventListener("mousemove", this._onMove);
     this._host.removeEventListener("mouseleave", this._onLeave);
     window.removeEventListener("scroll", this._onScroll, true);
@@ -262,7 +286,15 @@ export class BlockHandle {
     // the text start would take the click aimed at a block's first word. Where no
     // gutter exists (the block starts within 52px of the viewport edge — a phone),
     // there is no handle; the slash menu and the keyboard still add blocks.
-    if (r.left - 52 < 0) { this.hide(); return; }
+    // On a touch screen with no gutter the handle sits at the block's top-right
+    // corner instead, with 44px targets (CSS: .bp-block-handle--touch).
+    if (r.left - 52 < 0) {
+      if (!this._touch) { this.hide(); return; }
+      this._el.style.display = "flex";
+      this._el.style.top = `${r.top - h.top + this._host.scrollTop}px`;
+      this._el.style.left = `${Math.max(0, r.right - h.left - 92)}px`;
+      return;
+    }
     this._el.style.display = "flex";
     this._el.style.top = `${r.top - h.top + this._host.scrollTop + Math.max(0, (line - 22) / 2)}px`;
     this._el.style.left = `${r.left - h.left - 52}px`;
@@ -353,17 +385,23 @@ export class BlockHandle {
     const menu = document.createElement("div");
     menu.className = "bp-block-menu";
     menu.setAttribute("role", "menu");
+    menu.setAttribute("aria-label", "Block options");
     const node = this._editor.state.doc.child(index);
     const prose = ["paragraph", "heading", "bulletList", "orderedList"].includes(node.type.name);
-    const item = (label, glyph, action, extra = "") => `<button type="button" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph">${glyph}</span>${label}</button>`;
+    // A role=menu owns menuitems, grouped (axe aria-required-children): each
+    // visible heading names its role=group, and the heading itself is hidden
+    // from the tree so it is not read twice.
+    const item = (label, glyph, action, extra = "") => `<button type="button" role="menuitem" class="bp-block-menu__item ${extra}" data-action="${action}"><span class="bp-block-menu__glyph" aria-hidden="true">${glyph}</span>${label}</button>`;
+    const group = (title, items) => `<div role="group" aria-label="${title}"><div class="bp-block-menu__group" aria-hidden="true">${title}</div>${items.join("")}</div>`;
     menu.innerHTML = [
-      prose ? `<div class="bp-block-menu__group">Turn into</div>${TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind)).join("")}` : "",
-      `<div class="bp-block-menu__group">Block</div>`,
-      item("Duplicate", "⧉", "duplicate"),
-      item("Move up", "↑", "up"),
-      item("Move down", "↓", "down"),
-      this._canSaveMaster(node) ? item("Save as master", "★", "save-master") : "",
-      item("Delete", "✕", "delete", "bp-block-menu__item--danger"),
+      prose ? group("Turn into", TURN_INTO.map((t) => item(t.label, t.glyph, "turn:" + t.kind))) : "",
+      group("Block", [
+        item("Duplicate", "⧉", "duplicate"),
+        item("Move up", "↑", "up"),
+        item("Move down", "↓", "down"),
+        this._canSaveMaster(node) ? item("Save as master", "★", "save-master") : "",
+        item("Delete", "✕", "delete", "bp-block-menu__item--danger"),
+      ]),
     ].join("");
     menu.addEventListener("mousedown", (e) => e.preventDefault());
     menu.addEventListener("click", (e) => {
