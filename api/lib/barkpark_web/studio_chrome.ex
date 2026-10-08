@@ -167,6 +167,14 @@ defmodule BarkparkWeb.StudioChrome do
           :instance_admin?,
           instance_admin?(s.assigns[:api_token], s.assigns[:current_user])
         )
+        # The top bar leaves out tabs to `:ops`-gated consoles for a viewer
+        # that gate refuses (task-f859c5f7f3a0f9f5). Only LiveAuth's viewer
+        # hook set this, so on Settings / Connectors (other live_sessions) the
+        # layout read a missing assign as "show" and a workspace admin got
+        # Projects / Fleet tabs that bounced (task-b3315da9ad2d0c92).
+        |> assign_new(:ops_access?, fn ->
+          BarkparkWeb.LiveAuth.ops_access?(s.assigns[:api_token], s.assigns[:current_user])
+        end)
       end)
       |> assign_new(:current_path, fn -> nil end)
       |> assign_new(:create_open, fn -> nil end)

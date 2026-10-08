@@ -65,6 +65,39 @@ defmodule BarkparkWeb.Studio.StudioOpsLinksTest do
     refute html =~ ~s(href="/admin/fleet")
   end
 
+  # task-b3315da9ad2d0c92: Settings mounts under another live_session, where
+  # nothing set :ops_access?, so the tabs came back there.
+  test "a workspace admin without ops access sees no ops tab on Settings either", %{conn: conn} do
+    {:ok, ws} = Barkpark.Tenancy.create_workspace(%{slug: "opslinks-ws", name: "Opslinks WS"})
+    {:ok, proj} = Barkpark.Tenancy.create_project_with_dataset(ws, %{name: "OpsP"})
+    raw = "opslinks-wsadmin-#{System.unique_integer([:positive])}"
+
+    {:ok, token} =
+      %Auth.ApiToken{}
+      |> Auth.ApiToken.changeset(%{
+        token_hash: Auth.ApiToken.hash_token(raw),
+        label: "opslinks-wsadmin",
+        dataset: @dataset,
+        permissions: ["read", "write"]
+      })
+      |> Barkpark.Repo.insert()
+
+    {:ok, _} = Barkpark.Tenancy.Auth.create_membership(ws.id, token.id, "admin")
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => raw})
+
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/settings")
+    assert html =~ "Workspace Settings"
+    refute html =~ ~s(href="/admin/projects")
+    refute html =~ ~s(href="/admin/fleet")
+  end
+
+  test "an ops viewer keeps the ops tabs on Settings", %{conn: conn} do
+    conn = Plug.Test.init_test_session(conn, %{"api_token" => @admin})
+    {ws, proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/settings")
+    assert html =~ ~s(href="/admin/projects")
+  end
+
   test "an admin still sees them", %{conn: conn} do
     conn = Plug.Test.init_test_session(conn, %{"api_token" => @admin})
     {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio"))
