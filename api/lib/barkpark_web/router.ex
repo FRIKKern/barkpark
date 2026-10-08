@@ -3327,6 +3327,10 @@ defmodule BarkparkWeb.Router do
     # masters an author may insert into paper :slug. Writes (save/insert/
     # pin/detach) ride the scoped-mutate pipeline below.
     get("/v1/papers/:slug/masters", PaperMastersController, :index)
+    # A paper's fleet blocks (task list/board/detail, roadmap, …), rendered
+    # server-side (task-4feb8efa46a0ed33) — read-only, so it rides this
+    # token-required scoped-read pipeline like the masters list above.
+    get("/v1/papers/:slug/fleet-blocks", PaperFleetBlocksController, :show)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the

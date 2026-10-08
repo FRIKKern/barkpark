@@ -1900,6 +1900,23 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      # ── paper fleet blocks over HTTP (task-4feb8efa46a0ed33). Member
+      # token, scoped `/w/:workspace_slug/p/:project_slug` — the same render
+      # the Studio canvas gets pushed in-process
+      # (StudioLive.Shared.Paper.push_block_renders/1).
+      core_cmd(
+        "paper.fleet-blocks",
+        "paper",
+        "fleet-blocks",
+        "Server-rendered HTML for paper :slug's fleet blocks (task list/board/detail, roadmap, …), by block id.",
+        "GET",
+        "/v1/papers/:slug/fleet-blocks",
+        "read",
+        args: [arg("slug", true, "string", "Paper slug.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # ── paper access trail (edit-on-the-link slice 4, task-e99a8e946f80f52c).
       # Behind `:flat_admin_api` (RequireToken + RequireAdmin) -> tier "admin",
       # the same pipeline the media/documents search-config blocks below ride.
