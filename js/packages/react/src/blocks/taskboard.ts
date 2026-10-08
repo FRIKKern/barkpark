@@ -18,7 +18,6 @@ import {
   roleOf,
   glyphHtml,
   draftHtml,
-  glyphChar,
   labelForRole,
   LEGEND_ROLES,
 } from '../inline'
