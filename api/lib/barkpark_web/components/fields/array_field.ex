@@ -647,7 +647,14 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   defp subfield_attr(_, _), do: nil
 
   defp title_for(%{title: t}) when is_binary(t) and t != "", do: t
-  defp title_for(%{name: n}) when is_binary(n), do: humanize(n)
+
+  # The schema parser names an array's item "<array>[item]" (an internal key).
+  # Shown as-is it read "Choices[item]" on an empty row; an untitled item is
+  # just an "Item" to an editor (task-3630409f12d4a43b).
+  defp title_for(%{name: n}) when is_binary(n) do
+    if String.ends_with?(n, "[item]"), do: "Item", else: humanize(n)
+  end
+
   defp title_for(_), do: ""
 
   defp humanize(name) do
