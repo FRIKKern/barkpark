@@ -5,7 +5,7 @@
       NOT a color literal — it lives OUTSIDE the GENERATED tokens marker, so the
       Part-E exemption ledger is unaffected. Omitted entirely for the default
       (evergreen) theme, so a default page is byte-identical to before. --%>
-<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
