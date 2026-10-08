@@ -2075,6 +2075,10 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert menu_btns != [] and funnels != []
     assert Enum.all?(menu_btns ++ funnels, &(&1 =~ ~s(tabindex="-1")))
 
+    strip = view |> element(~s([data-test-id="sheet-tabs"])) |> render()
+    assert strip =~ ~s(phx-hook="SheetToolbar")
+    assert strip =~ ~s(data-roving-follow="selected")
+
     instructions = view |> element("#sheet-grid-sg-tab-stops-grid-instructions") |> render()
     assert instructions =~ "Alt+Down opens the column filter"
     assert instructions =~ "Shift+F10"

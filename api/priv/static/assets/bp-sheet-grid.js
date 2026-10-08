@@ -2473,9 +2473,13 @@
   // box and formula bar (text inputs) stay ordinary Tab stops, and anything in
   // a popover dialog (the CF panel) is left alone. A LiveView patch can drop
   // the client-set tabindex, so updated() re-applies it.
+  //
+  // The sheet tab strip reuses it (data-roving-items="[role='tab']",
+  // data-roving-follow="selected"): the ACTIVE tab is the one stop, arrows
+  // move focus between tabs, Enter/Space activate natively.
   window.BarkparkSheetToolbar = {
     mounted() {
-      this._current = 0;
+      this._current = this._selectedIndex();
       this._onKey = (e) => {
         const items = this._items();
         const i = items.indexOf(e.target);
@@ -2503,11 +2507,22 @@
       this._apply();
     },
     updated() {
+      if (this._follow()) this._current = this._selectedIndex();
       this._apply();
+    },
+    _follow() {
+      return !!(this.el.dataset && this.el.dataset.rovingFollow === "selected");
+    },
+    _selectedIndex() {
+      if (!this._follow()) return this._current || 0;
+      const i = this._items().findIndex((el) =>
+        el.getAttribute && el.getAttribute("aria-selected") === "true");
+      return i < 0 ? 0 : i;
     },
     _items() {
       if (!this.el.querySelectorAll) return [];
-      return Array.prototype.filter.call(this.el.querySelectorAll("button, select"), (el) =>
+      const sel = (this.el.dataset && this.el.dataset.rovingItems) || "button, select";
+      return Array.prototype.filter.call(this.el.querySelectorAll(sel), (el) =>
         !el.disabled && !(el.closest && el.closest("[role='dialog']")));
     },
     _apply(items) {
