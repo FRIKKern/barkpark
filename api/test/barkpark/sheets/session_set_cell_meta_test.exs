@@ -112,6 +112,67 @@ defmodule Barkpark.Plugins.Sheets.SessionSetCellMetaTest do
     assert cell("m-badfmt", "A1") == %{"v" => 5}
   end
 
+  # ── cur set / clear / invalid / orphan-drop (task-4fb1d8de887d8bc6) ────────
+
+  test "the toolbar picks a currency and the format in one op" do
+    create_sheet("m-cur", %{"A1" => %{"v" => 1234.5}})
+
+    assert %{applied: 1, errors: []} =
+             apply!("m-cur", [set_meta("A1", %{"fmt" => "currency", "cur" => "NOK"})])
+
+    assert cell("m-cur", "A1") == %{"v" => 1234.5, "fmt" => "currency", "cur" => "NOK"}
+  end
+
+  test "a nil cur CLEARS it, leaving fmt alone" do
+    create_sheet("m-curclear", %{"A1" => %{"v" => 1, "fmt" => "currency", "cur" => "EUR"}})
+
+    assert %{applied: 1, errors: []} = apply!("m-curclear", [set_meta("A1", %{"cur" => nil})])
+    assert cell("m-curclear", "A1") == %{"v" => 1, "fmt" => "currency"}
+  end
+
+  test "an unknown cur is rejected (invalid_cur) and the cell is untouched" do
+    create_sheet("m-badcur", %{"A1" => %{"v" => 5, "fmt" => "currency"}})
+
+    assert %{applied: 0, errors: [%{index: 0, code: "invalid_cur"}]} =
+             apply!("m-badcur", [set_meta("A1", %{"cur" => "ZZZ"})])
+
+    assert cell("m-badcur", "A1") == %{"v" => 5, "fmt" => "currency"}
+  end
+
+  test "switching fmt away from currency drops an orphaned cur" do
+    create_sheet("m-curorphan", %{"A1" => %{"v" => 1, "fmt" => "currency", "cur" => "GBP"}})
+
+    assert %{applied: 1, errors: []} =
+             apply!("m-curorphan", [set_meta("A1", %{"fmt" => "percent"})])
+
+    assert cell("m-curorphan", "A1") == %{"v" => 1, "fmt" => "percent"}
+  end
+
+  test "an unrelated meta write (style) leaves fmt AND cur untouched" do
+    create_sheet("m-curkeep", %{"A1" => %{"v" => 1, "fmt" => "currency", "cur" => "SEK"}})
+
+    assert %{applied: 1, errors: []} =
+             apply!("m-curkeep", [set_meta("A1", %{"s" => %{"b" => true}})])
+
+    assert cell("m-curkeep", "A1") ==
+             %{"v" => 1, "fmt" => "currency", "cur" => "SEK", "s" => %{"b" => true}}
+  end
+
+  test "cur round-trips through undo/redo" do
+    create_sheet("m-curundo", %{"A1" => %{"v" => 1}})
+
+    assert %{applied: 1, errors: []} =
+             apply!("m-curundo", [set_meta("A1", %{"fmt" => "currency", "cur" => "DKK"})])
+
+    assert cell("m-curundo", "A1") == %{"v" => 1, "fmt" => "currency", "cur" => "DKK"}
+
+    assert %{applied: 1, errors: []} = apply!("m-curundo", [undo("u")])
+    assert cell("m-curundo", "A1") == %{"v" => 1}
+
+    assert %{applied: 1, errors: []} = apply!("m-curundo", [redo("u")])
+    assert cell("m-curundo", "A1") == %{"v" => 1, "fmt" => "currency", "cur" => "DKK"}
+  end
+
   # ── the anti-mutation guarantee: raw is NEVER re-parsed ──────────────────────
 
   test "formatting a string that looks numeric does NOT coerce it to a number" do

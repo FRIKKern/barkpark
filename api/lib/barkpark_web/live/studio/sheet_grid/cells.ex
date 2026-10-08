@@ -98,10 +98,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   def display(%{"v" => false}), do: "FALSE"
 
   def display(%{"v" => v} = cell) when is_number(v),
-    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
+    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"], cell["cur"])
 
   def display(%{"v" => v} = cell) when is_binary(v),
-    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"])
+    do: Barkpark.Plugins.Sheets.Fmt.display(v, cell["fmt"], cell["cur"])
 
   def display(_cell), do: ""
 

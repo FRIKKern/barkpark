@@ -132,6 +132,34 @@ test("fmt is collected only for the six-class vocabulary", () => {
   assert.equal(d.fmts["0,2"], undefined);
 });
 
+test("cur is collected only for the six ISO 4217 codes, and only where fmt is currency (task-4fb1d8de887d8bc6)", () => {
+  const d = densifyTab({
+    cells: {
+      A1: { v: 1234.5, fmt: "currency", cur: "NOK" },
+      B1: { v: 1234.5, fmt: "currency", cur: "ZZZ" }, // not a code → dropped
+      C1: { v: 1234.5, fmt: "currency" }, // no cur
+      D1: { v: 1234.5, cur: "NOK" }, // cur with no currency fmt — still collected
+    },
+  });
+  assert.equal(d.curs["0,0"], "NOK");
+  assert.equal(d.curs["0,1"], undefined);
+  assert.equal(d.curs["0,2"], undefined);
+  assert.equal(d.curs["0,3"], "NOK");
+});
+
+test("toRenderModel re-keys curs to the body grid the same way it re-keys fmts", () => {
+  const dense = densifyTab({
+    cells: {
+      A1: { v: "Name" },
+      A2: { v: 1234.5, fmt: "currency", cur: "SEK" },
+    },
+    frozen_rows: "1",
+  });
+  const model = toRenderModel(dense);
+  assert.equal(model.fmts["0,0"], "currency");
+  assert.equal(model.curs["0,0"], "SEK");
+});
+
 test("frozen_rows accepts a number or a numeric string", () => {
   assert.equal(densifyTab({ cells: { A1: { v: 1 } }, frozen_rows: 1 }).frozenRows, 1);
   assert.equal(densifyTab({ cells: { A1: { v: 1 } }, frozen_rows: "1" }).frozenRows, 1);

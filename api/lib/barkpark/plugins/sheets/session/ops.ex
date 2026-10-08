@@ -109,16 +109,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   # Display-only meta write (the toolbar apply-UI): stamp a cell's number
-  # format ("fmt") and/or style ("s") onto the EXISTING cell WITHOUT touching
-  # its "v"/"f". Deliberately NOT set_cell with a re-sent raw — build_cell
-  # re-parses raw and can coerce a stored string like "0123" into a number,
-  # silently mutating data on a formatting gesture. An absent "fmt"/"s" key is
-  # a no-op; nil clears; "fmt" validates against Fmt.vocabulary and "s" against
-  # the STRICT style grammar (b/i boolean, al left|center|right, bg #rrggbb) —
-  # tighter than set_cell's lax override_style, whose "s" arrives copied from an
-  # already-stored cell (fill) or an import. Formatting an EMPTY cell is REFUSED
-  # (empty_cell): the model has no empty-but-formatted cell (clear_cell's comment
-  # locks that), so a meta write onto a blank ref would plant a phantom the next
+  # format ("fmt"), currency ("cur", task-4fb1d8de887d8bc6) and/or style ("s")
+  # onto the EXISTING cell WITHOUT touching its "v"/"f". Deliberately NOT
+  # set_cell with a re-sent raw — build_cell re-parses raw and can coerce a
+  # stored string like "0123" into a number, silently mutating data on a
+  # formatting gesture. An absent "fmt"/"cur"/"s" key is a no-op; nil clears;
+  # "fmt" validates against Fmt.vocabulary, "cur" against Fmt.currency_codes,
+  # and "s" against the STRICT style grammar (b/i boolean, al
+  # left|center|right, bg #rrggbb) — tighter than set_cell's lax
+  # override_style, whose "s" arrives copied from an already-stored cell
+  # (fill) or an import. Formatting an EMPTY cell is REFUSED (empty_cell): the
+  # model has no empty-but-formatted cell (clear_cell's comment locks that),
+  # so a meta write onto a blank ref would plant a phantom the next
   # clear/retype silently drops. A merge-covered ref is refused like set_cell
   # (merged_cell). The inverse is the existing {:cell, …, prior} undo shape.
   def apply_one(%{"op" => "set_cell_meta", "tab" => tab, "ref" => ref} = op, state) do
@@ -128,6 +130,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          prior = cell_before(state, tab_idx, ref),
          {:ok, prior} <- refuse_empty_meta(prior),
          {:ok, cell} <- override_fmt(op, prior),
+         {:ok, cell} <- override_cur(op, cell),
          {:ok, cell} <- override_meta_style(op, cell) do
       inverse = {:cell, tab_idx, ref, prior}
       {:ok, apply_cell(state, tab_idx, ref, cell, true), inverse}
@@ -584,7 +587,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def apply_one(_op, _state) do
     {:error, "malformed_op",
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
-       "set_cell_meta (\"tab\"+\"ref\"+\"fmt\"?/\"s\"?), " <>
+       "set_cell_meta (\"tab\"+\"ref\"+\"fmt\"?/\"cur\"?/\"s\"?), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
@@ -1488,6 +1491,40 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
       end
     else
       {:ok, cell}
+    end
+  end
+
+  # "cur" (task-4fb1d8de887d8bc6) — an explicit write validates against
+  # Fmt.currency_codes and nil clears. Absent from the op, cur rides along
+  # UNCHANGED *unless* this same write just moved "fmt" away from
+  # "currency" (checked on `cell`, the post-override_fmt result): a
+  # "cur" orphaned on a non-currency cell is dead weight a later re-pick of
+  # "currency" would silently resurrect, so it is dropped here instead.
+  defp override_cur(op, cell) do
+    cond do
+      Map.has_key?(op, "cur") ->
+        case op["cur"] do
+          nil ->
+            {:ok, Map.delete(cell, "cur")}
+
+          cur when is_binary(cur) ->
+            if cur in Fmt.currency_codes() do
+              {:ok, Map.put(cell, "cur", cur)}
+            else
+              {:error, "invalid_cur",
+               "\"cur\" must be one of #{inspect(Fmt.currency_codes())} or null, got #{inspect(cur)}"}
+            end
+
+          other ->
+            {:error, "invalid_cur",
+             "\"cur\" must be a currency code string or null, got #{inspect(other)}"}
+        end
+
+      Map.get(cell, "fmt") != "currency" and Map.has_key?(cell, "cur") ->
+        {:ok, Map.delete(cell, "cur")}
+
+      true ->
+        {:ok, cell}
     end
   end
 
