@@ -42,7 +42,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
     ~H"""
     <span class={"status status-#{@status}"}>
       <span class="status-dot"></span>
-      <%= @status %>
+      <%= status_word(@status) %>
     </span>
     """
   end
@@ -606,7 +606,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # of the document. The `:trailing` slot (presence dots) is decorative and
   # deliberately not spoken.
   defp doc_row_label(assigns) do
-    status = if assigns.is_draft, do: "draft", else: assigns.status
+    status = status_word(if assigns.is_draft, do: "draft", else: assigns.status)
 
     [assigns.title, status, assigns[:badge], assigns[:meta]]
     |> Enum.filter(&(is_binary(&1) and String.trim(&1) != ""))
@@ -629,6 +629,16 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # here, at display (task-33bcb0b4415bc528). Schema titles pass through: they
   # are already the content owner's words. Public for the desk breadcrumb,
   # which shows the same pane titles.
+  @doc """
+  A document status in the viewer's Studio language, for text a person reads
+  or hears (the status badge, a list row's accessible name). The raw status
+  stays the CSS modifier. A status this map does not know reads as written.
+  """
+  @spec status_word(String.t() | nil) :: String.t() | nil
+  def status_word("draft"), do: gettext("draft")
+  def status_word("published"), do: gettext("published")
+  def status_word(status), do: status
+
   @doc false
   def chrome_title("Structure"), do: gettext("Structure")
   def chrome_title("Plugins"), do: gettext("Plugins")
