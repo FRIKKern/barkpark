@@ -1641,7 +1641,7 @@ bp-paper-canvas .ProseMirror :is(.bp-table__th, .bp-table__td) { white-space: pr
 .bp-canvas-diagram-field, .bp-canvas-technical-field { display: grid; gap: 0.3rem; min-width: 0; }
 .bp-canvas-diagram-area, .bp-canvas-technical-area, .bp-canvas-technical-meta { width: 100%; box-sizing: border-box; color: var(--paper-ink); background: transparent; border: 1px solid var(--paper-rule); border-radius: 3px; padding: 0.5rem; }
 /* Diagram source reads as the reader's code block: same mono face, size, leading and ground. */
-.bp-canvas-diagram-area { font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh); letter-spacing: inherit; font-feature-settings: inherit; text-rendering: inherit; background: var(--paper-bg-deep); }
+.bp-canvas-diagram-area { font-family: var(--paper-font-mono); font-size: var(--bp-pre-size); line-height: var(--bp-pre-lh); letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; background: var(--paper-bg-deep); }
 .bp-canvas-diagram-editor :is(summary, input, textarea):focus-visible,
 .bp-canvas-technical-editor :is(summary, input, textarea):focus-visible { outline: 2px solid var(--paper-accent); outline-offset: 2px; }
 /* Recovery is editor chrome, never a replacement document. */
