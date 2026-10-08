@@ -392,10 +392,10 @@ defmodule Barkpark.Content.ValidationTest do
 
     test "an item naming an undeclared _type is refused" do
       schema = links_schema()
-      content = %{"links" => [%{"_type" => "videoEmbed", "url" => "x"}]}
+      content = %{"links" => [%{"_type" => "galleryBlock", "url" => "x"}]}
 
       assert {:error, %{"links" => msgs}} = Validation.validate(content, nil, schema)
-      assert Enum.any?(msgs, &String.contains?(&1, "videoEmbed"))
+      assert Enum.any?(msgs, &String.contains?(&1, "galleryBlock"))
     end
 
     test "an item with no _type at all is refused" do

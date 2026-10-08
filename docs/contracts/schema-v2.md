@@ -72,7 +72,7 @@ Each field MAY carry `surface: "body" | "sidebar"` — PortableDoc doctrine rule
 
 ## TUI constraint (D12)
 
-Go TUI is **read-only** for v1 plugin schemas: v2 docs render as JSON dumps, editor menus skip v2 fields. Studio (`/studio`) edits v2 schemas.
+Go TUI is **read-only** for v1 plugin schemas: v2 docs render as JSON, editor menus skip `composite / arrayOf / codelist / localizedText` fields. Studio (`/studio`) edits v2 schemas.
 
 ## Code anchors
 
