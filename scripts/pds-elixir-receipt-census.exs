@@ -1288,7 +1288,19 @@ defmodule PDS.Census do
     {:put, "/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
     {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
     {:put, "/w/:workspace_slug/p/:project_slug/v1/secrets/:name", "BarkparkWeb.SecretController", :update, :status_only_receipt},
-    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
+    # task-bd311f4b5ea2b3b8 (#22210): dispatch/2's :real-mode receipt is
+    # `json(conn, %{result: json_safe(result)})`, where `result` is a
+    # PLUGIN-OWNED map (OnixEdit's publish_to_bokbasen returns `%{status:
+    # Status.read-shape, job: %Oban.Job{}}`) handed straight back, not a
+    # literal `ok: true` this controller asserts about its own write. The
+    # mutation itself already happened inside the plugin's own handler
+    # (DocActions.dispatch_action/5 -> the resolved handler), one hop below
+    # this action — same shape the PluginSettingsController/SecretController/
+    # WebhookController rows above already carry.
+    {:post,
+     "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
+     "BarkparkWeb.DocumentActionsController", :dispatch, :status_only_receipt}
   ]
 
   # ---------------------------------------- the exclusion anchors (PDS-D585)
