@@ -3489,6 +3489,85 @@ check("sheet download: a payload without data or a file name saves nothing", () 
   });
 });
 
+// ── Tab stops (task-5201a73e33535129): header controls from the key map,
+//    and the formatting bar as one roving toolbar ────────────────────────────
+
+function withActiveCol(h, c) {
+  h.el._active = {
+    dataset: { c: String(c), ref: "B1" },
+    getBoundingClientRect: () => ({ left: 100, bottom: 40 }),
+  };
+}
+
+check("Alt+ArrowDown opens the active column's filter", () => {
+  const h = mountHook();
+  withActiveCol(h, 2);
+  const e = keydown("ArrowDown", { altKey: true });
+  h.el.dispatch("keydown", e);
+  assert.deepEqual(h._pushed, [{ event: "filter-open", payload: { col: 2 } }]);
+  assert.equal(e.prevented, true);
+});
+
+check("Alt+Shift+ArrowDown opens the active column's menu and asks to focus it", () => {
+  const h = mountHook();
+  withActiveCol(h, 3);
+  h.el.dispatch("keydown", keydown("ArrowDown", { altKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed, [{ event: "menu-open", payload: { kind: "col", index: 3 } }]);
+  assert.equal(h._headMenuWantFocus, true);
+});
+
+for (const [label, opts] of [["Shift+F10", { key: "F10", shiftKey: true }], ["the Menu key", { key: "ContextMenu" }]]) {
+  check(`${label} opens the cell context menu at the active cell`, () => {
+    const h = mountHook();
+    withActiveCol(h, 1);
+    h.el.dispatch("keydown", keydown(opts.key, opts));
+    assert.deepEqual(h._pushed, [{ event: "cell-menu-open", payload: { x: 108, y: 40 } }]);
+    assert.equal(h._ctxWantFocus, true);
+  });
+}
+
+check("plain ArrowDown still navigates (no header route)", () => {
+  const h = mountHook();
+  withActiveCol(h, 1);
+  h.el.dispatch("keydown", keydown("ArrowDown"));
+  assert.deepEqual(h._pushed, [{ event: "nav", payload: { key: "ArrowDown", shift: false } }]);
+});
+
+check("the formatting toolbar is one Tab stop and arrow keys move inside it", () => {
+  const mk = (name) => {
+    const el = {
+      name, attrs: {}, disabled: false,
+      setAttribute(k, v) { this.attrs[k] = v; },
+      closest: () => null,
+      focus() { sandbox.document.activeElement = el; },
+    };
+    return el;
+  };
+  const items = [mk("merge"), mk("bold"), mk("italic")];
+  const listeners = {};
+  const tb = Object.create(sandbox.window.BarkparkSheetToolbar);
+  tb.el = {
+    querySelectorAll: () => items,
+    addEventListener(t, fn) { listeners[t] = fn; },
+  };
+  tb.mounted();
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["0", "-1", "-1"]);
+  const e = { key: "ArrowRight", target: items[0], preventDefault() { this.prevented = true; } };
+  listeners.keydown(e);
+  assert.equal(e.prevented, true);
+  assert.equal(sandbox.document.activeElement, items[1]);
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["-1", "0", "-1"]);
+  listeners.keydown({ key: "End", target: items[1], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, items[2]);
+  listeners.keydown({ key: "ArrowRight", target: items[2], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, items[0], "wraps around");
+  // A patch that dropped the attributes is repaired by updated().
+  items.forEach((i) => (i.attrs = {}));
+  tb.updated();
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["0", "-1", "-1"]);
+  sandbox.document.activeElement = null;
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
