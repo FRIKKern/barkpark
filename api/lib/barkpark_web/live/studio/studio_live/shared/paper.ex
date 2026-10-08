@@ -1642,15 +1642,23 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     end
   end
 
-  # A block that paints through the fleet channel: a component-fleet kind OR a
-  # data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same bp:block-html
-  # push, same render_block(:article) producer).
-  defp fleet_block?(block) when is_map(block),
+  @doc """
+  A block that paints through the fleet channel: a component-fleet kind OR a
+  data-viz kind (pd-ee-dataviz-editors — same bpFleet atom, same
+  bp:block-html push, same render_block(:article) producer).
+
+  Made public for `BarkparkWeb.PaperFleetBlocksController`
+  (task-4feb8efa46a0ed33), which filters a paper's top-level blocks to this
+  set before calling `fleet_render/2` over HTTP — the same filter
+  `push_block_renders/1` applies for the connected Studio canvas. Behaviour
+  unchanged.
+  """
+  def fleet_block?(block) when is_map(block),
     do:
       Map.get(block, "type") in @fleet_render_types or
         Map.get(block, "type") in @dataviz_render_types
 
-  defp fleet_block?(_), do: false
+  def fleet_block?(_), do: false
 
   defp figure_block?(block) when is_map(block),
     do: Map.get(block, "type") in @figure_render_types

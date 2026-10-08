@@ -89,7 +89,34 @@ defmodule Barkpark.Plugins.Github.RetireJob do
   """
   @spec enqueue_for_deleted(map()) :: :ok
   def enqueue_for_deleted(%{doc: doc, dataset: dataset})
-      when is_map(doc) and is_binary(dataset) do
+      when is_map(doc) and is_binary(dataset),
+      do: enqueue(doc, dataset, %{}, "deleted")
+
+  def enqueue_for_deleted(_payload), do: :ok
+
+  @doc """
+  The `:after_unpublish` hook (task-2cdf028b51e25cac). An unpublish keeps an
+  EXISTING draft as it is, and a draft forked before the mirror wrote
+  `content.github` onto the published row carries no issue number — so
+  `MirrorJob`'s retraction, which reads the draft first, found nothing to close
+  and the issue stayed open with no published row behind it. The
+  just-unpublished PUBLISHED row is the last reader of the number; enqueue the
+  close from it. The job's re-check is the PUBLISHED row only (a draft is the
+  expected survivor of an unpublish), so a republish before it runs keeps the
+  issue open.
+
+  `payload.prev_doc` is the published row: `WriteScope.fire_after/3` replaces
+  `payload.doc` with the write's RESULT, which for an unpublish is the kept
+  draft — the row that lacks the link.
+  """
+  @spec enqueue_for_unpublished(map()) :: :ok
+  def enqueue_for_unpublished(%{prev_doc: published, dataset: dataset})
+      when is_map(published) and is_binary(dataset),
+      do: enqueue(published, dataset, %{mode: "unpublished"}, "unpublished")
+
+  def enqueue_for_unpublished(_payload), do: :ok
+
+  defp enqueue(doc, dataset, extra, verb) do
     with true <- task?(doc),
          link when is_map(link) <- Link.get(doc),
          num when is_integer(num) <- Map.get(link, "issue"),
@@ -102,6 +129,7 @@ defmodule Barkpark.Plugins.Github.RetireJob do
         issue: num
       }
       |> Map.merge(scope_args(doc))
+      |> Map.merge(extra)
       |> new()
       |> Oban.insert()
       |> case do
@@ -110,7 +138,7 @@ defmodule Barkpark.Plugins.Github.RetireJob do
 
         {:error, reason} ->
           Logger.error(
-            "github retire: could not enqueue close of issue ##{num} for deleted " <>
+            "github retire: could not enqueue close of issue ##{num} for #{verb} " <>
               "task #{inspect(doc_id_of(doc))}: #{inspect(reason)}"
           )
 
@@ -121,16 +149,15 @@ defmodule Barkpark.Plugins.Github.RetireJob do
     end
   end
 
-  def enqueue_for_deleted(_payload), do: :ok
-
   @impl Oban.Worker
   def perform(%Oban.Job{
         args: %{"doc_id" => doc_id, "dataset" => dataset, "repo" => repo, "issue" => num} = args
       })
       when is_binary(repo) and is_integer(num) do
     opts = scope_opts(args)
+    unpublished? = Map.get(args, "mode") == "unpublished"
 
-    if task_present?(doc_id, dataset, opts) do
+    if task_present?(doc_id, dataset, opts, unpublished?) do
       # The id came back between the delete and this run. Retiring the mirror of
       # a LIVE task would be worse than the orphan.
       {:cancel, :task_returned}
@@ -166,10 +193,13 @@ defmodule Barkpark.Plugins.Github.RetireJob do
 
   # ─── Helpers ───────────────────────────────────────────────────────────────
 
-  defp task_present?(doc_id, dataset, opts) do
+  # After a DELETE either variant coming back means the task returned. After an
+  # UNPUBLISH the draft is the expected survivor; only a republished row counts.
+  defp task_present?(doc_id, dataset, opts, unpublished?) do
     published = Content.published_id(doc_id)
+    ids = if unpublished?, do: [published], else: [published, Content.draft_id(published)]
 
-    Enum.any?([published, Content.draft_id(published)], fn id ->
+    Enum.any?(ids, fn id ->
       match?({:ok, %Document{}}, Content.get_document(id, @task_type, dataset, opts))
     end)
   end

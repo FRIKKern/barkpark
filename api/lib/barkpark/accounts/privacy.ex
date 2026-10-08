@@ -53,21 +53,18 @@ defmodule Barkpark.Accounts.Privacy do
   Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
   `:actor_label`. One query, however many rows.
   """
+  #
+  # An `"api_token"` row is named the same way through the token's owner
+  # (`owner_user_id`): a member's app token writes history as that member
+  # (task-d0c6a847e2a4658e). A token with no owner (a service token) stays
+  # unlabelled.
   @spec redact_actor_labels([map()]) :: [map()]
   def redact_actor_labels(rows) when is_list(rows) do
-    ids =
-      rows
-      |> Enum.flat_map(fn row ->
-        case {Map.get(row, :actor_kind), Map.get(row, :actor_id)} do
-          {"user", id} when is_binary(id) -> [id]
-          _ -> []
-        end
-      end)
-      |> Enum.uniq()
-      |> Enum.flat_map(fn id -> List.wrap(Repo.uuid_or_nil(id)) end)
+    token_owners = token_owner_ids(actor_ids(rows, "api_token"))
+    user_ids = Enum.uniq(actor_ids(rows, "user") ++ Map.values(token_owners))
 
     emails =
-      case ids do
+      case user_ids do
         [] ->
           %{}
 
@@ -81,16 +78,50 @@ defmodule Barkpark.Accounts.Privacy do
       rows
     else
       Enum.map(rows, fn row ->
-        with "user" <- Map.get(row, :actor_kind),
-             id when is_binary(id) <- Map.get(row, :actor_id),
-             {:ok, email} <- Map.fetch(emails, id) do
-          Map.put(row, :actor_label, email)
-        else
-          _ -> row
+        case label_owner(row, token_owners) do
+          id when is_binary(id) ->
+            case Map.fetch(emails, id) do
+              {:ok, email} -> Map.put(row, :actor_label, email)
+              :error -> row
+            end
+
+          _ ->
+            row
         end
       end)
     end
   end
+
+  defp actor_ids(rows, kind) do
+    rows
+    |> Enum.flat_map(fn row ->
+      case {Map.get(row, :actor_kind), Map.get(row, :actor_id)} do
+        {^kind, id} when is_binary(id) -> List.wrap(Repo.uuid_or_nil(id))
+        _ -> []
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp token_owner_ids([]), do: %{}
+
+  defp token_owner_ids(token_ids) do
+    from(t in ApiToken,
+      where: t.id in ^token_ids and not is_nil(t.owner_user_id),
+      select: {t.id, t.owner_user_id}
+    )
+    |> Repo.all()
+    |> Map.new()
+  end
+
+  # The account whose email names this row: the user itself, or the owner of the
+  # token it was written with.
+  defp label_owner(%{actor_kind: "user", actor_id: id}, _owners) when is_binary(id), do: id
+
+  defp label_owner(%{actor_kind: "api_token", actor_id: id}, owners) when is_binary(id),
+    do: Map.get(owners, id)
+
+  defp label_owner(_row, _owners), do: nil
 
   @doc """
   Assemble the subject's complete, machine-readable data bundle. Deliberately

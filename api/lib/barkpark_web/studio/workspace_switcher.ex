@@ -24,6 +24,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   import BarkparkWeb.Icons, only: [icon: 1]
 
@@ -210,7 +211,11 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
   # muted) while hover/focus still surfaces exactly where the operator is and
   # what the button switches (sup-w1 compact scope chip).
   defp scope_hint(ws, proj, dataset) do
-    "Switch scope — #{name_of(ws)} · #{name_of(proj)} · #{dataset || "—"}"
+    gettext("Switch scope — %{workspace} · %{project} · %{dataset}",
+      workspace: name_of(ws),
+      project: name_of(proj),
+      dataset: dataset || "—"
+    )
   end
 
   defp same?(%{id: a}, %{id: b}), do: a == b

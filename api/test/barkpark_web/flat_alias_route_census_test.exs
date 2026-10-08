@@ -322,6 +322,12 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
          "token they own — because removal from the owning Cloud team ends ALL their access. " <>
          "Gated like the email form of /v1/auth/login-tickets: admin bearer, plus the " <>
          "platform-operator allowlist when armed. :current_workspace is never read."},
+    # TokenSelfController.show
+    {"GET", "/v1/auth/token"} =>
+      {:workspace_derived,
+       "credential-derived: describes the BEARER only — its own row, its own workspace " <>
+         "(token.workspace_id) and its own seat there (task-bc2541aca8541ff1). No other " <>
+         "token or tenant row is read."},
     # LoginTicketController.create
     {"POST", "/v1/auth/login-tickets"} =>
       {:global,

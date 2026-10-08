@@ -42,6 +42,12 @@ func runTasksBoard(out *writer, g globals, ctx manifest.Context, args []string) 
 		Project:   ctx.Project,
 		Dataset:   ctx.Dataset,
 	}
+	// "goal" in the repo's .barkpark.json scopes the board to that goal's
+	// subtree. A missing or unreadable file leaves the board unscoped; Execute
+	// has already refused a present-but-invalid file before dispatch.
+	if rf, err := loadRepoFile(); err == nil && rf != nil {
+		cfg.Goal = rf.Goal
+	}
 	// The board closes through apiclient (DoClose / DoCloseRev), so it carries
 	// the same session headers `bp task close` sends (task-e4cbf4cd9f672c33).
 	sess := apiSessionConfig(apiclient.Config{}, g, ctx)
@@ -76,6 +82,9 @@ func printTasksBoardHelp(out *writer) {
 	out.outf("the paper's tasks, a child task, its children… esc/backspace ascends.")
 	out.outf("Wide terminals show a two-pane board+reader with the document centered at")
 	out.outf("the 80-col reading measure; narrow ones push full-frame. One view, no toggles.")
+	out.outf("")
+	out.outf("A \"goal\" task id in the repo's .barkpark.json limits the board to that")
+	out.outf("task and its descendants, for a repo that works one goal in a shared workspace.")
 	out.outf("")
 	out.outf("keys:")
 	out.outf("  j / k, ↓ / ↑   move the cursor")

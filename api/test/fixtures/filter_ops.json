@@ -12,5 +12,13 @@
   "gte",
   "lt",
   "lte",
-  "is"
+  "is",
+  "notContains",
+  "nhas",
+  "countEq",
+  "countNeq",
+  "countGt",
+  "countGte",
+  "countLt",
+  "countLte"
 ]

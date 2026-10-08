@@ -1247,6 +1247,53 @@ for (const key of ["Enter", " ", "Tab"]) {
   });
 }
 
+// task-028c354f7f24fb65: a HEADER button inside the grid element (the filter
+// funnel, a column menu button) or a control in a popover dialog must keep
+// native keys too. Enter on the funnel opened the cell editor and Space typed
+// a space into it, so the filter could not be opened by keyboard.
+function inGridControlKey(key, selector) {
+  const e = keydown(key);
+  e.target = {
+    _inGrid: true,
+    matches: () => false,
+    closest: (sel) => (sel === "button, a[href], [role='dialog']" ? { selector } : null),
+  };
+  return e;
+}
+
+for (const key of ["Enter", " ", "Tab"]) {
+  check(`in-grid header button ${key === " " ? "Space" : key} keeps native behaviour`, () => {
+    const h = mountHook();
+    const e = inGridControlKey(key, "button");
+    h.el.dispatch("keydown", e);
+    assert.deepEqual(h._pushed, [], `${key} on a header button must not drive the grid key map`);
+    assert.equal(e.prevented, false);
+  });
+}
+
+check("bp:sheet-focus-first focuses the dialog's first FORM control, not its Close button", () => {
+  const h = mountHook();
+  const focused = [];
+  const ctl = (name) => ({ name, focus() { focused.push(name); } });
+  const close = ctl("close");
+  const op = ctl("op");
+  const box = {
+    querySelector(sel) {
+      return sel.startsWith("form ") ? op : close;
+    },
+  };
+  const saved = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === "dlg" ? box : null);
+  try {
+    h._focusFirstIn("dlg");
+    h._focusFirstIn("");
+    h._focusFirstIn(undefined);
+  } finally {
+    sandbox.document.getElementById = saved;
+  }
+  assert.deepEqual(focused, ["op"]);
+});
+
 // Regression guard: the SAME keys with an in-grid target still behave exactly
 // as before — the scope guard only rejects out-of-grid targets.
 check("grid Enter still edit-starts, Tab still navs, Space still seeds (scope-guard regression pin)", () => {
@@ -3255,6 +3302,298 @@ check("type-ahead: a buffer the server never answered goes stale, so typing star
       { event: "edit-start", payload: { seed: "y" } },
     ],
   );
+});
+
+// ── SheetTabRename: focus into and out of the inline tab rename ─────────────
+// task-12b3b4e250901169. requestAnimationFrame is absent in this sandbox, so
+// the hook's frame watch falls back to the controllable setTimeout above.
+
+function tabRenameFixture({ buttonArrivesLate = false } = {}) {
+  const body = { tag: "body" };
+  const focusable = (name) => {
+    const el = {
+      name,
+      isConnected: true,
+      focus() { sandbox.document.activeElement = el; },
+    };
+    return el;
+  };
+  const button = focusable("tab-0");
+  let lookups = 0;
+  const strip = {
+    querySelector(sel) {
+      assert.equal(sel, "[data-test-id='sheet-tab-0']");
+      lookups++;
+      return buttonArrivesLate && lookups < 3 ? null : button;
+    },
+  };
+  const listeners = {};
+  const input = focusable("input");
+  Object.assign(input, {
+    selected: false,
+    select() { input.selected = true; },
+    form: { querySelector: (sel) => (sel === "input[name='tab']" ? { value: "0" } : null) },
+    closest: (sel) => (sel === "[role='tablist']" ? strip : null),
+    addEventListener(type, fn) { listeners[type] = fn; },
+    fire(type, e) { listeners[type] && listeners[type](e); },
+  });
+  sandbox.document.body = body;
+  timers.length = 0;
+  const hook = Object.create(sandbox.window.BarkparkSheetTabRename);
+  hook.el = input;
+  hook.mounted();
+  // The patch removes the focused input: the browser drops focus to <body>.
+  const removeInput = () => { sandbox.document.activeElement = body; };
+  const flush = () => {
+    for (let i = 0; i < 40 && timers.length; i++) timers.shift()();
+  };
+  return { hook, input, button, body, focusable, removeInput, flush };
+}
+
+check("tab rename: the input takes focus with its text selected on mount", () => {
+  const { input } = tabRenameFixture();
+  assert.equal(sandbox.document.activeElement, input);
+  assert.equal(input.selected, true);
+});
+
+for (const key of ["Enter", "Escape"]) {
+  check(`tab rename: ${key} hands focus back to the renamed tab`, () => {
+    const { hook, input, button, removeInput, flush } = tabRenameFixture();
+    input.fire("keydown", { key });
+    removeInput();
+    hook.destroyed();
+    flush();
+    assert.equal(sandbox.document.activeElement, button);
+  });
+}
+
+check("tab rename: the tab button may arrive a frame after the input leaves", () => {
+  const { hook, input, button, removeInput, flush } = tabRenameFixture({ buttonArrivesLate: true });
+  input.fire("keydown", { key: "Enter" });
+  removeInput();
+  hook.destroyed();
+  assert.notEqual(sandbox.document.activeElement, button);
+  flush();
+  assert.equal(sandbox.document.activeElement, button);
+});
+
+check("tab rename: a blur keeps focus on what the user moved to, even if the patch drops it", () => {
+  const { hook, input, focusable, body, flush } = tabRenameFixture();
+  const next = focusable("tab-1");
+  input.fire("focusout", { relatedTarget: next });
+  next.focus();
+  hook.destroyed();
+  // The patch re-inserts the neighbour and focus falls to <body>.
+  sandbox.document.activeElement = body;
+  flush();
+  assert.equal(sandbox.document.activeElement, next);
+});
+
+check("tab rename: focus the user put elsewhere is never taken", () => {
+  const { hook, input, button, focusable, removeInput, flush } = tabRenameFixture();
+  input.fire("keydown", { key: "Enter" });
+  removeInput();
+  const elsewhere = focusable("search");
+  elsewhere.focus();
+  hook.destroyed();
+  flush();
+  assert.equal(sandbox.document.activeElement, elsewhere);
+  assert.notEqual(sandbox.document.activeElement, button);
+});
+
+check("tab rename: a blur to nothing (click on empty space) moves no focus", () => {
+  const { hook, input, body, removeInput, flush } = tabRenameFixture();
+  input.fire("focusout", { relatedTarget: null });
+  removeInput();
+  hook.destroyed();
+  flush();
+  assert.equal(sandbox.document.activeElement, body);
+  sandbox.document.activeElement = null;
+});
+
+// ── Sheet download: phx:bp:sheet-download saves the pushed file ─────────────
+// task-da387f54432114d8. The server pushes {filename, mime, data(base64)}; the
+// handler must decode the bytes exactly and click a temporary <a download>.
+
+function withDownloadStubs(fn) {
+  const made = [];
+  const appended = [];
+  const revoked = [];
+  const saved = {
+    atob: sandbox.atob, Blob: sandbox.Blob, URL: sandbox.URL, document: sandbox.document,
+  };
+  sandbox.atob = (b64) => Buffer.from(b64, "base64").toString("binary");
+  sandbox.Blob = class { constructor(parts, opts) { this.parts = parts; this.type = opts.type; } };
+  sandbox.URL = {
+    createObjectURL(blob) { made.push(blob); return "blob:test/" + made.length; },
+    revokeObjectURL(url) { revoked.push(url); },
+  };
+  sandbox.document = {
+    activeElement: null,
+    body: { appendChild(el) { appended.push(el); } },
+    createElement(tag) {
+      const el = { tag, style: {}, clicked: 0, removed: false };
+      el.click = () => { el.clicked++; };
+      el.remove = () => { el.removed = true; };
+      return el;
+    },
+  };
+  timers.length = 0;
+  try {
+    fn({ made, appended, revoked });
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+}
+
+check("sheet download: the pushed payload is saved byte-for-byte under its file name", () => {
+  withDownloadStubs(({ made, appended, revoked }) => {
+    const bytes = Buffer.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0xff, 0x80]);
+    sandbox.window.BarkparkSheetDownload({
+      filename: "Budsjett 2027.xlsx", mime: "application/x-test", data: bytes.toString("base64"),
+    });
+    assert.equal(made.length, 1);
+    assert.equal(made[0].type, "application/x-test");
+    assert.deepEqual(Array.from(made[0].parts[0]), Array.from(bytes));
+    assert.equal(appended.length, 1);
+    assert.equal(appended[0].tag, "a");
+    assert.equal(appended[0].download, "Budsjett 2027.xlsx");
+    assert.equal(appended[0].href, "blob:test/1");
+    assert.equal(appended[0].clicked, 1);
+    assert.equal(appended[0].removed, true);
+    timers.forEach((t) => t());
+    assert.deepEqual(revoked, ["blob:test/1"]);
+  });
+});
+
+// Other checks reset window._listeners, so the wiring is checked on a fresh
+// load of the shipped file.
+check("sheet download: loading the file listens for phx:bp:sheet-download", () => {
+  const fresh = { window: { _listeners: {}, addEventListener(t, fn) { (this._listeners[t] ||= []).push(fn); } }, document: {} };
+  vm.createContext(fresh);
+  vm.runInContext(
+    fs.readFileSync(new URL("../../priv/static/assets/bp-sheet-grid.js", import.meta.url), "utf8"),
+    fresh,
+  );
+  assert.equal((fresh.window._listeners["phx:bp:sheet-download"] || []).length, 1);
+});
+
+check("sheet download: a payload without data or a file name saves nothing", () => {
+  withDownloadStubs(({ made, appended }) => {
+    const save = sandbox.window.BarkparkSheetDownload;
+    assert.equal(save({ filename: "x.csv" }), false);
+    assert.equal(save({ data: "YQ==" }), false);
+    assert.equal(save(undefined), false);
+    assert.equal(made.length, 0);
+    assert.equal(appended.length, 0);
+  });
+});
+
+// ── Tab stops (task-5201a73e33535129): header controls from the key map,
+//    and the formatting bar as one roving toolbar ────────────────────────────
+
+function withActiveCol(h, c) {
+  h.el._active = {
+    dataset: { c: String(c), ref: "B1" },
+    getBoundingClientRect: () => ({ left: 100, bottom: 40 }),
+  };
+}
+
+check("Alt+ArrowDown opens the active column's filter", () => {
+  const h = mountHook();
+  withActiveCol(h, 2);
+  const e = keydown("ArrowDown", { altKey: true });
+  h.el.dispatch("keydown", e);
+  assert.deepEqual(h._pushed, [{ event: "filter-open", payload: { col: 2 } }]);
+  assert.equal(e.prevented, true);
+});
+
+check("Alt+Shift+ArrowDown opens the active column's menu and asks to focus it", () => {
+  const h = mountHook();
+  withActiveCol(h, 3);
+  h.el.dispatch("keydown", keydown("ArrowDown", { altKey: true, shiftKey: true }));
+  assert.deepEqual(h._pushed, [{ event: "menu-open", payload: { kind: "col", index: 3 } }]);
+  assert.equal(h._headMenuWantFocus, true);
+});
+
+for (const [label, opts] of [["Shift+F10", { key: "F10", shiftKey: true }], ["the Menu key", { key: "ContextMenu" }]]) {
+  check(`${label} opens the cell context menu at the active cell`, () => {
+    const h = mountHook();
+    withActiveCol(h, 1);
+    h.el.dispatch("keydown", keydown(opts.key, opts));
+    assert.deepEqual(h._pushed, [{ event: "cell-menu-open", payload: { x: 108, y: 40 } }]);
+    assert.equal(h._ctxWantFocus, true);
+  });
+}
+
+check("plain ArrowDown still navigates (no header route)", () => {
+  const h = mountHook();
+  withActiveCol(h, 1);
+  h.el.dispatch("keydown", keydown("ArrowDown"));
+  assert.deepEqual(h._pushed, [{ event: "nav", payload: { key: "ArrowDown", shift: false } }]);
+});
+
+check("the formatting toolbar is one Tab stop and arrow keys move inside it", () => {
+  const mk = (name) => {
+    const el = {
+      name, attrs: {}, disabled: false,
+      setAttribute(k, v) { this.attrs[k] = v; },
+      closest: () => null,
+      focus() { sandbox.document.activeElement = el; },
+    };
+    return el;
+  };
+  const items = [mk("merge"), mk("bold"), mk("italic")];
+  const listeners = {};
+  const tb = Object.create(sandbox.window.BarkparkSheetToolbar);
+  tb.el = {
+    querySelectorAll: () => items,
+    addEventListener(t, fn) { listeners[t] = fn; },
+  };
+  tb.mounted();
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["0", "-1", "-1"]);
+  const e = { key: "ArrowRight", target: items[0], preventDefault() { this.prevented = true; } };
+  listeners.keydown(e);
+  assert.equal(e.prevented, true);
+  assert.equal(sandbox.document.activeElement, items[1]);
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["-1", "0", "-1"]);
+  listeners.keydown({ key: "End", target: items[1], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, items[2]);
+  listeners.keydown({ key: "ArrowRight", target: items[2], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, items[0], "wraps around");
+  // A patch that dropped the attributes is repaired by updated().
+  items.forEach((i) => (i.attrs = {}));
+  tb.updated();
+  assert.deepEqual(items.map((i) => i.attrs.tabindex), ["0", "-1", "-1"]);
+  sandbox.document.activeElement = null;
+});
+
+check("tab-strip mode: the ACTIVE tab is the stop and follows a server tab switch", () => {
+  const mk = (name, selected) => ({
+    name, attrs: { "aria-selected": selected ? "true" : "false" }, disabled: false,
+    setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k]; },
+    closest: () => null,
+    focus() { sandbox.document.activeElement = this; },
+  });
+  const tabs = [mk("t0", false), mk("t1", true), mk("t2", false)];
+  const listeners = {};
+  const strip = Object.create(sandbox.window.BarkparkSheetToolbar);
+  strip.el = {
+    dataset: { rovingItems: "[role='tab']", rovingFollow: "selected" },
+    querySelectorAll: (sel) => (sel === "[role='tab']" ? tabs : []),
+    addEventListener(t, fn) { listeners[t] = fn; },
+  };
+  strip.mounted();
+  assert.deepEqual(tabs.map((t) => t.attrs.tabindex), ["-1", "0", "-1"]);
+  listeners.keydown({ key: "ArrowLeft", target: tabs[1], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, tabs[0]);
+  // The server switches to t2: the stop follows aria-selected on the patch.
+  tabs[1].attrs["aria-selected"] = "false";
+  tabs[2].attrs["aria-selected"] = "true";
+  strip.updated();
+  assert.deepEqual(tabs.map((t) => t.attrs.tabindex), ["-1", "-1", "0"]);
+  sandbox.document.activeElement = null;
 });
 
 if (failures > 0) {

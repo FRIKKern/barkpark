@@ -768,6 +768,14 @@
       return entries;
     }
 
+    // The entries that NARROW the list: search, facets, kind. The open folder
+    // is a place, not a filter (task-575bf6656312084a): counting it made an
+    // empty folder read "No assets match these filters" with no filter set.
+    // Its pill still renders from _activeFacetEntries().
+    _narrowingEntries() {
+      return this._activeFacetEntries().filter(([field]) => field !== "collection");
+    }
+
     _pillLabel(field, value) {
       if (field === "q") return "Search: " + value;
       if (field === "collection") return "Collection: " + value;
@@ -851,7 +859,7 @@
 
     _renderFindBar() {
       if (!this._findBarEl) return;
-      const entries = this._activeFacetEntries();
+      const entries = this._narrowingEntries();
       if (!entries.length) {
         this._findBarEl.hidden = true;
         this._findBarEl.innerHTML = "";
@@ -872,7 +880,7 @@
     }
 
     _emptyMessage() {
-      if (this._activeFacetEntries().length) {
+      if (this._narrowingEntries().length) {
         return "No assets match these filters — try removing one or search for something broader.";
       }
       if (this._collectionId) {
@@ -1355,11 +1363,19 @@
             kind === "image"
               ? '<img src="' + thumbUrl + '" alt="" />'
               : '<span>' + esc(kind) + "</span>";
+          // The thumbnail is decorative (alt=""), so the button carries the
+          // asset's name and whether it is the selected one — before this it
+          // had no accessible name at all (task-d4619e875ace82ca).
+          const name = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
           return (
             '<button type="button" class="bp-ae-strip-item' +
             sel +
             '" data-id="' +
             esc(id) +
+            '" aria-label="' +
+            name +
+            '" aria-pressed="' +
+            (sel ? "true" : "false") +
             '">' +
             inner +
             "</button>"
@@ -1486,7 +1502,7 @@
           ? '<button type="button" class="btn btn-sm bp-ae-remove-member">Remove from collection</button>'
           : "") +
         (this._collections.filter((c) => c.kind !== "virtual").length
-          ? '<select class="form-input bp-ae-add-collection"><option value="">Add to collection…</option></select>'
+          ? '<select class="form-input bp-ae-add-collection" aria-label="Add to collection"><option value="">Add to collection…</option></select>'
           : "") +
         "</div>" +
         '<div class="bp-ae-action-row bp-ae-action-row--secondary">' +

@@ -245,6 +245,38 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
       assert html =~ ~s(data-test-id="connector-card-telegram")
     end
 
+    # task-9606fa7f7daaf674: the banner told every viewer to set a deploy secret
+    # and read an ops doc; only an installation admin can do either.
+    test "no secret: a workspace-only admin is told to ask the installation admin", %{
+      conn: conn,
+      ws: ws,
+      path: path,
+      admin_raw: raw
+    } do
+      configure(connect_secret: nil)
+
+      email = "conn-wsadmin-#{System.unique_integer([:positive])}@example.com"
+
+      {:ok, user} =
+        Barkpark.Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+
+      {:ok, session} = Barkpark.Accounts.create_user_session_token(user)
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "admin", "user")
+
+      {:ok, _view, html} =
+        live(Plug.Test.init_test_session(conn, %{"user_session" => session}), path)
+
+      assert html =~ "Connect is not configured on this instance"
+      assert html =~ ~s(data-test-id="connectors-readonly-ask-admin")
+      refute html =~ "CONNECTORS_CONNECT_SECRET"
+      refute html =~ "docs/ops/connectors-deploy.md"
+
+      # The installation admin still gets the operator sentence.
+      {:ok, _view, op_html} = live(as(conn, raw), path)
+      assert op_html =~ "docs/ops/connectors-deploy.md"
+      refute op_html =~ ~s(data-test-id="connectors-readonly-ask-admin")
+    end
+
     test "no secret + a forged open_connect event => flash, no dialog, no crash", %{
       conn: conn,
       path: path,

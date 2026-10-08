@@ -118,7 +118,7 @@
        `bp-paper-surface`) so they WIN over the shared source's fallback
        `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline
        `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on
-       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,
+       the reader on the bp-theme (a shared ink #15211d, rule #e2e6e5,
        etc.). Dark-mode note: the reader stamps `html[data-theme]` only via
        its pre-paint toggle script (localStorage `barkpark_theme`, shared
        with Studio); before that script runs — and with JS off — the
@@ -135,7 +135,7 @@
       --paper-bg-deep:    #eaf1ee;
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
-      --paper-rule:       #dde7e2;
+      --paper-rule:       #e2e6e5;
       --paper-accent:     #1e5347;
       /* Link border-bottom tone (`.bp-paper-surface a` + walk.ex inline links
          read it). Light value matches the shared source's fallback; the dark
@@ -178,7 +178,7 @@
         --paper-bg-deep:    #131d19;
         --paper-ink:        #e7ede9;
         --paper-ink-soft:   #9aaaa3;
-        --paper-rule:       rgba(231, 237, 233, 0.13);
+        --paper-rule:       rgba(255, 255, 255, 0.10);
         --paper-accent:     #45b394;
         /* Warm-dark link border (same value as Studio's html[data-theme=dark]
            block in paper-surface.css) — without it links keep the light-theme
@@ -197,7 +197,7 @@
            prefers-color-scheme companion. */
         --paper-ink-faint:    #6c7a74;
         --paper-chrome-bg:    #131d19;
-        --paper-chrome-border: rgba(231, 237, 233, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
         --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
         --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -212,12 +212,12 @@
        client showing a light HTML email; the served email bytes never change
        with the theme. */
     #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     @media (prefers-color-scheme: dark) {
       #bp-mailapp {
-        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
@@ -235,7 +235,7 @@
       --paper-bg-deep:    #eaf1ee;
       --paper-ink:        #15211d;
       --paper-ink-soft:   #55635e;
-      --paper-rule:       #dde7e2;
+      --paper-rule:       #e2e6e5;
       --paper-accent:     #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
@@ -246,7 +246,7 @@
          image of the #1217 bug). Values match the un-stamped light path. */
       --paper-ink-faint:    #82918b;
       --paper-chrome-bg:    #f6faf9;
-      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
       --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
       --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -259,13 +259,13 @@
       --paper-bg-deep:    #131d19;
       --paper-ink:        #e7ede9;
       --paper-ink-soft:   #9aaaa3;
-      --paper-rule:       rgba(231, 237, 233, 0.13);
+      --paper-rule:       rgba(255, 255, 255, 0.10);
       --paper-accent:     #45b394;
       --paper-accent-soft: rgba(70, 179, 148, 0.16);
       --paper-reading-accent: #d98a6a; /* S7 stub — S8 consumes */
       --paper-ink-faint:    #6c7a74;
       --paper-chrome-bg:    #131d19;
-      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg:    #172032; --bp-tone-info-fg:    #9db8ff;
       --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
       --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -273,11 +273,11 @@
       --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
     }
     html[data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     html[data-theme="dark"] #bp-mailapp {
-      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
       --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -294,13 +294,13 @@
         --paper-bg-deep:    #eaf1ee;
         --paper-ink:        #15211d;
         --paper-ink-soft:   #55635e;
-        --paper-rule:       #dde7e2;
+        --paper-rule:       #e2e6e5;
         --paper-accent:     #1e5347;
         --paper-accent-soft: rgba(30, 83, 71, 0.10);
         --paper-reading-accent: #a23925; /* S7 stub — S8 consumes */
         --paper-ink-faint:    #82918b;
         --paper-chrome-bg:    #f6faf9;
-        --paper-chrome-border: rgba(21, 33, 29, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg:    #e9eff7; --bp-tone-info-fg:    #2d5e8f;
         --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
         --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -315,7 +315,7 @@
       --paper-bg-deep: #eaf1ee;
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
-      --paper-rule: #dde7e2;
+      --paper-rule: #e2e6e5;
       --paper-accent: #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925;
@@ -327,13 +327,13 @@
         --paper-bg-deep: #131d19;
         --paper-ink: #e7ede9;
         --paper-ink-soft: #9aaaa3;
-        --paper-rule: rgba(231, 237, 233, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #45b394;
         --paper-accent-soft: rgba(70, 179, 148, 0.16);
         --paper-reading-accent: #d98a6a;
         --paper-ink-faint: #6c7a74;
         --paper-chrome-bg: #131d19;
-        --paper-chrome-border: rgba(231, 237, 233, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #172032; --bp-tone-info-fg: #9db8ff;
         --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
         --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -342,12 +342,12 @@
       }
     }
     html[data-bp-theme="evergreen"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="evergreen"] #bp-mailapp {
-        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+        --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
         --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
       }
     }
@@ -357,13 +357,13 @@
       --paper-bg-deep: #eaf1ee;
       --paper-ink: #15211d;
       --paper-ink-soft: #55635e;
-      --paper-rule: #dde7e2;
+      --paper-rule: #e2e6e5;
       --paper-accent: #1e5347;
       --paper-accent-soft: rgba(30, 83, 71, 0.10);
       --paper-reading-accent: #a23925;
       --paper-ink-faint: #82918b;
       --paper-chrome-bg: #f6faf9;
-      --paper-chrome-border: rgba(21, 33, 29, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e9eff7; --bp-tone-info-fg: #2d5e8f;
       --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
       --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -376,13 +376,13 @@
       --paper-bg-deep: #131d19;
       --paper-ink: #e7ede9;
       --paper-ink-soft: #9aaaa3;
-      --paper-rule: rgba(231, 237, 233, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #45b394;
       --paper-accent-soft: rgba(70, 179, 148, 0.16);
       --paper-reading-accent: #d98a6a;
       --paper-ink-faint: #6c7a74;
       --paper-chrome-bg: #131d19;
-      --paper-chrome-border: rgba(231, 237, 233, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #172032; --bp-tone-info-fg: #9db8ff;
       --bp-tone-success-bg: #12241c; --bp-tone-success-fg: #5fcf9c;
       --bp-tone-warning-bg: #2a2210; --bp-tone-warning-fg: #e3b661;
@@ -390,11 +390,11 @@
       --bp-tone-neutral-bg: #23211e; --bp-tone-neutral-fg: #c9c2b6;
     }
     html[data-bp-theme="evergreen"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #dde7e2;
+      --mail-paper: #ffffff; --mail-bar: #f6faf9; --mail-rule: #e2e6e5;
       --mail-ink: #15211d; --mail-soft: #55635e; --mail-accent: #1e5347;
     }
     html[data-bp-theme="evergreen"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #26332d;
+      --mail-paper: #131d19; --mail-bar: #0e1614; --mail-rule: #2b3230;
       --mail-ink: #e7ede9; --mail-soft: #9aaaa3; --mail-accent: #45b394;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -411,13 +411,13 @@
         --paper-bg-deep: #eaf1ee;
         --paper-ink: #15211d;
         --paper-ink-soft: #55635e;
-        --paper-rule: #dde7e2;
+        --paper-rule: #e2e6e5;
         --paper-accent: #1e5347;
         --paper-accent-soft: rgba(30, 83, 71, 0.10);
         --paper-reading-accent: #a23925;
         --paper-ink-faint: #82918b;
         --paper-chrome-bg: #f6faf9;
-        --paper-chrome-border: rgba(21, 33, 29, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e9eff7; --bp-tone-info-fg: #2d5e8f;
         --bp-tone-success-bg: #e7f2ec; --bp-tone-success-fg: #1e6b52;
         --bp-tone-warning-bg: #f7f0df; --bp-tone-warning-fg: #8a6420;
@@ -431,7 +431,7 @@
       --paper-bg-deep: #f0ecf3;
       --paper-ink: #241e27;
       --paper-ink-soft: #565059;
-      --paper-rule: #e0dde1;
+      --paper-rule: #e8e5e9;
       --paper-accent: #7b3a96;
       --paper-accent-soft: rgba(123, 58, 150, 0.10);
       --paper-reading-accent: #302ba5;
@@ -443,13 +443,13 @@
         --paper-bg-deep: #151117;
         --paper-ink: #e1dde3;
         --paper-ink-soft: #a29da4;
-        --paper-rule: rgba(225, 221, 227, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #c78ae0;
         --paper-accent-soft: rgba(199, 138, 224, 0.16);
         --paper-reading-accent: #8480ea;
         --paper-ink-faint: #6f6b70;
         --paper-chrome-bg: #151117;
-        --paper-chrome-border: rgba(225, 221, 227, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8beea;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9fcba7;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d8b88d;
@@ -458,12 +458,12 @@
       }
     }
     html[data-bp-theme="charple"] #bp-mailapp {
-      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e0dde1;
+      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e8e5e9;
       --mail-ink: #241e27; --mail-soft: #565059; --mail-accent: #7b3a96;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="charple"] #bp-mailapp {
-        --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
+        --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #282629;
         --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
       }
     }
@@ -473,13 +473,13 @@
       --paper-bg-deep: #f0ecf3;
       --paper-ink: #241e27;
       --paper-ink-soft: #565059;
-      --paper-rule: #e0dde1;
+      --paper-rule: #e8e5e9;
       --paper-accent: #7b3a96;
       --paper-accent-soft: rgba(123, 58, 150, 0.10);
       --paper-reading-accent: #302ba5;
       --paper-ink-faint: #7e7a81;
       --paper-chrome-bg: #fcf9fd;
-      --paper-chrome-border: rgba(36, 30, 39, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3a538a;
       --bp-tone-success-bg: #def6e2; --bp-tone-success-fg: #276438;
       --bp-tone-warning-bg: #feecd4; --bp-tone-warning-fg: #734c00;
@@ -492,13 +492,13 @@
       --paper-bg-deep: #151117;
       --paper-ink: #e1dde3;
       --paper-ink-soft: #a29da4;
-      --paper-rule: rgba(225, 221, 227, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #c78ae0;
       --paper-accent-soft: rgba(199, 138, 224, 0.16);
       --paper-reading-accent: #8480ea;
       --paper-ink-faint: #6f6b70;
       --paper-chrome-bg: #151117;
-      --paper-chrome-border: rgba(225, 221, 227, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8beea;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9fcba7;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d8b88d;
@@ -506,11 +506,11 @@
       --bp-tone-neutral-bg: #0d0c0d; --bp-tone-neutral-fg: #bfbdbf;
     }
     html[data-bp-theme="charple"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e0dde1;
+      --mail-paper: #f8f8fc; --mail-bar: #fcf9fd; --mail-rule: #e8e5e9;
       --mail-ink: #241e27; --mail-soft: #565059; --mail-accent: #7b3a96;
     }
     html[data-bp-theme="charple"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #363337;
+      --mail-paper: #151117; --mail-bar: #0b080c; --mail-rule: #282629;
       --mail-ink: #e1dde3; --mail-soft: #a29da4; --mail-accent: #c78ae0;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -527,13 +527,13 @@
         --paper-bg-deep: #f0ecf3;
         --paper-ink: #241e27;
         --paper-ink-soft: #565059;
-        --paper-rule: #e0dde1;
+        --paper-rule: #e8e5e9;
         --paper-accent: #7b3a96;
         --paper-accent-soft: rgba(123, 58, 150, 0.10);
         --paper-reading-accent: #302ba5;
         --paper-ink-faint: #7e7a81;
         --paper-chrome-bg: #fcf9fd;
-        --paper-chrome-border: rgba(36, 30, 39, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3a538a;
         --bp-tone-success-bg: #def6e2; --bp-tone-success-fg: #276438;
         --bp-tone-warning-bg: #feecd4; --bp-tone-warning-fg: #734c00;
@@ -547,7 +547,7 @@
       --paper-bg-deep: #f4ece9;
       --paper-ink: #291d19;
       --paper-ink-soft: #5b504c;
-      --paper-rule: #e2dcda;
+      --paper-rule: #eae5e3;
       --paper-accent: #b34e1e;
       --paper-accent-soft: rgba(179, 78, 30, 0.10);
       --paper-reading-accent: #bf321d;
@@ -559,13 +559,13 @@
         --paper-bg-deep: #18110e;
         --paper-ink: #e5ddd9;
         --paper-ink-soft: #a69d99;
-        --paper-rule: rgba(229, 221, 217, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #e8875a;
         --paper-accent-soft: rgba(232, 135, 90, 0.16);
         --paper-reading-accent: #f5855c;
         --paper-ink-faint: #726b68;
         --paper-chrome-bg: #18110e;
-        --paper-chrome-border: rgba(229, 221, 217, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8bee9;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a0caa7;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d7b88e;
@@ -574,12 +574,12 @@
       }
     }
     html[data-bp-theme="ember"] #bp-mailapp {
-      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #e2dcda;
+      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #eae5e3;
       --mail-ink: #291d19; --mail-soft: #5b504c; --mail-accent: #b34e1e;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="ember"] #bp-mailapp {
-        --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #383330;
+        --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #2a2624;
         --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
       }
     }
@@ -589,13 +589,13 @@
       --paper-bg-deep: #f4ece9;
       --paper-ink: #291d19;
       --paper-ink-soft: #5b504c;
-      --paper-rule: #e2dcda;
+      --paper-rule: #eae5e3;
       --paper-accent: #b34e1e;
       --paper-accent-soft: rgba(179, 78, 30, 0.10);
       --paper-reading-accent: #bf321d;
       --paper-ink-faint: #827a76;
       --paper-chrome-bg: #fef9f7;
-      --paper-chrome-border: rgba(41, 29, 25, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3b5487;
       --bp-tone-success-bg: #dff6e3; --bp-tone-success-fg: #2a6339;
       --bp-tone-warning-bg: #fdecd5; --bp-tone-warning-fg: #724d0a;
@@ -608,13 +608,13 @@
       --paper-bg-deep: #18110e;
       --paper-ink: #e5ddd9;
       --paper-ink-soft: #a69d99;
-      --paper-rule: rgba(229, 221, 217, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #e8875a;
       --paper-accent-soft: rgba(232, 135, 90, 0.16);
       --paper-reading-accent: #f5855c;
       --paper-ink-faint: #726b68;
       --paper-chrome-bg: #18110e;
-      --paper-chrome-border: rgba(229, 221, 217, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #020a24; --bp-tone-info-fg: #a8bee9;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a0caa7;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d7b88e;
@@ -622,11 +622,11 @@
       --bp-tone-neutral-bg: #0e0c0b; --bp-tone-neutral-fg: #c0bdbb;
     }
     html[data-bp-theme="ember"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #e2dcda;
+      --mail-paper: #fdfcfb; --mail-bar: #fef9f7; --mail-rule: #eae5e3;
       --mail-ink: #291d19; --mail-soft: #5b504c; --mail-accent: #b34e1e;
     }
     html[data-bp-theme="ember"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #383330;
+      --mail-paper: #18110e; --mail-bar: #0d0806; --mail-rule: #2a2624;
       --mail-ink: #e5ddd9; --mail-soft: #a69d99; --mail-accent: #e8875a;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -643,13 +643,13 @@
         --paper-bg-deep: #f4ece9;
         --paper-ink: #291d19;
         --paper-ink-soft: #5b504c;
-        --paper-rule: #e2dcda;
+        --paper-rule: #eae5e3;
         --paper-accent: #b34e1e;
         --paper-accent-soft: rgba(179, 78, 30, 0.10);
         --paper-reading-accent: #bf321d;
         --paper-ink-faint: #827a76;
         --paper-chrome-bg: #fef9f7;
-        --paper-chrome-border: rgba(41, 29, 25, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #3b5487;
         --bp-tone-success-bg: #dff6e3; --bp-tone-success-fg: #2a6339;
         --bp-tone-warning-bg: #fdecd5; --bp-tone-warning-fg: #724d0a;
@@ -663,7 +663,7 @@
       --paper-bg-deep: #e7f0f2;
       --paper-ink: #162327;
       --paper-ink-soft: #495559;
-      --paper-rule: #d9dfe1;
+      --paper-rule: #e2e7e9;
       --paper-accent: #0e6e85;
       --paper-accent-soft: rgba(14, 110, 133, 0.10);
       --paper-reading-accent: #0f8299;
@@ -675,13 +675,13 @@
         --paper-bg-deep: #0c1417;
         --paper-ink: #d8e0e3;
         --paper-ink-soft: #97a1a4;
-        --paper-rule: rgba(216, 224, 227, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #6cc4dd;
         --paper-accent-soft: rgba(108, 196, 221, 0.16);
         --paper-reading-accent: #53d6ea;
         --paper-ink-faint: #666e70;
         --paper-chrome-bg: #0c1417;
-        --paper-chrome-border: rgba(216, 224, 227, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #040b1f; --bp-tone-info-fg: #adbedf;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a7c7ad;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d1ba9a;
@@ -690,12 +690,12 @@
       }
     }
     html[data-bp-theme="fjord"] #bp-mailapp {
-      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #d9dfe1;
+      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #e2e7e9;
       --mail-ink: #162327; --mail-soft: #495559; --mail-accent: #0e6e85;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="fjord"] #bp-mailapp {
-        --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #2f3537;
+        --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #232729;
         --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
       }
     }
@@ -705,13 +705,13 @@
       --paper-bg-deep: #e7f0f2;
       --paper-ink: #162327;
       --paper-ink-soft: #495559;
-      --paper-rule: #d9dfe1;
+      --paper-rule: #e2e7e9;
       --paper-accent: #0e6e85;
       --paper-accent-soft: rgba(14, 110, 133, 0.10);
       --paper-reading-accent: #0f8299;
       --paper-ink-faint: #747e81;
       --paper-chrome-bg: #f6fbfd;
-      --paper-chrome-border: rgba(22, 35, 39, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #435579;
       --bp-tone-success-bg: #e4f4e6; --bp-tone-success-fg: #3b5f42;
       --bp-tone-warning-bg: #f9eddd; --bp-tone-warning-fg: #6a502b;
@@ -724,13 +724,13 @@
       --paper-bg-deep: #0c1417;
       --paper-ink: #d8e0e3;
       --paper-ink-soft: #97a1a4;
-      --paper-rule: rgba(216, 224, 227, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #6cc4dd;
       --paper-accent-soft: rgba(108, 196, 221, 0.16);
       --paper-reading-accent: #53d6ea;
       --paper-ink-faint: #666e70;
       --paper-chrome-bg: #0c1417;
-      --paper-chrome-border: rgba(216, 224, 227, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #040b1f; --bp-tone-info-fg: #adbedf;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #a7c7ad;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #d1ba9a;
@@ -738,11 +738,11 @@
       --bp-tone-neutral-bg: #0b0d0d; --bp-tone-neutral-fg: #bbbebf;
     }
     html[data-bp-theme="fjord"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #d9dfe1;
+      --mail-paper: #fcfcfd; --mail-bar: #f6fbfd; --mail-rule: #e2e7e9;
       --mail-ink: #162327; --mail-soft: #495559; --mail-accent: #0e6e85;
     }
     html[data-bp-theme="fjord"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #2f3537;
+      --mail-paper: #0c1417; --mail-bar: #050a0c; --mail-rule: #232729;
       --mail-ink: #d8e0e3; --mail-soft: #97a1a4; --mail-accent: #6cc4dd;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -759,13 +759,13 @@
         --paper-bg-deep: #e7f0f2;
         --paper-ink: #162327;
         --paper-ink-soft: #495559;
-        --paper-rule: #d9dfe1;
+        --paper-rule: #e2e7e9;
         --paper-accent: #0e6e85;
         --paper-accent-soft: rgba(14, 110, 133, 0.10);
         --paper-reading-accent: #0f8299;
         --paper-ink-faint: #747e81;
         --paper-chrome-bg: #f6fbfd;
-        --paper-chrome-border: rgba(22, 35, 39, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #435579;
         --bp-tone-success-bg: #e4f4e6; --bp-tone-success-fg: #3b5f42;
         --bp-tone-warning-bg: #f9eddd; --bp-tone-warning-fg: #6a502b;
@@ -779,7 +779,7 @@
       --paper-bg-deep: #ecedf5;
       --paper-ink: #1f1f2a;
       --paper-ink-soft: #51525b;
-      --paper-rule: #dddee2;
+      --paper-rule: #e5e6ea;
       --paper-accent: #5b46d6;
       --paper-accent-soft: rgba(91, 70, 214, 0.10);
       --paper-reading-accent: #3692e6;
@@ -791,13 +791,13 @@
         --paper-bg-deep: #121219;
         --paper-ink: #dedee5;
         --paper-ink-soft: #9e9ea6;
-        --paper-rule: rgba(222, 222, 229, 0.13);
+        --paper-rule: rgba(255, 255, 255, 0.10);
         --paper-accent: #9d8cff;
         --paper-accent-soft: rgba(157, 140, 255, 0.16);
         --paper-reading-accent: #8cc8ff;
         --paper-ink-faint: #6c6c72;
         --paper-chrome-bg: #121219;
-        --paper-chrome-border: rgba(222, 222, 229, 0.13);
+        --paper-chrome-border: rgba(255, 255, 255, 0.10);
         --bp-tone-info-bg: #010828; --bp-tone-info-fg: #a4bef1;
         --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9acca4;
         --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #dcb785;
@@ -806,12 +806,12 @@
       }
     }
     html[data-bp-theme="iris"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #dddee2;
+      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #e5e6ea;
       --mail-ink: #1f1f2a; --mail-soft: #51525b; --mail-accent: #5b46d6;
     }
     @media (prefers-color-scheme: dark) {
       html[data-bp-theme="iris"] #bp-mailapp {
-        --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
+        --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #27262b;
         --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
       }
     }
@@ -821,13 +821,13 @@
       --paper-bg-deep: #ecedf5;
       --paper-ink: #1f1f2a;
       --paper-ink-soft: #51525b;
-      --paper-rule: #dddee2;
+      --paper-rule: #e5e6ea;
       --paper-accent: #5b46d6;
       --paper-accent-soft: rgba(91, 70, 214, 0.10);
       --paper-reading-accent: #3692e6;
       --paper-ink-faint: #7a7b83;
       --paper-chrome-bg: #f9fafe;
-      --paper-chrome-border: rgba(31, 31, 42, 0.12);
+      --paper-chrome-border: rgba(0, 0, 0, 0.09);
       --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #335296;
       --bp-tone-success-bg: #daf8df; --bp-tone-success-fg: #0f662f;
       --bp-tone-warning-bg: #ffecd2; --bp-tone-warning-fg: #734c00;
@@ -840,13 +840,13 @@
       --paper-bg-deep: #121219;
       --paper-ink: #dedee5;
       --paper-ink-soft: #9e9ea6;
-      --paper-rule: rgba(222, 222, 229, 0.13);
+      --paper-rule: rgba(255, 255, 255, 0.10);
       --paper-accent: #9d8cff;
       --paper-accent-soft: rgba(157, 140, 255, 0.16);
       --paper-reading-accent: #8cc8ff;
       --paper-ink-faint: #6c6c72;
       --paper-chrome-bg: #121219;
-      --paper-chrome-border: rgba(222, 222, 229, 0.13);
+      --paper-chrome-border: rgba(255, 255, 255, 0.10);
       --bp-tone-info-bg: #010828; --bp-tone-info-fg: #a4bef1;
       --bp-tone-success-bg: #001103; --bp-tone-success-fg: #9acca4;
       --bp-tone-warning-bg: #140a00; --bp-tone-warning-fg: #dcb785;
@@ -854,11 +854,11 @@
       --bp-tone-neutral-bg: #0c0c0e; --bp-tone-neutral-fg: #bdbdc0;
     }
     html[data-bp-theme="iris"][data-theme="light"] #bp-mailapp {
-      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #dddee2;
+      --mail-paper: #ffffff; --mail-bar: #f9fafe; --mail-rule: #e5e6ea;
       --mail-ink: #1f1f2a; --mail-soft: #51525b; --mail-accent: #5b46d6;
     }
     html[data-bp-theme="iris"][data-theme="dark"] #bp-mailapp {
-      --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #343339;
+      --mail-paper: #121219; --mail-bar: #09080e; --mail-rule: #27262b;
       --mail-ink: #dedee5; --mail-soft: #9e9ea6; --mail-accent: #9d8cff;
     }
     /* PRINT: the LIGHT palette, re-stamped from the same token data as the
@@ -875,13 +875,13 @@
         --paper-bg-deep: #ecedf5;
         --paper-ink: #1f1f2a;
         --paper-ink-soft: #51525b;
-        --paper-rule: #dddee2;
+        --paper-rule: #e5e6ea;
         --paper-accent: #5b46d6;
         --paper-accent-soft: rgba(91, 70, 214, 0.10);
         --paper-reading-accent: #3692e6;
         --paper-ink-faint: #7a7b83;
         --paper-chrome-bg: #f9fafe;
-        --paper-chrome-border: rgba(31, 31, 42, 0.12);
+        --paper-chrome-border: rgba(0, 0, 0, 0.09);
         --bp-tone-info-bg: #e7efff; --bp-tone-info-fg: #335296;
         --bp-tone-success-bg: #daf8df; --bp-tone-success-fg: #0f662f;
         --bp-tone-warning-bg: #ffecd2; --bp-tone-warning-fg: #734c00;

@@ -594,7 +594,7 @@ func whoamiSourceLabel(source string, active bool, path string) string {
 // switch and fails on drift — do not hand-trim this without updating the switch.
 var completionNouns = []string{
 	"agent", "attach", "barkparks", "capabilities", "chat", "cloud", "cmux", "completion", "context", "deploy",
-	"dev", "doc", "doctor", "export", "go-live", "help", "instance", "launch", "listen", "login",
+	"dev", "doc", "doctor", "export", "go-live", "help", "import", "instance", "launch", "listen", "login",
 	"latency", "logout", "make", "mcp", "media", "migrate", "onramp", "paper", "plugin", "provider", "register",
 	"scaffy", "schema", "search", "seed", "server", "servers", "setup", "sheet", "signup",
 	"sites", "style", "subscribe", "task", "tasks", "team", "teams", "tinker", "token", "uninstall", "upgrade",

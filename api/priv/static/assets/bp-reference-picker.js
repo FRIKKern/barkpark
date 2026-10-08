@@ -120,10 +120,7 @@ class BpReferencePicker extends HTMLElement {
 
     const typeSpan = document.createElement("span");
     typeSpan.className = "ref-selected-type";
-    // One declared type reads as before; several read as the PICKED type
-    // (resolved with the title) until it is known, then the declared set.
-    typeSpan.textContent =
-      this._refTypes.length > 1 ? this._selectedType || this._refTypes.join(" · ") : this._refType;
+    typeSpan.textContent = this._typeLabel();
     info.appendChild(typeSpan);
 
     pill.appendChild(info);
@@ -151,6 +148,28 @@ class BpReferencePicker extends HTMLElement {
     this.appendChild(wrap);
   }
 
+  // One declared type reads as before; several read as the PICKED type
+  // (resolved with the title) until it is known, then the declared set.
+  _typeLabel() {
+    return this._refTypes.length > 1
+      ? this._selectedType || this._refTypes.join(" · ")
+      : this._refType;
+  }
+
+  // A resolved title lands in the pill in place. A full render would replace
+  // the Change button a keyboard user may already be on, dropping focus to
+  // the page just as the title arrives.
+  _paintSelected() {
+    const title = this.querySelector(".ref-selected-title");
+    const type = this.querySelector(".ref-selected-type");
+    if (!title || !type) {
+      this._render();
+      return;
+    }
+    title.textContent = this._selectedTitle || this._value;
+    type.textContent = this._typeLabel();
+  }
+
   _renderSearch() {
     const wrap = document.createElement("div");
     wrap.className = "ref-field bp-ref-search-wrap";
@@ -168,10 +187,23 @@ class BpReferencePicker extends HTMLElement {
     input.setAttribute("aria-autocomplete", "list");
     input.setAttribute("aria-expanded", "false");
     input.setAttribute("aria-controls", this._listId);
+    // A host that shows the field's label beside the picker names the search
+    // after it (the Paper canvas field node view).
+    const fieldLabel = this.getAttribute("data-field-label");
+    if (fieldLabel) input.setAttribute("aria-label", fieldLabel);
     input.addEventListener("input", (e) => this._onSearchInput(e.target.value));
     input.addEventListener("focus", () => this._onSearchInput(input.value));
     input.addEventListener("keydown", (e) => {
-      if (e.key === "Escape") this._hideDropdown();
+      if (e.key === "Escape") {
+        // The first Escape closes an open list; the next one, after Change,
+        // takes the field back to the document it held.
+        if (this._prior && (!this._dropdown || this._dropdown.hidden)) {
+          e.preventDefault();
+          this._cancelChange();
+          return;
+        }
+        this._hideDropdown();
+      }
       if (e.key === "ArrowDown") {
         const first = this._options()[0];
         if (first) {
@@ -181,6 +213,15 @@ class BpReferencePicker extends HTMLElement {
       }
     });
     wrap.appendChild(input);
+
+    if (this._prior) {
+      const cancel = document.createElement("button");
+      cancel.type = "button";
+      cancel.className = "btn btn-sm bp-ref-cancel";
+      cancel.textContent = this._t("cancel", "Cancel");
+      cancel.addEventListener("click", () => this._cancelChange());
+      wrap.appendChild(cancel);
+    }
 
     const dropdown = document.createElement("div");
     dropdown.className = "bp-ref-dropdown";
@@ -230,14 +271,31 @@ class BpReferencePicker extends HTMLElement {
     if (this._status) this._status.textContent = text;
   }
 
+  // Change keeps the pick it replaces until a new one lands, so Cancel or
+  // Escape can bring it back: the stored value never changed, and nothing
+  // is emitted.
   _switchToSearch() {
+    this._prior = { value: this._value, title: this._selectedTitle, type: this._selectedType };
     this._value = "";
     this._selectedTitle = "";
     this._render();
     if (this._searchInput) this._searchInput.focus();
   }
 
+  _cancelChange() {
+    const prior = this._prior;
+    this._prior = null;
+    if (!prior) return;
+    this._hideDropdown();
+    this._value = prior.value;
+    this._selectedTitle = prior.title;
+    this._selectedType = prior.type;
+    this._render();
+    if (this._changeButton) this._changeButton.focus();
+  }
+
   _clear() {
+    this._prior = null;
     this._value = "";
     this._selectedTitle = "";
     this._render();
@@ -247,6 +305,7 @@ class BpReferencePicker extends HTMLElement {
   }
 
   _select(doc) {
+    this._prior = null;
     const idx = this._lastSearchMatches.findIndex((d) => d.id === doc.id);
     this._recordSearchInteraction(doc.id, idx >= 0 ? idx : null);
     // Store the CANONICAL id even when the picked row is a draft — Sanity's
@@ -563,7 +622,7 @@ class BpReferencePicker extends HTMLElement {
       const title = doc.title || doc._id || "";
       if (title && this._value) {
         this._selectedTitle = title;
-        if (this._mounted && this._value) this._render();
+        if (this._mounted && this._value) this._paintSelected();
       }
     } catch (_e) {
       /* pill keeps id */
@@ -592,7 +651,7 @@ class BpReferencePicker extends HTMLElement {
       if (title && this._value) {
         this._selectedTitle = title;
         this._selectedType = (match && (match._type || match.type)) || "";
-        if (this._mounted && this._value) this._render();
+        if (this._mounted && this._value) this._paintSelected();
       }
     } catch (_e) {
       /* pill keeps id */
@@ -615,6 +674,7 @@ class BpReferencePicker extends HTMLElement {
 
   set value(v) {
     if (v === this._value) return;
+    this._prior = null;
     this._value = v || "";
     // Before connectedCallback the element has no config (ref-type, dataset,
     // strings) to render with. Keep the value; connectedCallback renders it.

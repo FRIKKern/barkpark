@@ -92,6 +92,7 @@ defmodule Barkpark.PluginFreeBootTest do
   @coupling_studio_ui [
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/cells.ex"},
+    {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/file_io.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/filter.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/geometry.ex"},
     {"Barkpark.Plugins.Sheets", "lib/barkpark_web/live/studio/sheet_grid/grid_data.ex"},
@@ -188,11 +189,24 @@ defmodule Barkpark.PluginFreeBootTest do
     {"Barkpark.Plugins.Github", "lib/barkpark/tasks/close.ex"}
   ]
 
+  # `BarkparkWeb.PaperMastersController` (task-2dc7b441443f3aaf) is the HTTP
+  # twin of this same file's `block_ops.ex` coupling above: a host controller
+  # calling `Barkpark.Plugins.Bulldocs.Masters` to list/save/insert/pin/detach
+  # paper masters over a member token, mirroring what the Studio paper socket
+  # already does in-process. The monorepo keeps `Masters` compiled regardless
+  # of `:plugins []`, so there is no UndefinedFunctionError; the route itself
+  # answers 404/422 on the paper-not-found and masterability refusals the
+  # module already returns, never a crash.
+  @coupling_paper_masters_http [
+    {"Barkpark.Plugins.Bulldocs", "lib/barkpark_web/controllers/paper_masters_controller.ex"}
+  ]
+
   @sanctioned_host_plugin_coupling @coupling_studio_ui ++
                                      @coupling_public_reader_ui ++
                                      @coupling_core_static ++
                                      @coupling_plugin_http ++
-                                     @coupling_guarded_runtime
+                                     @coupling_guarded_runtime ++
+                                     @coupling_paper_masters_http
 
   # `:persistent_term` keys that the plugin layer writes during a normal
   # boot. They survive `Application.stop` because persistent_term is

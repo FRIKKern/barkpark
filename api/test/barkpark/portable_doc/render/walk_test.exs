@@ -15,7 +15,7 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
   describe "render_body/3 — PdHr" do
     test "emits hr with default thickness 1 and palette rule colour" do
       html = Walk.render_body(%{"kind" => "PdHr"}, @width, @email)
-      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
     end
 
     test "respects explicit thickness" do

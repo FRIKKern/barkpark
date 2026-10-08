@@ -393,6 +393,20 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
       assert %{title: "Row"} = ArrayField.item_preview(item, %{})
     end
 
+    # task-3630409f12d4a43b: an untitled item's internal "<array>[item]" name
+    # reached the empty row's heading ("Choices[item]").
+    test "an untitled item reads Item, never its internal [item] name" do
+      item = %Field{
+        name: "choices[item]",
+        type: "composite",
+        fields: [%Field{name: "label", type: "string"}]
+      }
+
+      assert %{title: "Item"} = ArrayField.item_preview(item, %{})
+      assert %{title: "Ja"} = ArrayField.item_preview(item, %{"label" => "Ja"})
+      assert %{title: "Valg"} = ArrayField.item_preview(%{item | title: "Valg"}, %{})
+    end
+
     test "arrays of scalars keep the plain row (no item frame)" do
       field = %Field{name: "tags", type: "arrayOf", of: %Field{name: "tag", type: "string"}}
       html = render_component(&ArrayField.array_field/1, %{field: field, value: ["a"]})

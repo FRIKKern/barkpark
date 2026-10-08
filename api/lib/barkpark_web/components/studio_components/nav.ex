@@ -312,7 +312,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       <.form :let={_f} for={%{}} as={:session} action={@logout_path} method="post">
         <%!-- Icon-only (Sanity-style right rail); the accessible name and
               tooltip both say "Sign out". --%>
-        <button type="submit" class="btn btn-ghost btn-sm" aria-label="Sign out" title="Sign out">
+        <button type="submit" class="btn btn-ghost btn-sm" aria-label={gettext("Sign out")} title={gettext("Sign out")}>
           <.icon name="log-out" size={15} />
         </button>
       </.form>
@@ -340,8 +340,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         class="btn btn-ghost btn-sm theme-toggle"
         phx-hook="ThemeToggle"
         phx-update="ignore"
-        aria-label="Toggle dark / light theme"
-        title="Toggle dark / light theme"
+        aria-label={gettext("Toggle dark / light theme")}
+        title={gettext("Toggle dark / light theme")}
       >
         <span class="theme-toggle-sun"><.icon name="sun" size={16} /></span>
         <span class="theme-toggle-moon"><.icon name="moon" size={16} /></span>

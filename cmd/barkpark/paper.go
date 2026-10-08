@@ -120,7 +120,7 @@ func barkparkPaperTheme() pdrender.Theme {
 	// retired with task-ddb1e0ab09a62466 (see the code-BLOCK frame token comment in
 	// api/assets/paper-surface/paper-surface.css). The 3px accent-bar idiom this
 	// borrows survives on the pullquote: `.bp-paper-surface .bp-role-pullquote`
-	// `border-left: 3px solid var(--paper-reading-accent)`.
+	// `border-left: 3px solid var(--paper-rule)`.
 	t.CodeBar = lipgloss.NewStyle().Foreground(accent)
 	if dark {
 		t.ChromaStyle = "monokai"

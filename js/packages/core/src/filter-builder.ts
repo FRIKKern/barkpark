@@ -112,7 +112,7 @@ export function makeFilterExpression(
   }
   if (op === 'is' && !(typeof value === 'string' && IS_VALUES.includes(value))) {
     throw new BarkparkValidationError(
-      `op 'is' takes the string 'null' or 'notnull' (got ${JSON.stringify(value)}) — it is the server's IS NULL / IS NOT NULL test, not an equality check`,
+      `op 'is' takes the string 'null' or 'notnull' (got ${JSON.stringify(value)}) — a null test, not equality`,
       { field: 'value', issues: [{ op, allowed: IS_VALUES }] },
     )
   }

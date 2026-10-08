@@ -109,16 +109,18 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   end
 
   # Display-only meta write (the toolbar apply-UI): stamp a cell's number
-  # format ("fmt") and/or style ("s") onto the EXISTING cell WITHOUT touching
-  # its "v"/"f". Deliberately NOT set_cell with a re-sent raw — build_cell
-  # re-parses raw and can coerce a stored string like "0123" into a number,
-  # silently mutating data on a formatting gesture. An absent "fmt"/"s" key is
-  # a no-op; nil clears; "fmt" validates against Fmt.vocabulary and "s" against
-  # the STRICT style grammar (b/i boolean, al left|center|right, bg #rrggbb) —
-  # tighter than set_cell's lax override_style, whose "s" arrives copied from an
-  # already-stored cell (fill) or an import. Formatting an EMPTY cell is REFUSED
-  # (empty_cell): the model has no empty-but-formatted cell (clear_cell's comment
-  # locks that), so a meta write onto a blank ref would plant a phantom the next
+  # format ("fmt"), currency ("cur", task-4fb1d8de887d8bc6) and/or style ("s")
+  # onto the EXISTING cell WITHOUT touching its "v"/"f". Deliberately NOT
+  # set_cell with a re-sent raw — build_cell re-parses raw and can coerce a
+  # stored string like "0123" into a number, silently mutating data on a
+  # formatting gesture. An absent "fmt"/"cur"/"s" key is a no-op; nil clears;
+  # "fmt" validates against Fmt.vocabulary, "cur" against Fmt.currency_codes,
+  # and "s" against the STRICT style grammar (b/i boolean, al
+  # left|center|right, bg #rrggbb) — tighter than set_cell's lax
+  # override_style, whose "s" arrives copied from an already-stored cell
+  # (fill) or an import. Formatting an EMPTY cell is REFUSED (empty_cell): the
+  # model has no empty-but-formatted cell (clear_cell's comment locks that),
+  # so a meta write onto a blank ref would plant a phantom the next
   # clear/retype silently drops. A merge-covered ref is refused like set_cell
   # (merged_cell). The inverse is the existing {:cell, …, prior} undo shape.
   def apply_one(%{"op" => "set_cell_meta", "tab" => tab, "ref" => ref} = op, state) do
@@ -128,6 +130,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
          prior = cell_before(state, tab_idx, ref),
          {:ok, prior} <- refuse_empty_meta(prior),
          {:ok, cell} <- override_fmt(op, prior),
+         {:ok, cell} <- override_cur(op, cell),
          {:ok, cell} <- override_meta_style(op, cell) do
       inverse = {:cell, tab_idx, ref, prior}
       {:ok, apply_cell(state, tab_idx, ref, cell, true), inverse}
@@ -350,9 +353,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Rename a tab. CROSS-TAB (CT / wave-1): because refs are NAME-based
   # (design decision 1), a rename rewrites every `OldName!`/`'Old Name'!`
   # qualifier across ALL OTHER tabs to the new name — that sweep is owned by
-  # `Structure.rename_refs/3` (X2), wired here behind a `function_exported?`
-  # guard so this slice compiles + gates BEFORE X2 merges (no-op until then;
-  # the own-tab rename always works). The named SILENT-CORRUPTION hazard
+  # `Structure.rename_refs/3` (X2), called from `rename_cross_tab_refs/3`.
+  # The named SILENT-CORRUPTION hazard
   # (design §6): the sweep touches OTHER users' tabs, so the inverse MUST
   # capture the PRE-rewrite cells of every rewritten tab — the
   # `{:rename_restore, …}` multi-tab capture — or undo cannot restore the
@@ -585,7 +587,7 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   def apply_one(_op, _state) do
     {:error, "malformed_op",
      "op must be set_cell/clear_cell (\"tab\"+\"ref\"), " <>
-       "set_cell_meta (\"tab\"+\"ref\"+\"fmt\"?/\"s\"?), " <>
+       "set_cell_meta (\"tab\"+\"ref\"+\"fmt\"?/\"cur\"?/\"s\"?), " <>
        "insert_rows/delete_rows/insert_cols/delete_cols (\"tab\"+\"at\"+\"count\"), " <>
        "set_col_width (\"tab\"+\"col\"+\"px\"), set_row_height (\"tab\"+\"row\"+\"px\"), " <>
        "set_frozen (\"tab\"+\"rows\"+\"cols\"), " <>
@@ -1492,6 +1494,40 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end
   end
 
+  # "cur" (task-4fb1d8de887d8bc6) — an explicit write validates against
+  # Fmt.currency_codes and nil clears. Absent from the op, cur rides along
+  # UNCHANGED *unless* this same write just moved "fmt" away from
+  # "currency" (checked on `cell`, the post-override_fmt result): a
+  # "cur" orphaned on a non-currency cell is dead weight a later re-pick of
+  # "currency" would silently resurrect, so it is dropped here instead.
+  defp override_cur(op, cell) do
+    cond do
+      Map.has_key?(op, "cur") ->
+        case op["cur"] do
+          nil ->
+            {:ok, Map.delete(cell, "cur")}
+
+          cur when is_binary(cur) ->
+            if cur in Fmt.currency_codes() do
+              {:ok, Map.put(cell, "cur", cur)}
+            else
+              {:error, "invalid_cur",
+               "\"cur\" must be one of #{inspect(Fmt.currency_codes())} or null, got #{inspect(cur)}"}
+            end
+
+          other ->
+            {:error, "invalid_cur",
+             "\"cur\" must be a currency code string or null, got #{inspect(other)}"}
+        end
+
+      Map.get(cell, "fmt") != "currency" and Map.has_key?(cell, "cur") ->
+        {:ok, Map.delete(cell, "cur")}
+
+      true ->
+        {:ok, cell}
+    end
+  end
+
   defp override_style(op, cell) do
     if Map.has_key?(op, "s") do
       case op["s"] do
@@ -1991,24 +2027,25 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end)
   end
 
-  # ── X2 Structure integration seams (guarded until X2 merges) ─────────────
+  # ── X2 Structure integration seams ───────────────────────────────────────
   #
   # Cross-tab formula-text rewrites are owned by
   # `Barkpark.Plugins.Sheets.Structure` (X2) under the single-writer rule — this
-  # module never rewrites formula text itself. Each call is guarded on
-  # `function_exported?/3` so X3 compiles + gates on origin/main BEFORE X2
-  # lands; every seam is a NO-OP until then (own-tab work always happens; only
-  # the cross-tab ref rewrite waits on X2). The ASSUMED contracts below are the
-  # integration points the merging agent rebases if a signature differs.
+  # module never rewrites formula text itself. These calls were once guarded on
+  # `function_exported?/3` so X3 could merge before X2. That guard is false for
+  # a module the VM has not loaded yet, which is the normal state under
+  # interactive code loading (dev, `mix test`): the rewrites silently did
+  # nothing, so renaming a tab left other tabs' formulas pointing at the old
+  # name (task-12b3b4e250901169). X2 has landed; the calls are direct.
 
   # `Structure.rename_refs(tabs, old_name, new_name) :: tabs` (X2) — rewrite
   # every `OldName!`/`'Old Name'!` qualifier across ALL tabs to the new name.
   # X2 operates on the `tabs` list (its module boundary); this session adapter
   # peels tabs off content and puts the rewritten list back (integration seam).
   defp rename_cross_tab_refs(content, old_name, new_name) do
-    if old_name != new_name and function_exported?(Structure, :rename_refs, 3) do
+    if old_name != new_name do
       tabs = Map.get(content, "tabs") || []
-      Map.put(content, "tabs", apply(Structure, :rename_refs, [tabs, old_name, new_name]))
+      Map.put(content, "tabs", Structure.rename_refs(tabs, old_name, new_name))
     else
       content
     end
@@ -2018,12 +2055,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # ref to the deleted tab, across all tabs, to the literal `#REF!`. Same
   # content↔tabs adapter as rename above.
   defp delete_cross_tab_refs(content, deleted_name) do
-    if function_exported?(Structure, :delete_tab_refs, 2) do
-      tabs = Map.get(content, "tabs") || []
-      Map.put(content, "tabs", apply(Structure, :delete_tab_refs, [tabs, deleted_name]))
-    else
-      content
-    end
+    tabs = Map.get(content, "tabs") || []
+    Map.put(content, "tabs", Structure.delete_tab_refs(tabs, deleted_name))
   end
 
   # `Structure.shift_cross_tab_refs(tabs, target_index, axis, {kind, at, count})
@@ -2032,14 +2065,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Session adapter: peel tabs off content, call X2 with the tab INDEX + change
   # tuple, put the rewritten list back (the X2 seam — content↔tabs + /4 shape).
   defp apply_cross_tab_shift(state, target_index, axis, {_kind, _at, _count} = change) do
-    if function_exported?(Structure, :shift_cross_tab_refs, 4) do
-      before = state.content
-      tabs = Map.get(before, "tabs") || []
-      new_tabs = apply(Structure, :shift_cross_tab_refs, [tabs, target_index, axis, change])
-      commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
-    else
-      state
-    end
+    before = state.content
+    tabs = Map.get(before, "tabs") || []
+    new_tabs = Structure.shift_cross_tab_refs(tabs, target_index, axis, change)
+    commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
   end
 
   # Commit an X2 cross-tab content transform: when it changed anything, swap the

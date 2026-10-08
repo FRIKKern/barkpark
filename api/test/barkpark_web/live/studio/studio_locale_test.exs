@@ -130,4 +130,118 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     assert html =~ "Structure"
     assert Tenancy.workspace_locale(default_ws) == "en"
   end
+
+  # task-33bcb0b4415bc528: the top bar, panes and profile chrome stayed English
+  # around the translated parts.
+  test "the nb-NO top bar, profile and presence chrome are Norwegian", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, editor(ws, proj))
+
+    assert html =~ ~s(aria-label="Logg ut")
+    assert html =~ ~s(aria-label="Bytt mellom mørkt og lyst tema")
+    assert html =~ "Bytt arbeidsområde — Locale Twin"
+    assert html =~ "— åpne profilen din"
+    assert html =~ "Tilbake til Struktur"
+    # The media picker's broken-image card reads the stamped strings too.
+    assert html =~ "Bildet er ikke tilgjengelig — slipp en fil her, eller klikk for å bytte"
+    assert html =~ "Bytt bilde"
+    refute html =~ ~s(aria-label="Sign out")
+    refute html =~ "Switch scope —"
+    refute html =~ "open your profile"
+  end
+
+  test "the default workspace keeps the English top bar", %{conn: conn} do
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+    {:ok, _view, html} = live(conn, desk(default_ws, default_proj))
+
+    assert html =~ ~s(aria-label="Sign out")
+    assert html =~ "Switch scope —"
+  end
+
+  # task-f2d81f691f447ed9: the sheet editor's toolbar, menus and grid
+  # instructions stayed English in an nb-NO workspace.
+  test "the nb-NO sheet editor is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "sheet",
+          "title" => "Sheets",
+          "visibility" => "private",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => "sheet-loc",
+          "content" => %{"tabs" => [%{"name" => "Data", "cells" => %{"A1" => %{"v" => 1}}}]}
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet/sheet-loc")
+
+    assert html =~ ~s(aria-label="Arkformatering")
+    assert html =~ ~s(aria-label="Valutaformat")
+    assert html =~ "Slå sammen"
+    assert html =~ ~s(aria-label="Meny for kolonne A")
+    assert html =~ "Trykk Escape og så Tab for å forlate rutenettet."
+    assert html =~ "Gul"
+    assert html =~ ~s(aria-label="Fet")
+    refute html =~ ~s(aria-label="Sheet formatting")
+    refute html =~ "Press Escape then Tab"
+  end
+
+  # task-c227351a938bcf9c: the page was declared English whatever the chrome
+  # spoke, so a screen reader read Norwegian Studio with an English voice.
+  test "the page language follows the workspace's Studio language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    nb = conn |> get(desk(ws, proj)) |> html_response(200)
+    assert nb =~ ~s(<html lang="nb-NO")
+
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    en =
+      conn
+      |> get("/w/#{default_ws.slug}/p/#{default_proj.slug}/d/#{@dataset}/studio")
+      |> html_response(200)
+
+    assert en =~ ~s(<html lang="en")
+  end
+
+  # task-623e30911e8ff328: the Studio dialogs stayed English in an nb-NO
+  # workspace, and history times read "Oct 06, 2026 at 07:25:45".
+  test "the nb-NO history dialog is Norwegian, with a Norwegian time", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+    html = render_click(view, "show-history", %{})
+
+    assert html =~ "Dokumenthistorikk"
+    assert html =~ "Opprettet"
+    assert html =~ "Gjenopprett"
+    assert html =~ "Gjenopprette denne versjonen? Gjeldende endringer blir overskrevet."
+
+    assert html =~
+             ~r/\d\d\. (jan\.|feb\.|mars|apr\.|mai|juni|juli|aug\.|sep\.|okt\.|nov\.|des\.) \d{4} kl\. \d\d:\d\d:\d\d/
+
+    refute html =~ "Document history"
+    refute html =~ ~r/[A-Z][a-z]{2} \d\d, \d{4} at \d\d:/
+  end
 end

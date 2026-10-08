@@ -476,12 +476,24 @@ defmodule Barkpark.Media do
   @doc """
   Patch metadata on the linked `mediaAsset` document. Creates the asset
   document if missing. Does not mutate blob fields (`fileInfo`, `mediaFileId`).
+
+  Does NOT require the `mediaAsset` schema to be pre-registered for
+  `dataset` (task-8ddfc18c98283581). A `with` clause here used to gate on
+  a raw `Content.get_schema/2` lookup — its result was never read
+  (`{:ok, _schema}`), so it was a pure existence check, and it was the ONLY
+  thing in this function that needed the schema to exist. `ensure_asset_doc/1`
+  (via `Assets.create_draft/1`) creates the asset document with a bare
+  `Content.create_document/4` call that asks for no schema at all — so a
+  freshly-created dataset (`Tenancy.get_or_create_dataset/2` mints one on a
+  slug nobody registered schemas for yet, e.g. an e2e/CI dataset) could
+  UPLOAD an asset into it and then never edit its metadata: every
+  `PATCH /v1/media/:dataset/:id` 404'd "document not found" on this gate
+  alone, even though the asset doc it names exists and resolves fine.
   """
   @spec patch_asset_metadata(MediaFile.t(), map(), String.t()) ::
           {:ok, struct()} | {:error, term()}
   def patch_asset_metadata(%MediaFile{} = file, params, dataset) when is_map(params) do
-    with {:ok, doc} <- ensure_asset_doc(file),
-         {:ok, _schema} <- Content.get_schema(@asset_type, dataset) do
+    with {:ok, doc} <- ensure_asset_doc(file) do
       patch = pick_metadata(params)
       title = Map.get(patch, "title", doc.title)
       content_patch = Map.drop(patch, ["title"])

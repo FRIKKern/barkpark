@@ -128,6 +128,42 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
     assert subs == ["Author", "Publication"]
   end
 
+  # task-b4e6fba573777ba3: a type whose schema is a SHARED row (workspace_id
+  # NULL, as a plugin registers it) was missing from the listed catalog, so the
+  # hit read its raw id ("paper").
+  test "a hit whose type is a shared schema row is labelled by that schema's title",
+       %{conn: conn, ws: ws, proj: proj, scope: scope} do
+    {:ok, _} =
+      %Barkpark.Content.SchemaDefinition{}
+      |> Barkpark.Content.SchemaDefinition.changeset(%{
+        "name" => "deskshared",
+        "title" => "Shared Things",
+        "dataset" => @dataset,
+        "visibility" => "public",
+        "fields" => [%{"name" => "title", "title" => "Tittel", "type" => "string"}]
+      })
+      |> Barkpark.Repo.insert()
+
+    {:ok, _} =
+      Content.upsert_document(
+        "deskshared",
+        %{"doc_id" => "shared-nord", "title" => "Nordlys", "status" => "published"},
+        @dataset,
+        Keyword.put(scope, :source, :api)
+      )
+
+    {view, _} = desk(conn, ws, proj)
+    html = type_in(view, "nordlys")
+
+    subs =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(~s([data-test-id="desk-search-hit"] .pane-doc-sub))
+      |> Enum.map(&LazyHTML.text/1)
+
+    assert subs == ["Shared Things"]
+  end
+
   # Stranger walk, 2026-09-30: a never-published document was unsearchable.
   # Its hit links by the PUBLISHED id, the address every Studio path uses —
   # never the `drafts.` row id.

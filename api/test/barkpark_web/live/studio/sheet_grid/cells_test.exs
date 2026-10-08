@@ -37,6 +37,15 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       refute Cells.display(%{"v" => 123_456_789.123}) =~ "e"
     end
 
+    # "cur" wiring (task-4fb1d8de887d8bc6): Fmt.display/3 itself is unit-
+    # locked in fmt_test.exs; this only proves the grid forwards a cell's
+    # "cur" to it rather than rendering the implicit USD unconditionally.
+    test "a currency cell's \"cur\" selects the matching symbol" do
+      assert Cells.display(%{"v" => 150, "fmt" => "currency"}) == "$150.00"
+      assert Cells.display(%{"v" => 150, "fmt" => "currency", "cur" => "NOK"}) == "150.00 kr"
+      assert Cells.display(%{"v" => 150, "fmt" => "currency", "cur" => "EUR"}) == "€150.00"
+    end
+
     test "extreme magnitudes keep exponent form, like Excel General" do
       assert Cells.display(%{"v" => 1.0e-7}) =~ "e"
       assert Cells.display(%{"v" => 1.0e21}) =~ "e"

@@ -6,6 +6,17 @@ defmodule BarkparkWeb.PaperAccessController do
   `Barkpark.Content.PaperAccess`: rows NEWEST FIRST, bounded by `?limit=`
   (default 100, hard cap 500), optionally narrowed by `?dataset=`.
 
+  ## Paging past the first N (task-fb4cf8323a9795e5)
+
+  The trail is unbounded (90-day retention, `PaperAccess.ttl_days/0`), so a
+  bounded top-N with no signal left a caller holding a full page unable to
+  tell it from the whole log. Every page now carries `has_more` and
+  `next_offset`, the same contract `SecretController.audit/2` already gives
+  its own unbounded trail: `has_more` is derived by fetching ONE row past
+  `limit` and dropping it (never a separate COUNT that could disagree with
+  the page), and `next_offset` is `nil` exactly when `has_more` is false.
+  Walk with `?offset=<next_offset>` until `has_more` is false.
+
   ## Why `:flat_admin_api`
 
   Because it is a flat admin surface, and that is the pipeline flat admin
@@ -39,13 +50,21 @@ defmodule BarkparkWeb.PaperAccessController do
 
   def index(conn, %{"slug" => slug} = params) do
     opts = scope_opts(conn)
+    limit = parse_limit(params["limit"])
+    offset = parse_offset(params["offset"])
 
-    rows =
+    # ONE row past the page decides `has_more`; it is dropped before render —
+    # the same technique SecretController.audit/2 uses for the same reason.
+    fetched =
       PaperAccess.list(slug,
         workspace_id: Keyword.get(opts, :workspace_id),
         dataset: dataset_param(params),
-        limit: parse_limit(params["limit"])
+        limit: limit + 1,
+        offset: offset
       )
+
+    has_more = length(fetched) > limit
+    rows = Enum.take(fetched, limit)
 
     json(conn, %{
       slug: slug,
@@ -53,7 +72,13 @@ defmodule BarkparkWeb.PaperAccessController do
         rows
         |> Barkpark.Accounts.Privacy.redact_actor_labels()
         |> Enum.map(&render_row/1),
-      count: length(rows)
+      count: length(rows),
+      limit: limit,
+      offset: offset,
+      has_more: has_more,
+      # Minted from the SAME `has_more` that promises it, so the signal and
+      # its continuation cannot drift apart.
+      next_offset: if(has_more, do: offset + length(rows))
     })
   end
 
@@ -89,4 +114,16 @@ defmodule BarkparkWeb.PaperAccessController do
   defp parse_limit(_raw), do: @default_limit
 
   defp clamp(n), do: n |> max(1) |> min(@max_limit)
+
+  defp parse_offset(nil), do: 0
+
+  defp parse_offset(raw) when is_binary(raw) do
+    case Integer.parse(raw) do
+      {n, _} -> max(n, 0)
+      :error -> 0
+    end
+  end
+
+  defp parse_offset(raw) when is_integer(raw), do: max(raw, 0)
+  defp parse_offset(_raw), do: 0
 end

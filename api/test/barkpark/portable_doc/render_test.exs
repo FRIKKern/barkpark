@@ -79,7 +79,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
     test "emits only the body fragment when doctype: false" do
       html = Render.render_html(%{"kind" => "PdHr"}, %{doctype: false})
-      assert html == ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+      assert html == ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
     end
   end
 
@@ -426,7 +426,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
     test "PdHr respects thickness, defaults to 1" do
       assert Render.render_html(%{"kind" => "PdHr", "thickness" => 2}, @opts) ==
-               ~s(<hr style="border:none;border-top:2px solid #dde7e2;margin:30px 0 26px">)
+               ~s(<hr style="border:none;border-top:2px solid #e2e6e5;margin:30px 0 26px">)
     end
 
     test "PdImage emits dims and escapes alt; safe src" do
@@ -455,8 +455,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       assert Render.render_html(node, @opts) ==
                ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0"><tbody>) <>
-                 ~s(<tr><td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>A</span></td>) <>
-                 ~s(<td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>B</span></td></tr>) <>
+                 ~s(<tr><td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>A</span></td>) <>
+                 ~s(<td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>B</span></td></tr>) <>
                  ~s(</tbody></table>)
     end
 
@@ -469,7 +469,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<div style="border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0"><div style="color:#8a6420;font-weight:600;margin:0 0 6px">Heads up</div><span>body</span></div>)
+               ~s(<div style="border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px"><span style="color:#8a6420">&#9679;</span>&nbsp; Heads up</div><span>body</span></div>)
     end
   end
 
@@ -509,7 +509,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
     test "divider composes to an hr" do
       assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
-               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+               ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
     end
 
     test "callout uses tone palette and title (matches fixture block shape)" do
@@ -522,8 +522,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<div style="border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0">) <>
-                 ~s(<div style="color:#8a6420;font-weight:600;margin:0 0 6px">Degraded</div><span>API latency is elevated.</span></div>)
+               ~s(<div style="border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0">) <>
+                 ~s(<div style="font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px"><span style="color:#8a6420">&#9679;</span>&nbsp; Degraded</div><span>API latency is elevated.</span></div>)
     end
 
     test "action composes to a primary button" do
@@ -555,7 +555,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
 
       html = Render.render_block(block)
       # Leading + trailing hr from the composed section sub-tree.
-      assert html =~ ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+      assert html =~ ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
       assert html =~ ~s(<span style="font-weight:bold">Highlights</span>)
       assert html =~ email_p("Body.")
     end
@@ -923,7 +923,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
                ~s(<p style="margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px">Kicker</p>)
 
       assert byline ==
-               ~s(<p style="border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px">Author</p>)
+               ~s(<p style="border-bottom:1px solid #e2e6e5;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px">Author</p>)
 
       assert ingress == ~s(<p style="margin:0 0 10px;line-height:1.55;font-size:18px">Lead</p>)
     end
@@ -1648,7 +1648,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_diagram
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption class="bp-figcaption">The three-stage pipeline</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto"><pre class="mermaid">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><figcaption class="bp-figcaption">The three-stage pipeline</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><pre style="background:#f3f4f6;padding:12px;font-family:ui-monospace,Menlo,monospace;font-size:0.9em;overflow:auto;white-space:pre-wrap">graph TD; A[Ingest] --&gt; B[Render] --&gt; C[Publish]</pre><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">The three-stage pipeline</div></figure>|
@@ -1658,7 +1658,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       input = @pd_parity_input_asciicast
 
       assert Render.render_block(input, %{style: :article}) ==
-               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
+               ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto"><div class="bp-asciicast" data-cast-src="https://example.com/casts/demo.cast" data-cast-poster="npt:0:12" style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div><figcaption class="bp-figcaption">A terminal walkthrough</figcaption></figure>|
 
       assert Render.render_block(input, %{style: :email}) ==
                ~s|<figure style="margin:16px 0"><a href="https://example.com/casts/demo.cast">Terminal recording</a><div style="color:#6b7280;font-style:italic;font-size:0.9em;margin-top:8px">A terminal walkthrough</div></figure>|
@@ -1740,7 +1740,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       # Stage 2 wave 2: body cells are class-driven (`.bp-table__td` owns the
       # warm rule colour); no inline theme, and never the email gray.
       assert html =~ ~s(<td class="bp-table__td">)
-      refute html =~ "#dde7e2"
+      refute html =~ "#e2e6e5"
     end
 
     test "article mode emits a <thead>/<th> band when an explicit head row is supplied" do
@@ -1813,7 +1813,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       refute html =~ "<th "
 
       assert html =~
-               ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0"><tbody><tr><td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>Name</span></td><td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>Role</span></td></tr><tr><td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>Pelle</span></td><td style="border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top"><span>Author</span></td></tr></tbody></table>)
+               ~s(<table role="presentation" style="border-collapse:collapse;width:100%;margin:18px 0"><tbody><tr><td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>Name</span></td><td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>Role</span></td></tr><tr><td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>Pelle</span></td><td style="border-bottom:1px solid #e2e6e5;padding:10px 12px;vertical-align:top"><span>Author</span></td></tr></tbody></table>)
     end
   end
 
@@ -1854,7 +1854,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
     test "article mode renders the § glyph straddling a hairline rule" do
       html = Render.render_block(@divider, %{style: :article})
       assert html =~ "§"
-      assert html =~ "border-top:1px solid var(--paper-rule, #dde7e2)"
+      assert html =~ "border-top:1px solid var(--paper-rule, #e2e6e5)"
       refute html =~ "<hr"
     end
 
@@ -1862,7 +1862,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       html = Render.render_block(@divider, %{style: :email})
 
       assert html ==
-               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+               ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
 
       refute html =~ "§"
     end
@@ -2070,7 +2070,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
   describe "regression — existing block email output byte-unchanged (P4)" do
     test "divider email output is byte-identical" do
       assert Render.render_block(%{"id" => "d", "type" => "divider"}) ==
-               ~s(<hr style="border:none;border-top:1px solid #dde7e2;margin:30px 0 26px">)
+               ~s(<hr style="border:none;border-top:1px solid #e2e6e5;margin:30px 0 26px">)
     end
 
     test "bold heading email output is byte-identical" do

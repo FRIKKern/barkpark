@@ -797,16 +797,35 @@ defmodule Barkpark.Content.Writer do
         # in `create_document/4` runs BEFORE this step; `apply_initial_values`
         # can deep-merge a schema-declared `content["blocks"]` that lacks ids
         # AFTER it. Re-run the SAME chokepoint so the final block list is always
-        # id-bearing. (No projection on this v1 path, so there is no body-mirror
-        # to keep in sync.) Additive + idempotent.
+        # id-bearing. Additive + idempotent. A create that carries a block list
+        # then projects it, as a patch does: bound fields, body and preview are
+        # stored at birth, not after the first save (task-b43256e0d9d90733).
         attrs
         |> apply_initial_values(type, dataset)
         |> maybe_ensure_block_ids()
+        |> maybe_project_created_content(dataset)
     end
   end
 
   defp scaffold_or_initial_values(attrs, type, dataset),
     do: maybe_ensure_block_ids(apply_initial_values(attrs, type, dataset))
+
+  # Project-on-create, with one difference from a patch: a `body` the caller
+  # sent is kept. An importer that carries a rendered body beside blocks the
+  # projection cannot render (Sanity-shaped `_type`/`children`) would otherwise
+  # lose its text at birth.
+  defp maybe_project_created_content(attrs, dataset) do
+    given_body = attrs |> Map.get("content") |> body_given()
+    attrs = maybe_project_document_content(attrs, dataset)
+
+    case given_body do
+      {:ok, body} -> put_in(attrs, ["content", "body"], body)
+      :error -> attrs
+    end
+  end
+
+  defp body_given(%{"body" => body}), do: {:ok, body}
+  defp body_given(_content), do: :error
 
   # Build the scaffold block list from the schema's Expectation + provided
   # values, persist it under content["blocks"], and project. The row title
@@ -823,6 +842,51 @@ defmodule Barkpark.Content.Writer do
       |> Map.put_new("title", Map.get(attrs, "title"))
       |> drop_nil_values()
 
+    case Map.get(provided, "blocks") do
+      [_ | _] = given ->
+        keep_given_blocks(attrs, provided, given, values, layout, prefill, dataset, schema)
+
+      _ ->
+        scaffold_blocks(attrs, provided, values, layout, prefill, dataset, schema)
+    end
+  end
+
+  # A create that carries its own block list authored the document: keep it
+  # (task-ca8ea94527d39fa0 — the scaffold used to replace it). Prefill fills
+  # only the layout fields the create leaves empty: bound by no given block and
+  # absent from the given content.
+  defp keep_given_blocks(attrs, provided, given, values, layout, prefill, dataset, schema) do
+    bound = for %{"fieldName" => name} <- given, is_binary(name), into: MapSet.new(), do: name
+
+    fills =
+      for %{"kind" => "field", "name" => name} <- layout,
+          not MapSet.member?(bound, name),
+          not Map.has_key?(values, name),
+          Map.has_key?(prefill, name),
+          into: %{},
+          do: {name, Map.get(prefill, name)}
+
+    blocks =
+      given
+      |> BlockOps.ensure_block_ids()
+      |> BlockOps.normalize_render_shapes()
+
+    content =
+      provided
+      |> Map.merge(fills)
+      |> Map.put("blocks", blocks)
+      |> Projection.project(blocks, doc_render_opts(dataset, schema.name, attrs))
+
+    content =
+      case body_given(provided) do
+        {:ok, body} -> Map.put(content, "body", body)
+        :error -> content
+      end
+
+    Map.put(attrs, "content", content)
+  end
+
+  defp scaffold_blocks(attrs, provided, values, layout, prefill, dataset, schema) do
     # R2 chokepoint (id-less backfill). `Synthesis.scaffold` mints synth ids for
     # every bound field-block, but the body region can be a caller-provided
     # `%{"blocks" => [...]}` reused VERBATIM (see `scaffold_body_blocks/2`) whose

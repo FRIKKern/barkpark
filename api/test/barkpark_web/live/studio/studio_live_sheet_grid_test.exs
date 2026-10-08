@@ -330,6 +330,37 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
   end
 
+  test "the currency picker formats the active cell as kroner, in one op (task-4fb1d8de887d8bc6)",
+       %{conn: conn} do
+    create_sheet!("sg-cur", one_tab(%{"A1" => %{"v" => 1234.5}}))
+    {view, target, _html} = open!(conn, "sg-cur")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    refute cell_a1.() =~ "kr"
+
+    view
+    |> element(~s(form[phx-change="set-currency"]))
+    |> render_change(%{"cur" => "NOK"})
+
+    # One picker change both formats the cell AND names its currency —
+    # fmt="currency" + cur="NOK" land in the SAME set_cell_meta op.
+    assert cell_a1.() =~ "1,234.50 kr"
+
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency", "cur" => "NOK"}} =
+             peek_cells("sg-cur")
+
+    # Reselecting "USD ($)" (cur: nil) is byte-identical to the plain $
+    # button — the implicit default, existing $ cells unchanged.
+    view
+    |> element(~s(form[phx-change="set-currency"]))
+    |> render_change(%{"cur" => ""})
+
+    assert cell_a1.() =~ "$1,234.50"
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = cells = peek_cells("sg-cur")
+    refute Map.has_key?(cells["A1"], "cur")
+  end
+
   test "the Checkbox fmt option stamps checkbox on the active cell and renders the glyph",
        %{conn: conn} do
     create_sheet!("sg-cb-apply", one_tab(%{"A1" => %{"v" => false}}))
@@ -1984,6 +2015,130 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     render_keydown(target, "tab-rename-cancel", %{"key" => "Escape"})
     refute render(view) =~ ~s(data-test-id="sheet-tab-rename-input")
     assert has_element?(view, ~s([data-test-id="sheet-tab-0"]))
+  end
+
+  # task-12b3b4e250901169: F2 opened the input but nothing focused it, and
+  # Enter/Escape dropped focus to <body> when the button came back. The
+  # SheetTabRename hook moves focus (pinned in assets/sheet-grid/
+  # __tabrename.test.mjs); this pins the markup it depends on.
+  test "the rename input mounts the focus hook, and tabs keep stable ids", %{conn: conn} do
+    create_sheet!("sg-rename-focus", [
+      %{"name" => "Sheet 1", "cells" => %{}},
+      %{"name" => "Sheet 2", "cells" => %{}}
+    ])
+
+    {view, target, _html} = open!(conn, "sg-rename-focus")
+
+    tab1_id = view |> element(~s([data-test-id="sheet-tab-1"])) |> render() |> attr_id()
+    assert tab1_id =~ ~r/-tab-1$/
+
+    render_keydown(target, "tab-rename-start", %{"tab" => "0", "key" => "F2"})
+
+    input = view |> element(~s([data-test-id="sheet-tab-rename-input"])) |> render()
+    assert input =~ ~s(phx-hook="SheetTabRename")
+    assert attr_id(input) =~ ~r/-tab-rename$/
+
+    # The neighbour keeps its id while tab 0 is a form, so the DOM patch that
+    # swaps the button back cannot re-use the focused neighbour's node.
+    assert view |> element(~s([data-test-id="sheet-tab-1"])) |> render() |> attr_id() == tab1_id
+  end
+
+  defp attr_id(html),
+    do: html |> then(&Regex.run(~r/\sid="([^"]+)"/, &1, capture: :all_but_first)) |> List.first()
+
+  # task-880a2d3f48ccbfcb: the select was named "Number format class".
+  test "the number-format select is labelled Number format", %{conn: conn} do
+    create_sheet!("sg-fmt-label", [%{"name" => "Sheet 1", "cells" => %{}}])
+    {view, _target, _html} = open!(conn, "sg-fmt-label")
+
+    select = view |> element(~s([data-test-id="sheet-fmt-select"])) |> render()
+    assert select =~ ~s(aria-label="Number format")
+    refute select =~ "Number format class"
+  end
+
+  # task-028c354f7f24fb65: the filter and conditional-format dialogs never took
+  # focus, and closing them dropped it; each now focuses its first control when
+  # it opens and hands focus back to the button that opened it.
+  test "the filter and CF dialogs take focus and return it to their trigger", %{conn: conn} do
+    create_sheet!("sg-dialog-focus", [%{"name" => "Sheet 1", "cells" => %{"A1" => %{"v" => 1}}}])
+    {view, target, _html} = open!(conn, "sg-dialog-focus")
+    grid = "sheet-grid-sg-dialog-focus"
+
+    funnel = view |> element(~s([data-test-id="sheet-filter-funnel-1"])) |> render()
+    assert funnel =~ ~s(id="#{grid}-filter-funnel-1")
+
+    render_click(target, "filter-open", %{"col" => "1"})
+    assert_push_event(view, "bp:sheet-focus-first", %{id: form_id})
+    assert form_id == "#{grid}-filter-form-1"
+    assert has_element?(view, "form##{form_id}")
+    panel = view |> element(~s([data-test-id="sheet-filter-panel"])) |> render()
+    # The funnel is no Tab stop in an editable grid (task-5201a73e33535129), so
+    # a closed filter hands focus back to the grid it was opened from.
+    assert panel =~ ~r/phx-window-keydown="[^"]*filter-close[^"]*#{grid}-grid&quot;/
+
+    close = view |> element(~s([data-test-id="sheet-filter-close"])) |> render()
+    assert close =~ ~r/phx-click="[^"]*filter-close[^"]*#{grid}-grid&quot;/
+
+    render_click(target, "cf-open", %{})
+    assert_push_event(view, "bp:sheet-focus-first", %{id: cf_id})
+    assert cf_id == "#{grid}-cf-panel"
+    cf = view |> element(~s([data-test-id="sheet-cf-panel"])) |> render()
+    assert cf =~ ~s(id="#{cf_id}")
+    assert cf =~ ~r/phx-window-keydown="[^"]*cf-close[^"]*#{grid}-cf-btn/
+  end
+
+  # task-5201a73e33535129: leaving the sheet by keyboard took ~70 Tabs.
+  test "the toolbar is one Tab stop and the header controls are not Tab stops", %{conn: conn} do
+    create_sheet!("sg-tab-stops", [%{"name" => "Sheet 1", "cells" => %{"A1" => %{"v" => 1}}}])
+    {view, _target, html} = open!(conn, "sg-tab-stops")
+
+    toolbar = view |> element(~s([data-test-id="sheet-toolbar"])) |> render()
+    assert toolbar =~ ~s(role="toolbar")
+    assert toolbar =~ ~s(phx-hook="SheetToolbar")
+    assert toolbar =~ ~s(id="sheet-grid-sg-tab-stops-toolbar")
+
+    menu_btns =
+      Regex.scan(~r/<button[^>]*class="sheet-head-menu-btn"[^>]*>/, html) |> List.flatten()
+
+    funnels =
+      Regex.scan(~r/<button[^>]*class="sheet-filter-funnel[^"]*"[^>]*>/, html) |> List.flatten()
+
+    assert menu_btns != [] and funnels != []
+    assert Enum.all?(menu_btns ++ funnels, &(&1 =~ ~s(tabindex="-1")))
+
+    strip = view |> element(~s([data-test-id="sheet-tabs"])) |> render()
+    assert strip =~ ~s(phx-hook="SheetToolbar")
+    assert strip =~ ~s(data-roving-follow="selected")
+
+    instructions = view |> element("#sheet-grid-sg-tab-stops-grid-instructions") |> render()
+    assert instructions =~ "Alt+Down opens the column filter"
+    assert instructions =~ "Shift+F10"
+  end
+
+  # task-d4619e875ace82ca: toolbar buttons were named "$", "%", ",", "⯇", "≡",
+  # "⯈", "⌫", and the swatches by hex code.
+  test "every toolbar button has a word name; swatches are named by colour", %{conn: conn} do
+    create_sheet!("sg-btn-names", [%{"name" => "Sheet 1", "cells" => %{}}])
+    {view, target, _html} = open!(conn, "sg-btn-names")
+    toolbar = view |> element(~s([data-test-id="sheet-toolbar"])) |> render()
+
+    for name <- [
+          "Currency format",
+          "Percent format",
+          "Thousands separator",
+          "Align left",
+          "Align center",
+          "Align right",
+          "Clear background",
+          "Yellow background",
+          "Grey background"
+        ] do
+      assert toolbar =~ ~s(aria-label="#{name}"), "no toolbar control named #{name}"
+    end
+
+    render_click(target, "cf-open", %{})
+    cf = view |> element(~s([data-test-id="sheet-cf-panel"])) |> render()
+    assert cf =~ ~s(aria-label="Blue background")
   end
 
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do

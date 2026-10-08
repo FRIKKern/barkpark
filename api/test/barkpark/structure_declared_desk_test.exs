@@ -99,6 +99,27 @@ defmodule Barkpark.StructureDeclaredDeskTest do
 
   defp ids(nodes), do: Enum.map(nodes, &{&1.type, &1.title})
 
+  # task-9eafad70d2249770 — Sanity's `S.list().title('Innhold')`: the declared
+  # root title names the desk; without one the root keeps "Structure".
+  test "the declared root title names the desk" do
+    declare!(@tree)
+    assert Structure.build(@dataset).title == "Structure"
+
+    {:ok, _} =
+      Content.create_document(
+        "deskStructure",
+        %{
+          "doc_id" => "deskStructure",
+          "title" => "Desk",
+          "content" => %{"title" => "Innhold", "items" => @tree}
+        },
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+    assert Structure.build(@dataset).title == "Innhold"
+  end
+
   test "without a deskStructure document the default tree stands" do
     tree = Structure.build(@dataset)
     assert Enum.any?(tree.items, &(&1.id == "content-types"))

@@ -39,7 +39,7 @@ function scanStringLeaves(text) {
     i++; // opening "
     let out = "";
     while (text[i] !== '"') {
-      if (text[i] === "\\") { out += JSON.parse(`"${text.slice(i, i + 2)}"`); i += 2; }
+      if (text[i] === "\\") { const n = text[i + 1] === "u" ? 6 : 2; out += JSON.parse(`"${text.slice(i, i + n)}"`); i += n; } // \uXXXX is six bytes, not two
       else { out += text[i]; i++; }
     }
     i++; // closing "

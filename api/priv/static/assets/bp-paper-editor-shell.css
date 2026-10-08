@@ -361,7 +361,7 @@
       font-style: italic;
       font-size: 1.2rem;
       color: var(--paper-ink-soft);
-      border-left: 3px solid var(--paper-reading-accent);
+      border-left: 3px solid var(--paper-rule);
       border-bottom: 0;
       margin: 1.6rem 0;
       padding: 0.2rem 0 0.2rem 1.2rem;
@@ -726,7 +726,7 @@
     .bp-paper-editor-body > h2,
 .bp-paper-editor-body > .ProseMirror > h2 {
       margin-top: var(--bp-section-beat);
-      border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+      border-top: var(--bp-section-rule) solid var(--paper-rule);
       padding-top: var(--bp-section-gap);
       margin-inline: var(--bp-evidence-pull, 0px);
       width: var(--bp-evidence-width, 100%);
@@ -798,7 +798,7 @@
     .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
     .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
     .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
@@ -1091,7 +1091,7 @@
          inlined paper-surface.css `.bp-pnode*` rules — keep BYTE-ALIGNED with the
          styles.css + paper-surface.css copies (the card THREE-copy lockstep). */
     .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-    .bp-canvas-stage--src { border-color: var(--paper-accent); }
+    .bp-canvas-stage--src { border-color: var(--paper-ink-faint); }
     .bp-canvas-stage__k, .bp-canvas-stage__t, .bp-canvas-stage__d, .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
     .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
     .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
@@ -1426,7 +1426,7 @@
       --paper-bg:          #fbfaf6;
       --paper-ink:         #1f1a14;
       --paper-ink-soft:    #5b524a;
-      --paper-ink-faint:   #8a8278;
+      --paper-ink-faint:   #787067;
       --paper-rule:        rgba(31, 26, 20, 0.08);
       --paper-rule-soft:   rgba(31, 26, 20, 0.04);
       --paper-accent:      #a23925;
@@ -1438,7 +1438,7 @@
       --paper-bg:          #1b1815;
       --paper-ink:         #ece6dc;
       --paper-ink-soft:    #b8ad9e;
-      --paper-ink-faint:   #7f7568;
+      --paper-ink-faint:   #908679;
       --paper-rule:        rgba(236, 230, 220, 0.10);
       --paper-rule-soft:   rgba(236, 230, 220, 0.05);
       --paper-accent:      #d97a5f;
@@ -1451,7 +1451,7 @@
       --paper-bg:          #fbfaf6;
       --paper-ink:         #1f1a14;
       --paper-ink-soft:    #5b524a;
-      --paper-ink-faint:   #8a8278;
+      --paper-ink-faint:   #787067;
       --paper-rule:        rgba(31, 26, 20, 0.08);
       --paper-rule-soft:   rgba(31, 26, 20, 0.04);
       --paper-accent:      #a23925;
@@ -1500,6 +1500,8 @@
     }
     .bp-slash-item:hover,
     .bp-slash-item.is-active { background: var(--paper-accent-soft); }
+    /* A finger needs a 44px row (task-be754bd628311c5f). */
+    @media (hover: none), (max-width: 768px) { .bp-slash-item { min-height: 44px; } }
     .bp-slash-hint {
       flex: 0 0 16px;
       display: inline-flex; align-items: center; justify-content: center;
@@ -2587,6 +2589,11 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-handle__btn:hover { background: var(--paper-edit-hover); color: var(--paper-ink); }
 .bp-block-handle__grip { cursor: grab; font-size: 14px; }
 .bp-block-handle--dragging .bp-block-handle__grip { cursor: grabbing; }
+/* Touch (task-be754bd628311c5f): the handle follows the caret to the block's
+   top-right corner, and every target is 44px; the block menu rows too. */
+.bp-block-handle--touch { height: 44px; gap: 0; opacity: 1; }
+.bp-block-handle--touch .bp-block-handle__btn { width: 44px; height: 44px; }
+@media (hover: none), (max-width: 768px) { .bp-block-menu__item { min-height: 44px; } }
 .bp-block-drop { position: absolute; height: 2px; background: var(--paper-accent); border-radius: 1px; pointer-events: none; z-index: 6; }
 .bp-block-menu { position: absolute; z-index: 30; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
 .bp-block-menu__group { font-size: 10px; text-transform: uppercase; color: var(--paper-ink-soft); padding: 6px 8px 2px; }

@@ -22,13 +22,16 @@ export interface CellStyle {
 
 /** One cell in a sparse sheet tab. `v` is the computed value; `f` the formula
  * source; `t` an optional type hint ("n" | "s" | "b" | "d" | …); `s` the style
- * map; `fmt` the coarse format class ("percent" | "currency" | …). */
+ * map; `fmt` the coarse format class ("percent" | "currency" | …); `cur` an
+ * ISO 4217 code naming a `"currency"` cell's currency (task-4fb1d8de887d8bc6
+ * — absent/unrecognized is the implicit USD, unchanged). */
 export interface SheetCell {
   v?: unknown;
   f?: string;
   t?: string;
   s?: CellStyle;
   fmt?: string;
+  cur?: string;
 }
 
 /** One tab (worksheet) of a sheet document, in its raw sparse form. */
@@ -86,6 +89,9 @@ export interface DensifiedTab {
   styles: Record<string, CellStyle>;
   /** Per-cell format classes, keyed `"row,col"` over the FULL grid (0-based). */
   fmts: Record<string, string>;
+  /** Per-cell currency codes (only meaningful where `fmts` is `"currency"`),
+   * keyed `"row,col"` over the FULL grid (0-based). (task-4fb1d8de887d8bc6) */
+  curs: Record<string, string>;
   /** Number of frozen leading rows/cols (parsed from number or numeric string). */
   frozenRows: number;
   frozenCols: number;
@@ -99,6 +105,9 @@ export interface RenderModel {
   head?: unknown[];
   styles: Record<string, CellStyle>;
   fmts: Record<string, string>;
+  /** Per-cell currency codes, re-keyed to the BODY grid like `fmts`.
+   * (task-4fb1d8de887d8bc6) */
+  curs: Record<string, string>;
   merges: MergeRegion[];
 }
 
@@ -183,6 +192,25 @@ const FMT_CLASSES = new Set([
   "date",
   "datetime",
 ]);
+
+/** The six ISO 4217 codes a "currency" cell's `cur` may name. Mirrors
+ * `Fmt.currency_codes/0` in `api/lib/barkpark/plugins/sheets/fmt.ex`
+ * (task-4fb1d8de887d8bc6). */
+const CURRENCY_CODES = new Set(["USD", "EUR", "GBP", "NOK", "SEK", "DKK"]);
+
+/** `cur` → `{symbol, placement}`, the TS twin of `Fmt`'s `@currency_symbols`.
+ * Scandinavian currencies are a SUFFIX ("150,00 kr" customary place); the
+ * rest prefix, matching the pre-existing "$" shape. Unknown/absent is the
+ * pre-existing implicit USD "$" prefix. */
+const CURRENCY_SYMBOLS: Record<string, { symbol: string; suffix: boolean }> =
+  {
+    USD: { symbol: "$", suffix: false },
+    EUR: { symbol: "€", suffix: false },
+    GBP: { symbol: "£", suffix: false },
+    NOK: { symbol: "kr", suffix: true },
+    SEK: { symbol: "kr", suffix: true },
+    DKK: { symbol: "kr", suffix: true },
+  };
 
 /**
  * Excel-General-like number → display string. Twin of `Core.number_to_display/1`
@@ -332,14 +360,19 @@ export function displayValue(v: unknown): string {
 }
 
 /**
- * Render a cell value under its `fmt` class — the exact twin of `Fmt.display/2`.
+ * Render a cell value under its `fmt` class — the exact twin of `Fmt.display/3`.
  * Booleans always render TRUE/FALSE; number classes use half-away-from-zero
  * rounding (percent/fixed 2 decimals, thousands grouped integer, currency
- * `$`-prefixed with the sign OUTSIDE the symbol); date/datetime operate on ISO
- * strings; any type/class mismatch or absent/unknown fmt falls through to
- * {@link displayValue}.
+ * placed at its `cur`'s customary side with the sign OUTSIDE the symbol);
+ * date/datetime operate on ISO strings; any type/class mismatch or
+ * absent/unknown fmt falls through to {@link displayValue}.
+ *
+ * `cur` (ignored by every class but `"currency"`) is the cell's ISO 4217
+ * currency code; absent/unrecognized renders the pre-existing implicit USD
+ * "$" prefix, byte-identical to every currency cell formatted before
+ * per-cell currency existed (task-4fb1d8de887d8bc6).
  */
-export function formatDisplay(v: unknown, fmt?: string): string {
+export function formatDisplay(v: unknown, fmt?: string, cur?: string): string {
   if (typeof v === "boolean") return v ? "TRUE" : "FALSE";
 
   if (typeof v === "number" && Number.isFinite(v)) {
@@ -373,7 +406,12 @@ export function formatDisplay(v: unknown, fmt?: string): string {
       }
       case "currency": {
         const { neg, body } = formatNumber(v, 2, true);
-        return `${neg ? "-" : ""}$${body}`;
+        const { symbol, suffix } = CURRENCY_SYMBOLS[cur ?? ""] ?? {
+          symbol: "$",
+          suffix: false,
+        };
+        const withSymbol = suffix ? `${body} ${symbol}` : `${symbol}${body}`;
+        return `${neg ? "-" : ""}${withSymbol}`;
       }
       // date/datetime on a number, or general/unknown → general path.
       default:
@@ -545,6 +583,7 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
     v: unknown;
     s: CellStyle | null;
     fmt: string | null;
+    cur: string | null;
   }> = [];
 
   for (const [ref, cell] of Object.entries(cells)) {
@@ -556,12 +595,17 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
       typeof cell?.fmt === "string" && FMT_CLASSES.has(cell.fmt)
         ? cell.fmt
         : null;
+    const cur =
+      typeof cell?.cur === "string" && CURRENCY_CODES.has(cell.cur)
+        ? cell.cur
+        : null;
     parsed.push({
       row: pos.row,
       col: pos.col,
       v: cell?.v ?? null,
       s: sanitizeStyle(cell?.s),
       fmt,
+      cur,
     });
   }
 
@@ -580,11 +624,13 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
   );
   const styles: Record<string, CellStyle> = {};
   const fmts: Record<string, string> = {};
-  for (const { row, col, v, s, fmt } of parsed) {
+  const curs: Record<string, string> = {};
+  for (const { row, col, v, s, fmt, cur } of parsed) {
     if (row < nRows && col < nCols) {
       rows[row][col] = v;
       if (s) styles[`${row},${col}`] = s;
       if (fmt) fmts[`${row},${col}`] = fmt;
+      if (cur) curs[`${row},${col}`] = cur;
     }
   }
 
@@ -601,6 +647,7 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
     merges,
     styles,
     fmts,
+    curs,
     frozenRows: frozenCount(tab.frozen_rows),
     frozenCols: frozenCount(tab.frozen_cols),
   };
@@ -624,7 +671,9 @@ export function densifyTab(tab: SheetTab): DensifiedTab {
 export function toRenderModel(dense: DensifiedTab): RenderModel {
   const dataStart = dense.frozenRows >= 1 ? 1 : 0;
   const head = dataStart
-    ? dense.rows[0].map((v, c) => formatDisplay(v, dense.fmts[`0,${c}`]))
+    ? dense.rows[0].map((v, c) =>
+        formatDisplay(v, dense.fmts[`0,${c}`], dense.curs[`0,${c}`]),
+      )
     : undefined;
   const rows = dense.rows.slice(dataStart);
 
@@ -656,6 +705,7 @@ export function toRenderModel(dense: DensifiedTab): RenderModel {
     head,
     styles: rekey(dense.styles),
     fmts: rekey(dense.fmts),
+    curs: rekey(dense.curs),
     merges,
   };
 }

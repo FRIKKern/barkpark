@@ -327,8 +327,23 @@ defmodule Barkpark.SelfUpdate.Runner do
         {:reply, {:error, :already_running}, state}
 
       true ->
+        # Captured BEFORE open_port spawns the child: deploy-rebuild's own
+        # flight record carries a `ts` stamped the instant it reaches a
+        # phase, which can be microseconds after exec, and
+        # `matching_deploy_status/1` requires `ts >= started_at`. A
+        # `started_at` taken after the spawn can land later than that `ts`
+        # even though the child started after it.
+        started_at = DateTime.utc_now()
+
         case open_port(mode, env) do
-          {:ok, port} ->
+          # `os_pid` rides the spawn itself: `Port.info(port, :os_pid)`
+          # returns `nil` once the child has already exited (confirmed: a
+          # trivial/fast child can die before this process is scheduled
+          # again), so it must be read here, not later — a `nil` os_pid
+          # makes `matching_deploy_status/1`'s guard refuse to match and the
+          # failure silently falls back to `source: "exit_code"` (seen on
+          # CI: task-5ce2d1ba1fc78838, a migrate failure misreported this way).
+          {:ok, port, os_pid} ->
             # Watchdog: force-close a run that outlives the deadline so `running?`
             # can't wedge true (and block every future trigger) until a BEAM restart.
             schedule_run_deadline(port)
@@ -339,10 +354,10 @@ defmodule Barkpark.SelfUpdate.Runner do
                 port: port,
                 mode: mode,
                 log: [],
-                started_at: DateTime.utc_now(),
+                started_at: started_at,
                 finished_at: nil,
                 run_id: new_run_id(),
-                os_pid: port_os_pid(port),
+                os_pid: os_pid,
                 orphan?: false
             }
 
@@ -480,7 +495,10 @@ defmodule Barkpark.SelfUpdate.Runner do
             ]
           )
 
-        {:ok, port}
+        # Read right away: `Port.info/2` goes `nil` for `:os_pid` once the
+        # child has exited, and a fast/short-lived child can beat the
+        # caller back to this line if it's read any later.
+        {:ok, port, port_os_pid(port)}
     end
   rescue
     # Port.open raises on e.g. a missing cd — degrade to a start failure.

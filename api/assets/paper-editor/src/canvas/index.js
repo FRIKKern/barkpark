@@ -76,6 +76,7 @@ import {
   reconcileServerEcho,
   docToBlocks,
   hasOverlappingOps,
+  pendingUploadIndexes,
 } from "./run-convert.js";
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
@@ -256,6 +257,7 @@ import {
   slashTriggerAllowsParent,
   CANVAS_COMPOUND_INSERTS,
   CANVAS_SERVER_INSERT_TYPES,
+  serverBuildsInsert,
   masterInsertAnchor,
 } from "./slash-insert.js";
 // P5 command palette: the Obsidian Cmd-P analog — a fuzzy, keyboard-triggered (Mod-p)
@@ -309,6 +311,7 @@ import { transactionVetoesLock, isLockedTitle } from "./locks.js";
 import { transactionVetoesConstraints, parseConstraints } from "./constraints.js";
 import {
   parseVocabulary,
+  quoteTypeFor,
   transactionVetoesVocabulary,
   slashItemsForVocabulary,
 } from "./vocabulary.js";
@@ -624,6 +627,21 @@ const CANVAS_SLASH_ITEMS = [
     desc: p.desc,
   })),
 ];
+
+// The first control a person can type into or press inside a node view, or null.
+function focusableControlIn(dom) {
+  if (!dom || typeof dom.querySelectorAll !== "function") return null;
+  // Something to type into first (a picker's search, a field's input); a button only
+  // when the node view has nothing else (a Boolean toggle, a picker's Choose).
+  for (const selector of ['input:not([type="hidden"]), select, textarea, [contenteditable="true"]', 'button, [tabindex]:not([tabindex="-1"])']) {
+    for (const el of dom.querySelectorAll(selector)) {
+      if (el.disabled || el.readOnly || el.getAttribute("aria-hidden") === "true") continue;
+      if (el.closest && el.closest('[hidden], [aria-hidden="true"]')) continue;
+      return el;
+    }
+  }
+  return null;
+}
 
 class BpPaperCanvas extends HTMLElement {
   static get observedAttributes() {
@@ -1275,6 +1293,7 @@ class BpPaperCanvas extends HTMLElement {
       },
     });
 
+    this._restSelectionOffAtom();
     // Lifecycle: one-shot bubbling/composed signal a host hook can await —
     // mirrors ../index.js's bp-ready.
     this.dispatchEvent(
@@ -1692,7 +1711,14 @@ class BpPaperCanvas extends HTMLElement {
     }
 
     this._debounceBaselineBlocks = null;
-    const ops = runToOps(diffBaseline, stableDoc, { preserveNewIds: true });
+    // A picture still uploading, or whose upload failed, is not sent (run-convert.js
+    // pendingUploadIndexes). stableDoc keeps it above so ids materialize by position.
+    const held = pendingUploadIndexes(nextDoc, diffBaseline);
+    // Indexes are top-level positions in the live doc; they apply only while the
+    // round-trip kept one top-level node per live node (otherwise nothing is held).
+    const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
+    const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
+    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true });
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
@@ -2772,6 +2798,25 @@ class BpPaperCanvas extends HTMLElement {
   // Predicate parity with _maybeSlash: caret collapsed, caret at end, single line —
   // all evaluated BLOCK-LOCALLY (the multi-block canvas frame), so it never fires
   // mid-prose or across blocks. The trailing space in the regex commits the gesture.
+  // Replace the caret's top-level block with an empty quote of `type` (blockquote, or
+  // pullquote in a field that admits only that), keeping its id so the save is a
+  // same-id replace-block, not remove + insert. The caret lands inside the quote.
+  _replaceTopBlockWithQuote(type) {
+    const { state, view } = this._editor;
+    const $from = state.selection.$from;
+    if ($from.depth < 1) return false;
+    const start = $from.before(1);
+    const end = $from.after(1);
+    const nodeType = state.schema.nodes[type];
+    if (!nodeType) return false;
+    const quoteNode = nodeType.create({ bpId: $from.node(1).attrs.bpId || null, bpType: type });
+    let tr = state.tr.replaceWith(start, end, quoteNode);
+    try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
+    view.dispatch(tr);
+    this._editor.commands.focus();
+    return true;
+  }
+
   _maybeBlockShorthand() {
     if (!this._editable || !this._editor) return false;
     const { selection } = this._editor.state;
@@ -2788,19 +2833,8 @@ class BpPaperCanvas extends HTMLElement {
       // `> ` → the plain quote block (`blockquote`, what Notion and Tiptap authors mean by a
       // quote; the pullquote stays article chrome, reached from the slash menu). The callout
       // gesture `> [!note] ` still works: _maybeCalloutShorthand accepts `[!note] ` typed inside.
-      const { state, view } = this._editor;
-      const start = $from.before(1);
-      const end = $from.after(1);
-      // Keep the block's id so the save is a same-id replace-block, not remove + insert.
-      const quoteNode = state.schema.nodes.blockquote
-        ? state.schema.nodes.blockquote.create({ bpId: $from.parent.attrs.bpId || null, bpType: "blockquote" })
-        : null;
-      if (!quoteNode) return false;
-      let tr = state.tr.replaceWith(start, end, quoteNode);
-      try { tr = tr.setSelection(TextSelection.near(tr.doc.resolve(start + 1))); } catch (_e) {}
-      view.dispatch(tr);
-      this._editor.commands.focus();
-      return true;
+      // In a field whose vocabulary has the blockquote STYLE that block is a pullquote.
+      return this._replaceTopBlockWithQuote(quoteTypeFor(parseVocabulary(this.getAttribute("data-vocabulary"))));
     }
     if (!divider && !code) return false;
     if (code) {
@@ -2996,7 +3030,12 @@ class BpPaperCanvas extends HTMLElement {
       this._insertObjectBlock(item.type);
       return;
     }
-    if (item && !item.fieldName && CANVAS_SERVER_INSERT_TYPES.has(item.type)) {
+    // A field's Quote row makes the block the field admits (vocabulary.js quoteTypeFor).
+    if (item && item.quoteAs === "pullquote") {
+      this._replaceTopBlockWithQuote("pullquote");
+      return;
+    }
+    if (item && !item.fieldName && serverBuildsInsert(item.type, this._hostBuildsInserts())) {
       this._insertViaServer(item.type, { replaceSlashLine: true });
       return;
     }
@@ -3116,9 +3155,15 @@ class BpPaperCanvas extends HTMLElement {
   // that removal so the hook queues it BEFORE the insert; a palette pick keeps the
   // caret's block and anchors on it when it is confirmed. The editor is blurred so
   // the server echo carrying the new block renders at once.
+  // Does the host build blocks on the server? Barkpark's LiveView hook marks the editor
+  // (or an ancestor) `data-server-insert`; a plain embedder does not (see slash-insert.js).
+  _hostBuildsInserts() {
+    return Boolean(this.closest && this.closest("[data-server-insert]"));
+  }
+
   _insertViaServer(type, { replaceSlashLine = false } = {}) {
     const editor = this._editor;
-    if (!editor || !this._editable || !CANVAS_SERVER_INSERT_TYPES.has(type)) return false;
+    if (!editor || !this._editable || !serverBuildsInsert(type, this._hostBuildsInserts())) return false;
     const index = topLevelIndexAtSelection(editor);
     const liveIds = [];
     editor.state.doc.forEach((node) => liveIds.push(node.attrs.bpId));
@@ -3173,6 +3218,7 @@ class BpPaperCanvas extends HTMLElement {
       onToggleSource: () => this.toggleSourceMode(),
       // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
+      serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({
@@ -3820,9 +3866,11 @@ class BpPaperCanvas extends HTMLElement {
         tr.delete(position, position + removed.nodeSize);
       }
       if (tr.docChanged) this._editor.view.dispatch(tr);
+      this._restSelectionOffAtom();
       this._consumePendingFocus();
       return;
     }
+    const caret = this._captureCaret();
     this._editor
       .chain()
       .setContent(runToTiptap(blocks), { emitUpdate: false })
@@ -3831,7 +3879,61 @@ class BpPaperCanvas extends HTMLElement {
         return true;
       })
       .run();
+    this._restoreCaret(caret);
+    this._restSelectionOffAtom();
     this._consumePendingFocus();
+  }
+
+  // A whole-document replace (a REORDER, which cannot be applied in place) maps
+  // the selection through "everything was replaced", so the caret lands at an
+  // edge of the doc — after a "Move up" that is inside the moved block, and the
+  // author's next Enter or "/" goes there (task-b2abe773242241f8). While the
+  // author is in the editor, remember the caret as block id + offset and put it
+  // back in the same block afterwards. Selection only: no doc change, no ops.
+  _captureCaret() {
+    const editor = this._editor;
+    if (!editor || !editor.view || !editor.isFocused) return null;
+    const { $head } = editor.state.selection;
+    if ($head.depth < 1) return null;
+    const id = $head.node(1)?.attrs?.bpId;
+    if (id == null) return null;
+    return { id, offset: $head.pos - $head.before(1) };
+  }
+
+  _restoreCaret(caret) {
+    if (!caret || !this._editor) return;
+    const { state, view } = this._editor;
+    let target = null;
+    state.doc.forEach((node, pos) => {
+      if (!target && node.attrs?.bpId === caret.id) target = { node, pos };
+    });
+    if (!target) return;
+    const at = Math.min(target.pos + caret.offset, target.pos + target.node.nodeSize - 1);
+    let selection;
+    try {
+      selection = TextSelection.near(state.doc.resolve(at));
+    } catch (_) {
+      return;
+    }
+    view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
+  }
+
+  // A canvas at rest must not hold a NodeSelection on a whole block. A fresh doc (or one
+  // replaced by setContent) starts with the selection on block 0, and when that block is
+  // an atom (a bound field-string title) a click whose DOM selection never reached the
+  // editor state left it there, so the first keystroke REPLACED the bound block — a data
+  // loss (task-f24549dea0618da2). While the editor is unfocused, move such a selection to
+  // the first text position; with no text block, leave it. Selection-only: no doc change,
+  // no ops, no history.
+  _restSelectionOffAtom() {
+    const editor = this._editor;
+    if (!editor || editor.isDestroyed) return;
+    const { state, view } = editor;
+    if (!(state.selection instanceof NodeSelection)) return;
+    if (view && typeof view.hasFocus === "function" && view.hasFocus()) return;
+    const text = TextSelection.findFrom(state.doc.resolve(0), 1, true);
+    if (!text) return;
+    view.dispatch(state.tr.setSelection(text).setMeta("addToHistory", false));
   }
 
   // Put the caret in the top-level block `id` and focus the editor. The host
@@ -3851,6 +3953,18 @@ class BpPaperCanvas extends HTMLElement {
     }
     this._pendingFocus = null;
     const { state, view } = this._editor;
+    // A field block (String, Select, Date & time, the Image/Reference pickers…) is an
+    // atom whose node view holds its own control: a TextSelection lands BESIDE it, so
+    // focus the control instead (task-13abe9408c006c96). An atom with no control — a
+    // divider — falls through to the caret as before.
+    const node = state.doc.nodeAt(pos);
+    if (node && node.isAtom && !node.isTextblock) {
+      const control = focusableControlIn(view.nodeDOM(pos));
+      if (control) {
+        control.focus();
+        return true;
+      }
+    }
     let selection;
     try {
       selection = TextSelection.near(state.doc.resolve(pos + 1));
@@ -4031,6 +4145,7 @@ class BpPaperCanvas extends HTMLElement {
     this._awaitingOwnEchoes = [];
     this._dirtyWhileInflight = false;
     if (this._editor) {
+      const caret = this._captureCaret();
       this._programmaticApply = true;
       try {
         // The seed is the run's starting point, not an edit: keep it out of
@@ -4050,6 +4165,8 @@ class BpPaperCanvas extends HTMLElement {
       } finally {
         this._programmaticApply = false;
       }
+      this._restoreCaret(caret);
+      this._restSelectionOffAtom();
       this._verifyPainted("seed");
       this._consumePendingFocus();
     }

@@ -61,7 +61,7 @@ func TestHelpOverlayScrollWindows(t *testing.T) {
 		t.Errorf("small view should show the overflow indicator:\n%s", short)
 	}
 
-	m.helpScroll = len(helpLines()) - 1
+	m.helpScroll = len(helpLines(100)) - 1
 	end := m.renderHelpOverlay(100, 18)
 	if strings.Contains(end, "more") {
 		t.Error("scrolled-to-end view must not claim more rows")
@@ -71,7 +71,7 @@ func TestHelpOverlayScrollWindows(t *testing.T) {
 	// not shrink one row at a time down to a lone trailing line adrift in the
 	// modal. height 18 → maxRows = max(18-8, 4) = 10, so the top clamps to
 	// len-maxRows and the last full page of rows renders.
-	all := helpLines()
+	all := helpLines(100)
 	maxRows := maxInt(18-8, 4)
 	pageStart := maxInt(len(all)-maxRows, 0)
 	want, shown := 0, 0
@@ -100,7 +100,7 @@ func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
 	// presses is dead against the render clamp.
 	after, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'G'}})
 	am := after.(model)
-	if want := helpMaxScroll(m.paneHeight()); am.helpScroll != want {
+	if want := helpMaxScroll(m.width, m.paneHeight()); am.helpScroll != want {
 		t.Errorf("G should jump to max scroll (%d), got %d", want, am.helpScroll)
 	}
 
@@ -118,10 +118,10 @@ func TestHelpOverlayGGJumpsTopBottom(t *testing.T) {
 func TestHelpScrollNeverOverclamps(t *testing.T) {
 	for _, height := range []int{10, 18, 24, 40} {
 		m := model{helpOpen: true, height: height}
-		max := helpMaxScroll(m.paneHeight())
+		max := helpMaxScroll(m.width, m.paneHeight())
 
 		// Mash j well past the end.
-		for i := 0; i < len(helpLines())+5; i++ {
+		for i := 0; i < len(helpLines(m.width))+5; i++ {
 			next, _ := m.handleHelpKey(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'j'}})
 			m = next.(model)
 		}

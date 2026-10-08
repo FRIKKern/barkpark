@@ -752,6 +752,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
               draft={@editor_doc}
               published={@published_doc}
               schema={@editor_schema}
+              ref_title={diff_ref_title(@dataset, @parent_assigns)}
             />
           <% else %>
             <%!-- DOCUMENT VIEWS (Gyldendal parity E10). Sanity's
@@ -846,7 +847,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <%= for field <- visible_fields(Enum.reject(@editor_schema.fields, & &1["name"] == "title"), @nav_group),
                         Visibility.visible?(field, @editor_form) do %>
                   <.studio_field_renderer
-                    field={field}
+                    field={Barkpark.Content.ReadOnlyFields.resolve_for(field, @editor_form)}
                     editor_form={@editor_form}
                     dataset={@dataset}
                     validation_errors={@validation_errors}
@@ -909,8 +910,8 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     names = Enum.map(presences, &Map.get(&1, :name, "User"))
 
     case names do
-      [one] -> "#{one} is editing"
-      many -> "#{Enum.join(many, ", ")} are editing"
+      [one] -> gettext("%{name} is editing", name: one)
+      many -> gettext("%{names} are editing", names: Enum.join(many, ", "))
     end
   end
 
@@ -1372,4 +1373,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   defp own_findings(list) when is_list(list), do: list
   defp own_findings(%{__self__: list}) when is_list(list), do: list
   defp own_findings(_), do: []
+
+  # The Diff view's reference resolver (task-30d564b8b1219ab9): the referenced
+  # document's title, read in the editor's own tenant scope — the same
+  # `scope_opts_from_assigns/1` seam the paper sidebar uses for its relations.
+  defp diff_ref_title(dataset, parent_assigns) do
+    scope = BarkparkWeb.ScopeHelpers.scope_opts_from_assigns(parent_assigns)
+    fn id, ref_type -> Barkpark.Content.reference_title(id, ref_type, dataset, scope) end
+  end
 end

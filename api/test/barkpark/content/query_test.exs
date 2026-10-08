@@ -270,9 +270,18 @@ defmodule Barkpark.Content.QueryTest do
       assert Query.validate_filter_map(%{}) == :ok
       assert Query.validate_filter_map(%{"title" => "Alpha"}) == :ok
 
-      for op <- Query.valid_filter_ops() -- ["is", "hasStrong", "in", "nin"] do
+      # The array ops (task-aaf4d51bf8a51aec) have no arm on the `title` column;
+      # they are checked on an array content field below.
+      array_ops = ["nhas" | Query.count_ops()]
+
+      for op <- Query.valid_filter_ops() -- (["is", "hasStrong", "in", "nin"] ++ array_ops) do
         assert Query.validate_filter_map(%{"title" => %{op => "x"}}) == :ok,
                "expected #{op} to be accepted"
+      end
+
+      for op <- array_ops do
+        assert Query.validate_filter_map(%{"tags" => %{op => "1"}}) == :ok,
+               "expected #{op} to be accepted on a content field"
       end
 
       assert Query.validate_filter_map(%{"title" => %{"in" => ["a", "b"]}}) == :ok

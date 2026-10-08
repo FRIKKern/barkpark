@@ -1845,8 +1845,8 @@ function pdrenderGo(themes = loadThemes()) {
     "",
     "// GenAirRowSplit is the collapse threshold (a ratio at or above it earns a",
     "// SECOND blank row). GenAirRowsDefault is the air a block that is not on the",
-    "// ladder opens with. GenSectionGapRows is space.section.beat (4.18 air beats ≈",
-    "// 92px, the benchmark artifact's section margin) rounded to whole rows: the air",
+    "// ladder opens with. GenSectionGapRows is space.section.beat (2.2 air beats ≈",
+    "// 48px of section air) rounded to whole rows: the air",
     "// that says one section ENDED, the half of the boundary device the rule glyph",
     "// completes. GenSectionHeadGapRows is space.section.gap (the artifact's 16px",
     "// .sec-head padding-top) in rows: the air between the rule and the words.",
@@ -2296,7 +2296,7 @@ function elixirTokensGen(themes = loadThemes()) {
     // ── Paper EMAIL surface skin (theme-system Wave 1 CAPTURE — tokens.json
     // paperEmail). Verbatim hand values, NOT derived from color.primary/border:
     // those HSL-round-tripped brand/rule slots ABOVE (#1e5243/#e4e4e7) are drifted
-    // from the live email hexes (#1e5347/#dde7e2), so palettes.ex / data_viz.ex
+    // from the live email hexes (#1e5347/#e2e6e5), so palettes.ex / data_viz.ex
     // consume THESE instead — zero email-golden retint. RATIFIED 2026-09-11; the
     // decision record is tokens.json paperEmail._note (do not restate it here).
     "  # Paper email surface — verbatim hand hex (light-only; email has no dark mode).",
@@ -2782,7 +2782,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "       `bp-paper-surface`) so they WIN over the shared source's fallback",
     "       `.bp-paper-surface { --paper-* }` block — otherwise render.ex's inline",
     "       `var(--paper-*, hex)` block HTML would resolve to the Studio defaults on",
-    "       the reader on the bp-theme (a shared ink #15211d, rule #dde7e2,",
+    "       the reader on the bp-theme (a shared ink #15211d, rule #e2e6e5,",
     "       etc.). Dark-mode note: the reader stamps `html[data-theme]` only via",
     "       its pre-paint toggle script (localStorage `barkpark_theme`, shared",
     "       with Studio); before that script runs — and with JS off — the",

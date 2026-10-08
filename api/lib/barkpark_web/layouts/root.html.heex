@@ -5,7 +5,7 @@
       NOT a color literal — it lives OUTSIDE the GENERATED tokens marker, so the
       Part-E exemption ledger is unaffected. Omitted entirely for the default
       (evergreen) theme, so a default page is byte-identical to before. --%>
-<html lang="en" data-bp-theme={bp_theme_attr(assigns)}>
+<html lang={BarkparkWeb.StudioLocale.html_lang()} data-bp-theme={bp_theme_attr(assigns)}>
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
@@ -2779,12 +2779,16 @@
     .bp-draft-diff-table td.bp-diff-col-name { width: 22%; }
     .bp-draft-diff-table th.bp-diff-col-status,
     .bp-draft-diff-table td.bp-diff-col-status,
-    .bp-draft-diff-table td.bp-diff-status { width: 56px; text-align: center; }
+    .bp-draft-diff-table td.bp-diff-status { width: 96px; text-align: center; }
+    .bp-diff-field-key {
+      display: block; font-family: var(--font-mono); font-size: var(--text-2xs);
+      color: var(--fg-dim);
+    }
     .bp-diff-row.bp-diff-unchanged { color: var(--fg-dim); }
     .bp-diff-row.bp-diff-changed   { background: hsl(var(--warn-hsl) / 0.06); }
     .bp-diff-row.bp-diff-added     { background: hsl(var(--ok-hsl) / 0.06); }
     .bp-diff-row.bp-diff-removed   { background: hsl(var(--danger-hsl) / 0.06); }
-    .bp-diff-status { font-family: var(--font-mono); }
+    .bp-diff-status { font-size: var(--text-xs); }
     .bp-diff-draft, .bp-diff-published {
       margin: 0; padding: 0;
       font-family: var(--font-mono); font-size: var(--text-2xs);
@@ -5402,6 +5406,10 @@
     // (keyboard map, clipboard TSV, resize drag, scroll keep). Defined in
     // /assets/bp-sheet-grid.js (loaded non-defer just above).
     Hooks.SheetGrid = window.BarkparkSheetGrid;
+    // SheetTabRename — focus into and back out of the inline tab rename.
+    Hooks.SheetTabRename = window.BarkparkSheetTabRename;
+    // SheetToolbar — the formatting bar as one Tab stop with arrow keys.
+    Hooks.SheetToolbar = window.BarkparkSheetToolbar;
 
     // GraphPane — the Studio blast-radius graph client half (self-contained
     // Canvas2D + hand-rolled force sim, no Cytoscape). Defined in

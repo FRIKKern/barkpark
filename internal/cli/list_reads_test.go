@@ -225,8 +225,10 @@ func TestPaginatedArmKeepsTheStrictKeyTest(t *testing.T) {
 var objectReadCommands = map[string]string{
 	"access.show":                  "single grant object (access_controller.ex)",
 	"auth.me":                      "flat identity map, no row array (auth_controller.ex)",
+	"auth.token":                   "the bearer's own description, one object, no row array (token_self_controller.ex)",
 	"chat.get_attachment":          "single attachment object — id, media_type, byte_size, base64 data; never a row array (chat_attachment_controller.ex)",
 	"chat.get_session":             "single session object (chat_controller.ex)",
+	"codelist.show":                "values is a nested array, not the top-level row set; codelistId/name/description/issue are metadata (codelist_controller.ex)",
 	"cycle.show":                   "wave projection object; several values are arrays, none is 'the rows' (cycle_fleet_controller.ex)",
 	"data.counts":                  "`counts` is a type=>count MAP, not an array — `{}` is an honest fresh dataset (query_controller.ex)",
 	"doc.get":                      "single document; envelopeRows refuses list treatment for a payload carrying _id (query_controller.ex)",
@@ -239,6 +241,7 @@ var objectReadCommands = map[string]string{
 	"media.search-synonym-preview": "preview object (v1/media_controller.ex)",
 	"media.share-view":             "share projection; hits nested under result (v1/media_collections_controller.ex)",
 	"media.suggest":                "result.recent/popular/nohits, none guaranteed present (v1/media_controller.ex)",
+	"paper.fleet-blocks":           "blocks is a blockId=>html MAP, not a row array; slug/rev are scalars (paper_fleet_blocks_controller.ex)",
 	"schema.get":                   "one schema object (schema_controller.ex)",
 	"search.insights":              "aggregate counters object (search_controller.ex)",
 	"search.settings":              "settings object (search_controller.ex)",
@@ -247,6 +250,7 @@ var objectReadCommands = map[string]string{
 	"secret.get":                   "one secret object (secret_controller.ex)",
 	"secret.scoped-get":            "one secret object, scoped twin (secret_controller.ex)",
 	"webhook.get":                  "single subscription object (webhook_controller.ex)",
+	"workspace.locale":             "single locale+known_locales object (workspace_locale_controller.ex)",
 }
 
 var coreCmdOpen = regexp.MustCompile(`^\s*core_cmd\($`)

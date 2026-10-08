@@ -1320,6 +1320,10 @@ defmodule BarkparkWeb.Router do
 
     post("/login-tickets", LoginTicketController, :create)
 
+    # The bearer describes itself — permissions, tier, dataset, workspace, seat
+    # (task-bc2541aca8541ff1). /me needs a session; this needs only the token.
+    get("/token", TokenSelfController, :show)
+
     # Owner ruling #26 — the control plane takes a removed team member OFF this
     # instance: sessions revoked, seats dropped, owned tokens revoked. Admin
     # bearer + operator allowlist, like the email form of /login-tickets.
@@ -3299,9 +3303,19 @@ defmodule BarkparkWeb.Router do
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
 
-  # Token-required scoped reads (listen/export/analytics/history/revision).
+  # Token-required scoped reads (listen/export/analytics/history/revision/locale/codelists).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token])
+
+    # Studio chrome locale read (task-9a82d5dc67e5b7e0) — any member token;
+    # the admin-gated PATCH below this block is the only write.
+    get("/v1/workspace/locale", WorkspaceLocaleController, :show)
+
+    # A codelist registry read (task-93b24f20348f6df0) — any member token.
+    # Not tenant data (Codelists keys on plugin_name/list_id/issue, no
+    # workspace scope); scoped here only for member-token authentication
+    # parity with the rest of this block.
+    get("/v1/codelists/:codelist_id", CodelistController, :show)
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
@@ -3313,6 +3327,14 @@ defmodule BarkparkWeb.Router do
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
     get("/v1/data/revision/:dataset/:id", HistoryController, :show)
+    # Paper masters, member-token read half (task-2dc7b441443f3aaf) — the
+    # masters an author may insert into paper :slug. Writes (save/insert/
+    # pin/detach) ride the scoped-mutate pipeline below.
+    get("/v1/papers/:slug/masters", PaperMastersController, :index)
+    # A paper's fleet blocks (task list/board/detail, roadmap, …), rendered
+    # server-side (task-4feb8efa46a0ed33) — read-only, so it rides this
+    # token-required scoped-read pipeline like the masters list above.
+    get("/v1/papers/:slug/fleet-blocks", PaperFleetBlocksController, :show)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the
@@ -3339,6 +3361,13 @@ defmodule BarkparkWeb.Router do
       DocumentOpsController,
       :apply_field_ops
     )
+
+    # Paper masters, write half (task-2dc7b441443f3aaf) — save/insert/pin/
+    # detach, the same checks the Studio canvas's events get in-process.
+    post("/v1/papers/:slug/masters", PaperMastersController, :create)
+    post("/v1/papers/:slug/masters/:master_id/insert", PaperMastersController, :insert)
+    post("/v1/papers/:slug/masters/blocks/:block_id/pin", PaperMastersController, :pin)
+    post("/v1/papers/:slug/masters/blocks/:block_id/detach", PaperMastersController, :detach)
   end
 
   # Scoped admin reads (search insights/synonyms).
@@ -3351,13 +3380,21 @@ defmodule BarkparkWeb.Router do
     delete("/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
+  # membership at :read). An editing Studio on a member token needs the schema
+  # to render a form (task-23c4ac86976c46a9); writes below stay admin.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token])
+
+    get("/v1/schemas/:dataset", SchemaController, :index)
+    get("/v1/schemas/:dataset/:name", SchemaController, :show)
+  end
+
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
     get("/v1/structure/:dataset", StructureController, :show)
-    get("/v1/schemas/:dataset", SchemaController, :index)
-    get("/v1/schemas/:dataset/:name", SchemaController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end

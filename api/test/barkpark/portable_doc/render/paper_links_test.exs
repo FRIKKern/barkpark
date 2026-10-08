@@ -159,7 +159,7 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     assert default.title_default?
 
     assert default.section_style ==
-             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)"
 
     whitespace =
       Compose.paper_links_presentation(

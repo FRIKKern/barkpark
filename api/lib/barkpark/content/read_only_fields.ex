@@ -22,6 +22,12 @@ defmodule Barkpark.Content.ReadOnlyFields do
   create the base is the published row when one exists, otherwise empty, so a
   client that supplies a readOnly value on a new document is refused.
 
+  A CONDITION. `readOnly` may also be a `visibleWhen`-shaped predicate
+  (`%{"field" => "stage", "operator" => "eq", "value" => "done"}`, evaluated by
+  `Barkpark.Content.FieldVisibility`): the field is read-only while the predicate
+  holds on the row the write starts from (task-00eac0b023b11517). So the write
+  that moves `stage` to `done` may still set the field, and later writes may not.
+
   WHAT IT DOES NOT COVER. Plugin code that writes through `Content` directly
   (the ticket thread, form ingestion) never reaches these doors, so the server
   keeps setting the fields it owns. Only top-level `content` keys are checked;
@@ -30,6 +36,7 @@ defmodule Barkpark.Content.ReadOnlyFields do
 
   alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias Barkpark.Content.FieldVisibility
 
   @doc """
   `:ok`, or `{:error, {:read_only_fields, names}}` naming every readOnly field
@@ -42,10 +49,12 @@ defmodule Barkpark.Content.ReadOnlyFields do
           :ok | {:error, {:read_only_fields, [String.t()]}}
   def check(type, base, merged, dataset, opts) do
     with true <- enforced?(opts),
-         [_ | _] = names <- read_only_names(type, dataset, opts) do
+         [_ | _] = rules <- read_only_rules(type, dataset, opts) do
       base = if is_function(base, 0), do: base.(), else: base
       base = if is_map(base), do: base, else: %{}
       merged = if is_map(merged), do: merged, else: %{}
+
+      names = for {name, rule} <- rules, locked?(rule, base), do: name
 
       case Enum.filter(names, &(Map.get(base, &1) != Map.get(merged, &1))) do
         [] -> :ok
@@ -61,25 +70,46 @@ defmodule Barkpark.Content.ReadOnlyFields do
       match?(%CallerContext{is_admin: false}, Keyword.get(opts, :caller_context))
   end
 
-  @doc "The top-level field names `type`'s schema marks readOnly."
-  @spec read_only_names(String.t() | nil, String.t(), keyword()) :: [String.t()]
-  def read_only_names(type, dataset, opts) when is_binary(type) do
+  # `{name, true | predicate}` for every top-level field `type`'s schema marks
+  # readOnly, unconditionally or by a condition.
+  defp read_only_rules(type, dataset, opts) when is_binary(type) do
     case Content.resolve_schema(type, dataset, opts) do
       {:ok, %{fields: fields}} when is_list(fields) ->
         for f when is_map(f) <- fields,
-            read_only?(f),
+            rule = read_only_rule(f),
+            rule != nil,
             name = field_name(f),
             is_binary(name),
-            do: name
+            do: {name, rule}
 
       _ ->
         []
     end
   end
 
-  def read_only_names(_type, _dataset, _opts), do: []
+  defp read_only_rules(_type, _dataset, _opts), do: []
 
-  defp read_only?(f), do: Map.get(f, "readOnly") == true or Map.get(f, :readOnly) == true
+  defp read_only_rule(f) do
+    case Map.get(f, "readOnly", Map.get(f, :readOnly)) do
+      true -> true
+      %{} = predicate when map_size(predicate) > 0 -> predicate
+      _ -> nil
+    end
+  end
+
+  @doc """
+  `field` with a conditional `readOnly` resolved to `true` or `false` against
+  `values` (a Studio form), so a renderer that knows only `readOnly: true` shows
+  a locked field display-only. Any other field comes back unchanged.
+  """
+  @spec resolve_for(map(), map() | nil) :: map()
+  def resolve_for(%{"readOnly" => %{} = predicate} = field, values) when map_size(predicate) > 0,
+    do: Map.put(field, "readOnly", locked?(predicate, values || %{}))
+
+  def resolve_for(field, _values), do: field
+
+  defp locked?(true, _base), do: true
+  defp locked?(predicate, base), do: FieldVisibility.visible?(%{"visibleWhen" => predicate}, base)
 
   defp field_name(f), do: Map.get(f, "name") || Map.get(f, :name)
 end

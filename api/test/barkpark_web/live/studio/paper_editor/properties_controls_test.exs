@@ -78,6 +78,14 @@ defmodule BarkparkWeb.Studio.PaperEditor.PropertiesControlsTest do
              ~s([data-prop-block-id="#{added["id"]}"] [data-test-id="paper-unbind-property"])
            )
 
+    # task-e25d03d0a56be4b7: the "×" names the property it unbinds.
+    unbind =
+      view
+      |> element(~s([data-prop-block-id="#{added["id"]}"] [data-test-id="paper-unbind-property"]))
+      |> render()
+
+    assert unbind =~ ~s(aria-label="Unbind Accent")
+
     view
     |> element(~s([data-prop-block-id="#{added["id"]}"] [data-test-id="paper-unbind-property"]))
     |> render_click(%{"if_rev" => current_rev(view)})
