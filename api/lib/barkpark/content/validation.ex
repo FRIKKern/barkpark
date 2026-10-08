@@ -300,9 +300,11 @@ defmodule Barkpark.Content.Validation do
 
   def rules_at(_, _), do: %{}
 
+  # Sanity's third level, `info`, never blocks: it is surfaced with the warnings
+  # (task-b183e15684138399). Before, anything not "warning" read as an error.
   defp rule_level(%{} = rules) do
     case Map.get(rules, "level") || Map.get(rules, :level) do
-      l when l in ["warning", "warn", :warning, :warn] -> :warning
+      l when l in ["warning", "warn", "info", :warning, :warn, :info] -> :warning
       _ -> :error
     end
   end
