@@ -122,8 +122,8 @@
    },
    {
     "path": "api/priv/static/assets/bp-paper-editor-shell.css",
-    "count": 147,
-    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule. Link preview adds one non-text viewport clamp (100vw minus 16px safe edge), not a type/reading measure; its font sizes and line heights consume the chrome ladder. RAISED 144 -> 147 by task-b02fa9b19cbe1327: the canvas block-gutter rules (grip 14px, menu group 10px, menu glyph 11px) are mirrored byte-for-byte from paper-editor styles.css, moved not minted. /papers loads only this shell, so without them the handle rendered in flow and shifted the page; the --text-* chrome ladder is not emitted on the Bulldocs layout, so a var() here would resolve to nothing."
+    "count": 151,
+    "note": "The Beta paper-editor rule run extracted byte-for-byte from root.html.heex; its type literals are that file's former residue, moved not minted, and sweep on the same schedule. Link preview adds one non-text viewport clamp (100vw minus 16px safe edge), not a type/reading measure; its font sizes and line heights consume the chrome ladder. RAISED 144 -> 147 by task-b02fa9b19cbe1327: the canvas block-gutter rules (grip 14px, menu group 10px, menu glyph 11px) are mirrored byte-for-byte from paper-editor styles.css, moved not minted. /papers loads only this shell, so without them the handle rendered in flow and shifted the page; the --text-* chrome ladder is not emitted on the Bulldocs layout, so a var() here would resolve to nothing. RAISED +4 by the canvas field row: .bp-canvas-field / -label / -control copy the reader's .bp-field row metrics (0.75rem, 0.02em, 0.98rem, 1.5) so a field block in Edit reads as it does in View; the portable reader stylesheet may not name canvas classes, so the values are mirrored, not shared."
    },
    {
     "path": "api/lib/barkpark_web/layouts/bulldocs.html.heex",
@@ -137,8 +137,8 @@
    },
    {
     "path": "api/assets/paper-editor/src/styles.css",
-    "count": 74,
-    "note": "Paper-editor Studio bundle (the scoped embedder source), outside its paper-surface mirror block. Its sizes must track the reader's; a silent stamp here IS View/Edit drift. 69 -> 72 (paper-editor block gutter, 2026-09-18): the hover gutter's three chrome sizes — .bp-block-handle__grip font-size: 14px, .bp-block-menu__group font-size: 10px, .bp-block-menu__glyph font-size: 11px. These are EDITOR CHROME (the + / grip buttons and the block menu), not reader type, so tracking the reader's scale is wrong for them, and this file carries no chrome type ladder to consume (only the mirrored --bp-* reading tokens). RAISED and MEASURED: node design/check.mjs Part O printed GREW 69 -> 72 (+3) and named 72. 72 -> 74 (the quiet callout label: one shared rule for the title and the collapsible summary, font-size 0.72em and letter-spacing 0.09em, 2026-10-05)."
+    "count": 78,
+    "note": "Paper-editor Studio bundle (the scoped embedder source), outside its paper-surface mirror block. Its sizes must track the reader's; a silent stamp here IS View/Edit drift. 69 -> 72 (paper-editor block gutter, 2026-09-18): the hover gutter's three chrome sizes — .bp-block-handle__grip font-size: 14px, .bp-block-menu__group font-size: 10px, .bp-block-menu__glyph font-size: 11px. These are EDITOR CHROME (the + / grip buttons and the block menu), not reader type, so tracking the reader's scale is wrong for them, and this file carries no chrome type ladder to consume (only the mirrored --bp-* reading tokens). RAISED and MEASURED: node design/check.mjs Part O printed GREW 69 -> 72 (+3) and named 72. 72 -> 74 (the quiet callout label: one shared rule for the title and the collapsible summary, font-size 0.72em and letter-spacing 0.09em, 2026-10-05). RAISED +4 by the canvas field row: .bp-canvas-field / -label / -control copy the reader's .bp-field row metrics (0.75rem, 0.02em, 0.98rem, 1.5) so a field block in Edit reads as it does in View; the portable reader stylesheet may not name canvas classes, so the values are mirrored, not shared."
    },
    {
     "path": "api/assets/paper-surface/paper-surface.css",

@@ -41,7 +41,10 @@ defmodule BarkparkWeb.Studio.MediaFolderCountTest do
     assert inspector =~ "Math.max(this._total || 0, this._assets.length)",
            "the folder badge counts the loaded page instead of the folder's total"
 
-    assert inspector =~ ~s(count === 1 ? "1 asset" : count + " assets"),
+    # The words go through the explorer's strings hook (task-2bc7975ad3bdb737);
+    # the singular is still its own message.
+    assert inspector =~
+             ~s|count === 1 ? this._t("1 asset") : this._t("%{count} assets", { count: count })|,
            "the folder badge says \"1 assets\""
 
     refute inspector =~ ~s[this._statusBadge(count + " assets"],

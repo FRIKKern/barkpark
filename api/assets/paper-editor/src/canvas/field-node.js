@@ -608,14 +608,19 @@ export const Field = Node.create({
       control.setAttribute("data-test-id", "paper-field-" + fieldType);
 
       dom.appendChild(labelEl);
-      dom.appendChild(control);
-      // field-number shows its unit (if any) after the input, as quiet text.
+      // field-number shows its unit (if any) after the input, as quiet text. The
+      // input and unit share the row's value column.
       const unit = node.attrs && node.attrs.unit;
       if (fieldType === "field-number" && unit) {
+        const valueEl = document.createElement("span");
+        valueEl.className = "bp-canvas-field-value";
         const unitEl = document.createElement("span");
         unitEl.className = "bp-canvas-field-unit";
         unitEl.textContent = unit;
-        dom.appendChild(unitEl);
+        valueEl.append(control, unitEl);
+        dom.appendChild(valueEl);
+      } else {
+        dom.appendChild(control);
       }
 
       // Paint the control from the node's current attrs. Re-run on every update()

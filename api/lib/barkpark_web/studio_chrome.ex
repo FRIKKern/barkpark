@@ -157,6 +157,11 @@ defmodule BarkparkWeb.StudioChrome do
       |> then(fn s ->
         assign(s, :bp_theme, Tenancy.workspace_theme(s.assigns[:current_workspace]))
       end)
+      # ...and its LANGUAGE (task-7cf960756f738c6e): every chrome surface, not
+      # only the desk, renders in the workspace's Studio locale and declares it
+      # in <html lang>. Process-local, so it holds for this LiveView's renders;
+      # StudioLive re-stamps it on an in-view scope switch.
+      |> tap(fn s -> BarkparkWeb.StudioLocale.put(s.assigns[:current_workspace]) end)
       # Two oracles, one resolved scope (see "Two admin oracles" above).
       # `shares_admin?` is workspace-scoped seat authority on the MOUNTED
       # workspace; `instance_admin?` stays the host-level one.

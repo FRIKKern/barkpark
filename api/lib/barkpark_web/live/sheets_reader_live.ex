@@ -50,6 +50,9 @@ defmodule BarkparkWeb.SheetsReaderLive do
         raise NotFound, message: "no published sheet #{inspect(slug)}"
 
       doc ->
+        # The page speaks the owning workspace's language (task-c84978a632220e1c).
+        BarkparkWeb.StudioLocale.put_owner(nil, doc.workspace_id)
+
         # Field-visibility seal (fail-closed): redact the published sheet's
         # content under the ANONYMOUS caller before ANY consumer (the preview
         # manifest AND SheetGrid) reads it.
