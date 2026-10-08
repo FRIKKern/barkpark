@@ -1346,6 +1346,18 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       )
     end
 
+    # task-65e83bfe222337f0: the editor was rendered for this principal and
+    # refused every action; it now shows who manages credentials instead.
+    test "a workspace-B-only admin sees a sentence, not the credential editor",
+         %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
+      {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
+
+      assert has_element?(view, ~s([data-test-id="settings-credentials-no-authority"]))
+      refute has_element?(view, "form[phx-submit=load]")
+      refute has_element?(view, "textarea[name=settings_json]")
+      refute render(view) =~ "w35-victim"
+    end
+
     test "reveal is REFUSED for a workspace-B-only admin — no secret in the DOM, no reveal audit, row unchanged",
          %{conn: conn, ws_b: ws_b, proj_b: proj_b} do
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
@@ -1424,9 +1436,9 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
 
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
 
-      view
-      |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
-      |> render_submit()
+      # This principal gets no load form (task-65e83bfe222337f0), so the load
+      # is a forged event — refused like the reveal below.
+      render_submit(view, "load", %{"plugin_name" => "bokbasen"})
 
       before = Repo.get_by(SettingsRecord, plugin_name: "bokbasen")
 
@@ -1526,9 +1538,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
 
       html =
-        view
-        |> form("form[phx-submit=load]", %{plugin_name: "w35-load-victim"})
-        |> render_submit()
+        render_submit(view, "load", %{"plugin_name" => "w35-load-victim"})
 
       # (b) DOM ORACLE FIRST, deliberately: with the guard disarmed this is the
       # assertion that reds, and it reds NAMING the leak ("********Qv7Z" in the
@@ -1538,7 +1548,10 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       # …nor the stored key names (the inventory half of the leak).
       refute html =~ "api_key"
       # The panel never advanced past the empty state (`@loaded?` mirror).
-      assert html =~ "Status: empty"
+      # The panel never advanced: this principal has no editor at all, only
+      # the who-manages-credentials sentence (task-65e83bfe222337f0).
+      assert html =~ ~s(data-test-id="settings-credentials-no-authority")
+      refute html =~ ~s(name="settings_json")
       # (a) STATE ORACLE: zero reads of the installation-global store — the
       # refusal is fail-closed, not mask-harder. `Settings.get/2` audits every
       # successful read; the POSITIVE CONTROL below shows this counter DOES move
@@ -1595,9 +1608,7 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
 
       html =
-        view
-        |> form("form[phx-submit=load]", %{plugin_name: "bokbasen"})
-        |> render_submit()
+        render_submit(view, "load", %{"plugin_name" => "bokbasen"})
 
       # DOM ORACLE FIRST (see the generic arm): no masked tail, and none of the
       # plaintext config the typed renderer would have shown in the clear.
@@ -1605,7 +1616,10 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       refute html =~ String.slice(@typed_secret, -4, 4)
       refute html =~ "https://api-sandbox.bokbasen.example"
       refute html =~ "https://login.bokbasen.example/oauth2/token"
-      assert html =~ "Status: empty"
+      # The panel never advanced: this principal has no editor at all, only
+      # the who-manages-credentials sentence (task-65e83bfe222337f0).
+      assert html =~ ~s(data-test-id="settings-credentials-no-authority")
+      refute html =~ ~s(name="settings_json")
       # STATE ORACLE: the typed path never reached the store either.
       assert audit_count("bokbasen", "read") == 0
       assert html =~ "installation-admin authority"
@@ -1616,15 +1630,16 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view, _html} = live(conn, w35_settings_url(ws_b, proj_b))
 
       absent =
-        view
-        |> form("form[phx-submit=load]", %{plugin_name: "w35-load-no-such-plugin"})
-        |> render_submit()
+        render_submit(view, "load", %{"plugin_name" => "w35-load-no-such-plugin"})
 
       # The not-found flash IS the presence signal — it must never appear, and
       # the disposition must be the same refusal the existing row produced.
       refute absent =~ "No settings yet for"
       assert absent =~ "installation-admin authority"
-      assert absent =~ "Status: empty"
+      # The panel never advanced: this principal has no editor at all, only
+      # the who-manages-credentials sentence (task-65e83bfe222337f0).
+      assert absent =~ ~s(data-test-id="settings-credentials-no-authority")
+      refute absent =~ ~s(name="settings_json")
       assert audit_count("w35-load-no-such-plugin", "read") == 0
     end
   end
