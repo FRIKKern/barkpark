@@ -142,7 +142,7 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
   end
 
   describe "list_deliveries/2 limit clamp (context boundary)" do
-    test "clamps absent/negative/zero/huge to 1..100" do
+    test "clamps absent/negative/zero/huge to 1..101" do
       {:ok, wh} =
         Webhooks.create_webhook(%{
           "name" => "Clamp",
@@ -151,9 +151,9 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
           "events" => ["discardDraft"]
         })
 
-      # 101 deliveries so 25 (default) and 100 (max) are both strictly below the
+      # 102 deliveries so 25 (default) and 101 (max) are both strictly below the
       # total — the clamp is observable, not masked by a small row count.
-      for i <- 1..101 do
+      for i <- 1..102 do
         ev = make_event()
         {:ok, d} = Webhooks.claim_delivery(wh.id, ev.id)
         {:ok, _} = Webhooks.mark_delivered(d, 200, 1, i)
@@ -165,8 +165,12 @@ defmodule BarkparkWeb.WebhookDeliveriesTest do
       assert length(Webhooks.list_deliveries(wh.id, limit: -5)) == 1
       # Zero → clamped up to 1.
       assert length(Webhooks.list_deliveries(wh.id, limit: 0)) == 1
-      # Huge → clamped down to 100.
-      assert length(Webhooks.list_deliveries(wh.id, limit: 100_000)) == 100
+      # Huge → clamped down to 101, not 100: the ceiling is ONE PAST the
+      # user-facing max page size (100) on purpose (task-fb4cf8323a9795e5) —
+      # WebhookController fetches `limit: 100 + 1` to probe `has_more` at the
+      # page-size ceiling, and a context clamp back down to 100 would erase
+      # that signal exactly there. See list_deliveries/2's own doc.
+      assert length(Webhooks.list_deliveries(wh.id, limit: 100_000)) == 101
     end
   end
 
