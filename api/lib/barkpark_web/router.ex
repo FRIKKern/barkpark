@@ -2156,6 +2156,10 @@ defmodule BarkparkWeb.Router do
     # Self-service password change, gated on the current password — same
     # re-auth shape as /erase. See AuthController.change_password/2.
     patch("/password", AuthController, :change_password)
+    # Self-service display name (task-cfb6ca3f5ffaf099) — not sensitive, no
+    # reauth. Media.Storage.Actor.display/2 renders it in place of "another
+    # editor" for a "user:<id>" checkout-lock stamp.
+    patch("/display-name", AuthController, :update_display_name)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
     # Present a current factor to make this session step-up-fresh (clears a

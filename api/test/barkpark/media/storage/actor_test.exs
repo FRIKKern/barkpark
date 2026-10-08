@@ -3,9 +3,15 @@ defmodule Barkpark.Media.Storage.ActorTest do
   The one checkout-lock stamp (task-36a302b2e981d5e1): an account is
   "user:<id>" (a legacy email stamp still matches it), a token is its label,
   and what a viewer is shown is never an email or a raw "user:" id.
-  """
-  use ExUnit.Case, async: true
 
+  `use Barkpark.DataCase` (not bare `ExUnit.Case`) because task-cfb6ca3f5ffaf099
+  added a real DB lookup to the "another editor" branch (the account's
+  display_name) — only the two new tests at the bottom touch the sandbox; the
+  rest stay pure.
+  """
+  use Barkpark.DataCase, async: true
+
+  alias Barkpark.Accounts
   alias Barkpark.Media.Storage.Actor
 
   @user %{id: "u-1", email: "ed@example.com"}
@@ -36,5 +42,25 @@ defmodule Barkpark.Media.Storage.ActorTest do
     assert Actor.display("someone@example.com", me) == "another editor"
     assert Actor.display("studio-parity", me) == "studio-parity"
     assert Actor.display("user:u-2", nil) == "another editor"
+  end
+
+  test "display: a user:<id> stamp renders the account's display_name when it has one" do
+    {:ok, holder} =
+      Accounts.register_user(%{email: "holder@example.com", password: "correct-horse-battery"})
+
+    {:ok, holder} = Accounts.update_display_name(holder, %{display_name: "Alex Rivera"})
+    me = Actor.of(%{assigns: %{current_user: @user}})
+
+    assert Actor.display("user:" <> holder.id, me) == "Alex Rivera"
+  end
+
+  test "display: a user:<id> stamp with no display_name set still falls back to \"another editor\"" do
+    {:ok, holder} =
+      Accounts.register_user(%{email: "nameless@example.com", password: "correct-horse-battery"})
+
+    me = Actor.of(%{assigns: %{current_user: @user}})
+
+    refute holder.display_name
+    assert Actor.display("user:" <> holder.id, me) == "another editor"
   end
 end

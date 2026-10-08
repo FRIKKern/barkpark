@@ -60,9 +60,12 @@ defmodule Barkpark.Media.Storage.Actor do
 
   @doc """
   How a `checkedOutBy` value is shown to `viewer`: `nil` when nobody holds it,
-  `"you"` for the viewer's own lock, a token's label as is, and
-  `"another editor"` for any other account. Never an email, never a raw
-  `user:` id.
+  `"you"` for the viewer's own lock, a token's label as is, the holder's
+  display name (task-cfb6ca3f5ffaf099) when it's a `"user:<id>"` stamp and
+  that account has one set, and `"another editor"` for any other account —
+  including a `"user:<id>"` stamp whose account has no display name set, or a
+  legacy email stamp from before the no-email ruling. Never an email, never a
+  raw `user:` id.
   """
   @spec display(term(), t() | nil) :: String.t() | nil
   def display(holder, _viewer) when holder in [nil, ""], do: nil
@@ -70,14 +73,20 @@ defmodule Barkpark.Media.Storage.Actor do
   def display(holder, viewer) when is_binary(holder) do
     cond do
       viewer && holds?(viewer, holder) -> "you"
-      account_stamp?(holder) -> "another editor"
-      true -> holder
+      true -> account_display(holder)
     end
   end
 
   def display(_holder, _viewer), do: nil
 
-  # A "user:<id>" stamp, or a legacy email stamp from before the ruling.
-  defp account_stamp?("user:" <> _), do: true
-  defp account_stamp?(holder), do: String.contains?(holder, "@")
+  defp account_display("user:" <> id) do
+    case Barkpark.Accounts.get_user(id) do
+      %{display_name: name} when is_binary(name) and name != "" -> name
+      _ -> "another editor"
+    end
+  end
+
+  defp account_display(holder) do
+    if String.contains?(holder, "@"), do: "another editor", else: holder
+  end
 end

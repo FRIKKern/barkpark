@@ -3374,6 +3374,20 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "json"
       ),
       core_cmd(
+        "auth.set-display-name",
+        "auth",
+        "set-display-name",
+        "Set (or, passed blank, clear) the current user's display name. Not security-sensitive — no reauth. Shown in place of \"another editor\" wherever another account is named back to a viewer.",
+        "PATCH",
+        "/v1/auth/display-name",
+        "write",
+        args: [
+          arg("display_name", false, "string", "New display name; omit or pass blank to clear.")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
         "auth.token",
         "auth",
         "token",
