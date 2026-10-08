@@ -101,6 +101,9 @@ defmodule Barkpark.Plugins.Registry.TopMenuDisabledEntriesTest do
       assert is_binary(tab.reason)
       assert tab.reason =~ a.name
       assert tab.reason =~ "Disabled in this workspace"
+      # task-aa4f50a406951fae: the SAME fact as data, for a translating
+      # reader (Studio's nav.ex) to compose its own sentence from.
+      assert tab.enabled_in == a.name
       # The entry keeps its declared placement in the order tier.
       assert tab.order == 90
       assert tab.path == "/admin/scoped"
@@ -115,6 +118,7 @@ defmodule Barkpark.Plugins.Registry.TopMenuDisabledEntriesTest do
       assert tab, "expected the enabling workspace to surface the tab"
       assert tab.disabled == false
       assert tab.reason == nil
+      assert tab.enabled_in == nil
     end
 
     test "CONTROL: a plugin enabled everywhere renders enabled on both workspaces" do
@@ -165,6 +169,7 @@ defmodule Barkpark.Plugins.Registry.TopMenuDisabledEntriesTest do
       for e <- entries do
         assert Map.has_key?(e, :disabled), "entry #{e.label} is missing :disabled"
         assert Map.has_key?(e, :reason), "entry #{e.label} is missing :reason"
+        assert Map.has_key?(e, :enabled_in), "entry #{e.label} is missing :enabled_in"
       end
     end
   end
