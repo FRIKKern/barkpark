@@ -242,6 +242,7 @@ var objectReadCommands = map[string]string{
 	"media.share-view":             "share projection; hits nested under result (v1/media_collections_controller.ex)",
 	"media.suggest":                "result.recent/popular/nohits, none guaranteed present (v1/media_controller.ex)",
 	"paper.fleet-blocks":           "blocks is a blockId=>html MAP, not a row array; slug/rev are scalars (paper_fleet_blocks_controller.ex)",
+	"pref.get":                     "single {key, dataset, value} object; value is nil for an unset key, an honest answer, not an empty row set (user_pref_controller.ex)",
 	"schema.get":                   "one schema object (schema_controller.ex)",
 	"search.insights":              "aggregate counters object (search_controller.ex)",
 	"search.settings":              "settings object (search_controller.ex)",

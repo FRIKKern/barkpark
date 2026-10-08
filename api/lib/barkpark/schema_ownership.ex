@@ -56,7 +56,7 @@ defmodule Barkpark.SchemaOwnership do
     secrets_audit share_links shares social_identities social_providers
     status_incidents sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs task_edges token_sessions user_email_tokens
-    user_sessions users webauthn_challenge_replays webauthn_credentials webhook_deliveries webhooks
+    user_prefs user_sessions users webauthn_challenge_replays webauthn_credentials webhook_deliveries webhooks
     workspace_invitations workspace_memberships workspaces
   )
 
