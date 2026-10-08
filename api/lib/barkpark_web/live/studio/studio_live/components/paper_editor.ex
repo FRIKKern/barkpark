@@ -500,6 +500,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move up"
+                aria-label={"Move #{block_kind(block)} block up"}
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="up"
@@ -514,6 +515,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 type="button"
                 class="btn btn-ghost btn-sm"
                 title="Move down"
+                aria-label={"Move #{block_kind(block)} block down"}
                 phx-click="paper-move-block"
                 phx-value-id={Map.get(block, "id")}
                 phx-value-dir="down"
@@ -525,6 +527,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 type="button"
                 class="btn btn-destructive btn-sm"
                 title="Delete block"
+                aria-label={"Delete #{block_kind(block)} block"}
                 phx-click="paper-delete-block"
                 phx-value-id={Map.get(block, "id")}
                 data-test-id="paper-delete-block"
@@ -1080,6 +1083,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move up"
+            aria-label={"Move #{block_kind(@block)} block up"}
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="up"
@@ -1091,6 +1095,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="button"
             class="btn btn-ghost btn-sm"
             title="Move down"
+            aria-label={"Move #{block_kind(@block)} block down"}
             phx-click="paper-move-block"
             phx-value-id={Map.get(@block, "id")}
             phx-value-dir="down"
@@ -1143,6 +1148,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="button"
             class="btn btn-destructive btn-sm"
             title="Delete block"
+            aria-label={"Delete #{block_kind(@block)} block"}
             phx-click="paper-delete-block"
             phx-value-id={Map.get(@block, "id")}
             data-test-id="paper-delete-block"
@@ -1459,6 +1465,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="button"
             class="btn btn-ghost btn-sm bp-prop-unbind"
             title="Unbind property"
+            aria-label={"Unbind " <> prop_label(block, descriptor)}
             phx-click="paper-unbind-property"
             phx-value-id={Map.get(block, "id")}
             data-test-id="paper-unbind-property"
@@ -1522,6 +1529,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       {:ok, Map.merge(projection, %{id: block["id"], type: "table"})}
     else
       _ -> :readonly
+    end
+  end
+
+  # The block kind in words, for the accessible names of its ▲ ▼ × controls
+  # ("Move paragraph block up"): the glyphs alone read as "up-pointing
+  # triangle" / "times" (task-e25d03d0a56be4b7).
+  defp block_kind(block) do
+    case Map.get(block, "type") do
+      type when is_binary(type) and type != "" -> String.replace(type, "-", " ")
+      _ -> "this"
     end
   end
 

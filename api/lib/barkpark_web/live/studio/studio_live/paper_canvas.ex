@@ -602,6 +602,16 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   def canvas?(_), do: false
 
   @doc """
+  Whether a freshly added block of this type can take the canvas caret through
+  `focusBlock/1`: the run blocks that hold text the author types into. Atoms
+  and field node views are left out — `TextSelection.near` would put the caret
+  in a NEIGHBOUR block instead (task-44f900b38fac79e9).
+  """
+  @caret_types @prose_types ++ @canvas_content_types ++ @canvas_role_types
+  def caret_block?(%{"type" => type} = block), do: canvas?(block) and type in @caret_types
+  def caret_block?(_), do: false
+
+  @doc """
   The STABLE run id for a run at ORDINAL `i` of the paper `slug`, in the ordered
   `partition_runs/1` output: `slug <> "-run-" <> i`.
 

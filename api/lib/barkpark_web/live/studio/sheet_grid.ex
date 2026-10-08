@@ -1522,7 +1522,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # from the current selection (Excel's "apply to" default).
   def handle_event("cf-open", _params, socket) do
     panel = if socket.assigns.cf_panel, do: nil, else: cf_new_form(socket)
-    {:noreply, assign(socket, cf_panel: panel)}
+
+    {:noreply,
+     socket
+     |> assign(cf_panel: panel)
+     |> focus_first_in(panel && "#{socket.assigns.id}-cf-panel")}
   end
 
   def handle_event("cf-close", _params, socket) do
@@ -1602,7 +1606,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   def handle_event("filter-open", %{"col" => col}, socket) do
     col = to_int(col)
     panel = filter_open_form(socket.assigns.filters, col)
-    {:noreply, assign(socket, filter_panel: panel, menu: nil)}
+
+    {:noreply,
+     socket
+     |> assign(filter_panel: panel, menu: nil)
+     |> focus_first_in("#{socket.assigns.id}-filter-form-#{col}")}
   end
 
   def handle_event("filter-close", _params, socket) do
@@ -1784,6 +1792,26 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   defp import_error_text(:too_many_files), do: gettext("Choose one file.")
   defp import_error_text(other), do: gettext("The upload failed (%{reason}).", reason: other)
+
+  # task-028c354f7f24fb65: a popover dialog takes focus when it opens. The hook
+  # (`bp:sheet-focus-first` in bp-sheet-grid.js) focuses the first control of
+  # the element with this id once the patch has put it in the DOM.
+  defp focus_first_in(socket, nil), do: socket
+  defp focus_first_in(socket, id), do: push_event(socket, "bp:sheet-focus-first", %{id: id})
+
+  # task-028c354f7f24fb65: closing a popover dialog (Escape, ×, Apply) hands
+  # focus back to the button that opened it instead of dropping it on <body>.
+  # Where a closed filter hands focus: the grid when the funnel is not a Tab
+  # stop (an editable grid opens the filter from Alt+Down, task-5201a73e33535129),
+  # else the funnel itself.
+  defp filter_return_id(id, _col, true), do: "#{id}-grid"
+  defp filter_return_id(id, col, _editable), do: "#{id}-filter-funnel-#{col}"
+
+  defp close_and_refocus(event, target, trigger_id) do
+    event
+    |> Phoenix.LiveView.JS.push(target: target)
+    |> Phoenix.LiveView.JS.focus(to: "#" <> trigger_id)
+  end
 
   defp send_ops(socket, ops) do
     refs = for %{"ref" => ref} <- ops, do: ref
@@ -3074,7 +3102,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         </:actions>
       </.document_header>
 
-      <div :if={@editable} class="sheet-toolbar" data-test-id="sheet-toolbar">
+      <%!-- role="toolbar": ONE Tab stop for the formatting controls, arrow keys
+            inside (the SheetToolbar hook, task-5201a73e33535129). The name box
+            and formula bar stay ordinary Tab stops. --%>
+      <div
+        :if={@editable}
+        id={"#{@id}-toolbar"}
+        class="sheet-toolbar"
+        role="toolbar"
+        aria-label="Sheet formatting"
+        phx-hook="SheetToolbar"
+        data-test-id="sheet-toolbar"
+      >
         <form phx-submit="name-jump" phx-target={@myself}>
           <input
             name="ref"
@@ -3259,6 +3298,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             aria-haspopup="dialog"
             aria-expanded={to_string(@cf_panel != nil)}
             title="Conditional formatting"
+            id={"#{@id}-cf-btn"}
             data-test-id="sheet-cf-btn"
           >Cond. format</button>
 
@@ -3267,11 +3307,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             class="sheet-popover sheet-cf-panel"
             role="dialog"
             aria-label="Conditional formatting rules"
+            id={"#{@id}-cf-panel"}
+            phx-window-keydown={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")}
+            phx-key="Escape"
             data-test-id="sheet-cf-panel"
           >
             <div class="sheet-cf-head">
               <span class="sheet-cf-title">Conditional formatting</span>
-              <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-close" phx-target={@myself} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
+              <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("cf-close", @myself, "#{@id}-cf-btn")} aria-label="Close conditional-format panel" data-test-id="sheet-cf-close">&times;</button>
             </div>
 
             <%!-- Existing rules for THIS tab (raw stored list). Honest empty state. --%>
@@ -3567,6 +3610,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           Press Escape then Tab to leave the grid.
           <%= if @editable do %>
             F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+            Alt+Down opens the column filter, Alt+Shift+Down the column menu, and
+            Shift+F10 the cell menu.
           <% else %>
             Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.
           <% end %>
@@ -3673,8 +3718,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </div>
 
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
-            tabindex is deferred — every tab stays natively tab-focusable. --%>
-      <div class="sheet-tabs" data-test-id="sheet-tabs" role="tablist" aria-label="Sheet tabs">
+            tabindex (task-5201a73e33535129): the ACTIVE tab is the one Tab
+            stop, Left/Right/Home/End move between tabs (the SheetToolbar
+            hook in its tab-strip mode), Enter/Space switch. --%>
+      <div
+        id={"#{@id}-tabs"}
+        class="sheet-tabs"
+        data-test-id="sheet-tabs"
+        role="tablist"
+        aria-label="Sheet tabs"
+        phx-hook={@hookable && "SheetToolbar"}
+        data-roving-items="[role='tab']"
+        data-roving-follow="selected"
+      >
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
           <%!-- Stable ids: without them morphdom matched tabs by position, so
                 swapping the rename form back to a button re-used the FOCUSED
@@ -3877,6 +3933,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="col"
                 phx-value-index={c}
@@ -3917,6 +3974,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <button
               type="button"
               class={"sheet-filter-funnel" <> if(Map.has_key?(@filters, c), do: " sheet-funnel-active", else: "")}
+              tabindex={@editable && "-1"}
               phx-click="filter-open"
               phx-value-col={c}
               phx-target={@myself}
@@ -3931,6 +3989,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                   )
               }
               title="Filter this column"
+              id={"#{@id}-filter-funnel-#{c}"}
               data-active={to_string(Map.has_key?(@filters, c))}
               data-test-id={"sheet-filter-funnel-#{c}"}
             ><svg viewBox="0 0 16 16" width="11" height="11" aria-hidden="true" focusable="false"><path d="M1.5 2.5h13L9.5 9v4.2l-3 1.4V9L1.5 2.5Z" fill="currentColor" /></svg></button>
@@ -3940,16 +3999,15 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               class="sheet-popover sheet-filter-panel"
               role="dialog"
               aria-label={"Filter column " <> Geometry.col_letters(c)}
-              phx-window-keydown="filter-close"
+              phx-window-keydown={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))}
               phx-key="Escape"
-              phx-target={@myself}
               data-test-id="sheet-filter-panel"
             >
               <div class="sheet-filter-head">
                 <span class="sheet-filter-title">Filter <%= Geometry.col_letters(c) %></span>
-                <button type="button" class="btn btn-ghost btn-sm" phx-click="filter-close" phx-target={@myself} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
+                <button type="button" class="btn btn-ghost btn-sm" phx-click={close_and_refocus("filter-close", @myself, filter_return_id(@id, c, @editable))} aria-label="Close filter" data-test-id="sheet-filter-close">&times;</button>
               </div>
-              <form class="sheet-filter-form" phx-submit="filter-apply" phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
+              <form id={"#{@id}-filter-form-#{c}"} class="sheet-filter-form" phx-submit={close_and_refocus("filter-apply", @myself, filter_return_id(@id, c, @editable))} phx-change="filter-form-change" phx-target={@myself} data-test-id="sheet-filter-form">
                 <input type="hidden" name="col" value={c} />
                 <label class="sheet-filter-field">
                   <span>Show rows where</span>
@@ -4026,6 +4084,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <button
                 type="button"
                 class="sheet-head-menu-btn"
+                tabindex="-1"
                 phx-click="menu-open"
                 phx-value-kind="row"
                 phx-value-index={r}

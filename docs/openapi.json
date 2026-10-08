@@ -8102,6 +8102,64 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/codelists/{codelist_id}": {
+      "get": {
+        "operationId": "codelist.show",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "codelist_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated language preference order for labels (default nob,eng).",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
+        "tags": [
+          "codelist"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/webhooks/{dataset}/{id}/test-send": {
       "post": {
         "operationId": "webhook.test-send",
@@ -8180,6 +8238,41 @@
       }
     },
     "/v1/workspace/locale": {
+      "get": {
+        "operationId": "workspace.locale",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "read"
+      },
       "patch": {
         "operationId": "workspace.set-locale",
         "parameters": [],
@@ -15155,6 +15248,80 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/codelists/{codelist_id}": {
+      "get": {
+        "operationId": "codelist.show.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "codelist_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Comma-separated language preference order for labels (default nob,eng).",
+            "in": "query",
+            "name": "lang",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
+        "tags": [
+          "codelist"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/v1/auth/mfa/disable": {
       "post": {
         "operationId": "auth.mfa-disable",
@@ -18553,6 +18720,61 @@
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/workspace/locale": {
+      "get": {
+        "operationId": "workspace.locale.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "read"
+      },
       "patch": {
         "operationId": "workspace.set-locale.scoped",
         "parameters": [

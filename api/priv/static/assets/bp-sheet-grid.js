@@ -154,6 +154,12 @@
       // input on the common ancestor so both the grid (inside el) and the bar
       // (a sibling) are covered; cell/td lookups still go through this.el.
       this.root = (this.el.closest && this.el.closest(".sheet-editor")) || this.el;
+      // A popover dialog (filter, conditional formatting) takes focus when it
+      // opens (task-028c354f7f24fb65): the server names the element and the
+      // first form control inside it gets focus once the patch lands.
+      if (typeof this.handleEvent === "function") {
+        this.handleEvent("bp:sheet-focus-first", (payload) => this._focusFirstIn(payload && payload.id));
+      }
       // Function autocomplete: the server stamps the whole function vocabulary
       // on this element (data-fns), space-joined. _fn holds the live dropdown
       // state ({token,start,items,idx,navigated}); _menuEl is its rendered node.
@@ -375,6 +381,13 @@
         if (!(e.target === this.el || (this.el.contains && this.el.contains(e.target)))) return;
         // Name box / formula bar / tab-rename inputs keep native behaviour.
         if (e.target.matches && e.target.matches("input, textarea, select")) return;
+        // Header controls INSIDE the grid element — the filter funnel, the
+        // column / row menu buttons — and anything in a popover dialog keep
+        // native keys too: Enter/Space on a focused funnel opened the cell
+        // editor (or typed a space into it) instead of the filter
+        // (task-028c354f7f24fb65). The grid wrapper itself never matches.
+        if (e.target !== this.el && e.target.closest &&
+            e.target.closest("button, a[href], [role='dialog']")) return;
 
         // WCAG 2.1.2 escape hatch: Tab normally walks the selection (a keyboard
         // trap — focus can never leave the grid). Escape arms a one-shot so the
@@ -395,6 +408,13 @@
         if (e.key !== "Shift" && e.key !== "Control" && e.key !== "Alt" && e.key !== "Meta") {
           this._tabExits = false;
         }
+
+        // Header controls are not Tab stops (task-5201a73e33535129): the grid
+        // key map opens them for the ACTIVE cell instead.
+        //   Alt+ArrowDown        — the active column's filter
+        //   Alt+Shift+ArrowDown  — the active column's menu
+        //   Shift+F10 / Menu key — the cell context menu at the active cell
+        if (this._headerKeyRoute(e)) return;
 
         // Find-in-sheet (Cmd/Ctrl+F): open the server-rendered find bar instead
         // of the browser's native page find — a DOM find would only see the
@@ -592,7 +612,11 @@
         // nest INSIDE the th, so a naive closest("th") would steal their
         // clicks — the three guards keep them working.
         const th = e.target.closest && e.target.closest("th.sheet-colhead, th.sheet-rowhead");
-        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu"))) {
+        // The filter funnel and its popover live in the header cell too; a
+        // click there opens / drives the filter and must not select the column
+        // and pull focus to the grid (task-028c354f7f24fb65).
+        if (th && !(e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu") ||
+                    e.target.closest(".sheet-filter-funnel") || e.target.closest(".sheet-popover"))) {
           this.el.focus({ preventScroll: true });
           // A header click is a click-away: commit any open cell editor / dirty
           // bar to the still-active cell before the whole-row/col selection.
@@ -674,7 +698,8 @@
         if (!th) return;
         // Menu button, resize handle, and open menu nest INSIDE the th — the
         // same guards _onClick uses keep their mousedowns out of the drag.
-        if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu")) return;
+        if (e.target.closest(".sheet-head-menu-btn") || e.target.closest(".sheet-rsz") || e.target.closest(".sheet-menu") ||
+            e.target.closest(".sheet-filter-funnel") || e.target.closest(".sheet-popover")) return;
         // POINT ROUTING for headers (Decision 4): a header click while the caret
         // expects a reference inserts a whole-column (B:B) / whole-row (3:3) ref
         // and drag-extends it; otherwise falls through to the whole-row/col
@@ -799,7 +824,10 @@
       // fall through to the button's native activation (phx-click / _onCtxClick).
       // Bound on root; a keydown whose target is not inside the menu returns.
       this._onCtxKeydown = (e) => {
-        const menu = e.target.closest && e.target.closest(".sheet-context-menu");
+        // The header column / row menus share the same roving keys
+        // (task-5201a73e33535129): their buttons are not Tab stops any more.
+        const menu = e.target.closest &&
+          (e.target.closest(".sheet-context-menu") || e.target.closest(".sheet-menu"));
         if (!menu) return;
         const items = menu.querySelectorAll
           ? Array.prototype.slice.call(menu.querySelectorAll("[role='menuitem']"))
@@ -1084,6 +1112,13 @@
       }
       // A right-click just opened the context menu — focus its first item and
       // clamp it inside the viewport so it never spills off a screen edge.
+      if (this._headMenuWantFocus) {
+        const item = this.el.querySelector && this.el.querySelector(".sheet-menu [role='menuitem']");
+        if (item) {
+          this._headMenuWantFocus = false;
+          if (item.focus) item.focus();
+        }
+      }
       if (this._ctxWantFocus) {
         this._ctxWantFocus = false;
         this._focusAndClampCtxMenu();
@@ -1094,9 +1129,66 @@
       this._presencePing();
     },
 
+    _focusFirstIn(id, tries = 30) {
+      if (typeof id !== "string" || id === "" || typeof document === "undefined" || !document.getElementById) return;
+      const box = document.getElementById(id);
+      // A form control first (the dialog's Close button is earlier in the DOM
+      // but is not where the user starts), then any control.
+      const target = box && box.querySelector &&
+        (box.querySelector("form select, form input:not([type='hidden']), form textarea") ||
+          box.querySelector("select, input:not([type='hidden']), textarea, button"));
+      if (target && target.focus) {
+        target.focus();
+      } else if (tries > 0) {
+        const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame : (fn) => setTimeout(fn, 16);
+        raf(() => this._focusFirstIn(id, tries - 1));
+      }
+    },
+
     // Focus the first context-menu item and nudge the menu back on-screen if the
     // cursor sat near a viewport edge. Browser-only geometry — the node harness
     // has no getBoundingClientRect, so it bails after the (also-absent) focus.
+    // The grid key map's route to the header controls (task-5201a73e33535129).
+    // Returns true when the key was one of them (and pushed its event).
+    _headerKeyRoute(e) {
+      const menuKey = (e.key === "F10" && e.shiftKey && !e.altKey && !e.ctrlKey && !e.metaKey) ||
+        e.key === "ContextMenu";
+      const altDown = e.key === "ArrowDown" && e.altKey && !e.ctrlKey && !e.metaKey;
+      if (!menuKey && !altDown) return false;
+      const td = this.el.querySelector && this.el.querySelector("td.sheet-active");
+      const col = td && td.dataset ? parseInt(td.dataset.c, 10) : NaN;
+      if (!td || isNaN(col)) return false;
+      e.preventDefault();
+      if (menuKey) {
+        const r = td.getBoundingClientRect ? td.getBoundingClientRect() : null;
+        this._push("cell-menu-open", { x: r ? Math.round(r.left + 8) : 0, y: r ? Math.round(r.bottom) : 0 });
+        this._ctxWantFocus = true;
+        // The context menu is a SIBLING of this.el, and a keyboard open patches
+        // nothing inside it, so updated() may never run: watch for the menu.
+        this._focusCtxMenuSoon(30);
+      } else if (e.shiftKey) {
+        this._push("menu-open", { kind: "col", index: col });
+        this._headMenuWantFocus = true;
+      } else {
+        this._push("filter-open", { col: col });
+      }
+      return true;
+    },
+
+    _focusCtxMenuSoon(tries) {
+      const menu = this.root && this.root.querySelector && this.root.querySelector(".sheet-context-menu");
+      if (menu) {
+        if (this._ctxWantFocus) {
+          this._ctxWantFocus = false;
+          this._focusAndClampCtxMenu();
+        }
+        return;
+      }
+      if (tries > 0 && typeof requestAnimationFrame === "function") {
+        requestAnimationFrame(() => this._focusCtxMenuSoon(tries - 1));
+      }
+    },
+
     _focusAndClampCtxMenu() {
       if (!this._dom()) return;
       const menu = this.root && this.root.querySelector && this.root.querySelector(".sheet-context-menu");
@@ -2371,6 +2463,73 @@
         if (++frames < TAB_RENAME_WATCH_FRAMES) raf(watch);
       };
       watch();
+    }
+  };
+  // ── SheetToolbar: one Tab stop for the formatting bar (task-5201a73e33535129)
+  //
+  // The toolbar's ~26 buttons and selects were each a Tab stop. As a
+  // role="toolbar" it is ONE stop: the last-used control keeps tabindex=0,
+  // every other one -1, and Left/Right/Home/End move between them. The name
+  // box and formula bar (text inputs) stay ordinary Tab stops, and anything in
+  // a popover dialog (the CF panel) is left alone. A LiveView patch can drop
+  // the client-set tabindex, so updated() re-applies it.
+  //
+  // The sheet tab strip reuses it (data-roving-items="[role='tab']",
+  // data-roving-follow="selected"): the ACTIVE tab is the one stop, arrows
+  // move focus between tabs, Enter/Space activate natively.
+  window.BarkparkSheetToolbar = {
+    mounted() {
+      this._current = this._selectedIndex();
+      this._onKey = (e) => {
+        const items = this._items();
+        const i = items.indexOf(e.target);
+        if (i < 0) return;
+        let next = null;
+        if (e.key === "ArrowRight") next = (i + 1) % items.length;
+        else if (e.key === "ArrowLeft") next = (i - 1 + items.length) % items.length;
+        else if (e.key === "Home") next = 0;
+        else if (e.key === "End") next = items.length - 1;
+        if (next === null) return;
+        e.preventDefault();
+        this._current = next;
+        this._apply(items);
+        if (items[next].focus) items[next].focus();
+      };
+      this._onFocusIn = (e) => {
+        const i = this._items().indexOf(e.target);
+        if (i >= 0 && i !== this._current) {
+          this._current = i;
+          this._apply();
+        }
+      };
+      this.el.addEventListener("keydown", this._onKey);
+      this.el.addEventListener("focusin", this._onFocusIn);
+      this._apply();
+    },
+    updated() {
+      if (this._follow()) this._current = this._selectedIndex();
+      this._apply();
+    },
+    _follow() {
+      return !!(this.el.dataset && this.el.dataset.rovingFollow === "selected");
+    },
+    _selectedIndex() {
+      if (!this._follow()) return this._current || 0;
+      const i = this._items().findIndex((el) =>
+        el.getAttribute && el.getAttribute("aria-selected") === "true");
+      return i < 0 ? 0 : i;
+    },
+    _items() {
+      if (!this.el.querySelectorAll) return [];
+      const sel = (this.el.dataset && this.el.dataset.rovingItems) || "button, select";
+      return Array.prototype.filter.call(this.el.querySelectorAll(sel), (el) =>
+        !el.disabled && !(el.closest && el.closest("[role='dialog']")));
+    },
+    _apply(items) {
+      const list = items || this._items();
+      if (!list.length) return;
+      if (this._current >= list.length) this._current = list.length - 1;
+      list.forEach((el, i) => el.setAttribute("tabindex", i === this._current ? "0" : "-1"));
     }
   };
 })();

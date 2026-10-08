@@ -1044,6 +1044,33 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "codelist.show",
+        "codelist",
+        "show",
+        "Read a registered codelist's values as a tree (a flat list is a tree with no children): code, resolved label and nested children, by a member token.",
+        "GET",
+        "/v1/codelists/:codelist_id",
+        "read",
+        args: [
+          arg(
+            "codelist_id",
+            true,
+            "string",
+            "Codelist id, e.g. onixedit:thema (<plugin>:<name>)."
+          )
+        ],
+        flags: [
+          flag(
+            "lang",
+            "string",
+            "Comma-separated language preference order for labels (default nob,eng)."
+          )
+        ],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.history",
         "doc",
         "history",
@@ -2383,6 +2410,18 @@ defmodule Barkpark.Plugins.Capabilities do
           )
         ],
         writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.locale",
+        "workspace",
+        "locale",
+        "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
+        "GET",
+        "/v1/workspace/locale",
+        "read",
+        writes: false,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),

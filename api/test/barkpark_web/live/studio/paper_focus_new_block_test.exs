@@ -100,8 +100,34 @@ defmodule BarkparkWeb.Studio.PaperFocusNewBlockTest do
     end
   end
 
-  test "a non-paragraph add does not steal focus", %{view: view} do
+  # task-44f900b38fac79e9: only a paragraph took the caret; a keyboard user
+  # who added anything else was left on the Add button.
+  test "Add block → Callout asks the canvas to focus the new callout", %{view: view} do
+    before = stored_ids()
+    render_hook(view, "paper-add-block", %{"block-type" => "callout", "if_rev" => rev(view)})
+
+    [new_id] = stored_ids() -- before
+    assert_push_event(view, "bp:focus-block", %{id: ^new_id})
+  end
+
+  test "a block that renders as its own editor gets bp:focus-boundary", %{view: view} do
+    before = stored_ids()
+    render_hook(view, "paper-add-block", %{"block-type" => "equation", "if_rev" => rev(view)})
+
+    [new_id] = stored_ids() -- before
+    assert_push_event(view, "bp:focus-boundary", %{id: ^new_id})
+    refute_push_event(view, "bp:focus-block", %{id: _}, 100)
+  end
+
+  test "an atom in the run (divider) takes no focus: the caret would land beside it",
+       %{view: view} do
     render_hook(view, "paper-add-block", %{"block-type" => "divider", "if_rev" => rev(view)})
+    refute_push_event(view, "bp:focus-block", %{id: _}, 200)
+    refute_push_event(view, "bp:focus-boundary", %{id: _}, 100)
+  end
+
+  test "a refused write pushes no focus", %{view: view} do
+    render_hook(view, "paper-add-block", %{"block-type" => "callout", "if_rev" => "stale-rev"})
     refute_push_event(view, "bp:focus-block", %{id: _}, 200)
   end
 end
