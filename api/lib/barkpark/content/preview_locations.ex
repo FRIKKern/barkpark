@@ -6,13 +6,14 @@ defmodule Barkpark.Content.PreviewLocations do
 
   Reuses `Content.Graph.reverse_referencers/2`'s own fail-closed hydration
   for scoping (an unreadable source is dropped, never stubbed -- see that
-  function's doc) and the SAME `desk.preview` URL-template vocabulary
-  StudioLive's editor-header Preview action already interpolates for a
-  single document (`doc_actions.ex` / `studio_components/editor.ex`) --
-  independently RE-IMPLEMENTED here rather than imported, so a core HTTP
-  read never depends on a LiveView-owned module (those live under
-  `barkpark_web/live` and `barkpark_web/components/studio_components`,
-  outside this module's fence).
+  function's doc) and OWNS the SAME `desk.preview`/schema-action URL-template
+  interpolation StudioLive's editor-header Preview action and every other
+  schema-declared `"link"` action use for a single document
+  (`interpolate/5`, below) -- `studio_components/editor.ex`'s
+  `do_interpolate_href/5` delegates to it, so there is exactly ONE
+  placeholder-substitution implementation for both the batch (backlinks ->
+  locations) and single-document (StudioLive) callers, pinned equal by
+  `studio_preview_link_action_test.exs`.
 
   A location is OMITTED, never emitted with a guessed/wrong URL, when:
 
@@ -49,6 +50,31 @@ defmodule Barkpark.Content.PreviewLocations do
     Enum.flat_map(backlinks, &resolve_one(&1, templates, docs_by_id, dataset, url_scope))
   end
 
+  @doc """
+  The raw placeholder substitution ANY schema-declared `href` template uses
+  -- `:workspace` · `:project` · `:dataset` · `:slug` · `:id`,
+  longest-token-first (`:workspace`/`:project` before `:id` is not a prefix
+  ambiguity today, but the ORDER is the invariant this list is built on, see
+  `editor.ex`'s own comment). No resolvability check here — an unfilled
+  placeholder becomes `""`; `resolve/4` is what REFUSES to emit a location
+  whose `:slug` can't be filled. `studio_components/editor.ex`'s
+  `do_interpolate_href/5` calls this directly, so a StudioLive-rendered
+  link's href and this module's own `url` field are the SAME computation for
+  the same inputs.
+  """
+  @spec interpolate(String.t(), map() | nil, String.t() | nil, String.t() | nil, String.t() | nil) ::
+          String.t()
+  def interpolate(template, doc, dataset, workspace_slug \\ nil, project_slug \\ nil) do
+    id = Content.published_id(Map.get(doc || %{}, :doc_id) || "")
+
+    template
+    |> String.replace(":workspace", to_string(workspace_slug || ""))
+    |> String.replace(":project", to_string(project_slug || ""))
+    |> String.replace(":dataset", to_string(dataset || ""))
+    |> String.replace(":slug", doc_slug(doc) || "")
+    |> String.replace(":id", id)
+  end
+
   defp resolve_one(bl, templates, docs_by_id, dataset, url_scope) do
     with template when is_binary(template) <- Map.get(templates, bl.type),
          %{} = doc <- Map.get(docs_by_id, bl.from_doc_id),
@@ -71,20 +97,17 @@ defmodule Barkpark.Content.PreviewLocations do
   end
 
   defp fill_template(template, doc, dataset, url_scope) do
-    slug = doc_slug(doc)
-
-    if String.contains?(template, ":slug") and not is_binary(slug) do
+    if String.contains?(template, ":slug") and not is_binary(doc_slug(doc)) do
       :error
     else
-      id = Content.published_id(Map.get(doc, :doc_id) || "")
-
       url =
-        template
-        |> String.replace(":workspace", to_string(Map.get(url_scope, :workspace_slug) || ""))
-        |> String.replace(":project", to_string(Map.get(url_scope, :project_slug) || ""))
-        |> String.replace(":dataset", to_string(dataset || ""))
-        |> String.replace(":slug", slug || "")
-        |> String.replace(":id", id)
+        interpolate(
+          template,
+          doc,
+          dataset,
+          Map.get(url_scope, :workspace_slug),
+          Map.get(url_scope, :project_slug)
+        )
 
       {:ok, url}
     end
