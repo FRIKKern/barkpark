@@ -138,6 +138,91 @@ try {
       cases++;
     } finally { canvas.remove(); }
   }
+  // The settings disclosure: a number's range + unit, a select's options. Each
+  // edit saves only the config keys it changed.
+  const setting = (canvas, key, value) => change(canvas, `paper-field-setting-${key}`, value);
+  await exercise(number, canvas => {
+    const details = canvas.querySelector(".bp-canvas-field-settings");
+    assert.equal(details.tagName, "DETAILS");
+    assert.equal(details.querySelector("summary").textContent, "Edit number");
+    setting(canvas, "max", "20");
+  }, (patch, canvas) => {
+    assert.deepEqual(patch, { max: 20 });
+    assert.equal(canvas.querySelector('[data-test-id="paper-field-field-number"]').max, "20",
+      "the value input takes the new bound in place");
+  });
+  await exercise(number, canvas => setting(canvas, "min", ""),
+    patch => assert.deepEqual(patch, { min: null }));
+  await exercise(number, canvas => setting(canvas, "unit", "lb"), (patch, canvas) => {
+    assert.deepEqual(patch, { unit: "lb" });
+    assert.equal(canvas.querySelector(".bp-canvas-field-unit").textContent, "lb");
+  });
+  for (const [key, typed] of [["min", "12"], ["step", "0"], ["max", "2"]]) {
+    // min > max, a zero step, a range that strands the value: kept, marked, not sent.
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([number]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      setting(canvas, key, typed);
+      canvas.flushPendingChanges();
+      assert.deepEqual(batches, [], `${key}=${typed} is not saved`);
+      const input = canvas.querySelector(`[data-test-id="paper-field-setting-${key}"]`);
+      assert.equal(input.getAttribute("aria-invalid"), "true");
+      assert.equal(input.value, typed, "the refused config stays in the input");
+      cases++;
+    } finally { canvas.remove(); }
+  }
+  const select = { id: "field", type: "field-select", value: "a", label: "Pick",
+    options: [{ value: "a", label: "Alpha" }, { value: "b", label: "Beta" }] };
+  await exercise(select, canvas => {
+    canvas.querySelector('[data-test-id="paper-field-setting-add-option"]').click();
+    const rows = canvas.querySelectorAll(".bp-canvas-field-setting-option");
+    assert.equal(rows.length, 3);
+    const [value, label] = rows[2].querySelectorAll("input");
+    assert.equal(value.getAttribute("aria-label"), "Option 3 value");
+    value.value = "c";
+    value.dispatchEvent(new window.Event("change", { bubbles: true }));
+    label.value = "Gamma";
+    label.dispatchEvent(new window.Event("change", { bubbles: true }));
+  }, (patch, canvas) => {
+    assert.deepEqual(patch, { options: [{ value: "a", label: "Alpha" },
+      { value: "b", label: "Beta" }, { value: "c", label: "Gamma" }] });
+    assert.deepEqual([...canvas.querySelector("select").options].map(o => o.textContent),
+      ["Alpha", "Beta", "Gamma"], "the select takes the new option in place");
+  });
+  await exercise(select, canvas => {
+    canvas.querySelectorAll('[data-test-id="paper-field-setting-remove-option"]')[1].click();
+  }, patch => assert.deepEqual(patch, { options: [{ value: "a", label: "Alpha" }] }));
+  await exercise(select, canvas => {
+    canvas.querySelectorAll('[data-test-id="paper-field-setting-remove-option"]')[0].click();
+  }, patch => assert.deepEqual(patch, { options: [{ value: "b", label: "Beta" }], value: "" },
+    "removing the selected option clears the value"));
+  await exercise(select, canvas => {
+    const value = canvas.querySelector('[data-option-part="value"]');
+    value.value = "aa";
+    value.dispatchEvent(new window.Event("change", { bubbles: true }));
+  }, patch => assert.deepEqual(patch, { options: [{ value: "aa", label: "Alpha" },
+    { value: "b", label: "Beta" }], value: "aa" }, "renaming the selected option carries the value"));
+  {
+    // Escape closes the disclosure and puts focus back on its summary.
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([select]);
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      const details = canvas.querySelector(".bp-canvas-field-settings");
+      details.open = true;
+      const input = details.querySelector("input");
+      input.focus();
+      input.dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      assert.equal(details.open, false);
+      assert.equal(document.activeElement, details.querySelector("summary"));
+      cases++;
+    } finally { canvas.remove(); }
+  }
   for (const [title, expected] of [
     ["Add row", { head: table.head, rows: [...table.rows, [[], []]] }],
     ["Remove row", { head: table.head, rows: table.rows.slice(0, 1) }],

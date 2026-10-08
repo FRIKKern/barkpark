@@ -1294,6 +1294,7 @@ for (const type of BP_NATIVE_FIELD_TYPES) {
     if (seed.label != null) reordered.label = seed.label;
     if (seed.options != null) reordered.options = seed.options;
     if (seed.rows != null) reordered.rows = seed.rows;
+    for (const k of ["min", "max", "step", "unit"]) if (seed[k] != null) reordered[k] = seed[k];
     f.attrs = reordered;
 
     const ops = runToOps(blocks, doc);

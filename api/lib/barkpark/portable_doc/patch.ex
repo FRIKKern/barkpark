@@ -842,7 +842,28 @@ defmodule Barkpark.PortableDoc.Patch do
     end
   end
 
+  # A field-select patch that carries `options` (the canvas settings disclosure
+  # edits the list) must send a list of `%{"value" => text}` with an optional text
+  # `"label"` and no repeated value: the reader looks each option up by value.
+  defp coerce_field_patch(%{"type" => "field-select"}, %{"options" => options} = patch) do
+    if select_options?(options), do: {:ok, patch}, else: :error
+  end
+
   defp coerce_field_patch(_target, patch), do: {:ok, patch}
+
+  defp select_options?(options) when is_list(options) do
+    Enum.all?(options, fn
+      %{"value" => value} = option when is_binary(value) and value != "" ->
+        Map.keys(option) -- ["value", "label"] == [] and
+          is_binary(Map.get(option, "label", ""))
+
+      _ ->
+        false
+    end) and
+      length(Enum.uniq_by(options, & &1["value"])) == length(options)
+  end
+
+  defp select_options?(_options), do: false
 
   defp op_for_error(id, patch), do: %{"op" => "patch-block", "id" => id, "patch" => patch}
 end

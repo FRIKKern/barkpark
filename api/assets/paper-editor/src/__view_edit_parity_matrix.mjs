@@ -286,6 +286,9 @@ function ownersFor(root) {
   for (const c of root.querySelectorAll("input:not([type=hidden]):not([type=checkbox]):not([type=radio]), textarea")) {
     const t = norm(c.value || "");
     if (!t || hidden(c)) continue;
+    // A field's settings (its options, its range) are config behind a closed
+    // disclosure, never the value the reader prints.
+    if (c.closest(".bp-canvas-field-settings")) continue;
     const style = pick(c, "control");
     // A control whose own ink is transparent does not paint its glyphs: a
     // sibling layer carrying the same text does (the canvas code block's
