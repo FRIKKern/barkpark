@@ -17,13 +17,6 @@
   },
   {
    "surface": "canvas",
-   "fixture": "field-number",
-   "text": "(block)",
-   "axis": "mounted",
-   "reason": "field-number is not a canvas type (PaperCanvas @canvas_field_types), so the all-in-one-canvas mount drops it; the liveview surface measures it as the boundary editor /papers really mounts."
-  },
-  {
-   "surface": "canvas",
    "fixture": "field-select",
    "text": "Hardcover",
    "axis": "text-owner-missing-in-edit",
@@ -70,90 +63,6 @@
    "text": "Yes",
    "axis": "text-owner-missing-in-edit",
    "reason": "The Edit surface holds this value in a checkbox/select control, not painted text; there is no text owner to compare."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "312",
-   "axis": "fontFeatureSettings",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "312",
-   "axis": "fontSize",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "312",
-   "axis": "letterSpacing",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "312",
-   "axis": "lineHeight",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "312",
-   "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "color",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "fontFamily",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "fontFeatureSettings",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "fontSize",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "letterSpacing",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "lineHeight",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
   },
   {
    "surface": "liveview",

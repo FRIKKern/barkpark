@@ -1312,6 +1312,14 @@
       font-weight: 500;
       color: var(--paper-ink-faint, #82918b);
     }
+    /* field-number's unit, after its number input: quiet text, not chrome. The
+       input and unit share the field row's value column. */
+    .bp-canvas-field-value { display: flex; align-items: baseline; min-width: 0; }
+    .bp-canvas-field-value > .bp-canvas-field-control { flex: 1 1 auto; min-width: 0; }
+    .bp-canvas-field-unit {
+      margin-inline-start: 0.4em;
+      color: var(--paper-ink-faint);
+    }
 
     /* ── canvas action node-view (editable-action: the CTA button) ────────────
        The CTA `action` block edited in-canvas: a live bp-button PREVIEW (byte-

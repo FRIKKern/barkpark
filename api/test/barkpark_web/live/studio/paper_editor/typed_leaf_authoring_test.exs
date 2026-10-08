@@ -190,11 +190,23 @@ defmodule BarkparkWeb.Studio.PaperEditor.TypedLeafAuthoringTest do
       )
 
     refute html =~ "blocks are not editable yet"
-    assert html =~ ~s(id="field-number-form-number")
-    assert html =~ ~s(phx-change="paper-edit-block")
-    assert html =~ ~s(name="value")
-    assert html =~ ~s(id="field-number-value-number")
-    assert html =~ ~s(step="any")
+    # field-number rides the canvas run as a native number control, carrying its
+    # config; the per-block form is the non-canvas fallback.
+    refute html =~ ~s(id="field-number-form-number")
+    assert html =~ ~s(&quot;type&quot;:&quot;field-number&quot;,&quot;unit&quot;:&quot;kg&quot;)
+
+    fallback =
+      render_component(&PaperEditor.paper_block_editor/1,
+        slug: "paper",
+        blocks: Enum.take(blocks, 1),
+        canvas_eligible: false
+      )
+
+    assert fallback =~ ~s(id="field-number-form-number")
+    assert fallback =~ ~s(phx-change="paper-edit-block")
+    assert fallback =~ ~s(name="value")
+    assert fallback =~ ~s(id="field-number-value-number")
+    assert fallback =~ ~s(step="any")
     assert html =~ ~s(id="blockquote-form-quote")
     assert html =~ ~s(id="paper-ed-quote")
     tree = LazyHTML.from_fragment(html)

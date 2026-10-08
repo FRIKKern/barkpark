@@ -45,6 +45,7 @@ import {
 } from "../convert.js";
 // Merged cells (plan #24): the grid <-> visible-rows model (spans on the block, covered placeholders).
 import { gridToVisible, visibleToGrid, PLACEHOLDER_CELL } from "./table-grid.js";
+import { toFieldNumber } from "./field-node.js";
 
 // The doc-block kinds convert.js round-trips as prose (convert.js blockToTiptap
 // switch). These project to a native ProseMirror textblock and diff via
@@ -284,15 +285,16 @@ const CANVAS_ATTR_ATOM_BP_TYPE_BY_NODE = {
   bpFiletree: "filetree",
 };
 
-// S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+// S3.5: the 8 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
 // nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
 // in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
-// select / datetime-local / color; see field-node.js). UNLIKE the code/diagram
+// select / datetime-local / color / number; see field-node.js). UNLIKE the code/diagram
 // attr-atoms (one bpType per TipTap node, body text in a free textarea), the field
-// control-atom serves 7 bpTypes through ONE node (`bpField`), the edit surface is a
+// control-atom serves 8 bpTypes through ONE node (`bpField`), the edit surface is a
 // TYPED control, and the value is COERCED BY FIELD TYPE exactly like the shipped
-// BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked; every
-// other native type → a STRING via control.value).
+// BarkparkFieldBlockBridge (field-boolean → a BOOLEAN via control.checked;
+// field-number → a NUMBER or null; every other native type → a STRING via
+// control.value).
 //
 // RUN-SPLITTER TAIL (part 1): field-image (bp-media-picker WC) and field-reference
 // (bp-reference-picker WC) now ALSO ride the canvas through the SAME `bpField` atom —
@@ -318,6 +320,7 @@ const CANVAS_NATIVE_FIELD_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
 ]);
 const CANVAS_PICKER_FIELD_TYPES = new Set(["field-image", "field-reference"]);
 const CANVAS_FIELD_TYPES = new Set([
@@ -2919,6 +2922,8 @@ function normalizeFieldValue(bpType, value) {
   if (bpType === "field-boolean") {
     return value === true || value === "true";
   }
+  // field-number stores a NUMBER, or null when empty (blocks.ex default_block).
+  if (bpType === "field-number") return toFieldNumber(value);
   if (value == null) return "";
   return typeof value === "string" ? value : String(value);
 }
@@ -2933,6 +2938,8 @@ function normalizeFieldValue(bpType, value) {
 //   * label     — only when present (label is a string; carry it as-is when set).
 //   * options   — only when present (field-select carries it; others don't).
 //   * rows      — only when present (field-text's optional row count).
+const FIELD_NUMBER_CONFIG = ["min", "max", "step", "unit"];
+
 function fieldBlockToNode(block, bpId, bpType) {
   const attrs = {
     bpId,
@@ -2944,6 +2951,8 @@ function fieldBlockToNode(block, bpId, bpType) {
   if (block && block.label != null) attrs.label = block.label;
   if (block && block.options != null) attrs.options = block.options;
   if (block && block.rows != null) attrs.rows = block.rows;
+  // field-number config: min / max / step / unit, only when present.
+  for (const k of FIELD_NUMBER_CONFIG) if (block && block[k] != null) attrs[k] = block[k];
   // PICKER config (field-image / field-reference) carried verbatim so the round-trip is
   // byte-identical: refType (field-reference's target schema) + dataset (a per-block
   // fetch-scope override). Carried ONLY when present so an untouched picker's getJSON
@@ -2980,6 +2989,7 @@ function fieldNodeToBlock(node, id) {
   if (attrs.label != null) block.label = attrs.label;
   if (attrs.options != null) block.options = attrs.options;
   if (attrs.rows != null) block.rows = attrs.rows;
+  for (const k of FIELD_NUMBER_CONFIG) if (attrs[k] != null) block[k] = attrs[k];
   // PICKER config (field-image / field-reference): refType + dataset threaded ONLY when
   // present so the reconstructed block is byte-identical to one that round-tripped
   // through the per-block path (no stray refType/dataset on a native field). The inverse

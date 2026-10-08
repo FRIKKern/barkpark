@@ -108,6 +108,36 @@ try {
       control.dispatchEvent(new window.Event("change", { bubbles: true }));
     }, patch => assert.deepEqual(patch, { value: after }, `${type} preserves the exact value type`));
   }
+  // field-number: a native number input carrying min/max/step, the unit after it;
+  // the value saves as a NUMBER (null when cleared), never a string.
+  const number = { id: "field", type: "field-number", value: 3, label: "Weight",
+    min: 0, max: 10, step: 0.5, unit: "kg" };
+  for (const [typed, saved] of [["4.5", 4.5], ["", null]]) {
+    await exercise(number, canvas => {
+      const control = canvas.querySelector('[data-test-id="paper-field-field-number"]');
+      assert.equal(control.type, "number");
+      assert.deepEqual([control.min, control.max, control.step], ["0", "10", "0.5"]);
+      assert.equal(control.nextElementSibling.textContent, "kg", "unit follows the input");
+      change(canvas, "paper-field-field-number", typed);
+    }, patch => assert.deepEqual(patch, { value: saved }, `number "${typed}" saves ${saved}`));
+  }
+  {
+    // Out of range: the control keeps the input, marks it invalid, saves nothing.
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.blocks = structuredClone([number]);
+    const batches = [];
+    canvas.addEventListener("bp-canvas-ops", event => batches.push(event.detail.ops));
+    document.body.appendChild(canvas);
+    try {
+      await new Promise(resolve => setTimeout(resolve, 350));
+      change(canvas, "paper-field-field-number", "11");
+      canvas.flushPendingChanges();
+      assert.deepEqual(batches, [], "an out-of-range number is not saved");
+      assert.equal(canvas.querySelector('[data-test-id="paper-field-field-number"]')
+        .getAttribute("aria-invalid"), "true");
+      cases++;
+    } finally { canvas.remove(); }
+  }
   for (const [title, expected] of [
     ["Add row", { head: table.head, rows: [...table.rows, [[], []]] }],
     ["Remove row", { head: table.head, rows: table.rows.slice(0, 1) }],

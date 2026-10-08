@@ -101,6 +101,7 @@ defmodule Barkpark.PortableDoc.Patch do
   """
 
   alias Barkpark.PortableDoc.Constraints
+  alias Barkpark.PortableDoc.FieldNumber
 
   @figure_child_constraint "figure must contain exactly one child"
 
@@ -225,32 +226,31 @@ defmodule Barkpark.PortableDoc.Patch do
 
   defp apply_to_blocks(blocks, %{"op" => "patch-block", "id" => id, "patch" => patch})
        when is_map(patch) do
-    # Track a type mismatch out-of-band: transform_at_id can only signal
-    # found / not-found, so the merge fn records the conflict and leaves the
-    # target untouched, and we inspect the flag after the walk — a captured
-    # `type_mismatch?` flag threaded out of the closure.
-    {result, mismatch?} =
+    # Track a refusal out-of-band: transform_at_id can only signal found /
+    # not-found, so the merge fn records the conflict (`:type_mismatch` or
+    # `:invalid_value`) and leaves the target untouched, and we inspect the flag
+    # after the walk.
+    {result, refusal} =
       transform_with_flag(blocks, id, fn target ->
         # `patch.type` present and differing from the target's type is a
         # mismatch (contract §5); omitting `type` is the common case. A literal
         # `null` is treated as "absent" — it can never re-key the type.
-        case Map.get(patch, "type") do
-          nil ->
-            {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))], false}
+        patch_type = Map.get(patch, "type")
 
-          patch_type ->
-            if patch_type != Map.get(target, "type") do
-              {[target], true}
-            else
-              {[merge_block(target, coerce_field_patch(target, strip_template_keys(patch)))],
-               false}
-            end
+        if patch_type != nil and patch_type != Map.get(target, "type") do
+          {[target], :type_mismatch}
+        else
+          case coerce_field_patch(target, strip_template_keys(patch)) do
+            {:ok, coerced} -> {[merge_block(target, coerced)], false}
+            :error -> {[target], :invalid_value}
+          end
         end
       end)
 
     cond do
       result == nil -> {:error, {:block_not_found, id, "patch-block"}}
-      mismatch? -> {:error, {:type_mismatch, id, "patch-block"}}
+      refusal == :type_mismatch -> {:error, {:type_mismatch, id, "patch-block"}}
+      refusal == :invalid_value -> {:error, {:invalid_op, op_for_error(id, patch)}}
       true -> {:ok, result}
     end
   end
@@ -811,20 +811,38 @@ defmodule Barkpark.PortableDoc.Patch do
   defp block_locked?(block) when is_map(block), do: Map.get(block, "locked") == true
   defp block_locked?(_block), do: false
 
-  # Minimal per-type coercion for field-* LEAF blocks (P2.1). Only the
-  # `"value"` key is touched, and only for field-boolean (string "true"/"false"
-  # → real bool) so a stringy checkbox value can never land in the store as a
-  # binary. All other field types (string/slug/text/select/datetime/color) keep
-  # their value as-is — string values are already the right shape. Non-field
+  # Minimal per-type coercion for field-* LEAF blocks (P2.1). For field-boolean
+  # only the `"value"` key is touched (string "true"/"false" → real bool) so a
+  # stringy checkbox value can never land in the store as a binary. A
+  # field-number patch that touches value/min/max/step goes through
+  # `FieldNumber.validate/2`: numeric text becomes a number, "" becomes nil, and
+  # a value the Paper editor's number form would refuse (not a number, outside
+  # min..max) is refused here too (`:error`). All other field types
+  # (string/slug/text/select/datetime/color) keep their value as-is. Non-field
   # blocks (rich text, callout, …) are returned untouched, so the P1 path is
-  # byte-identical. Full per-type schema validation is a later slice.
+  # byte-identical.
   defp coerce_field_patch(%{"type" => "field-boolean"}, patch) do
     case Map.fetch(patch, "value") do
-      {:ok, "true"} -> Map.put(patch, "value", true)
-      {:ok, "false"} -> Map.put(patch, "value", false)
-      _ -> patch
+      {:ok, "true"} -> {:ok, Map.put(patch, "value", true)}
+      {:ok, "false"} -> {:ok, Map.put(patch, "value", false)}
+      _ -> {:ok, patch}
     end
   end
 
-  defp coerce_field_patch(_target, patch), do: patch
+  defp coerce_field_patch(%{"type" => "field-number"} = target, patch) do
+    numbers = Map.take(patch, FieldNumber.number_keys())
+
+    if numbers == %{} do
+      {:ok, patch}
+    else
+      case FieldNumber.validate(target, numbers) do
+        {:ok, parsed} -> {:ok, Map.merge(patch, parsed)}
+        {:error, _reason} -> :error
+      end
+    end
+  end
+
+  defp coerce_field_patch(_target, patch), do: {:ok, patch}
+
+  defp op_for_error(id, patch), do: %{"op" => "patch-block", "id" => id, "patch" => patch}
 end

@@ -9,6 +9,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
   """
 
   alias Barkpark.Content.Papers.CanvasRunContext
+  alias Barkpark.PortableDoc.FieldNumber
   alias BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor
 
   @card_form_fields ~w(card-tone card-title card-media-src card-media-alt card-action-label card-action-href card-action-priority)
@@ -754,24 +755,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   @doc false
   def validate_block_patch(%{"type" => "field-number"} = block, params) do
-    with {:ok, value} <- parse_effective_number(block, params, "value"),
-         {:ok, min} <- parse_effective_number(block, params, "min"),
-         {:ok, max} <- parse_effective_number(block, params, "max"),
-         {:ok, step} <- parse_effective_number(block, params, "step"),
-         true <- is_nil(step) or step > 0,
-         true <- is_nil(min) or is_nil(max) or min <= max,
-         true <- is_nil(value) or is_nil(min) or value >= min,
-         true <- is_nil(value) or is_nil(max) or value <= max do
+    with {:ok, numbers} <- FieldNumber.validate(block, params) do
       {:ok,
        %{}
        |> put_if_fetched(params, "label", "")
        |> put_if_fetched(params, "unit", "")
-       |> put_if_parsed(params, "value", value)
-       |> put_if_parsed(params, "min", min)
-       |> put_if_parsed(params, "max", max)
-       |> put_if_parsed(params, "step", step)}
-    else
-      _ -> {:error, :invalid_number}
+       |> Map.merge(numbers)}
     end
   end
 
@@ -3655,10 +3644,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
     end
   end
 
-  defp put_if_parsed(map, params, key, value) do
-    if Map.has_key?(params, key), do: Map.put(map, key, value), else: map
-  end
-
   # Compare the submitted control value with its source projection, not the raw
   # JSON shape. Untouched blank/equivalent controls must not normalize metadata.
   @doc false
@@ -3697,40 +3682,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Blocks do
 
   defp contextual_optional_input("layout", _value), do: :error
 
-  defp parse_submitted_number(value) when value in [nil, ""], do: {:ok, nil}
-  defp parse_submitted_number(value) when is_integer(value) or is_float(value), do: {:ok, value}
-
-  defp parse_submitted_number(value) when is_binary(value) do
-    trimmed = String.trim(value)
-
-    case Integer.parse(trimmed) do
-      {number, ""} ->
-        {:ok, number}
-
-      _ ->
-        case Float.parse(trimmed) do
-          {number, ""} -> {:ok, number}
-          _ -> :error
-        end
-    end
-  end
-
-  defp parse_submitted_number(_value), do: :error
-
-  defp parse_number_param(params, key) do
-    case Map.fetch(params, key) do
-      {:ok, value} -> parse_submitted_number(value)
-      :error -> {:ok, nil}
-    end
-  end
-
-  defp parse_effective_number(block, params, key) do
-    if Map.has_key?(params, key) do
-      parse_number_param(params, key)
-    else
-      parse_submitted_number(Map.get(block, key))
-    end
-  end
+  defp parse_submitted_number(value), do: FieldNumber.parse(value)
 
   defp optional_string(value) when is_binary(value) do
     case String.trim(value) do

@@ -96,17 +96,18 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # (Code/Diagram/Diff/Filetree) ⇄ here.
   @canvas_attr_atom_types ~w(code diagram diff filetree)
 
-  # S3.5: the 7 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
+  # S3.5: the 8 NATIVE-CONTROL field-* block kinds the canvas handles as CONTROL-ATOM
   # nodes — atom nodes (no PM-managed body, like the divider/code) whose VALUE rides
   # in an attr and is edited by a NATIVE HTML control (input / textarea / checkbox /
-  # select / datetime-local / color; run-convert.js CANVAS_FIELD_TYPES). UNLIKE the
-  # code/diagram attr-atoms, the value is COERCED BY FIELD TYPE exactly like the
-  # shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; the rest → a STRING).
-  # These 7 no longer SPLIT a run.
+  # select / datetime-local / color / number; run-convert.js CANVAS_FIELD_TYPES).
+  # UNLIKE the code/diagram attr-atoms, the value is COERCED BY FIELD TYPE exactly like
+  # the shipped BarkparkFieldBlockBridge (field-boolean → a BOOLEAN; field-number → a
+  # NUMBER or nil, checked by Patch against min/max; the rest → a STRING).
+  # These 8 no longer SPLIT a run.
   #
   # Keep aligned with run-convert.js CANVAS_NATIVE_FIELD_TYPES and
   # field-node.js BP_NATIVE_FIELD_TYPES.
-  @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color)
+  @canvas_field_types ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number)
 
   # RUN-SPLITTER TAIL (part 1): the 2 PICKER field-* block kinds the canvas now handles
   # as CONTROL-ATOM nodes mounting the EXISTING client-side picker Web Components —

@@ -56,6 +56,7 @@ export const SLASH_ITEMS = [
   { group: "Basic fields", type: "field-select", label: "Select", hint: "▾", desc: "pick one option" },
   { group: "Basic fields", type: "field-datetime", label: "Date & time", hint: "◷", desc: "timestamp value" },
   { group: "Basic fields", type: "field-color", label: "Color", hint: "●", desc: "hex swatch value" },
+  { group: "Basic fields", type: "field-number", label: "Number", hint: "#", desc: "numeric value" },
 
   { group: "Media & reference", type: "field-image", label: "Image field", hint: "▣", desc: "upload or url" },
   { group: "Media & reference", type: "field-reference", label: "Reference", hint: "↗", desc: "link another document" },
