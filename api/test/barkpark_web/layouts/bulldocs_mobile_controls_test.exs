@@ -12,7 +12,7 @@ defmodule BarkparkWeb.Layouts.BulldocsMobileControlsTest do
     src = File.read!(@layout)
 
     assert src =~
-             ~s|<div class="bp-view-controls" role="group" aria-label="Paper view controls">|
+             ~s|<div class="bp-view-controls" role="group" aria-label={gettext("Paper view controls")}>|
 
     assert src =~ ~r/\.bp-view-controls \{.*?display: flex;.*?flex-wrap: wrap;/s
 
