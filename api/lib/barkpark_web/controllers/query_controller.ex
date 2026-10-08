@@ -333,7 +333,7 @@ defmodule BarkparkWeb.QueryController do
       # the query builder's catch-all (apply_field_op/4) and SILENTLY returns
       # every row — a typo'd op (?filter[status][bogus]=x) looked like it
       # filtered but didn't. Checked here so the reject beats the query.
-      bad = invalid_filter_op(filter_map) ->
+      bad = invalid_filter_op(filter_map, reference_ops_allowed?(conn)) ->
         case bad do
           # A documented operator whose value/shape can't be honoured carries
           # its OWN message — the shared "unknown filter operator" wording
@@ -1410,7 +1410,18 @@ defmodule BarkparkWeb.QueryController do
   #
   # A bare `filter[field]=value` scalar carries no op (it's `eq` sugar) and is
   # accepted; a bare LIST/MAP value is not (same CastError family).
-  defp invalid_filter_op(filter_map) do
+  # `referencedBy` / `notReferencedBy` on `_id` (task-f343d828861d7a7a): the
+  # desk's «Kategorier uten utgivelser» list. Builder-only until now; the wire
+  # takes them from a caller that reads with a token and is not grant-narrowed,
+  # because the clause reads ANOTHER type's rows (drafts included) and a
+  # grant-narrowed or anonymous caller must not learn from rows it cannot read.
+  @wire_reference_ops ~w(referencedBy notReferencedBy)
+  @id_fields_on_wire ~w(_id doc_id)
+
+  defp reference_ops_allowed?(conn),
+    do: authed?(conn) and conn.assigns[:grant_scoped_read] != true
+
+  defp invalid_filter_op(filter_map, reference_ops? \\ false) do
     Enum.find_value(filter_map, fn
       # `$or`/`$and`: not fields, and this route has no boolean-group form. Checked
       # BEFORE the operator scan so the group INDEX is never reported as an operator.
@@ -1422,8 +1433,20 @@ defmodule BarkparkWeb.QueryController do
 
       {field, %{} = ops} ->
         cond do
-          op = Enum.find(Map.keys(ops), fn op -> op not in @valid_filter_ops end) ->
+          op =
+              Enum.find(Map.keys(ops), fn op ->
+                op not in @valid_filter_ops and
+                    not (reference_ops? and field in @id_fields_on_wire and
+                             op in @wire_reference_ops)
+              end) ->
             {field, op}
+
+          op =
+              Enum.find(@wire_reference_ops, fn op ->
+                Map.has_key?(ops, op) and not (is_binary(ops[op]) and String.trim(ops[op]) != "")
+              end) ->
+            {:clause, "filter[#{field}][#{op}] takes a document type name",
+             %{field: field, op: op}}
 
           Map.has_key?(ops, "is") and Map.get(ops, "is") not in ["null", "notnull"] ->
             {:clause,

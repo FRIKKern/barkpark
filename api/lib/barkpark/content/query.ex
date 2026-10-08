@@ -1002,7 +1002,11 @@ defmodule Barkpark.Content.Query do
 
     case Enum.find(schemas, &(&1.name == type)) do
       nil ->
-        raise Barkpark.Content.InvalidFilterError.new(field, op)
+        # The op is fine; the TYPE is unknown. Say that, not "unsupported operator".
+        raise %{
+          Barkpark.Content.InvalidFilterError.new(field, op)
+          | message: "filter #{op} names no document type in this dataset: #{inspect(type)}"
+        }
 
       schema ->
         {op, {type, reference_field_names(schema)}}
