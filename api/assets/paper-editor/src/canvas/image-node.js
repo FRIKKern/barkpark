@@ -23,6 +23,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpImage`; the portable-doc `bpType` stays "image"
 // (run-convert.js maps a block.type "image" to this node and back).
@@ -141,7 +142,7 @@ export const Image = Node.create({
       img.draggable = false;
       const empty = document.createElement("div");
       empty.className = "bp-canvas-image-empty";
-      empty.textContent = "No image yet — paste or drop a picture, or enter a URL below";
+      empty.textContent = t("No image yet — paste or drop a picture, or enter a URL below");
       const badge = document.createElement("div");
       badge.className = "bp-canvas-image-badge";
       frame.appendChild(img);
@@ -206,7 +207,7 @@ export const Image = Node.create({
           img.style.display = "none";
           empty.style.display = "";
         }
-        if (a.uploading) { badge.textContent = "Uploading…"; badge.style.display = ""; badge.className = "bp-canvas-image-badge"; }
+        if (a.uploading) { badge.textContent = t("Uploading…"); badge.style.display = ""; badge.className = "bp-canvas-image-badge"; }
         else if (a.uploadError) { badge.textContent = "Upload failed: " + a.uploadError; badge.style.display = ""; badge.className = "bp-canvas-image-badge bp-canvas-image-badge--error"; }
         else { badge.style.display = "none"; }
         const locked = a.locked === true;

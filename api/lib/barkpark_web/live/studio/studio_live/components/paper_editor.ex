@@ -942,6 +942,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-picker-browse={@picker_browse && "true" || "false"}
       data-canvas-locked-tail={@locked_tail && "true"}
       data-canvas-constraints={@constraints}
+      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
       data-paper-doc-key={@doc_key}
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}

@@ -24,6 +24,7 @@ import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility } from "./embed-node.js";
 import { safeUrl } from "../safe-url.js";
+import { t } from "../i18n.js";
 
 // ── field codecs ──────────────────────────────────────────────────────────────
 
@@ -85,7 +86,7 @@ export const ISLAND_SPECS = {
       el.className = "bp-equation" + (tex ? "" : " bp-equation--empty") + " bp-canvas-island__preview";
       el.textContent = "";
       if (!tex) {
-        el.textContent = "equation — no tex source";
+        el.textContent = t("equation — no tex source");
         return;
       }
       const code = document.createElement("code");
@@ -105,7 +106,7 @@ export const ISLAND_SPECS = {
       el.textContent = "";
       if (!notes.length) {
         el.className += " bp-canvas-island__empty";
-        el.textContent = "footnotes — none yet";
+        el.textContent = t("footnotes — none yet");
         return;
       }
       const ol = document.createElement("ol");
@@ -133,7 +134,7 @@ export const ISLAND_SPECS = {
       el.textContent = "";
       if (!items.length) {
         el.className += " bp-canvas-island__empty";
-        el.textContent = "contents — no entries yet";
+        el.textContent = t("contents — no entries yet");
         return;
       }
       const nav = document.createElement("nav");
@@ -169,7 +170,7 @@ export const ISLAND_SPECS = {
       el.textContent = "";
       if (!src) {
         el.className += " bp-canvas-island__empty";
-        el.textContent = "No video yet — paste a video url below";
+        el.textContent = t("No video yet — paste a video url below");
         return;
       }
       const fig = document.createElement("figure");
@@ -285,7 +286,7 @@ export function makeIslandNode(spec) {
           row.className = "bp-canvas-island__field bp-canvas-island__field--" + field.kind;
           const caption = document.createElement("span");
           caption.className = "bp-canvas-island__label";
-          caption.textContent = field.label;
+          caption.textContent = t(field.label);
           let input;
           if (field.kind === "bool") {
             input = document.createElement("input");
@@ -293,15 +294,15 @@ export function makeIslandNode(spec) {
           } else if (field.kind === "text") {
             input = document.createElement("input");
             input.type = "text";
-            input.placeholder = field.placeholder || "";
+            input.placeholder = field.placeholder ? t(field.placeholder) : "";
           } else {
             input = document.createElement("textarea");
-            input.placeholder = field.placeholder || "";
+            input.placeholder = field.placeholder ? t(field.placeholder) : "";
             input.rows = 2;
             if (field.mono) input.classList.add("bp-canvas-island__mono");
           }
           input.className += " bp-canvas-island__input bp-canvas-island__input--" + field.key;
-          input.setAttribute("aria-label", field.label);
+          input.setAttribute("aria-label", t(field.label));
           input.setAttribute("contenteditable", "false");
           input.spellcheck = false;
           input.setAttribute("data-test-id", `paper-${spec.bpType}-${field.key}`);

@@ -17,6 +17,8 @@
 //   • open() shows a "Searching…" state until setResults() fires for the first time.
 //   • Eyebrow reads "Link to page" (vs slash menu's "Insert block").
 
+import { t, te } from "./i18n.js";
+
 export class WikilinkMenu {
   constructor({ onChoose, onDismiss, eyebrow, kind } = {}) {
     this._onChoose = onChoose || (() => {});
@@ -133,7 +135,7 @@ export class WikilinkMenu {
     // the scrollable row list. Mirrors the slash menu's "Insert block" eyebrow.
     const eyebrow = document.createElement("div");
     eyebrow.className = "bp-wikilink-menu__eyebrow";
-    eyebrow.textContent = this._eyebrow;
+    eyebrow.textContent = t(this._eyebrow);
     this._el.appendChild(eyebrow);
 
     // Scrollable list region so the eyebrow + footer stay pinned at top/bottom.
@@ -145,13 +147,13 @@ export class WikilinkMenu {
       // Async loading state — setResults() has not yet been called for this open.
       const searching = document.createElement("div");
       searching.className = "bp-wikilink-empty";
-      searching.textContent = "Searching…";
+      searching.textContent = t("Searching…");
       list.appendChild(searching);
     } else if (this._results.length === 0) {
       // Empty results — non-selectable. Note-creation is out of scope.
       const empty = document.createElement("div");
       empty.className = "bp-wikilink-empty";
-      empty.textContent = "No matching pages";
+      empty.textContent = t("No matching pages");
       list.appendChild(empty);
     } else {
       // Flat candidate list — no groups (the server already scoped the results).
@@ -197,9 +199,9 @@ export class WikilinkMenu {
     const foot = document.createElement("div");
     foot.className = "bp-wikilink-foot";
     foot.innerHTML =
-      "<kbd>↵</kbd> insert link <span class=\"bp-wikilink-foot-sep\">·</span> " +
-      "<kbd>↑</kbd><kbd>↓</kbd> navigate " +
-      "<span class=\"bp-wikilink-foot-sep\">·</span> <kbd>esc</kbd> dismiss";
+      `<kbd>↵</kbd> ${te("insert link")} <span class="bp-wikilink-foot-sep">·</span> ` +
+      `<kbd>↑</kbd><kbd>↓</kbd> ${te("navigate")} ` +
+      `<span class="bp-wikilink-foot-sep">·</span> <kbd>esc</kbd> ${te("dismiss")}`;
     this._el.appendChild(foot);
   }
 

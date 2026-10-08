@@ -88,6 +88,7 @@
 // only, never the NodeView) without a browser.
 
 import { Node, mergeAttributes } from "@tiptap/core";
+import { t } from "../i18n.js";
 
 // The callout tone vocabulary, mirroring walk.ex `callout_tone_class/1`
 // (walk.ex:1676-1683) and the JS SDK's own copy (the tone list in
@@ -333,7 +334,7 @@ export const Callout = Node.create({
       // contentDOM. Commit on input, not a timer: View, folding and body edits
       // must never overtake an uncommitted title.
       titleEl.setAttribute("role", "textbox");
-      titleEl.setAttribute("aria-label", "Callout title");
+      titleEl.setAttribute("aria-label", t("Callout title"));
       titleEl.setAttribute("aria-multiline", "false");
       titleEl.tabIndex = 0;
       titleEl.style.cursor = "text";

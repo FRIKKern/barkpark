@@ -108,6 +108,7 @@
 
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS } from "../contract.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpField` (the canvas naming convention, like
 // bpCode/bpDiagram). The portable-doc `bpType` is the specific field-* kind
@@ -206,7 +207,7 @@ export function coercePickerValue(detail) {
 function applyLockCue(dom, node) {
   if (node && node.attrs && node.attrs.locked === true) {
     dom.setAttribute("data-bp-locked", "true");
-    dom.setAttribute("title", "Part of the document template");
+    dom.setAttribute("title", t("Part of the document template"));
   }
 }
 
@@ -251,12 +252,13 @@ export function imagePlaceholderModel(fieldType, value, label) {
 
   return {
     show: fieldType === "field-image" && isEmptyPickerValue(value),
-    label: IMAGE_PLACEHOLDER_LABEL,
-    hint: IMAGE_PLACEHOLDER_HINT,
+    // Shown in the viewer's Studio language (the constants are the English keys).
+    label: t(IMAGE_PLACEHOLDER_LABEL),
+    hint: t(IMAGE_PLACEHOLDER_HINT),
     ariaLabel:
       fieldLabel === ""
-        ? IMAGE_PLACEHOLDER_LABEL
-        : IMAGE_PLACEHOLDER_LABEL + " — " + fieldLabel,
+        ? t(IMAGE_PLACEHOLDER_LABEL)
+        : t(IMAGE_PLACEHOLDER_LABEL) + " — " + fieldLabel,
   };
 }
 
@@ -271,7 +273,7 @@ function buildImagePlaceholder(ariaLabel) {
   el.setAttribute("contenteditable", "false");
   el.setAttribute("role", "button");
   el.setAttribute("tabindex", "0");
-  el.setAttribute("aria-label", ariaLabel || IMAGE_PLACEHOLDER_LABEL);
+  el.setAttribute("aria-label", ariaLabel || t(IMAGE_PLACEHOLDER_LABEL));
   el.setAttribute("data-test-id", "paper-featured-image-placeholder");
 
   // A calm framed-picture glyph (inline SVG, currentColor — themes with the label).
@@ -291,11 +293,11 @@ function buildImagePlaceholder(ariaLabel) {
 
   const label = document.createElement("div");
   label.className = "bp-canvas-field-image-empty-label";
-  label.textContent = IMAGE_PLACEHOLDER_LABEL;
+  label.textContent = t(IMAGE_PLACEHOLDER_LABEL);
 
   const hint = document.createElement("div");
   hint.className = "bp-canvas-field-image-empty-hint";
-  hint.textContent = IMAGE_PLACEHOLDER_HINT;
+  hint.textContent = t(IMAGE_PLACEHOLDER_HINT);
 
   el.appendChild(icon);
   el.appendChild(label);
@@ -776,7 +778,7 @@ export function mountFieldLabel(labelEl, { editor, getPos, onName }) {
     if (editable()) {
       labelEl.setAttribute("contenteditable", "plaintext-only");
       labelEl.setAttribute("role", "textbox");
-      labelEl.setAttribute("aria-label", "Field label");
+      labelEl.setAttribute("aria-label", t("Field label"));
       labelEl.setAttribute("aria-multiline", "false");
       labelEl.setAttribute("spellcheck", "false");
       labelEl.tabIndex = 0;

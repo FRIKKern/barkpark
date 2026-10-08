@@ -53,6 +53,7 @@
 import { Node, mergeAttributes } from "@tiptap/core";
 import { DEBOUNCE_MS, configControlHidden } from "../contract.js";
 import { wireAtomAccessibility, readerPaintClass } from "./embed-node.js";
+import { t } from "../i18n.js";
 
 // The TipTap node NAME is `bpFigure`; the portable-doc `bpType` stays "figure"
 // (run-convert.js maps a block.type "figure" to this node and back). NO StarterKit
@@ -193,7 +194,7 @@ export const Figure = Node.create({
       body.setAttribute("data-bp-fleet-body", "");
       const chip = document.createElement("div");
       chip.className = "bp-canvas-readonly-chip";
-      chip.textContent = "Figure";
+      chip.textContent = t("Figure");
       body.appendChild(chip);
       dom.appendChild(body);
 
@@ -203,10 +204,10 @@ export const Figure = Node.create({
       const captionInput = document.createElement("input");
       captionInput.type = "text";
       captionInput.className = "bp-canvas-figure-caption-input";
-      captionInput.placeholder = "caption";
+      captionInput.placeholder = t("caption");
       // Accessible name that survives the resting-chrome hide (a placeholder is only a
       // fallback name, and it is invisible while the control is hidden).
-      captionInput.setAttribute("aria-label", "figure caption");
+      captionInput.setAttribute("aria-label", t("figure caption"));
       captionInput.setAttribute("contenteditable", "false");
       // Inline styles mirroring the reader <figcaption>, which since
       // papers/captions-floor is styled by ONE class (.bp-figcaption in
