@@ -41,6 +41,18 @@ export function numberSettingsFrom(raw, value) {
   return { config: next };
 }
 
+// The selected value once the options change: kept while its option survives,
+// carried along when that option's value is renamed in place, and cleared when
+// its option is removed, so the field never points at an option it lacks.
+export function selectValueAfter(value, before, after) {
+  if (value == null || value === "" || after.some((o) => o.value === value)) return {};
+  const i = before.findIndex((o) => o.value === value);
+  if (i >= 0 && before.length === after.length && !before.some((o) => o.value === after[i].value)) {
+    return { value: after[i].value };
+  }
+  return { value: "" };
+}
+
 // The options list a set of {value,label} rows asks for, or the row it fails on.
 // A row with neither value nor label is a draft still being typed and is left out.
 export function selectOptionsFrom(rows) {
@@ -156,8 +168,9 @@ export function buildFieldSettings({ fieldType, editor, write, current }) {
         invalid(rows[result.refused].querySelector("[data-option-part='value']"), true);
         return;
       }
-      if (JSON.stringify(result.options) === JSON.stringify(node.attrs.options || [])) return;
-      write({ options: result.options });
+      const before = node.attrs.options || [];
+      if (JSON.stringify(result.options) === JSON.stringify(before)) return;
+      write({ options: result.options, ...selectValueAfter(node.attrs.value, before, result.options) });
     };
     const renumber = () => {
       [...list.children].forEach((row, i) => {

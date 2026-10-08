@@ -196,6 +196,16 @@ try {
   await exercise(select, canvas => {
     canvas.querySelectorAll('[data-test-id="paper-field-setting-remove-option"]')[1].click();
   }, patch => assert.deepEqual(patch, { options: [{ value: "a", label: "Alpha" }] }));
+  await exercise(select, canvas => {
+    canvas.querySelectorAll('[data-test-id="paper-field-setting-remove-option"]')[0].click();
+  }, patch => assert.deepEqual(patch, { options: [{ value: "b", label: "Beta" }], value: "" },
+    "removing the selected option clears the value"));
+  await exercise(select, canvas => {
+    const value = canvas.querySelector('[data-option-part="value"]');
+    value.value = "aa";
+    value.dispatchEvent(new window.Event("change", { bubbles: true }));
+  }, patch => assert.deepEqual(patch, { options: [{ value: "aa", label: "Alpha" },
+    { value: "b", label: "Beta" }], value: "aa" }, "renaming the selected option carries the value"));
   {
     // Escape closes the disclosure and puts focus back on its summary.
     const canvas = document.createElement("bp-paper-canvas");
