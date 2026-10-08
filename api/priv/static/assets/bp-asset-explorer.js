@@ -768,6 +768,14 @@
       return entries;
     }
 
+    // The entries that NARROW the list: search, facets, kind. The open folder
+    // is a place, not a filter (task-575bf6656312084a): counting it made an
+    // empty folder read "No assets match these filters" with no filter set.
+    // Its pill still renders from _activeFacetEntries().
+    _narrowingEntries() {
+      return this._activeFacetEntries().filter(([field]) => field !== "collection");
+    }
+
     _pillLabel(field, value) {
       if (field === "q") return "Search: " + value;
       if (field === "collection") return "Collection: " + value;
@@ -851,7 +859,7 @@
 
     _renderFindBar() {
       if (!this._findBarEl) return;
-      const entries = this._activeFacetEntries();
+      const entries = this._narrowingEntries();
       if (!entries.length) {
         this._findBarEl.hidden = true;
         this._findBarEl.innerHTML = "";
@@ -872,7 +880,7 @@
     }
 
     _emptyMessage() {
-      if (this._activeFacetEntries().length) {
+      if (this._narrowingEntries().length) {
         return "No assets match these filters — try removing one or search for something broader.";
       }
       if (this._collectionId) {
