@@ -2387,6 +2387,18 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "workspace.locale",
+        "workspace",
+        "locale",
+        "Read the Studio chrome language of the active --workspace, and the known locales a `set-locale` call will accept.",
+        "GET",
+        "/v1/workspace/locale",
+        "read",
+        writes: false,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "workspace.set-locale",
         "workspace",
         "set-locale",
