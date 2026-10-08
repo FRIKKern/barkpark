@@ -542,6 +542,36 @@ defmodule Barkpark.Search.DocumentsRetriever do
         )
       )
 
+  # The words that prefix-match: the last plain term (the word being typed) and
+  # every `word*` the parser split off.
+  defp prefix_words(parsed) do
+    Enum.take(Map.get(parsed, :terms, []), -1) ++ Map.get(parsed, :prefixes, [])
+  end
+
+  # `excer` -> "excer:*"; `e-mail` -> "e & mail:*". Only letters and digits reach
+  # to_tsquery, so no operator in the user's text can change the query.
+  defp prefix_tsquery(term) do
+    case Regex.scan(~r/[\p{L}\p{N}]+/u, term) |> List.flatten() do
+      [] -> nil
+      words -> Enum.join(words, " & ") <> ":*"
+    end
+  end
+
+  defp ts_prefix_match(:full, tsq),
+    do: dynamic([d], fragment("?.search_vector @@ to_tsquery('english', ?)", d, ^tsq))
+
+  defp ts_prefix_match(:public, tsq),
+    do:
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(?.public_search_vector, ?.search_vector) @@ to_tsquery('english', ?)",
+          d,
+          d,
+          ^tsq
+        )
+      )
+
   defp ts_phrase_match(:full, phrase),
     do: dynamic([d], fragment("?.search_vector @@ phraseto_tsquery('english', ?)", d, ^phrase))
 
@@ -585,6 +615,7 @@ defmodule Barkpark.Search.DocumentsRetriever do
 
   defp include_dynamic(terms, parsed, config, relaxed, index) do
     threshold = TypoPolicy.threshold(config, relaxed)
+    prefix_words = prefix_words(parsed)
 
     term_dyn =
       Enum.reduce(terms, nil, fn term, dyn ->
@@ -636,6 +667,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
             dynamic([d], ^clause or ilike(d.title, ^prefix_pattern))
           else
             clause
+          end
+
+        # The last typed word (and any `word*`) also prefix-matches content
+        # text, so results follow typing: `excer` finds "excerpt"
+        # (task-2590983e26a88496). `:*` on a tsquery lexeme uses the same GIN
+        # index as the whole-word arm.
+        clause =
+          case term in prefix_words and prefix_tsquery(term) do
+            tsq when is_binary(tsq) -> dynamic([d], ^clause or ^ts_prefix_match(index, tsq))
+            _ -> clause
           end
 
         if dyn, do: dynamic([d], ^dyn or ^clause), else: clause
