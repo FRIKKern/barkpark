@@ -101,7 +101,7 @@ try {
   check("the block menu reads the stamped words, and a translation stays text", () => {
     nb._handle._index = 0;
     nb._handle._openMenu();
-    const menu = nb.querySelector(".bp-block-menu");
+    const menu = document.querySelector(".bp-block-menu");
     assert.equal(menu.getAttribute("aria-label"), "Blokkvalg");
     const dup = menu.querySelector('[data-action="duplicate"]');
     assert.match(dup.textContent, /<b>Dupliser<\/b>/);

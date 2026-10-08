@@ -1546,6 +1546,11 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       max-width: 130px;
     }
+    /* On the tinted active/hover row the faint description fell under AA
+       (4.1:1 light, 3.8:1 dark); it steps up to the soft ink there
+       (task-be754bd628311c5f). */
+    .bp-slash-item:hover .bp-slash-desc,
+    .bp-slash-item.is-active .bp-slash-desc { color: var(--paper-ink-soft); }
     /* ── EX2 — EXPECTED group. The top group of fields the doc's Expectation
        recommends. Its eyebrow + ✦ hint + "expected" tag pick up the rust
        accent so the recommended fields read distinctly from the generic
@@ -2627,7 +2632,7 @@ bp-paper-canvas { position: relative; display: block; }
 .bp-block-handle--touch .bp-block-handle__btn { width: 44px; height: 44px; }
 @media (hover: none), (max-width: 768px) { .bp-block-menu__item { min-height: 44px; } }
 .bp-block-drop { position: absolute; height: 2px; background: var(--paper-accent); border-radius: 1px; pointer-events: none; z-index: 6; }
-.bp-block-menu { position: absolute; z-index: 30; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
+.bp-block-menu { position: fixed; z-index: 200; min-width: 200px; padding: 6px; border-radius: 10px; background: var(--paper-chrome-bg); color: var(--paper-ink); border: 1px solid var(--paper-chrome-border); box-shadow: 0 12px 40px var(--paper-chrome-border), 0 2px 8px var(--paper-rule); font: 13px/1.4 var(--paper-font-sans, system-ui, sans-serif); }
 .bp-block-menu__group { font-size: 10px; text-transform: uppercase; color: var(--paper-ink-soft); padding: 6px 8px 2px; }
 .bp-block-menu__item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 6px 8px; border: 0; border-radius: 6px; background: transparent; color: inherit; font: inherit; text-align: left; cursor: pointer; }
 .bp-block-menu__item:hover, .bp-block-menu__item:focus-visible { background: var(--paper-edit-hover); outline: 0; }
