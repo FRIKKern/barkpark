@@ -3257,6 +3257,113 @@ check("type-ahead: a buffer the server never answered goes stale, so typing star
   );
 });
 
+// ── SheetTabRename: focus into and out of the inline tab rename ─────────────
+// task-12b3b4e250901169. requestAnimationFrame is absent in this sandbox, so
+// the hook's frame watch falls back to the controllable setTimeout above.
+
+function tabRenameFixture({ buttonArrivesLate = false } = {}) {
+  const body = { tag: "body" };
+  const focusable = (name) => {
+    const el = {
+      name,
+      isConnected: true,
+      focus() { sandbox.document.activeElement = el; },
+    };
+    return el;
+  };
+  const button = focusable("tab-0");
+  let lookups = 0;
+  const strip = {
+    querySelector(sel) {
+      assert.equal(sel, "[data-test-id='sheet-tab-0']");
+      lookups++;
+      return buttonArrivesLate && lookups < 3 ? null : button;
+    },
+  };
+  const listeners = {};
+  const input = focusable("input");
+  Object.assign(input, {
+    selected: false,
+    select() { input.selected = true; },
+    form: { querySelector: (sel) => (sel === "input[name='tab']" ? { value: "0" } : null) },
+    closest: (sel) => (sel === "[role='tablist']" ? strip : null),
+    addEventListener(type, fn) { listeners[type] = fn; },
+    fire(type, e) { listeners[type] && listeners[type](e); },
+  });
+  sandbox.document.body = body;
+  timers.length = 0;
+  const hook = Object.create(sandbox.window.BarkparkSheetTabRename);
+  hook.el = input;
+  hook.mounted();
+  // The patch removes the focused input: the browser drops focus to <body>.
+  const removeInput = () => { sandbox.document.activeElement = body; };
+  const flush = () => {
+    for (let i = 0; i < 40 && timers.length; i++) timers.shift()();
+  };
+  return { hook, input, button, body, focusable, removeInput, flush };
+}
+
+check("tab rename: the input takes focus with its text selected on mount", () => {
+  const { input } = tabRenameFixture();
+  assert.equal(sandbox.document.activeElement, input);
+  assert.equal(input.selected, true);
+});
+
+for (const key of ["Enter", "Escape"]) {
+  check(`tab rename: ${key} hands focus back to the renamed tab`, () => {
+    const { hook, input, button, removeInput, flush } = tabRenameFixture();
+    input.fire("keydown", { key });
+    removeInput();
+    hook.destroyed();
+    flush();
+    assert.equal(sandbox.document.activeElement, button);
+  });
+}
+
+check("tab rename: the tab button may arrive a frame after the input leaves", () => {
+  const { hook, input, button, removeInput, flush } = tabRenameFixture({ buttonArrivesLate: true });
+  input.fire("keydown", { key: "Enter" });
+  removeInput();
+  hook.destroyed();
+  assert.notEqual(sandbox.document.activeElement, button);
+  flush();
+  assert.equal(sandbox.document.activeElement, button);
+});
+
+check("tab rename: a blur keeps focus on what the user moved to, even if the patch drops it", () => {
+  const { hook, input, focusable, body, flush } = tabRenameFixture();
+  const next = focusable("tab-1");
+  input.fire("focusout", { relatedTarget: next });
+  next.focus();
+  hook.destroyed();
+  // The patch re-inserts the neighbour and focus falls to <body>.
+  sandbox.document.activeElement = body;
+  flush();
+  assert.equal(sandbox.document.activeElement, next);
+});
+
+check("tab rename: focus the user put elsewhere is never taken", () => {
+  const { hook, input, button, focusable, removeInput, flush } = tabRenameFixture();
+  input.fire("keydown", { key: "Enter" });
+  removeInput();
+  const elsewhere = focusable("search");
+  elsewhere.focus();
+  hook.destroyed();
+  flush();
+  assert.equal(sandbox.document.activeElement, elsewhere);
+  assert.notEqual(sandbox.document.activeElement, button);
+});
+
+check("tab rename: a blur to nothing (click on empty space) moves no focus", () => {
+  const { hook, input, body, removeInput, flush } = tabRenameFixture();
+  input.fire("focusout", { relatedTarget: null });
+  removeInput();
+  hook.destroyed();
+  flush();
+  assert.equal(sandbox.document.activeElement, body);
+  sandbox.document.activeElement = null;
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);
