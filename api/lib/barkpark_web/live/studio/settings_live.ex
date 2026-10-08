@@ -962,6 +962,7 @@ defmodule BarkparkWeb.Studio.SettingsLive do
                     Placement
                     <.bp_select
                       name="placement"
+                      aria-label={"Placement of #{row.display}"}
                       value={to_string(row.placement)}
                       options={@placement_labels}
                       disabled={not row.enabled}
