@@ -275,7 +275,7 @@ msgstr ""
 msgid "Sign in with token"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/nav.ex:560
+#: lib/barkpark_web/components/studio_components/nav.ex:569
 #: lib/barkpark_web/components/studio_components/panes.ex:633
 #, elixir-autogen, elixir-format
 msgid "Structure"
@@ -6032,8 +6032,7 @@ msgstr ""
 msgid "Connectors"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/nav.ex:455
-#: lib/barkpark_web/components/studio_components/nav.ex:456
+#: lib/barkpark_web/components/studio_components/nav.ex:503
 #, elixir-autogen, elixir-format
 msgid "Disabled in this workspace"
 msgstr ""
@@ -6091,6 +6090,11 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/nav.ex:493
 #, elixir-autogen, elixir-format
 msgid "chat"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/nav.ex:501
+#, elixir-autogen, elixir-format
+msgid "Disabled in this workspace — enabled in %{workspace}"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:332

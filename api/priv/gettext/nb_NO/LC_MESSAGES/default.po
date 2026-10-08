@@ -275,7 +275,7 @@ msgstr "Logg inn med et API-token i stedet"
 msgid "Sign in with token"
 msgstr "Logg inn med token"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:560
+#: lib/barkpark_web/components/studio_components/nav.ex:569
 #: lib/barkpark_web/components/studio_components/panes.ex:633
 #, elixir-autogen, elixir-format
 msgid "Structure"
@@ -6032,8 +6032,7 @@ msgstr "API"
 msgid "Connectors"
 msgstr "Tilkoblinger"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:455
-#: lib/barkpark_web/components/studio_components/nav.ex:456
+#: lib/barkpark_web/components/studio_components/nav.ex:503
 #, elixir-autogen, elixir-format
 msgid "Disabled in this workspace"
 msgstr "Slått av i dette arbeidsområdet"
@@ -6092,6 +6091,11 @@ msgstr "Saker"
 #, elixir-autogen, elixir-format
 msgid "chat"
 msgstr "chat"
+
+#: lib/barkpark_web/components/studio_components/nav.ex:501
+#, elixir-autogen, elixir-format
+msgid "Disabled in this workspace — enabled in %{workspace}"
+msgstr "Slått av i dette arbeidsområdet — slått på i %{workspace}"
 
 #: lib/barkpark_web/studio_locale.ex:332
 #, elixir-autogen, elixir-format
