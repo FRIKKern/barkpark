@@ -507,6 +507,96 @@ defmodule Barkpark.Content.Query do
     |> Repo.all()
   end
 
+  @doc """
+  Live reference holders for the authenticated backlinks read, including both
+  stored versions. SQL selects matching rows only; no projected edges are needed.
+  Row/grant scope and reference-field visibility apply before a source is emitted.
+  """
+  def list_reference_holders(target_id, dataset, opts) do
+    pub_id = Barkpark.Content.published_id(target_id)
+    ids = [pub_id, Barkpark.Content.draft_id(pub_id)]
+    ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
+
+    opts
+    |> Keyword.get_lazy(:schemas, fn -> Barkpark.Content.list_schemas(dataset, opts) end)
+    |> Enum.flat_map(fn schema ->
+      {predicate, via_field} =
+        (schema.fields || [])
+        |> Enum.filter(
+          &(is_binary(&1["name"]) and
+              Barkpark.Content.Envelope.field_readable?(schema, &1["name"], ctx))
+        )
+        |> Enum.reverse()
+        |> Enum.reduce({dynamic(false), dynamic(nil)}, fn field, {acc, selected_field} ->
+          name = field["name"]
+          # Match the two core reference shapes without treating ordinary text
+          # or hidden fields as links. Nested plugin links stay on the graph arm.
+          matches =
+            cond do
+              field["type"] == "reference" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "?->>? = ? OR ?->?->>'_ref' = ?",
+                    d.content,
+                    ^name,
+                    ^pub_id,
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
+              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "reference" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(?::text) OR ?->? @> jsonb_build_array(jsonb_build_object('_ref', ?::text)))",
+                    d.content,
+                    ^name,
+                    d.content,
+                    ^name,
+                    ^pub_id,
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
+              true ->
+                dynamic(false)
+            end
+
+          {dynamic([d], ^acc or ^matches),
+           dynamic(
+             [d],
+             fragment("CASE WHEN ? THEN ?::text ELSE ? END", ^matches, ^name, ^selected_field)
+           )}
+        end)
+
+      schema.name
+      |> base_query(dataset, %{}, opts)
+      |> Barkpark.Content.Scope.scope_to_owner(Keyword.get(opts, :caller_context))
+      |> restrict_to_visible_types(dataset, opts)
+      |> where([d], d.doc_id not in ^ids)
+      |> where(^predicate)
+      |> order_by([d], desc: fragment("? LIKE 'drafts.%'", d.doc_id), asc: d.doc_id)
+      # Return only card fields, not every matching document's content payload.
+      |> select([d], %{
+        id: d.id,
+        doc_id: d.doc_id,
+        title: d.title,
+        type: d.type,
+        rev: d.rev,
+        updated_at: d.updated_at,
+        description: fragment("?->'description'", d.content),
+        event_type: fragment("?->'event_type'", d.content)
+      })
+      |> select_merge(^%{via_field: via_field})
+      |> Repo.all()
+    end)
+  end
+
   defp base_query(type, dataset, filter_map, opts) do
     Document
     |> where([d], d.type == ^type)

@@ -135,10 +135,11 @@ func clampItemLines(il []string, w int) []string {
 
 func (m model) renderToolbar() string {
 	logo := logoStyle.Render("▣ Studio")
+	// The TUI has one view, Structure. Add a second tab label here only once a
+	// key reaches that view; a label no key opens misleads the reader.
 	tabs := dimStyle.Render("[") +
 		activeTabStyle.Render("Structure") +
-		dimStyle.Render("] ") +
-		dimStyle.Render("Vision")
+		dimStyle.Render("]")
 	prefix := logo + "  " + tabs // highest-value left segment — kept longest
 
 	// Breadcrumbs (the elastic, lowest-priority left segment).

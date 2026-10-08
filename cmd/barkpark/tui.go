@@ -515,8 +515,8 @@ func (m *model) buildDocListPane(node *StructureNode) Pane {
 		items = append(items, PaneItem{
 			ID:       docs[i].ID,
 			Title:    title,
-			Icon:     statusIcon(docs[i].Status),
-			Status:   docs[i].Status,
+			Icon:     statusIcon(publishState(&docs[i])),
+			Status:   publishState(&docs[i]),
 			Subtitle: timeAgo(docs[i].UpdatedAt),
 			Doc:      &docs[i],
 			Badge:    previewValue(docs[i], preview.Badge),

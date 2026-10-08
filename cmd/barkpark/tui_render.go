@@ -223,8 +223,8 @@ func (m model) renderPane(pane Pane, width, height int, isActive bool) string {
 
 	// Header — headerStyle has Padding(0,1) which is inside Width()
 	icon := ""
-	if pane.Node.Icon != "" {
-		icon = pane.Node.Icon + " "
+	if g := terminalIcon(pane.Node.Icon); g != "" {
+		icon = g + " "
 	}
 	headerText := icon + pane.Node.Title
 	if pane.IsDocList {
@@ -344,8 +344,9 @@ func (m model) renderPaneItem(item PaneItem, width int, selected, isCursor, isDo
 		return []string{line1, line2}
 	}
 
-	// Structure list item
-	icon := item.Icon
+	// Structure list item. Schema-built desk rows carry the schema's raw icon,
+	// which may be a Lucide name; terminalIcon turns it into a glyph.
+	icon := terminalIcon(item.Icon)
 	if icon == "" {
 		icon = " "
 	}
@@ -424,18 +425,25 @@ func (m model) buildEditorContent(width int) string {
 	var lines []string
 
 	// Header
-	dot := statusStyle(m.selectedDoc.Status).Render(statusIcon(m.selectedDoc.Status))
+	// The dot and badge show publish state. A schema "status" content field
+	// that says something else (an archived published post) follows as a
+	// separate dim label, so neither hides the other.
+	state := publishState(m.selectedDoc)
+	dot := statusStyle(state).Render(statusIcon(state))
 	title := truncate(m.selectedDoc.Title, width-20)
 	header := fmt.Sprintf(" %s %s", dot, headerStyle.Render(title))
-	if m.selectedDoc.Status != "" {
-		header += " " + dimStyle.Render("["+m.selectedDoc.Status+"]")
+	if state != "" {
+		header += " " + dimStyle.Render("["+state+"]")
+	}
+	if cs := contentStatus(m.selectedDoc); cs != "" && cs != state {
+		header += " " + dimStyle.Render("status: "+cs)
 	}
 	lines = append(lines, header)
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", maxInt(width-2, 0))))
 
 	// Schema info
 	lines = append(lines, dimStyle.Render(fmt.Sprintf(
-		" %s %s  |  %d fields", m.editorSchema.Icon, m.editorSchema.Title, len(m.editorSchema.Fields),
+		" %s %s  |  %d fields", terminalIcon(m.editorSchema.Icon), m.editorSchema.Title, len(m.editorSchema.Fields),
 	)))
 	lines = append(lines, "")
 
@@ -468,7 +476,7 @@ func (m model) buildEditorContent(width int) string {
 	// binding; a published doc shows a dim, action-free checkmark; any other
 	// status (e.g. a select-field "active") shows neither.
 	var publishBtn string
-	switch m.selectedDoc.Status {
+	switch publishState(m.selectedDoc) {
 	case "draft":
 		publishBtn = publishBtnStyle.Render("Ctrl+P publish")
 	case "published":
@@ -1007,8 +1015,8 @@ func (m model) buildDocListPreview(node *StructureNode, width, height int) strin
 
 	// Header (preview headers use width-2, matching the pre-change layout).
 	icon := ""
-	if node.Icon != "" {
-		icon = node.Icon + " "
+	if g := terminalIcon(node.Icon); g != "" {
+		icon = g + " "
 	}
 	pane := m.buildDocListPane(node)
 	headerText := icon + node.Title + dimStyle.Render(" "+docListCount(pane))
@@ -1044,8 +1052,8 @@ func (m model) buildListPreview(node *StructureNode, width, height int) string {
 	var lines []string
 
 	icon := ""
-	if node.Icon != "" {
-		icon = node.Icon + " "
+	if g := terminalIcon(node.Icon); g != "" {
+		icon = g + " "
 	}
 	lines = append(lines, headerStyle.Width(width-2).Render(icon+node.Title))
 	lines = append(lines, dividerStyle.Render(strings.Repeat("─", width-2)))

@@ -778,6 +778,123 @@ defmodule Barkpark.Content.LifecycleTest do
                "gate green"
     end
 
+    # ── task-f8696f3aa33b06ec: a twin refreshed AFTER the stamps landed ──────
+    #
+    # The live shape, measured on guerrilla 2026-09-05 on
+    # `drafts.task-bf3adebfec5833df`: the twin was minted off the published
+    # row, the worker stamped three of four criteria on the PUBLISHED row, and
+    # the GitHub mirror stamp (`Github.Link.put/4` before #16479) kept
+    # rewriting the twin's `content.github` on every pass. The refresh never
+    # touched the criteria, so the twin stayed at met=false with no evidence.
+    # The live twin carried no claim, so `stale_claim?/2` refused it too; this
+    # test mints the twin after the claim so only the criteria fence can see it.
+    @tag :requires_plugins
+    test "a twin refreshed after three stamps cannot publish over them", %{scope: scope} do
+      criteria =
+        for i <- 0..3,
+            do: %{"criterion" => "twin criterion #{i}", "met" => false, "evidence" => ""}
+
+      task_draft!("twin-refreshed", scope, %{"acceptance_criteria" => criteria})
+      {:ok, _} = Content.publish_document("twin-refreshed", "task", @dataset, scope)
+      {:ok, claimed} = Barkpark.Tasks.claim_by_id("twin-refreshed", "twin-worker", scope)
+      epoch = claimed.content["claim"]["epoch"]
+
+      mint_twin_from_published!("twin-refreshed", scope, & &1)
+
+      for i <- [0, 1, 3] do
+        {:ok, _} =
+          Barkpark.Tasks.stamp(claimed.id, "twin-worker",
+            observed_epoch: epoch,
+            criterion: i,
+            criterion_text: "twin criterion #{i}",
+            outcome: {:met, "gate green: criterion #{i} proven by mix test"}
+          )
+      end
+
+      # The refresh: a draft-first write that changes only `content.github`,
+      # which is what every pre-#16479 mirror pass did to the twin.
+      {:ok, twin} = Content.get_document("drafts.twin-refreshed", "task", @dataset, scope)
+
+      {:ok, _} =
+        Content.upsert_document(
+          "task",
+          %{
+            "doc_id" => "twin-refreshed",
+            "title" => twin.title,
+            "content" => Map.put(twin.content, "github", %{"synced_rev" => twin.rev})
+          },
+          @dataset,
+          Keyword.put(scope, :source, :github)
+        )
+
+      {:ok, twin} = Content.get_document("drafts.twin-refreshed", "task", @dataset, scope)
+
+      assert Enum.map(twin.content["acceptance_criteria"], & &1["met"]) ==
+               List.duplicate(false, 4)
+
+      assert Enum.all?(twin.content["acceptance_criteria"], &(&1["evidence"] == ""))
+
+      assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+               Content.publish_document("twin-refreshed", "task", @dataset, scope)
+
+      assert message =~ "clear the `met: true` flag"
+
+      pub = published_task!("twin-refreshed", scope)
+
+      assert Enum.map(pub.content["acceptance_criteria"], & &1["met"]) == [
+               true,
+               true,
+               false,
+               true
+             ]
+
+      assert Enum.map(pub.content["acceptance_criteria"], & &1["evidence"]) == [
+               "gate green: criterion 0 proven by mix test",
+               "gate green: criterion 1 proven by mix test",
+               "",
+               "gate green: criterion 3 proven by mix test"
+             ]
+    end
+
+    # The shape `criteria_fence/2` let through: met stays true and evidence
+    # stays non-blank, but the twin holds an older, shorter stamp. Live on
+    # guerrilla 2026-10-07 as `drafts.task-12ee483328b7c87e`.
+    @tag :requires_plugins
+    test "a twin holding an older, SHORTER stamp cannot publish over the re-stamp",
+         %{scope: scope} do
+      {uuid, epoch} = claim_and_stamp!("twin-shorter", scope, "fence-worker")
+
+      # The twin from `claim_and_stamp!` predates the first stamp. Rebase it on
+      # the stamped row, so it carries met:true and the FIRST evidence.
+      {:ok, _} = Content.discard_draft("twin-shorter", "task", @dataset, scope)
+      mint_twin_from_published!("twin-shorter", scope, & &1)
+
+      longer = "gate green: mix test lifecycle_test.exs, re-run with the full suite and CI"
+
+      {:ok, _} =
+        Barkpark.Tasks.stamp(uuid, "fence-worker",
+          observed_epoch: epoch,
+          criterion: 0,
+          criterion_text: @c0,
+          outcome: {:met, longer}
+        )
+
+      {:ok, twin} = Content.get_document("drafts.twin-shorter", "task", @dataset, scope)
+      assert %{"met" => true, "evidence" => older} = hd(twin.content["acceptance_criteria"])
+      assert byte_size(older) < byte_size(longer)
+
+      assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+               Content.publish_document("twin-shorter", "task", @dataset, scope)
+
+      assert message =~ "the draft twin `drafts.twin-shorter` carries less evidence"
+      assert message =~ "acceptance criterion 0"
+      assert message =~ "`discardDraft` `twin-shorter`"
+
+      assert hd(published_task!("twin-shorter", scope).content["acceptance_criteria"])[
+               "evidence"
+             ] == longer
+    end
+
     # ── the flip risk: the fence must NOT refuse legitimate publishes ────────
 
     test "a draft that PRESERVES the criteria and advances another field publishes cleanly",
