@@ -2279,4 +2279,68 @@
 
     _tsvEncode: tsvEncode
   };
+  // ── SheetTabRename: the inline tab-rename input's focus (task-12b3b4e250901169)
+  //
+  // F2 / double-click swaps a tab button for this input, and Enter / Escape
+  // swaps it back. The server cannot hand focus across that swap: a
+  // `phx-mounted` focus on the returning button never fired in the browser,
+  // and the patch that removes the input also re-inserts the neighbouring tab
+  // buttons, which drops focus from any of them. Either way focus fell to
+  // <body> and a keyboard user lost their place. This hook owns the swap:
+  //   - mounted: the input takes focus with its text selected, so typing
+  //     replaces the old name.
+  //   - destroyed: after Enter or Escape, focus goes to the renamed tab. After
+  //     a blur (Tab or a click elsewhere), focus goes back to whatever the
+  //     user moved to, if the patch knocked it to <body>.
+  // The target is watched for a few frames because the patch that moves or
+  // re-creates it can land after this hook is destroyed. Focus that the user
+  // (or another control) put somewhere other than <body> is never taken.
+  const TAB_RENAME_WATCH_FRAMES = 30;
+
+  window.BarkparkSheetTabRename = {
+    mounted() {
+      this._key = null;
+      this._blurTo = null;
+      const tabInput = this.el.form && this.el.form.querySelector("input[name='tab']");
+      this._tab = tabInput ? tabInput.value : null;
+      this._strip = this.el.closest ? this.el.closest("[role='tablist']") : null;
+      this._onKey = (e) => {
+        if (e.key === "Enter" || e.key === "Escape") this._key = e.key;
+      };
+      this._onFocusOut = (e) => {
+        this._blurTo = e.relatedTarget || null;
+      };
+      this.el.addEventListener("keydown", this._onKey);
+      this.el.addEventListener("focusout", this._onFocusOut);
+      this.el.focus();
+      try { this.el.select(); } catch (_e) { /* noop */ }
+    },
+
+    destroyed() {
+      let target;
+      if (this._key) {
+        if (this._tab == null || !this._strip) return;
+        const strip = this._strip;
+        const sel = "[data-test-id='sheet-tab-" + this._tab + "']";
+        target = () => strip.querySelector(sel);
+      } else if (this._blurTo) {
+        const el = this._blurTo;
+        target = () => (el.isConnected === false ? null : el);
+      } else {
+        return;
+      }
+      const raf = (typeof requestAnimationFrame === "function")
+        ? requestAnimationFrame
+        : (fn) => setTimeout(fn, 16);
+      let frames = 0;
+      const watch = () => {
+        const want = target();
+        const a = document.activeElement;
+        if (a && a !== document.body && a !== want) return;
+        if (want && a !== want) want.focus();
+        if (++frames < TAB_RENAME_WATCH_FRAMES) raf(watch);
+      };
+      watch();
+    }
+  };
 })();

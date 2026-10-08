@@ -350,9 +350,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Rename a tab. CROSS-TAB (CT / wave-1): because refs are NAME-based
   # (design decision 1), a rename rewrites every `OldName!`/`'Old Name'!`
   # qualifier across ALL OTHER tabs to the new name — that sweep is owned by
-  # `Structure.rename_refs/3` (X2), wired here behind a `function_exported?`
-  # guard so this slice compiles + gates BEFORE X2 merges (no-op until then;
-  # the own-tab rename always works). The named SILENT-CORRUPTION hazard
+  # `Structure.rename_refs/3` (X2), called from `rename_cross_tab_refs/3`.
+  # The named SILENT-CORRUPTION hazard
   # (design §6): the sweep touches OTHER users' tabs, so the inverse MUST
   # capture the PRE-rewrite cells of every rewritten tab — the
   # `{:rename_restore, …}` multi-tab capture — or undo cannot restore the
@@ -1991,24 +1990,25 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
     end)
   end
 
-  # ── X2 Structure integration seams (guarded until X2 merges) ─────────────
+  # ── X2 Structure integration seams ───────────────────────────────────────
   #
   # Cross-tab formula-text rewrites are owned by
   # `Barkpark.Plugins.Sheets.Structure` (X2) under the single-writer rule — this
-  # module never rewrites formula text itself. Each call is guarded on
-  # `function_exported?/3` so X3 compiles + gates on origin/main BEFORE X2
-  # lands; every seam is a NO-OP until then (own-tab work always happens; only
-  # the cross-tab ref rewrite waits on X2). The ASSUMED contracts below are the
-  # integration points the merging agent rebases if a signature differs.
+  # module never rewrites formula text itself. These calls were once guarded on
+  # `function_exported?/3` so X3 could merge before X2. That guard is false for
+  # a module the VM has not loaded yet, which is the normal state under
+  # interactive code loading (dev, `mix test`): the rewrites silently did
+  # nothing, so renaming a tab left other tabs' formulas pointing at the old
+  # name (task-12b3b4e250901169). X2 has landed; the calls are direct.
 
   # `Structure.rename_refs(tabs, old_name, new_name) :: tabs` (X2) — rewrite
   # every `OldName!`/`'Old Name'!` qualifier across ALL tabs to the new name.
   # X2 operates on the `tabs` list (its module boundary); this session adapter
   # peels tabs off content and puts the rewritten list back (integration seam).
   defp rename_cross_tab_refs(content, old_name, new_name) do
-    if old_name != new_name and function_exported?(Structure, :rename_refs, 3) do
+    if old_name != new_name do
       tabs = Map.get(content, "tabs") || []
-      Map.put(content, "tabs", apply(Structure, :rename_refs, [tabs, old_name, new_name]))
+      Map.put(content, "tabs", Structure.rename_refs(tabs, old_name, new_name))
     else
       content
     end
@@ -2018,12 +2018,8 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # ref to the deleted tab, across all tabs, to the literal `#REF!`. Same
   # content↔tabs adapter as rename above.
   defp delete_cross_tab_refs(content, deleted_name) do
-    if function_exported?(Structure, :delete_tab_refs, 2) do
-      tabs = Map.get(content, "tabs") || []
-      Map.put(content, "tabs", apply(Structure, :delete_tab_refs, [tabs, deleted_name]))
-    else
-      content
-    end
+    tabs = Map.get(content, "tabs") || []
+    Map.put(content, "tabs", Structure.delete_tab_refs(tabs, deleted_name))
   end
 
   # `Structure.shift_cross_tab_refs(tabs, target_index, axis, {kind, at, count})
@@ -2032,14 +2028,10 @@ defmodule Barkpark.Plugins.Sheets.Session.Ops do
   # Session adapter: peel tabs off content, call X2 with the tab INDEX + change
   # tuple, put the rewritten list back (the X2 seam — content↔tabs + /4 shape).
   defp apply_cross_tab_shift(state, target_index, axis, {_kind, _at, _count} = change) do
-    if function_exported?(Structure, :shift_cross_tab_refs, 4) do
-      before = state.content
-      tabs = Map.get(before, "tabs") || []
-      new_tabs = apply(Structure, :shift_cross_tab_refs, [tabs, target_index, axis, change])
-      commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
-    else
-      state
-    end
+    before = state.content
+    tabs = Map.get(before, "tabs") || []
+    new_tabs = Structure.shift_cross_tab_refs(tabs, target_index, axis, change)
+    commit_cross_tab_content(state, before, Map.put(before, "tabs", new_tabs))
   end
 
   # Commit an X2 cross-tab content transform: when it changed anything, swap the

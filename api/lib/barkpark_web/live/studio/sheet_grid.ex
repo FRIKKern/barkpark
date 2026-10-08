@@ -3485,8 +3485,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             tabindex is deferred — every tab stays natively tab-focusable. --%>
       <div class="sheet-tabs" data-test-id="sheet-tabs" role="tablist" aria-label="Sheet tabs">
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
+          <%!-- Stable ids: without them morphdom matched tabs by position, so
+                swapping the rename form back to a button re-used the FOCUSED
+                neighbour's node and focus jumped to the renamed tab. --%>
           <%= if @editable and @renaming_tab == i do %>
-            <form phx-submit="tab-rename" phx-target={@myself} style="display: inline-flex;">
+            <form
+              id={"#{@id}-tab-rename-form"}
+              phx-submit="tab-rename"
+              phx-target={@myself}
+              style="display: inline-flex;"
+            >
               <input type="hidden" name="tab" value={i} />
               <input
                 name="name"
@@ -3499,6 +3507,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 phx-key="Escape"
                 phx-blur="tab-rename-cancel"
                 phx-target={@myself}
+                id={"#{@id}-tab-rename"}
+                phx-hook="SheetTabRename"
                 data-test-id="sheet-tab-rename-input"
               />
             </form>
@@ -3514,6 +3524,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-key="F2"
               phx-value-tab={i}
               phx-target={@myself}
+              id={"#{@id}-tab-#{i}"}
               data-test-id={"sheet-tab-#{i}"}
             >
               <%!-- The tab-color swatch (QL-D2): a small colored dot in the

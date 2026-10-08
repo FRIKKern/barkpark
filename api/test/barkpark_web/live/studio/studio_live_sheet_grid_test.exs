@@ -1986,6 +1986,35 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert has_element?(view, ~s([data-test-id="sheet-tab-0"]))
   end
 
+  # task-12b3b4e250901169: F2 opened the input but nothing focused it, and
+  # Enter/Escape dropped focus to <body> when the button came back. The
+  # SheetTabRename hook moves focus (pinned in assets/sheet-grid/
+  # __tabrename.test.mjs); this pins the markup it depends on.
+  test "the rename input mounts the focus hook, and tabs keep stable ids", %{conn: conn} do
+    create_sheet!("sg-rename-focus", [
+      %{"name" => "Sheet 1", "cells" => %{}},
+      %{"name" => "Sheet 2", "cells" => %{}}
+    ])
+
+    {view, target, _html} = open!(conn, "sg-rename-focus")
+
+    tab1_id = view |> element(~s([data-test-id="sheet-tab-1"])) |> render() |> attr_id()
+    assert tab1_id =~ ~r/-tab-1$/
+
+    render_keydown(target, "tab-rename-start", %{"tab" => "0", "key" => "F2"})
+
+    input = view |> element(~s([data-test-id="sheet-tab-rename-input"])) |> render()
+    assert input =~ ~s(phx-hook="SheetTabRename")
+    assert attr_id(input) =~ ~r/-tab-rename$/
+
+    # The neighbour keeps its id while tab 0 is a form, so the DOM patch that
+    # swaps the button back cannot re-use the focused neighbour's node.
+    assert view |> element(~s([data-test-id="sheet-tab-1"])) |> render() |> attr_id() == tab1_id
+  end
+
+  defp attr_id(html),
+    do: html |> then(&Regex.run(~r/\sid="([^"]+)"/, &1, capture: :all_but_first)) |> List.first()
+
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
     create_sheet!("sg-tab-announce", [
       %{"name" => "T0", "cells" => %{}},
