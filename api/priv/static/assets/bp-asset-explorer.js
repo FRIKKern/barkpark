@@ -1502,7 +1502,7 @@
           ? '<button type="button" class="btn btn-sm bp-ae-remove-member">Remove from collection</button>'
           : "") +
         (this._collections.filter((c) => c.kind !== "virtual").length
-          ? '<select class="form-input bp-ae-add-collection"><option value="">Add to collection…</option></select>'
+          ? '<select class="form-input bp-ae-add-collection" aria-label="Add to collection"><option value="">Add to collection…</option></select>'
           : "") +
         "</div>" +
         '<div class="bp-ae-action-row bp-ae-action-row--secondary">' +
