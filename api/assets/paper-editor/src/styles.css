@@ -1073,11 +1073,13 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * typography + the bp-button mirror below paint them), so ONLY the container +
  * tone rules are mirrored; the model-A slot-chrome rules are GONE (S10,
  * parity2-bug-card-slot-chrome). bp-canvas-card* is the thin edit-only hook. */
-.bp-paper-editor-body .bp-card { background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; border-left: 3px solid var(--paper-chrome-border); }
-.bp-paper-editor-body .bp-card--info { border-left-color: var(--st-info); }
-.bp-paper-editor-body .bp-card--ok { border-left-color: var(--st-ok); }
-.bp-paper-editor-body .bp-card--warn { border-left-color: var(--st-warn); }
-.bp-paper-editor-body .bp-card--danger { border-left-color: var(--st-danger); }
+.bp-paper-editor-body .bp-card { position: relative; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 13px 15px; }
+.bp-paper-editor-body .bp-card[class*="bp-card--"] { padding-right: 30px; }
+.bp-paper-editor-body .bp-card[class*="bp-card--"]::before { content: ""; position: absolute; top: 14px; right: 14px; width: 6px; height: 6px; border-radius: 50%; background: var(--bp-card-dot); }
+.bp-paper-editor-body .bp-card--info { --bp-card-dot: var(--st-info); }
+.bp-paper-editor-body .bp-card--ok { --bp-card-dot: var(--st-ok); }
+.bp-paper-editor-body .bp-card--warn { --bp-card-dot: var(--st-warn); }
+.bp-paper-editor-body .bp-card--danger { --bp-card-dot: var(--st-danger); }
 .bp-canvas-card__media-paint {
   position: absolute; padding: 0; margin: 0; border: 0;
   border-radius: 0; background: transparent; color: transparent;
@@ -1126,7 +1128,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * `.bp-pnode*` — keep BYTE-ALIGNED with those reader rules. Inputs are transparent so
  * they read as the cell's own text, edited in place. */
 .bp-paper-editor-body .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-accent); }
+.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-ink-faint); }
 .bp-paper-editor-body .bp-canvas-stage__k, .bp-paper-editor-body .bp-canvas-stage__t, .bp-paper-editor-body .bp-canvas-stage__d, .bp-paper-editor-body .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
 .bp-paper-editor-body .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
 .bp-paper-editor-body .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
