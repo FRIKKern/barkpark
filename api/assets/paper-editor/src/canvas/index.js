@@ -3870,6 +3870,7 @@ class BpPaperCanvas extends HTMLElement {
       this._consumePendingFocus();
       return;
     }
+    const caret = this._captureCaret();
     this._editor
       .chain()
       .setContent(runToTiptap(blocks), { emitUpdate: false })
@@ -3878,8 +3879,43 @@ class BpPaperCanvas extends HTMLElement {
         return true;
       })
       .run();
+    this._restoreCaret(caret);
     this._restSelectionOffAtom();
     this._consumePendingFocus();
+  }
+
+  // A whole-document replace (a REORDER, which cannot be applied in place) maps
+  // the selection through "everything was replaced", so the caret lands at an
+  // edge of the doc — after a "Move up" that is inside the moved block, and the
+  // author's next Enter or "/" goes there (task-b2abe773242241f8). While the
+  // author is in the editor, remember the caret as block id + offset and put it
+  // back in the same block afterwards. Selection only: no doc change, no ops.
+  _captureCaret() {
+    const editor = this._editor;
+    if (!editor || !editor.view || !editor.isFocused) return null;
+    const { $head } = editor.state.selection;
+    if ($head.depth < 1) return null;
+    const id = $head.node(1)?.attrs?.bpId;
+    if (id == null) return null;
+    return { id, offset: $head.pos - $head.before(1) };
+  }
+
+  _restoreCaret(caret) {
+    if (!caret || !this._editor) return;
+    const { state, view } = this._editor;
+    let target = null;
+    state.doc.forEach((node, pos) => {
+      if (!target && node.attrs?.bpId === caret.id) target = { node, pos };
+    });
+    if (!target) return;
+    const at = Math.min(target.pos + caret.offset, target.pos + target.node.nodeSize - 1);
+    let selection;
+    try {
+      selection = TextSelection.near(state.doc.resolve(at));
+    } catch (_) {
+      return;
+    }
+    view.dispatch(state.tr.setSelection(selection).setMeta("addToHistory", false));
   }
 
   // A canvas at rest must not hold a NodeSelection on a whole block. A fresh doc (or one
@@ -4109,6 +4145,7 @@ class BpPaperCanvas extends HTMLElement {
     this._awaitingOwnEchoes = [];
     this._dirtyWhileInflight = false;
     if (this._editor) {
+      const caret = this._captureCaret();
       this._programmaticApply = true;
       try {
         // The seed is the run's starting point, not an edit: keep it out of
@@ -4128,6 +4165,7 @@ class BpPaperCanvas extends HTMLElement {
       } finally {
         this._programmaticApply = false;
       }
+      this._restoreCaret(caret);
       this._restSelectionOffAtom();
       this._verifyPainted("seed");
       this._consumePendingFocus();
