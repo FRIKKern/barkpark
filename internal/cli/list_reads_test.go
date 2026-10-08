@@ -240,6 +240,7 @@ var objectReadCommands = map[string]string{
 	"media.search-synonym-preview": "preview object (v1/media_controller.ex)",
 	"media.share-view":             "share projection; hits nested under result (v1/media_collections_controller.ex)",
 	"media.suggest":                "result.recent/popular/nohits, none guaranteed present (v1/media_controller.ex)",
+	"paper.fleet-blocks":           "blocks is a blockId=>html MAP, not a row array; slug/rev are scalars (paper_fleet_blocks_controller.ex)",
 	"schema.get":                   "one schema object (schema_controller.ex)",
 	"search.insights":              "aggregate counters object (search_controller.ex)",
 	"search.settings":              "settings object (search_controller.ex)",
