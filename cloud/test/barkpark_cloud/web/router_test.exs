@@ -1359,8 +1359,9 @@ defmodule BarkparkCloud.Web.RouterTest do
       {:ok, token} = Accounts.create_user_session_token(user)
 
       {:ok, _sub} = Billing.subscribe(team, "supporter")
-      bp = barkpark_fixture(team)
-      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 2})
+      _bp = barkpark_fixture(team)
+      conn = call(:post, "/v1/onboarding", %{action: "ack", step: "published_doc"}, token)
+      assert conn.status == 200
 
       conn = call(:post, "/v1/onboarding", %{action: "complete"}, token)
       assert conn.status == 200

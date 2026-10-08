@@ -19039,14 +19039,17 @@ test("runwayStepModel: check marks vs digits, real instance-name hint, Open Stud
 // and every __preview__/*.mjs returned zero before this test existed, so the
 // string could be changed, or re-added, with no exit code anywhere).
 //
-// `Accounts.published_doc?/1` derives the step from an `AgentEvent` of type
-// "content" with `payload->>'published_count' > 0`. The four `record_event/3`
-// call sites in cloud/lib write "health" and "space" (the agent-report and
-// agent-space handlers in web/router.ex), "verify" (the verify-run handler) and
-// "status" (`Health.StalenessWorker`) — never "content" — and the agent's HTTP
-// surface has no content endpoint, so no producer exists and none was built
-// here. That is still true after cch-w55-bl (charter D902) and is pinned
-// server-side by `agent_event_producer_census_test.exs`.
+// `Accounts.published_doc?/1` used to derive the step from an `AgentEvent` of
+// type "content" with `payload->>'published_count' > 0`. The four
+// `record_event/3` call sites in cloud/lib write "health" and "space" (the
+// agent-report and agent-space handlers in web/router.ex), "verify" (the
+// verify-run handler) and "status" (`Health.StalenessWorker`) — never
+// "content" — and the agent's HTTP surface has no content endpoint, so no
+// producer ever existed. task-71a5ed0d3734d592 (2026-10-08) struck that dead
+// consumer entirely, and `content` followed it out of `AgentEvent.@types`
+// (same precedent as `backup`/`tls`) — pinned server-side by
+// `agent_event_test.exs`'s closed-vocabulary check now that the word is gone,
+// rather than by a per-type producer-backedness entry that no longer exists.
 //
 // cch-w55-bl — the SECOND half of the sentence above has since been fixed: the
 // manual ack (`Accounts.ack_onboarding_step/2`, via POST /v1/onboarding

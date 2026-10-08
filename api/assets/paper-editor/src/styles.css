@@ -1044,9 +1044,9 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * host extra pattern. view_edit_parity_test.exs §"callout tone mirror" locks it
  * byte-for-byte to the reader. Tokens `--bp-tone-*` are defined above. */
 .bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
-.bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
-.bp-paper-editor-body .bp-callout > strong:first-child { display: block; margin: 0 0 6px; }
-.bp-paper-editor-body .bp-callout > strong:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
+.bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong, .bp-paper-editor-body .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
+.bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child { display: block; margin: 0 0 6px; }
+.bp-paper-editor-body .bp-callout > strong:first-child::before, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
 .bp-paper-editor-body .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
 .bp-paper-editor-body .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
 .bp-paper-editor-body .bp-callout--warning { --bp-callout-dot: var(--bp-tone-warning-fg); }

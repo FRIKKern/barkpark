@@ -627,8 +627,10 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   # The desk's own folder names come from `Barkpark.Structure`, which also feeds
   # the TUI and /v1/structure, so they stay English there and are translated
   # here, at display (task-33bcb0b4415bc528). Schema titles pass through: they
-  # are already the content owner's words.
-  defp chrome_title("Structure"), do: gettext("Structure")
-  defp chrome_title("Plugins"), do: gettext("Plugins")
-  defp chrome_title(title), do: title
+  # are already the content owner's words. Public for the desk breadcrumb,
+  # which shows the same pane titles.
+  @doc false
+  def chrome_title("Structure"), do: gettext("Structure")
+  def chrome_title("Plugins"), do: gettext("Plugins")
+  def chrome_title(title), do: title
 end

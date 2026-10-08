@@ -244,4 +244,52 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     refute html =~ "Document history"
     refute html =~ ~r/[A-Z][a-z]{2} \d\d, \d{4} at \d\d:/
   end
+
+  # task-d4c382b7aa8ad9ef: the document panel beside a paper stayed English in
+  # an nb-NO workspace, around a half-translated Studio.
+  test "the nb-NO document panel is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "paper",
+          "title" => "Papers",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        workspace_id: ws.id,
+        project_id: proj.id
+      )
+
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "loc-paper",
+          "title" => "Fjellet",
+          "dataset" => @dataset,
+          "blocks" => [
+            %{
+              "id" => "p1",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "Ein stad i fjellet."}]
+            }
+          ],
+          "workspace_id" => ws.id,
+          "project_id" => proj.id
+        })
+      )
+
+    {:ok, _view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/paper/loc-paper")
+
+    assert html =~ ~s(aria-label="Dokumentmetadata")
+    assert html =~ ">Synlighet<"
+    assert html =~ ">Datasett<"
+    assert html =~ "Relasjoner"
+    assert html =~ "Bare medlemmer"
+    assert html =~ "publisert"
+    refute html =~ ">Visibility<"
+    refute html =~ "Members only"
+    refute html =~ ~s(aria-label="Document metadata")
+  end
 end

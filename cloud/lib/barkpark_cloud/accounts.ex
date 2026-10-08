@@ -60,7 +60,6 @@ defmodule BarkparkCloud.Accounts do
   }
 
   alias BarkparkCloud.Billing.Subscription
-  alias BarkparkCloud.Registry.AgentEvent
   alias Ecto.Multi
 
   # How long a 2fa-pending challenge token stays valid: just long enough to read
@@ -3486,10 +3485,10 @@ defmodule BarkparkCloud.Accounts do
   `completed?` is true once `onboarding_completed_at` is set (the team either
   finished or dismissed). Each checklist step is `%{key, done}` where `done` is
   derived LIVE from the domain — `has_subscription` from `Billing`,
-  `has_instance` from `Registry`, `has_published_doc` from an agent-reported
-  `content` event OR a user ack — so the checklist self-heals if the user
-  subscribed or launched OUTSIDE the wizard (no drift, exactly like Coolify
-  recomputes from domain rows rather than trusting a cached flag).
+  `has_instance` from `Registry`, `has_published_doc` from a user ack — so the
+  checklist self-heals if the user subscribed or launched OUTSIDE the wizard
+  (no drift, exactly like Coolify recomputes from domain rows rather than
+  trusting a cached flag).
   """
   @spec onboarding_status(Team.t()) :: map()
   def onboarding_status(%Team{} = team) do
@@ -3503,10 +3502,11 @@ defmodule BarkparkCloud.Accounts do
     steps = [
       %{key: "subscription", done: has_subscription},
       %{key: "instance", done: has_instance},
-      # published_doc: the control plane can't see CMS content directly, so the
-      # step is done when EITHER an agent reported published content OR the user
-      # ticked it (acked). Honest: we don't fake a signal we can't observe.
-      %{key: "published_doc", done: published_doc?(instances) or "published_doc" in acked}
+      # published_doc: the control plane can't see CMS content directly, and
+      # no on-box agent emits a content-count signal (task-71a5ed0d3734d592,
+      # ruling: option B) — so this step is done only when the user ticks it
+      # (acked). Honest: we don't fake a signal we can't observe.
+      %{key: "published_doc", done: "published_doc" in acked}
     ]
 
     %{
@@ -3554,26 +3554,6 @@ defmodule BarkparkCloud.Accounts do
 
   defp update_onboarding(team, attrs) do
     team |> Team.onboarding_changeset(attrs) |> Repo.update()
-  end
-
-  # The one non-trivial derivation. CMS documents live INSIDE the provisioned
-  # api/ instance, not in the control plane, so "has published a doc" is not
-  # directly observable from cloud/. We treat it as true when the on-box agent
-  # has posted a `content` event with published_count > 0 for any of the team's
-  # instances. Until the agent emits that, the step is reachable via the user-ack
-  # path (ack_onboarding_step/2) — so the feature ships today and tightens
-  # automatically when the agent learns to report content.
-  defp published_doc?([]), do: false
-
-  defp published_doc?(instances) do
-    ids = Enum.map(instances, & &1.id)
-
-    Repo.exists?(
-      from e in AgentEvent,
-        where: e.barkpark_id in ^ids,
-        where: e.type == "content",
-        where: fragment("(?->>'published_count')::int > 0", e.payload)
-    )
   end
 
   defp now, do: DateTime.utc_now() |> DateTime.truncate(:microsecond)

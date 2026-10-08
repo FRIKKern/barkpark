@@ -759,9 +759,9 @@ html[data-theme="dark"] .bp-paper-body {
    The title is a small uppercase label on its own line, and the tone is a 6px
    dot before it — `bp-callout--<tone>` sets only `--bp-callout-dot`. */
 .bp-paper-surface .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
-.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
-.bp-paper-surface .bp-callout > strong:first-child { display: block; margin: 0 0 6px; }
-.bp-paper-surface .bp-callout > strong:first-child::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
+.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child > strong, .bp-paper-surface .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-callout > strong:first-child, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child { display: block; margin: 0 0 6px; }
+.bp-paper-surface .bp-callout > strong:first-child::before, .bp-paper-surface .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
 .bp-paper-surface .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
 .bp-paper-surface .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
 .bp-paper-surface .bp-callout--warning { --bp-callout-dot: var(--bp-tone-warning-fg); }
