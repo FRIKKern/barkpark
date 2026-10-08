@@ -88,6 +88,18 @@ defmodule BarkparkWeb.Studio.PaperFocusNewBlockTest do
     assert_push_event(view, "bp:focus-block", %{id: ^new_id})
   end
 
+  # task-13abe9408c006c96: a field block's control takes the focus in the canvas.
+  for type <- ~w(field-string field-select) do
+    test "Add block → #{type} asks the canvas to focus the new field block", %{view: view} do
+      before = stored_ids()
+
+      render_hook(view, "paper-add-block", %{"block-type" => unquote(type), "if_rev" => rev(view)})
+
+      [new_id] = stored_ids() -- before
+      assert_push_event(view, "bp:focus-block", %{id: ^new_id})
+    end
+  end
+
   test "a non-paragraph add does not steal focus", %{view: view} do
     render_hook(view, "paper-add-block", %{"block-type" => "divider", "if_rev" => rev(view)})
     refute_push_event(view, "bp:focus-block", %{id: _}, 200)

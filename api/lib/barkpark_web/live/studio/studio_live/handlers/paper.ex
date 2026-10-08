@@ -648,6 +648,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       else: socket
   end
 
+  # A canvas field block (String, Select, Date & time, the Image/Reference pickers…)
+  # holds its own control; the canvas focuses that control on bp:focus-block, so a
+  # keyboard author who adds one lands in it (task-13abe9408c006c96). A divider or
+  # any other control-less block takes no focus.
+  @focus_field_types ~w(field-string field-slug field-text field-boolean field-select
+                        field-datetime field-color field-image field-reference)
+
+  defp focus_new_block(socket, %{"id" => id, "type" => type})
+       when is_binary(id) and type in @focus_field_types do
+    if socket.assigns[:last_paper_save_ok?] == true,
+      do: push_event(socket, "bp:focus-block", %{id: id}),
+      else: socket
+  end
+
   defp focus_new_block(socket, _block), do: socket
 
   # An image or equation picked in the canvas is built here (it is not a
