@@ -18,22 +18,22 @@ msgid_plural "%{count} warnings — publishing is still allowed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1056
+#: lib/barkpark_web/studio/pane_builder.ex:1060
 #, elixir-autogen, elixir-format
 msgid "%{n}d ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1055
+#: lib/barkpark_web/studio/pane_builder.ex:1059
 #, elixir-autogen, elixir-format
 msgid "%{n}h ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1054
+#: lib/barkpark_web/studio/pane_builder.ex:1058
 #, elixir-autogen, elixir-format
 msgid "%{n}m ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1057
+#: lib/barkpark_web/studio/pane_builder.ex:1061
 #, elixir-autogen, elixir-format
 msgid "%{n}mo ago"
 msgstr ""
@@ -81,7 +81,8 @@ msgstr ""
 msgid "Close reference: %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3098
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3132
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3378
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
 #, elixir-autogen, elixir-format
 msgid "Delete"
@@ -107,6 +108,8 @@ msgstr ""
 msgid "Duplicate"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3151
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3377
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:206
 #, elixir-autogen, elixir-format
 msgid "Edit"
@@ -127,7 +130,7 @@ msgstr ""
 msgid "Hide preview"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3088
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3122
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:176
 #, elixir-autogen, elixir-format
 msgid "History"
@@ -180,7 +183,7 @@ msgstr ""
 msgid "Preview"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2969
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3003
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:107
 #, elixir-autogen, elixir-format
 msgid "Publish"
@@ -250,25 +253,25 @@ msgstr ""
 msgid "This desk has no section named"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2982
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3016
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:150
 #, elixir-autogen, elixir-format
 msgid "Unpublish"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:376
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2915
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2949
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1013
+#: lib/barkpark_web/studio/pane_builder.ex:1017
 #, elixir-autogen, elixir-format
 msgid "Untitled %{type} · %{tail}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1045
+#: lib/barkpark_web/studio/pane_builder.ex:1049
 #, elixir-autogen, elixir-format
 msgid "Updated %{ago}"
 msgstr ""
@@ -288,7 +291,7 @@ msgstr ""
 msgid "but your access grant does not cover it"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1017
+#: lib/barkpark_web/studio/pane_builder.ex:1021
 #, elixir-autogen, elixir-format
 msgid "document"
 msgstr ""
@@ -319,7 +322,7 @@ msgstr ""
 msgid "it covers %{scope}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1053
+#: lib/barkpark_web/studio/pane_builder.ex:1057
 #, elixir-autogen, elixir-format
 msgid "just now"
 msgstr ""
@@ -502,12 +505,12 @@ msgstr ""
 msgid "Type at least 2 characters"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2954
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2988
 #, elixir-autogen, elixir-format
 msgid "Rename"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2936
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2970
 #, elixir-autogen, elixir-format
 msgid "Sheet name"
 msgstr ""
@@ -564,28 +567,28 @@ msgstr[1] ""
 msgid "Back to %{pane}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1339
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1344
 #, elixir-autogen, elixir-format
 msgid "Choose a CSV file to import."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1793
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1804
 #, elixir-autogen, elixir-format
 msgid "Choose one file."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3000
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3034
 #, elixir-autogen, elixir-format
 msgid "Download"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2999
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3007
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3033
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3041
 #, elixir-autogen, elixir-format
 msgid "Download or import"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1318
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1323
 #, elixir-autogen, elixir-format
 msgid "Downloading %{file}"
 msgstr ""
@@ -600,22 +603,22 @@ msgstr ""
 msgid "Editor mode"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3026
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3060
 #, elixir-autogen, elixir-format
 msgid "Excel workbook, all tabs (.xlsx)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3073
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3107
 #, elixir-autogen, elixir-format
 msgid "Import"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3052
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3086
 #, elixir-autogen, elixir-format
 msgid "Import a CSV or TSV file as a new tab"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1352
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1357
 #, elixir-autogen, elixir-format
 msgid "Imported %{rows} rows into the new tab %{name}"
 msgstr ""
@@ -642,12 +645,12 @@ msgstr ""
 msgid "Switch scope — %{workspace} · %{project} · %{dataset}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1789
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1800
 #, elixir-autogen, elixir-format
 msgid "The file is larger than %{mb} MB."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:1794
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1805
 #, elixir-autogen, elixir-format
 msgid "The upload failed (%{reason})."
 msgstr ""
@@ -662,7 +665,7 @@ msgstr ""
 msgid "This project has no dataset named “%{asked}”, so Studio opened “%{opened}”."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3037
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3071
 #, elixir-autogen, elixir-format
 msgid "This tab as CSV (.csv)"
 msgstr ""
@@ -691,4 +694,646 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:67
 #, elixir-autogen, elixir-format
 msgid "Image unavailable — drop a file, or click to replace"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3329
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3442
+#, elixir-autogen, elixir-format
+msgid "%{color} background"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3452
+#, elixir-autogen, elixir-format
+msgid "Add rule"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3871
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3872
+#, elixir-autogen, elixir-format
+msgid "Add tab"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3317
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3317
+#, elixir-autogen, elixir-format
+msgid "Align center"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3316
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3316
+#, elixir-autogen, elixir-format
+msgid "Align left"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3318
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3318
+#, elixir-autogen, elixir-format
+msgid "Align right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4109
+#, elixir-autogen, elixir-format
+msgid "Apply"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3388
+#, elixir-autogen, elixir-format
+msgid "Apply to range"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3666
+#, elixir-autogen, elixir-format
+msgid "Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3434
+#, elixir-autogen, elixir-format
+msgid "Background"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3328
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3441
+#, elixir-autogen, elixir-format
+msgid "Background %{color}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1835
+#, elixir-autogen, elixir-format
+msgid "Blue"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3314
+#, elixir-autogen, elixir-format
+msgid "Bold (Cmd/Ctrl+B)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3754
+#, elixir-autogen, elixir-format
+msgid "Cell actions"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3319
+#, elixir-autogen, elixir-format
+msgid "Cell background"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3175
+#, elixir-autogen, elixir-format
+msgid "Cell reference (name box)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3313
+#, elixir-autogen, elixir-format
+msgid "Cell style"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3303
+#, elixir-autogen, elixir-format
+msgid "Checkbox"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3763
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4108
+#, elixir-autogen, elixir-format
+msgid "Clear"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3333
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3333
+#, elixir-autogen, elixir-format
+msgid "Clear background"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3932
+#, elixir-autogen, elixir-format
+msgid "Clear tab color"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1912
+#, elixir-autogen, elixir-format
+msgid "Clear the column filters before sorting"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3369
+#, elixir-autogen, elixir-format
+msgid "Close conditional-format panel"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4060
+#, elixir-autogen, elixir-format
+msgid "Close filter"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3543
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3544
+#, elixir-autogen, elixir-format
+msgid "Close find"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3277
+#, elixir-autogen, elixir-format
+msgid "Colon"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3991
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4000
+#, elixir-autogen, elixir-format
+msgid "Column %{col} menu"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3274
+#, elixir-autogen, elixir-format
+msgid "Comma"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3355
+#, elixir-autogen, elixir-format
+msgid "Cond. format"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3344
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3352
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3368
+#, elixir-autogen, elixir-format
+msgid "Conditional formatting"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3361
+#, elixir-autogen, elixir-format
+msgid "Conditional formatting rules"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3761
+#, elixir-autogen, elixir-format
+msgid "Copy"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3291
+#, elixir-autogen, elixir-format
+msgid "Currency ($1,234.50)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3291
+#, elixir-autogen, elixir-format
+msgid "Currency format"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3760
+#, elixir-autogen, elixir-format
+msgid "Cut"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3301
+#, elixir-autogen, elixir-format
+msgid "Date"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3302
+#, elixir-autogen, elixir-format
+msgid "Datetime"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3767
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4005
+#, elixir-autogen, elixir-format
+msgid "Delete column"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3765
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4158
+#, elixir-autogen, elixir-format
+msgid "Delete row"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3378
+#, elixir-autogen, elixir-format
+msgid "Delete rule %{rule}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3891
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3892
+#, elixir-autogen, elixir-format
+msgid "Delete the active tab"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3880
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3881
+#, elixir-autogen, elixir-format
+msgid "Duplicate the active tab"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1408
+#, elixir-autogen, elixir-format
+msgid "Duplicated as Copy of %{tab}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4191
+#, elixir-autogen, elixir-format
+msgid "Edit cell %{ref}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3377
+#, elixir-autogen, elixir-format
+msgid "Edit rule %{rule}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3188
+#, elixir-autogen, elixir-format
+msgid "Enter a value or =FORMULA"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3664
+#, elixir-autogen, elixir-format
+msgid "F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes. Alt+Down opens the column filter, Alt+Shift+Down the column menu, and Shift+F10 the cell menu."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4059
+#, elixir-autogen, elixir-format
+msgid "Filter %{col}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4040
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4053
+#, elixir-autogen, elixir-format
+msgid "Filter column %{col}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4036
+#, elixir-autogen, elixir-format
+msgid "Filter column %{col} (active: %{filter})"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4043
+#, elixir-autogen, elixir-format
+msgid "Filter this column"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3517
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3518
+#, elixir-autogen, elixir-format
+msgid "Find in sheet"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3525
+#, elixir-autogen, elixir-format
+msgid "Find next"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3535
+#, elixir-autogen, elixir-format
+msgid "Find previous"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3300
+#, elixir-autogen, elixir-format
+msgid "Fixed"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3399
+#, elixir-autogen, elixir-format
+msgid "Format cells where the value"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3189
+#, elixir-autogen, elixir-format
+msgid "Formula bar for %{ref}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3231
+#, elixir-autogen, elixir-format
+msgid "Freeze"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3228
+#, elixir-autogen, elixir-format
+msgid "Freeze rows/cols above and left of the active cell"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3299
+#, elixir-autogen, elixir-format
+msgid "General"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1834
+#, elixir-autogen, elixir-format
+msgid "Green"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1838
+#, elixir-autogen, elixir-format
+msgid "Grey"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4156
+#, elixir-autogen, elixir-format
+msgid "Insert above"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4157
+#, elixir-autogen, elixir-format
+msgid "Insert below"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3766
+#, elixir-autogen, elixir-format
+msgid "Insert column"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4003
+#, elixir-autogen, elixir-format
+msgid "Insert left"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4004
+#, elixir-autogen, elixir-format
+msgid "Insert right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3764
+#, elixir-autogen, elixir-format
+msgid "Insert row"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3315
+#, elixir-autogen, elixir-format
+msgid "Italic (Cmd/Ctrl+I)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3211
+#, elixir-autogen, elixir-format
+msgid "Merge"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3208
+#, elixir-autogen, elixir-format
+msgid "Merge the selected cells"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3851
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3852
+#, elixir-autogen, elixir-format
+msgid "Move sheet left"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3862
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3863
+#, elixir-autogen, elixir-format
+msgid "Move sheet right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2823
+#, elixir-autogen, elixir-format
+msgid "Moved %{tab} left"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2824
+#, elixir-autogen, elixir-format
+msgid "Moved %{tab} right"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3586
+#, elixir-autogen, elixir-format
+msgid "Next"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3524
+#, elixir-autogen, elixir-format
+msgid "Next match (Enter)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1915
+#, elixir-autogen, elixir-format
+msgid "Nothing to sort"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3290
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3305
+#, elixir-autogen, elixir-format
+msgid "Number format"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3762
+#, elixir-autogen, elixir-format
+msgid "Paste"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3292
+#, elixir-autogen, elixir-format
+msgid "Percent (25.00%)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3292
+#, elixir-autogen, elixir-format
+msgid "Percent format"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3278
+#, elixir-autogen, elixir-format
+msgid "Pipe"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3662
+#, elixir-autogen, elixir-format
+msgid "Press Escape then Tab to leave the grid."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3577
+#, elixir-autogen, elixir-format
+msgid "Prev"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3534
+#, elixir-autogen, elixir-format
+msgid "Previous match"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1837
+#, elixir-autogen, elixir-format
+msgid "Purple"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1836
+#, elixir-autogen, elixir-format
+msgid "Red"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3462
+#, elixir-autogen, elixir-format
+msgid "Redo (Cmd/Ctrl+Shift+Z)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3462
+#, elixir-autogen, elixir-format
+msgid "Redo last undone change"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1727
+#, elixir-autogen, elixir-format
+msgid "Renamed to %{title}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3435
+#, elixir-autogen, elixir-format
+msgid "Rule background color"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3452
+#, elixir-autogen, elixir-format
+msgid "Save rule"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3275
+#, elixir-autogen, elixir-format
+msgid "Semicolon"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3909
+#, elixir-autogen, elixir-format
+msgid "Set this sheet's tab color"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2819
+#, elixir-autogen, elixir-format
+msgid "Sheet %{n}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2806
+#, elixir-autogen, elixir-format
+msgid "Sheet %{n} of %{count}: %{name}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3164
+#, elixir-autogen, elixir-format
+msgid "Sheet formatting"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3779
+#, elixir-autogen, elixir-format
+msgid "Sheet tabs"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4065
+#, elixir-autogen, elixir-format
+msgid "Show rows where"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:699
+#, elixir-autogen, elixir-format
+msgid "Showing rows %{first}–%{last} of %{rows}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3246
+#, elixir-autogen, elixir-format
+msgid "Sort ascending"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3258
+#, elixir-autogen, elixir-format
+msgid "Sort descending"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3247
+#, elixir-autogen, elixir-format
+msgid "Sort the selection A→Z"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3259
+#, elixir-autogen, elixir-format
+msgid "Sort the selection Z→A"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3276
+#, elixir-autogen, elixir-format
+msgid "Space"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2454
+#, elixir-autogen, elixir-format
+msgid "Split %{cells} cell(s) across %{span} columns"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3280
+#, elixir-autogen, elixir-format
+msgid "Split text to columns"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3273
+#, elixir-autogen, elixir-format
+msgid "Split…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3642
+#, elixir-autogen, elixir-format
+msgid "Spreadsheet grid"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3910
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3917
+#, elixir-autogen, elixir-format
+msgid "Tab color"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3928
+#, elixir-autogen, elixir-format
+msgid "Tab color %{color}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3293
+#, elixir-autogen, elixir-format
+msgid "Thousands separator"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3293
+#, elixir-autogen, elixir-format
+msgid "Thousands separator (1,234)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3461
+#, elixir-autogen, elixir-format
+msgid "Undo (Cmd/Ctrl+Z)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3461
+#, elixir-autogen, elixir-format
+msgid "Undo last change"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3231
+#, elixir-autogen, elixir-format
+msgid "Unfreeze"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3221
+#, elixir-autogen, elixir-format
+msgid "Unmerge"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3218
+#, elixir-autogen, elixir-format
+msgid "Unmerge cells in the selection"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3151
+#, elixir-autogen, elixir-format
+msgid "View"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:1833
+#, elixir-autogen, elixir-format
+msgid "Yellow"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2095
+#, elixir-autogen, elixir-format
+msgid "contains “%{value}”"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3314
+#, elixir-autogen, elixir-format
+msgid "Bold"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3315
+#, elixir-autogen, elixir-format
+msgid "Italic"
 msgstr ""
