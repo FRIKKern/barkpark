@@ -3299,13 +3299,19 @@ defmodule BarkparkWeb.Router do
     get("/renditions/:id/:preset", MediaController, :serve_rendition)
   end
 
-  # Token-required scoped reads (listen/export/analytics/history/revision/locale).
+  # Token-required scoped reads (listen/export/analytics/history/revision/locale/codelists).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :require_token])
 
     # Studio chrome locale read (task-9a82d5dc67e5b7e0) — any member token;
     # the admin-gated PATCH below this block is the only write.
     get("/v1/workspace/locale", WorkspaceLocaleController, :show)
+
+    # A codelist registry read (task-93b24f20348f6df0) — any member token.
+    # Not tenant data (Codelists keys on plugin_name/list_id/issue, no
+    # workspace scope); scoped here only for member-token authentication
+    # parity with the rest of this block.
+    get("/v1/codelists/:codelist_id", CodelistController, :show)
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
