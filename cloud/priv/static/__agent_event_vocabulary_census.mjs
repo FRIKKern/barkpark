@@ -15,7 +15,10 @@
 // `tlvVerdictOf` answered "completed" for a backup that cannot exist; the empty
 // state told a brand-new owner, in the console's own voice, that "backups" would
 // appear here. Meanwhile `space` — which the agent beat DOES write — was absent
-// from the map and rendered as the raw word "space".
+// from the map and rendered as the raw word "space". (`content` never was
+// titled here either — it was declared-for-a-consumer only, in `AgentEvent`'s
+// @types, which arm A does not read; see LIMIT 4. task-71a5ed0d3734d592
+// struck that consumer and the word followed it out of @types entirely.)
 //
 // ── THE THREE ARMS ──────────────────────────────────────────────────────────
 //
@@ -61,7 +64,9 @@
 // A variant globbing `cloud/**` runs GREEN on the very tree this census exists
 // to red, and it does so on the strength of TEST FIXTURES. registry_test.exs's
 // ordering test supplied `backup` and `tls` as false producers until cch-w51-bl
-// rewrote it onto real types; accounts_test.exs still supplies `content`;
+// rewrote it onto real types; accounts_test.exs supplied `content` as a false
+// producer the same way until task-71a5ed0d3734d592 removed the consumer that
+// was the word's only reason to exist and deleted those fixture rows with it;
 // registry_test.exs's deliberate negative-test type `meltdown` is invented
 // alongside them; and `__app.test.mjs` manufactured `backup`/`tls` EV() rows
 // for the timeline grammar until arm C was widened to read it (below) and they
@@ -147,13 +152,13 @@
 //
 //   LIMIT 4 — AgentEvent's @types allowlist is NOT an arm and deliberately so
 //   (charter D576). DECLARED is not PRODUCED, and it is PRODUCED that a title
-//   promises. cch-w51-bl since dropped `backup` and `tls` from that allowlist —
-//   they had neither a producer nor a consumer — and KEPT `content`, which has
-//   no producer but does have a live server consumer in accounts.ex
-//   (published_doc?/1, the onboarding checklist). The allowlist's own both-ways
-//   guard lives in Elixir, next to the changeset it governs:
-//   cloud/test/barkpark_cloud/registry/agent_event_test.exs. This file is still
-//   the CONSOLE side and still does not read @types.
+//   promises. cch-w51-bl dropped `backup` and `tls` from that allowlist — they
+//   had neither a producer nor a consumer. `content` followed them out in
+//   task-71a5ed0d3734d592, once the server consumer that was its only reason
+//   to stay (published_doc?/1, the onboarding checklist) was itself removed.
+//   The allowlist's own both-ways guard lives in Elixir, next to the
+//   changeset it governs: cloud/test/barkpark_cloud/registry/agent_event_test.exs.
+//   This file is still the CONSOLE side and still does not read @types.
 //
 // Exit codes:
 //   0 — the three arms agree
@@ -605,9 +610,8 @@ if (orphanTitles.length || untitled.length || impossibleFixtures.length) {
   console.error(`  rendered (${rendered.size}): ${sorted(rendered).join(", ")}`);
   console.error(`  fixtured (${fixtured.size}): ${sorted(fixtured).join(", ")}`);
   console.error("");
-  console.error("  NOTE: AgentEvent's @types allowlist is NOT the oracle here. It declares");
-  console.error("  `content` with no producer on purpose (charter D576) — that word has a");
-  console.error("  server-side consumer. DECLARED is not PRODUCED.");
+  console.error("  NOTE: AgentEvent's @types allowlist is NOT the oracle here. DECLARED is");
+  console.error("  not PRODUCED — see LIMIT 4.");
   process.exit(1);
 }
 

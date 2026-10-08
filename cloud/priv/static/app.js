@@ -9574,6 +9574,15 @@
   // producer, deliberately — ticking a checkbox you ticked yourself is an
   // honest self-report; inventing an agent endpoint to observe it is the
   // "build the actor before deciding the effect" trap this wave refuses.
+  //
+  // task-71a5ed0d3734d592 (2026-10-08) — THE NEVER-WRITTEN "content" EVENT IS
+  // GONE, NOT JUST UNFIRED. `Accounts.published_doc?/1` is deleted, the OR
+  // described two paragraphs up no longer exists, and `content` itself was
+  // struck from `AgentEvent.@types` (it follows `backup`/`tls` out of the
+  // allowlist for the same reason: neither a producer nor a consumer). The
+  // step is reached ONLY through the ack control this paragraph already
+  // describes — nothing here changes, because the ack path was already the
+  // one real way in.
   var RUNWAY_STEPS = [
     { key: "subscription", label: "Start your trial", hint: "14 days, no card needed" },
     { key: "instance", label: "Launch your first Barkpark" },

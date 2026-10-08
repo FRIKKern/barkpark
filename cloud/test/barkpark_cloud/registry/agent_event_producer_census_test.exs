@@ -5,14 +5,16 @@ defmodule BarkparkCloud.Registry.AgentEventProducerCensusTest do
   `agent_event_test.exs` already pins the allowlist in both directions, but it
   pins an OR: a word survives it with a producer OR a consumer. That is the
   right rule for "can this word be reached at all", and it is structurally blind
-  to the thing `cch-w55-bl` found — `content` has a live consumer
-  (`Accounts.published_doc?/1`, the onboarding checklist's third step) and ZERO
-  producers, and it could gain one, or `status` could lose its only one, without
-  that test moving a pixel. Both of those are product decisions, not refactors:
+  to a word GAINING or LOSING one of its two arms while the other still holds —
+  `content` was exactly that case (a live consumer, `Accounts.published_doc?/1`,
+  and ZERO producers) until task-71a5ed0d3734d592 struck the consumer and the
+  word followed it out of `@types` entirely. While a word like that still
+  stands, `status` losing its only producer is the same kind of invisible
+  event, and either direction is a product decision, not a refactor:
 
-    * a `content` producer landing means the onboarding step stops being a
-      self-report and starts being an observation, which is precisely the
-      "build the actor before deciding the effect" move charter D902 refused;
+    * a producer landing for a consumer-only word means a step stops being a
+      self-report and starts being an observation — exactly the "build the
+      actor before deciding the effect" move charter D902 refused for `content`;
     * a producer disappearing means a word that used to arrive on the instance
       timeline silently never does again — the console's `TLV_EVENT_TITLES` and
       `__agent_event_vocabulary_census.mjs` would follow it down without anyone
@@ -69,17 +71,20 @@ defmodule BarkparkCloud.Registry.AgentEventProducerCensusTest do
   #   status  — the offline flip (health/staleness_worker.ex)
   #   space   — the 15-minute disk payload (web/router.ex, D58)
   #   verify  — the control-plane readiness suite (web/router.ex, C8/D53)
-  #   content — NO PRODUCER, BY DECISION (charter D902). Consumed by
-  #             Accounts.published_doc?/1; the onboarding step it feeds is
-  #             reached by the user-ack control instead. Flipping this to true
-  #             is not a test fix — it is the decision D902 deferred, and the
-  #             console copy, the ack control and both moduledocs move with it.
+  #
+  # `content` (NO PRODUCER, BY DECISION — charter D902) used to live here as
+  # `false`: consumed by `Accounts.published_doc?/1`, the onboarding step it
+  # fed reached instead by the user-ack control. task-71a5ed0d3734d592 struck
+  # that consumer (the automatic arm never fired in the wild), so `content` now
+  # has neither arm and follows `backup`/`tls` out of `AgentEvent.@types`
+  # entirely — there is no entry for it here any more for the same reason
+  # there never was one for `backup`/`tls`: a word that is not declared cannot
+  # drift, so it needs no decision record.
   @expected_producer %{
     "health" => true,
     "status" => true,
     "space" => true,
-    "verify" => true,
-    "content" => false
+    "verify" => true
   }
 
   # A word no call site writes and no allowlist declares. If the scan ever
