@@ -70,10 +70,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.DeskSearch do
   # title keeps its id.
   defp type_titles([], _dataset, _scope), do: %{}
 
-  defp type_titles(_found, dataset, scope) do
-    dataset
-    |> Content.list_schemas(scope)
-    |> Map.new(fn schema -> {schema.name, title_or_name(schema)} end)
+  defp type_titles(found, dataset, scope) do
+    listed =
+      dataset
+      |> Content.list_schemas(scope)
+      |> Map.new(fn schema -> {schema.name, title_or_name(schema)} end)
+
+    # The listed catalog leaves out a plugin's SHARED schema row (workspace_id
+    # NULL) in a non-Default workspace, so a paper hit read "paper"
+    # (task-b4e6fba573777ba3). Resolve each missing type through the scoped
+    # resolver, which has the shared-row rung; a type it cannot find keeps its id.
+    found
+    |> Enum.map(& &1.type)
+    |> Enum.uniq()
+    |> Enum.reject(&Map.has_key?(listed, &1))
+    |> Enum.reduce(listed, fn type, acc ->
+      case Content.resolve_schema(type, dataset, scope) do
+        {:ok, schema} -> Map.put(acc, type, title_or_name(schema))
+        _ -> acc
+      end
+    end)
   end
 
   defp title_or_name(%{title: title}) when is_binary(title) and title != "", do: title
