@@ -3230,7 +3230,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       "margin:4.8rem var(--bp-evidence-pull, 0) 0;width:var(--bp-evidence-width, auto);padding-top:1.65rem;border-top:3px double var(--paper-ink, #17332d)"
 
   defp paper_links_section_style(_layout),
-    do: "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #dde7e2)"
+    do: "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)"
 
   defp paper_links_title_style(layout) when layout in ["chapters", "timeline"],
     do:
@@ -3241,11 +3241,11 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   defp paper_links_grid_style("chapters"),
     do:
-      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #dde7e2)"
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,25rem),1fr));gap:0;border-bottom:1px solid var(--paper-rule, #e2e6e5)"
 
   defp paper_links_grid_style("timeline"),
     do:
-      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #dde7e2);border-bottom:1px solid var(--paper-rule, #dde7e2)"
+      "display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,13rem),1fr));gap:0;border-top:1px solid var(--paper-rule, #e2e6e5);border-bottom:1px solid var(--paper-rule, #e2e6e5)"
 
   defp paper_links_grid_style(_layout), do: "display:grid;gap:0.85rem"
 
@@ -3328,7 +3328,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         kind: :chapters,
         href: href,
         card_style:
-          "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+          "#{featured}display:flex;min-height:13rem;flex-direction:column;padding:1.75rem 1.65rem 1.8rem;border-top:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
         before_title_html: eyebrow,
         eyebrow_text: ref.eyebrow,
         eyebrow_style: eyebrow_style,
@@ -3371,7 +3371,7 @@ defmodule Barkpark.PortableDoc.Render.Compose do
         kind: :timeline,
         href: href,
         card_style:
-          "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #dde7e2);color:inherit;text-decoration:none",
+          "display:flex;min-height:11rem;flex-direction:column;padding:1.35rem 1.15rem 1.45rem;border-right:1px solid var(--paper-rule, #e2e6e5);color:inherit;text-decoration:none",
         before_title_html: ~s|<span style="#{eyebrow_style}">#{Util.escape_html(eyebrow)}</span>|,
         eyebrow_text: eyebrow,
         eyebrow_style: eyebrow_style,
@@ -3406,10 +3406,10 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     card_style =
       case style do
         :article ->
-          "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #dde7e2);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none"
+          "display:block;padding:1.15rem 1.2rem;border:1px solid var(--paper-rule, #e2e6e5);border-left:3px solid var(--paper-accent, #1e5347);border-radius:0.65rem;background:var(--paper-accent-soft, rgba(30,83,71,0.10));color:inherit;text-decoration:none"
 
         _ ->
-          "display:block;padding:14px 16px;border:1px solid #dde7e2;border-radius:8px;color:#17332d;text-decoration:none"
+          "display:block;padding:14px 16px;border:1px solid #e2e6e5;border-radius:8px;color:#17332d;text-decoration:none"
       end
 
     card =

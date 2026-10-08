@@ -827,7 +827,7 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
   # is three `~s|…| <> ~s|…|` fragments; strip the sigil delimiters + `<>` glue so a
   # `style="…"` that straddles a fragment boundary (the span's is split across L35/36)
   # reads as one attribute. Returns %{container: decls, mark: decls}, var()-fallbacks
-  # stripped so `var(--paper-rule, #dde7e2)` compares equal to the CSS `var(--paper-rule)`.
+  # stripped so `var(--paper-rule, #e2e6e5)` compares equal to the CSS `var(--paper-rule)`.
   defp figures_divider_decls do
     src = File.read!(@figures_ex)
 

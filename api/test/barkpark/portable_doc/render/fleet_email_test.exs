@@ -17,7 +17,7 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
 
   # Evergreen email skin (the default theme's captured hex).
   @ever_ground "#eaf1ee"
-  @ever_border "#dde7e2"
+  @ever_border "#e2e6e5"
 
   defp tasks_block do
     %{

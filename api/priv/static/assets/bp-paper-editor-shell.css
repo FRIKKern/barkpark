@@ -361,7 +361,7 @@
       font-style: italic;
       font-size: 1.2rem;
       color: var(--paper-ink-soft);
-      border-left: 3px solid var(--paper-reading-accent);
+      border-left: 3px solid var(--paper-rule);
       border-bottom: 0;
       margin: 1.6rem 0;
       padding: 0.2rem 0 0.2rem 1.2rem;
@@ -726,7 +726,7 @@
     .bp-paper-editor-body > h2,
 .bp-paper-editor-body > .ProseMirror > h2 {
       margin-top: var(--bp-section-beat);
-      border-top: var(--bp-section-rule) solid color-mix(in srgb, var(--paper-ink) 32%, var(--paper-bg));
+      border-top: var(--bp-section-rule) solid var(--paper-rule);
       padding-top: var(--bp-section-gap);
       margin-inline: var(--bp-evidence-pull, 0px);
       width: var(--bp-evidence-width, 100%);
@@ -798,7 +798,7 @@
     .bp-paper-editor-body .bp-role-eyebrow { font-family: var(--paper-font-serif); color: var(--paper-accent); letter-spacing: 0.08em; text-transform: uppercase; font-weight: 600; font-size: 0.78em; overflow-wrap: break-word; }
     .bp-paper-editor-body .bp-role-byline { border-bottom: 1px solid var(--paper-rule); padding-bottom: 0.6rem; margin: 0.75rem 0 2rem; color: var(--paper-ink-soft); font-family: var(--paper-font-serif); font-size: 0.9em; }
     .bp-paper-editor-body .bp-role-ingress { color: var(--paper-ink); line-height: 1.5; font-weight: 500; font-size: 1.28em; margin-top: 20px; }
-    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-reading-accent); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
+    .bp-paper-editor-body .bp-role-pullquote { display: block; margin: 1.6rem 0; padding: 0.2rem 0 0.2rem 1.2rem; border-left: 3px solid var(--paper-rule); color: var(--paper-ink-soft); line-height: 1.5; font-size: 1.2em; }
     /* editable-table: the three reader table class rules, mirrored byte-for-byte from
        paper-surface.css `.bp-paper-surface .bp-table*` (view_edit_parity_test.exs §2
        guards drift). Same --paper-rule/--paper-ink-soft/--paper-font-serif tokens the
@@ -1091,7 +1091,7 @@
          inlined paper-surface.css `.bp-pnode*` rules — keep BYTE-ALIGNED with the
          styles.css + paper-surface.css copies (the card THREE-copy lockstep). */
     .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-    .bp-canvas-stage--src { border-color: var(--paper-accent); }
+    .bp-canvas-stage--src { border-color: var(--paper-ink-faint); }
     .bp-canvas-stage__k, .bp-canvas-stage__t, .bp-canvas-stage__d, .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; }
     .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
     .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }

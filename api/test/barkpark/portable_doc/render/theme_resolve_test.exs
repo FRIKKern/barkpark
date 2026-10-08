@@ -101,7 +101,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
 
       refute themed == ever
       # evergreen rule vs override rule
-      assert ever =~ "#dde7e2"
+      assert ever =~ "#e2e6e5"
       assert themed =~ "#0000ff"
     end
   end
@@ -115,7 +115,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
       assert TokensGen.email_brand() == "#1e5347"
       assert TokensGen.email_brand(:evergreen) == "#1e5347"
       assert TokensGen.email_brand("no-such-theme") == "#1e5347"
-      assert TokensGen.email_rule() == "#dde7e2"
+      assert TokensGen.email_rule() == "#e2e6e5"
       assert TokensGen.tone_ok() == "#137236"
       assert TokensGen.reading_accent() == "#a23925"
       assert TokensGen.callout(:success) == %{bg: "#e7f2ec", fg: "#1e6b52"}
@@ -145,7 +145,7 @@ defmodule Barkpark.PortableDoc.Render.ThemeResolveTest do
     test "brand/rule accessors take the theme arg, default evergreen" do
       assert Palettes.brand() == "#1e5347"
       assert Palettes.brand(@theme) == "#ff0000"
-      assert Palettes.rule() == "#dde7e2"
+      assert Palettes.rule() == "#e2e6e5"
       assert Palettes.rule(@theme) == "#0000ff"
     end
   end

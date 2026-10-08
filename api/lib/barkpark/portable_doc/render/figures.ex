@@ -111,7 +111,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # (`.bp-section-divider` / `.bp-section-divider__mark`), so this closes an
   # asymmetry rather than inventing a second vocabulary for one block.
   def section_divider_html do
-    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)">| <>
+    ~s|<div class="bp-section-divider" style="position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #e2e6e5)">| <>
       ~s|<span class="bp-section-divider__mark" style="position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;| <>
       ~s|background:var(--paper-bg, #f6faf9);color:var(--paper-ink-soft, #55635e);font-size:1.1rem">§</span></div>|
   end
@@ -181,7 +181,7 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s|<figcaption class="bp-figcaption">#{figcaption_inner(caption)}</figcaption>|
       end
 
-    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #dde7e2);border-radius:4px;overflow-x:auto">| <>
+    ~s|<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;padding:1.2rem;background:var(--paper-bg-deep, #eaf1ee);border:1px solid var(--paper-rule, #e2e6e5);border-radius:4px;overflow-x:auto">| <>
       ~s(<pre class="mermaid">#{encode_mermaid(source)}</pre>) <>
       cap <>
       "</figure>"
@@ -240,12 +240,12 @@ defmodule Barkpark.PortableDoc.Render.Figures do
       if is_integer(rows) and rows in 6..40, do: ~s( data-cast-rows="#{rows}"), else: ""
 
     # `~s|…|`, not `~s(…)`: a paren-delimited sigil whose body contains
-    # `var(--paper-rule, #dde7e2)` makes the tokenizer read `border-radius:6px`
+    # `var(--paper-rule, #e2e6e5)` makes the tokenizer read `border-radius:6px`
     # as a keyword argument ("keyword argument must be followed by space after:
     # radius:") and the file will not compile. The pipe delimiter has no such
     # ambiguity, and the sibling figure/divider strings above already use it.
     ~s|<figure style="margin:var(--bp-air-asciicast, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">| <>
-      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #dde7e2);border-radius:6px;overflow:hidden"></div>| <>
+      ~s|<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr}#{rows_attr} style="border:1px solid var(--paper-rule, #e2e6e5);border-radius:6px;overflow:hidden"></div>| <>
       cap <>
       "</figure>"
   end

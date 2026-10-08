@@ -26,7 +26,7 @@ Structure the story, component per job:
 - eyebrow · heading · byline · ingress — the epic in one breath.
 - stat-grid — headline numbers: waves, slices shipped/deferred, PRs merged, total tokens, wall-clock span, interrupts.
 - steps or pipeline — the epic's arc wave by wave: ambition → obstacles → turning points → what stands.
-- Per wave: heading + a journey-highlight cards block (the 2-4 BEST moments across that wave's agents — surprises and refuted premises beat routine wins) + callouts for the decisions that shaped what followed.
+- Per wave: heading + a journey-highlight cards block (the 2-4 BEST moments across that wave's agents — surprises and refuted premises beat routine wins) + the decisions that shaped what followed, as plain paragraphs. Callouts are rare: at most one in the whole Paper, for the single verdict that must stand apart (owner ruling 2026-10-05, /papers/paper-authoring-excellence).
 - table — shipped vs deferred vs stalled, with task ids and PR links.
 - chart — cross-wave trends from the telemetry sections (tokens per phase per wave; did Decide get cheaper as the charter matured?). Only measured data; state grain.
 - THE RETRO WITH TEETH: table of per-phase verdicts across waves, then cards with your top-3 process changes — each argued from telemetry rows or journey moments. Offer to file each as a published bp backlog task under the epic (ask first).

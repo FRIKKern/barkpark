@@ -72,7 +72,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
     evergreen: %{
       brand: "#1e5347",
       brand_text: "#ffffff",
-      rule: "#dde7e2",
+      rule: "#e2e6e5",
       page_bg: "#eaf1ee",
       paper: "#ffffff",
       text: "#15211d",
@@ -82,7 +82,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
     charple: %{
       brand: "#7b3a96",
       brand_text: "#ffffff",
-      rule: "#e0dde1",
+      rule: "#e8e5e9",
       page_bg: "#f0ecf3",
       paper: "#f8f8fc",
       text: "#241e27",
@@ -92,7 +92,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
     ember: %{
       brand: "#b34e1e",
       brand_text: "#ffffff",
-      rule: "#e2dcda",
+      rule: "#eae5e3",
       page_bg: "#f4ece9",
       paper: "#fdfcfb",
       text: "#291d19",
@@ -102,7 +102,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
     fjord: %{
       brand: "#0e6e85",
       brand_text: "#ffffff",
-      rule: "#d9dfe1",
+      rule: "#e2e7e9",
       page_bg: "#e7f0f2",
       paper: "#fcfcfd",
       text: "#162327",
@@ -112,7 +112,7 @@ defmodule Barkpark.PortableDoc.Render.TokensGen do
     iris: %{
       brand: "#5b46d6",
       brand_text: "#ffffff",
-      rule: "#dddee2",
+      rule: "#e5e6ea",
       page_bg: "#ecedf5",
       paper: "#ffffff",
       text: "#1f1f2a",
