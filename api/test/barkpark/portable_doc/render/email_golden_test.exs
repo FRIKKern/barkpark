@@ -111,9 +111,9 @@ defmodule Barkpark.PortableDoc.Render.EmailGoldenTest do
             ~s(class="sheet-al-center"),
             "background:#fef3c7",
             "color:#dc2626",
-            # callouts (tones + collapsible)
-            "border-left:3px solid #1e6b52",
-            "border-left:3px solid #a63a2e",
+            # callouts (tones + collapsible): the quiet card's tone dot, 2026-10-05
+            ~s(<span style="color:#1e6b52">&#9679;</span>),
+            ~s(<span style="color:#a63a2e">&#9679;</span>),
             "<details",
             "<summary",
             # box geometry

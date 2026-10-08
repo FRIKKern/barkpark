@@ -1855,10 +1855,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
             ""
 
           t ->
-            ~s(<div style="color:#{tone.fg};font-weight:600;margin:0 0 6px">#{escape_html(t)}</div>)
+            # The quiet card (2026-10-05), as on the article: a small uppercase label on
+            # its own line, the tone only in a dot before it.
+            ~s(<div style="font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#{pal.muted};margin:0 0 6px"><span style="color:#{tone.fg}">&#9679;</span>&nbsp; #{escape_html(t)}</div>)
         end
 
-      ~s(<div style="border-left:3px solid #{tone.fg};background:#{tone.bg};padding:14px 18px;border-radius:0 8px 8px 0;color:#{pal.text};margin:20px 0">#{title}#{inner}</div>)
+      ~s(<div style="border:1px solid #{pal.rule};border-radius:12px;padding:18px 22px 20px;color:#{pal.text};margin:20px 0">#{title}#{inner}</div>)
     end
   end
 

@@ -469,7 +469,7 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_html(node, @opts) ==
-               ~s(<div style="border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0"><div style="color:#8a6420;font-weight:600;margin:0 0 6px">Heads up</div><span>body</span></div>)
+               ~s(<div style="border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0"><div style="font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px"><span style="color:#8a6420">&#9679;</span>&nbsp; Heads up</div><span>body</span></div>)
     end
   end
 
@@ -522,8 +522,8 @@ defmodule Barkpark.PortableDoc.RenderTest do
       }
 
       assert Render.render_block(block) ==
-               ~s(<div style="border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0">) <>
-                 ~s(<div style="color:#8a6420;font-weight:600;margin:0 0 6px">Degraded</div><span>API latency is elevated.</span></div>)
+               ~s(<div style="border:1px solid #e2e6e5;border-radius:12px;padding:18px 22px 20px;color:#15211d;margin:20px 0">) <>
+                 ~s(<div style="font-size:11px;font-weight:600;letter-spacing:0.09em;text-transform:uppercase;color:#55635e;margin:0 0 6px"><span style="color:#8a6420">&#9679;</span>&nbsp; Degraded</div><span>API latency is elevated.</span></div>)
     end
 
     test "action composes to a primary button" do
