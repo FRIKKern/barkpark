@@ -251,7 +251,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Session
   alias Barkpark.Plugins.Sheets.Structure
-  alias BarkparkWeb.Studio.SheetGrid.{Cells, Filter, Geometry, GridData, Ops}
+  alias BarkparkWeb.Studio.SheetGrid.{Cells, FileIO, Filter, Geometry, GridData, Ops}
   alias BarkparkWeb.Studio.StudioLive.DocActions
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.TokensGen
@@ -287,7 +287,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   @impl true
   def mount(socket) do
     {:ok,
-     assign(socket,
+     socket
+     # The header's File panel (task-da387f54432114d8): download the sheet,
+     # and for write-capable hosts import a CSV as a new tab. See FileIO.
+     |> allow_upload(:csv_import,
+       # The mime registry has no `.tsv`, so the picker filter rides the
+       # input's own accept attribute and FileIO checks the extension.
+       accept: :any,
+       max_entries: 1,
+       max_file_size: FileIO.import_byte_cap()
+     )
+     |> assign(
+       file_panel: false,
        content: nil,
        rev: 0,
        epoch: nil,
@@ -1284,6 +1295,75 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   # into @content) arrives AFTER this handler returns — so the switch is armed
   # here and taken in update/2 once the tab exists. Staying on the old tab was
   # a trap: the editor's next keystrokes overwrote the tab they had just left.
+  # ── File panel: download + CSV import (task-da387f54432114d8) ────────────
+
+  def handle_event("file-toggle", _params, socket) do
+    {:noreply, assign(socket, file_panel: not socket.assigns.file_panel)}
+  end
+
+  def handle_event("file-close", _params, socket) do
+    {:noreply, assign(socket, file_panel: false)}
+  end
+
+  # The file is built from the content this socket renders and pushed to the
+  # client, which saves it (phx:bp:sheet-download in bp-sheet-grid.js). A
+  # read-only viewer may download: it is the same bytes the grid shows.
+  def handle_event("download", %{"format" => format}, socket) do
+    title = socket.assigns.renamed_title || socket.assigns.doc.title
+
+    case FileIO.download(socket.assigns.content, title, socket.assigns.tab, format) do
+      {:ok, payload} ->
+        {:noreply,
+         socket
+         |> assign(status: gettext("Downloading %{file}", file: payload.filename))
+         |> push_event("bp:sheet-download", payload)}
+
+      {:error, message} ->
+        {:noreply, assign(socket, notice: message)}
+    end
+  end
+
+  def handle_event("csv-import-validate", _params, socket), do: {:noreply, socket}
+
+  # Only a write-capable host renders the import form; a forged submit from
+  # any other host consumes nothing and writes nothing (send_ops/2 is the
+  # last wall either way).
+  def handle_event("csv-import", _params, %{assigns: %{write_capable: false}} = socket),
+    do: {:noreply, socket}
+
+  def handle_event("csv-import", _params, socket) do
+    files = consume_uploaded_entries(socket, :csv_import, &read_import_upload/2)
+
+    case files do
+      [] ->
+        {:noreply, assign(socket, notice: gettext("Choose a CSV file to import."))}
+
+      [{raw, filename} | _] ->
+        case FileIO.import_ops(raw, filename, GridData.tabs(socket)) do
+          {:ok, ops, info} ->
+            socket = send_ops(socket, ops)
+
+            if socket.assigns[:notice] == nil do
+              {:noreply,
+               assign(socket,
+                 follow_tab: info.index,
+                 file_panel: false,
+                 status:
+                   gettext("Imported %{rows} rows into the new tab %{name}",
+                     rows: info.rows,
+                     name: info.name
+                   )
+               )}
+            else
+              {:noreply, socket}
+            end
+
+          {:error, message} ->
+            {:noreply, assign(socket, notice: message)}
+        end
+    end
+  end
+
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
     socket = send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])
@@ -1687,6 +1767,23 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     |> note_own_refs([Sheets.format_ref(pos)])
     |> Ops.commit(pos, value)
   end
+
+  # Sobelow Traversal.FileModule false-positive: `path` is the LiveView upload's
+  # framework-managed temp file, never a name the client chose; `client_name`
+  # is only used to name the new tab.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp read_import_upload(%{path: path}, entry) do
+    {:ok, {File.read!(path), entry.client_name}}
+  end
+
+  defp import_error_text(:too_large),
+    do:
+      gettext("The file is larger than %{mb} MB.",
+        mb: div(FileIO.import_byte_cap(), 1_000_000)
+      )
+
+  defp import_error_text(:too_many_files), do: gettext("Choose one file.")
+  defp import_error_text(other), do: gettext("The upload failed (%{reason}).", reason: other)
 
   defp send_ops(socket, ops) do
     refs = for %{"ref" => ref} <- ops, do: ref
@@ -2839,6 +2936,100 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           >
             <.icon name="archive" size={14} /> {gettext("Unpublish")}
           </button>
+          <%!-- File panel (task-da387f54432114d8): every Studio viewer can
+                download; only a write-capable host gets the import form. A
+                disclosure, not a menu: it holds a file input and a form. --%>
+          <span class="sheet-file" style="position: relative; display: inline-flex;">
+            <button
+              type="button"
+              class="btn btn-ghost btn-sm"
+              phx-click="file-toggle"
+              phx-target={@myself}
+              aria-expanded={to_string(@file_panel)}
+              aria-controls={"#{@id}-file-panel"}
+              id={"#{@id}-file-btn"}
+              data-test-id="sheet-file"
+            >
+              <.icon name="download" size={14} /> {if @write_capable,
+                do: gettext("Download or import"),
+                else: gettext("Download")}
+            </button>
+            <div
+              :if={@file_panel}
+              id={"#{@id}-file-panel"}
+              class="sheet-file-panel"
+              role="group"
+              aria-label={gettext("Download or import")}
+              phx-keydown={
+                Phoenix.LiveView.JS.push("file-close", target: @myself)
+                |> Phoenix.LiveView.JS.focus(to: "##{@id}-file-btn")
+              }
+              phx-key="Escape"
+              style="position: absolute; top: 100%; right: 0; z-index: 30; margin-top: 4px; min-width: 260px; display: flex; flex-direction: column; gap: 6px; padding: 10px; background: var(--card); color: var(--card-foreground); border: 1px solid var(--border); border-radius: 8px; box-shadow: 0 8px 24px rgb(0 0 0 / 0.15);"
+              data-test-id="sheet-file-panel"
+            >
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="justify-content: flex-start;"
+                phx-click="download"
+                phx-value-format="xlsx"
+                phx-target={@myself}
+                phx-mounted={Phoenix.LiveView.JS.focus()}
+                data-test-id="sheet-download-xlsx"
+              >
+                {gettext("Excel workbook, all tabs (.xlsx)")}
+              </button>
+              <button
+                type="button"
+                class="btn btn-ghost btn-sm"
+                style="justify-content: flex-start;"
+                phx-click="download"
+                phx-value-format="csv"
+                phx-target={@myself}
+                data-test-id="sheet-download-csv"
+              >
+                {gettext("This tab as CSV (.csv)")}
+              </button>
+              <form
+                :if={@write_capable}
+                id={"#{@id}-csv-import"}
+                phx-submit={
+                  Phoenix.LiveView.JS.push("csv-import", target: @myself)
+                  |> Phoenix.LiveView.JS.focus(to: "##{@id}-file-btn")
+                }
+                phx-change="csv-import-validate"
+                phx-target={@myself}
+                style="display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--border); padding-top: 8px;"
+                data-test-id="sheet-import-form"
+              >
+                <label for={@uploads.csv_import.ref} style="font-size: 12px;">
+                  {gettext("Import a CSV or TSV file as a new tab")}
+                </label>
+                <.live_file_input
+                  upload={@uploads.csv_import}
+                  accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values"
+                  data-test-id="sheet-import-file"
+                />
+                <p
+                  :for={err <- upload_errors(@uploads.csv_import) ++ Enum.flat_map(@uploads.csv_import.entries, &upload_errors(@uploads.csv_import, &1))}
+                  role="alert"
+                  style="margin: 0; font-size: 12px; color: var(--destructive);"
+                  data-test-id="sheet-import-error"
+                >
+                  {import_error_text(err)}
+                </p>
+                <button
+                  type="submit"
+                  class="btn btn-primary btn-sm"
+                  disabled={@uploads.csv_import.entries == []}
+                  data-test-id="sheet-import-submit"
+                >
+                  {gettext("Import")}
+                </button>
+              </form>
+            </div>
+          </span>
           <%!-- History reaches StudioLive's own handler; its restore goes
                 through Sheets.Session.restore/4 so the live session cannot
                 overwrite the restored row (task-1eaa2c0dc6e60047). --%>

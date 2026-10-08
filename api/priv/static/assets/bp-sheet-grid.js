@@ -100,6 +100,36 @@
     });
   }
 
+  // ── Sheet download (task-da387f54432114d8) ─────────────────────────────────
+  //
+  // The editor's "Download" buttons have the LiveView build the file from the
+  // content it renders and push it here as `bp:sheet-download`
+  // {filename, mime, data (base64)}. There is no HTTP export door for a
+  // browser session (ruling (b) on the task); this turns the payload into a
+  // Blob and saves it through a temporary <a download>. The server caps the
+  // size (SheetGrid.FileIO.download_byte_cap/0).
+  function saveSheetDownload(detail) {
+    if (!detail || typeof detail.data !== "string" || typeof detail.filename !== "string") {
+      return false;
+    }
+    const bin = atob(detail.data);
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    const blob = new Blob([bytes], { type: detail.mime || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = detail.filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    return true;
+  }
+  window.BarkparkSheetDownload = saveSheetDownload;
+  window.addEventListener("phx:bp:sheet-download", (e) => saveSheetDownload(e.detail));
+
   window.BarkparkSheetGrid = {
     mounted() {
       this.scrollEl = this.el.querySelector(".sheet-scroll");
