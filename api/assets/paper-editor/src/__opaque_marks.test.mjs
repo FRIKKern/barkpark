@@ -86,6 +86,20 @@ check("per-block editor: blockToTiptap -> tiptapToBlock keeps the marks (no-op a
   assert.deepEqual(leafAt({ content: out }, "Peer Gynt!"), { ...BESIDE, value: "Peer Gynt!" }, JSON.stringify(out));
 });
 
-if (ran !== 5) { failures += 1; console.log(`FAIL  ran ${ran} of 5 checks`); }
+// BPML (`bp paper push`) writes marks as bare strings. A known one ("code")
+// must load as the editor's own mark, and an unknown one survive verbatim.
+check("bare-string marks: known ones load as editor marks; the leaf saves unchanged", () => {
+  const leaf = { type: "text", value: "POST /v1", marks: ["code"] };
+  const odd = { type: "text", value: "Ibsen", marks: ["smallcaps", "strong"] };
+  const block = { id: "s1", type: "paragraph", content: [{ type: "text", value: "Call " }, leaf, { type: "text", value: " by " }, odd] };
+  const t = blockToTiptap(clone(block));
+  const run = t.content[0].content.find((n) => n.text === "POST /v1");
+  assert.deepEqual((run.marks || []).map((m) => m.type), ["code"], JSON.stringify(run));
+  const out = tiptapToBlock(clone(t), "s1", "paragraph");
+  assert.equal(canonical(out.content), canonical(block.content), JSON.stringify(out.content));
+  assert.equal(canonical(docToBlocks(runToTiptap([clone(block)]))[0].content), canonical(block.content));
+});
+
+if (ran !== 6) { failures += 1; console.log(`FAIL  ran ${ran} of 6 checks`); }
 if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
 console.log("\nopaque marks: unknown flat marks round-trip verbatim");

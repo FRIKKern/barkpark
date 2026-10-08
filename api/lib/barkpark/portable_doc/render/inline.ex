@@ -127,7 +127,7 @@ defmodule Barkpark.PortableDoc.Render.Inline do
     case Map.get(n, "marks") do
       nil -> value
       [] -> value
-      marks when is_list(marks) -> apply_marks(value, marks, inside_link)
+      marks when is_list(marks) -> apply_marks(value, Enum.map(marks, &mark_map/1), inside_link)
       _ -> value
     end
   end
@@ -415,6 +415,11 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # so the first mark in the list ends up as the OUTERMOST wrapper (matches
   # ProseMirror's serializer order). `code` is leaf-only — it produces a
   # PdInlineCode and any remaining marks wrap that node via PdText.
+  # BPML (`bp paper push`) stores a mark as a bare string (`"code"`); the editor
+  # stores `%{"type" => "code"}`. Both spellings paint the same.
+  defp mark_map(name) when is_binary(name), do: %{"type" => name}
+  defp mark_map(mark), do: mark
+
   defp apply_marks(value, marks, inside_link) do
     marks
     |> Enum.reverse()
