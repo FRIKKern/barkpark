@@ -261,12 +261,10 @@ export const Diagram = Node.create({
       area.setAttribute("spellcheck", "false");
       area.setAttribute("aria-label", "Mermaid source");
       area.setAttribute("contenteditable", "false");
-      area.style.fontFamily =
-        "ui-monospace, SFMono-Regular, Menlo, Consolas, monospace";
+      // Face and ground come from .bp-canvas-diagram-area (the reader's pre tokens).
       area.style.width = "100%";
       area.style.boxSizing = "border-box";
       area.style.border = "none";
-      area.style.background = "transparent";
       area.style.resize = "vertical";
       area.style.whiteSpace = "pre";
       area.style.overflowWrap = "normal";
