@@ -47,7 +47,7 @@ defmodule Barkpark.Content.Errors do
     "schema_has_documents" =>
       "Delete the documents of this type first, or repeat the delete with force to remove the schema and orphan them: `bp schema delete <name> --force`, or ?force=true over HTTP.",
     "invalid_filter" =>
-      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is) — check for a typo or wrong case.",
+      "Use one of the documented filter operators (eq, neq, in, nin, has, hasStrong, contains, startsWith, endsWith, gt, gte, lt, lte, is, notContains, nhas, countEq, countNeq, countGt, countGte, countLt, countLte) — check for a typo or wrong case.",
     "forbidden_field" =>
       "Filter/order only on fields your token can read; use an admin/owner token, or query a field that isn't private in this schema.",
     "halted" =>

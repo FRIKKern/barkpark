@@ -719,7 +719,13 @@ defmodule Barkpark.Content.Query do
   defp apply_perspective(query, _), do: query
 
   # The documented public filter operators (docs/api-v1.md §4).
-  @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is)
+  @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is
+                       notContains nhas countEq countNeq countGt countGte countLt countLte)
+
+  # Array-length ops (task-aaf4d51bf8a51aec): Sanity's search-filter "count"
+  # family. The value is an INTEGER; `parse_count/1` is the one parser the door
+  # and the SQL arm share, so a non-integer is a 400 rather than a silent no-op.
+  @count_ops ~w(countEq countNeq countGt countGte countLt countLte)
 
   # Builder-only spellings: `apply_field_op/4` has clauses for these on the
   # `doc_id`/`_id` column ONLY (prefix matching for id-space queries). They have
@@ -793,14 +799,18 @@ defmodule Barkpark.Content.Query do
   #     comparison ops are a category error on a type name, and `is` could only
   #     ever mean "no rows" on a NOT NULL column.
   @column_field_ops %{
-    "title" => ~w(eq neq in nin contains startsWith endsWith gt gte lt lte is has hasStrong),
+    "title" =>
+      ~w(eq neq in nin contains notContains startsWith endsWith gt gte lt lte is has hasStrong),
     "status" => ~w(eq neq in nin contains startsWith endsWith is),
     "doc_id" => ~w(eq neq in nin contains startsWith endsWith),
     "_id" => ~w(eq neq in nin contains startsWith endsWith),
     "type" => ~w(eq neq in nin contains startsWith endsWith),
     "_type" => ~w(eq neq in nin contains startsWith endsWith),
     "_createdAt" => ~w(eq neq gt gte lt lte),
-    "_updatedAt" => ~w(eq neq gt gte lt lte)
+    "_updatedAt" => ~w(eq neq gt gte lt lte),
+    # `references(id)` — not a column, the whole document: it references `id`
+    # anywhere in its content (task-aaf4d51bf8a51aec).
+    "_references" => ~w(eq)
   }
 
   @doc """
@@ -1189,6 +1199,22 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "contains", v),
     do: where(query, [d], ilike(d.title, ^like_contains(v)))
 
+  defp apply_field_op(query, "title", "notContains", v),
+    do: where(query, [d], not ilike(fragment("coalesce(?, '')", d.title), ^like_contains(v)))
+
+  # `references(id)`: some `_ref` anywhere in the content names `id`.
+  defp apply_field_op(query, "_references", "eq", v) when is_binary(v),
+    do:
+      where(
+        query,
+        [d],
+        fragment(
+          "jsonb_path_exists(?, '$.** \\? (@._ref == $id)', jsonb_build_object('id', ?::text))",
+          d.content,
+          ^v
+        )
+      )
+
   defp apply_field_op(query, "title", "startsWith", v),
     do: where(query, [d], ilike(d.title, ^like_starts_with(v)))
 
@@ -1396,6 +1422,53 @@ defmodule Barkpark.Content.Query do
 
   defp apply_field_op(query, field, "contains", v),
     do: apply_ilike(query, field, like_contains(v))
+
+  # `notContains` (task-aaf4d51bf8a51aec) is Sanity's `!(field match …)`: a
+  # document WITHOUT the field does not contain the text, so it matches — the
+  # coalesce keeps an absent value from turning the NOT into NULL.
+  defp apply_field_op(query, field, "notContains", v) do
+    segs = nested_segments(field)
+
+    where(
+      query,
+      [d],
+      fragment(
+        "coalesce(jsonb_extract_path_text(?, VARIADIC ?), '') NOT ILIKE ?",
+        d.content,
+        ^segs,
+        ^like_contains(v)
+      )
+    )
+  end
+
+  # `nhas` — the array does not hold the value; no array holds nothing. The
+  # element test is `has`'s, negated.
+  defp apply_field_op(query, field, "nhas", v) do
+    segs = nested_segments(field)
+
+    where(
+      query,
+      [d],
+      fragment(
+        "NOT EXISTS (SELECT 1 FROM jsonb_array_elements(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END) AS e WHERE e->>'_ref' = ? OR e #>> '{}' = ?)",
+        d.content,
+        ^segs,
+        d.content,
+        ^segs,
+        ^v,
+        ^v
+      )
+    )
+  end
+
+  # Array length; no array counts 0. A value that is not an integer has no
+  # clause here — the door refuses it first (`parse_count/1`).
+  defp apply_field_op(query, field, op, v) when op in @count_ops do
+    case parse_count(v) do
+      {:ok, n} -> where(query, ^count_compare(op, nested_segments(field), n))
+      :error -> raise Barkpark.Content.InvalidFilterError.new(field, op)
+    end
+  end
 
   defp apply_field_op(query, field, "startsWith", v),
     do: apply_ilike(query, field, like_starts_with(v))
@@ -1691,6 +1764,46 @@ defmodule Barkpark.Content.Query do
   end
 
   def parse_has_strong(_), do: :error
+
+  @doc "An array-length op's value: a non-negative integer, as `{:ok, n}`, or `:error`."
+  @spec parse_count(term()) :: {:ok, non_neg_integer()} | :error
+  def parse_count(v) when is_integer(v) and v >= 0, do: {:ok, v}
+
+  def parse_count(v) when is_binary(v) do
+    case Integer.parse(String.trim(v)) do
+      {n, ""} when n >= 0 -> {:ok, n}
+      _ -> :error
+    end
+  end
+
+  def parse_count(_), do: :error
+
+  @doc "The array-length operators."
+  @spec count_ops() :: [String.t()]
+  def count_ops, do: @count_ops
+
+  defp count_compare(op, segs, n) do
+    len =
+      dynamic(
+        [d],
+        fragment(
+          "coalesce(jsonb_array_length(CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'array' THEN jsonb_extract_path(?, VARIADIC ?) ELSE '[]'::jsonb END), 0)",
+          d.content,
+          ^segs,
+          d.content,
+          ^segs
+        )
+      )
+
+    case op do
+      "countEq" -> dynamic([d], ^len == ^n)
+      "countNeq" -> dynamic([d], ^len != ^n)
+      "countGt" -> dynamic([d], ^len > ^n)
+      "countGte" -> dynamic([d], ^len >= ^n)
+      "countLt" -> dynamic([d], ^len < ^n)
+      "countLte" -> dynamic([d], ^len <= ^n)
+    end
+  end
 
   # Parse a range filter value into a number Postgrex encodes as `numeric`, so a
   # numeric `gt`/`lt` compares numerically while `gt('title', 'M')` stays text.
