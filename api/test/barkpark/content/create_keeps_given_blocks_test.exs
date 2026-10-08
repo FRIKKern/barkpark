@@ -141,4 +141,27 @@ defmodule Barkpark.Content.CreateKeepsGivenBlocksTest do
       assert is_map(doc.content["preview"])
     end
   end
+
+  # A create that sends its own rendered body beside blocks keeps that body:
+  # Sanity-shaped blocks render to nothing, and the text was lost at birth.
+  test "a create keeps a body it sends, and still projects the bound fields" do
+    body = %{"blocks" => [para("b-1", "Kept.")], "html" => "<p>Kept.</p>"}
+
+    blocks = [
+      %{"id" => "f-kicker", "type" => "field-string", "fieldName" => "kicker", "value" => "K"},
+      %{"_type" => "block", "_key" => "s1", "children" => [%{"_type" => "span", "text" => "x"}]}
+    ]
+
+    for type <- ["story", "note"] do
+      attrs = %{
+        "doc_id" => "#{type}-#{System.unique_integer([:positive])}",
+        "title" => "T",
+        "content" => %{"blocks" => blocks, "body" => body}
+      }
+
+      {:ok, doc} = Content.create_document(type, attrs, @dataset)
+      assert doc.content["body"] == body, type
+      assert doc.content["kicker"] == "K", type
+    end
+  end
 end
