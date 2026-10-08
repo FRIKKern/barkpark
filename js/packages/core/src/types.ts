@@ -103,6 +103,14 @@ export const FILTER_OPS = [
   'lt',
   'lte',
   'is',
+  'notContains',
+  'nhas',
+  'countEq',
+  'countNeq',
+  'countGt',
+  'countGte',
+  'countLt',
+  'countLte',
 ] as const
 
 export type FilterOp = (typeof FILTER_OPS)[number]

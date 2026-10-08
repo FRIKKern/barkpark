@@ -1443,6 +1443,16 @@ defmodule BarkparkWeb.QueryController do
                "(e.g. \"epic:50\"), got #{inspect(Map.get(ops, "hasStrong"))}",
              %{field: field, op: "hasStrong"}}
 
+          # The array-length ops take an integer (task-aaf4d51bf8a51aec); the SQL
+          # arm reads it with the same parser.
+          op =
+              Enum.find(Content.Query.count_ops(), fn op ->
+                Map.has_key?(ops, op) and Content.Query.parse_count(Map.get(ops, op)) == :error
+              end) ->
+            {:clause,
+             "filter[#{field}][#{op}] takes a whole number (an array length), got " <>
+               "#{inspect(Map.get(ops, op))}", %{field: field, op: op}}
+
           op = Enum.find(Map.keys(ops), &non_scalar_op_value?(ops, &1)) ->
             {:clause,
              "filter[#{field}][#{op}] takes a single value, not a list or object; " <>
