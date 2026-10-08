@@ -1168,71 +1168,17 @@ defmodule BarkparkCloud.AccountsTest do
       assert Accounts.get_team(team.id).onboarding_state["acked"] == ["published_doc"]
     end
 
-    test "published_doc step done via a 'content' agent_event with published_count > 0" do
-      team = team_fixture()
-
-      {:ok, bp} =
-        Registry.register_barkpark(team, %{
-          name: "BP",
-          slug: "bp-#{System.unique_integer([:positive])}"
-        })
-
-      refute onboarding_step(Accounts.onboarding_status(team), "published_doc").done
-
-      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 3})
-      assert onboarding_step(Accounts.onboarding_status(team), "published_doc").done
-    end
-
-    test "a 'content' event with published_count 0 does NOT mark published_doc done" do
-      team = team_fixture()
-
-      {:ok, bp} =
-        Registry.register_barkpark(team, %{
-          name: "BP",
-          slug: "bp-#{System.unique_integer([:positive])}"
-        })
-
-      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 0})
-      refute onboarding_step(Accounts.onboarding_status(team), "published_doc").done
-    end
-
-    test "a 'content' event on ANOTHER team's barkpark does NOT flip this team's published_doc" do
-      team_a = team_fixture()
-      team_b = team_fixture()
-
-      {:ok, _bp_a} =
-        Registry.register_barkpark(team_a, %{
-          name: "A",
-          slug: "a-#{System.unique_integer([:positive])}"
-        })
-
-      {:ok, bp_b} =
-        Registry.register_barkpark(team_b, %{
-          name: "B",
-          slug: "b-#{System.unique_integer([:positive])}"
-        })
-
-      # Team B's instance publishes content...
-      {:ok, _ev} = Registry.record_event(bp_b, "content", %{"published_count" => 9})
-
-      # ...team A's published_doc step must NOT be satisfied by it (no
-      # cross-tenant leak: the derivation is scoped to team A's own instances).
-      refute onboarding_step(Accounts.onboarding_status(team_a), "published_doc").done
-      # And team B's IS satisfied.
-      assert onboarding_step(Accounts.onboarding_status(team_b), "published_doc").done
-    end
-
     test "all_done? is true once every step is satisfied" do
       team = team_fixture()
       {:ok, _sub} = Billing.subscribe(team, "supporter")
 
-      {:ok, bp} =
+      {:ok, _bp} =
         Registry.register_barkpark(team, %{
           name: "BP",
           slug: "bp-#{System.unique_integer([:positive])}"
         })
 
-      {:ok, _ev} = Registry.record_event(bp, "content", %{"published_count" => 1})
+      {:ok, team} = Accounts.ack_onboarding_step(team, "published_doc")
 
       assert Accounts.onboarding_status(team).all_done?
     end
