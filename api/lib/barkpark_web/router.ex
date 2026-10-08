@@ -1320,6 +1320,10 @@ defmodule BarkparkWeb.Router do
 
     post("/login-tickets", LoginTicketController, :create)
 
+    # The bearer describes itself — permissions, tier, dataset, workspace, seat
+    # (task-bc2541aca8541ff1). /me needs a session; this needs only the token.
+    get("/token", TokenSelfController, :show)
+
     # Owner ruling #26 — the control plane takes a removed team member OFF this
     # instance: sessions revoked, seats dropped, owned tokens revoked. Admin
     # bearer + operator allowlist, like the email form of /login-tickets.
