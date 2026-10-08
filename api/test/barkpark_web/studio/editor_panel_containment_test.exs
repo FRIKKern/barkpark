@@ -160,6 +160,9 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # deliberately NOT classified as a portal. Desktop stays an absolute rail.
     ".bp-paper-edit-toolbar" => :under_panel,
     ".bp-slash-menu" => :body_portal,
+    # block-handle.js `_openMenu/0` appends `.bp-block-menu` to `document.body`
+    # (task-be754bd628311c5f); the shell sheet styles it fixed.
+    ".bp-block-menu" => :body_portal,
     ".bp-paper-format" => :body_portal,
     ".bp-paper-context-menu" => :body_portal,
     # canvas/link-preview.js appends the shared hover card to document.body.
@@ -197,6 +200,11 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # `document.body.appendChild(el)`s it — portalled out of the panel before it
     # is ever shown, so no containing block the panel grows can reach it.
     ".bp-wikilink-menu" => :body_portal,
+    # block-handle.js `_openMenu/0` builds `.bp-block-menu` and
+    # `document.body.appendChild(menu)`s it before placing it (task-be754bd628311c5f:
+    # fixed and clamped to the viewport so a phone can reach it); `_closeMenu/0`
+    # removes it. It is never shown inside the panel.
+    ".bp-block-menu" => :body_portal,
     # The canvas owns this notice and appends it to itself. Its viewport/caret
     # coordinates rely on the same panel containing-block ban as the toolbar;
     # it is not a body portal. Scroll/resize dismiss it before its anchor moves.

@@ -180,6 +180,13 @@ export const TURN_INTO = [
   { kind: "quote", label: "Quote", glyph: "❝" },
 ];
 
+// The tokens .bp-block-menu paints with (styles.css), carried onto the
+// portalled menu from its host.
+const MENU_TOKENS = [
+  "--paper-chrome-bg", "--paper-chrome-border", "--paper-ink", "--paper-ink-soft",
+  "--paper-rule", "--paper-edit-hover", "--bp-tone-danger-fg", "--paper-font-sans",
+];
+
 export class BlockHandle {
   // host: the <bp-paper-canvas> element (position: relative via CSS).
   // openSlash(): host callback that opens the slash menu at the caret.
@@ -207,7 +214,8 @@ export class BlockHandle {
 
     this._onMove = (e) => this._track(e);
     this._onLeave = () => this._scheduleHide();
-    this._onScroll = () => this._reposition();
+    this._onScroll = () => { this._reposition(); this._placeMenu(); };
+    this._onResize = () => this._placeMenu();
     this._onDocDown = (e) => { if (this._menu && !this._menu.contains(e.target) && !this._el.contains(e.target)) this._closeMenu(); };
     host.addEventListener("mousemove", this._onMove);
     host.addEventListener("mouseleave", this._onLeave);
@@ -414,17 +422,57 @@ export class BlockHandle {
       this._closeMenu();
     });
     menu.addEventListener("keydown", (e) => { if (e.key === "Escape") { e.preventDefault(); this._closeMenu(); this._editor.commands.focus(); } });
-    this._host.appendChild(menu);
-    const h = this._host.getBoundingClientRect();
-    const r = this._el.getBoundingClientRect();
-    menu.style.top = `${r.bottom - h.top + this._host.scrollTop + 4}px`;
-    menu.style.left = `${r.left - h.left}px`;
+    // A BODY PORTAL, like the slash and [[ menus: fixed positioning inside the
+    // editor panel would resolve against any containing block the panel grows
+    // (transform, filter, contain) and the canvas host clips with
+    // overflow:auto. Out of the host it loses the surface-scoped --paper-*
+    // tokens, so the ones it paints with are copied from the host as resolved
+    // there: the menu keeps the canvas theme in both modes.
+    for (const name of MENU_TOKENS) {
+      const value = getComputedStyle(this._host).getPropertyValue(name);
+      if (value) menu.style.setProperty(name, value.trim());
+    }
+    document.body.appendChild(menu);
     this._menu = menu;
+    this._placeMenu();
+    window.addEventListener("resize", this._onResize);
     const first = menu.querySelector("[data-action]");
     if (first) first.focus();
   }
 
+  // The menu is placed in the VIEWPORT (task-be754bd628311c5f): on a phone it
+  // opened under a handle near the right/bottom edge and ran off both, and the
+  // host's overflow:auto canvas clipped it, so no item was reachable.
+  // position:fixed escapes that clip; the menu is clamped inside the viewport
+  // with a margin, flips above the handle when there is no room below, and is
+  // capped to the viewport height (it scrolls inside). With room, it sits where
+  // it always did: just under the handle, aligned with its left edge.
+  _placeMenu() {
+    const menu = this._menu;
+    if (!menu) return;
+    const margin = 8;
+    const gap = 4;
+    const vw = window.innerWidth || document.documentElement.clientWidth || 0;
+    const vh = window.innerHeight || document.documentElement.clientHeight || 0;
+    const r = this._el.getBoundingClientRect();
+    menu.style.position = "fixed";
+    menu.style.maxHeight = `${Math.max(0, vh - 2 * margin)}px`;
+    menu.style.overflowY = "auto";
+    const m = menu.getBoundingClientRect();
+    const mw = m.width;
+    const mh = Math.min(m.height, Math.max(0, vh - 2 * margin));
+    const left = Math.max(margin, Math.min(r.left, vw - margin - mw));
+    let top = r.bottom + gap;
+    if (top + mh > vh - margin) {
+      const above = r.top - gap - mh;
+      top = above >= margin ? above : Math.max(margin, vh - margin - mh);
+    }
+    menu.style.left = `${left}px`;
+    menu.style.top = `${top}px`;
+  }
+
   _closeMenu() {
+    window.removeEventListener("resize", this._onResize);
     if (this._menu) { this._menu.remove(); this._menu = null; }
   }
 

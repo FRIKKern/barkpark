@@ -68,7 +68,7 @@ try {
 
   // The block menu: menuitems in labelled groups, and a name.
   canvas._handle._openMenu();
-  const menu = canvas.querySelector(".bp-block-menu");
+  const menu = document.querySelector(".bp-block-menu");
   check("block menu: a named role=menu whose actions are menuitems in labelled groups", () => {
     assert.equal(menu.getAttribute("role"), "menu");
     assert.ok(menu.getAttribute("aria-label"));
