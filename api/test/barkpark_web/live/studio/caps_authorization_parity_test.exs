@@ -842,6 +842,34 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
     assert source =~ "Auth.resolve_session_credential("
   end
 
+  test "PIN: resolve_session_credential/2 routes BOTH branches through Auth.verify_token/1" do
+    source = File.read!("lib/barkpark/auth.ex")
+
+    # Hop 1 (the legacy raw-cookie arm): calls verify_token/1 directly on the
+    # bearer presented in `session["api_token"]`.
+    assert source =~ "def resolve_session_credential(_session_id, legacy_raw)"
+
+    assert source =~ ~r/case verify_token\(legacy_raw\) do/,
+           "the legacy-raw-cookie arm must call verify_token/1 directly"
+
+    # Hop 2 (the new revocable-session arm): delegates to
+    # verify_token_session/1, which must ITSELF call verify_token/1 on the
+    # decrypted raw bearer — not re-derive liveness from a second,
+    # hand-written copy of verify_token/1's WHERE clause. Two copies of "is
+    # this api_token still live" can drift: a future change to verify_token/1
+    # (a new revocation signal, a new `kind`) would silently not apply to a
+    # session-cookie-minted caller unless a duplicate predicate were updated
+    # in lockstep, and nothing would catch the gap. Routing through the same
+    # function makes that impossible by construction.
+    assert source =~ ~r/def resolve_session_credential\(session_id, _legacy_raw\)/
+    assert source =~ "verify_token_session(session_id)"
+
+    assert source =~ "def verify_token_session(plaintext) when is_binary(plaintext) do"
+
+    assert source =~ ~r/case verify_token\(raw\) do/,
+           "verify_token_session/1 must call verify_token/1 on the decrypted raw bearer, not a second liveness predicate"
+  end
+
   # ── COST: PDS-D634's one-load property, preserved and quoted ────────────────
   #
   # The meter is the process-scoped one from pds_w43_caps_derive_cost_test.exs

@@ -2,8 +2,8 @@
 # Auth & roles
 
 Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
-(SHA256 hash + permission list); LiveViews read a revocable session id
-(`session["api_token_session"]`) via `on_mount` hooks.
+(SHA256 hash + permission list); LiveViews read `session["api_token_session"]`
+(or `session["api_token"]`) via `on_mount`.
 
 > Accounts, sessions, MFA, login tickets, field visibility, row ownership:
 > [auth-user-sessions.md](auth-user-sessions.md).

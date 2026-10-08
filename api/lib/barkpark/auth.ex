@@ -512,10 +512,20 @@ defmodule Barkpark.Auth do
   Resolve a browser token-session's opaque session id to its live
   `%ApiToken{}` and the raw bearer it was minted with. Returns `:error` for
   an unknown, revoked, or expired session row, OR one whose underlying
-  api_token is itself no longer live (re-checked here, same WHERE shape as
-  `verify_token/1` — kind == "api", not revoked, not expired — because a
-  preloaded `TokenSession.api_token` is only as fresh as the query that ran).
-  Throttle-touches `last_used_at` like `verify_user_session/1`'s twin.
+  api_token is itself no longer live.
+
+  THE UNDERLYING TOKEN'S LIVENESS IS RE-CHECKED BY CALLING `verify_token/1`
+  ON THE DECRYPTED RAW BEARER — not by re-reading the preloaded `ApiToken`
+  struct's fields against a second, hand-written copy of `verify_token/1`'s
+  WHERE clause. Two copies of "is this api_token still live" (kind == "api",
+  not revoked, not expired) can drift: a future change to `verify_token/1`'s
+  checks (a new revocation signal, a new kind) would silently NOT apply to a
+  session-cookie-minted caller unless this function's own copy were updated
+  in lockstep, and nothing would catch the gap. Calling `verify_token/1`
+  itself makes that impossible by construction — there is exactly one place
+  that decides whether an api_token is live, and both the legacy raw-cookie
+  arm of `resolve_session_credential/2` and this one route through it
+  (pinned in `CapsAuthorizationParityTest`, both hops).
   """
   @spec verify_token_session(binary()) :: {:ok, ApiToken.t(), binary()} | :error
   def verify_token_session(plaintext) when is_binary(plaintext) do
@@ -525,29 +535,25 @@ defmodule Barkpark.Auth do
     query =
       from s in TokenSession,
         where: s.session_hash == ^hash and is_nil(s.revoked_at),
-        where: is_nil(s.expires_at) or s.expires_at > ^now,
-        preload: [:api_token]
+        where: is_nil(s.expires_at) or s.expires_at > ^now
 
     case Repo.one(query) do
-      %TokenSession{api_token: %ApiToken{} = token, raw_token: raw, last_used_at: prev} ->
-        if token_session_live?(token, now) do
-          maybe_touch_token_session_last_used(hash, prev, now)
-          {:ok, token, raw}
-        else
-          :error
+      %TokenSession{raw_token: raw, last_used_at: prev} ->
+        case verify_token(raw) do
+          {:ok, token} ->
+            maybe_touch_token_session_last_used(hash, prev, now)
+            {:ok, token, raw}
+
+          {:error, :unauthorized} ->
+            :error
         end
 
-      _ ->
+      nil ->
         :error
     end
   end
 
   def verify_token_session(_), do: :error
-
-  defp token_session_live?(%ApiToken{kind: "api", revoked_at: nil, expires_at: exp}, now),
-    do: is_nil(exp) or DateTime.compare(exp, now) == :gt
-
-  defp token_session_live?(_token, _now), do: false
 
   @token_session_last_used_throttle_seconds 60
 
