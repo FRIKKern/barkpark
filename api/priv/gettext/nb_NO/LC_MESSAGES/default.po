@@ -276,7 +276,7 @@ msgid "Sign in with token"
 msgstr "Logg inn med token"
 
 #: lib/barkpark_web/components/studio_components/nav.ex:569
-#: lib/barkpark_web/components/studio_components/panes.ex:633
+#: lib/barkpark_web/components/studio_components/panes.ex:643
 #, elixir-autogen, elixir-format
 msgid "Structure"
 msgstr "Struktur"
@@ -487,6 +487,7 @@ msgid "documents"
 msgstr "dokumenter"
 
 #: lib/barkpark_web/components/studio_components/editor.ex:800
+#: lib/barkpark_web/components/studio_components/panes.ex:638
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2356
 #: lib/barkpark_web/studio_locale.ex:528
 #, elixir-autogen, elixir-format
@@ -764,7 +765,7 @@ msgstr "Bytt mellom mørkt og lyst tema"
 msgid "browsing"
 msgstr "blar"
 
-#: lib/barkpark_web/components/studio_components/panes.ex:634
+#: lib/barkpark_web/components/studio_components/panes.ex:644
 #, elixir-autogen, elixir-format
 msgid "Plugins"
 msgstr "Utvidelser"
@@ -2382,6 +2383,7 @@ msgstr[1] "er referert fra %{count} dokumenter. Avpublisering vil etterlate de r
 msgid "label"
 msgstr "etikett"
 
+#: lib/barkpark_web/components/studio_components/panes.ex:639
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2357
 #, elixir-autogen, elixir-format
 msgid "published"
