@@ -318,7 +318,8 @@ defmodule BarkparkWeb.WebhookController do
 
   # Catch-all: a list param (`?limit[]=5` -> Plug parses to `["5"]`) or any
   # other non-scalar falls back to the default instead of raising
-  # FunctionClauseError -> 500 (history_controller.ex:132 same idiom).
+  # FunctionClauseError -> 500 (the same idiom HistoryController's own limit
+  # parser carries).
   defp parse_limit(_), do: @default_delivery_limit
 
   defp clamp_limit(n), do: n |> max(1) |> min(@max_delivery_limit)
