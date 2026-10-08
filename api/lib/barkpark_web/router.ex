@@ -3361,13 +3361,21 @@ defmodule BarkparkWeb.Router do
     delete("/v1/data/search/:dataset/synonyms/:id", SearchController, :delete_search_synonym)
   end
 
+  # Scoped schema reads — any member of the workspace (ResolveWorkspace gates
+  # membership at :read). An editing Studio on a member token needs the schema
+  # to render a form (task-23c4ac86976c46a9); writes below stay admin.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :require_token])
+
+    get("/v1/schemas/:dataset", SchemaController, :index)
+    get("/v1/schemas/:dataset/:name", SchemaController, :show)
+  end
+
   # Scoped schema management (admin).
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
     get("/v1/structure/:dataset", StructureController, :show)
-    get("/v1/schemas/:dataset", SchemaController, :index)
-    get("/v1/schemas/:dataset/:name", SchemaController, :show)
     post("/v1/schemas/:dataset", SchemaController, :upsert)
     delete("/v1/schemas/:dataset/:name", SchemaController, :delete)
   end

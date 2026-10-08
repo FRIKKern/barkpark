@@ -150,4 +150,45 @@ defmodule BarkparkWeb.ScopedRoleGateTest do
       assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden"
     end
   end
+
+  # task-23c4ac86976c46a9: an editing Studio on a member token could not render
+  # a form — schema reads sat behind the admin gate. Reads open to members;
+  # writes stay admin.
+  describe "scoped SCHEMA reads (members read the content model)" do
+    setup %{} do
+      raw = "role-gate-rw-member-#{System.unique_integer([:positive])}"
+      {:ok, token} = Auth.create_token(raw, "rw member of B", @dataset, ["read", "write"])
+      %{id: ws_id} = Tenancy.get_workspace_by_slug("role-gate-b")
+      {:ok, _} = TenancyAuth.create_membership(ws_id, token.id)
+      {:ok, rw_raw: raw}
+    end
+
+    test "a read/write member reads the schema index and one schema", %{conn: conn, rw_raw: raw} do
+      index = conn |> authed(raw) |> get("/w/role-gate-b/p/default/v1/schemas/#{@dataset}")
+      assert index.status == 200
+      assert Enum.any?(Jason.decode!(index.resp_body)["schemas"], &(&1["name"] == "post"))
+
+      show =
+        build_conn() |> authed(raw) |> get("/w/role-gate-b/p/default/v1/schemas/#{@dataset}/post")
+
+      assert show.status == 200
+      assert Jason.decode!(show.resp_body)["schema"]["name"] == "post"
+    end
+
+    test "a read/write member still cannot write or delete a schema", %{conn: conn, rw_raw: raw} do
+      assert schema_upsert(conn, raw, "rw_member_schema").status == 403
+
+      del =
+        build_conn()
+        |> authed(raw)
+        |> delete("/w/role-gate-b/p/default/v1/schemas/#{@dataset}/post")
+
+      assert del.status == 403
+    end
+
+    test "a non-member cannot read the schemas", %{conn: conn, nonmember_raw: raw} do
+      resp = conn |> authed(raw) |> get("/w/role-gate-b/p/default/v1/schemas/#{@dataset}")
+      assert resp.status == 403
+    end
+  end
 end
