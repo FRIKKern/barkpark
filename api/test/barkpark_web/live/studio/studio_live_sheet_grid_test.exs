@@ -2084,6 +2084,32 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert instructions =~ "Shift+F10"
   end
 
+  # task-d4619e875ace82ca: toolbar buttons were named "$", "%", ",", "⯇", "≡",
+  # "⯈", "⌫", and the swatches by hex code.
+  test "every toolbar button has a word name; swatches are named by colour", %{conn: conn} do
+    create_sheet!("sg-btn-names", [%{"name" => "Sheet 1", "cells" => %{}}])
+    {view, target, _html} = open!(conn, "sg-btn-names")
+    toolbar = view |> element(~s([data-test-id="sheet-toolbar"])) |> render()
+
+    for name <- [
+          "Currency format",
+          "Percent format",
+          "Thousands separator",
+          "Align left",
+          "Align center",
+          "Align right",
+          "Clear background",
+          "Yellow background",
+          "Grey background"
+        ] do
+      assert toolbar =~ ~s(aria-label="#{name}"), "no toolbar control named #{name}"
+    end
+
+    render_click(target, "cf-open", %{})
+    cf = view |> element(~s([data-test-id="sheet-cf-panel"])) |> render()
+    assert cf =~ ~s(aria-label="Blue background")
+  end
+
   test "the reorder / duplicate buttons announce the action on the polite region", %{conn: conn} do
     create_sheet!("sg-tab-announce", [
       %{"name" => "T0", "cells" => %{}},
