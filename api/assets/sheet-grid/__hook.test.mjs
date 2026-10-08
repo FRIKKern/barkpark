@@ -3568,6 +3568,34 @@ check("the formatting toolbar is one Tab stop and arrow keys move inside it", ()
   sandbox.document.activeElement = null;
 });
 
+check("tab-strip mode: the ACTIVE tab is the stop and follows a server tab switch", () => {
+  const mk = (name, selected) => ({
+    name, attrs: { "aria-selected": selected ? "true" : "false" }, disabled: false,
+    setAttribute(k, v) { this.attrs[k] = v; },
+    getAttribute(k) { return this.attrs[k]; },
+    closest: () => null,
+    focus() { sandbox.document.activeElement = this; },
+  });
+  const tabs = [mk("t0", false), mk("t1", true), mk("t2", false)];
+  const listeners = {};
+  const strip = Object.create(sandbox.window.BarkparkSheetToolbar);
+  strip.el = {
+    dataset: { rovingItems: "[role='tab']", rovingFollow: "selected" },
+    querySelectorAll: (sel) => (sel === "[role='tab']" ? tabs : []),
+    addEventListener(t, fn) { listeners[t] = fn; },
+  };
+  strip.mounted();
+  assert.deepEqual(tabs.map((t) => t.attrs.tabindex), ["-1", "0", "-1"]);
+  listeners.keydown({ key: "ArrowLeft", target: tabs[1], preventDefault() {} });
+  assert.equal(sandbox.document.activeElement, tabs[0]);
+  // The server switches to t2: the stop follows aria-selected on the patch.
+  tabs[1].attrs["aria-selected"] = "false";
+  tabs[2].attrs["aria-selected"] = "true";
+  strip.updated();
+  assert.deepEqual(tabs.map((t) => t.attrs.tabindex), ["-1", "-1", "0"]);
+  sandbox.document.activeElement = null;
+});
+
 if (failures > 0) {
   console.log(`\n${failures} FAILURE(S)`);
   process.exit(1);

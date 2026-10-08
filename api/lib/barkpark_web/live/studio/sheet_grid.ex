@@ -3718,8 +3718,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </div>
 
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
-            tabindex is deferred — every tab stays natively tab-focusable. --%>
-      <div class="sheet-tabs" data-test-id="sheet-tabs" role="tablist" aria-label="Sheet tabs">
+            tabindex (task-5201a73e33535129): the ACTIVE tab is the one Tab
+            stop, Left/Right/Home/End move between tabs (the SheetToolbar
+            hook in its tab-strip mode), Enter/Space switch. --%>
+      <div
+        id={"#{@id}-tabs"}
+        class="sheet-tabs"
+        data-test-id="sheet-tabs"
+        role="tablist"
+        aria-label="Sheet tabs"
+        phx-hook={@hookable && "SheetToolbar"}
+        data-roving-items="[role='tab']"
+        data-roving-follow="selected"
+      >
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
           <%!-- Stable ids: without them morphdom matched tabs by position, so
                 swapping the rename form back to a button re-used the FOCUSED
