@@ -1697,9 +1697,11 @@
       if (isCheckedOut) {
         row.hidden = false;
         // The server names the holder for THIS viewer (task-36a302b2e981d5e1):
-        // "you", a token's label, or "another editor". checkedOutBy itself is a
-        // stamp ("user:<id>", or a legacy email) and is never printed.
-        const who = detail && typeof detail.checkoutLabel === "string" ? detail.checkoutLabel : "";
+        // "you", a token's label, the holder's display name, or "another
+        // editor". checkedOutBy itself is a stamp ("user:<id>", or a legacy
+        // email) and is never printed. The two fixed words go through _t; a
+        // name has no entry, so it reads as written.
+        const who = detail && typeof detail.checkoutLabel === "string" ? this._t(detail.checkoutLabel) : "";
         row.innerHTML = this._statusBadge(
           who ? this._t("Checked out by %{who}", { who: who }) : this._t("Checked out"),
           "lock"
