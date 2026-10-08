@@ -222,4 +222,26 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
 
     assert en =~ ~s(<html lang="en")
   end
+
+  # task-623e30911e8ff328: the Studio dialogs stayed English in an nb-NO
+  # workspace, and history times read "Oct 06, 2026 at 07:25:45".
+  test "the nb-NO history dialog is Norwegian, with a Norwegian time", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+    html = render_click(view, "show-history", %{})
+
+    assert html =~ "Dokumenthistorikk"
+    assert html =~ "Opprettet"
+    assert html =~ "Gjenopprett"
+    assert html =~ "Gjenopprette denne versjonen? Gjeldende endringer blir overskrevet."
+
+    assert html =~
+             ~r/\d\d\. (jan\.|feb\.|mars|apr\.|mai|juni|juli|aug\.|sep\.|okt\.|nov\.|des\.) \d{4} kl\. \d\d:\d\d:\d\d/
+
+    refute html =~ "Document history"
+    refute html =~ ~r/[A-Z][a-z]{2} \d\d, \d{4} at \d\d:/
+  end
 end

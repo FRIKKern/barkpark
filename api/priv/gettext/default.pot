@@ -81,6 +81,7 @@ msgstr ""
 msgid "Close reference: %{title}"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:892
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3151
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3420
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
@@ -98,6 +99,8 @@ msgstr ""
 msgid "Diff"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:954
+#: lib/barkpark_web/components/studio_components/modals.ex:969
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:220
 #, elixir-autogen, elixir-format
 msgid "Discard draft"
@@ -108,6 +111,9 @@ msgstr ""
 msgid "Duplicate"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:488
+#: lib/barkpark_web/components/studio_components/modals.ex:674
+#: lib/barkpark_web/components/studio_components/modals.ex:740
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3170
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3419
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:206
@@ -260,6 +266,8 @@ msgid "Unpublish"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:376
+#: lib/barkpark_web/components/studio_components/modals.ex:792
+#: lib/barkpark_web/components/studio_components/modals.ex:906
 #: lib/barkpark_web/live/studio/sheet_grid.ex:2968
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #, elixir-autogen, elixir-format
@@ -352,6 +360,16 @@ msgstr ""
 msgid "Change"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:70
+#: lib/barkpark_web/components/studio_components/modals.ex:146
+#: lib/barkpark_web/components/studio_components/modals.ex:265
+#: lib/barkpark_web/components/studio_components/modals.ex:391
+#: lib/barkpark_web/components/studio_components/modals.ex:562
+#: lib/barkpark_web/components/studio_components/modals.ex:711
+#: lib/barkpark_web/components/studio_components/modals.ex:781
+#: lib/barkpark_web/components/studio_components/modals.ex:885
+#: lib/barkpark_web/components/studio_components/modals.ex:955
+#: lib/barkpark_web/components/studio_components/modals.ex:1014
 #: lib/barkpark_web/studio_locale.ex:83
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -372,6 +390,7 @@ msgstr ""
 msgid "No matches"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:213
 #: lib/barkpark_web/studio_locale.ex:91
 #, elixir-autogen, elixir-format
 msgid "Remove"
@@ -433,6 +452,7 @@ msgstr ""
 msgid "Title"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:82
 #: lib/barkpark_web/studio_locale.ex:72
 #, elixir-autogen, elixir-format
 msgid "Upload"
@@ -863,6 +883,8 @@ msgstr ""
 msgid "Conditional formatting rules"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:300
+#: lib/barkpark_web/components/studio_components/modals.ex:420
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3803
 #, elixir-autogen, elixir-format
 msgid "Copy"
@@ -1313,6 +1335,8 @@ msgstr ""
 msgid "Unmerge cells in the selection"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:481
+#: lib/barkpark_web/components/studio_components/modals.ex:673
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3170
 #, elixir-autogen, elixir-format
 msgid "View"
@@ -1373,7 +1397,538 @@ msgstr ""
 msgid "USD ($)"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/modals.ex:503
+#: lib/barkpark_web/components/studio_components/modals.ex:891
+#: lib/barkpark_web/components/studio_components/modals.ex:913
+#: lib/barkpark_web/components/studio_components/modals.ex:963
+#: lib/barkpark_web/components/studio_components/modals.ex:1056
 #: lib/barkpark_web/studio_locale.ex:90
 #, elixir-autogen, elixir-format
 msgid "Cancel"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:835
+#, elixir-autogen, elixir-format
+msgid "%b %d, %Y at %H:%M:%S"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:457
+#, elixir-autogen, elixir-format
+msgid "1 day"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:455
+#, elixir-autogen, elixir-format
+msgid "30 min"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:456
+#, elixir-autogen, elixir-format
+msgid "5 hours"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:561
+#, elixir-autogen, elixir-format
+msgid "Access"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:453
+#, elixir-autogen, elixir-format
+msgid "Access lasts"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:400
+#, elixir-autogen, elixir-format
+msgid "Access shared"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:590
+#, elixir-autogen, elixir-format
+msgid "Active grants in this workspace"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:190
+#, elixir-autogen, elixir-format
+msgid "Active shares"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:675
+#, elixir-autogen, elixir-format
+msgid "Admin"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:185
+#, elixir-autogen, elixir-format
+msgid "An admin token is required to manage network shares."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:344
+#, elixir-autogen, elixir-format
+msgid "An admin token is required to share items."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:324
+#, elixir-autogen, elixir-format
+msgid "An edit link opens this one paper in the reader's editor."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:273
+#, elixir-autogen, elixir-format
+msgid "Anyone with the link"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:845
+#, elixir-autogen, elixir-format
+msgid "Apr"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:889
+#, elixir-autogen, elixir-format
+msgid "Are you sure you want to delete"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:849
+#, elixir-autogen, elixir-format
+msgid "Aug"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:470
+#, elixir-autogen, elixir-format
+msgid "Capabilities"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1034
+#, elixir-autogen, elixir-format
+msgid "Color"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:416
+#, elixir-autogen, elixir-format
+msgid "Copied"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:298
+#: lib/barkpark_web/components/studio_components/modals.ex:418
+#, elixir-autogen, elixir-format
+msgid "Copy link"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:339
+#, elixir-autogen, elixir-format
+msgid "Create edit link"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:331
+#, elixir-autogen, elixir-format
+msgid "Create view link"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:823
+#, elixir-autogen, elixir-format
+msgid "Created"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:465
+#, elixir-autogen, elixir-format
+msgid "Custom expiry"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:458
+#, elixir-autogen, elixir-format
+msgid "Custom…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:853
+#, elixir-autogen, elixir-format
+msgid "Dec"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:884
+#, elixir-autogen, elixir-format
+msgid "Delete document"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:828
+#, elixir-autogen, elixir-format
+msgid "Deleted"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:959
+#, elixir-autogen, elixir-format
+msgid "Discard all unsaved changes to"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:914
+#, elixir-autogen, elixir-format
+msgid "Disconnect references and delete"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:735
+#, elixir-autogen, elixir-format
+msgid "Docs"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:780
+#, elixir-autogen, elixir-format
+msgid "Document history"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:424
+#, elixir-autogen, elixir-format
+msgid "Done"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1055
+#, elixir-autogen, elixir-format
+msgid "Download or erase your data"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:827
+#, elixir-autogen, elixir-format
+msgid "Draft discarded"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:454
+#, elixir-autogen, elixir-format
+msgid "Duration"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:824
+#, elixir-autogen, elixir-format
+msgid "Edited"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:401
+#, elixir-autogen, elixir-format
+msgid "Emailed to the recipient. Copy the link if you want to hand it over directly."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:843
+#, elixir-autogen, elixir-format
+msgid "Feb"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:842
+#, elixir-autogen, elixir-format
+msgid "Jan"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:848
+#, elixir-autogen, elixir-format
+msgid "Jul"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:847
+#, elixir-autogen, elixir-format
+msgid "Jun"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:304
+#, elixir-autogen, elixir-format
+msgid "Link is active. Its address is shown only when the link is created: to share it again, create a new link, and revoke this one if it should stop working."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:844
+#, elixir-autogen, elixir-format
+msgid "Mar"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:846
+#, elixir-autogen, elixir-format
+msgid "May"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:736
+#, elixir-autogen, elixir-format
+msgid "Media"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1030
+#, elixir-autogen, elixir-format
+msgid "Name"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:145
+#, elixir-autogen, elixir-format
+msgid "Network shares"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:593
+#, elixir-autogen, elixir-format
+msgid "No active grants in this workspace."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:725
+#, elixir-autogen, elixir-format
+msgid "No documents found"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:644
+#, elixir-autogen, elixir-format
+msgid "No expiry"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:785
+#, elixir-autogen, elixir-format
+msgid "No history yet"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:92
+#, elixir-autogen, elixir-format
+msgid "No images yet. Upload one above."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:279
+#, elixir-autogen, elixir-format
+msgid "No link yet."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:192
+#, elixir-autogen, elixir-format
+msgid "Nothing is shared — this scope is private."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:852
+#, elixir-autogen, elixir-format
+msgid "Nov"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:851
+#, elixir-autogen, elixir-format
+msgid "Oct"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:734
+#, elixir-autogen, elixir-format
+msgid "Papers"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:825
+#, elixir-autogen, elixir-format
+msgid "Published"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:739
+#, elixir-autogen, elixir-format
+msgid "Read"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:176
+#, elixir-autogen, elixir-format
+msgid "Read-only — anyone on the local network can view this scope, not edit it."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:430
+#, elixir-autogen, elixir-format
+msgid "Recipient email"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:811
+#, elixir-autogen, elixir-format
+msgid "Restore"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:804
+#, elixir-autogen, elixir-format
+msgid "Restore the version from %{time} (%{action})"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:809
+#, elixir-autogen, elixir-format
+msgid "Restore this version? Current changes will be overwritten."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:829
+#, elixir-autogen, elixir-format
+msgid "Restored"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:316
+#: lib/barkpark_web/components/studio_components/modals.ex:612
+#, elixir-autogen, elixir-format
+msgid "Revoke"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:610
+#, elixir-autogen, elixir-format
+msgid "Revoke access for %{email}"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:314
+#, elixir-autogen, elixir-format
+msgid "Revoke this link"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1057
+#, elixir-autogen, elixir-format
+msgid "Save"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:152
+#, elixir-autogen, elixir-format
+msgid "Scope"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:714
+#, elixir-autogen, elixir-format
+msgid "Search documents"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:714
+#, elixir-autogen, elixir-format
+msgid "Search..."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:69
+#, elixir-autogen, elixir-format
+msgid "Select Image"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:710
+#, elixir-autogen, elixir-format
+msgid "Select reference"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:850
+#, elixir-autogen, elixir-format
+msgid "Sep"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:180
+#, elixir-autogen, elixir-format
+msgid "Share"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:389
+#: lib/barkpark_web/components/studio_components/modals.ex:510
+#, elixir-autogen, elixir-format
+msgid "Share access"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:264
+#, elixir-autogen, elixir-format
+msgid "Share “%{title}”"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1025
+#, elixir-autogen, elixir-format
+msgid "Signed in as %{account}"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:497
+#, elixir-autogen, elixir-format
+msgid "Single use (link is spent on first claim)"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:211
+#, elixir-autogen, elixir-format
+msgid "Stop sharing this scope"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:164
+#, elixir-autogen, elixir-format
+msgid "Surfaces"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1139
+#, elixir-autogen, elixir-format
+msgid "That file type isn't supported — use a JPG, PNG, GIF, WEBP, or SVG."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1141
+#, elixir-autogen, elixir-format
+msgid "That image couldn't be uploaded."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1133
+#, elixir-autogen, elixir-format
+msgid "That image is too large — the limit is 10 MB."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:960
+#, elixir-autogen, elixir-format
+msgid "The published version will remain untouched."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:889
+#, elixir-autogen, elixir-format
+msgid "This action cannot be undone."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1023
+#, elixir-autogen, elixir-format
+msgid "This is how others see you"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:826
+#, elixir-autogen, elixir-format
+msgid "Unpublished"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:664
+#: lib/barkpark_web/components/studio_components/modals.ex:665
+#, elixir-autogen, elixir-format
+msgid "Workspace"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1136
+#, elixir-autogen, elixir-format
+msgid "You can only upload one image at a time."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:573
+#, elixir-autogen, elixir-format
+msgid "You have no scoped access grants right now."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:473
+#, elixir-autogen, elixir-format
+msgid "You hold no shareable access in this workspace."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:570
+#, elixir-autogen, elixir-format
+msgid "Your access"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:1013
+#, elixir-autogen, elixir-format
+msgid "Your profile"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:274
+#, elixir-autogen, elixir-format
+msgid "can open just this item — no account needed."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:655
+#, elixir-autogen, elixir-format
+msgid "dataset: %{name}"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:657
+#, elixir-autogen, elixir-format
+msgid "doc: %{id}"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:641
+#, elixir-autogen, elixir-format
+msgid "expiring…"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:897
+#, elixir-autogen, elixir-format
+msgid "is referenced by %{count} document:"
+msgid_plural "is referenced by %{count} documents:"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:661
+#, elixir-autogen, elixir-format
+msgid "project"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:656
+#, elixir-autogen, elixir-format
+msgid "type: %{name}"
 msgstr ""
