@@ -456,12 +456,33 @@ defmodule BarkparkWeb.Router do
 
   # Docs writes (mutate) — mirrors [:scoped_api, :require_token, :require_write,
   # :idempotent] with the edit-token grant spliced in.
+  #
+  # Cookie-aware (task-27006bc488ad1570): a seated member signed in at
+  # `/v1/auth/login` (or holding a token-sign-in `api_token_session` cookie,
+  # post ruling #16 rework) carries no Bearer header, only the session
+  # cookie — `OptionalToken` left `:api_token`/`:current_user` both nil and
+  # `ResolveWorkspace` 403'd `not_a_member` for a real member of the very
+  # workspace their own browser session belongs to, while the sibling
+  # `:scoped_media_mutate` pipeline already admitted the identical cookie
+  # (gfr-w1-account-session-bearer-gap). Mirrors that precedent exactly:
+  # `OptionalSessionToken` resolves the cookie (bearer still wins when
+  # present — ANONYMOUS passes through untouched, denied below as before),
+  # `RequireBearerOrSessionToken` is the hard gate — it halts an anonymous
+  # conn, and CSRF-guards the cookie branch with the same `x-requested-with`
+  # check (every route on this pipeline is a POST, so the check always
+  # applies; a bearer caller returns before it and is unaffected, same as
+  # `:scoped_media_mutate`). `RequireWritePermission` already has an ACCOUNT
+  # arm (`account_write?/1`) that authorizes a `:current_user` member on
+  # their workspace role — built for this exact gap, just never reachable
+  # here because nothing upstream populated `:current_user` on this
+  # pipeline. No change to RequireWritePermission itself.
   pipeline :scoped_mutate do
+    plug(:fetch_session)
     plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalToken)
+    plug(BarkparkWeb.Plugs.OptionalSessionToken)
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -469,7 +490,7 @@ defmodule BarkparkWeb.Router do
     # tenant-attributable in the logs (the blast-radius question includes denied
     # attempts).
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
-    plug(BarkparkWeb.Plugs.RequireToken)
+    plug(BarkparkWeb.Plugs.RequireBearerOrSessionToken)
     # Per-workspace quota gate (perfect-plan-build W1, D11) — AFTER
     # ResolveWorkspace (current_workspace is set) and BEFORE the write gate. Doc
     # writes are metered by the [:barkpark, :content, :mutate] span, so no
