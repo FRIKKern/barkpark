@@ -1470,6 +1470,11 @@ textarea.bp-canvas-island__input { resize: vertical; }
   font-weight: 500;
   color: var(--paper-ink-faint, #82918b);
 }
+/* field-number's unit, after its number input: quiet text, not chrome. */
+.bp-canvas-field-unit {
+  margin-inline-start: 0.4em;
+  color: var(--paper-ink-faint);
+}
 
 /* ── canvas action node-view (editable-action: the CTA button) ────────────────
  * The CTA `action` block edited in-canvas: a live bp-button PREVIEW (byte-matching

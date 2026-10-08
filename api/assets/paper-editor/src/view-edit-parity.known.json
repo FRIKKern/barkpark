@@ -151,9 +151,93 @@
   {
    "surface": "canvas",
    "fixture": "field-number",
-   "text": "(block)",
-   "axis": "mounted",
-   "reason": "field-number is not a canvas type (PaperCanvas @canvas_field_types), so the all-in-one-canvas mount drops it; the liveview surface measures it as the boundary editor /papers really mounts."
+   "text": "312",
+   "axis": "backgroundColor",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "color",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "fontFamily",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "fontFeatureSettings",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "fontSize",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "letterSpacing",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "lineHeight",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "textRendering",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "Pages",
+   "axis": "color",
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "Pages",
+   "axis": "fontFamily",
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "Pages",
+   "axis": "fontSize",
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "Pages",
+   "axis": "letterSpacing",
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
+  },
+  {
+   "surface": "canvas",
+   "fixture": "field-number",
+   "text": "Pages",
+   "axis": "lineHeight",
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "canvas",
@@ -670,85 +754,92 @@
    "surface": "liveview",
    "fixture": "field-number",
    "text": "312",
+   "axis": "backgroundColor",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "liveview",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "color",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "liveview",
+   "fixture": "field-number",
+   "text": "312",
+   "axis": "fontFamily",
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
+  },
+  {
+   "surface": "liveview",
+   "fixture": "field-number",
+   "text": "312",
    "axis": "fontFeatureSettings",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "312",
    "axis": "fontSize",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "312",
    "axis": "letterSpacing",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "312",
    "axis": "lineHeight",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "312",
    "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas node-view form control keeps the browser's control type instead of inheriting the reader's. Follow-up: inherit on the control, as PR 20087 did for the figure caption, code and terminal controls."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "Pages",
    "axis": "color",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "Pages",
    "axis": "fontFamily",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "fontFeatureSettings",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "Pages",
    "axis": "fontSize",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "Pages",
    "axis": "letterSpacing",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "liveview",
    "fixture": "field-number",
    "text": "Pages",
    "axis": "lineHeight",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
-  },
-  {
-   "surface": "liveview",
-   "fixture": "field-number",
-   "text": "Pages",
-   "axis": "textRendering",
-   "reason": "Generic LiveView form editor (input.bp-paper-edit-text): a form field, not an inline paint of the reader text. Follow-up: an inline editor for this block type."
+   "reason": "Canvas field-* label is editor chrome (UI label type); the reader prints the label as a small-caps field row. Follow-up."
   },
   {
    "surface": "liveview",

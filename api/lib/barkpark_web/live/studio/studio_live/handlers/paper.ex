@@ -651,7 +651,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   # pickers…): its node view holds its own control, and the canvas focuses that
   # control on bp:focus-block (task-13abe9408c006c96).
   @focus_field_types ~w(field-string field-slug field-text field-boolean field-select
-                        field-datetime field-color field-image field-reference)
+                        field-datetime field-color field-number field-image field-reference)
 
   defp focus_new_block(%{assigns: %{last_paper_save_ok?: true}} = socket, %{"id" => id} = block)
        when is_binary(id) do

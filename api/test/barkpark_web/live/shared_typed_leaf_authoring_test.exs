@@ -65,9 +65,10 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     {:ok, public, _html} = live(ctx.conn, public_path)
     render_click(public, "paper-toggle-edit", %{})
 
-    assert has_element?(public, "#field-number-form-number")
-    assert has_element?(public, ~s(#field-number-form-number[phx-update="ignore"]))
-    assert has_element?(public, ~s(#field-number-form-number[phx-change="paper-edit-block"]))
+    # field-number rides the canvas run (a native number control); its per-block
+    # form is the canvas-off fallback, whose event still saves here.
+    refute has_element?(public, "#field-number-form-number")
+    assert render(public) =~ ~s(&quot;type&quot;:&quot;field-number&quot;)
     assert has_element?(public, "#blockquote-form-quote")
     assert has_element?(public, "#equation-form-equation")
     assert has_element?(public, "#video-form-video")
@@ -135,8 +136,8 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
         render(studio)
       end
 
-    assert studio_html =~ ~s(id="field-number-form-number")
-    assert studio_html =~ ~s(value="4.5")
+    assert studio_html =~ ~s(&quot;type&quot;:&quot;field-number&quot;)
+    assert studio_html =~ ~s(&quot;value&quot;:4.5)
 
     assert has_element?(
              studio,
@@ -202,6 +203,15 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     assert render(studio) =~ "Save failed"
     assert stored_paper(ctx).rev == before_studio.rev
     assert by_id(stored_blocks(ctx), "number")["value"] == 3
+
+    # The canvas saves the number field as a patch-block op: it stores a number
+    # and is refused outside min..max, like the form.
+    assert canvas_number_save(studio, "4") == true
+    assert by_id(stored_blocks(ctx), "number")["value"] === 4
+    before_canvas = stored_paper(ctx)
+    assert canvas_number_save(studio, 99) == false
+    assert stored_paper(ctx).rev == before_canvas.rev
+    assert by_id(stored_blocks(ctx), "number")["value"] === 4
   end
 
   test "a schema number field synthesizes, edits, projects, and remounts through Beta" do
@@ -333,6 +343,19 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
     assert socket_of(reloaded).assigns.edit_blocks == stored_blocks(ctx)
   end
 
+  defp canvas_number_save(view, value) do
+    request_id = Ecto.UUID.generate()
+
+    render_hook(view, "paper-ops", %{
+      "ops" => [%{"op" => "patch-block", "id" => "number", "patch" => %{"value" => value}}],
+      "if_rev" => mutation_rev(view),
+      "request_id" => request_id
+    })
+
+    assert_reply(view, %{saved: saved, request_id: ^request_id})
+    saved
+  end
+
   defp save_form(view, block_id, params) do
     request_id = Ecto.UUID.generate()
 
@@ -396,6 +419,7 @@ defmodule BarkparkWeb.SharedTypedLeafAuthoringTest do
         "type" => "field-number",
         "label" => "Weight",
         "value" => 3,
+        "max" => 10,
         "unit" => "lb",
         "unknown" => "number-meta"
       },

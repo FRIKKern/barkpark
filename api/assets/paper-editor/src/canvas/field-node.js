@@ -2,16 +2,17 @@
 // FOURTH node-view variant, after divider (atom), callout (content), code/diagram
 // (attr-atom).
 //
-// Brings the 7 NATIVE-CONTROL field-* blocks INTO the continuous canvas as a
+// Brings the 8 NATIVE-CONTROL field-* blocks INTO the continuous canvas as a
 // ProseMirror ATOM whose VALUE rides in an ATTR (`value`) and is edited by a
 // NATIVE HTML control — like the S3.3 code attr-atom, but the edit surface is a
 // TYPED control (input / textarea / checkbox / select / datetime-local / color),
 // NOT a free textarea, and the value is COERCED BY FIELD TYPE exactly like the
 // shipped BarkparkFieldBlockBridge (root.html.heex ~3543):
 //   * field-boolean → a CHECKBOX whose value is `control.checked` (a BOOLEAN).
+//   * field-number  → a number input whose value is a NUMBER (null when empty).
 //   * everything else → a string control whose value is `control.value` (a STRING).
 //
-// ── THE 7 NATIVE-CONTROL FIELD TYPES (the S3.5 scope) ─────────────────────────
+// ── THE 8 NATIVE-CONTROL FIELD TYPES (the S3.5 scope + field-number) ──────────
 //
 //   field-string  → <input type=text>         value: string
 //   field-slug    → <input type=text>         value: string
@@ -20,6 +21,7 @@
 //   field-select  → <select><option…>          value: string   (options config carried)
 //   field-datetime→ <input type=datetime-local>value: string
 //   field-color   → <input type=color>         value: string
+//   field-number  → <input type=number>        value: NUMBER|null (min/max/step/unit carried)
 //
 // PHASE-4 RUN-SPLITTER TAIL (part 1): field-image (the bp-media-picker WC) and
 // field-reference (the bp-reference-picker WC) now ALSO ride the canvas as CONTROL-ATOM
@@ -115,7 +117,7 @@ import { DEBOUNCE_MS } from "../contract.js";
 // StarterKit node is disabled for it.
 export const BP_FIELD_NODE_NAME = "bpField";
 
-// The 7 NATIVE-CONTROL field-* bpTypes this node-view owns through a native HTML
+// The 8 NATIVE-CONTROL field-* bpTypes this node-view owns through a native HTML
 // control. Keep aligned with run-convert.js:CANVAS_NATIVE_FIELD_TYPES and
 // paper_canvas.ex:@canvas_field_types.
 export const BP_NATIVE_FIELD_TYPES = [
@@ -126,6 +128,7 @@ export const BP_NATIVE_FIELD_TYPES = [
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
 ];
 
 // The 2 PICKER field-* bpTypes this node-view owns through a client-side WC (the
@@ -154,11 +157,31 @@ const PICKER_TAG = {
 //
 // Read the control's value coerced by field type, EXACTLY as the per-block bridge:
 //   field-boolean → control.checked  (a BOOLEAN)
+//   field-number  → a NUMBER, or null when empty (what blocks.ex stores)
 //   everything else → control.value   (a STRING)
 // Exported so __smoke.mjs / run-convert.js can assert fidelity against the bridge.
 export function coerceFieldValue(fieldType, control) {
   if (fieldType === "field-boolean") return !!(control && control.checked);
+  if (fieldType === "field-number") return toFieldNumber(control ? control.value : null);
   return control ? control.value : "";
+}
+
+// A field-number value in its stored form: a finite NUMBER, or null for empty or
+// unparseable input. A numeric string ("12", "2.5") becomes its number, so a value
+// stored as text by an older path reads the same as one stored as a number.
+export function toFieldNumber(value) {
+  if (typeof value === "number") return Number.isFinite(value) ? value : null;
+  if (typeof value !== "string" || value.trim() === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+// True when a number control holds input the server would refuse: text the browser
+// cannot parse, or a value outside the block's min/max (blocks.ex
+// validate_block_patch). Step alignment is not checked there, so not here either.
+function numberInputRefused(control) {
+  const v = control.validity;
+  return !!(v && (v.badInput || v.rangeUnderflow || v.rangeOverflow));
 }
 
 // ── THE PICKER COERCION (lifted verbatim from BarkparkFieldBlockBridge) ───────
@@ -288,6 +311,27 @@ const DEBOUNCED_FIELD_TYPES = new Set([
   "field-text",
 ]);
 
+const NUMBER_CONFIG_KEYS = ["min", "max", "step", "unit"];
+
+function numberConfigChanged(a, b) {
+  return NUMBER_CONFIG_KEYS.some(
+    (k) => ((a.attrs && a.attrs[k]) ?? null) !== ((b.attrs && b.attrs[k]) ?? null),
+  );
+}
+
+// A field-number config attr (min / max / step): a number or null, carried on
+// data-field-<key>.
+function numberConfigAttr(key) {
+  return {
+    [key]: {
+      default: null,
+      parseHTML: (el) => toFieldNumber(el.getAttribute("data-field-" + key)),
+      renderHTML: (attrs) =>
+        attrs[key] != null ? { ["data-field-" + key]: String(attrs[key]) } : {},
+    },
+  };
+}
+
 export const Field = Node.create({
   name: BP_FIELD_NODE_NAME,
 
@@ -360,6 +404,9 @@ export const Field = Node.create({
           if (el.getAttribute("data-field-type") === "field-boolean") {
             return raw === "true";
           }
+          if (el.getAttribute("data-field-type") === "field-number") {
+            return toFieldNumber(raw);
+          }
           return raw;
         },
         renderHTML: (attrs) => ({
@@ -417,6 +464,19 @@ export const Field = Node.create({
         },
         renderHTML: (attrs) =>
           attrs.rows != null ? { "data-field-rows": String(attrs.rows) } : {},
+      },
+      // min / max / step / unit — field-number's config. min/max/step become the
+      // number input's attributes; unit is shown after it. OPTIONAL, carried so the
+      // round-trip preserves them. data-field-min / -max / -step / -unit.
+      ...numberConfigAttr("min"),
+      ...numberConfigAttr("max"),
+      ...numberConfigAttr("step"),
+      unit: {
+        default: null,
+        parseHTML: (el) =>
+          el.hasAttribute("data-field-unit") ? el.getAttribute("data-field-unit") : null,
+        renderHTML: (attrs) =>
+          attrs.unit != null ? { "data-field-unit": attrs.unit } : {},
       },
       // refType — field-reference's target schema (config; the `ref-type` attr the
       // bp-reference-picker reads to scope its typeahead). OPTIONAL (an unscoped
@@ -549,6 +609,14 @@ export const Field = Node.create({
 
       dom.appendChild(labelEl);
       dom.appendChild(control);
+      // field-number shows its unit (if any) after the input, as quiet text.
+      const unit = node.attrs && node.attrs.unit;
+      if (fieldType === "field-number" && unit) {
+        const unitEl = document.createElement("span");
+        unitEl.className = "bp-canvas-field-unit";
+        unitEl.textContent = unit;
+        dom.appendChild(unitEl);
+      }
 
       // Paint the control from the node's current attrs. Re-run on every update()
       // so an external attr change (an echo, an undo) reflects. Guard against
@@ -588,6 +656,15 @@ export const Field = Node.create({
         if (pos == null) return;
         const cur = editor.state.doc.nodeAt(pos);
         if (!cur) return;
+        // A number the server would refuse (out of range, unparseable) stays in the
+        // control, marked invalid, and is not saved.
+        if (fieldType === "field-number") {
+          if (numberInputRefused(control)) {
+            control.setAttribute("aria-invalid", "true");
+            return;
+          }
+          control.removeAttribute("aria-invalid");
+        }
         // LIFT the BarkparkFieldBlockBridge coercion: boolean → checked; else value.
         const nextValue = coerceFieldValue(fieldType, control);
         if (cur.attrs.value === nextValue) return; // nothing changed — emit nothing
@@ -620,7 +697,7 @@ export const Field = Node.create({
       };
 
       // Mirror BarkparkFieldBlockBridge's event binding: string/slug/text on
-      // `input` (debounced); boolean/select/datetime/color on `change`.
+      // `input` (debounced); boolean/select/datetime/color/number on `change`.
       const eventName = DEBOUNCED_FIELD_TYPES.has(fieldType) ? "input" : "change";
       control.addEventListener(eventName, scheduleWrite);
       dom.addEventListener("bp-flush-node", flushPending);
@@ -637,6 +714,8 @@ export const Field = Node.create({
           if (updated.type.name !== BP_FIELD_NODE_NAME) return false;
           const nextType = (updated.attrs && updated.attrs.bpType) || "field-string";
           if (nextType !== fieldType) return false; // type swap → full rebuild
+          // A number field whose min/max/step/unit changed needs a fresh control.
+          if (fieldType === "field-number" && numberConfigChanged(node, updated)) return false;
           paint(updated);
           return true;
         },
@@ -1147,6 +1226,19 @@ function buildControl(fieldType, node) {
       inp.type = "color";
       inp.className = "bp-canvas-field-color";
       inp.value = value == null || value === "" ? "#000000" : String(value);
+      return inp;
+    }
+
+    case "field-number": {
+      // MIRRORS the per-block number input (paper_editor.ex field-number form):
+      // step="any" unless the block sets one; min/max from the block config.
+      const inp = document.createElement("input");
+      inp.type = "number";
+      inp.className = "bp-canvas-field-number";
+      if (attrs.min != null) inp.min = String(attrs.min);
+      if (attrs.max != null) inp.max = String(attrs.max);
+      inp.step = attrs.step != null ? String(attrs.step) : "any";
+      inp.value = value == null ? "" : String(value);
       return inp;
     }
 

@@ -1191,6 +1191,7 @@ check("S3.4 runToOps: a diagram + code + callout in ONE run all round-trip with 
 //   field-select  <select>          string  (options config carried)
 //   field-datetime datetime-local   string
 //   field-color   color input       string
+//   field-number  number input      NUMBER  (min/max/step/unit config carried)
 // ───────────────────────────────────────────────────────────────────────────
 
 // A representative seed per native field type: the value plus carried config
@@ -1214,6 +1215,7 @@ const S35_FIELD_SEEDS = {
   },
   "field-datetime": { id: "f-dt", type: "field-datetime", label: "Published at", fieldName: "publishedAt", value: "2026-06-24T10:00" },
   "field-color": { id: "f-col", type: "field-color", label: "Accent", fieldName: "accent", value: "#3b82f6" },
+  "field-number": { id: "f-num", type: "field-number", label: "Pages", fieldName: "pages", value: 312, min: 1, max: 999, step: 1, unit: "pp" },
 };
 
 // The EDITED value per type — a second valid value to drive the value-edit case.
@@ -1226,6 +1228,7 @@ const S35_FIELD_EDITS = {
   "field-select": "draft",
   "field-datetime": "2026-07-01T09:30",
   "field-color": "#ef4444",
+  "field-number": 128,
 };
 
 // S3.5-a) PROJECTION — EACH of the 7 native field types projects to a native
@@ -1253,6 +1256,8 @@ for (const type of BP_NATIVE_FIELD_TYPES) {
     assert.deepEqual(f.attrs.value, seed.value);
     if (type === "field-boolean") {
       assert.equal(typeof f.attrs.value, "boolean", "boolean value is a BOOLEAN");
+    } else if (type === "field-number") {
+      assert.equal(typeof f.attrs.value, "number", "number value is a NUMBER");
     } else {
       assert.equal(typeof f.attrs.value, "string", "non-boolean value is a STRING");
     }
@@ -1332,6 +1337,8 @@ for (const type of BP_NATIVE_FIELD_TYPES) {
     assert.deepEqual(patches[0].patch.value, edited, "the COERCED edited value");
     if (type === "field-boolean") {
       assert.equal(typeof patches[0].patch.value, "boolean", "boolean patch value is a BOOLEAN");
+    } else if (type === "field-number") {
+      assert.equal(typeof patches[0].patch.value, "number", "number patch value is a NUMBER");
     } else {
       assert.equal(typeof patches[0].patch.value, "string", "non-boolean patch value is a STRING");
     }
@@ -1362,6 +1369,10 @@ check("S3.5 coerceFieldValue matches BarkparkFieldBlockBridge (boolean→checked
     assert.equal(coerceFieldValue(type, { value: "abc", checked: true }), "abc", `${type} reads control.value`);
     assert.equal(typeof coerceFieldValue(type, { value: "abc" }), "string", `${type} value is a STRING`);
   }
+
+  // field-number → a NUMBER, or null when empty/unparseable.
+  assert.equal(coerceFieldValue("field-number", { value: "4.5" }), 4.5);
+  assert.equal(coerceFieldValue("field-number", { value: "" }), null);
 });
 
 // S3.5-d) INSERT — a NEW native field block (no bpId) between two surviving prose

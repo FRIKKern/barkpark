@@ -81,6 +81,7 @@ export const CANVAS_SLASH_TYPES = new Set([
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
   // A sheet REFERENCE inserts with an empty `ref`: the bpSheet atom mounts its
   // reference picker (pd-ee-sheet-embed-retarget), so the author picks the sheet
   // right on the chip, and the server hydrates the snapshot on save. Without this
@@ -283,6 +284,8 @@ export function canvasDefaultBlock(type) {
       return { id: null, type: "field-datetime", label: "Date & time", value: "" };
     case "field-color":
       return { id: null, type: "field-color", label: "Color", value: "#000000" };
+    case "field-number":
+      return { id: null, type: "field-number", label: "Number", value: null };
     case "field-select":
       return {
         id: null,

@@ -63,6 +63,7 @@ try {
     { id: "fn", type: "field-select", label: "Audience", value: "eng", options: [{ value: "eng", label: "Engineering" }] },
     { id: "fd", type: "field-datetime", label: "Goes live", value: "" },
     { id: "fc", type: "field-color", label: "Accent", value: "#000000" },
+    { id: "fnum", type: "field-number", label: "Pages", value: 312, unit: "pp" },
     { id: "fr", type: "field-reference", label: "Companion paper", value: "" },
   ]) {
     const { canvas, pm } = mount([paragraph("lead", "Lead."), block, paragraph("end", "End.")]);

@@ -493,13 +493,13 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
              "expected composite to STAY a boundary"
     end
 
-    # ── S3.5: the 7 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
+    # ── S3.5: the 8 NATIVE field-* types are now CANVAS-ELIGIBLE — they no longer split ──
 
     test "S3.5: a native field block INSIDE prose keeps the run whole (was split by the field)" do
-      # All 7 native field-* types are canvas-eligible (control-atoms), so each rides
+      # All 8 native field-* types are canvas-eligible (control-atoms), so each rides
       # the prose run rather than splitting it.
       for type <-
-            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number) do
         fld = %{"id" => "x1", "type" => type, "value" => ""}
         blocks = [para("p1"), fld, para("p2")]
 
@@ -758,10 +758,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       # attrs, edited by a non-PM textarea island — mirrors the code shape).
       assert PaperCanvas.canvas?(diagram("g"))
 
-      # S3.5: each of the 7 NATIVE field-* types is canvas-eligible (a control-atom:
+      # S3.5: each of the 8 NATIVE field-* types is canvas-eligible (a control-atom:
       # value in an attr, edited by a native control, coerced by field type).
       for type <-
-            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color) do
+            ~w(field-string field-slug field-text field-boolean field-select field-datetime field-color field-number) do
         assert PaperCanvas.canvas?(%{"id" => "f", "type" => type, "value" => ""}),
                "expected #{type} to be canvas-eligible"
       end

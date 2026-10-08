@@ -340,6 +340,7 @@ const INSERT_META = {
   "field-select": { label: "Select", hint: "▾" },
   "field-datetime": { label: "Date & time", hint: "◷" },
   "field-color": { label: "Color", hint: "●" },
+  "field-number": { label: "Number", hint: "#" },
   sheet: { label: "Sheet", hint: "▦" },
 };
 
@@ -379,6 +380,7 @@ const INSERT_ORDER = [
   "field-select",
   "field-datetime",
   "field-color",
+  "field-number",
   "sheet",
 ];
 
