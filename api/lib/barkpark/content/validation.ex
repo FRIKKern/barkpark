@@ -135,6 +135,10 @@ defmodule Barkpark.Content.Validation do
       Absent or anything else means `error`, byte-identical to before.
     * `"message": "…"` — replaces the generated wording of every finding the
       map produces (Sanity's `.warning("…")` / `.error("…")` argument).
+    * `"unique": true` — on an array: two items that point at the same document
+      (by `_ref`) or hold the same value (a row's `_key` aside) are one finding,
+      «Items must be unique» unless `"message"` says otherwise (Sanity's
+      `Rule.unique()`).
 
   Sanity's `shortDescription` → `{"max": 200, "level": "warning", "message":
   "Over 200 tegn blir klippet på kortet."}`; a required field that also warns
@@ -762,8 +766,32 @@ defmodule Barkpark.Content.Validation do
           acc
       end
     end)
+    |> then(fn acc ->
+      # Sanity's `Rule.unique()` on an array (task-bd4b556125fe702e): opt-in, so
+      # no schema without `"unique": true` sees a new finding.
+      if match?(%{"unique" => true}, rules) and duplicate_items?(list),
+        do: ["Items must be unique" | acc],
+        else: acc
+    end)
     |> Enum.reverse()
   end
+
+  # Two items are the same when they point at the same document (a reference, by
+  # `_ref` or `ref`) or carry the same value; a row's `_key` is its identity in the
+  # list, not its content, so it is left out of the comparison.
+  defp duplicate_items?(list) do
+    keys = Enum.map(list, &unique_key/1)
+    length(Enum.uniq(keys)) < length(keys)
+  end
+
+  defp unique_key(%{} = item) do
+    case Map.get(item, "_ref") || Map.get(item, "ref") do
+      ref when is_binary(ref) and ref != "" -> {:ref, ref}
+      _ -> {:value, Map.delete(item, "_key")}
+    end
+  end
+
+  defp unique_key(item), do: {:value, item}
 
   defp localized_shape_findings(value, langs, fmt, path) do
     Enum.flat_map(value, fn {lang, text} ->
