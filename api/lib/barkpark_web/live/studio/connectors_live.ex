@@ -693,11 +693,27 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         style="border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 8px; padding: 12px 16px; margin: 16px 0; background: var(--bg-card);"
       >
         <strong>Connect is not configured on this instance.</strong>
-        <p class="text-sm" style="color: var(--fg-muted); margin: 4px 0 0;">
+        <%!-- The setup step is an operator's (a deploy secret and an ops doc).
+              A workspace admin cannot take it, so they read who can
+              (task-9606fa7f7daaf674). --%>
+        <p
+          :if={assigns[:instance_admin?] == true}
+          class="text-sm"
+          style="color: var(--fg-muted); margin: 4px 0 0;"
+        >
           No <code>CONNECTORS_CONNECT_SECRET</code>
           is set, so Barkpark cannot authorize a connect against the bridge. The catalog below is
           read-only. A deploy generates the secret once — see
           <code>docs/ops/connectors-deploy.md</code>.
+        </p>
+        <p
+          :if={assigns[:instance_admin?] != true}
+          class="text-sm"
+          style="color: var(--fg-muted); margin: 4px 0 0;"
+          data-test-id="connectors-readonly-ask-admin"
+        >
+          The installation admin has not set up connectors yet, so the catalog below is
+          read-only. Ask them to enable connectors for this installation.
         </p>
       </div>
 
