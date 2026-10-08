@@ -30,6 +30,17 @@ defmodule BarkparkWeb.StudioLocale do
   @spec resolve(Tenancy.Workspace.t() | nil) :: String.t()
   def resolve(workspace), do: gettext_locale(Tenancy.workspace_locale(workspace))
 
+  @doc """
+  The page language for `<html lang>`: the locale this process renders in, in
+  BCP-47 spelling (`nb-NO`, `en`). The Studio puts the workspace locale before
+  the layout renders, so a Norwegian Studio is no longer declared English to
+  screen readers (task-c227351a938bcf9c); a surface that puts none stays `en`.
+  """
+  @spec html_lang() :: String.t()
+  def html_lang do
+    BarkparkWeb.Gettext |> Gettext.get_locale() |> String.replace("_", "-")
+  end
+
   @doc "Put the workspace's locale on the current process for the render that follows."
   @spec put(Tenancy.Workspace.t() | nil) :: String.t()
   def put(workspace) do

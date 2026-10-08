@@ -202,4 +202,24 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     refute html =~ ~s(aria-label="Sheet formatting")
     refute html =~ "Press Escape then Tab"
   end
+
+  # task-c227351a938bcf9c: the page was declared English whatever the chrome
+  # spoke, so a screen reader read Norwegian Studio with an English voice.
+  test "the page language follows the workspace's Studio language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    nb = conn |> get(desk(ws, proj)) |> html_response(200)
+    assert nb =~ ~s(<html lang="nb-NO")
+
+    {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    en =
+      conn
+      |> get("/w/#{default_ws.slug}/p/#{default_proj.slug}/d/#{@dataset}/studio")
+      |> html_response(200)
+
+    assert en =~ ~s(<html lang="en")
+  end
 end
