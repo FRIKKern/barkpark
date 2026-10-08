@@ -452,8 +452,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             class="studio-tab studio-tab-disabled"
             aria-disabled="true"
             style="opacity:0.45;cursor:not-allowed;"
-            title={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
-            aria-label={"#{tab.label} — #{tab[:reason] || "Disabled in this workspace"}"}
+            title={"#{tab_label(tab.label)} — #{tab[:reason] || gettext("Disabled in this workspace")}"}
+            aria-label={"#{tab_label(tab.label)} — #{tab[:reason] || gettext("Disabled in this workspace")}"}
             data-test-id="top-menu-tab-disabled"
           ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></span>
         <% else %>
@@ -461,8 +461,8 @@ defmodule BarkparkWeb.StudioComponents.Nav do
             href={tab.path}
             class={"studio-tab #{if active, do: "active"}"}
             aria-current={if active, do: "page"}
-            title={tab.label}
-            aria-label={tab.label}
+            title={tab_label(tab.label)}
+            aria-label={tab_label(tab.label)}
             data-test-id="top-menu-tab"
           ><span class="studio-tab-icon" aria-hidden="true"><.icon name={BarkparkWeb.Icons.drawable_name(tab[:icon], "file")} size={16} /></span></a>
         <% end %>
@@ -470,6 +470,28 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     </div>
     """
   end
+
+  @doc """
+  A top-menu tab's name in the viewer's Studio language. Tab labels are DATA
+  (the host's built-ins below and every plugin's `top_menu_entries/0`), kept
+  English so nav-parity checks compare one vocabulary; the name is translated
+  only where it is shown. A label this map does not know (a new plugin's)
+  reads as written.
+  """
+  @spec tab_label(String.t()) :: String.t()
+  def tab_label("Media"), do: gettext("Media")
+  def tab_label("API"), do: gettext("API")
+  def tab_label("Style"), do: gettext("Style")
+  def tab_label("Connectors"), do: gettext("Connectors")
+  def tab_label("Settings"), do: gettext("Settings")
+  def tab_label("Projects"), do: gettext("Projects")
+  def tab_label("Fleet"), do: gettext("Fleet")
+  def tab_label("Tickets"), do: gettext("Tickets")
+  def tab_label("Tasks"), do: gettext("Tasks")
+  def tab_label("Quizzes"), do: gettext("Quizzes")
+  def tab_label("Form submissions"), do: gettext("Form submissions")
+  def tab_label("chat"), do: gettext("chat")
+  def tab_label(label), do: label
 
   @doc """
   The canonical Studio nav model: the host's built-in top-menu tabs in
