@@ -1227,6 +1227,19 @@ defmodule Barkpark.Plugins.Capabilities do
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
       core_cmd(
+        "doc.disconnect",
+        "doc",
+        "disconnect",
+        "Remove every reference to a document from the documents that hold one, and list which documents and fields changed. Full members with write only.",
+        "POST",
+        "/v1/data/disconnect/:dataset/:doc_id",
+        "write",
+        args: [arg("doc_id", true, "string", "The referenced document's id.")],
+        writes: true,
+        default_output: "json",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
         "doc.op",
         "doc",
         "op",

@@ -2624,6 +2624,8 @@ defmodule BarkparkWeb.Router do
     # The field twin: a batch of block ops on one block-editor richText field,
     # the call Studio's field canvas makes in-process.
     post("/doc/:dataset/:type/:doc_id/fields/:field/ops", DocumentOpsController, :apply_field_ops)
+    # Remove every reference to a document (the unpublish guard's disconnect).
+    post("/disconnect/:dataset/:doc_id", DisconnectController, :create)
   end
 
   # ── Tasks API surface ───────────────────────────────────────────────────
@@ -3355,6 +3357,7 @@ defmodule BarkparkWeb.Router do
 
     post("/v1/data/mutate/:dataset", MutateController, :mutate)
     post("/v1/data/doc/:dataset/:type/:doc_id/ops", DocumentOpsController, :apply_op)
+    post("/v1/data/disconnect/:dataset/:doc_id", DisconnectController, :create)
 
     post(
       "/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops",
