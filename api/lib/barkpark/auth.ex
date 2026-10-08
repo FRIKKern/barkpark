@@ -592,6 +592,58 @@ defmodule Barkpark.Auth do
   def revoke_token_session(_), do: {:ok, 0}
 
   @doc """
+  Delete `token_sessions` rows that are expired (`expires_at <= now`) or
+  flagged revoked (`revoked_at` not nil — the idempotent kill-switch flag
+  `revoke_token_session/1` does not itself rely on, since logout DELETES;
+  this is the backstop for any OTHER path that flags rather than deletes).
+  Single unbounded `DELETE`; see `sweep_token_sessions_batch/1` for the
+  bounded form `Barkpark.Auth.TokenSessionSweeper` actually drives.
+
+  A live row holds a Cloak-encrypted raw bearer — the same retention
+  concern `LoginTicketSweeper`'s moduledoc documents for `login_tickets` —
+  so an expired-but-unswept row is a live, decryptable credential retained
+  past its stated life, not a hygiene-only concern.
+  """
+  @spec sweep_token_sessions(DateTime.t()) :: {:ok, non_neg_integer()}
+  def sweep_token_sessions(now \\ DateTime.utc_now()) do
+    {n, _} =
+      from(s in TokenSession, where: s.expires_at <= ^now or not is_nil(s.revoked_at))
+      |> Repo.delete_all()
+
+    {:ok, n}
+  end
+
+  @doc """
+  ONE BOUNDED PASS of `sweep_token_sessions/1` — deletes at most
+  `:token_session, :sweep_batch_limit` (default 5_000) rows, OLDEST
+  `expires_at` first, and returns how many it removed. Mirrors
+  `Barkpark.PreviewToken.sweep_batch/1`'s shape exactly: the subquery picks
+  the oldest eligible ids and the outer DELETE removes just those, so one
+  statement is bounded no matter how deep the backlog is. Returning 0 means
+  "nothing left eligible" and is the sweeper's loop terminator.
+  """
+  @spec sweep_token_sessions_batch(DateTime.t()) :: non_neg_integer()
+  def sweep_token_sessions_batch(now \\ DateTime.utc_now()) do
+    victims =
+      from(s in TokenSession,
+        where: s.expires_at <= ^now or not is_nil(s.revoked_at),
+        order_by: [asc: s.expires_at],
+        limit: ^token_session_sweep_batch_limit(),
+        select: s.id
+      )
+
+    {n, _} = from(s in TokenSession, where: s.id in subquery(victims)) |> Repo.delete_all()
+    n
+  end
+
+  @default_token_session_sweep_batch_limit 5_000
+
+  defp token_session_sweep_batch_limit do
+    Application.get_env(:barkpark, :token_session, [])
+    |> Keyword.get(:sweep_batch_limit, @default_token_session_sweep_batch_limit)
+  end
+
+  @doc """
   True when EITHER the new session-id key or the legacy raw-token key holds a
   non-blank string — independent of whether either actually verifies. Lets a
   caller distinguish "no explicit browser credential was presented" (where a
