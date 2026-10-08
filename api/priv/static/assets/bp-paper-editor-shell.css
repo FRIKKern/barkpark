@@ -1257,6 +1257,20 @@
        click / Enter / right-click opens the media picker. Colour rides --paper-*
        so it is dark/light safe (this mirror MUST stay in lockstep with
        assets/paper-editor/src/styles.css — paper-editor-mirror-check). */
+    /* Canvas field block (field-node.js), laid out as the reader's `.bp-field`
+     * row: a small mono label beside the value in the Paper's own type. The value
+     * control was a browser-default input (Arial 13px on white); it now inherits
+     * the page and shows only a faint hairline on hover and focus. Checkbox and
+     * colour controls keep their native shape. Values mirror paper-surface.css
+     * `.bp-field` / `.bp-field__l` / `.bp-field__v`. */
+    .bp-canvas-field { display: grid; grid-template-columns: clamp(7rem, 24%, 11rem) minmax(0, 1fr); column-gap: 1.1rem; align-items: baseline; padding: 0.36rem 0; }
+    .bp-canvas-field-label { font-family: var(--paper-font-mono); font-size: 0.75rem; letter-spacing: 0.02em; color: var(--paper-ink-soft); }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select) { box-sizing: border-box; width: 100%; margin: 0; padding: 0; border: 0; border-bottom: 1px solid transparent; border-radius: 0; background: transparent; color: var(--paper-ink); font-family: inherit; font-size: 0.98rem; line-height: 1.5; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):hover { border-bottom-color: var(--paper-rule); }
+    .bp-canvas-field-control:is(input:not([type="checkbox"]):not([type="color"]), textarea, select):focus { outline: none; border-bottom-color: var(--paper-ink-soft); }
+    textarea.bp-canvas-field-control { resize: vertical; field-sizing: content; min-height: 1.5em; }
+    .bp-canvas-field-control:is(input[type="checkbox"], input[type="color"]) { justify-self: start; }
+    @media (max-width: 560px) { .bp-canvas-field { grid-template-columns: 1fr; row-gap: 2px; } }
     .bp-canvas-field-image-empty {
       display: flex;
       flex-direction: column;
