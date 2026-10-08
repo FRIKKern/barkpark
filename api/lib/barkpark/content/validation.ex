@@ -502,9 +502,13 @@ defmodule Barkpark.Content.Validation do
     end
   end
 
-  # arrayOf — iterate elements with index-prefixed paths
-  defp walk_field(%Field{type: "arrayOf", of: of} = f, value, path, level) do
+  # arrayOf — iterate elements with index-prefixed paths. `of_types`
+  # (task-b3ebbd3ab1575e2a: several NAMED member types, mutually exclusive
+  # with `of` — SchemaDefinition sets exactly one) discriminates each item by
+  # its own `"_type"` key instead of walking every item against one shape.
+  defp walk_field(%Field{type: "arrayOf", of: of, of_types: of_types} = f, value, path, level) do
     rules = field_rules(f, level)
+    typed? = is_map(of_types) and map_size(of_types) > 0
 
     cond do
       blank?(value) and required?(rules) ->
@@ -516,9 +520,9 @@ defmodule Barkpark.Content.Validation do
       not is_list(value) ->
         shape(level, [{path, "expected a list"}])
 
-      is_nil(of) ->
-        # Schema lacks an `of` shape descriptor — defer to v2 schema parser
-        # (which would reject), so this is a defensive no-op.
+      is_nil(of) and not typed? ->
+        # Schema lacks an `of`/`of_types` shape descriptor — defer to v2
+        # schema parser (which would reject), so this is a defensive no-op.
         []
 
       true ->
@@ -530,7 +534,13 @@ defmodule Barkpark.Content.Validation do
           value
           |> Enum.with_index()
           |> Enum.flat_map(fn {item, idx} ->
-            walk_field(of, item, path <> "/" <> Integer.to_string(idx), level)
+            item_path = path <> "/" <> Integer.to_string(idx)
+
+            if typed? do
+              walk_typed_array_item(of_types, item, item_path, level)
+            else
+              walk_field(of, item, item_path, level)
+            end
           end)
 
         own ++ rows
@@ -628,6 +638,27 @@ defmodule Barkpark.Content.Validation do
 
   # primitive leaf — apply v1-style rules from raw["validation"]
   defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  # One item of a several-named-member-types `arrayOf` (task-b3ebbd3ab1575e2a) —
+  # the typed branch of the "arrayOf" `walk_field/4` clause above, kept out of
+  # that clause group so the `walk_field/4` clauses themselves stay contiguous.
+  # Sanity's own object-array convention: the item names its member type with
+  # a `"_type"` key, looked up against the schema's declared member names.
+  defp walk_typed_array_item(_of_types, item, path, level) when not is_map(item),
+    do: shape(level, [{path, "expected an object"}])
+
+  defp walk_typed_array_item(of_types, item, path, level) do
+    case Map.get(item, "_type") do
+      type_name when is_binary(type_name) and type_name != "" ->
+        case Map.get(of_types, type_name) do
+          %Field{} = member_shape -> walk_field(member_shape, item, path, level)
+          nil -> shape(level, [{path, "unknown _type #{inspect(type_name)}"}])
+        end
+
+      _ ->
+        shape(level, [{path, "missing _type"}])
+    end
+  end
 
   defp walk_leaf(%Field{} = f, value, path, level) do
     rules = field_rules(f, level)

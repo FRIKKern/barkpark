@@ -362,6 +362,78 @@ defmodule Barkpark.Content.ValidationTest do
     end
   end
 
+  describe "v2 recursion — arrayOf with several named member types (task-b3ebbd3ab1575e2a)" do
+    test "an item matching its declared _type's own shape passes" do
+      schema = links_schema()
+
+      content = %{
+        "links" => [
+          %{"_type" => "externalLink", "url" => "https://example.com"},
+          %{"_type" => "docLink", "ref" => "post-1"}
+        ]
+      }
+
+      assert {:ok, ^content} = Validation.validate(content, nil, schema)
+    end
+
+    test "an item failing its OWN _type's required field is refused at its index" do
+      schema = links_schema()
+
+      content = %{
+        "links" => [
+          # externalLink requires "url" — missing here
+          %{"_type" => "externalLink"}
+        ]
+      }
+
+      assert {:error, %{"links" => msgs}} = Validation.validate(content, nil, schema)
+      assert Enum.any?(msgs, &String.contains?(&1, "/links/0/url"))
+    end
+
+    test "an item naming an undeclared _type is refused" do
+      schema = links_schema()
+      content = %{"links" => [%{"_type" => "videoEmbed", "url" => "x"}]}
+
+      assert {:error, %{"links" => msgs}} = Validation.validate(content, nil, schema)
+      assert Enum.any?(msgs, &String.contains?(&1, "videoEmbed"))
+    end
+
+    test "an item with no _type at all is refused" do
+      schema = links_schema()
+      content = %{"links" => [%{"url" => "https://example.com"}]}
+
+      assert {:error, %{"links" => msgs}} = Validation.validate(content, nil, schema)
+      assert Enum.any?(msgs, &String.contains?(&1, "_type"))
+    end
+
+    defp links_schema do
+      %{
+        "fields" => [
+          %{
+            "name" => "links",
+            "type" => "arrayOf",
+            "of" => [
+              %{
+                "name" => "externalLink",
+                "type" => "composite",
+                "fields" => [
+                  %{"name" => "url", "type" => "string", "validation" => %{"required" => true}}
+                ]
+              },
+              %{
+                "name" => "docLink",
+                "type" => "composite",
+                "fields" => [
+                  %{"name" => "ref", "type" => "string", "validation" => %{"required" => true}}
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    end
+  end
+
   describe "v2 recursion — composite-inside-array-inside-composite" do
     test "nested cross-field path is built correctly" do
       schema = %{

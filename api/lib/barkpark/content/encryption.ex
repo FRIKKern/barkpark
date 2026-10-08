@@ -401,6 +401,13 @@ defmodule Barkpark.Content.Encryption do
     do: any_sensitive?(subs)
 
   defp sensitive_field?(%Field{type: "arrayOf", of: %Field{} = of}), do: sensitive_field?(of)
+
+  # Several-named-member-types arrayOf (task-b3ebbd3ab1575e2a): any one
+  # member's own fields may carry `encrypted: true`, same as a single-shape
+  # `of`'s own fields would.
+  defp sensitive_field?(%Field{type: "arrayOf", of_types: types}) when is_map(types),
+    do: Enum.any?(Map.values(types), &sensitive_field?/1)
+
   defp sensitive_field?(_), do: false
 
   # The CHOKEPOINT's second half. A bound block in content["blocks"] carries a
@@ -531,7 +538,43 @@ defmodule Barkpark.Content.Encryption do
        when is_list(value),
        do: transform_list(value, of, cx, mode)
 
+  # Several-named-member-types arrayOf (task-b3ebbd3ab1575e2a): each item
+  # names its own member type via `"_type"`, so the shape driving its
+  # encryption/decryption is looked up per item rather than shared by the
+  # whole array.
+  defp transform_value(value, %Field{type: "arrayOf", of_types: types}, cx, mode)
+       when is_map(types) and is_list(value),
+       do: transform_typed_list(value, types, cx, mode)
+
   defp transform_value(value, _field, _cx, _mode), do: {:ok, value}
+
+  defp transform_typed_list(list, types, cx, mode) do
+    list
+    |> Enum.reduce_while({:ok, []}, fn item, {:ok, acc} ->
+      case transform_value(item, item_type_field(item, types), cx, mode) do
+        {:ok, value} -> {:cont, {:ok, [value | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, acc} -> {:ok, Enum.reverse(acc)}
+      :error -> :error
+    end
+  end
+
+  # An item with no known `_type` (malformed, or a type the schema does not
+  # declare) gets a blank %Field{} — transform_value's catch-all then passes
+  # it through unchanged rather than guessing a shape for it. Validation
+  # (Barkpark.Content.Validation) is what REFUSES that item; encryption's job
+  # here is only to never crash on it.
+  defp item_type_field(%{} = item, types) do
+    case Map.get(item, "_type") do
+      t when is_binary(t) -> Map.get(types, t) || %Field{}
+      _ -> %Field{}
+    end
+  end
+
+  defp item_type_field(_item, _types), do: %Field{}
 
   defp transform_list(list, of_field, cx, mode) do
     list
