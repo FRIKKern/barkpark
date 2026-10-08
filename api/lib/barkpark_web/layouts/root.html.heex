@@ -2779,12 +2779,16 @@
     .bp-draft-diff-table td.bp-diff-col-name { width: 22%; }
     .bp-draft-diff-table th.bp-diff-col-status,
     .bp-draft-diff-table td.bp-diff-col-status,
-    .bp-draft-diff-table td.bp-diff-status { width: 56px; text-align: center; }
+    .bp-draft-diff-table td.bp-diff-status { width: 96px; text-align: center; }
+    .bp-diff-field-key {
+      display: block; font-family: var(--font-mono); font-size: var(--text-2xs);
+      color: var(--fg-dim);
+    }
     .bp-diff-row.bp-diff-unchanged { color: var(--fg-dim); }
     .bp-diff-row.bp-diff-changed   { background: hsl(var(--warn-hsl) / 0.06); }
     .bp-diff-row.bp-diff-added     { background: hsl(var(--ok-hsl) / 0.06); }
     .bp-diff-row.bp-diff-removed   { background: hsl(var(--danger-hsl) / 0.06); }
-    .bp-diff-status { font-family: var(--font-mono); }
+    .bp-diff-status { font-size: var(--text-xs); }
     .bp-diff-draft, .bp-diff-published {
       margin: 0; padding: 0;
       font-family: var(--font-mono); font-size: var(--text-2xs);

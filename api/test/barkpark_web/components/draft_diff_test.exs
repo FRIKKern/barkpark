@@ -146,4 +146,93 @@ defmodule BarkparkWeb.Components.DraftDiffTest do
       assert html =~ "2 changes"
     end
   end
+
+  # task-30d564b8b1219ab9: the Diff showed storage, not what the editor wrote.
+  describe "draft_diff/1 — values read as words" do
+    defp typed_schema do
+      %{
+        "fields" => [
+          %{"name" => "title", "title" => "Tittel", "type" => "string"},
+          %{
+            "name" => "author",
+            "title" => "Forfatter",
+            "type" => "reference",
+            "to" => [%{"type" => "author"}]
+          },
+          %{"name" => "cover", "title" => "Omslag", "type" => "image"},
+          %{"name" => "body", "title" => "Tekst", "type" => "richText"}
+        ]
+      }
+    end
+
+    defp typed_doc(author, alt, text) do
+      doc(%{
+        "title" => "Fjellet",
+        "author" => %{"_ref" => author},
+        "cover" => %{
+          "alt" => alt,
+          "width" => 1200,
+          "height" => 630,
+          "assetId" => "a1e0",
+          "lqip" => "data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD"
+        },
+        "body" => [
+          %{"_type" => "block", "children" => [%{"_type" => "span", "text" => text}]}
+        ]
+      })
+    end
+
+    test "labels, a resolved reference, an image without its data URI, rich text, word statuses" do
+      titles = %{
+        {"author-ness", "author"} => "Ingrid Ness",
+        {"author-graff", "author"} => "Sverre Graff"
+      }
+
+      html =
+        render_component(&DraftDiff.draft_diff/1, %{
+          draft: typed_doc("author-graff", "Et snødekt fjell", "Ny tekst."),
+          published: typed_doc("author-ness", "", "Gammel tekst."),
+          schema: typed_schema(),
+          ref_title: fn id, type -> Map.get(titles, {id, type}, id) end
+        })
+
+      assert html =~ "Tittel"
+      assert html =~ "Forfatter"
+      assert html =~ "Ingrid Ness"
+      assert html =~ "Sverre Graff"
+      refute html =~ "_ref"
+      assert html =~ "Image 1200×630 · alt: Et snødekt fjell"
+      assert html =~ "Image 1200×630 · no alt text"
+      refute html =~ "data:image"
+      refute html =~ "base64"
+      assert html =~ "Ny tekst."
+      assert html =~ "Gammel tekst."
+      refute html =~ "children"
+      assert html =~ "Unchanged"
+      assert html =~ "Changed"
+      refute html =~ "Δ"
+    end
+
+    test "without a resolver a reference shows its id, and a stray data URI in any composite is dropped" do
+      html =
+        render_component(&DraftDiff.draft_diff/1, %{
+          draft:
+            doc(%{
+              "author" => %{"_ref" => "author-ness"},
+              "meta" => %{"thumb" => "data:image/png;base64,AAA", "k" => "v"}
+            }),
+          published: nil,
+          schema: %{
+            "fields" => [
+              %{"name" => "author", "type" => "reference"},
+              %{"name" => "meta", "type" => "object"}
+            ]
+          }
+        })
+
+      assert html =~ "author-ness"
+      assert html =~ ~s({&quot;k&quot;:&quot;v&quot;})
+      refute html =~ "data:image"
+    end
+  end
 end
