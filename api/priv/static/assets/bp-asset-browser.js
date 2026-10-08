@@ -45,10 +45,10 @@
       this.hidden = true;
       this.className = "bp-ab-overlay";
       this.innerHTML =
-        '<div class="bp-ab-dialog" role="dialog" aria-modal="true">' +
+        '<div class="bp-ab-dialog" role="dialog" aria-modal="true" aria-label="Media library">' +
         '<header class="bp-ab-header">' +
         '<h2 class="bp-ab-title">Media library</h2>' +
-        '<input type="search" class="bp-ab-search form-input" placeholder="Search assets…" />' +
+        '<input type="search" class="bp-ab-search form-input" placeholder="Search assets…" aria-label="Search assets" />' +
         '<button type="button" class="bp-ab-close btn btn-sm" aria-label="Close">✕</button>' +
         "</header>" +
         '<div class="bp-ab-body">' +
