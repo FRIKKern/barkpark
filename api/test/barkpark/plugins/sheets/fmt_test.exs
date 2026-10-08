@@ -144,6 +144,71 @@ defmodule Barkpark.Plugins.Sheets.FmtTest do
     end
   end
 
+  # ── currency_codes/0, display/3 and num_format/2 (task-4fb1d8de887d8bc6) ───
+  #
+  # Per-cell currency, ruling (a): a "currency" cell may carry a "cur" ISO
+  # 4217 code beside it. Absent/nil/unrecognized is the pre-existing implicit
+  # USD "$" — covered already by the display/2 and num_format/1 vectors above,
+  # which keep calling the 2-arg forms Elixir generates from the \\ nil
+  # default, so this block only adds the SIX codes' own rendering.
+
+  describe "currency_codes/0" do
+    test "the six ISO 4217 codes the toolbar picker and \"cur\" accept" do
+      assert Fmt.currency_codes() == ["DKK", "EUR", "GBP", "NOK", "SEK", "USD"]
+    end
+  end
+
+  describe "display/3 — per-currency symbol placement" do
+    @currency_vectors [
+      {1234.5, "USD", "$1,234.50"},
+      {-2, "USD", "-$2.00"},
+      {1234.5, "EUR", "€1,234.50"},
+      {1234.5, "GBP", "£1,234.50"},
+      # Scandinavian currencies: suffix "kr", sign stays at the very front.
+      {1234.5, "NOK", "1,234.50 kr"},
+      {-2, "NOK", "-2.00 kr"},
+      {1234.5, "SEK", "1,234.50 kr"},
+      {1234.5, "DKK", "1,234.50 kr"},
+      # unrecognized / nil cur is the pre-existing implicit USD.
+      {1234.5, nil, "$1,234.50"},
+      {1234.5, "XXX", "$1,234.50"}
+    ]
+
+    for {value, cur, expected} <- @currency_vectors do
+      test "display(#{inspect(value)}, \"currency\", #{inspect(cur)}) == #{inspect(expected)}" do
+        assert Fmt.display(unquote(Macro.escape(value)), "currency", unquote(cur)) ==
+                 unquote(expected)
+      end
+    end
+
+    test "cur is ignored by every class but currency" do
+      assert Fmt.display(0.25, "percent", "NOK") == "25.00%"
+      assert Fmt.display(1200, "thousands", "EUR") == "1,200"
+    end
+  end
+
+  describe "num_format/2 — per-currency xlsx export format" do
+    test "each of the six codes maps to its own format string" do
+      assert Fmt.num_format("currency", "USD") == "$#,##0.00"
+      assert Fmt.num_format("currency", "EUR") == "€#,##0.00"
+      assert Fmt.num_format("currency", "GBP") == "£#,##0.00"
+      assert Fmt.num_format("currency", "NOK") == "#,##0.00\" kr\""
+      assert Fmt.num_format("currency", "SEK") == "#,##0.00\" kr\""
+      assert Fmt.num_format("currency", "DKK") == "#,##0.00\" kr\""
+    end
+
+    test "nil / unrecognized cur is the pre-existing canonical $ format" do
+      assert Fmt.num_format("currency", nil) == "$#,##0.00"
+      assert Fmt.num_format("currency", "XXX") == "$#,##0.00"
+      assert Fmt.num_format("currency") == "$#,##0.00"
+    end
+
+    test "cur is ignored by every class but currency" do
+      assert Fmt.num_format("percent", "NOK") == "0.00%"
+      assert Fmt.num_format("fixed", "EUR") == "0.00"
+    end
+  end
+
   # ── classify/2 ──────────────────────────────────────────────────────────────
 
   describe "classify/2" do

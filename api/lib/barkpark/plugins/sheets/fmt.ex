@@ -74,6 +74,40 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   @spec vocabulary() :: [String.t()]
   def vocabulary, do: (Map.keys(@canonical) ++ @display_only) |> Enum.sort()
 
+  # Per-cell currency (task-4fb1d8de887d8bc6, ruling (a) — additive, per-cell,
+  # over a workspace/sheet default). A `"currency"`-fmt cell may carry a
+  # `"cur"` ISO 4217 code beside it; absent/nil/unrecognized means the
+  # PRE-EXISTING implicit USD rendering, so every cell formatted before this
+  # landed is byte-identical. Each entry is `{symbol, placement}` for display
+  # and the matching xlsx number-format string for export — the display and
+  # export tables are the SAME six codes so neither can list one the other
+  # does not (`fmt_test.exs` asserts the key sets match). Scandinavian
+  # currencies are a SUFFIX ("150,00 kr" is the customary place); the rest are
+  # a prefix, same as the pre-existing "$" rendering this never touches. No
+  # locale-aware number formatting (grouping/decimal marks) — that is ruling
+  # (b), deliberately deferred.
+  @currency_symbols %{
+    "USD" => {"$", :prefix},
+    "EUR" => {"€", :prefix},
+    "GBP" => {"£", :prefix},
+    "NOK" => {"kr", :suffix},
+    "SEK" => {"kr", :suffix},
+    "DKK" => {"kr", :suffix}
+  }
+
+  @currency_num_formats %{
+    "USD" => "$#,##0.00",
+    "EUR" => "€#,##0.00",
+    "GBP" => "£#,##0.00",
+    "NOK" => "#,##0.00\" kr\"",
+    "SEK" => "#,##0.00\" kr\"",
+    "DKK" => "#,##0.00\" kr\""
+  }
+
+  @doc "The ISO 4217 currency codes a \"currency\" cell's \"cur\" may name."
+  @spec currency_codes() :: [String.t()]
+  def currency_codes, do: @currency_symbols |> Map.keys() |> Enum.sort()
+
   @doc """
   numFmtId (+ the workbook's custom `numFmtId => formatCode` map) → fmt
   class, or `nil` for general/unknown.
@@ -116,9 +150,21 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
 
   def classify_format(_), do: nil
 
-  @doc "fmt class → the canonical xlsx format string (nil for general/unknown)."
-  @spec num_format(term()) :: String.t() | nil
-  def num_format(fmt), do: @canonical[fmt]
+  @doc """
+  fmt class → the canonical xlsx format string (nil for general/unknown).
+
+  `cur` (the cell's currency code, only meaningful when `fmt == "currency"`)
+  selects the matching per-currency format string; absent/nil/unrecognized
+  falls back to the pre-existing `"$#,##0.00"` canonical, byte-identical to
+  every cell formatted before per-cell currency existed.
+  """
+  @spec num_format(term(), String.t() | nil) :: String.t() | nil
+  def num_format(fmt, cur \\ nil)
+
+  def num_format("currency", cur) when is_binary(cur),
+    do: Map.get(@currency_num_formats, cur, @canonical["currency"])
+
+  def num_format(fmt, _cur), do: @canonical[fmt]
 
   @doc """
   Render a cell value for DISPLAY under its `fmt` class — the read-surface
@@ -140,38 +186,56 @@ defmodule Barkpark.Plugins.Sheets.Fmt do
   Date classes expect the ISO-8601 strings xlsx import stores: `date`
   keeps the date part, `datetime` renders `YYYY-MM-DD HH:MM:SS` (seconds,
   no subseconds); an unparseable string returns verbatim.
-  """
-  @spec display(term(), String.t() | nil) :: String.t()
-  def display(true, _fmt), do: "TRUE"
-  def display(false, _fmt), do: "FALSE"
 
-  def display(v, "percent") when is_number(v) do
+  `cur` (ignored by every class but `"currency"`) is the cell's ISO 4217
+  currency code; absent/nil/unrecognized renders the pre-existing implicit
+  USD "$" prefix, byte-identical to every currency cell formatted before
+  per-cell currency existed (task-4fb1d8de887d8bc6).
+  """
+  @spec display(term(), String.t() | nil, String.t() | nil) :: String.t()
+  def display(v, fmt, cur \\ nil)
+
+  def display(true, _fmt, _cur), do: "TRUE"
+  def display(false, _fmt, _cur), do: "FALSE"
+
+  def display(v, "percent", _cur) when is_number(v) do
     {neg?, body} = format_number(v * 100, 2, false)
     sign(neg?) <> body <> "%"
   end
 
-  def display(v, "fixed") when is_number(v) do
+  def display(v, "fixed", _cur) when is_number(v) do
     {neg?, body} = format_number(v, 2, false)
     sign(neg?) <> body
   end
 
-  def display(v, "thousands") when is_number(v) do
+  def display(v, "thousands", _cur) when is_number(v) do
     {neg?, body} = format_number(v, 0, true)
     sign(neg?) <> body
   end
 
-  def display(v, "currency") when is_number(v) do
+  def display(v, "currency", cur) when is_number(v) do
     {neg?, body} = format_number(v, 2, true)
-    sign(neg?) <> "$" <> body
+    sign(neg?) <> currency_body(body, cur)
   end
 
-  def display(v, "date") when is_binary(v), do: date_part(v)
-  def display(v, "datetime") when is_binary(v), do: datetime_part(v)
+  def display(v, "date", _cur) when is_binary(v), do: date_part(v)
+  def display(v, "datetime", _cur) when is_binary(v), do: datetime_part(v)
 
   # General / fallback path: any type/class mismatch lands here.
-  def display(v, _fmt) when is_number(v), do: Core.number_to_display(v)
-  def display(v, _fmt) when is_binary(v), do: v
-  def display(_v, _fmt), do: ""
+  def display(v, _fmt, _cur) when is_number(v), do: Core.number_to_display(v)
+  def display(v, _fmt, _cur) when is_binary(v), do: v
+  def display(_v, _fmt, _cur), do: ""
+
+  # `cur` placed at its currency's customary side of the unsigned body — a
+  # prefix symbol butts directly against the body (pre-existing "$" shape);
+  # a suffix one (Scandinavian "kr") takes a space, "150,00 kr"'s own
+  # customary spacing. Unknown/absent `cur` is the pre-existing USD "$".
+  defp currency_body(body, cur) do
+    case Map.get(@currency_symbols, cur, {"$", :prefix}) do
+      {symbol, :prefix} -> symbol <> body
+      {symbol, :suffix} -> body <> " " <> symbol
+    end
+  end
 
   # A number → {negative?, unsigned body} with `decimals` fixed places and
   # optional comma grouping of the integer part. Sign is returned separately

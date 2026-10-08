@@ -1488,6 +1488,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, apply_meta_to_selection(socket, fn _cell -> %{"fmt" => fmt} end)}
   end
 
+  # The currency picker (task-4fb1d8de887d8bc6, ruling (a)): picking a
+  # currency formats the selection AND names it, in the one op
+  # `set_cell_meta`'s override_fmt + override_cur pipeline already supports.
+  # "" (USD) sends cur: nil — the implicit default, byte-identical to a
+  # plain $ click.
+  def handle_event("set-currency", %{"cur" => cur}, socket) do
+    cur = if cur == "", do: nil, else: cur
+
+    {:noreply,
+     apply_meta_to_selection(socket, fn _cell -> %{"fmt" => "currency", "cur" => cur} end)}
+  end
+
   # Bold / italic — Excel toggle: the ACTIVE cell decides the new value (its key
   # absent/false → turn ON, true → turn OFF), then that ONE value stamps every
   # selected cell (merging into each cell's own "s" so bg/align survive).
@@ -2923,13 +2935,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       if assigns.editable,
         do: Map.get(Map.get(assigns.cells, Sheets.format_ref(assigns.active)) || %{}, "fmt")
 
+    # The currency select's selected option (task-4fb1d8de887d8bc6) — same
+    # render-local rule as active_fmt above.
+    active_cur =
+      if assigns.editable,
+        do: Map.get(Map.get(assigns.cells, Sheets.format_ref(assigns.active)) || %{}, "cur")
+
     assigns =
       assign(assigns,
         peer_cursors: peer_cursors,
         peer_sels: peer_sels,
         sel_stats: sel_stats,
         active_s: active_s,
-        active_fmt: active_fmt
+        active_fmt: active_fmt,
+        active_cur: active_cur
       )
 
     ~H"""
@@ -3282,13 +3301,36 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           />
         </form>
 
-        <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select).
-              Each stamps a display-only "fmt" onto every occupied cell in the
-              selection; General clears it. The buttons' aria-pressed and the
-              select's selected option mirror the ACTIVE cell's fmt so AT reads
-              the current state, not just the available actions. --%>
+        <%!-- Number-format group ($ % , + a General/Fixed/Date/Datetime select,
+              + a currency picker). Each stamps a display-only "fmt" onto every
+              occupied cell in the selection; General clears it. The buttons'
+              aria-pressed and the selects' selected option mirror the ACTIVE
+              cell's fmt/cur so AT reads the current state, not just the
+              available actions. --%>
         <div class="sheet-fmt-group" role="group" aria-label={gettext("Number format")} data-test-id="sheet-fmt-group">
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title={gettext("Currency ($1,234.50)")} aria-label={gettext("Currency format")} data-test-id="sheet-fmt-currency">$</button>
+          <%!-- Currency picker (task-4fb1d8de887d8bc6, ruling (a) — additive,
+                per-cell): choosing one stamps BOTH fmt=currency and cur in
+                one op, so picking "NOK" formats the cell AND names its
+                currency — the $ button above stays the one-click USD
+                shortcut. "USD ($)" reselects the implicit default (nil cur),
+                byte-identical to a plain $ click. --%>
+          <form phx-change="set-currency" phx-target={@myself}>
+            <.bp_select
+              name="cur"
+              value={@active_cur || ""}
+              options={[
+                {"", gettext("USD ($)")},
+                {"EUR", gettext("EUR (€)")},
+                {"GBP", gettext("GBP (£)")},
+                {"NOK", gettext("NOK (kr)")},
+                {"SEK", gettext("SEK (kr)")},
+                {"DKK", gettext("DKK (kr)")}
+              ]}
+              aria-label={gettext("Currency")}
+              data-test-id="sheet-currency-select"
+            />
+          </form>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title={gettext("Percent (25.00%)")} aria-label={gettext("Percent format")} data-test-id="sheet-fmt-percent">%</button>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title={gettext("Thousands separator (1,234)")} aria-label={gettext("Thousands separator")} data-test-id="sheet-fmt-thousands">,</button>
           <form phx-change="set-fmt" phx-target={@myself}>

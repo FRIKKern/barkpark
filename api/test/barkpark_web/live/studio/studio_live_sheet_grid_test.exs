@@ -330,6 +330,37 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = peek_cells("sg-fmt")
   end
 
+  test "the currency picker formats the active cell as kroner, in one op (task-4fb1d8de887d8bc6)",
+       %{conn: conn} do
+    create_sheet!("sg-cur", one_tab(%{"A1" => %{"v" => 1234.5}}))
+    {view, target, _html} = open!(conn, "sg-cur")
+
+    render_hook(target, "cell-click", %{"ref" => "A1", "shift" => false})
+    cell_a1 = fn -> view |> element(~s(td[data-ref="A1"])) |> render() end
+    refute cell_a1.() =~ "kr"
+
+    view
+    |> element(~s(form[phx-change="set-currency"]))
+    |> render_change(%{"cur" => "NOK"})
+
+    # One picker change both formats the cell AND names its currency —
+    # fmt="currency" + cur="NOK" land in the SAME set_cell_meta op.
+    assert cell_a1.() =~ "1,234.50 kr"
+
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency", "cur" => "NOK"}} =
+             peek_cells("sg-cur")
+
+    # Reselecting "USD ($)" (cur: nil) is byte-identical to the plain $
+    # button — the implicit default, existing $ cells unchanged.
+    view
+    |> element(~s(form[phx-change="set-currency"]))
+    |> render_change(%{"cur" => ""})
+
+    assert cell_a1.() =~ "$1,234.50"
+    assert %{"A1" => %{"v" => 1234.5, "fmt" => "currency"}} = cells = peek_cells("sg-cur")
+    refute Map.has_key?(cells["A1"], "cur")
+  end
+
   test "the Checkbox fmt option stamps checkbox on the active cell and renders the glyph",
        %{conn: conn} do
     create_sheet!("sg-cb-apply", one_tab(%{"A1" => %{"v" => false}}))
