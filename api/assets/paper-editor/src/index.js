@@ -55,7 +55,7 @@ import { normalizeTone } from "./tone.js";
 // Internal-link marks (wikilink/blockref/tag) — schema registration only, so
 // the editor holds these nodes through a setContent->getJSON round-trip. Defined
 // in the DOM-free marks.js so the smoke harness can assert their schema.
-import { Wikilink, Blockref, Tag, Valueref } from "./marks.js";
+import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "./marks.js";
 import { CONTRACT_VERSION, DEBOUNCE_MS, PLACEHOLDER } from "./contract.js";
 import { OpaqueMark } from "./opaque-mark.js";
 import "./canvas/index.js";
@@ -271,6 +271,7 @@ class BpPaperEditor extends HTMLElement {
         Blockref,
         Tag,
         Valueref,
+        InlineOpaque,
       ],
       content: this._editorMode === "card-body"
         ? cardBodyProjection(block).doc

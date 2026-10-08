@@ -321,7 +321,7 @@ import {
 // (identical role to ../index.js). The [[ / # autocomplete UI lands on top of
 // these marks in P4: a pick inserts a wikilink/tag MARK, which runToOps emits as
 // a patch-block for that block (the existing prose patch path).
-import { Wikilink, Blockref, Tag, Valueref } from "../marks.js";
+import { Wikilink, Blockref, Tag, Valueref, InlineOpaque } from "../marks.js";
 import { DEBOUNCE_MS, PLACEHOLDER } from "../contract.js";
 import { OpaqueMark } from "../opaque-mark.js";
 
@@ -961,6 +961,7 @@ class BpPaperCanvas extends HTMLElement {
         Blockref,
         Tag,
         Valueref,
+        InlineOpaque,
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,

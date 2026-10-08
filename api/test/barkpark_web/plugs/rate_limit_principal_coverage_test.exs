@@ -40,7 +40,10 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     "RequireToken" => {:resolved, "api_token via Auth.verify_token_id/1"},
     "OptionalSessionToken" =>
       {:resolved,
-       "bearer branch is Auth.verify_token/1; the cookie branch carries no bearer and keys on IP"},
+       "bearer branch is Auth.verify_token/1; the cookie branch (task-2c31de0cf6597d32) now " <>
+         "resolves too, via RateLimit's own session_principal_id/1 (session[\"api_token\"] -> " <>
+         "Auth.verify_token_id/1, else session[\"user_session\"] -> Accounts.verify_user_session/1) " <>
+         "-- only a conn with NO session at all (or no :fetch_session upstream) keys on IP"},
     "RequireBearerOrSessionToken" =>
       {:resolved, "bearer branch is Auth.verify_token/1; cookie branch as above"},
     "RequireShareEditToken" =>
@@ -143,5 +146,15 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     assert Code.ensure_loaded?(Barkpark.Scim)
     assert function_exported?(Barkpark.Auth, :verify_token_id, 1)
     assert function_exported?(Barkpark.Scim, :resolve_token_id, 1)
+
+    # The session half the two cookie-branch rows above now claim
+    # (task-2c31de0cf6597d32): session_principal_id/1 is a private function,
+    # so this reads the SOURCE for its two resolver calls rather than
+    # reflecting on the module, same idiom this test already uses for the
+    # Bearer registry two lines up.
+    assert src =~ "Barkpark.Auth.verify_token_id(raw)"
+    assert src =~ "Barkpark.Accounts.verify_user_session(raw)"
+    assert Code.ensure_loaded?(Barkpark.Accounts)
+    assert function_exported?(Barkpark.Accounts, :verify_user_session, 1)
   end
 end

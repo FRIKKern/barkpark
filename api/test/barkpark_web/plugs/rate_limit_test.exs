@@ -438,4 +438,121 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       assert RateLimit.call(read_with(raw), RateLimit.init([])).halted
     end
   end
+
+  # task-2c31de0cf6597d32 — a Studio editor authenticated by SESSION COOKIE
+  # alone (no Bearer) gets their OWN write bucket, at the wider
+  # :session_write_per_minute default, instead of sharing the per-IP bucket
+  # every other cookie-only caller shares. Both session shapes
+  # OptionalSessionToken recognises: the token-sign-in cookie
+  # (`session["api_token"]`) and the account/SSO login
+  # (`session["user_session"]`).
+  describe "a session-cookie editor, holding no Bearer" do
+    defp session_conn(method, path, path_params, session) do
+      build(method, path, path_params, [])
+      |> Plug.Test.init_test_session(session)
+    end
+
+    defp mutate_with_session(session) do
+      session_conn(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, session)
+    end
+
+    defp token_session(label) do
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, _token} = Barkpark.Auth.create_token(raw, label, "production", ["read", "write"])
+      %{"api_token" => raw}
+    end
+
+    defp account_session(email) do
+      user = Barkpark.AccountsFixtures.register_user(email)
+      {:ok, raw} = Barkpark.Accounts.create_user_session_token(user)
+      %{"user_session" => raw}
+    end
+
+    test "two editors signed in via the token-sign-in cookie get independent buckets, " <>
+           "each at the session default (180/min), not the 60/min token default" do
+      with_limits([])
+
+      a = token_session("editor-a")
+      b = token_session("editor-b")
+
+      # 60 calls would exhaust the OLD shared/token default; the session
+      # default (180) must still have allowance left for BOTH editors past it.
+      results_a = for _ <- 1..65, do: RateLimit.call(mutate_with_session(a), RateLimit.init([]))
+
+      refute Enum.any?(results_a, & &1.halted),
+             "editor A hit a write 429 before 65 writes — session budget is not wider than 60/min"
+
+      results_b = for _ <- 1..65, do: RateLimit.call(mutate_with_session(b), RateLimit.init([]))
+
+      refute Enum.any?(results_b, & &1.halted),
+             "editor B hit a write 429 before 65 writes — editors are sharing ONE bucket again"
+    end
+
+    test "an account-session (user_session) editor also gets the session default, " <>
+           "and two account editors do not share a bucket" do
+      with_limits([])
+
+      a = account_session("session-editor-a@example.com")
+      b = account_session("session-editor-b@example.com")
+
+      results_a = for _ <- 1..65, do: RateLimit.call(mutate_with_session(a), RateLimit.init([]))
+      refute Enum.any?(results_a, & &1.halted)
+
+      results_b = for _ <- 1..65, do: RateLimit.call(mutate_with_session(b), RateLimit.init([]))
+      refute Enum.any?(results_b, & &1.halted)
+    end
+
+    test "the session write budget is independently configurable and still per-editor" do
+      with_limits(session_write_per_minute: 3)
+
+      a = token_session("editor-small-a")
+      b = token_session("editor-small-b")
+
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      # A has spent its 3; B, a DIFFERENT editor, still has all 3 of its own.
+      assert RateLimit.call(mutate_with_session(a), RateLimit.init([])).halted
+      assert not RateLimit.call(mutate_with_session(b), RateLimit.init([])).halted
+    end
+
+    test "abuse limits for anonymous and token traffic are UNCHANGED by the session class" do
+      with_limits(write_per_minute: 1)
+
+      # Anonymous (no Bearer, no session at all) still gets the small
+      # write_per_minute default, not the wider session one.
+      anon = build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [])
+      assert not RateLimit.call(anon, RateLimit.init([])).halted
+      assert RateLimit.call(anon, RateLimit.init([])).halted
+
+      # A live api_token presented as a BEARER (not a session cookie) still
+      # gets write_per_minute too — the session widen is session-ONLY.
+      raw = mint("editor-bearer")
+
+      bearer_write =
+        build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+          {"authorization", "Bearer " <> raw}
+        ])
+
+      assert not RateLimit.call(bearer_write, RateLimit.init([])).halted
+      assert RateLimit.call(bearer_write, RateLimit.init([])).halted
+    end
+
+    test "a Bearer still wins over a session cookie on the SAME request" do
+      with_limits(write_per_minute: 1, session_write_per_minute: 180)
+
+      raw = mint("editor-bearer-precedence")
+      session = token_session("editor-session-precedence")
+
+      conn =
+        session_conn(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, session)
+        |> Plug.Conn.put_req_header("authorization", "Bearer " <> raw)
+
+      # Bearer resolves first (same precedence OptionalSessionToken documents),
+      # so this request is billed at write_per_minute (1), not the wider
+      # session default, even though a valid session cookie also rides along.
+      assert not RateLimit.call(conn, RateLimit.init([])).halted
+      assert RateLimit.call(conn, RateLimit.init([])).halted
+    end
+  end
 end
