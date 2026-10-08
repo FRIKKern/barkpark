@@ -160,4 +160,46 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     assert html =~ ~s(aria-label="Sign out")
     assert html =~ "Switch scope —"
   end
+
+  # task-f2d81f691f447ed9: the sheet editor's toolbar, menus and grid
+  # instructions stayed English in an nb-NO workspace.
+  test "the nb-NO sheet editor is Norwegian", %{conn: conn, ws: ws, proj: proj} do
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "sheet",
+          "title" => "Sheets",
+          "visibility" => "private",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "sheet",
+        %{
+          "doc_id" => "sheet-loc",
+          "content" => %{"tabs" => [%{"name" => "Data", "cells" => %{"A1" => %{"v" => 1}}}]}
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet/sheet-loc")
+
+    assert html =~ ~s(aria-label="Arkformatering")
+    assert html =~ ~s(aria-label="Valutaformat")
+    assert html =~ "Slå sammen"
+    assert html =~ ~s(aria-label="Meny for kolonne A")
+    assert html =~ "Trykk Escape og så Tab for å forlate rutenettet."
+    assert html =~ "Gul"
+    assert html =~ ~s(aria-label="Fet")
+    refute html =~ ~s(aria-label="Sheet formatting")
+    refute html =~ "Press Escape then Tab"
+  end
 end
