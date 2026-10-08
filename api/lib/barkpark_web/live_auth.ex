@@ -45,16 +45,19 @@ defmodule BarkparkWeb.LiveAuth do
       closed). Runs in the scoped + admin + plugin Studio live_sessions
       (router.ex).
 
-  Both hooks read `session["api_token"]` (the raw bearer token), verify it
-  via `Barkpark.Auth`, and halt with a redirect to `/studio` on failure.
+  Both hooks resolve the browser credential via `Barkpark.Auth.
+  resolve_session_credential/2`, which tries `session["api_token_session"]`
+  (a revocable session row, ruling #16 rework half, task-57f23825b18ab55d)
+  then falls back to the legacy `session["api_token"]` raw bearer for one
+  release, and halt with a redirect to `/studio` on failure.
 
   Tests inject the session token with `Plug.Test.init_test_session/2`.
 
   Browser sessions are bootstrapped at `GET /login` (see
   `BarkparkWeb.SessionController`), where a human pastes their raw API
-  token. The controller stores it under `session["api_token"]` after
-  verifying via `Barkpark.Auth.verify_token/1`. `POST /logout` clears
-  the session.
+  token. The controller mints a `Barkpark.Auth.TokenSession` and stores only
+  its opaque id under `session["api_token_session"]`. `POST /logout` deletes
+  that row and clears the session.
 
   A failed `on_mount` redirects to `/studio` with an error flash. To
   recover, the user navigates to `/login` and pastes a valid token.
@@ -129,19 +132,21 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   def on_mount(:fetch_api_token, _params, session, socket) do
-    raw =
-      case session["api_token"] do
-        token when is_binary(token) and token != "" -> token
-        _ -> dev_browser_token_fallback()
-      end
+    session_id = session["api_token_session"]
+    legacy_raw = session["api_token"]
+    explicit_present? = Auth.session_credential_present?(session_id, legacy_raw)
 
     # Server-only provenance: a failed/revoked effective credential must not be
     # indistinguishable from a genuinely anonymous Studio mount. This includes
-    # both an explicit session bearer and the configured dev-browser fallback.
-    # Most public Studio remains intentionally open in demo posture, but a
-    # reconnect that still attempts an invalidated bearer may never inherit
-    # that authority.
-    token_credential_present? = is_binary(raw) and raw != ""
+    # both an explicit session credential and the configured dev-browser
+    # fallback. Most public Studio remains intentionally open in demo posture,
+    # but a reconnect that still attempts an invalidated bearer may never
+    # inherit that authority. The dev fallback is only even TRIED when no
+    # explicit session credential was presented — a presented-but-dead
+    # explicit credential must not silently fall through to it.
+    token_credential_present? =
+      explicit_present? or
+        (is_binary(dev_browser_token_fallback()) and dev_browser_token_fallback() != "")
 
     socket =
       socket
@@ -149,29 +154,27 @@ defmodule BarkparkWeb.LiveAuth do
       |> assign(:api_token_credential_present?, token_credential_present?)
       |> arm_session_teardown(session)
 
+    resolved =
+      if explicit_present? do
+        Auth.resolve_session_credential(session_id, legacy_raw)
+      else
+        Auth.resolve_session_credential(nil, dev_browser_token_fallback())
+      end
+
     {:cont, socket} =
-      case raw do
-        nil ->
+      case resolved do
+        {:ok, api_token, raw} ->
+          {:cont,
+           socket
+           |> assign(:api_token, api_token)
+           |> assign(:api_token_raw, raw)
+           |> arm_revocation_teardown(api_token)}
+
+        :error ->
           {:cont,
            socket
            |> assign(:api_token, nil)
            |> assign(:api_token_raw, "")}
-
-        token ->
-          case Auth.verify_token(token) do
-            {:ok, api_token} ->
-              {:cont,
-               socket
-               |> assign(:api_token, api_token)
-               |> assign(:api_token_raw, token)
-               |> arm_revocation_teardown(api_token)}
-
-            _ ->
-              {:cont,
-               socket
-               |> assign(:api_token, nil)
-               |> assign(:api_token_raw, "")}
-          end
       end
 
     # Whether this viewer passes the `:ops` gate, once per mount, so the
@@ -238,9 +241,9 @@ defmodule BarkparkWeb.LiveAuth do
 
   # Dev token first: the host running Barkpark locally always gets
   # admin+ops, even if the browser is carrying a stale/insufficient
-  # `session["api_token"]` from earlier manual testing. In non-dev envs
+  # session credential from earlier manual testing. In non-dev envs
   # `dev_browser_token_fallback/0` is nil, so this is a no-op there and
-  # the real session token (or the user_session path) decides.
+  # the real session credential (or the user_session path) decides.
   # OWNER RULING 2026-10-03 #2, the LiveView twin of `RequireAdmin`: the
   # `:admin` gate (flat admin LiveViews: settings, plugin settings, …) also
   # needs the token's holder to still have admin authority where it acts — a
@@ -251,17 +254,21 @@ defmodule BarkparkWeb.LiveAuth do
   defp admin_seat_ok?(_allowed_perms, _api_token), do: true
 
   defp authorize(socket, session, allowed_perms, denial_flash) do
-    candidates = Enum.filter([dev_browser_token_fallback(), session["api_token"]], &is_binary/1)
+    candidates = [
+      Auth.resolve_session_credential(nil, dev_browser_token_fallback()),
+      Auth.resolve_session_credential(session["api_token_session"], session["api_token"])
+    ]
 
     granted =
-      Enum.find_value(candidates, fn token ->
-        with {:ok, api_token} <- Auth.verify_token(token),
-             true <- Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)),
-             true <- admin_seat_ok?(allowed_perms, api_token) do
-          api_token
-        else
-          _ -> nil
-        end
+      Enum.find_value(candidates, fn
+        {:ok, api_token, _raw} ->
+          if Enum.any?(allowed_perms, &Auth.has_permission?(api_token, &1)) and
+               admin_seat_ok?(allowed_perms, api_token) do
+            api_token
+          end
+
+        :error ->
+          nil
       end)
 
     case granted do
@@ -392,13 +399,12 @@ defmodule BarkparkWeb.LiveAuth do
   # outside :dev, so the exemption is inert in test/prod.
   defp scoped_admin_authorize(socket, session, ws) do
     granted =
-      Enum.find_value(scoped_admin_candidates(session), fn {kind, raw} ->
-        with {:ok, api_token} <- Auth.verify_token(raw),
-             true <- scoped_admin_grant?(kind, api_token, ws) do
-          api_token
-        else
-          _ -> nil
-        end
+      Enum.find_value(scoped_admin_candidates(session), fn
+        {kind, {:ok, api_token, _raw}} ->
+          if scoped_admin_grant?(kind, api_token, ws), do: api_token
+
+        {_kind, :error} ->
+          nil
       end)
 
     case granted do
@@ -439,10 +445,11 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   defp scoped_admin_candidates(session) do
-    Enum.filter(
-      [dev_root: dev_browser_token_fallback(), session: session["api_token"]],
-      fn {_kind, raw} -> is_binary(raw) end
-    )
+    [
+      {:dev_root, Auth.resolve_session_credential(nil, dev_browser_token_fallback())},
+      {:session,
+       Auth.resolve_session_credential(session["api_token_session"], session["api_token"])}
+    ]
   end
 
   defp scoped_admin_grant?(:dev_root, api_token, _ws),
@@ -526,7 +533,8 @@ defmodule BarkparkWeb.LiveAuth do
   end
 
   defp anonymous?(session) do
-    blank?(session["api_token"]) and blank?(session["user_session"])
+    blank?(session["api_token_session"]) and blank?(session["api_token"]) and
+      blank?(session["user_session"])
   end
 
   defp blank?(value), do: not (is_binary(value) and value != "")

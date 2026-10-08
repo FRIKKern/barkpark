@@ -42,7 +42,14 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
     # CSRF token state is established naturally — mirrors the recycle()
     # pattern from SessionControllerTest's "POST /logout" describe block.
     logged_in = post(conn, "/login", %{"token" => @admin_token})
-    assert get_session(logged_in, "api_token") == @admin_token
+    # Ruling #16 rework half (task-57f23825b18ab55d): a token sign-in no
+    # longer puts the raw bearer in the session — only an opaque
+    # TokenSession id. Resolve it rather than comparing the cookie directly.
+    session_id = get_session(logged_in, "api_token_session")
+    assert is_binary(session_id)
+
+    assert {:ok, %Auth.ApiToken{}, @admin_token} =
+             Auth.resolve_session_credential(session_id, nil)
 
     logged_out =
       logged_in
@@ -53,5 +60,6 @@ defmodule BarkparkWeb.Studio.SignoutChromeTest do
 
     next = recycle(logged_out) |> get("/login")
     assert get_session(next, "api_token") == nil
+    assert get_session(next, "api_token_session") == nil
   end
 end

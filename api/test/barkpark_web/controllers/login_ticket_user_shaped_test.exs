@@ -108,8 +108,17 @@ defmodule BarkparkWeb.LoginTicketUserShapedTest do
     consume = scoped_conn() |> get("/login/ticket/#{ticket}")
 
     assert redirected_to(consume) == "/studio"
-    assert get_session(consume, "api_token") == @admin_token
     refute get_session(consume, "user_session")
+
+    # Ruling #16 rework half (task-57f23825b18ab55d): the legacy token-shaped
+    # consume no longer puts the raw bearer in the session either — resolve
+    # the opaque TokenSession id instead of comparing the cookie directly.
+    refute get_session(consume, "api_token")
+    session_id = get_session(consume, "api_token_session")
+    assert is_binary(session_id)
+
+    assert {:ok, %Auth.ApiToken{}, @admin_token} =
+             Auth.resolve_session_credential(session_id, nil)
   end
 
   # ── Owner ruling #26 (2026-10-03, "Match role, revoke") ─────────────────

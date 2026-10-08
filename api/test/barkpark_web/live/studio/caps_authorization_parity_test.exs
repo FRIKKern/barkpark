@@ -829,7 +829,45 @@ defmodule BarkparkWeb.Studio.CapsAuthorizationParityTest do
              "unaccounted :api_token writer: #{String.trim(line)}"
     end
 
-    assert source =~ "Auth.verify_token(token)"
+    # Ruling #16 rework half (task-57f23825b18ab55d): the direct
+    # `Auth.verify_token(token)` call this pin used to require moved OUT of
+    # this file — every `:api_token` write's value now comes from
+    # `Auth.resolve_session_credential/2`, which itself resolves to either
+    # `Auth.verify_token/1` (the legacy raw-cookie arm) or
+    # `Auth.verify_token_session/1` (the new revocable-session arm), both in
+    # `Barkpark.Auth` and both returning only `{:ok, %ApiToken{}, raw}` or
+    # `:error` (pinned in auth_token_session_test.exs). The property this
+    # test exists to catch — a write of anything OTHER than a real verified
+    # ApiToken, e.g. a CallerContext — still has nowhere to hide.
+    assert source =~ "Auth.resolve_session_credential("
+  end
+
+  test "PIN: resolve_session_credential/2 routes BOTH branches through Auth.verify_token/1" do
+    source = File.read!("lib/barkpark/auth.ex")
+
+    # Hop 1 (the legacy raw-cookie arm): calls verify_token/1 directly on the
+    # bearer presented in `session["api_token"]`.
+    assert source =~ "def resolve_session_credential(_session_id, legacy_raw)"
+
+    assert source =~ ~r/case verify_token\(legacy_raw\) do/,
+           "the legacy-raw-cookie arm must call verify_token/1 directly"
+
+    # Hop 2 (the new revocable-session arm): delegates to
+    # verify_token_session/1, which must ITSELF call verify_token/1 on the
+    # decrypted raw bearer — not re-derive liveness from a second,
+    # hand-written copy of verify_token/1's WHERE clause. Two copies of "is
+    # this api_token still live" can drift: a future change to verify_token/1
+    # (a new revocation signal, a new `kind`) would silently not apply to a
+    # session-cookie-minted caller unless a duplicate predicate were updated
+    # in lockstep, and nothing would catch the gap. Routing through the same
+    # function makes that impossible by construction.
+    assert source =~ ~r/def resolve_session_credential\(session_id, _legacy_raw\)/
+    assert source =~ "verify_token_session(session_id)"
+
+    assert source =~ "def verify_token_session(plaintext) when is_binary(plaintext) do"
+
+    assert source =~ ~r/case verify_token\(raw\) do/,
+           "verify_token_session/1 must call verify_token/1 on the decrypted raw bearer, not a second liveness predicate"
   end
 
   # ── COST: PDS-D634's one-load property, preserved and quoted ────────────────

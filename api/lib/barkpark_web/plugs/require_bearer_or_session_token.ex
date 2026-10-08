@@ -4,7 +4,10 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
 
     * `Authorization: Bearer …` — API clients and Web Components that
       receive `data-token` from LiveView, or
-    * `session["api_token"]` — browser Studio after `POST /login`.
+    * `session["api_token_session"]` — browser Studio after `POST /login`
+      (a revocable session id resolved via `Barkpark.Auth.
+      resolve_session_credential/2`, which also tolerates the legacy
+      `session["api_token"]` raw-bearer shape for one release).
 
   Requires `:fetch_session` upstream. Used by `/media/upload` and
   `/media/:id` DELETE so same-origin browser uploads work with the
@@ -23,7 +26,7 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
 
   The Studio uploaders (`bp-asset-explorer`, `bp-media-picker`) authenticate
   with `Authorization: Bearer <data-token>` — the raw token LiveAuth derives
-  from `session["api_token"]` — so they take the bearer branch and never hit
+  from the session credential — so they take the bearer branch and never hit
   this check. Bearer (API/external) callers are unaffected: APIs don't use
   cookies and aren't a CSRF target.
   """
@@ -129,12 +132,12 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
   end
 
   defp assign_from_session(conn) do
-    case get_session(conn, "api_token") do
-      raw when is_binary(raw) and raw != "" ->
-        verify_and_assign(conn, raw)
-
-      _ ->
-        {:error, conn}
+    case Auth.resolve_session_credential(
+           get_session(conn, "api_token_session"),
+           get_session(conn, "api_token")
+         ) do
+      {:ok, token, _raw} -> {:ok, assign(conn, :api_token, token)}
+      :error -> {:error, conn}
     end
   end
 

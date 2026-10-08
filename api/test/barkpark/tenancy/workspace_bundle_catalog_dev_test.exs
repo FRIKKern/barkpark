@@ -49,7 +49,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundleCatalogDevTest do
                share_links registered_chat_hosts preview_token_jti audit_events
                chat_execution_leases chat_execution_events workspace_memberships
                sync_cursors sync_dead_letters sync_push_conflicts
-               sync_push_cursors sync_push_doc_revs) do
+               sync_push_cursors sync_push_doc_revs token_sessions) do
         assert Catalog.dev_partition()[table] == :deny,
                "#{table} is charter-denied (PDS-D4) and must never travel in a dev bundle"
       end

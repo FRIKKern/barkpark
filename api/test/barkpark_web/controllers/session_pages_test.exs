@@ -20,6 +20,7 @@ defmodule BarkparkWeb.SessionPagesTest do
   import Barkpark.TotpTestHelper
 
   alias Barkpark.Accounts
+  alias Barkpark.Auth
   alias Barkpark.Auth.ApiToken
   alias Barkpark.Repo
 
@@ -122,11 +123,13 @@ defmodule BarkparkWeb.SessionPagesTest do
   end
 
   describe "solo token-paste login (zero-tax behavioral no-op)" do
-    # The API-token paste path (SessionController.create/2) is byte-identical
-    # pre/post the enterprise-auth epic. This pins the behaviour, not the markup:
-    # a bare valid token still sets the SAME `api_token` session key and lands on
-    # the SAME `/studio` redirect, and the Cloud button stays absent with
-    # BARKPARK_CLOUD_URL unset (mirror of the branded-page no-cloud assertion).
+    # The API-token paste path (SessionController.create/2) lands on the SAME
+    # `/studio` redirect pre/post the enterprise-auth epic, and the Cloud
+    # button stays absent with BARKPARK_CLOUD_URL unset (mirror of the
+    # branded-page no-cloud assertion). The session SHAPE is not pinned here
+    # any more: ruling #16's rework half (task-57f23825b18ab55d) stopped
+    # putting the raw bearer in the session, so this now resolves the opaque
+    # TokenSession id back to the same raw token instead.
     test "a valid token sets the api_token session + redirects to /studio; no cloud button",
          %{conn: conn} do
       raw = mint_api_token!()
@@ -136,9 +139,11 @@ defmodule BarkparkWeb.SessionPagesTest do
 
       conn = post(conn, "/login", %{"token" => raw})
 
-      # SAME redirect + SAME session key the unchanged create/2 code path sets.
       assert redirected_to(conn) == "/studio"
-      assert get_session(conn, "api_token") == raw
+      refute get_session(conn, "api_token")
+      session_id = get_session(conn, "api_token_session")
+      assert is_binary(session_id)
+      assert {:ok, %ApiToken{}, ^raw} = Auth.resolve_session_credential(session_id, nil)
     end
 
     test "an invalid token re-renders the page and sets NO session (deny path)", %{conn: conn} do
