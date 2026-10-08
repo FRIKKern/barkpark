@@ -1363,11 +1363,19 @@
             kind === "image"
               ? '<img src="' + thumbUrl + '" alt="" />'
               : '<span>' + esc(kind) + "</span>";
+          // The thumbnail is decorative (alt=""), so the button carries the
+          // asset's name and whether it is the selected one — before this it
+          // had no accessible name at all (task-d4619e875ace82ca).
+          const name = esc(doc.title || (doc.fileInfo && doc.fileInfo.originalName) || id);
           return (
             '<button type="button" class="bp-ae-strip-item' +
             sel +
             '" data-id="' +
             esc(id) +
+            '" aria-label="' +
+            name +
+            '" aria-pressed="' +
+            (sel ? "true" : "false") +
             '">' +
             inner +
             "</button>"

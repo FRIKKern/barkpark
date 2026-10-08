@@ -701,6 +701,18 @@ defmodule BarkparkWeb.Studio.SettingsLiveTest do
       {:ok, view: view, html: html}
     end
 
+    # task-c451ccb816273921: every row's select was named just "Placement".
+    @tag :requires_plugins
+    test "each plugin's placement select is named for its plugin", %{view: view} do
+      html = render(view)
+      names = Regex.scan(~r/aria-label="Placement of ([^"]+)"/, html, capture: :all_but_first)
+      rows = Regex.scan(~r/data-plugin="[^"]+"/, html)
+
+      assert names != []
+      assert length(names) == length(rows)
+      assert length(Enum.uniq(names)) == length(names)
+    end
+
     # Plugins-off: registered plugins (the plugins section lists them; onixedit's bokbasen settings_schema is the typed-form fixture)
     @tag :requires_plugins
     test "lists installed plugins, each row carrying a default badge when no override exists",
