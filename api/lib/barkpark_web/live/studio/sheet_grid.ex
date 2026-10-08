@@ -1813,6 +1813,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     |> Phoenix.LiveView.JS.focus(to: "#" <> trigger_id)
   end
 
+  # task-d4619e875ace82ca: a swatch's accessible name is a colour a person can
+  # say, not its hex code. Unknown palette entries keep the hex.
+  @swatch_names %{
+    "#fde68a" => "Yellow",
+    "#bbf7d0" => "Green",
+    "#bfdbfe" => "Blue",
+    "#fecaca" => "Red",
+    "#e9d5ff" => "Purple",
+    "#e5e7eb" => "Grey"
+  }
+
+  defp swatch_name(hex), do: Map.get(@swatch_names, String.downcase(hex), hex)
+
   defp send_ops(socket, ops) do
     refs = for %{"ref" => ref} <- ops, do: ref
 
@@ -3237,9 +3250,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               select's selected option mirror the ACTIVE cell's fmt so AT reads
               the current state, not just the available actions. --%>
         <div class="sheet-fmt-group" role="group" aria-label="Number format" data-test-id="sheet-fmt-group">
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title="Currency ($1,234.50)" data-test-id="sheet-fmt-currency">$</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title="Percent (25.00%)" data-test-id="sheet-fmt-percent">%</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title="Thousands separator (1,234)" data-test-id="sheet-fmt-thousands">,</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="currency" phx-target={@myself} aria-pressed={to_string(@active_fmt == "currency")} title="Currency ($1,234.50)" aria-label="Currency format" data-test-id="sheet-fmt-currency">$</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="percent" phx-target={@myself} aria-pressed={to_string(@active_fmt == "percent")} title="Percent (25.00%)" aria-label="Percent format" data-test-id="sheet-fmt-percent">%</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-fmt" phx-value-fmt="thousands" phx-target={@myself} aria-pressed={to_string(@active_fmt == "thousands")} title="Thousands separator (1,234)" aria-label="Thousands separator" data-test-id="sheet-fmt-thousands">,</button>
           <form phx-change="set-fmt" phx-target={@myself}>
             <.bp_select
               name="fmt"
@@ -3262,9 +3275,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <div class="sheet-style-group" role="group" aria-label="Cell style" data-test-id="sheet-style-group">
           <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="b" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "b") == true)} title="Bold (Cmd/Ctrl+B)" data-test-id="sheet-style-bold"><strong>B</strong></button>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="toggle-style" phx-value-k="i" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "i") == true)} title="Italic (Cmd/Ctrl+I)" data-test-id="sheet-style-italic"><em>I</em></button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "left")} title="Align left" data-test-id="sheet-align-left">⯇</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "center")} title="Align center" data-test-id="sheet-align-center">≡</button>
-          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title="Align right" data-test-id="sheet-align-right">⯈</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="left" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "left")} title="Align left" aria-label="Align left" data-test-id="sheet-align-left">⯇</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="center" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "center")} title="Align center" aria-label="Align center" data-test-id="sheet-align-center">≡</button>
+          <button type="button" class="btn btn-ghost btn-sm" phx-click="set-align" phx-value-al="right" phx-target={@myself} aria-pressed={to_string(Map.get(@active_s, "al") == "right")} title="Align right" aria-label="Align right" data-test-id="sheet-align-right">⯈</button>
           <span class="sheet-bg-swatches" role="group" aria-label="Cell background">
             <button
               :for={swatch <- TokensGen.sheet_cf_backgrounds()}
@@ -3275,10 +3288,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               phx-value-bg={swatch}
               phx-target={@myself}
               title={"Background " <> swatch}
+              aria-label={swatch_name(swatch) <> " background"}
               data-test-id={"sheet-bg-" <> String.trim_leading(swatch, "#")}
             >
             </button>
-            <button type="button" class="btn btn-ghost btn-sm" phx-click="set-bg" phx-value-bg="" phx-target={@myself} title="Clear background" data-test-id="sheet-bg-clear">⌫</button>
+            <button type="button" class="btn btn-ghost btn-sm" phx-click="set-bg" phx-value-bg="" phx-target={@myself} title="Clear background" aria-label="Clear background" data-test-id="sheet-bg-clear">⌫</button>
           </span>
         </div>
 
@@ -3387,7 +3401,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                         A themed control would be invisible here, so they stay
                         native. --%>
                   <label :for={swatch <- TokensGen.sheet_cf_backgrounds()} class="sheet-cf-swatch-opt" title={"Background " <> swatch}>
-                    <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" />
+                    <input type="radio" name="bg" value={swatch} checked={@cf_panel["bg"] == swatch} class="sr-only" aria-label={swatch_name(swatch) <> " background"} />
                     <span class="sheet-bg-swatch" style={"background: #{swatch};"} data-test-id={"sheet-cf-bg-" <> String.trim_leading(swatch, "#")} data-selected={to_string(@cf_panel["bg"] == swatch)}></span>
                   </label>
                 </span>
