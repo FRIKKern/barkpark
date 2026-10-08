@@ -55,8 +55,8 @@ defmodule Barkpark.SchemaOwnership do
     search_intel_merge_patterns search_surface_config search_synonyms secrets
     secrets_audit share_links shares social_identities social_providers
     status_incidents sync_cursors sync_dead_letters sync_push_conflicts
-    sync_push_cursors sync_push_doc_revs task_edges user_email_tokens user_sessions
-    users webauthn_challenge_replays webauthn_credentials webhook_deliveries webhooks
+    sync_push_cursors sync_push_doc_revs task_edges token_sessions user_email_tokens
+    user_sessions users webauthn_challenge_replays webauthn_credentials webhook_deliveries webhooks
     workspace_invitations workspace_memberships workspaces
   )
 
