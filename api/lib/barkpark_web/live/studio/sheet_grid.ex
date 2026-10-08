@@ -1814,17 +1814,21 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   end
 
   # task-d4619e875ace82ca: a swatch's accessible name is a colour a person can
-  # say, not its hex code. Unknown palette entries keep the hex.
-  @swatch_names %{
-    "#fde68a" => "Yellow",
-    "#bbf7d0" => "Green",
-    "#bfdbfe" => "Blue",
-    "#fecaca" => "Red",
-    "#e9d5ff" => "Purple",
-    "#e5e7eb" => "Grey"
-  }
+  # say, not its hex code. Named by POSITION in the generated palette (no colour
+  # literal here — studio-literal-check); a palette that grows or shrinks keeps
+  # the hex for every entry rather than mislabel one.
+  @swatch_names ~w(Yellow Green Blue Red Purple Grey)
 
-  defp swatch_name(hex), do: Map.get(@swatch_names, String.downcase(hex), hex)
+  defp swatch_name(hex) do
+    palette = TokensGen.sheet_cf_backgrounds()
+
+    with true <- length(palette) == length(@swatch_names),
+         i when is_integer(i) <- Enum.find_index(palette, &(&1 == hex)) do
+      Enum.at(@swatch_names, i)
+    else
+      _ -> hex
+    end
+  end
 
   defp send_ops(socket, ops) do
     refs = for %{"ref" => ref} <- ops, do: ref
