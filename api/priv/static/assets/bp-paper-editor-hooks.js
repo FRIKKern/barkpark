@@ -3631,6 +3631,12 @@
           if (tok != null) el.setAttribute("data-token", tok);
           if (prefix != null) el.setAttribute("data-scope-prefix", prefix);
           if (pickerBrowse != null) el.setAttribute("data-picker-browse", pickerBrowse);
+          // The workspace's picker strings (nb-NO etc.): the node-views hand them to
+          // each picker they mount as its data-strings.
+          const mediaStrings = this.el.dataset.canvasMediaStrings;
+          const referenceStrings = this.el.dataset.canvasReferenceStrings;
+          if (mediaStrings != null) el.setAttribute("data-media-strings", mediaStrings);
+          if (referenceStrings != null) el.setAttribute("data-reference-strings", referenceStrings);
           // pdd-t2: the block AFTER this run in the full document is template-
           // locked (e.g. the featured image right after the title run). The WC's
           // filterTransaction reads data-locked-tail LIVE and vetoes any run

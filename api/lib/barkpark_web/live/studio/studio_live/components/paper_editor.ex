@@ -943,6 +943,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-canvas-locked-tail={@locked_tail && "true"}
       data-canvas-constraints={@constraints}
       data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
+      data-canvas-media-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
+      data-canvas-reference-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
       data-paper-doc-key={@doc_key}
       data-paper-rev={@paper_rev}
       data-document-rev={@document_rev}
@@ -4846,6 +4848,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               ref-type={Map.get(@block, "refType", "")}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:reference)}
               data-test-id="paper-field-field-reference"
             ></bp-reference-picker>
           <% else %>

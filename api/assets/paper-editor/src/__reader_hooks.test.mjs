@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import vm from 'node:vm';
 import { JSDOM } from 'jsdom';
 
-const dom = new JSDOM('<main data-paper-doc-key="production:paper:probe" data-paper-rev="7"><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
+const dom = new JSDOM('<main data-paper-doc-key="production:paper:probe" data-paper-rev="7"><button id="toggle" data-editing="true">View</button><div id="paper-canvas-probe-run-0" phx-hook="BarkparkPaperCanvas" data-canvas-blocks="[]" data-canvas-dataset="production" data-canvas-token="writer" data-canvas-scope-prefix="/w/acme/p/books" data-canvas-picker-browse="false" data-canvas-media-strings="{&quot;replace&quot;:&quot;Bytt bilde&quot;}" data-canvas-reference-strings="{&quot;remove&quot;:&quot;Fjern&quot;}"><bp-paper-canvas></bp-paper-canvas></div><form class="bp-paper-edit-form" phx-change="paper-block-autosave" phx-debounce="0"><input name="block_id" value="fallback-1"><textarea name="text">Before</textarea></form><footer><span role="status" data-test-id="bp-paper-footer-save"></span></footer></main>');
 const { window } = dom;
 let nextRequestId = 0;
 Object.defineProperty(window, 'crypto', {configurable:true, value:{
@@ -67,6 +67,10 @@ const bridge = { ...hooks.BarkparkPaperCanvas, el: wrapper,
 bridge.mounted();
 assert.equal(canvas.getAttribute('data-scope-prefix'), '/w/acme/p/books');
 assert.equal(canvas.getAttribute('data-picker-browse'), 'false');
+assert.equal(canvas.getAttribute('data-media-strings'), '{"replace":"Bytt bilde"}',
+  'the run wrapper hands the workspace media strings to the canvas host');
+assert.equal(canvas.getAttribute('data-reference-strings'), '{"remove":"Fjern"}',
+  'the run wrapper hands the workspace reference strings to the canvas host');
 
 // Real ordering on the reader: LiveView hook mounts before deferred WC upgrade.
 handlers.get('bp:block-html')({renders: [{block_id:'chart',html:'<p>Rendered chart</p>'}]});
