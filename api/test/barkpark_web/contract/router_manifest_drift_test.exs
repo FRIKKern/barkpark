@@ -236,7 +236,15 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/tickets/:*/attachments/:*"} =>
       "tickets submitter surface — ratified omission (charter D10/D11)",
     {"GET", "/v1/tickets/inbox/:*/attachments/:*"} =>
-      "operator attachment DOWNLOAD — a cookie-authed binary response, not a JSON verb"
+      "operator attachment DOWNLOAD — a cookie-authed binary response, not a JSON verb",
+    # ── Paper-canvas UI chrome strings (task-84fa11e11dacdc1b) ──────────────
+    # The locale map for a web component's own on-screen text (<bp-paper-
+    # canvas>'s buttons, placeholders, aria labels). A terminal renders no web
+    # component and has no chrome to translate, so there is nothing for a `bp`
+    # verb to fetch on its behalf — it exists for a non-LiveView BROWSER host
+    # (barkpark-studio) to stay in sync with the same map LiveView stamps.
+    {"GET", "/v1/i18n/paper_canvas"} =>
+      "paper-canvas web component's UI chrome strings — a browser host reads this, not a CLI verb"
   }
 
   # Routes a `bp` BUILT-IN already dials. These are reachable from the CLI

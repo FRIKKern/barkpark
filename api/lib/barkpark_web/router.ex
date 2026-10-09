@@ -1716,6 +1716,17 @@ defmodule BarkparkWeb.Router do
     plugin_routes(scope: :public_api)
   end
 
+  # ── i18n: UI chrome strings for a non-LiveView host (task-84fa11e11dacdc1b) ─
+  # `:public_api` core's first non-plugin mount: public, no auth, CORS-open —
+  # the Studio's own LiveView render already shows this exact text to an
+  # anonymous visitor, so a GET here discloses nothing a browser can't already
+  # see.
+  scope "/v1/i18n", BarkparkWeb do
+    pipe_through(:public_api)
+
+    get("/paper_canvas", I18nController, :paper_canvas)
+  end
+
   # ── Plugin-contributed routes — GitHub webhook (`auth: :github_webhook`) ──
   # The signature-gated, server-to-server sibling of `:public_api` (github-bridge
   # Wave 3). Same `/v1/plugins/<slug>/…` mount, but on the `:github_webhook`
