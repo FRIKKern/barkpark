@@ -5613,9 +5613,20 @@
       if (!names.some(Boolean) || hosts.length !== names.length) return;
       const label = this.el.dataset.paintedCopyLabel || bpPaperT(this.el, "Text");
       const multiline = this.el.dataset.paintedCopyMultiline;
+      // A painted row becomes a text field, so it stops being a tab or a list
+      // item: it drops the state those roles carry, and a parent whose role
+      // requires those children (the code-tabs tablist, a footnote <ol>)
+      // becomes a plain group (axe aria-allowed-attr / aria-required-children,
+      // task-29401c3d732311ff).
+      const OWNS_ONLY = /^(tablist|list|listbox|menu|menubar|radiogroup|tree)$/;
+      const roleOf = (node) =>
+        node.getAttribute("role") || (/^(OL|UL)$/.test(node.tagName) ? "list" : "");
       hosts.forEach((host, index) => {
         if (!names[index]) return;
         const lines = !!multiline && host.matches(multiline);
+        const parent = host.parentElement;
+        if (parent && parent !== this.el && OWNS_ONLY.test(roleOf(parent))) parent.setAttribute("role", "group");
+        host.removeAttribute("aria-selected");
         host.contentEditable = "plaintext-only";
         host.setAttribute("role", "textbox");
         host.setAttribute("aria-label", `${label} ${index + 1}`);
