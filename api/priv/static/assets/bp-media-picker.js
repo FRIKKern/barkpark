@@ -437,7 +437,9 @@ class BpMediaPicker extends HTMLElement {
     // Browse/Remove buttons exist only in the default variant (ghost drops the
     // whole row and routes those actions through the context menu instead).
     if (this._clearBtn) {
-      this._clearBtn.addEventListener("click", () => this._clearValue());
+      // The button hides itself once the field is empty, so focus would fall
+      // to <body>; it takes the same path as the menu's Remove.
+      this._clearBtn.addEventListener("click", () => this._removeAndFocusEmpty());
     }
     if (this._browseBtn) {
       this._browseBtn.addEventListener("click", () => this._openBrowser());
@@ -729,13 +731,15 @@ class BpMediaPicker extends HTMLElement {
   _runMenuAction(id) {
     if (id === "upload") this.openFileDialog();
     else if (id === "browse") this.openBrowser();
-    else if (id === "remove") {
-      this._clearValue();
-      // Keyboard continuity after the destructive action: the field just went
-      // empty — land focus on the empty-state card (the next affordance).
-      const card = this._previewEl && this._previewEl.querySelector(".bp-mp-empty");
-      if (card && typeof card.focus === "function") card.focus();
-    }
+    else if (id === "remove") this._removeAndFocusEmpty();
+  }
+
+  // Keyboard continuity after the destructive action: the field just went
+  // empty — land focus on the empty-state card (the next affordance).
+  _removeAndFocusEmpty() {
+    this._clearValue();
+    const card = this._previewEl && this._previewEl.querySelector(".bp-mp-empty");
+    if (card && typeof card.focus === "function") card.focus();
   }
 
   _setClearVisible(visible) {
