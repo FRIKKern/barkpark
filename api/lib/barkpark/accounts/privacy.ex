@@ -32,7 +32,8 @@ defmodule Barkpark.Accounts.Privacy do
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken, WebauthnCredential}
   alias Barkpark.Sso.SocialIdentity
-  alias Barkpark.Tenancy.Membership
+  alias Barkpark.Tenancy.{Invitation, Membership}
+  alias Barkpark.UserPrefs.UserPref
   alias Barkpark.Audit.Event
 
   @erased_domain "erased.invalid"
@@ -52,6 +53,13 @@ defmodule Barkpark.Accounts.Privacy do
 
   Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
   `:actor_label`. One query, however many rows.
+
+  Prefers the account's `display_name` (task-cfb6ca3f5ffaf099, #22161) over
+  its email — the same J15/J16 attribution preference Studio's own account
+  settings exist to let a person set. An account with no display name (the
+  pre-#22161 default, and `display_name_changeset/2`'s own trimmed-blank-to-
+  nil normalization) falls back to email exactly as this function always
+  resolved before #22161 existed.
   """
   #
   # An `"api_token"` row is named the same way through the token's owner
@@ -63,25 +71,27 @@ defmodule Barkpark.Accounts.Privacy do
     token_owners = token_owner_ids(actor_ids(rows, "api_token"))
     user_ids = Enum.uniq(actor_ids(rows, "user") ++ Map.values(token_owners))
 
-    emails =
+    labels =
       case user_ids do
         [] ->
           %{}
 
         ids ->
-          from(u in User, where: u.id in ^ids, select: {u.id, u.email})
+          from(u in User, where: u.id in ^ids, select: {u.id, {u.display_name, u.email}})
           |> Repo.all()
-          |> Map.new()
+          |> Map.new(fn {id, {display_name, email}} ->
+            {id, preferred_label(display_name, email)}
+          end)
       end
 
-    if emails == %{} do
+    if labels == %{} do
       rows
     else
       Enum.map(rows, fn row ->
         case label_owner(row, token_owners) do
           id when is_binary(id) ->
-            case Map.fetch(emails, id) do
-              {:ok, email} -> Map.put(row, :actor_label, email)
+            case Map.fetch(labels, id) do
+              {:ok, label} -> Map.put(row, :actor_label, label)
               :error -> row
             end
 
@@ -91,6 +101,15 @@ defmodule Barkpark.Accounts.Privacy do
       end)
     end
   end
+
+  defp preferred_label(display_name, email) when is_binary(display_name) do
+    case String.trim(display_name) do
+      "" -> email
+      trimmed -> trimmed
+    end
+  end
+
+  defp preferred_label(_display_name, email), do: email
 
   defp actor_ids(rows, kind) do
     rows
@@ -365,6 +384,24 @@ defmodule Barkpark.Accounts.Privacy do
     {social_identities, _} =
       Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user.id)
 
+    # task-7d2a48dbf7e4bf34 (#22013) postdates this function: a per-account
+    # prefs row (`value`, a caller-chosen JSON blob -- "recent_searches",
+    # list filters, ...) can hold genuinely personal/behavioural data, and
+    # unlike `workspace_memberships` above this table has NO pseudonymised
+    # alternative to fall back to. Deleted outright, same as the other
+    # per-account rows above it (sessions, email tokens, passkeys,
+    # social-login links) that have nothing worth pseudonymising either.
+    {user_prefs, _} = Repo.delete_all(from p in UserPref, where: p.user_id == ^user.id)
+
+    # Same reasoning, for a PENDING seat (OWNER RULING 2026-10-03 #7): it is
+    # not a real membership (never read by any authorization check), but it
+    # is still a live `user_id` reference this function left untouched. An
+    # erased account accepting an invite later would seat a pseudonymised
+    # identity into a workspace an admin meant for the real person who no
+    # longer exists under that id -- deleted outright, same as `memberships`
+    # below it.
+    {invitations, _} = Repo.delete_all(from i in Invitation, where: i.user_id == ^user.id)
+
     erased_email = "erased-#{user.id}@#{@erased_domain}"
 
     Repo.update_all(from(t in ApiToken, where: t.created_by == ^user.email),
@@ -395,7 +432,14 @@ defmodule Barkpark.Accounts.Privacy do
         totp_enabled: false,
         recovery_codes_hashed: [],
         last_totp_at: nil,
-        confirmed_at: nil
+        confirmed_at: nil,
+        # task-cfb6ca3f5ffaf099/#22161 postdates this function: a display
+        # name is free-text a person sets (often their real name), and
+        # `redact_actor_labels/1` now PREFERS it over email. Leaving it
+        # standing here would un-pseudonymise exactly the row this function
+        # exists to pseudonymise — erasure clears it the same way it already
+        # clears every other re-identifying field.
+        display_name: nil
       })
       |> Repo.update!()
 
@@ -413,7 +457,9 @@ defmodule Barkpark.Accounts.Privacy do
         "passkeys_deleted" => passkeys,
         "social_identities_deleted" => social_identities,
         "grants_pseudonymised" => grants_pseudonymised,
-        "memberships_deleted" => memberships
+        "memberships_deleted" => memberships,
+        "user_prefs_deleted" => user_prefs,
+        "invitations_deleted" => invitations
       }
     })
 
@@ -425,6 +471,8 @@ defmodule Barkpark.Accounts.Privacy do
       social_identities_deleted: social_identities,
       grants_pseudonymised: grants_pseudonymised,
       memberships_deleted: memberships,
+      user_prefs_deleted: user_prefs,
+      invitations_deleted: invitations,
       revoked_token_ids: revoked_token_ids
     }
   end
