@@ -417,4 +417,76 @@ defmodule Barkpark.Content.EnvelopeTest do
       assert Envelope.source_map(doc, %{}) == nil
     end
   end
+
+  describe "source_map_many/2 (task-b54d854d43769266)" do
+    setup do
+      {:ok, doc2} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "env-sm-many-2", "title" => "Second"},
+          "test"
+        )
+
+      %{doc2: doc2}
+    end
+
+    test "each row's mapping addresses ITS OWN row index, not document 0 for every row", %{
+      doc: doc,
+      doc2: doc2
+    } do
+      rendered_list = [Envelope.render(doc), Envelope.render(doc2)]
+      map = Envelope.source_map_many([doc, doc2], rendered_list)
+
+      assert [
+               %{"_id" => "drafts.env-1", "_type" => "post"},
+               %{"_id" => "drafts.env-sm-many-2", "_type" => "post"}
+             ] = map["documents"]
+
+      row0_title = ~s($[0]["title"])
+      row1_title = ~s($[1]["title"])
+      assert map["mappings"][row0_title]["source"]["document"] == 0
+      assert map["mappings"][row1_title]["source"]["document"] == 1
+    end
+
+    test "two rows sharing the SAME document still get independent addresses", %{doc: doc} do
+      rendered = Envelope.render(doc)
+      map = Envelope.source_map_many([doc, doc], [rendered, rendered])
+
+      assert length(map["documents"]) == 2
+      refute map["mappings"][~s($[0]["title"])] == map["mappings"][~s($[1]["title"])]
+      assert map["mappings"][~s($[0]["title"])]["source"]["document"] == 0
+      assert map["mappings"][~s($[1]["title"])]["source"]["document"] == 1
+    end
+
+    test "a row with no visible user-content key still gets a documents entry, keeping the " <>
+           "index correspondence intact for the row after it",
+         %{doc: doc, doc2: doc2} do
+      map = Envelope.source_map_many([doc, doc2], [%{}, Envelope.render(doc2)])
+
+      assert length(map["documents"]) == 2
+      refute Map.has_key?(map["mappings"], ~s($[0]["title"]))
+      assert map["mappings"][~s($[1]["title"])]["source"]["document"] == 1
+    end
+
+    test "a reserved key never appears in any row's mapping", %{doc: doc, doc2: doc2} do
+      rendered_list = [Envelope.render(doc), Envelope.render(doc2)]
+      map = Envelope.source_map_many([doc, doc2], rendered_list)
+
+      for row <- [0, 1],
+          reserved <- ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt) do
+        refute Map.has_key?(map["mappings"], ~s($[#{row}]["#{reserved}"]))
+      end
+    end
+
+    test "an empty result list returns nil" do
+      assert Envelope.source_map_many([], []) == nil
+    end
+
+    test "every row fully redacted (no visible fields anywhere) returns nil" do
+      assert Envelope.source_map_many(
+               [%Barkpark.Content.Document{doc_id: "a", type: "post"}],
+               [%{}]
+             ) == nil
+    end
+  end
 end

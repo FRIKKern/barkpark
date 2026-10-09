@@ -285,7 +285,81 @@ defmodule Barkpark.Content.Envelope do
 
   def source_map(_doc, _rendered), do: nil
 
+  @doc """
+  List-result sibling of `source_map/2` (task-b54d854d43769266). A list page
+  (home-page cards, a title+author listing) reads `/v1/data/query`, which
+  answers no source map, so a click-to-edit overlay could only mark up a
+  list's rows with one doc-get per row. Same rule as `source_map/2` — walk
+  an ALREADY-RENDERED envelope, never re-derive visibility — applied once
+  per ROW instead of once per document.
+
+  `docs` and `rendered_list` must be the SAME LENGTH, in the SAME ORDER
+  `Envelope.render_many/3` produced: the ROW INDEX is what addresses a
+  mapping's `"document"` entry, so `documents[i]` is always row `i`'s
+  source, 1:1 and NEVER deduped — two rows that happen to share a document
+  still get two independent addresses, so an edit anchored to one row can
+  never alias the other's. A row with no visible user-content field still
+  gets a `documents` entry (keeping the index correspondence intact for
+  every later row) but contributes no mapping.
+
+  Flat fields only, same scope cut as `source_map/2` — see that function's
+  doc for what is deliberately NOT covered here (`?expand=`, computed
+  fields). Returns `nil` when no row has a single visible field at all (an
+  empty result set, or every row fully redacted).
+  """
+  @spec source_map_many([Content.Document.t()], [map()]) :: map() | nil
+  def source_map_many(docs, rendered_list) when is_list(docs) and is_list(rendered_list) do
+    {documents, mappings, any_mapped?} =
+      docs
+      |> Enum.zip(rendered_list)
+      |> Enum.with_index()
+      |> Enum.reduce({[], %{}, false}, &reduce_row_source_map/2)
+
+    if any_mapped? do
+      %{
+        "documents" => Enum.reverse(documents),
+        "paths" => mappings |> Map.keys() |> Enum.sort(),
+        "mappings" => mappings
+      }
+    end
+  end
+
+  def source_map_many(_docs, _rendered_list), do: nil
+
+  defp reduce_row_source_map(
+         {{%{doc_id: doc_id, type: type}, rendered}, row_idx},
+         {docs_acc, mappings_acc, any_mapped?}
+       )
+       when is_map(rendered) do
+    doc_entry = %{"_id" => doc_id, "_type" => type}
+
+    case rendered |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort() do
+      [] ->
+        {[doc_entry | docs_acc], mappings_acc, any_mapped?}
+
+      keys ->
+        row_mappings =
+          keys
+          |> Enum.with_index()
+          |> Map.new(fn {key, field_idx} ->
+            {row_result_path(row_idx, key),
+             %{"source" => %{"document" => row_idx, "path" => field_idx}, "type" => "value"}}
+          end)
+
+        {[doc_entry | docs_acc], Map.merge(mappings_acc, row_mappings), true}
+    end
+  end
+
+  # A row whose document/rendered pair doesn't match the expected shape (it
+  # should never happen — render_many/3 always returns one map per input doc
+  # — but this function takes two lists a CALLER zips, not one it derives
+  # itself) contributes no entry rather than raising, same fail-soft posture
+  # `source_map/2`'s own no-match clause takes.
+  defp reduce_row_source_map(_pair, acc), do: acc
+
   defp result_path(key), do: "$[#{inspect(key)}]"
+
+  defp row_result_path(row_idx, key), do: "$[#{row_idx}][#{inspect(key)}]"
 
   @doc """
   Redact an ALREADY-rendered envelope map under a subscriber's caller context —
