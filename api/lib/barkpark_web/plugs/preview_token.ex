@@ -1,7 +1,9 @@
 defmodule BarkparkWeb.Plugs.PreviewToken do
   @moduledoc """
   Verifies a short-lived preview JWT from `Authorization: Preview <jwt>`
-  or `?preview_token=<jwt>`. Forces perspective to drafts on success.
+  or `?preview_token=<jwt>`. Forces perspective to drafts on success, UNLESS
+  the request explicitly asks for `?perspective=published` or `?perspective=
+  raw` (task-500b916ecdb0d1c0) — see `requested_perspective/1` below.
 
   ## What a token may read (owner ruling #17, task-8bac87cd4b34aeb6)
 
@@ -100,7 +102,7 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
          {:ok, _} <- maybe_record_jti(claims) do
       conn
       |> assign(:preview_claims, claims)
-      |> assign(:forced_perspective, "drafts")
+      |> assign(:forced_perspective, requested_perspective(conn))
       |> maybe_assign_doc_ids(doc_ids)
     else
       {:error, :already_used} -> deny(conn, :replay)
@@ -289,6 +291,29 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
       not is_binary(route_ds) -> :ok
       claim_ds == route_ds -> :ok
       true -> {:error, :dataset_mismatch}
+    end
+  end
+
+  # task-500b916ecdb0d1c0 — a Preview JWT used to force "drafts" NO MATTER
+  # what the caller asked for, so a Presentation Published-view switch (J63)
+  # reading through the SAME scoped token as its draft preview could never
+  # see the published page: `AnonPerspective.resolve/2` reads
+  # `conn.assigns[:forced_perspective]` FIRST and ignores `?perspective=`
+  # entirely once it is set (see that module's moduledoc). "drafts" is still
+  # the default when the caller asks for nothing — unchanged for every
+  # existing integration — but an EXPLICIT `?perspective=published` or
+  # `?perspective=raw` now rides through instead of being silently
+  # overridden. `AnonPerspective.parse/1` already treats anything else as
+  # `:published`, so this never WIDENS what a value could resolve to — it
+  # only lets the token's own scope (dataset/workspace/doc_ids, checked
+  # above) decide what is readable, same as it always has for a Bearer
+  # caller.
+  defp requested_perspective(conn) do
+    conn = fetch_query_params(conn)
+
+    case conn.query_params["perspective"] do
+      p when p in ["published", "raw"] -> p
+      _ -> "drafts"
     end
   end
 
