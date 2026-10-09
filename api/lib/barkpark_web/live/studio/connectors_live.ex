@@ -65,6 +65,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
   alias Barkpark.Connectors.Catalog
   alias Barkpark.Connectors.ConnectTicket
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
+  alias BarkparkWeb.Studio.ConnectorsCopy
 
   @dataset "production"
 
@@ -78,7 +79,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     {:ok,
      socket
      |> assign(
-       page_title: "Connectors",
+       page_title: gettext("Connectors"),
        providers: Catalog.providers(),
        tool_providers: Catalog.tool_providers(),
        installs: %{},
@@ -170,8 +171,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
          error: nil
        })}
     else
-      {:error, :forbidden} -> {:noreply, deny(socket)}
-      _ -> {:noreply, put_flash(socket, :error, "That provider cannot be connected here.")}
+      {:error, :forbidden} ->
+        {:noreply, deny(socket)}
+
+      _ ->
+        {:noreply, put_flash(socket, :error, gettext("That provider cannot be connected here."))}
     end
   end
 
@@ -208,13 +212,17 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         {:noreply, deny(socket)}
 
       {:error, :blank} ->
-        {:noreply, dialog_error(socket, "Paste the token first.")}
+        {:noreply, dialog_error(socket, gettext("Paste the token first."))}
 
       {:error, :not_configured} ->
         {:noreply, dialog_error(socket, not_configured_message())}
 
       {:error, ticket_err} when is_atom(ticket_err) ->
-        {:noreply, dialog_error(socket, "Could not sign a connect ticket (#{ticket_err}).")}
+        {:noreply,
+         dialog_error(
+           socket,
+           gettext("Could not sign a connect ticket (%{reason}).", reason: ticket_err)
+         )}
 
       _ ->
         {:noreply, assign(socket, :dialog, nil)}
@@ -282,14 +290,22 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
            |> reload()
            |> put_flash(
              :info,
-             "Disconnected #{provider_name(provider)}. #{revoked} token#{plural(revoked)} revoked."
+             ngettext(
+               "Disconnected %{provider}. %{count} token revoked.",
+               "Disconnected %{provider}. %{count} tokens revoked.",
+               revoked,
+               provider: provider_name(provider)
+             )
            )}
 
         {:error, reason} ->
           {:noreply,
            socket
            |> assign(:disconnecting, nil)
-           |> put_flash(:error, "Could not disconnect: #{bridge_message(reason)}")}
+           |> put_flash(
+             :error,
+             gettext("Could not disconnect: %{reason}", reason: bridge_message(reason))
+           )}
       end
     else
       {:error, :forbidden} ->
@@ -337,7 +353,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       {:ok, %{install_key: other}} ->
         dialog_error(
           socket,
-          "The bridge installed #{other}, not #{install_key}. Nothing was connected."
+          gettext("The bridge installed %{other}, not %{key}. Nothing was connected.",
+            other: other,
+            key: install_key
+          )
         )
 
       {:error, reason} ->
@@ -368,7 +387,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
             dialog_error(
               socket,
-              "The bridge installed #{other}, not #{install_key}. Nothing was connected."
+              gettext("The bridge installed %{other}, not %{key}. Nothing was connected.",
+                other: other,
+                key: install_key
+              )
             )
 
           {:error, reason} ->
@@ -380,7 +402,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
       {:error, reason} ->
         Logger.warning("connectors: chat-token mint failed for #{provider}: #{inspect(reason)}")
-        dialog_error(socket, "Could not mint a workspace chat token.")
+        dialog_error(socket, gettext("Could not mint a workspace chat token."))
     end
   end
 
@@ -434,7 +456,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     |> assign(dialog: nil, disconnecting: nil)
     |> put_flash(
       :error,
-      "You need to be an owner or admin of this workspace to change its connectors."
+      gettext("You need to be an owner or admin of this workspace to change its connectors.")
     )
   end
 
@@ -539,9 +561,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       nil ->
         oauth_gate(
           provider,
-          "Add to Slack is not configured on this instance — it needs a Slack app " <>
-            "(a client id from api.slack.com and a public callback URL). See " <>
-            "docs/ops/slack-app.md."
+          gettext(
+            "Add to Slack is not configured on this instance — it needs a Slack app (a client id from api.slack.com and a public callback URL). See docs/ops/slack-app.md."
+          )
         )
 
       cfg ->
@@ -565,13 +587,15 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
               oauth_gate(
                 provider,
-                "Add to Slack is unavailable right now: #{bridge_message(reason)}"
+                gettext("Add to Slack is unavailable right now: %{reason}",
+                  reason: bridge_message(reason)
+                )
               )
           end
         else
           {:error, reason} ->
             Logger.warning("connectors: could not prepare Add to Slack: #{inspect(reason)}")
-            oauth_gate(provider, "Could not prepare Add to Slack.")
+            oauth_gate(provider, gettext("Could not prepare Add to Slack."))
         end
     end
   end
@@ -587,9 +611,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       nil ->
         oauth_gate(
           provider,
-          "Connect Linear is not configured on this instance — it needs a Linear OAuth app " <>
-            "(a client id from linear.app/settings/api and a public callback URL). See " <>
-            "docs/ops/linear-app.md."
+          gettext(
+            "Connect Linear is not configured on this instance — it needs a Linear OAuth app (a client id from linear.app/settings/api and a public callback URL). See docs/ops/linear-app.md."
+          )
         )
 
       cfg ->
@@ -601,7 +625,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
           {:error, reason} ->
             Logger.warning("connectors: could not prepare Connect Linear: #{inspect(reason)}")
-            oauth_gate(provider, "Could not prepare Connect Linear.")
+            oauth_gate(provider, gettext("Could not prepare Connect Linear."))
         end
     end
   end
@@ -614,8 +638,8 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   # The connect CTA text, provider-derived — "Add to Slack" / "Connect Linear" —
   # so the hardcoded anchor never reads "Add to Slack" on Linear's card.
-  defp oauth_cta_label(%{id: "slack"}), do: "Add to Slack"
-  defp oauth_cta_label(%{name: name}), do: "Connect #{name}"
+  defp oauth_cta_label(%{id: "slack"}), do: gettext("Add to Slack")
+  defp oauth_cta_label(%{name: name}), do: gettext("Connect %{name}", name: name)
 
   defp slack_oauth_label, do: Catalog.token_label("slack", "oauth")
 
@@ -636,17 +660,23 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
   defp bridge_message(:unreachable),
     do:
-      "The connectors bridge is not answering on this instance. Nothing was connected — " <>
-        "check that barkpark-connectors is running."
+      gettext(
+        "The connectors bridge is not answering on this instance. Nothing was connected — check that barkpark-connectors is running."
+      )
 
   defp bridge_message({:refused, reason}) when is_binary(reason), do: reason
-  defp bridge_message({:http, status}), do: "The bridge returned HTTP #{status}."
-  defp bridge_message(other), do: "The bridge failed: #{inspect(other)}"
+
+  defp bridge_message({:http, status}),
+    do: gettext("The bridge returned HTTP %{status}.", status: status)
+
+  defp bridge_message(other),
+    do: gettext("The bridge failed: %{reason}", reason: inspect(other))
 
   defp not_configured_message,
     do:
-      "Connect is not configured on this instance (no CONNECTORS_CONNECT_SECRET). " <>
-        "The catalog is read-only."
+      gettext(
+        "Connect is not configured on this instance (no CONNECTORS_CONNECT_SECRET). The catalog is read-only."
+      )
 
   defp provider_name(id) do
     case Catalog.provider(id) do
@@ -654,9 +684,6 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       _ -> id
     end
   end
-
-  defp plural(1), do: ""
-  defp plural(_), do: "s"
 
   defp connected_at(%{created_at: %DateTime{} = at}),
     do: Calendar.strftime(at, "%Y-%m-%d %H:%M UTC")
@@ -678,12 +705,12 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       class="connectors-live"
       style="max-width: 960px; margin: 32px auto; padding: 0 24px; font-family: var(--font);"
     >
-      <h1 class="h1" style="margin-bottom: 4px;">Connectors</h1>
+      <h1 class="h1" style="margin-bottom: 4px;">{gettext("Connectors")}</h1>
       <p style="color: var(--fg-muted); margin-top: 0;">
-        Talk to your agent from the places your team already is. Each connector belongs to
+        {gettext("Talk to your agent from the places your team already is. Each connector belongs to")}
         <strong :if={@current_workspace}>{@current_workspace.name}</strong>
-        <span :if={!@current_workspace}>this workspace</span>
-        — its credentials never leave it.
+        <span :if={!@current_workspace}>{gettext("this workspace")}</span>
+        {gettext("— its credentials never leave it.")}
       </p>
 
       <div
@@ -692,7 +719,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         class="card"
         style="border: 1px solid var(--border); border-left: 3px solid var(--warn); border-radius: 8px; padding: 12px 16px; margin: 16px 0; background: var(--bg-card);"
       >
-        <strong>Connect is not configured on this instance.</strong>
+        <strong>{gettext("Connect is not configured on this instance.")}</strong>
         <%!-- The setup step is an operator's (a deploy secret and an ops doc).
               A workspace admin cannot take it, so they read who can
               (task-9606fa7f7daaf674). --%>
@@ -701,9 +728,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           class="text-sm"
           style="color: var(--fg-muted); margin: 4px 0 0;"
         >
-          No <code>CONNECTORS_CONNECT_SECRET</code>
-          is set, so Barkpark cannot authorize a connect against the bridge. The catalog below is
-          read-only. A deploy generates the secret once — see
+          {gettext("No")} <code>CONNECTORS_CONNECT_SECRET</code>
+          {gettext(
+            "is set, so Barkpark cannot authorize a connect against the bridge. The catalog below is read-only. A deploy generates the secret once — see"
+          )}
           <code>docs/ops/connectors-deploy.md</code>.
         </p>
         <p
@@ -712,15 +740,18 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           style="color: var(--fg-muted); margin: 4px 0 0;"
           data-test-id="connectors-readonly-ask-admin"
         >
-          The installation admin has not set up connectors yet, so the catalog below is
-          read-only. Ask them to enable connectors for this installation.
+          {gettext(
+            "The installation admin has not set up connectors yet, so the catalog below is read-only. Ask them to enable connectors for this installation."
+          )}
         </p>
       </div>
 
       <section data-test-id="connectors-section-channels">
-        <h2 class="h2" style="margin: 32px 0 4px;">Channels</h2>
+        <h2 class="h2" style="margin: 32px 0 4px;">{gettext("Channels")}</h2>
         <p class="text-sm" style="color: var(--fg-muted); margin: 0 0 8px;">
-          Places your team already talks — connect one and messages reach your agent there.
+          {gettext(
+            "Places your team already talks — connect one and messages reach your agent there."
+          )}
         </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px;">
           <.provider_card
@@ -735,10 +766,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       </section>
 
       <section data-test-id="connectors-section-tools">
-        <h2 class="h2" style="margin: 32px 0 4px;">Tools</h2>
+        <h2 class="h2" style="margin: 32px 0 4px;">{gettext("Tools")}</h2>
         <p class="text-sm" style="color: var(--fg-muted); margin: 0 0 8px;">
-          Services your agent can ACT on — connect one and it can open pull requests, file
-          issues, and more on your behalf.
+          {gettext(
+            "Services your agent can ACT on — connect one and it can open pull requests, file issues, and more on your behalf."
+          )}
         </p>
         <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px;">
           <.provider_card
@@ -767,24 +799,26 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           style="background: var(--bg-card); color: var(--fg); padding: 24px; min-width: 420px; max-width: 560px; border-radius: 10px; display: flex; flex-direction: column; gap: 12px;"
         >
           <h2 class="h3" style="margin: 0;">
-            Disconnect {provider_name(@disconnecting.provider)}?
+            {gettext("Disconnect %{provider}?", provider: provider_name(@disconnecting.provider))}
           </h2>
           <p class="text-sm" style="color: var(--fg-muted); margin: 0;">
-            The bridge unmounts <code>{@disconnecting.install_key}</code>
-            and deletes the install, and Barkpark revokes the chat token it was using. Messages sent
-            to it will stop reaching your agent immediately. You can reconnect by pasting the token
-            again.
+            {gettext("The bridge unmounts")} <code>{@disconnecting.install_key}</code>
+            {gettext(
+              "and deletes the install, and Barkpark revokes the chat token it was using. Messages sent to it will stop reaching your agent immediately. You can reconnect by pasting the token again."
+            )}
           </p>
           <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button type="button" class="btn" phx-click="cancel_disconnect">Cancel</button>
+            <button type="button" class="btn" phx-click="cancel_disconnect">
+              {gettext("Cancel")}
+            </button>
             <button
               type="button"
               class="btn btn-destructive"
               phx-click="confirm_disconnect"
-              phx-disable-with="Disconnecting…"
+              phx-disable-with={gettext("Disconnecting…")}
               data-test-id="connectors-confirm-disconnect"
             >
-              Disconnect
+              {gettext("Disconnect")}
             </button>
           </div>
         </div>
@@ -822,10 +856,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         </span>
       </div>
 
-      <p class="text-sm" style="margin: 0;">{@provider.blurb}</p>
+      <p class="text-sm" style="margin: 0;">{ConnectorsCopy.translate(@provider.blurb)}</p>
 
       <p class="text-sm" style="margin: 0; color: var(--fg-muted);">
-        <strong>What it takes:</strong> {@provider.effort}
+        <strong>{gettext("What it takes:")}</strong> {ConnectorsCopy.translate(@provider.effort)}
       </p>
 
       <div
@@ -835,9 +869,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         style="border-top: 1px solid var(--border); padding-top: 8px; color: var(--fg-muted);"
       >
         <div>
-          Install <code>{install.install_key}</code>
+          {gettext("Install")} <code>{install.install_key}</code>
         </div>
-        <div>Connected {connected_at(install)}</div>
+        <div>{gettext("Connected %{at}", at: connected_at(install))}</div>
         <.webhook_endpoint_row provider_id={@provider.id} install_key={install.install_key} />
       </div>
 
@@ -847,7 +881,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         class="text-sm"
         style="margin: 0; color: var(--fg-muted); border-left: 2px solid var(--border); padding-left: 10px;"
       >
-        {@provider.gate}
+        {ConnectorsCopy.translate(@provider.gate)}
       </p>
 
       <p
@@ -874,7 +908,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           phx-value-provider={@provider.id}
           data-test-id={"connector-connect-#{@provider.id}"}
         >
-          Connect
+          {gettext("Connect")}
         </button>
 
         <%!-- OAuth providers (Slack channel, Linear tool) connect over an external
@@ -906,7 +940,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           phx-value-install_key={install.install_key}
           data-test-id={"connector-disconnect-#{@provider.id}"}
         >
-          Disconnect
+          {gettext("Disconnect")}
         </button>
 
         <a
@@ -916,7 +950,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           rel="noopener noreferrer"
           class="btn btn-sm"
         >
-          How to get a token
+          {gettext("How to get a token")}
         </a>
       </div>
     </div>
@@ -954,7 +988,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       style="margin-top: 8px;"
     >
       <div class="text-sm" style="color: var(--fg-muted); font-weight: 600;">
-        {@endpoint.label}
+        {ConnectorsCopy.translate(@endpoint.label)}
       </div>
 
       <div
@@ -971,9 +1005,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           data-url={@endpoint.url}
           onclick={BarkparkWeb.CSP.copy_data_url_onclick()}
           data-test-id={"connector-webhook-copy-#{@provider_id}"}
-          title="Copy webhook URL"
+          title={gettext("Copy webhook URL")}
         >
-          Copy
+          {gettext("Copy")}
         </button>
       </div>
 
@@ -983,11 +1017,11 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         class="text-sm"
         style="margin-top: 2px; color: var(--fg-muted);"
       >
-        Endpoint unavailable — public base not configured.
+        {gettext("Endpoint unavailable — public base not configured.")}
       </div>
 
       <p :if={@endpoint.help} class="text-sm" style="margin: 4px 0 0; color: var(--fg-muted);">
-        {@endpoint.help}
+        {ConnectorsCopy.translate(@endpoint.help)}
       </p>
     </div>
     """
@@ -1012,7 +1046,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         style="background: var(--bg-card); color: var(--fg); padding: 24px; min-width: 480px; max-width: 620px; border-radius: 10px; display: flex; flex-direction: column; gap: 12px;"
       >
         <h2 id="connectors-connect-title" class="h3" style="margin: 0;">
-          Connect {@card.name}
+          {gettext("Connect %{name}", name: @card.name)}
         </h2>
 
         <p
@@ -1026,7 +1060,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
 
         <%= if @dialog.step == :paste do %>
           <form phx-submit="validate_credential" style="display: flex; flex-direction: column; gap: 10px;">
-            <label class="text-sm" for="connector-credential">{@card.credential_label}</label>
+            <label class="text-sm" for="connector-credential">
+              {ConnectorsCopy.translate(@card.credential_label)}
+            </label>
             <input
               id="connector-credential"
               type="password"
@@ -1039,42 +1075,49 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
               style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-family: var(--font-mono, monospace);"
             />
             <p :if={@card.credential_hint} class="text-sm" style="margin: 0; color: var(--fg-muted);">
-              {@card.credential_hint}
+              {ConnectorsCopy.translate(@card.credential_hint)}
             </p>
             <p class="text-sm" style="margin: 0; color: var(--fg-muted);">
-              Barkpark checks the token with {@card.name} before storing anything. It is sealed on
-              this box and never leaves it.
+              {gettext(
+                "Barkpark checks the token with %{name} before storing anything. It is sealed on this box and never leaves it.",
+                name: @card.name
+              )}
             </p>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button type="button" class="btn" phx-click="close_dialog">Cancel</button>
+              <button type="button" class="btn" phx-click="close_dialog">
+                {gettext("Cancel")}
+              </button>
               <button
                 type="submit"
                 class="btn btn-primary"
-                phx-disable-with="Checking with the provider…"
+                phx-disable-with={gettext("Checking with the provider…")}
                 data-test-id="connectors-validate-submit"
               >
-                Check token
+                {gettext("Check token")}
               </button>
             </div>
           </form>
         <% else %>
           <div data-test-id="connectors-confirm-step" style="display: flex; flex-direction: column; gap: 10px;">
             <p class="text-sm" style="margin: 0;">
-              That token belongs to
+              {gettext("That token belongs to")}
               <strong data-test-id="connectors-candidate-name">{@dialog.candidate.display_name}</strong>
-              (<code>{@dialog.candidate.install_key}</code>). Connecting mints a chat token for this
-              workspace, hands it to the bridge, and mounts the bot — no restart.
+              (<code>{@dialog.candidate.install_key}</code>). {gettext(
+                "Connecting mints a chat token for this workspace, hands it to the bridge, and mounts the bot — no restart."
+              )}
             </p>
             <div style="display: flex; gap: 8px; justify-content: flex-end;">
-              <button type="button" class="btn" phx-click="close_dialog">Cancel</button>
+              <button type="button" class="btn" phx-click="close_dialog">
+                {gettext("Cancel")}
+              </button>
               <button
                 type="button"
                 class="btn btn-primary"
                 phx-click="confirm_connect"
-                phx-disable-with="Connecting…"
+                phx-disable-with={gettext("Connecting…")}
                 data-test-id="connectors-confirm-connect"
               >
-                Yes, connect it
+                {gettext("Yes, connect it")}
               </button>
             </div>
           </div>
@@ -1084,9 +1127,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
     """
   end
 
-  defp status_label([_ | _], _loaded?), do: "Connected"
-  defp status_label([], true), do: "Not connected"
-  defp status_label([], false), do: "Loading…"
+  defp status_label([_ | _], _loaded?), do: gettext("Connected")
+  defp status_label([], true), do: gettext("Not connected")
+  defp status_label([], false), do: gettext("Loading…")
 
   defp status_color([_ | _], _loaded?), do: "var(--ok)"
   defp status_color([], _loaded?), do: "var(--fg-muted)"
