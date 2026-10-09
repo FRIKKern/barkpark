@@ -25,6 +25,26 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
   wrong document is not burned. Refusals are 403 `forbidden` with reason
   `preview_scope`.
 
+  ## Scoped routes: `optional: true`, and a signed scope must MATCH the URL
+  (task-88e9094df76d31c6)
+
+  Mounted with `plug(BarkparkWeb.Plugs.PreviewToken, optional: true)` on
+  `/w/:workspace_slug/p/:project_slug/v1/preview/*` (`:scoped_api_preview`,
+  alongside every other `:scoped_api` route's session/Bearer path, never
+  replacing it): a request with NO `Authorization: Preview`/`?preview_token=`
+  at all is a no-op pass-through (`{:cont, conn}`, unchanged) rather than the
+  flat mount's `deny(:unauthorized)` — the membership gate downstream
+  (`ResolveWorkspace`) still gets its turn. A PRESENT token is verified
+  exactly as on the flat route, with ONE extra check: its signed
+  `workspace_id` (and `project_id`, if the route carries one) must equal
+  what the URL's `:workspace_slug`/`:project_slug` resolve to —
+  `{:error, :workspace_mismatch}` → 403 otherwise, same `forbidden` envelope
+  `dataset_mismatch` already uses. A token minted for workspace A is
+  refused on `/w/B/...`, never silently re-scoped to B and never left to
+  fall through to `ResolveWorkspace`'s own gate (which would report
+  `not_a_member` — the wrong reason for a scope mismatch, and one that
+  would also apply to a legitimate member with no Preview token at all).
+
   ## Single-use, unless `multi_use` (task-8f7cba7f65cb343c)
 
   `record_jti/1` is single-use by construction (`INSERT … ON CONFLICT DO
@@ -47,13 +67,31 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
 
   def init(opts), do: opts
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
+    case extract_token(conn) do
+      nil ->
+        # task-88e9094df76d31c6 — `optional: true` is the ONLY thing that
+        # makes this pipeline-safe to ADD to an existing route family
+        # (:scoped_api_preview) rather than replace it: no Preview header at
+        # all is simply not this plug's business, and the conn continues
+        # unchanged into whatever runs next (ResolveWorkspace's ordinary
+        # session/Bearer membership gate). The flat mount (opts == [],
+        # `optional` defaults false) keeps denying outright — byte-identical
+        # to before this task.
+        if Keyword.get(opts, :optional, false), do: conn, else: deny(conn, :unauthorized)
+
+      raw ->
+        verify_and_assign(conn, raw)
+    end
+  end
+
+  defp verify_and_assign(conn, raw) do
     secret = Application.get_env(:barkpark, :preview, [])[:secret]
 
-    with raw when is_binary(raw) <- extract_token(conn),
-         true <- is_binary(secret) and byte_size(secret) > 0,
+    with true <- is_binary(secret) and byte_size(secret) > 0,
          {:ok, claims} <- PreviewToken.verify(raw, secret),
          :ok <- check_dataset_scope(conn, claims),
+         :ok <- check_workspace_scope(conn, claims),
          # A token without a dataset claim is structurally unusable (401 via
          # record_jti's contract); refuse it before judging what it names.
          true <- is_binary(Map.get(claims, "dataset")),
@@ -67,8 +105,58 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
     else
       {:error, :already_used} -> deny(conn, :replay)
       {:error, :dataset_mismatch} -> deny(conn, :forbidden)
+      {:error, :workspace_mismatch} -> deny(conn, :forbidden)
       {:error, :preview_scope} -> deny(conn, :preview_scope)
       _ -> deny(conn, :unauthorized)
+    end
+  end
+
+  # task-88e9094df76d31c6 — only binds on a route that CARRIES a
+  # :workspace_slug (the scoped /w/:ws/p/:proj/v1/preview/* family). The flat
+  # /v1/preview/* mount has no such param, so this is `:ok` there, unchanged,
+  # and `assign_claimed_scope/2` below still seats the read in whatever
+  # workspace the CLAIM alone names — exactly as it always has.
+  #
+  #   * :workspace_slug unresolvable → :ok. An unknown slug is THIS ROUTE's
+  #     404 to report (ResolveWorkspace, downstream), not a token-scope
+  #     question — this plug fails closed only on a REAL mismatch, never on
+  #     a URL error that belongs to someone else.
+  #   * resolvable, claim's workspace_id disagrees (or is absent) → refused.
+  #   * agrees → check the project half the same way, if the route carries
+  #     one.
+  defp check_workspace_scope(conn, claims) do
+    case conn.path_params["workspace_slug"] do
+      nil ->
+        :ok
+
+      slug ->
+        case Tenancy.get_workspace_by_slug(slug) do
+          %{id: ws_id} = ws ->
+            if Map.get(claims, "workspace_id") == ws_id,
+              do: check_project_scope(conn, claims, ws),
+              else: {:error, :workspace_mismatch}
+
+          nil ->
+            :ok
+        end
+    end
+  end
+
+  defp check_project_scope(conn, claims, ws) do
+    case conn.path_params["project_slug"] do
+      nil ->
+        :ok
+
+      slug ->
+        case Tenancy.get_project(ws.slug, slug) do
+          %{id: proj_id} ->
+            if Map.get(claims, "project_id") == proj_id,
+              do: :ok,
+              else: {:error, :workspace_mismatch}
+
+          nil ->
+            :ok
+        end
     end
   end
 

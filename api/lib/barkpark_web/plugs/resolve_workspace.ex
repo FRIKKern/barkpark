@@ -75,6 +75,20 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   # link would keep serving an archived workspace to anonymous readers.
   def call(%{assigns: %{share_public: true}} = conn, _opts), do: refuse_if_archived(conn)
 
+  # task-88e9094df76d31c6 — a VERIFIED, scope-matched Preview JWT has already
+  # resolved + assigned `:current_workspace` itself
+  # (`BarkparkWeb.Plugs.PreviewToken`'s `assign_claimed_scope/2`, reached
+  # only after that plug's OWN `check_workspace_scope/2` confirmed the
+  # claim's `workspace_id` equals THIS URL's `:workspace_slug`) — mirrors
+  # the `share_public` bypass immediately above. Without this, running the
+  # ordinary session/Bearer membership gate a second time here would refuse
+  # a bare Preview-JWT caller as `not_a_member` (it carries no `:api_token`
+  # and no `:current_user` at all), undoing the admission the Preview plug
+  # just granted. `:preview_claims` is set ONLY by that plug, and only once
+  # it has already verified signature, expiry, revocation AND the scope
+  # match — never by caller input.
+  def call(%{assigns: %{preview_claims: _}} = conn, _opts), do: refuse_if_archived(conn)
+
   def call(conn, opts) do
     slug = conn.path_params["workspace_slug"]
 

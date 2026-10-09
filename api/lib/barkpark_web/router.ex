@@ -295,6 +295,45 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
+  # task-88e9094df76d31c6 — byte-identical to :scoped_api, ONE line inserted:
+  # `BarkparkWeb.Plugs.PreviewToken, optional: true` runs BEFORE
+  # `ResolveWorkspace`. A caller presenting `Authorization: Preview <jwt>`
+  # (the flat /v1/preview/* tunnel's own credential) is verified here — and,
+  # new in this task, the JWT's signed `workspace_id`/`project_id` claims are
+  # checked against THIS URL's :workspace_slug/:project_slug (a mismatch is
+  # refused, never silently re-scoped) — before `ResolveWorkspace` ever runs
+  # its session/Bearer membership gate. `optional: true` is what makes this
+  # ADDITIVE rather than a replacement: a request with no Preview header (the
+  # existing editor-session/Bearer callers every other :scoped_api route
+  # already serves) passes through unchanged into the SAME membership gate
+  # :scoped_api always ran. Only a VERIFIED, scope-matched Preview JWT short-
+  # circuits that gate — via a bypass clause ResolveWorkspace itself carries
+  # (keyed on `assigns[:preview_claims]`, mirroring its existing
+  # `share_public` bypass), since a session/Bearer-shaped membership check
+  # cannot admit a credential that is neither.
+  #
+  # Before this pipeline existed, a Preview JWT presented on
+  # `/w/:ws/p/:proj/v1/preview/*` fell through `scoped_api_optional_credential`
+  # unresolved (OptionalToken only matches a `Bearer ` prefix, never
+  # `Preview `), reached `ResolveWorkspace` as a bare anonymous caller, and
+  # was refused `forbidden_membership` ("not_a_member") — the WRONG reason
+  # for a scope mismatch, and a dead end for the real case this fixes: a
+  # non-Default workspace's site previewing its own drafts without holding
+  # an editor's bearer token server-side (task-8f7cba7f65cb343c's mint is
+  # flat-only, so it could only ever scope a token to Default).
+  pipeline :scoped_api_preview do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.PreviewToken, optional: true)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # Soft credential resolution for :scoped_api — bearer ALWAYS, browser session
   # only where it cannot drive a forged state change (gyldendal field report
   # #15).
@@ -3299,8 +3338,17 @@ defmodule BarkparkWeb.Router do
     post("/v1/data/search/:dataset/correction", SearchController, :correction)
     get("/v1/data/search/:dataset", SearchController, :search)
     get("/v1/search/:dataset", FederatedSearchController, :search)
+  end
 
-    # Preview reads
+  # task-88e9094df76d31c6 — Preview reads, split out of the block above onto
+  # `:scoped_api_preview` so a `Preview <jwt>` credential scoped to THIS
+  # workspace/project is admitted alongside the session/Bearer members
+  # `:scoped_api` already served (see that pipeline's own comment for why).
+  # `listen` is NEW here — the flat `:api_preview` scope has carried it since
+  # task-78dc25a4f117fa07, but nothing mounted its scoped twin until now.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through(:scoped_api_preview)
+
     get("/v1/preview/query/:dataset/:type", QueryController, :index)
     get("/v1/preview/doc/:dataset/:type/:doc_id", QueryController, :show)
     get("/v1/preview/backlinks/:dataset/:id", QueryController, :backlinks)
@@ -3308,6 +3356,7 @@ defmodule BarkparkWeb.Router do
     get("/v1/preview/related/:dataset/:id", QueryController, :related)
     get("/v1/preview/tags/:dataset", QueryController, :tag_browse)
     get("/v1/preview/tags/:dataset/:tag", QueryController, :tag_docs)
+    get("/v1/preview/listen/:dataset", ListenController, :listen)
   end
 
   # Per-account prefs (task-7d2a48dbf7e4bf34) — NOT public: a member identity
@@ -3591,6 +3640,22 @@ defmodule BarkparkWeb.Router do
     # `admin` permission and the never-escalate cap live in
     # `Auth.mint_delegated_token/3`.
     post("/v1/tokens/elevated", ElevatedTokenController, :create)
+  end
+
+  # Scoped preview-JWT mint (task-88e9094df76d31c6) — SAME :scoped_admin gate
+  # (owner/admin ROLE in the resolved target workspace) as the token mint
+  # above, so an admin of workspace A reaches 403 at RequireWorkspaceRole on
+  # `/w/B/...`, never the controller. `PreviewTokenController.mint/2` is
+  # UNCHANGED from the flat mint (#22299): it already signs workspace_id/
+  # project_id from `ScopeHelpers.scope_opts(conn)`, never from a request
+  # param, and on THIS pipeline `:scoped_api` has already resolved those
+  # assigns from the URL (role-gated) rather than from the admin's own
+  # token scope — the flat route's "defaults to whatever the admin's OWN
+  # token resolves to, usually Default" gap this task exists to close.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :scoped_admin])
+
+    post("/v1/preview-tokens", PreviewTokenController, :mint)
   end
 
   # Scoped MEMBER administration (admin) — the workspace roster: who holds a
