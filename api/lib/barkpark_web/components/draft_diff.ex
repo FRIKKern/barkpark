@@ -36,6 +36,7 @@ defmodule BarkparkWeb.Components.DraftDiff do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   attr :draft, :map, required: true
   attr :published, :map, default: nil
@@ -53,18 +54,18 @@ defmodule BarkparkWeb.Components.DraftDiff do
     ~H"""
     <div class="bp-draft-diff" data-test-id="draft-diff">
       <header class="bp-draft-diff-header">
-        <span class="bp-draft-diff-title">Draft vs Published</span>
+        <span class="bp-draft-diff-title"><%= gettext("Draft vs Published") %></span>
         <span class="bp-draft-diff-meta" data-test-id="draft-diff-meta">
-          <%= @changed %> <%= if @changed == 1, do: "change", else: "changes" %>
+          <%= ngettext("1 change", "%{count} changes", @changed) %>
         </span>
       </header>
       <table class="bp-draft-diff-table">
         <thead>
           <tr>
-            <th class="bp-diff-col-name">Field</th>
-            <th class="bp-diff-col-side">Published</th>
-            <th class="bp-diff-col-side">Draft</th>
-            <th class="bp-diff-col-status">Status</th>
+            <th class="bp-diff-col-name"><%= gettext("Field") %></th>
+            <th class="bp-diff-col-side"><%= gettext("Published") %></th>
+            <th class="bp-diff-col-side"><%= gettext("Draft") %></th>
+            <th class="bp-diff-col-status"><%= gettext("Status") %></th>
           </tr>
         </thead>
         <tbody>
@@ -190,19 +191,20 @@ defmodule BarkparkWeb.Components.DraftDiff do
   defp format_image(%{} = img) do
     size =
       case {img["width"], img["height"]} do
-        {w, h} when is_integer(w) and is_integer(h) -> "Image #{w}×#{h}"
-        _ -> "Image"
+        {w, h} when is_integer(w) and is_integer(h) -> gettext("Image %{w}×%{h}", w: w, h: h)
+        _ -> gettext("Image")
       end
 
     case img["alt"] do
-      alt when is_binary(alt) and alt != "" -> "#{size} · alt: #{alt}"
-      _ -> "#{size} · no alt text"
+      alt when is_binary(alt) and alt != "" -> "#{size} · " <> gettext("alt: %{alt}", alt: alt)
+      _ -> "#{size} · " <> gettext("no alt text")
     end
   end
 
   defp format_image(v), do: format_plain(v)
 
-  defp format_plain(v) when is_binary(v), do: if(data_uri?(v), do: "[inline data]", else: v)
+  defp format_plain(v) when is_binary(v),
+    do: if(data_uri?(v), do: gettext("[inline data]"), else: v)
 
   defp format_plain(v) when is_atom(v) or is_number(v) or is_boolean(v), do: to_string(v)
 
@@ -246,8 +248,8 @@ defmodule BarkparkWeb.Components.DraftDiff do
   defp cap(s) when byte_size(s) > @text_cap, do: String.slice(s, 0, @text_cap) <> "…"
   defp cap(s), do: s
 
-  defp status_label(:unchanged), do: "Unchanged"
-  defp status_label(:added), do: "Added"
-  defp status_label(:removed), do: "Removed"
-  defp status_label(:changed), do: "Changed"
+  defp status_label(:unchanged), do: gettext("Unchanged")
+  defp status_label(:added), do: gettext("Added")
+  defp status_label(:removed), do: gettext("Removed")
+  defp status_label(:changed), do: gettext("Changed")
 end

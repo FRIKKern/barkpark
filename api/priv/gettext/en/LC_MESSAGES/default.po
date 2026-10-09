@@ -1815,6 +1815,7 @@ msgstr ""
 msgid "Papers"
 msgstr ""
 
+#: lib/barkpark_web/components/draft_diff.ex:66
 #: lib/barkpark_web/components/studio_components/modals.ex:825
 #, elixir-autogen, elixir-format
 msgid "Published"
@@ -2150,6 +2151,7 @@ msgstr ""
 msgid "Document metadata for %{title}"
 msgstr ""
 
+#: lib/barkpark_web/components/draft_diff.ex:67
 #: lib/barkpark_web/live/studio/studio_live/paper_canvas.ex:814
 #, elixir-autogen, elixir-format
 msgid "Draft"
@@ -2327,6 +2329,7 @@ msgstr ""
 msgid "Start the body with a paragraph"
 msgstr ""
 
+#: lib/barkpark_web/components/draft_diff.ex:68
 #: lib/barkpark_web/live/studio/studio_live/components.ex:899
 #: lib/barkpark_web/studio_locale.ex:243
 #, elixir-autogen, elixir-format
@@ -4103,6 +4106,7 @@ msgstr ""
 msgid "Heading"
 msgstr ""
 
+#: lib/barkpark_web/components/draft_diff.ex:195
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:719
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4997
 #: lib/barkpark_web/studio_locale.ex:519
@@ -9475,4 +9479,68 @@ msgstr ""
 #: lib/barkpark_web/live_auth.ex:385
 #, elixir-autogen, elixir-format
 msgid "Your access token was revoked — sign in again"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:59
+#, elixir-autogen, elixir-format
+msgid "1 change"
+msgid_plural "%{count} changes"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:742
+#, elixir-autogen, elixir-format
+msgid "1 field"
+msgid_plural "%{count} fields"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/draft_diff.ex:252
+#, elixir-autogen, elixir-format
+msgid "Added"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:254
+#, elixir-autogen, elixir-format
+msgid "Changed"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:57
+#, elixir-autogen, elixir-format
+msgid "Draft vs Published"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:65
+#, elixir-autogen, elixir-format
+msgid "Field"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:194
+#, elixir-autogen, elixir-format
+msgid "Image %{w}×%{h}"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:253
+#, elixir-autogen, elixir-format
+msgid "Removed"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:251
+#, elixir-autogen, elixir-format
+msgid "Unchanged"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:207
+#, elixir-autogen, elixir-format
+msgid "[inline data]"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:199
+#, elixir-autogen, elixir-format
+msgid "alt: %{alt}"
+msgstr ""
+
+#: lib/barkpark_web/components/draft_diff.ex:200
+#, elixir-autogen, elixir-format
+msgid "no alt text"
 msgstr ""

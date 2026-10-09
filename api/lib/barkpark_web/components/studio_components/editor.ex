@@ -739,7 +739,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                     schema 500'd the WHOLE Studio editor for every document of
                     that type — the largest of the three spd-w18-nil-icon-500
                     crash sites. --%>
-              <.icon name={drawable_icon(@editor_schema.icon) || "file"} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+              <.icon name={drawable_icon(@editor_schema.icon) || "file"} size={14} /> <%= @editor_schema.title %> &middot; <%= ngettext("1 field", "%{count} fields", length(@editor_schema.fields)) %>
             </div>
           <% end %>
 
