@@ -137,6 +137,30 @@ defmodule Barkpark.Content.FieldBlockOpsTest do
              blocks
   end
 
+  # task-839f9bebf5628c03 — the mirror image of the richText validation gap
+  # fixed in #22575. A raw `set` patch (or any write bypassing this field's
+  # own op path) can leave a block-editor field holding a BARE list rather
+  # than the `%{"blocks", "html"}` wrapper this module always writes.
+  # `field_blocks/1`'s catch-all used to read that bare list as EMPTY, so the
+  # first block op afterward silently DISCARDED the existing content instead
+  # of extending it.
+  test "a bare-list value (set directly, bypassing the block editor) is preserved on the first op",
+       %{scope: scope} do
+    doc = create!(scope, %{"description" => [para("p0", "Existing")]})
+
+    {:ok, %{blocks: blocks}} =
+      Content.apply_field_block_ops(
+        doc.doc_id,
+        "publication",
+        "description",
+        [%{"op" => "append-block", "block" => para("p2", "New")}],
+        @dataset,
+        scope
+      )
+
+    assert [%{"id" => "p0"}, %{"id" => "p2"}] = blocks
+  end
+
   test "an out-of-vocabulary block is refused BY NAME and nothing is written", %{scope: scope} do
     doc = create!(scope, %{})
 

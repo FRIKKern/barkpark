@@ -3254,11 +3254,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   @doc """
   The block array behind a field value, in every shape a `richText` field has
-  ever stored: the projected body map, a legacy plain string (one paragraph),
-  or nothing.
+  ever stored: the projected body map, a BARE list (task-839f9bebf5628c03 —
+  found alongside the Validation.walk_field/4 gap this mirrors: a raw `set`
+  patch, or any write that bypasses this field's own op path, can leave the
+  field holding a plain array rather than the `%{"blocks", "html"}` wrapper
+  this module itself always writes; a block op applied afterward used to read
+  that array as EMPTY via the catch-all below and silently DISCARD it instead
+  of extending it), a legacy plain string (one paragraph), or nothing.
   """
   @spec field_blocks(term()) :: [map()]
   def field_blocks(%{"blocks" => blocks}) when is_list(blocks), do: blocks
+  def field_blocks(blocks) when is_list(blocks), do: blocks
 
   def field_blocks(text) when is_binary(text) do
     case String.trim(text) do
