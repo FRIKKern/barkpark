@@ -1508,6 +1508,11 @@
     }
     .bp-paper-article .bp-goal-rail-event {
       display: flex;
+      width: 100%;
+      border: 0;
+      background: none;
+      font: inherit;
+      text-align: left;
       align-items: baseline;
       gap: 0.5rem;
       margin: 0.1rem 0;
@@ -1518,7 +1523,8 @@
       cursor: pointer;
       transition: background 0.12s ease;
     }
-    .bp-paper-article .bp-goal-rail-event:hover {
+    .bp-paper-article .bp-goal-rail-event:hover,
+    .bp-paper-article .bp-goal-rail-event:focus-visible {
       background: var(--paper-accent-soft);
     }
     .bp-paper-article .bp-goal-rail-event.is-selected {
@@ -3028,6 +3034,12 @@
         mounted() {
           if (typeof document === "undefined" || !this.el) return;
           this.selected = [];
+          // Shift+Enter on a focused row is the keyboard Shift+click. Handled on
+          // keydown (preventDefault stops the button's synthesized click), so it
+          // does not depend on the browser copying shiftKey onto that click.
+          this.onKey = (e) => {
+            if (e.key === "Enter" && e.shiftKey) this.onClick(e);
+          };
           this.onClick = (e) => {
             if (!e.shiftKey) return; // plain click → rail-select unaffected
             let row = e.target.closest("[phx-value-event-id]");
@@ -3045,6 +3057,9 @@
             } else if (this.selected.length === 1) {
               if (id === this.selected[0]) return; // same row twice → ignore
               row.classList.add("is-diff-b");
+              // The diff dialog's close pops focus back here. JS.push_focus()
+              // on the dialog itself would push the dialog, not this row.
+              this.liveSocket.execJS(row, '[["push_focus",{}]]');
               this.pushEvent("open-diff", { from: this.selected[0], to: id });
               this.selected = [];
               this.clearMarks();
@@ -3053,6 +3068,7 @@
           // Capture phase so we intercept the shift+click before the row's own
           // phx-click handler runs.
           this.el.addEventListener("click", this.onClick, true);
+          this.el.addEventListener("keydown", this.onKey, true);
         },
         clearMarks() {
           this.el.querySelectorAll(".is-diff-a, .is-diff-b").forEach((n) => {
@@ -3062,6 +3078,7 @@
         destroyed() {
           if (this.el && this.onClick) {
             this.el.removeEventListener("click", this.onClick, true);
+            this.el.removeEventListener("keydown", this.onKey, true);
           }
         }
       }

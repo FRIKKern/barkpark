@@ -59,6 +59,7 @@ defmodule BarkparkWeb.BulldocsLive do
   alias BarkparkWeb.BulldocsLive.Edit
   alias BarkparkWeb.Presence
   alias BarkparkWeb.PaperActor
+  alias Phoenix.LiveView.JS
   alias BarkparkWeb.PaperReaderStyle
   alias BarkparkWeb.PaperPresence
   alias BarkparkWeb.PaperViewer
@@ -1930,14 +1931,19 @@ defmodule BarkparkWeb.BulldocsLive do
               rows and push "open-diff" — the U3 diff modal below renders the
               line-diff of the two events' payloads. --%>
         <ol class="bp-goal-rail-events" id="goal-path-events" phx-hook="RailDiffSelect">
-          <li
-            :for={{event, idx} <- Enum.with_index(@rail_events, 1)}
-            class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
-            phx-click="rail-select"
-            phx-value-event-id={event.id}
-          >
-            <span class="bp-goal-rail-event-idx">{idx}</span>
-            <span class="bp-goal-rail-event-type">{event.event_type}</span>
+          <%!-- Each row is a <button> so Tab reaches it: Enter selects, and
+                Shift+Enter picks a diff endpoint exactly like Shift+click. --%>
+          <li :for={{event, idx} <- Enum.with_index(@rail_events, 1)}>
+            <button
+              type="button"
+              class={["bp-goal-rail-event", event.id == @selected_event_id && "is-selected"]}
+              aria-pressed={to_string(event.id == @selected_event_id)}
+              phx-click="rail-select"
+              phx-value-event-id={event.id}
+            >
+              <span class="bp-goal-rail-event-idx">{idx}</span>
+              <span class="bp-goal-rail-event-type">{event.event_type}</span>
+            </button>
           </li>
         </ol>
       </aside>
@@ -1947,20 +1953,41 @@ defmodule BarkparkWeb.BulldocsLive do
             "close-diff"; clicks inside the panel are stopped so the panel
             stays open. `{raw(@diff_html)}` is the TextDiff output — every line
             is HTML-escaped at format time, so the untrusted payload_html is
-            shown as text, never executed. --%>
-      <div :if={@diff_open} id="bp-diff-modal" class="bp-diff-overlay">
+            shown as text, never executed. RailDiffSelect pushes the row that
+            opened it onto the focus stack, the overlay moves focus to the
+            close button, and every close (✕, backdrop, Escape) pops focus back
+            to that row. --%>
+      <div
+        :if={@diff_open}
+        id="bp-diff-modal"
+        class="bp-diff-overlay"
+        phx-mounted={JS.focus(to: "#bp-diff-close")}
+      >
         <%!-- Backdrop is its own element behind the panel; clicking it closes
               the modal. The panel sits above it and does NOT carry the close
               click, so clicks inside the panel never bubble to a close. --%>
-        <div class="bp-diff-backdrop" phx-click="close-diff" aria-hidden="true"></div>
-        <div class="bp-diff-panel" role="dialog" aria-modal="true">
+        <div class="bp-diff-backdrop" phx-click={close_diff()} aria-hidden="true"></div>
+        <div
+          class="bp-diff-panel"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="bp-diff-title"
+          phx-window-keydown={close_diff()}
+          phx-key="escape"
+        >
           <div class="bp-diff-head">
-            <h2 class="bp-diff-title">
+            <h2 class="bp-diff-title" id="bp-diff-title">
               <span class="bp-diff-from">{@diff_from}</span>
               <span class="bp-diff-arrow">→</span>
               <span class="bp-diff-to">{@diff_to}</span>
             </h2>
-            <button type="button" class="bp-diff-close" phx-click="close-diff" aria-label={gettext("Close diff")}>
+            <button
+              type="button"
+              id="bp-diff-close"
+              class="bp-diff-close"
+              phx-click={close_diff()}
+              aria-label={gettext("Close diff")}
+            >
               ×
             </button>
           </div>
@@ -1970,6 +1997,8 @@ defmodule BarkparkWeb.BulldocsLive do
     </main>
     """
   end
+
+  defp close_diff, do: JS.pop_focus() |> JS.push("close-diff")
 
   # ── P4 scoped-reader helpers ────────────────────────────────────────────
 
