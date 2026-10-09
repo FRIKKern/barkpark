@@ -31,7 +31,7 @@ defmodule Barkpark.PortableDoc.Render.CardsEmail do
   Skin hexes come from `Palettes.email_skin(theme)` (the theme-resolved
   captured `paperEmail` hand hex — the SAME source the email palette and
   article var() fallbacks draw on). Card tones come from `StatusVocab.tones()`
-  light values (`info #2563eb`, `ok #0d9488`, `warn #d97706`, `danger #dc2626`
+  light values (`info #2563eb`, `ok #0f766e`, `warn #d97706`, `danger #dc2626`
   — matching the reader `--st-*`). NEVER `TokensGen.tone_*`, never a hand-typed
   hex.
 
