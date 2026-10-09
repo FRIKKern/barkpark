@@ -93,6 +93,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
         <button
           :if={!@visibility_notice.media_shared && @shares_admin?}
           type="button"
+          class="btn btn-sm"
           phx-click="publish_scope_media"
         >
           {gettext("Publish this scope's media")}
@@ -100,6 +101,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
       </div>
       <div
         id="media-explorer-host"
+        class="bp-ae-host"
         phx-update="ignore"
         style="flex: 1; display: flex; min-height: 0; overflow: hidden;"
       >
