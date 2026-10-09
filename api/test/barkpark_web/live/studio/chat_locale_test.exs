@@ -24,7 +24,8 @@ defmodule BarkparkWeb.Studio.ChatLocaleTest do
     {~s(aria-label="Send melding"), ~s(aria-label="Send message")},
     {~s(aria-label="Skråstrekkommandoer"), ~s(aria-label="Slash commands")},
     {~s(aria-label="Øktmodus"), ~s(aria-label="Session mode")},
-    {~s(aria-label="Legg ved et bilde"), ~s(aria-label="Attach an image")},
+    {~s(<span class="sr-only">Legg ved et bilde</span>),
+     ~s(<span class="sr-only">Attach an image</span>)},
     {"Vis arkiverte", "Show archived"},
     # The sidebar heading and its New button follow an icon's </svg>.
     {"</svg> chatter", "</svg> chats"},
@@ -79,6 +80,26 @@ defmodule BarkparkWeb.Studio.ChatLocaleTest do
       assert html =~ nb
       refute html =~ en
     end
+  end
+
+  # task-42d4ac3dbd2b7b64: aria-label is prohibited on a <label> (axe
+  # aria-prohibited-attr), and opacity on the dim status read below AA.
+  test "the attach control names its input in hidden text, and the status is not dimmed further",
+       %{conn: conn, ws: ws, proj: proj} do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/studio/chat")
+    doc = LazyHTML.from_fragment(html)
+
+    [label] = doc |> LazyHTML.query("label.bp-iconbtn") |> Enum.to_list()
+    assert LazyHTML.attribute(label, "aria-label") == []
+    assert label |> LazyHTML.query(".sr-only") |> LazyHTML.text() == "Legg ved et bilde"
+
+    assert [span] =
+             doc
+             |> LazyHTML.query("span.text-xs.text-dim")
+             |> Enum.filter(&(LazyHTML.text(&1) =~ "ny chat"))
+
+    [style] = LazyHTML.attribute(span, "style")
+    refute style =~ "opacity"
   end
 
   test "the default workspace's chat page stays English", %{conn: conn} do
