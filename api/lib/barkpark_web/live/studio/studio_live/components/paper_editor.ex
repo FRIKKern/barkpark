@@ -1482,7 +1482,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             type="button"
             class="btn btn-ghost btn-sm bp-prop-unbind"
             title={gettext("Unbind property")}
-            aria-label={"Unbind " <> prop_label(block, descriptor)}
+            aria-label={gettext("Unbind %{prop}", prop: prop_label(block, descriptor))}
             phx-click="paper-unbind-property"
             phx-value-id={Map.get(block, "id")}
             data-test-id="paper-unbind-property"
