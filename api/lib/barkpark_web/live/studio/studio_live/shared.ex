@@ -10,6 +10,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   (test-facing), and so does `default_dataset/0`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
@@ -462,7 +463,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         socket
         |> put_flash(
           :error,
-          "This asset is checked out by another editor, so its metadata is read-only for you."
+          gettext(
+            "This asset is checked out by another editor, so its metadata is read-only for you."
+          )
         )
         |> assign(save_status: "Read-only")
 
@@ -565,7 +568,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         {:error, {:halted, reason}} ->
           socket
           |> assign(save_status: "Save cancelled")
-          |> put_flash(:error, "Save cancelled: #{reason}")
+          |> put_flash(:error, gettext("Save cancelled: %{reason}", reason: reason))
 
         {:error, _} ->
           assign(socket, save_status: "Save failed")
@@ -762,7 +765,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       do_action(
         socket,
         fn doc, type -> unpublish_open_doc(doc, type, socket.assigns.dataset, opts) end,
-        "Unpublished"
+        gettext("Unpublished")
       )
 
     # Unpublish moves the revision outside the editors' save path, like
@@ -822,7 +825,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            socket |> put_flash(:info, with_advisories(msg, Warnings.drain())) |> rebuild_panes()}
 
         {:error, {:halted, reason}} ->
-          {:noreply, put_flash(socket, :error, "#{msg} cancelled: #{reason}")}
+          {:noreply,
+           put_flash(
+             socket,
+             :error,
+             gettext("%{action} cancelled: %{reason}", action: msg, reason: reason)
+           )}
 
         # The publish wall (authoring-excellence D14): a label-spine rejection
         # must render its field/rule/fix detail, never degrade to the
@@ -830,21 +838,33 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         # and it has to read like documentation.
         {:error, {:label_spine, details}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(details)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(details))
+           )}
 
         # The E3 tag-registry wall (authoring-excellence D80): an unknown-tag
         # rejection names each unregistered tag with its nearest suggestion, so
         # the fix is one flash away — never the content-free "Action failed".
         {:error, {:unknown_tag, payload}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(payload))
+           )}
 
         # The E4 dedup wall (authoring-excellence D80/D81): a near-duplicate
         # rejection surfaces the incumbent's published id plus the fix, so the
         # author can extend that document instead of re-publishing a twin.
         {:error, {:duplicate_of, payload}} ->
           {:noreply,
-           put_flash(socket, :error, "Publish blocked: #{format_wall_details(payload)}")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Publish blocked: %{detail}", detail: format_wall_details(payload))
+           )}
 
         # ── the four NON-WALL rejection shapes (ae-nonwall-rejection-render) ──
         #
@@ -863,8 +883,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "That document is no longer there — it may have been discarded, or " <>
-               "already #{String.downcase(msg)} in another tab."
+             gettext(
+               "That document is no longer there — it may have been discarded, or already %{action} in another tab.",
+               action: String.downcase(msg)
+             )
            )}
 
         # 2. The rev fence (`mutations.ex:151`, `lifecycle.ex:149`). The most
@@ -877,7 +899,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "The document changed since you loaded it — reload and retry."
+             gettext("The document changed since you loaded it — reload and retry.")
            )}
 
         # 3. The task lifecycle gate (`lifecycle.ex:349/352/365`,
@@ -902,14 +924,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
            put_flash(
              socket,
              :error,
-             "#{msg} failed: " <>
-               (changeset
-                |> Ecto.Changeset.traverse_errors(&changeset_message/1)
-                |> format_field_errors())
+             gettext("%{action} failed: %{errors}",
+               action: msg,
+               errors:
+                 changeset
+                 |> Ecto.Changeset.traverse_errors(&changeset_message/1)
+                 |> format_field_errors()
+             )
            )}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Action failed")}
+          {:noreply, put_flash(socket, :error, gettext("Action failed"))}
       end
     else
       {:noreply, socket}

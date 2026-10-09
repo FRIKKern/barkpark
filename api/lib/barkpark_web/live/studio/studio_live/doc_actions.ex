@@ -548,14 +548,18 @@ defmodule BarkparkWeb.Studio.StudioLive.DocActions do
 
   @doc false
   def format_action_error({:xsd_invalid, reasons}) when is_list(reasons) do
-    "ONIX failed XSD validation: " <> Enum.join(Enum.take(reasons, 3), "; ")
+    gettext("ONIX failed XSD validation: %{reasons}",
+      reasons: Enum.join(Enum.take(reasons, 3), "; ")
+    )
   end
 
-  def format_action_error(:no_doc), do: "No document loaded"
+  def format_action_error(:no_doc), do: gettext("No document loaded")
 
-  def format_action_error({:unknown_action, name}), do: "Unknown action: #{name}"
+  def format_action_error({:unknown_action, name}),
+    do: gettext("Unknown action: %{name}", name: name)
 
-  def format_action_error({:handler_raised, msg}), do: "Action failed: #{msg}"
+  def format_action_error({:handler_raised, msg}),
+    do: gettext("Action failed: %{message}", message: msg)
 
   def format_action_error(other), do: inspect(other, limit: 100)
 end

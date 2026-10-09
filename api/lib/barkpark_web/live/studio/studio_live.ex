@@ -233,7 +233,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
       socket
     else
       socket
-      |> put_flash(:error, "Your access grant is no longer valid.")
+      |> put_flash(:error, gettext("Your access grant is no longer valid."))
       |> redirect(to: "/login")
     end
   end
@@ -338,7 +338,11 @@ defmodule BarkparkWeb.Studio.StudioLive do
       |> schedule_access_expiry()
 
     {:noreply,
-     put_flash(socket, :info, "You've been granted access — check your email to claim it.")}
+     put_flash(
+       socket,
+       :info,
+       gettext("You've been granted access — check your email to claim it.")
+     )}
   end
 
   # Expiry tick (airdrop-grants / ag-liveview-read-liveness): a grant crossed its

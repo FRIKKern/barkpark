@@ -49,12 +49,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
     if revision_of_open_doc?(rev_id, socket) do
       do_restore_revision(rev_id, socket)
     else
-      {:noreply, put_flash(socket, :error, "Failed to restore")}
+      {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
   end
 
   def restore_revision(_params, socket),
-    do: {:noreply, put_flash(socket, :error, "Failed to restore")}
+    do: {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
 
   defp revision_of_open_doc?(rev_id, socket) do
     with %{doc_id: open_id} when is_binary(open_id) <- socket.assigns[:editor_doc],
@@ -75,7 +75,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
         socket =
           socket
           |> assign(show_history: false, revisions: [])
-          |> put_flash(:info, "Restored from history")
+          |> put_flash(:info, gettext("Restored from history"))
           |> Shared.rebuild_panes()
 
         # The restore rewrote the draft's blocks and revision behind the open
@@ -83,10 +83,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
         {:noreply, Paper.push_stored_doc(socket, socket.assigns[:editor_doc], type)}
 
       {:error, {:halted, reason}} ->
-        {:noreply, put_flash(socket, :error, "Restore cancelled: #{reason}")}
+        {:noreply,
+         put_flash(socket, :error, gettext("Restore cancelled: %{reason}", reason: reason))}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to restore")}
+        {:noreply, put_flash(socket, :error, gettext("Failed to restore"))}
     end
   end
 

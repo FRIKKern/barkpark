@@ -3,6 +3,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   Pane navigation + workspace/project/dataset scope switch + switcher create
   affordances. Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -192,7 +193,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
           is_nil(Shared.initial_project(workspace)) ->
             {:noreply,
-             put_flash(socket, :error, "Workspace has no projects yet — create one first")}
+             put_flash(
+               socket,
+               :error,
+               gettext("Workspace has no projects yet — create one first")
+             )}
 
           true ->
             project = Shared.initial_project(workspace)
@@ -275,7 +280,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
   def create_workspace(%{"name" => name}, socket) do
     case principal(socket) do
       nil ->
-        {:noreply, put_flash(socket, :error, "Sign in to create a workspace")}
+        {:noreply, put_flash(socket, :error, gettext("Sign in to create a workspace"))}
 
       principal ->
         case Tenancy.create_workspace_with_owner(%{name: name}, principal) do
@@ -295,7 +300,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
                scope_menu: nil
              )
              |> Shared.sync_scope_prefix()
-             |> put_flash(:info, "Workspace created")
+             |> put_flash(:info, gettext("Workspace created"))
              |> Shared.rescope_dataset_for_project(project)}
 
           {:error, changeset} ->
@@ -311,7 +316,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
 
     cond do
       is_nil(principal(socket)) ->
-        {:noreply, put_flash(socket, :error, "Sign in to create a project")}
+        {:noreply, put_flash(socket, :error, gettext("Sign in to create a project"))}
 
       is_nil(ws) ->
         {:noreply, socket}
@@ -333,7 +338,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Scope do
                scope_menu: nil
              )
              |> Shared.sync_scope_prefix()
-             |> put_flash(:info, "Project created")
+             |> put_flash(:info, gettext("Project created"))
              |> Shared.rescope_dataset_for_project(project)}
 
           {:error, changeset} ->

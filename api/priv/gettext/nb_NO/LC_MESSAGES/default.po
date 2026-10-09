@@ -48,7 +48,7 @@ msgstr "Et dokument av typen %{type} med id-en"
 msgid "API token"
 msgstr "API-token"
 
-#: lib/barkpark_web/components/fields/array_field.ex:152
+#: lib/barkpark_web/components/fields/array_field.ex:153
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:582
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1523
 #, elixir-autogen, elixir-format
@@ -155,7 +155,7 @@ msgstr "Skjul forhåndsvisning"
 msgid "History"
 msgstr "Historikk"
 
-#: lib/barkpark_web/components/fields/array_field.ex:118
+#: lib/barkpark_web/components/fields/array_field.ex:119
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:519
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1114
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2658
@@ -176,7 +176,7 @@ msgstr "Historikk"
 msgid "Move down"
 msgstr "Flytt ned"
 
-#: lib/barkpark_web/components/fields/array_field.ex:106
+#: lib/barkpark_web/components/fields/array_field.ex:107
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:504
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1102
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2655
@@ -249,7 +249,7 @@ msgstr "Publiser"
 msgid "Publish — makes this sheet public"
 msgstr "Publiser — gjør dette arket offentlig"
 
-#: lib/barkpark_web/components/fields/array_field.ex:131
+#: lib/barkpark_web/components/fields/array_field.ex:132
 #, elixir-autogen, elixir-format
 msgid "Remove row"
 msgstr "Fjern rad"
@@ -1694,6 +1694,7 @@ msgid "Download or erase your data"
 msgstr "Last ned eller slett dataene dine"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:828
+#: lib/barkpark_web/live/studio/studio_live/handlers/discard.ex:48
 #, elixir-autogen, elixir-format
 msgid "Draft discarded"
 msgstr "Utkast forkastet"
@@ -1825,6 +1826,8 @@ msgstr "Papers"
 
 #: lib/barkpark_web/components/draft_diff.ex:66
 #: lib/barkpark_web/components/studio_components/modals.ex:826
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:200
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1241
 #, elixir-autogen, elixir-format
 msgid "Published"
 msgstr "Publisert"
@@ -1987,6 +1990,7 @@ msgid "This is how others see you"
 msgstr "Slik ser andre deg"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:827
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:768
 #, elixir-autogen, elixir-format
 msgid "Unpublished"
 msgstr "Avpublisert"
@@ -2644,6 +2648,7 @@ msgstr "Forespurt: %{action}"
 
 #: lib/barkpark_web/live/bulldocs_live.ex:898
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:640
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1387
 #, elixir-autogen, elixir-format
 msgid "Save failed"
 msgstr "Lagring mislyktes"
@@ -5158,7 +5163,7 @@ msgstr "faner"
 msgid "Saved to your account: others see it in Studio and on media you check out."
 msgstr "Lagres på kontoen din: andre ser det i Studio og på medier du sjekker ut."
 
-#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:150
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:151
 #, elixir-autogen, elixir-format
 msgid "Use at most 80 characters."
 msgstr "Bruk høyst 80 tegn."
@@ -8910,12 +8915,12 @@ msgctxt "reference picker"
 msgid "1 search"
 msgstr "1 søk"
 
-#: lib/barkpark_web/components/fields/array_field.ex:606
+#: lib/barkpark_web/components/fields/array_field.ex:607
 #, elixir-autogen, elixir-format
 msgid "%{field} %{n}"
 msgstr "%{field} %{n}"
 
-#: lib/barkpark_web/components/fields/array_field.ex:84
+#: lib/barkpark_web/components/fields/array_field.ex:85
 #, elixir-autogen, elixir-format
 msgid "%{met}/%{total} met"
 msgstr "%{met}/%{total} oppfylt"
@@ -9295,10 +9300,12 @@ msgid "Save paused: this nested editor lost its document position. Your edits ar
 msgstr "Lagring satt på pause: denne nestede redigeringen mistet plassen sin i dokumentet. Endringene dine er fortsatt her; kopier dem før du laster inn på nytt."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:641
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:213
 #, elixir-autogen, elixir-format
 msgid "Saved"
 msgstr "Lagret"
 
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:639
 #: lib/barkpark_web/studio_locale.ex:319
 #, elixir-autogen, elixir-format
 msgid "Saved as master: %{title}"
@@ -9958,3 +9965,411 @@ msgstr "oppgave"
 msgctxt "type word"
 msgid "ticket"
 msgstr "sak"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/schema.ex:70
+#: lib/barkpark_web/live/studio/studio_live/handlers/schema.ex:85
+#, elixir-autogen, elixir-format
+msgid "%{name} failed: %{detail}"
+msgstr "%{name} mislyktes: %{detail}"
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1149
+#, elixir-autogen, elixir-format
+msgid "A label needs a rationale of at least 20 characters — say why this tag fits."
+msgstr "En etikett trenger en begrunnelse på minst 20 tegn — si hvorfor denne taggen passer."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1136
+#, elixir-autogen, elixir-format
+msgid "A label needs a tag name."
+msgstr "En etikett trenger et taggnavn."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1142
+#, elixir-autogen, elixir-format
+msgid "A label's strength must be a whole number from 1 to 100."
+msgstr "Styrken til en etikett må være et heltall fra 1 til 100."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1192
+#, elixir-autogen, elixir-format
+msgid "A new label name uses lowercase letters, numbers and hyphens, like “product-news”."
+msgstr "Et nytt etikettnavn bruker små bokstaver, tall og bindestreker, som «product-news»."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:254
+#, elixir-autogen, elixir-format
+msgid "A tag named “%{name}” already exists. Open that tag to change it, or give this one a different title."
+msgstr "Det finnes allerede en tagg som heter «%{name}». Åpne den taggen for å endre den, eller gi denne en annen tittel."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:624
+#, elixir-autogen, elixir-format
+msgid "Accept baseline failed"
+msgstr "Kunne ikke godta grunnlinjen"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/schema.ex:29
+#, elixir-autogen, elixir-format
+msgid "Action %{name} not yet wired"
+msgstr "Handlingen %{name} er ikke koblet til ennå"
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:937
+#, elixir-autogen, elixir-format
+msgid "Action failed"
+msgstr "Handlingen mislyktes"
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:562
+#, elixir-autogen, elixir-format
+msgid "Action failed: %{message}"
+msgstr "Handlingen mislyktes: %{message}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:33
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:263
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:340
+#, elixir-autogen, elixir-format
+msgid "Admin access required to manage shares."
+msgstr "Du trenger administratortilgang for å administrere delinger."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/item_share.ex:46
+#: lib/barkpark_web/live/studio/studio_live/handlers/item_share.ex:59
+#: lib/barkpark_web/live/studio/studio_live/handlers/item_share.ex:146
+#, elixir-autogen, elixir-format
+msgid "Admin access required to share items."
+msgstr "Du trenger administratortilgang for å dele elementer."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:597
+#, elixir-autogen, elixir-format
+msgid "Baseline accepted — pinned literal updated to the current value"
+msgstr "Grunnlinjen er godtatt — den låste verdien er oppdatert til gjeldende verdi"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:613
+#, elixir-autogen, elixir-format
+msgid "Baseline already matches the current value"
+msgstr "Grunnlinjen samsvarer allerede med gjeldende verdi"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:1106
+#, elixir-autogen, elixir-format
+msgid "Canonical value written to %{target} — changes %{count} doc(s)"
+msgid_plural "Canonical value written to %{target} — changes %{count} doc(s)"
+msgstr[0] "Kanonisk verdi skrevet til %{target} — endrer %{count} dokument"
+msgstr[1] "Kanonisk verdi skrevet til %{target} — endrer %{count} dokumenter"
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1212
+#, elixir-autogen, elixir-format
+msgid "Could not register “%{tag}” as a label. Try again, or ask another admin."
+msgstr "Kunne ikke registrere «%{tag}» som etikett. Prøv igjen, eller spør en annen administrator."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:142
+#, elixir-autogen, elixir-format
+msgid "Create cancelled: %{reason}"
+msgstr "Opprettelse avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:105
+#, elixir-autogen, elixir-format
+msgid "Delete cancelled: %{reason}"
+msgstr "Sletting avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:60
+#, elixir-autogen, elixir-format
+msgid "Deleted “%{title}” and removed 1 reference to it."
+msgid_plural "Deleted “%{title}” and removed %{count} references to it."
+msgstr[0] "Slettet «%{title}» og fjernet 1 referanse til det."
+msgstr[1] "Slettet «%{title}» og fjernet %{count} referanser til det."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:68
+#, elixir-autogen, elixir-format
+msgid "Deleted “%{title}”."
+msgstr "Slettet «%{title}»."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex:132
+#, elixir-autogen, elixir-format
+msgid "Document not found"
+msgstr "Fant ikke dokumentet"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:391
+#, elixir-autogen, elixir-format
+msgid "Duplicate cancelled: %{reason}"
+msgstr "Duplisering avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_blocks.ex:85
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:383
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:541
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:2313
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:2380
+#, elixir-autogen, elixir-format
+msgid "Edit failed"
+msgstr "Endringen mislyktes"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/fields.ex:145
+#, elixir-autogen, elixir-format
+msgid "Failed to create"
+msgstr "Kunne ikke opprette"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:124
+#, elixir-autogen, elixir-format
+msgid "Failed to delete"
+msgstr "Kunne ikke slette"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/discard.ex:56
+#, elixir-autogen, elixir-format
+msgid "Failed to discard draft"
+msgstr "Kunne ikke forkaste utkastet"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:394
+#, elixir-autogen, elixir-format
+msgid "Failed to duplicate"
+msgstr "Kunne ikke duplisere"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:52
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:57
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:90
+#, elixir-autogen, elixir-format
+msgid "Failed to restore"
+msgstr "Kunne ikke gjenopprette"
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:936
+#, elixir-autogen, elixir-format
+msgid "History step failed"
+msgstr "Historikksteget mislyktes"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/media.ex:103
+#, elixir-autogen, elixir-format
+msgid "Image upload failed. Please try again with a supported file."
+msgstr "Opplastingen av bildet mislyktes. Prøv igjen med en støttet fil."
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:556
+#, elixir-autogen, elixir-format
+msgid "No document loaded"
+msgstr "Ingen dokument er åpent"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/field_blocks.ex:77
+#, elixir-autogen, elixir-format
+msgid "Not allowed in this field: %{why}"
+msgstr "Ikke tillatt i dette feltet: %{why}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:398
+#, elixir-autogen, elixir-format
+msgid "Nothing to duplicate — open a document first"
+msgstr "Ingenting å duplisere — åpne et dokument først"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:94
+#, elixir-autogen, elixir-format
+msgid "Nothing to publish — open a document first"
+msgstr "Ingenting å publisere — åpne et dokument først"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:327
+#, elixir-autogen, elixir-format
+msgid "Nothing to unpublish — open a document first"
+msgstr "Ingenting å avpublisere — åpne et dokument først"
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:551
+#, elixir-autogen, elixir-format
+msgid "ONIX failed XSD validation: %{reasons}"
+msgstr "ONIX besto ikke XSD-valideringen: %{reasons}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:606
+#, elixir-autogen, elixir-format
+msgid "Paper changed since this view — re-rendered, retry the accept"
+msgstr "Artikkelen er endret siden denne visningen — vist på nytt, prøv å godta igjen"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:341
+#, elixir-autogen, elixir-format
+msgid "Project created"
+msgstr "Prosjektet er opprettet"
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:844
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:855
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:866
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1254
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1261
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1268
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1284
+#, elixir-autogen, elixir-format
+msgid "Publish blocked: %{detail}"
+msgstr "Publisering blokkert: %{detail}"
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1248
+#, elixir-autogen, elixir-format
+msgid "Publish blocked: %{reason}"
+msgstr "Publisering blokkert: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1275
+#, elixir-autogen, elixir-format
+msgid "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+msgstr "Publisering blokkert: duplikatsjekken er ikke tilgjengelig akkurat nå — prøv igjen om litt."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1288
+#, elixir-autogen, elixir-format
+msgid "Publish failed"
+msgstr "Publiseringen mislyktes"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:285
+#, elixir-autogen, elixir-format
+msgid "Publish failed: the tag “%{name}” could not be saved (%{inspect}). Your draft is unchanged."
+msgstr "Publiseringen mislyktes: taggen «%{name}» kunne ikke lagres (%{inspect}). Utkastet ditt er uendret."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:272
+#, elixir-autogen, elixir-format
+msgid "Published tag “%{name}”. Documents and tasks use it by that name."
+msgstr "Publiserte taggen «%{name}». Dokumenter og oppgaver bruker den med det navnet."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:194
+#, elixir-autogen, elixir-format
+msgid "Published. It is readable through the API under this workspace's sharing rules; this workspace has no public page for sheets yet."
+msgstr "Publisert. Det kan leses gjennom API-et etter delingsreglene i dette arbeidsområdet; arbeidsområdet har ingen offentlig side for regneark ennå."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:189
+#, elixir-autogen, elixir-format
+msgid "Published. Published sheets are public, so anyone can now read this one at /sheets/%{slug}."
+msgstr "Publisert. Publiserte regneark er offentlige, så alle kan nå lese dette på /sheets/%{slug}."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1208
+#, elixir-autogen, elixir-format
+msgid "Registered “%{tag}” as a label in this workspace."
+msgstr "Registrerte «%{tag}» som etikett i dette arbeidsområdet."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:87
+#, elixir-autogen, elixir-format
+msgid "Restore cancelled: %{reason}"
+msgstr "Gjenoppretting avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/history.ex:78
+#, elixir-autogen, elixir-format
+msgid "Restored from history"
+msgstr "Gjenopprettet fra historikken"
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:571
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1384
+#, elixir-autogen, elixir-format
+msgid "Save cancelled: %{reason}"
+msgstr "Lagring avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/bulk.ex:29
+#, elixir-autogen, elixir-format
+msgid "Selection limit reached (%{max_selected})"
+msgstr "Grensen for utvalg er nådd (%{max_selected})"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:253
+#, elixir-autogen, elixir-format
+msgid "Shared %{scope}."
+msgstr "Delte %{scope}."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:319
+#, elixir-autogen, elixir-format
+msgid "Sign in to create a project"
+msgstr "Logg inn for å opprette et prosjekt"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:283
+#, elixir-autogen, elixir-format
+msgid "Sign in to create a workspace"
+msgstr "Logg inn for å opprette et arbeidsområde"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:758
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:834
+#, elixir-autogen, elixir-format
+msgid "That field is already at its limit."
+msgstr "Feltet har allerede nådd grensen."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/access_panel.ex:102
+#, elixir-autogen, elixir-format
+msgid "That grant is no longer active."
+msgstr "Den tilgangen er ikke lenger aktiv."
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:902
+#, elixir-autogen, elixir-format
+msgid "The document changed since you loaded it — reload and retry."
+msgstr "Dokumentet er endret siden du lastet det inn — last inn på nytt og prøv igjen."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1378
+#, elixir-autogen, elixir-format
+msgid "The paper changed while you were editing — that metadata change was not saved; try again."
+msgstr "Artikkelen ble endret mens du redigerte — den metadataendringen ble ikke lagret; prøv igjen."
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:466
+#, elixir-autogen, elixir-format
+msgid "This asset is checked out by another editor, so its metadata is read-only for you."
+msgstr "Denne filen er sjekket ut av en annen redaktør, så metadataene er skrivebeskyttet for deg."
+
+#: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:559
+#, elixir-autogen, elixir-format
+msgid "Unknown action: %{name}"
+msgstr "Ukjent handling: %{name}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:854
+#, elixir-autogen, elixir-format
+msgid "Unknown property."
+msgstr "Ukjent egenskap."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/paper.ex:620
+#, elixir-autogen, elixir-format
+msgid "Value is unresolvable (dangling) — no baseline to accept"
+msgstr "Verdien kan ikke slås opp (hengende) — ingen grunnlinje å godta"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:303
+#, elixir-autogen, elixir-format
+msgid "Workspace created"
+msgstr "Arbeidsområdet er opprettet"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/scope.ex:199
+#, elixir-autogen, elixir-format
+msgid "Workspace has no projects yet — create one first"
+msgstr "Arbeidsområdet har ingen prosjekter ennå — opprett ett først"
+
+#: lib/barkpark_web/live/studio/studio_live.ex:341
+#, elixir-autogen, elixir-format
+msgid "You've been granted access — check your email to claim it."
+msgstr "Du har fått tilgang — sjekk e-posten din for å ta den i bruk."
+
+#: lib/barkpark_web/live/studio/studio_live.ex:234
+#, elixir-autogen, elixir-format
+msgid "Your access grant is no longer valid."
+msgstr "Tilgangen din er ikke lenger gyldig."
+
+#: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1185
+#, elixir-autogen, elixir-format
+msgid "“%{tag}” is not a label in this workspace yet. Pick one from the suggestions, or ask an admin to add it."
+msgstr "«%{tag}» er ikke en etikett i dette arbeidsområdet ennå. Velg en fra forslagene, eller be en administrator legge den til."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:355
+#, elixir-autogen, elixir-format
+msgid "%{scope} is STILL shared — %{reason}"
+msgstr "%{scope} er FORTSATT delt — %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:365
+#, elixir-autogen, elixir-format
+msgid "%{scope} was not shared — nothing to remove. Every item /s/ link under it was revoked too."
+msgstr "%{scope} var ikke delt — ingenting å fjerne. Alle /s/-elementlenker under det ble også trukket tilbake."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/doc.ex:244
+#, elixir-autogen, elixir-format
+msgid "Name the tag before publishing. Documents use the tag by a name made from its title (lowercase letters, digits and hyphens), so the title needs at least one letter or digit."
+msgstr "Gi taggen et navn før du publiserer. Dokumenter bruker taggen med et navn laget av tittelen (små bokstaver, sifre og bindestreker), så tittelen trenger minst én bokstav eller ett siffer."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:375
+#, elixir-autogen, elixir-format
+msgid "Stopped sharing %{scope} — it is no longer shared. Every item /s/ link under it was revoked too."
+msgstr "Sluttet å dele %{scope} — det er ikke lenger delt. Alle /s/-elementlenker under det ble også trukket tilbake."
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:886
+#, elixir-autogen, elixir-format
+msgid "That document is no longer there — it may have been discarded, or already %{action} in another tab."
+msgstr "Det dokumentet finnes ikke lenger — det kan ha blitt forkastet, eller allerede %{action} i en annen fane."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:401
+#, elixir-autogen, elixir-format
+msgid "the stored share is gone and it is NOT in the BARKPARK_SHARES baseline, so something else is still exposing it. The Studio cannot name the source — check the share configuration before treating this scope as private."
+msgstr "den lagrede delingen er borte, og den er IKKE i BARKPARK_SHARES-grunnlinjen, så noe annet eksponerer det fortsatt. Studio kan ikke si hva kilden er — sjekk delingsoppsettet før du regner dette området som privat."
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/shares.ex:397
+#, elixir-autogen, elixir-format
+msgid "the stored share is gone, but this scope is also declared in %{baseline}"
+msgstr "den lagrede delingen er borte, men dette området er også oppgitt i %{baseline}"
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:832
+#, elixir-autogen, elixir-format
+msgid "%{action} cancelled: %{reason}"
+msgstr "%{action} avbrutt: %{reason}"
+
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:927
+#, elixir-autogen, elixir-format
+msgid "%{action} failed: %{errors}"
+msgstr "%{action} mislyktes: %{errors}"
+
+#: lib/barkpark_web/live/studio/studio_live/handlers/schema.ex:61
+#, elixir-autogen, elixir-format
+msgid "%{name} enqueued"
+msgstr "%{name} er satt i kø"

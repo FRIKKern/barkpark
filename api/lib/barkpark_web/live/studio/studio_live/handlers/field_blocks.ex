@@ -11,6 +11,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldBlocks do
   uses; a `phx-update="ignore"` wrapper cannot be re-rendered into).
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Content
   alias BarkparkWeb.Studio.StudioLive.Shared
   alias BarkparkWeb.Studio.StudioLive.Shared.Paper
@@ -69,13 +71,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.FieldBlocks do
 
           {:error, {:out_of_vocabulary, why}} ->
             reply(
-              Phoenix.LiveView.put_flash(socket, :error, "Not allowed in this field: #{why}"),
+              Phoenix.LiveView.put_flash(
+                socket,
+                :error,
+                gettext("Not allowed in this field: %{why}", why: why)
+              ),
               params,
               false
             )
 
           {:error, _reason} ->
-            reply(Phoenix.LiveView.put_flash(socket, :error, "Edit failed"), params, false)
+            reply(
+              Phoenix.LiveView.put_flash(socket, :error, gettext("Edit failed")),
+              params,
+              false
+            )
         end
     end
   end
