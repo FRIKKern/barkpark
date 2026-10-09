@@ -97,15 +97,20 @@ defmodule BarkparkWeb.MediaDeleteWhereUsedTest do
       refute Repo.get(MediaFile, file.id)
     end
 
-    test "a DRAFT reference does not refuse — only published documents count" do
+    test "a DRAFT reference ALSO refuses — task-992eae89fc73b97e: a draft losing its image is the same data loss" do
       file = media_file!()
-      _draft = paper_referencing!(file, @dataset, status: "draft")
+      draft = paper_referencing!(file, @dataset, status: "draft")
 
-      admin(scoped_conn())
-      |> delete("/v1/media/#{@dataset}/#{file.id}")
-      |> json_response(200)
+      body =
+        admin(scoped_conn())
+        |> delete("/v1/media/#{@dataset}/#{file.id}")
+        |> json_response(409)
 
-      refute Repo.get(MediaFile, file.id)
+      assert Repo.get(MediaFile, file.id),
+             "the guard answered 409 but the blob row was deleted anyway"
+
+      referrers = Enum.map(body["error"]["details"]["referencedBy"], & &1["doc_id"])
+      assert draft.doc_id in referrers
     end
 
     test "a reference from ANOTHER dataset still refuses — the blob keyspace is flat" do

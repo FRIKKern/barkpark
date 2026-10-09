@@ -1,6 +1,7 @@
 defmodule Barkpark.Media.WhereUsed do
   @moduledoc """
-  Which PUBLISHED documents reference a media blob by its delivery URL.
+  Which documents (draft or published, task-992eae89fc73b97e) reference a
+  media blob by its delivery URL.
 
   Papers (and every other content type) embed self-hosted media as a RAW URL
   STRING inside their block JSON — `/media/files/<path>` — never as a typed
@@ -17,10 +18,24 @@ defmodule Barkpark.Media.WhereUsed do
   and finds a broken image. Nothing on either delete path consulted usage.
 
   This module is the missing lookup: a `content::text` containment scan for the
-  blob's delivery path over PUBLISHED rows. It is deliberately TEXTUAL rather
-  than structural — the reference IS text, in an arbitrary position of a
-  schemaless block tree, so any structural walk would have to enumerate shapes
-  and would miss the next one someone invents.
+  blob's delivery path over every draft or published row. It is deliberately
+  TEXTUAL rather than structural — the reference IS text, in an arbitrary
+  position of a schemaless block tree, so any structural walk would have to
+  enumerate shapes and would miss the next one someone invents.
+
+  DRAFTS COUNT (task-992eae89fc73b97e, widening the scope task-5f6e7ae324334044
+  already gave the structural half below): a raw URL pasted into a draft-only
+  block — a paper draft nobody has published yet, or a draft edit of a
+  published paper with a NEW embed not yet live — used to delete clean, because
+  the scan's `where: d.status == "published"` excluded it. Nothing about that
+  exclusion was ever a reasoned decision; it was the same acknowledged gap the
+  moduledoc below used to describe. A draft losing its image is the same
+  unrecoverable data loss as a published page losing it, so the scan now reads
+  `status in ["published", "draft"]`. Every OTHER status (`archived`,
+  `active`, `planning`, `completed` — the task-workflow statuses `Document`
+  also carries) stays excluded: this guard is about content that could show a
+  blob to a reader or an editor, not every row the `status` column's enum
+  happens to cover.
 
   ## The one shape the textual scan cannot see (task-5f6e7ae324334044)
 
@@ -40,14 +55,12 @@ defmodule Barkpark.Media.WhereUsed do
   document that lives in its OWN dataset's row space; there is no cross-
   dataset structural case the way there is a cross-dataset URL-string one.
 
-  UNLIKE the textual scan, the structural lookup counts DRAFT references too
-  (a draft edit's `_ref`, or a never-published document's). Deleting a blob a
-  draft references is the same unrecoverable data loss as deleting one a
-  published page references, and nothing scopes the textual scan to
-  published-only for a REASON that also applies here — it is a corpus-wide
-  text scan with its own churn/cost tradeoffs the structural lookup (a single
-  indexed read) does not share. So an author editing a draft, or one who never
-  published at all, is protected exactly as a live page is.
+  LIKE the textual scan (as of task-992eae89fc73b97e), the structural lookup
+  counts DRAFT references too (a draft edit's `_ref`, or a never-published
+  document's). Deleting a blob a draft references is the same unrecoverable
+  data loss as deleting one a published page references. So an author editing
+  a draft, or one who never published at all, is protected exactly as a live
+  page is, through either embed shape.
 
   ## The census that sets the urgency (measured 2026-09-01, guerrilla prod)
 
@@ -73,10 +86,11 @@ defmodule Barkpark.Media.WhereUsed do
 
   ## What it does NOT claim
 
-  A `false` from `referenced?/1` is not proof the blob is unused — an unpublished
-  draft, an external mirror, or a consumer outside this database can still hold
-  it. This answers one question only, and answers it conservatively: *does a
-  published document in this database contain this blob's delivery path?*
+  A `false` from `referenced?/1` is not proof the blob is unused — an external
+  mirror, or a consumer outside this database, can still hold it. This answers
+  one question only, and answers it conservatively: *does a draft or published
+  document in this database contain this blob's delivery path, or structurally
+  reference its companion asset document?*
   """
 
   import Ecto.Query, warn: false
@@ -103,13 +117,13 @@ defmodule Barkpark.Media.WhereUsed do
   def delivery_path(path) when is_binary(path), do: "/media/files/" <> path
 
   @doc """
-  Published documents whose `content` JSON contains this blob's delivery path,
-  OR whose schema `image`/`file` field structurally `_ref`s the blob's
-  companion `mediaAsset` document (task-5f6e7ae324334044 — see the moduledoc's
-  "one shape the textual scan cannot see").
+  Draft or published documents whose `content` JSON contains this blob's
+  delivery path, OR whose schema `image`/`file` field structurally `_ref`s the
+  blob's companion `mediaAsset` document (task-5f6e7ae324334044 — see the
+  moduledoc's "one shape the textual scan cannot see").
 
   Returns `%{count: non_neg_integer(), sample: [map()]}` — `count` is the exact
-  number of referring published documents, `sample` at most #{@sample_limit} of
+  number of referring documents, `sample` at most #{@sample_limit} of
   them as `%{doc_id:, type:, dataset:, title:}`.
 
   A blob with no `path` cannot be referenced by URL, but CAN still be
@@ -140,7 +154,7 @@ defmodule Barkpark.Media.WhereUsed do
   def referrers(path) when is_binary(path), do: path |> delivery_path() |> scan(nil)
 
   @doc """
-  True when at least one published document references the blob.
+  True when at least one draft or published document references the blob.
   """
   def referenced?(file_or_path), do: referrers(file_or_path).count > 0
 
@@ -173,15 +187,10 @@ defmodule Barkpark.Media.WhereUsed do
   # reference exactly as readily as a public one — the blob is just as
   # unrecoverable either way.
   #
-  # DRAFTS COUNT HERE, unlike the textual scan (which is published-only by
-  # design — see the moduledoc's "What it does NOT claim"). Deleting a blob a
+  # DRAFTS COUNT HERE — and, as of task-992eae89fc73b97e, in `scan/2` too, so
+  # this is no longer an asymmetry between the two halves. Deleting a blob a
   # draft references is the SAME unrecoverable data loss as deleting one a
-  # published page references; nothing in the textual scan's own published-
-  # only scoping is written as a reason to exclude a draft, only as an
-  # ACKNOWLEDGED gap in what a raw-text containment scan can promise (ruling,
-  # 2026-10-09). The structural lookup has no equivalent reason to narrow
-  # itself the same way: it is a single indexed read, not a corpus-wide text
-  # scan, so there is no churn/cost tradeoff pushing it toward published-only.
+  # published page references.
   #
   # The blob's OWN tenancy scope rides into the backlinks read
   # (task-fe13ea62be4a69e6). Without it `resolve_read_dataset_id/2` falls back
@@ -253,7 +262,15 @@ defmodule Barkpark.Media.WhereUsed do
 
     query =
       from(d in Document,
-        where: d.status == "published",
+        where: d.status in ["published", "draft"],
+        # task-992eae89fc73b97e — excludes the blob's OWN companion mediaAsset
+        # document. Every upload's `Assets.create_draft/1` stamps
+        # `content.fileInfo.url` with this blob's OWN delivery path, and a
+        # mediaAsset row is ALWAYS a draft (never published) — so widening
+        # this scan to drafts made every blob with a companion asset doc
+        # match ITSELF, one false "referrer" that is really just the blob
+        # describing its own metadata, never a reader- or editor-visible use.
+        where: d.type != "mediaAsset",
         where: fragment("(?)::text LIKE ? ESCAPE '\\'", d.content, ^pattern),
         select: %{
           doc_id: d.doc_id,
