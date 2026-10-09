@@ -124,7 +124,7 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
        [:details]},
       {"batch_too_large/mutate-gate", {:error, {:batch_too_large, 1001, 1000}}, "batch_too_large",
        422, [:details]},
-      {"batch_too_large/delete-gate", {:error, {:delete_batch_too_large, 250, 100}},
+      {"batch_too_large/delete-gate", {:error, {:delete_batch_too_large, 250, 50}},
        "batch_too_large", 422, [:details]},
       {"forbidden_origin", {:error, :forbidden_origin}, "cors_forbidden", 403, []},
       {"csrf_required", {:error, :csrf_required}, "csrf_required", 403, []},

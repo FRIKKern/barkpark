@@ -64,15 +64,26 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   delete; a real dataset's schema, corpus size and infra push that higher,
   which is the gap between "50 works" and "250 500s" on barkpark-studio's box.
 
-  `@max_delete_mutations` (100) is a flat, schema-independent cap chosen with
-  headroom under the measured-working 50 and well under the measured-failing
-  250 — a conservative choice, not a precise computed bound (this gate cannot
-  see the dataset's schema without a query of its own, which would itself
-  cost room on an already-oversize request). The real fix — batching
-  `ensure_unreferenced`'s query across the whole to-be-deleted id set
-  instead of once per id — is filed as a separate follow-up; this cap is the
-  unconditional backstop so no mutate size reaches a 500 in the meantime,
-  matching this gate's own "refuse before the transaction, name the cap"
+  WHY 50, NOT A LOOSER NUMBER. The candidate timeouts a long-held connection
+  could cross in prod: Postgres `statement_timeout` (30s, `runtime.exs`,
+  PER STATEMENT — cancels one slow query, not the sum of many fast ones) and
+  Ecto/Postgrex's client-side `:timeout` (15_000 ms default, PER CALL, still
+  unset in `repo_opts` — same file). Neither bounds a TRANSACTION making many
+  FAST sequential statements, which is exactly this shape: 100 deletes
+  against a 3-reference-field schema on a near-empty LOCAL corpus already
+  measured ~4.8 s — no real data, no concurrent load, no network hop to
+  Postgres. A real dataset's schema (e2e-sanity-builder plausibly carries
+  4-8 reference fields, not 3), its corpus size, and a busier box all push
+  that higher, and this gate cannot see any of them without a schema query
+  of its own (which would cost room on an already-oversize request) — so it
+  cannot PROVE a looser cap stays under either timeout. `@max_delete_mutations`
+  is set to 50 — the size barkpark-studio measured actually working in
+  production — rather than a number only proven safe on an empty local
+  table. The real fix — batching `ensure_unreferenced`'s query across the
+  whole to-be-deleted id set instead of once per id — is filed as a separate
+  follow-up; this cap is the unconditional backstop so no mutate size
+  reaches a 500 in the meantime, matching this gate's own "refuse before the
+  transaction, name the cap"
   shape for `@max_mutations`.
 
   ## Room for the WHOLE batch, not room for one
@@ -147,8 +158,11 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
 
   # task-c801daf4efd35a74 — see "## The delete cap" above. `delete` costs
   # ZERO quota room but a per-op reference-integrity scan `@max_mutations`
-  # never bounds; this is the schema-independent, conservative backstop.
-  @max_delete_mutations 100
+  # never bounds. 50, not a looser number proven only on an empty local
+  # table: the production-measured working size, below either candidate
+  # timeout (Postgres `statement_timeout` 30s, Ecto/Postgrex client
+  # `:timeout` 15_000ms) with real headroom this gate cannot otherwise prove.
+  @max_delete_mutations 50
 
   # Ops that can add a `documents` row. Everything else (delete, discardDraft,
   # patch) consumes ZERO room; see the moduledoc.

@@ -27,14 +27,21 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaDeleteCapTest do
   latency to Postgres only make it worse, which is the gap between "50
   works" and "250 500s" on barkpark-studio's own measurement.
 
-  THE FIX: `@max_delete_mutations` (100) on the SAME `RequireWithinQuota`
-  gate that already refuses an oversize batch before the transaction opens
-  -- a flat, schema-independent cap (this gate cannot afford a schema query
-  of its own just to decide whether to refuse), with headroom under the
-  measured-working 50 and well under the measured-failing 250. The real fix
-  -- batching the reference-integrity query across the whole to-be-deleted
-  id set instead of once per id -- is a separate, larger follow-up; this cap
-  is the unconditional backstop so no mutate batch size reaches a 500 in the
+  THE FIX: `@max_delete_mutations` (50) on the SAME `RequireWithinQuota` gate
+  that already refuses an oversize batch before the transaction opens -- a
+  flat, schema-independent cap (this gate cannot afford a schema query of
+  its own just to decide whether to refuse). Set to 50, not a looser number:
+  the candidate timeouts a long-held connection could cross in prod
+  (Postgres `statement_timeout` 30s, Ecto/Postgrex client `:timeout`
+  15_000ms, both PER STATEMENT/CALL, neither bounding a transaction making
+  many fast sequential ones) are not provably cleared by a bigger cap on an
+  empty local table -- 100 deletes against only 3 reference fields already
+  measured ~4.8s locally, with zero real data and zero concurrent load. 50
+  is the size barkpark-studio measured ACTUALLY WORKING in production, so
+  it is proven, not merely hoped-for. The real fix -- batching the
+  reference-integrity query across the whole to-be-deleted id set instead
+  of once per id -- is a separate, larger follow-up; this cap is the
+  unconditional backstop so no mutate batch size reaches a 500 in the
   meantime.
 
   Every request below goes over HTTP through the real endpoint + router,
@@ -110,8 +117,8 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaDeleteCapTest do
     Enum.map(body(resp)["results"], & &1["id"])
   end
 
-  test "the module's own documented cap value is 100", _ctx do
-    assert RequireWithinQuota.max_delete_mutations() == 100
+  test "the module's own documented cap value is 50", _ctx do
+    assert RequireWithinQuota.max_delete_mutations() == 50
   end
 
   describe "the delete cap refuses BEFORE the transaction opens" do
@@ -129,13 +136,13 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaDeleteCapTest do
       assert %{
                "error" => %{
                  "code" => "batch_too_large",
-                 "details" => %{"count" => 250, "max" => 100, "kind" => "delete"}
+                 "details" => %{"count" => 250, "max" => 50, "kind" => "delete"}
                }
              } = body(resp)
     end
 
     test "nothing was deleted when the batch is refused", %{conn: conn, slug: slug, raw: raw} do
-      ids = seed!(conn, slug, raw, 150)
+      ids = seed!(conn, slug, raw, 75)
 
       resp = mutate(conn, slug, raw, deletes(ids))
       assert resp.status == 422
@@ -153,42 +160,42 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuotaDeleteCapTest do
       assert still_there.status == 200
     end
 
-    test "a batch mixing creates and 150 deletes is refused on the delete count alone, well under the overall 1000 cap",
+    test "a batch mixing creates and 75 deletes is refused on the delete count alone, well under the overall 1000 cap",
          %{conn: conn, slug: slug, raw: raw} do
-      ids = seed!(conn, slug, raw, 150)
+      ids = seed!(conn, slug, raw, 75)
 
       resp = mutate(conn, slug, raw, creates(10) ++ deletes(ids))
 
       assert resp.status == 422
 
-      assert %{"error" => %{"details" => %{"count" => 150, "max" => 100, "kind" => "delete"}}} =
+      assert %{"error" => %{"details" => %{"count" => 75, "max" => 50, "kind" => "delete"}}} =
                body(resp)
     end
 
-    test "exactly at the cap (100 deletes) is still admitted", %{conn: conn, slug: slug, raw: raw} do
-      ids = seed!(conn, slug, raw, 100)
-
-      resp = mutate(conn, slug, raw, deletes(ids))
-
-      assert resp.status == 200,
-             "100 deletes == the cap must fit exactly: #{resp.status} #{resp.resp_body}"
-
-      assert length(body(resp)["results"]) == 100
-    end
-  end
-
-  describe "positive control: the measured real caller still succeeds" do
-    test "50 deletes (the production-measured working size) succeed", %{
-      conn: conn,
-      slug: slug,
-      raw: raw
-    } do
+    test "exactly at the cap (50 deletes) is still admitted", %{conn: conn, slug: slug, raw: raw} do
       ids = seed!(conn, slug, raw, 50)
 
       resp = mutate(conn, slug, raw, deletes(ids))
 
-      assert resp.status == 200, "#{resp.status} #{resp.resp_body}"
+      assert resp.status == 200,
+             "50 deletes == the cap must fit exactly: #{resp.status} #{resp.resp_body}"
+
       assert length(body(resp)["results"]) == 50
+    end
+  end
+
+  describe "positive control: the measured real caller still succeeds" do
+    test "25 deletes (comfortably under the production-measured working size of 50) succeed", %{
+      conn: conn,
+      slug: slug,
+      raw: raw
+    } do
+      ids = seed!(conn, slug, raw, 25)
+
+      resp = mutate(conn, slug, raw, deletes(ids))
+
+      assert resp.status == 200, "#{resp.status} #{resp.resp_body}"
+      assert length(body(resp)["results"]) == 25
     end
   end
 end
