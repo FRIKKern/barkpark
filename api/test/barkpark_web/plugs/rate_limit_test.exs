@@ -555,4 +555,65 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       assert RateLimit.call(conn, RateLimit.init([])).halted
     end
   end
+
+  # task-db8de40bbc928c54 — presence/focus must never share a bucket with
+  # content writes, for the SAME principal.
+  describe "the :presence_focus class (task-db8de40bbc928c54)" do
+    defp mint_presence(label) do
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+      {:ok, _token} = Barkpark.Auth.create_token(raw, label, "production", ["read", "write"])
+      raw
+    end
+
+    defp focus_conn(raw) do
+      build(:post, "/v1/data/presence/production/focus", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    defp write_conn(raw) do
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    test "a presence_focus burst never debits the content-write bucket", %{} do
+      with_limits(write_per_minute: 1, presence_focus_per_minute: 200)
+      raw = mint_presence("focus-isolation")
+
+      for _ <- 1..200 do
+        refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+      end
+
+      # The SAME principal's content-write bucket is untouched: its own
+      # budget (1/min) is still fully unspent after 200 focus calls.
+      refute RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+    end
+
+    test "a content write never debits the presence_focus bucket, either way", %{} do
+      with_limits(write_per_minute: 1, presence_focus_per_minute: 50)
+      raw = mint_presence("write-isolation")
+
+      refute RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+      # The write bucket (1/min) is now spent...
+      assert RateLimit.call(write_conn(raw), RateLimit.init([])).halted
+      # ...but presence_focus (50/min) is untouched by it.
+      refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+    end
+
+    test "a presence_focus flood is STILL bounded — it is a real class, not shadow-only" do
+      with_limits(presence_focus_per_minute: 3)
+      raw = mint_presence("focus-flood")
+
+      for _ <- 1..3 do
+        refute RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus)).halted
+      end
+
+      limited = RateLimit.call(focus_conn(raw), RateLimit.init(class: :presence_focus))
+      assert limited.halted
+      assert limited.status == 429
+      body = Jason.decode!(limited.resp_body)
+      assert body["error"]["code"] == "rate_limited"
+    end
+  end
 end
