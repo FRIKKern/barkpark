@@ -681,7 +681,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       <div class="editor-panel" data-role="content" role="main">
         <.document_header
           dataset={@dataset}
-          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}
+          title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || gettext("Untitled")}
           focus_on_mount={@focus_on_mount}
         >
           <:status_pill>
