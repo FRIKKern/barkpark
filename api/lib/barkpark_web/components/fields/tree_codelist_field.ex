@@ -387,7 +387,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
               class="bp-btn bp-tree-search-clear"
               phx-click="tree_search_clear"
               phx-target={@myself}
-            >Clear</button>
+            ><%= gettext("Clear") %></button>
           <% end %>
         </div>
 
@@ -395,9 +395,9 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           <%= if @visible_rows == [] do %>
             <li class="bp-tree-empty">
               <%= if @search_query != "" do %>
-                No matches for "<%= @search_query %>".
+                <%= gettext("No matches for \"%{query}\".", query: @search_query) %>
               <% else %>
-                No entries.
+                <%= gettext("No entries.") %>
               <% end %>
             </li>
           <% else %>

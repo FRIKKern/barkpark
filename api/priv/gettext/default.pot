@@ -85,7 +85,7 @@ msgid "Close reference: %{title}"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:893
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2282
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2288
 #: lib/barkpark_web/live/studio/chat_live.ex:3370
 #: lib/barkpark_web/live/studio/settings_live.ex:1069
 #: lib/barkpark_web/live/studio/settings_live.ex:1100
@@ -124,7 +124,7 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:489
 #: lib/barkpark_web/components/studio_components/modals.ex:675
 #: lib/barkpark_web/components/studio_components/modals.ex:741
-#: lib/barkpark_web/live/bulldocs_live.ex:1737
+#: lib/barkpark_web/live/bulldocs_live.ex:1738
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3170
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3419
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
@@ -455,6 +455,7 @@ msgid "No matches"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:213
+#: lib/barkpark_web/live/studio/paper_field_block.ex:189
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:509
 #: lib/barkpark_web/studio_locale.ex:610
 #: lib/barkpark_web/studio_locale.ex:729
@@ -902,6 +903,8 @@ msgstr ""
 msgid "Checkbox"
 msgstr ""
 
+#: lib/barkpark_web/components/field_inputs.ex:348
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:390
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:79
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3807
 #: lib/barkpark_web/live/studio/sheet_grid.ex:4152
@@ -1333,6 +1336,7 @@ msgid "Show rows where"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:699
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3632
 #, elixir-autogen, elixir-format
 msgid "Showing rows %{first}–%{last} of %{rows}"
 msgstr ""
@@ -1430,7 +1434,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:482
 #: lib/barkpark_web/components/studio_components/modals.ex:674
-#: lib/barkpark_web/live/bulldocs_live.ex:1737
+#: lib/barkpark_web/live/bulldocs_live.ex:1738
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3170
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
 #: lib/barkpark_web/studio_locale.ex:675
@@ -2255,7 +2259,7 @@ msgstr ""
 msgid "Open standalone"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2293
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2299
 #: lib/barkpark_web/live/studio/studio_live/components.ex:143
 #: lib/barkpark_web/live/studio/studio_live/components.ex:717
 #, elixir-autogen, elixir-format
@@ -2445,327 +2449,327 @@ msgstr ""
 msgid "why this tag fits (at least 20 characters)"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1778
+#: lib/barkpark_web/live/bulldocs_live.ex:1779
 #, elixir-autogen, elixir-format
 msgid "%{count} anonymous"
 msgid_plural "%{count} anonymous"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1838
+#: lib/barkpark_web/live/bulldocs_live.ex:1839
 #, elixir-autogen, elixir-format
 msgid "Accept"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1019
+#: lib/barkpark_web/live/bulldocs_live.ex:1020
 #, elixir-autogen, elixir-format
 msgid "Accepted %{branch}"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2279
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2285
 #: lib/barkpark_web/live/studio/chat_live.ex:3360
 #, elixir-autogen, elixir-format
 msgid "Archive"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2279
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2285
 #, elixir-autogen, elixir-format
 msgid "Archive — return to the reader"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2275
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2281
 #, elixir-autogen, elixir-format
 msgid "Back to inbox"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2275
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2281
 #, elixir-autogen, elixir-format
 msgid "Back — return to the reader"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:584
+#: lib/barkpark_web/live/bulldocs_live.ex:585
 #, elixir-autogen, elixir-format
 msgid "Build this plan"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1963
+#: lib/barkpark_web/live/bulldocs_live.ex:1989
 #, elixir-autogen, elixir-format
 msgid "Close diff"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2043
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2049
 #, elixir-autogen, elixir-format
 msgid "Close enlarged image"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:578
+#: lib/barkpark_web/live/bulldocs_live.ex:579
 #, elixir-autogen, elixir-format
 msgid "Create plan from this spec"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2029
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2035
 #, elixir-autogen, elixir-format
 msgid "Dark mode"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2282
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2288
 #, elixir-autogen, elixir-format
 msgid "Delete — return to the reader"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2049
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2055
 #, elixir-autogen, elixir-format
 msgid "Drag or scroll to inspect"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2034
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2040
 #, elixir-autogen, elixir-format
 msgid "Editor failed to load. Reload the page to try again."
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2035
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2041
 #, elixir-autogen, elixir-format
 msgid "Editor failed to load. Your paper is still readable; reload to try editing again."
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2032
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2338
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2038
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2344
 #, elixir-autogen, elixir-format
 msgid "Email view"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2039
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2045
 #, elixir-autogen, elixir-format
 msgid "Enlarged paper image"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2048
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2054
 #, elixir-autogen, elixir-format
 msgid "Fit image"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2314
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2320
 #, elixir-autogen, elixir-format
 msgid "Forward"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2026
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2032
 #, elixir-autogen, elixir-format
 msgid "Go to %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1923
+#: lib/barkpark_web/live/bulldocs_live.ex:1924
 #, elixir-autogen, elixir-format
 msgid "Goal path"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:585
+#: lib/barkpark_web/live/bulldocs_live.ex:586
 #, elixir-autogen, elixir-format
 msgid "Grill the plan"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:579
+#: lib/barkpark_web/live/bulldocs_live.ex:580
 #, elixir-autogen, elixir-format
 msgid "Grill the spec"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2046
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2052
 #, elixir-autogen, elixir-format
 msgid "Image size"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2271
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2277
 #: lib/barkpark_web/live/studio/chat_live.ex:3128
 #, elixir-autogen, elixir-format
 msgid "Inbox"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2028
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2034
 #, elixir-autogen, elixir-format
 msgid "Light mode"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2350
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2356
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4615
 #, elixir-autogen, elixir-format
 msgid "Mode"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1886
+#: lib/barkpark_web/live/bulldocs_live.ex:1887
 #, elixir-autogen, elixir-format
 msgid "No paper saved yet for"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:720
+#: lib/barkpark_web/live/bulldocs_live.ex:721
 #, elixir-autogen, elixir-format
 msgid "One of the selected events no longer exists."
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2025
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2031
 #, elixir-autogen, elixir-format
 msgid "Open enlarged image"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2321
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2327
 #, elixir-autogen, elixir-format
 msgid "Paper view controls"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2030
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2036
 #, elixir-autogen, elixir-format
 msgid "Reader view"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1846
+#: lib/barkpark_web/live/bulldocs_live.ex:1847
 #, elixir-autogen, elixir-format
 msgid "Reject"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1020
+#: lib/barkpark_web/live/bulldocs_live.ex:1021
 #, elixir-autogen, elixir-format
 msgid "Rejected %{branch}"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1030
+#: lib/barkpark_web/live/bulldocs_live.ex:1031
 #, elixir-autogen, elixir-format
 msgid "Reload the Paper editor before editing this Stage. Your draft has not been saved."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1024
+#: lib/barkpark_web/live/bulldocs_live.ex:1025
 #, elixir-autogen, elixir-format
 msgid "Reload the Paper editor before editing this Terminal. Your draft has not been saved."
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2310
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2316
 #, elixir-autogen, elixir-format
 msgid "Reply"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1807
+#: lib/barkpark_web/live/bulldocs_live.ex:1808
 #, elixir-autogen, elixir-format
 msgid "Requested: %{action}"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:898
+#: lib/barkpark_web/live/bulldocs_live.ex:899
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:640
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1387
 #, elixir-autogen, elixir-format
 msgid "Save failed"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2051
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2057
 #, elixir-autogen, elixir-format
 msgid "Scrollable enlarged image"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1010
+#: lib/barkpark_web/live/bulldocs_live.ex:1011
 #, elixir-autogen, elixir-format
 msgid "Sign in to act on this paper."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1826
+#: lib/barkpark_web/live/bulldocs_live.ex:1827
 #, elixir-autogen, elixir-format
 msgid "Simplify"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:799
+#: lib/barkpark_web/live/bulldocs_live.ex:800
 #, elixir-autogen, elixir-format
 msgid "Simplify could not be requested."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:796
+#: lib/barkpark_web/live/bulldocs_live.ex:797
 #, elixir-autogen, elixir-format
 msgid "Simplify requested — %{branch}"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2286
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2292
 #, elixir-autogen, elixir-format
 msgid "Star"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2286
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2292
 #, elixir-autogen, elixir-format
 msgid "Star this message"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:589
+#: lib/barkpark_web/live/bulldocs_live.ex:590
 #, elixir-autogen, elixir-format
 msgid "Submit"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2347
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2353
 #, elixir-autogen, elixir-format
 msgid "Switch between dark and light mode"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2031
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2329
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2037
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2335
 #, elixir-autogen, elixir-format
 msgid "TUI view"
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1015
+#: lib/barkpark_web/live/bulldocs_live.ex:1016
 #, elixir-autogen, elixir-format
 msgid "That simplify request could not be decided."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1008
+#: lib/barkpark_web/live/bulldocs_live.ex:1009
 #, elixir-autogen, elixir-format
 msgid "That simplify request has already been decided."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1009
+#: lib/barkpark_web/live/bulldocs_live.ex:1010
 #, elixir-autogen, elixir-format
 msgid "That simplify request has expired."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1011
+#: lib/barkpark_web/live/bulldocs_live.ex:1012
 #, elixir-autogen, elixir-format
 msgid "That simplify request is not yours to decide."
 msgstr ""
 
-#: lib/barkpark_web/live/bulldocs_live.ex:1882
+#: lib/barkpark_web/live/bulldocs_live.ex:1883
 #, elixir-autogen, elixir-format
 msgid "This paper has no safe, unambiguous reader source."
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2305
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2311
 #, elixir-autogen, elixir-format
 msgid "This paper rendered as the email subscribers receive"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2335
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2341
 #, elixir-autogen, elixir-format
 msgid "Toggle email view"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2326
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2332
 #, elixir-autogen, elixir-format
 msgid "Toggle terminal (TUI) view"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2316
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2322
 #, elixir-autogen, elixir-format
 msgid "View in browser"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2027
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2033
 #, elixir-autogen, elixir-format
 msgid "chapter"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:378
-#: lib/barkpark_web/live/bulldocs_live.ex:1767
+#: lib/barkpark_web/live/bulldocs_live.ex:1768
 #, elixir-autogen, elixir-format
 msgid "editing"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2033
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2039
 #, elixir-autogen, elixir-format
 msgid "rendering…"
 msgstr ""
 
-#: lib/barkpark_web/layouts/bulldocs.html.heex:2299
+#: lib/barkpark_web/layouts/bulldocs.html.heex:2305
 #, elixir-autogen, elixir-format
 msgid "to me"
 msgstr ""
@@ -10384,4 +10388,111 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgctxt "boolean"
 msgid "Yes"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3632
+#, elixir-autogen, elixir-format
+msgid "%{count} rows hidden by filter"
+msgid_plural "%{count} rows hidden by filter"
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/components/studio_components/modals.ex:202
+#, elixir-autogen, elixir-format
+msgid "Declared in %{file}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/paper_field_block.ex:182
+#, elixir-autogen, elixir-format
+msgid "Edit value"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4830
+#, elixir-autogen, elixir-format
+msgid "Enter a valid number in %{unit}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4829
+#, elixir-autogen, elixir-format
+msgid "Enter a valid number."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2552
+#, elixir-autogen, elixir-format
+msgid "Foldable"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:327
+#, elixir-autogen, elixir-format
+msgid "No color"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:400
+#, elixir-autogen, elixir-format
+msgid "No entries."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:398
+#, elixir-autogen, elixir-format
+msgid "No matches for \"%{query}\"."
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:1217
+#, elixir-autogen, elixir-format
+msgid "Reload"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:174
+#, elixir-autogen, elixir-format
+msgid "Select…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3636
+#, elixir-autogen, elixir-format
+msgid "Showing the first %{cols} of %{used} columns"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2555
+#, elixir-autogen, elixir-format
+msgid "Start collapsed"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:1209
+#, elixir-autogen, elixir-format
+msgid "Updated by another user — your unsaved edits are kept."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3632
+#, elixir-autogen, elixir-format
+msgid "first %{cols} of %{used} columns"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5463
+#, elixir-autogen, elixir-format
+msgctxt "callout tone"
+msgid "danger"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5460
+#, elixir-autogen, elixir-format
+msgctxt "callout tone"
+msgid "info"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5464
+#, elixir-autogen, elixir-format
+msgctxt "callout tone"
+msgid "neutral"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5461
+#, elixir-autogen, elixir-format
+msgctxt "callout tone"
+msgid "success"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5462
+#, elixir-autogen, elixir-format
+msgctxt "callout tone"
+msgid "warning"
 msgstr ""
