@@ -101,7 +101,29 @@ defmodule Barkpark.Sharing.PreviewLinksTest do
     {:ok, twice} = PreviewLinks.revoke(link.id)
 
     refute is_nil(once.revoked_at)
-    refute DateTime.compare(once.revoked_at, twice.revoked_at) == :lt
+    # Exact equality, not just "not later than" — the second call must leave
+    # the FIRST timestamp untouched, never merely fail to regress it.
+    assert DateTime.compare(once.revoked_at, twice.revoked_at) == :eq
+  end
+
+  # task-de405d9ec590b7b0 — the test above was flaky under load: revoke/1
+  # used to stamp a FRESH DateTime.utc_now() on every call, so it only
+  # LOOKED idempotent when both calls landed inside the same
+  # second-truncated instant. Forcing the already-revoked timestamp into the
+  # PAST (rather than racing the real clock across a second boundary)
+  # reproduces the straddle deterministically: a second revoke() call must
+  # not move it forward to "now".
+  test "revoke/1 does not advance an already-revoked timestamp, even across a real second boundary",
+       %{base: base} do
+    {:ok, {_raw, link}} = PreviewLinks.create(base)
+    {:ok, first} = PreviewLinks.revoke(link.id)
+
+    past = DateTime.add(first.revoked_at, -10, :second)
+    {:ok, _} = link |> Ecto.Changeset.change(revoked_at: past) |> Repo.update()
+
+    {:ok, second} = PreviewLinks.revoke(link.id)
+
+    assert DateTime.compare(second.revoked_at, past) == :eq
   end
 
   test "revoke_scoped/2 denies a non-admin principal and leaves the row live", %{

@@ -119,8 +119,18 @@ defmodule Barkpark.Sharing.PreviewLinks do
             {:error, :not_found}
 
           link ->
+            # task-de405d9ec590b7b0 — a second call used to overwrite
+            # `revoked_at` with a FRESH `DateTime.utc_now()` every time,
+            # which only LOOKED idempotent when both calls landed inside the
+            # same second-truncated instant. Across a second boundary the
+            # second write strictly advanced the timestamp, flaking the
+            # "second revoke keeps the first timestamp" test under load.
+            # `link.revoked_at || now` keeps whatever is ALREADY stamped —
+            # true idempotency, not a coincidence of clock resolution.
             link
-            |> Ecto.Changeset.change(revoked_at: DateTime.utc_now() |> DateTime.truncate(:second))
+            |> Ecto.Changeset.change(
+              revoked_at: link.revoked_at || DateTime.utc_now() |> DateTime.truncate(:second)
+            )
             |> Repo.update()
         end
     end
