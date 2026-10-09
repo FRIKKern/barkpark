@@ -8789,6 +8789,7 @@ msgstr "Mediefil"
 msgid "Media Collection"
 msgstr "Mediesamling"
 
+#: lib/barkpark_web/live/studio/media_live.ex:51
 #: lib/barkpark_web/studio/structure_copy.ex:77
 #, elixir-autogen, elixir-format
 msgid "Media Library"
@@ -8873,3 +8874,8 @@ msgstr "%{field} %{n}"
 #, elixir-autogen, elixir-format
 msgid "%{met}/%{total} met"
 msgstr "%{met}/%{total} oppfylt"
+
+#: lib/barkpark_web/components/field_inputs.ex:502
+#, elixir-autogen, elixir-format
+msgid "read-only — managed via API"
+msgstr "skrivebeskyttet — styres via API-et"

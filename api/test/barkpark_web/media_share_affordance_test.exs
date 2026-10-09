@@ -328,6 +328,8 @@ defmodule BarkparkWeb.MediaShareAffordanceTest do
       assert html =~ "Publiser mediene i dette området"
       refute html =~ MediaVisibilityCopy.public_label()
       refute html =~ "Publish this scope&#39;s media"
+      # task-1f3513bed827fc3a: the browser tab names the page in Norwegian too.
+      assert page_title(view) =~ "Mediebibliotek"
 
       assert render_click(view, "publish_scope_media", %{}) =~
                "Mediene i dette området er publisert"

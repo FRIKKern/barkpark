@@ -48,7 +48,7 @@ defmodule BarkparkWeb.Studio.MediaLive do
      |> assign_new(:scope_prefix, fn -> "" end)
      |> assign(
        dataset: dataset,
-       page_title: "Media Library"
+       page_title: gettext("Media Library")
      )
      |> assign_asset_edit_path()
      |> assign_visibility_notice()}
