@@ -79,6 +79,69 @@ defmodule Barkpark.Content.Edges do
   end
 
   @doc """
+  Batched sibling of `find_referencing_docs/3` (task-6b5e4b3e572d38c9): the
+  SAME bare-id/`._ref` referencer scan, but for a WHOLE SET of ids in ONE
+  pass -- one query per `(type, reference field, shape)`, same count as a
+  SINGLE call, instead of that count MULTIPLIED by `length(doc_ids)`.
+
+  Returns `%{published_id => [%{doc_id:, type:, title:, field:}]}` keyed by
+  the id each referencer actually points at (the batched WHERE only proves
+  "this row matches ONE of the ids", never which one, so each matching
+  row's own stored value is re-read in Elixir to attribute it -- cheap,
+  since the SQL filter already narrowed the row set to genuine matches).
+
+  Callers that pass no scope keep the explicit-global behaviour, same as
+  `find_referencing_docs/3`.
+  """
+  @spec find_referencing_docs_for_ids([String.t()], String.t(), keyword()) :: %{
+          optional(String.t()) => [
+            %{doc_id: String.t(), type: String.t(), title: term(), field: String.t()}
+          ]
+        }
+  def find_referencing_docs_for_ids(doc_ids, dataset, opts \\ []) when is_list(doc_ids) do
+    pub_ids = doc_ids |> Enum.map(&DraftId.published_id/1) |> Enum.uniq()
+    schemas = Content.list_schemas(dataset, opts)
+
+    ref_fields =
+      for schema <- schemas,
+          field <- schema.fields,
+          field["type"] == "reference",
+          do: {schema.name, field["name"]}
+
+    Enum.reduce(ref_fields, %{}, fn {type_name, field_name}, acc ->
+      [field_name, field_name <> "._ref"]
+      |> Enum.reduce(acc, fn path, acc2 ->
+        ref_opts =
+          opts
+          |> Keyword.put(:perspective, :raw)
+          |> Keyword.put(:filter_map, %{path => %{"in" => pub_ids}})
+          |> Keyword.put_new(:limit, 1000)
+
+        type_name
+        |> Content.list_documents(dataset, ref_opts)
+        |> Enum.reduce(acc2, fn doc, acc3 ->
+          case matched_target(doc.content, path, pub_ids) do
+            nil ->
+              acc3
+
+            target ->
+              entry = %{doc_id: doc.doc_id, type: type_name, title: doc.title, field: field_name}
+              Map.update(acc3, target, [entry], &[entry | &1])
+          end
+        end)
+      end)
+    end)
+  end
+
+  # Re-reads the stored value AT `path` from the already-fetched `content` map
+  # to learn WHICH of `pub_ids` this row's own batched-query match was for --
+  # the WHERE clause (`= ANY(pub_ids)`) proves membership, not identity.
+  defp matched_target(content, path, pub_ids) do
+    value = get_in(content, String.split(path, "."))
+    if is_binary(value) and value in pub_ids, do: value, else: nil
+  end
+
+  @doc """
   The target id a stored reference VALUE points at, or `nil`.
 
   A reference is stored either as a bare id string (what Studio writes) or as a

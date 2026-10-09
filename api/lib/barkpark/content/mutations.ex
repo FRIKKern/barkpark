@@ -161,23 +161,7 @@ defmodule Barkpark.Content.Mutations do
           # already knows the value it sent). Schema is memoised per type.
           caller = Keyword.get(opts, :caller_context) || CallerContext.anonymous()
 
-          {results, _schema_cache} =
-            Enum.map_reduce(mutations, %{}, fn m, cache ->
-              case apply_one(m, dataset, opts) do
-                {:ok, doc, op} ->
-                  :ok = between_mutations_barrier()
-                  {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
-
-                  {%{
-                     id: doc.doc_id,
-                     operation: op,
-                     document: Envelope.render(doc, schema, caller)
-                   }, cache}
-
-                {:error, reason} ->
-                  Repo.rollback(reason)
-              end
-            end)
+          results = apply_all(mutations, dataset, opts, caller)
 
           # DRY RUN: every gate, fence and write above ran for real, so the
           # results are exactly what a real batch would answer — then the whole
@@ -215,6 +199,88 @@ defmodule Barkpark.Content.Mutations do
     after
       Process.delete(@dry_run_key)
     end
+  end
+
+  # task-6b5e4b3e572d38c9 — `ensure_unreferenced/5` (called from the plain
+  # `"delete"` clause below) ran `ReferenceIntegrity.referrers/3` once PER
+  # delete: a query per reference-typed field across every schema in the
+  # dataset, PER delete, so a batch of N deletes cost O(N × reference
+  # fields) queries inside one transaction (task-c801daf4efd35a74, the
+  # 250-delete 500). Batched here: a RUN of 2+ CONSECUTIVE `"delete"`
+  # mutations gets its referrers precomputed in ONE pass
+  # (`ReferenceIntegrity.referrers_for_ids/3`) before any of them run, so the
+  # whole run costs the SAME query count as a single delete, not that count
+  # times the run's length.
+  #
+  # WHY ONLY A CONSECUTIVE RUN, NOT THE WHOLE BATCH AT ONCE: precomputing
+  # referrers for every delete in the batch BEFORE the batch starts would
+  # miss a reference CREATED earlier in the SAME transaction by an EARLIER,
+  # non-delete mutation — the live per-id check sees it (Postgres read-committed:
+  # your own transaction's earlier writes are visible to its later reads);
+  # a single global precompute, run before mutation 1, would not. Chunking
+  # on "is this a delete" and precomputing ONLY within each consecutive run —
+  # right when that run begins, after every PRECEDING mutation in the batch
+  # (delete or not) has already applied — preserves that visibility exactly:
+  # a run's precompute sees everything that ran before it, same as the
+  # unbatched per-id code would have. A lone delete between two non-deletes
+  # still runs the ORIGINAL single-id path unchanged (a run of 1 gains
+  # nothing from batching and this keeps that path's surface untouched).
+  #
+  # `referrers_for_ids/3`'s own moduledoc states the one deliberate
+  # behaviour refinement this introduces: two documents in the SAME run that
+  # reference each other no longer block one another (they vanish together
+  # regardless of order, since the whole mutate is one transaction) — the
+  # unbatched path was order-dependent for exactly that case.
+  defp apply_all(mutations, dataset, opts, caller) do
+    {chunks_results, _cache} =
+      mutations
+      |> Enum.chunk_by(&delete_mutation?/1)
+      |> Enum.map_reduce(%{}, fn chunk, cache ->
+        apply_chunk(chunk, dataset, opts, caller, cache)
+      end)
+
+    List.flatten(chunks_results)
+  end
+
+  defp delete_mutation?(%{"delete" => _}), do: true
+  defp delete_mutation?(_), do: false
+
+  defp apply_chunk([_, _ | _] = chunk, dataset, opts, caller, cache) do
+    if delete_mutation?(hd(chunk)) do
+      ids =
+        chunk
+        |> Enum.map(fn %{"delete" => %{"id" => id}} -> DraftId.published_id(id) end)
+        |> Enum.uniq()
+
+      precomputed = ReferenceIntegrity.referrers_for_ids(ids, dataset, opts)
+      chunk_opts = Keyword.put(opts, :precomputed_referrers, precomputed)
+
+      apply_each(chunk, dataset, chunk_opts, caller, cache)
+    else
+      apply_each(chunk, dataset, opts, caller, cache)
+    end
+  end
+
+  defp apply_chunk(chunk, dataset, opts, caller, cache),
+    do: apply_each(chunk, dataset, opts, caller, cache)
+
+  defp apply_each(chunk, dataset, opts, caller, cache) do
+    Enum.map_reduce(chunk, cache, fn m, cache ->
+      case apply_one(m, dataset, opts) do
+        {:ok, doc, op} ->
+          :ok = between_mutations_barrier()
+          {schema, cache} = echo_schema(doc.type, dataset, opts, cache)
+
+          {%{
+             id: doc.doc_id,
+             operation: op,
+             document: Envelope.render(doc, schema, caller)
+           }, cache}
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
   end
 
   # ── The tsvector cap is a CALLER fault, not an engine fault ────────────────
@@ -1760,16 +1826,29 @@ defmodule Barkpark.Content.Mutations do
   # transaction, so an override is never silent. A target that does not exist
   # is left to the delete itself to answer 404. Who counts as a referrer:
   # `Barkpark.Content.ReferenceIntegrity`.
+  # task-6b5e4b3e572d38c9 — `opts[:precomputed_referrers]` is set ONLY by
+  # `apply_chunk/5` for a RUN of 2+ consecutive deletes, keyed by PUBLISHED
+  # id (the same key `ReferenceIntegrity.referrers_for_ids/3` returns, and
+  # the same resolution `referrers/3` performs internally on `id`). A lone
+  # delete in a mixed batch, or any caller of `delete_document`/`apply_one`
+  # outside `apply_mutations` entirely, carries no such opt and falls
+  # through to the ORIGINAL per-id query unchanged.
   defp ensure_unreferenced(id, type, op, dataset, opts) when is_binary(id) do
-    case ReferenceIntegrity.referrers(id, dataset, opts) do
+    referrers =
+      case Keyword.get(opts, :precomputed_referrers) do
+        %{} = precomputed -> Map.get(precomputed, DraftId.published_id(id), [])
+        _ -> ReferenceIntegrity.referrers(id, dataset, opts)
+      end
+
+    case referrers do
       [] ->
         :ok
 
-      referrers ->
+      found ->
         case {delete_target(id, type, dataset, opts), Map.get(op, "force") == true} do
           {nil, _} -> :ok
-          {doc, true} -> audit_forced_delete(doc, type, dataset, referrers, opts)
-          {_doc, false} -> {:error, {:document_referenced, DraftId.published_id(id), referrers}}
+          {doc, true} -> audit_forced_delete(doc, type, dataset, found, opts)
+          {_doc, false} -> {:error, {:document_referenced, DraftId.published_id(id), found}}
         end
     end
   end
