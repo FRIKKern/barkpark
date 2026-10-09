@@ -318,6 +318,12 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
 
     # --- per-surface variant classes, not the default desk ---
     {".editor-panel.sheet-editor", ~w(container-type)},
+    # task-5d4f085dff4dd8ea: the sheet header's two-row grid. NOT the wide
+    # desk — `html:not([data-width-bucket="wide"])` scopes it to standard,
+    # narrow and phone, where the six text actions overflowed a flex-end row.
+    # A bucket rule because the sheet opts out of the `panel` container above.
+    {~S|html:not([data-width-bucket="wide"]) .editor-panel.sheet-editor > .editor-header|,
+     ~w(display flex-shrink)},
     {".editor-with-preview .editor-panel-main", ~w(flex min-width)},
     # spd-w5: the reading column's own query base. This one DOES apply at
     # 1280/1440 — see the scoped? allowlist below for why that is deliberate.
