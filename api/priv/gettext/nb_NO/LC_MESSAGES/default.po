@@ -169,6 +169,7 @@ msgstr "Historikk"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4346
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4453
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4646
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:508
 #: lib/barkpark_web/studio_locale.ex:294
 #: lib/barkpark_web/studio_locale.ex:568
 #, elixir-autogen, elixir-format
@@ -189,6 +190,7 @@ msgstr "Flytt ned"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4339
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4450
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4643
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:507
 #: lib/barkpark_web/studio_locale.ex:295
 #: lib/barkpark_web/studio_locale.ex:569
 #, elixir-autogen, elixir-format
@@ -453,6 +455,7 @@ msgid "No matches"
 msgstr "Ingen treff"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:213
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:509
 #: lib/barkpark_web/studio_locale.ex:610
 #: lib/barkpark_web/studio_locale.ex:729
 #: lib/barkpark_web/studio_locale.ex:753
@@ -813,6 +816,7 @@ msgstr "Legg til regel"
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3915
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3916
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:511
 #, elixir-autogen, elixir-format
 msgid "Add tab"
 msgstr "Legg til fane"
@@ -3682,6 +3686,7 @@ msgid "Classic"
 msgstr "Klassisk"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:661
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:502
 #: lib/barkpark_web/studio_locale.ex:457
 #, elixir-autogen, elixir-format
 msgid "Code"
@@ -4073,6 +4078,7 @@ msgid "Figure caption"
 msgstr "Figurtekst"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:696
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:59
 #, elixir-autogen, elixir-format
 msgid "File tree"
 msgstr "Filtre"
@@ -4148,11 +4154,14 @@ msgstr "Interaktiv"
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4631
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4704
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4798
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:500
 #, elixir-autogen, elixir-format
 msgid "Label"
 msgstr "Etikett"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4939
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:56
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
 #: lib/barkpark_web/studio_locale.ex:534
 #, elixir-autogen, elixir-format
 msgid "Language"
@@ -4184,6 +4193,7 @@ msgid "Legacy range retained until explicitly removed."
 msgstr "Eldre område beholdes til det fjernes eksplisitt."
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3596
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:505
 #, elixir-autogen, elixir-format
 msgid "Legacy row retained until explicitly removed."
 msgstr "Eldre rad beholdes til den fjernes eksplisitt."
@@ -4335,6 +4345,7 @@ msgstr "Ingen"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:683
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4638
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:498
 #: lib/barkpark_web/studio_locale.ex:581
 #, elixir-autogen, elixir-format
 msgid "Note"
@@ -5323,6 +5334,7 @@ msgstr "Oppføringer (rykk inn to mellomrom per nivå; `tekst | anker`)"
 msgid "Field label"
 msgstr "Feltnavn"
 
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:55
 #: lib/barkpark_web/studio_locale.ex:497
 #, elixir-autogen, elixir-format
 msgid "File"
@@ -5403,6 +5415,7 @@ msgstr "Sett inn: %{block}"
 msgid "Insert block"
 msgstr "Sett inn blokk"
 
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:60
 #: lib/barkpark_web/studio_locale.ex:537
 #: lib/barkpark_web/studio_locale.ex:698
 #, elixir-autogen, elixir-format
@@ -9729,3 +9742,103 @@ msgstr "%{count} koblinger"
 msgctxt "graph"
 msgid "1 connection"
 msgstr "1 kobling"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:183
+#, elixir-autogen, elixir-format
+msgid "API endpoint field"
+msgstr "API-endepunktfelt"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:511
+#, elixir-autogen, elixir-format
+msgid "Add note"
+msgstr "Legg til fotnote"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:266
+#, elixir-autogen, elixir-format
+msgid "Bar label"
+msgstr "Søyletekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:309
+#, elixir-autogen, elixir-format
+msgid "Code tab"
+msgstr "Kodefane"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:41
+#, elixir-autogen, elixir-format
+msgid "Configure %{block}"
+msgstr "Konfigurer %{block}"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:34
+#, elixir-autogen, elixir-format
+msgid "Configure %{block} to add content."
+msgstr "Konfigurer %{block} for å legge til innhold."
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:138
+#, elixir-autogen, elixir-format
+msgid "Criterion label"
+msgstr "Kriterietekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:102
+#, elixir-autogen, elixir-format
+msgid "Footnote"
+msgstr "Fotnote"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:242
+#, elixir-autogen, elixir-format
+msgid "Gauge text"
+msgstr "Målertekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:497
+#, elixir-autogen, elixir-format
+msgid "ID"
+msgstr "ID"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:375
+#, elixir-autogen, elixir-format
+msgid "Question text"
+msgstr "Spørsmålstekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:202
+#, elixir-autogen, elixir-format
+msgid "Route caption"
+msgstr "Rutetekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:64
+#, elixir-autogen, elixir-format
+msgid "Sync key"
+msgstr "Synkroniseringsnøkkel"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:344
+#, elixir-autogen, elixir-format
+msgid "Tab label"
+msgstr "Fanetekst"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:57
+#, elixir-autogen, elixir-format
+msgid "Unified diff"
+msgstr "Unified diff"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:459
+#, elixir-autogen, elixir-format
+msgid "code tabs"
+msgstr "kodefaner"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:456
+#, elixir-autogen, elixir-format
+msgid "diff"
+msgstr "diff"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:457
+#, elixir-autogen, elixir-format
+msgid "file tree"
+msgstr "filtre"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:458
+#, elixir-autogen, elixir-format
+msgid "footnotes"
+msgstr "fotnoter"
+
+#: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:460
+#, elixir-autogen, elixir-format
+msgid "technical block"
+msgstr "teknisk blokk"

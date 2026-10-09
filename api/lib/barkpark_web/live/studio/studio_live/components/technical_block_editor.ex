@@ -8,6 +8,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.PortableDoc.Render
   alias BarkparkWeb.Studio.StudioLive.Blocks
@@ -30,14 +31,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
         {painted_copy_attrs(@block, @id)}
       >
         <%= if @preview == "" do %>
-          <p class="bp-paper-edit-readonly">Configure {@label} to add content.</p>
+          <p class="bp-paper-edit-readonly">{gettext("Configure %{block} to add content.", block: @label)}</p>
         <% else %>
           {Phoenix.HTML.raw(@preview)}
         <% end %>
       </div>
       <details id={"technical-controls-" <> @id} class={technical_controls_class(@block)}
                phx-mounted={JS.ignore_attributes("open")}>
-        <summary class="bp-paper-contextual-toggle">Configure {@label}</summary>
+        <summary class="bp-paper-contextual-toggle">{gettext("Configure %{block}", block: @label)}</summary>
         <div class="bp-paper-contextual-panel">
     <form
       id={"technical-block-form-" <> @id}
@@ -51,16 +52,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
 
       <%= case Map.get(@block, "type") do %>
         <% "diff" -> %>
-          <.text_input name="file" label="File" value={field(@block, "file")} />
-          <.text_input name="lang" label="Language" value={field(@block, "lang")} />
-          <.textarea name="diff" label="Unified diff" value={field(@block, "diff")} />
+          <.text_input name="file" label={gettext("File")} value={field(@block, "file")} />
+          <.text_input name="lang" label={gettext("Language")} value={field(@block, "lang")} />
+          <.textarea name="diff" label={gettext("Unified diff")} value={field(@block, "diff")} />
         <% "filetree" -> %>
-          <.textarea name="text" label="File tree" value={field(@block, "text")} />
-          <.text_input name="legend" label="Legend" value={field(@block, "legend")} />
+          <.textarea name="text" label={gettext("File tree")} value={field(@block, "text")} />
+          <.text_input name="legend" label={gettext("Legend")} value={field(@block, "legend")} />
         <% "footnote" -> %>
           <.collection_rows kind="note" items={collection(@block, "notes")} />
         <% "code-tabs" -> %>
-          <.text_input name="syncKey" label="Sync key" value={field(@block, "syncKey")} />
+          <.text_input name="syncKey" label={gettext("Sync key")} value={field(@block, "syncKey")} />
           <.collection_rows kind="tab" items={collection(@block, "tabs")} />
         <% _ -> %>
       <% end %>
@@ -98,7 +99,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
         "data-painted-copy" => "li",
         "data-painted-copy-names" => names,
         "data-painted-copy-form" => "technical-block-form-" <> id,
-        "data-painted-copy-label" => "Footnote"
+        "data-painted-copy-label" => gettext("Footnote")
       }
     end
   end
@@ -134,7 +135,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
         "data-painted-copy" => ".bp-criteria-progress__l",
         "data-painted-copy-names" => Enum.join(names, ","),
         "data-painted-copy-form" => "criteria-progress-form-" <> id,
-        "data-painted-copy-label" => "Criterion label"
+        "data-painted-copy-label" => gettext("Criterion label")
       }
     end
   end
@@ -179,7 +180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
           ".bp-api-endpoint__method, .bp-api-endpoint__path, .bp-api-endpoint__params tbody td",
         "data-painted-copy-names" => Enum.join(names, ","),
         "data-painted-copy-form" => "api-endpoint-form-" <> id,
-        "data-painted-copy-label" => "API endpoint field"
+        "data-painted-copy-label" => gettext("API endpoint field")
       }
     end
   end
@@ -198,7 +199,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
           ".bp-route__caption",
           [name],
           "route-form-" <> id,
-          "Route caption"
+          gettext("Route caption")
         )
     end
   end
@@ -238,7 +239,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
             ".bp-gauge__t, .bp-gauge__l, .bp-gauge__n",
             names,
             "gauge-list-form-" <> id,
-            "Gauge text"
+            gettext("Gauge text")
           )
     end
   end
@@ -262,7 +263,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
                 ".bp-bar-chart__l",
                 names,
                 "bar-chart-form-" <> id,
-                "Bar label"
+                gettext("Bar label")
               )
         else
           %{}
@@ -305,7 +306,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
               ".bp-code-tabs__tab, .bp-code-tabs__panel > pre",
               names,
               "technical-block-form-" <> id,
-              "Code tab"
+              gettext("Code tab")
             )
             |> Map.put("data-painted-copy-multiline", ".bp-code-tabs__panel > pre")
           end
@@ -340,7 +341,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
               ":scope > .bp-tabs__section > .bp-tabs__label",
               names,
               "tabs-form-" <> id,
-              "Tab label"
+              gettext("Tab label")
             )
 
       _ ->
@@ -371,7 +372,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
                 ":scope > section > fieldset > .bp-form-opts > label > span",
               names,
               "form-editor-" <> id,
-              "Question text"
+              gettext("Question text")
             )
 
       _ ->
@@ -452,11 +453,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
 
   defp blank?(value), do: not is_binary(value) or value == ""
 
-  defp technical_label("diff"), do: "diff"
-  defp technical_label("filetree"), do: "file tree"
-  defp technical_label("footnote"), do: "footnotes"
-  defp technical_label("code-tabs"), do: "code tabs"
-  defp technical_label(_), do: "technical block"
+  defp technical_label("diff"), do: gettext("diff")
+  defp technical_label("filetree"), do: gettext("file tree")
+  defp technical_label("footnote"), do: gettext("footnotes")
+  defp technical_label("code-tabs"), do: gettext("code tabs")
+  defp technical_label(_), do: gettext("technical block")
 
   attr :name, :string, required: true
   attr :label, :string, required: true
@@ -493,21 +494,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
     <div :for={{item, index} <- Enum.with_index(@items)} data-test-id={@kind <> "-row"}>
       <%= if is_map(item) do %>
         <%= if @kind == "note" do %>
-          <.text_input name={row_name(@kind, index, "id")} label="ID" value={field(item, "id")} />
-          <.textarea name={row_name(@kind, index, "text")} label="Note" value={field(item, "text")} />
+          <.text_input name={row_name(@kind, index, "id")} label={gettext("ID")} value={field(item, "id")} />
+          <.textarea name={row_name(@kind, index, "text")} label={gettext("Note")} value={field(item, "text")} />
         <% else %>
-          <.text_input name={row_name(@kind, index, "label")} label="Label" value={field(item, "label")} />
-          <.text_input name={row_name(@kind, index, "language")} label="Language" value={field(item, "language")} />
-          <.textarea name={row_name(@kind, index, "value")} label="Code" value={tab_value(item)} />
+          <.text_input name={row_name(@kind, index, "label")} label={gettext("Label")} value={field(item, "label")} />
+          <.text_input name={row_name(@kind, index, "language")} label={gettext("Language")} value={field(item, "language")} />
+          <.textarea name={row_name(@kind, index, "value")} label={gettext("Code")} value={tab_value(item)} />
         <% end %>
       <% else %>
-        <p data-test-id={@kind <> "-legacy-row"}>Legacy row retained until explicitly removed.</p>
+        <p data-test-id={@kind <> "-legacy-row"}>{gettext("Legacy row retained until explicitly removed.")}</p>
       <% end %>
-      <button type="submit" name={@kind <> "-action"} value={"up:#{index}"} disabled={index == 0}>Move up</button>
-      <button type="submit" name={@kind <> "-action"} value={"down:#{index}"} disabled={index == length(@items) - 1}>Move down</button>
-      <button type="submit" name={@kind <> "-action"} value={"remove:#{index}"}>Remove</button>
+      <button type="submit" name={@kind <> "-action"} value={"up:#{index}"} disabled={index == 0}>{gettext("Move up")}</button>
+      <button type="submit" name={@kind <> "-action"} value={"down:#{index}"} disabled={index == length(@items) - 1}>{gettext("Move down")}</button>
+      <button type="submit" name={@kind <> "-action"} value={"remove:#{index}"}>{gettext("Remove")}</button>
     </div>
-    <button type="submit" name={@kind <> "-action"} value="add">Add {@kind}</button>
+    <button type="submit" name={@kind <> "-action"} value="add">{if @kind == "note", do: gettext("Add note"), else: gettext("Add tab")}</button>
     """
   end
 
