@@ -3817,17 +3817,19 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       <%!-- role="tablist"/"tab" wires the strip for screen readers. Roving
             tabindex (task-5201a73e33535129): the ACTIVE tab is the one Tab
             stop, Left/Right/Home/End move between tabs (the SheetToolbar
-            hook in its tab-strip mode), Enter/Space switch. --%>
+            hook in its tab-strip mode), Enter/Space switch. The tablist is
+            the inner wrapper and holds ONLY the tabs: the move/add/duplicate/
+            delete/colour buttons are not tabs, so they sit beside it in the
+            strip (axe aria-required-children, task-c96d59d0b4516fe5). --%>
       <div
         id={"#{@id}-tabs"}
         class="sheet-tabs"
         data-test-id="sheet-tabs"
-        role="tablist"
-        aria-label={gettext("Sheet tabs")}
         phx-hook={@hookable && "SheetToolbar"}
         data-roving-items="[role='tab']"
         data-roving-follow="selected"
       >
+        <div class="sheet-tab-list" role="tablist" aria-label={gettext("Sheet tabs")} data-test-id="sheet-tablist">
         <%= for {t, i} <- Enum.with_index(@all_tabs) do %>
           <%!-- Stable ids: without them morphdom matched tabs by position, so
                 swapping the rename form back to a button re-used the FOCUSED
@@ -3885,10 +3887,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 data-test-id={"sheet-tab-swatch-#{i}"}
                 aria-hidden="true"
               ></span>
-              <%= Map.get(t, "name") || "Sheet #{i + 1}" %>
+              <%= Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1) %>
             </button>
           <% end %>
         <% end %>
+        </div>
         <%= if @editable do %>
           <button
             type="button"

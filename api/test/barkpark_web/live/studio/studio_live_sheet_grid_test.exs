@@ -2037,6 +2037,38 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert input =~ ~s(aria-label="Gi nytt navn til Inntekt")
   end
 
+  # task-c96d59d0b4516fe5: a tab with no stored name fell back to the literal
+  # "Sheet N" in an nb-NO workspace, and the role=tablist div also held the
+  # move/add/duplicate/delete/colour buttons (axe aria-required-children).
+  test "an unnamed tab reads in the Studio language, and the tablist holds only tabs", %{
+    conn: conn
+  } do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    create_sheet!("sg-tablist-nb", [
+      %{"name" => "Inntekt", "cells" => %{}},
+      %{"cells" => %{}}
+    ])
+
+    {view, _target, _html} = open!(conn, "sg-tablist-nb")
+
+    tab = view |> element(~s([data-test-id="sheet-tab-1"])) |> render()
+    assert tab =~ "Ark 2"
+    refute tab =~ "Sheet 2"
+
+    list = view |> element(~s([role="tablist"][data-test-id="sheet-tablist"])) |> render()
+    children = list |> LazyHTML.from_fragment() |> LazyHTML.query("[role=tablist] > *")
+    roles = Enum.map(children, &(LazyHTML.attribute(&1, "role") |> List.first()))
+    assert roles == ["tab", "tab"]
+    refute list =~ ~s(data-test-id="sheet-tab-add")
+
+    strip = view |> element(~s([data-test-id="sheet-tabs"])) |> render()
+    refute strip =~ ~r/data-test-id="sheet-tabs"[^>]*role="tablist"/
+    assert strip =~ ~s(data-test-id="sheet-tab-add")
+    assert strip =~ ~s(phx-hook="SheetToolbar")
+  end
+
   # task-88ccab21dd4989e9: row header menus were labelled "Row N menu" in
   # English beside column twins already reading "Meny for kolonne A".
   test "row header menus are named in the Studio language", %{conn: conn} do
