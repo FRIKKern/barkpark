@@ -3515,9 +3515,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           title={if @save_state == :saved and @save_saved_at, do: DateTime.to_iso8601(@save_saved_at)}
         >
           <%= case @save_state do %>
-            <% :saving -> %>Saving…
-            <% :saved -> %>All changes saved · {Calendar.strftime(@save_saved_at, "%H:%M")}
-            <% :error -> %>Save failed — retrying
+            <% :saving -> %>{gettext("Saving…")}
+            <% :saved -> %>{gettext("All changes saved · %{time}",
+              time: Calendar.strftime(@save_saved_at, "%H:%M")
+            )}
+            <% :error -> %>{gettext("Save failed — retrying")}
           <% end %>
         </span>
       </div>

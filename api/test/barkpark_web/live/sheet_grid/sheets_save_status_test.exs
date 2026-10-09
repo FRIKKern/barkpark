@@ -149,6 +149,19 @@ defmodule BarkparkWeb.SheetsSaveStatusTest do
     wait_until(fn -> render(editor) =~ ~r/All changes saved · \d{2}:\d{2}/ end)
   end
 
+  # task-f4d89e59219e0c7e: a Norwegian workspace reads its save status in Norwegian.
+  test "a Norwegian workspace reads 'Alle endringer er lagret · HH:MM'", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    {editor, grid} = open_editor(conn)
+
+    commit(grid, "B2", "1200")
+
+    wait_until(fn -> render(editor) =~ ~r/Alle endringer er lagret · \d{2}:\d{2}/ end)
+    refute render(editor) =~ "All changes saved"
+  end
+
   test "a STALE persist frame (a rev the client has already passed) leaves it on Saving…",
        %{conn: conn} do
     put_cfg(debounce_ms: 60_000)
