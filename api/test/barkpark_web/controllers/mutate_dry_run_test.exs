@@ -296,6 +296,41 @@ defmodule BarkparkWeb.MutateDryRunTest do
     end
   end
 
+  describe "dryRun sends nothing out" do
+    # A subscribed webhook and a subscribed per-doc topic: the precondition
+    # asserts a delivery WOULD be selected, so the dry run's silence is about
+    # the flag, not about there being nobody to tell.
+    test "no PubSub message on the list or doc topic, no webhook fan-out or delivery row", %{
+      ws: ws
+    } do
+      {:ok, _hook} =
+        Barkpark.Webhooks.create_webhook(
+          %{"name" => "dry-run-probe", "url" => "http://example.com/hook", "dataset" => @dataset},
+          workspace_id: ws
+        )
+
+      assert [_] =
+               Barkpark.Webhooks.active_webhooks_for(@dataset, "create", "post", workspace_id: ws)
+
+      id = uid("dry-signal")
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, Broadcast.doc_topic(id, "post", ws, @dataset))
+      deliveries = fn -> Repo.aggregate(Barkpark.Webhooks.Delivery, :count) end
+      deliveries_before = deliveries.()
+
+      resp =
+        mutate(%{
+          "mutations" => [%{"create" => %{"_id" => id, "_type" => "post", "title" => "Quiet"}}],
+          "dryRun" => true
+        })
+
+      assert resp.status == 200, resp.resp_body
+      refute_receive {:document_changed, _}, 200
+      refute_received {:doc_updated, _}
+      refute_received {:webhook, _}
+      assert deliveries.() == deliveries_before
+    end
+  end
+
   describe "control: the same write without dryRun" do
     test "writes the row, revision and event, and fires broadcast, webhook and after_save" do
       for flag <- [:absent, false, "false"] do
