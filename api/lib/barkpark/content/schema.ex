@@ -843,7 +843,18 @@ defmodule Barkpark.Content.Schema do
       crossValidations: schema.cross_validations || [],
       # Generic list-row preview declaration (badge + meta content fields);
       # empty map == no declaration, SDK/TUI rows render unchanged.
-      listPreview: schema.list_preview || %{}
+      listPreview: schema.list_preview || %{},
+      # task-28082a4cf187403d: `create` already applies `initial_values` on a
+      # new document (post.featured=false lands), but the read never echoed
+      # it back, so a Studio showing a brand-new doc before its first write
+      # had no way to know a non-false/non-empty default existed. `layout`
+      # (the Expectation) and `prefill` round-trip VERBATIM, as POSTed —
+      # never through `resolve_expectation/1`'s "or synthesize a default"
+      # fallback, which is a SEPARATE concern for whichever caller wants a
+      # default layout/prefill when none was stored.
+      initialValues: schema.initial_values || %{},
+      layout: schema.layout || [],
+      prefill: schema.prefill || %{}
     }
   end
 
