@@ -32,7 +32,8 @@ defmodule Barkpark.Accounts.Privacy do
   alias Barkpark.Repo
   alias Barkpark.Accounts.{User, UserSession, UserEmailToken, WebauthnCredential}
   alias Barkpark.Sso.SocialIdentity
-  alias Barkpark.Tenancy.Membership
+  alias Barkpark.Tenancy.{Invitation, Membership}
+  alias Barkpark.UserPrefs.UserPref
   alias Barkpark.Audit.Event
 
   @erased_domain "erased.invalid"
@@ -383,6 +384,24 @@ defmodule Barkpark.Accounts.Privacy do
     {social_identities, _} =
       Repo.delete_all(from i in SocialIdentity, where: i.user_id == ^user.id)
 
+    # task-7d2a48dbf7e4bf34 (#22013) postdates this function: a per-account
+    # prefs row (`value`, a caller-chosen JSON blob -- "recent_searches",
+    # list filters, ...) can hold genuinely personal/behavioural data, and
+    # unlike `workspace_memberships` above this table has NO pseudonymised
+    # alternative to fall back to. Deleted outright, same as the other
+    # per-account rows above it (sessions, email tokens, passkeys,
+    # social-login links) that have nothing worth pseudonymising either.
+    {user_prefs, _} = Repo.delete_all(from p in UserPref, where: p.user_id == ^user.id)
+
+    # Same reasoning, for a PENDING seat (OWNER RULING 2026-10-03 #7): it is
+    # not a real membership (never read by any authorization check), but it
+    # is still a live `user_id` reference this function left untouched. An
+    # erased account accepting an invite later would seat a pseudonymised
+    # identity into a workspace an admin meant for the real person who no
+    # longer exists under that id -- deleted outright, same as `memberships`
+    # below it.
+    {invitations, _} = Repo.delete_all(from i in Invitation, where: i.user_id == ^user.id)
+
     erased_email = "erased-#{user.id}@#{@erased_domain}"
 
     Repo.update_all(from(t in ApiToken, where: t.created_by == ^user.email),
@@ -438,7 +457,9 @@ defmodule Barkpark.Accounts.Privacy do
         "passkeys_deleted" => passkeys,
         "social_identities_deleted" => social_identities,
         "grants_pseudonymised" => grants_pseudonymised,
-        "memberships_deleted" => memberships
+        "memberships_deleted" => memberships,
+        "user_prefs_deleted" => user_prefs,
+        "invitations_deleted" => invitations
       }
     })
 
@@ -450,6 +471,8 @@ defmodule Barkpark.Accounts.Privacy do
       social_identities_deleted: social_identities,
       grants_pseudonymised: grants_pseudonymised,
       memberships_deleted: memberships,
+      user_prefs_deleted: user_prefs,
+      invitations_deleted: invitations,
       revoked_token_ids: revoked_token_ids
     }
   end
