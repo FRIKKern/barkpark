@@ -1953,7 +1953,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               <.icon name="clock" size={14} /> {gettext("Access")}
             </button>
           </div>
-          <div style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
+          <div class="bp-ae-host" style="flex: 1; display: flex; min-height: 0; overflow: hidden;">
             <bp-asset-explorer
               dataset={@dataset}
               data-token={Map.get(assigns, :api_token_raw, "")}

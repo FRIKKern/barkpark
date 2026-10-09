@@ -385,6 +385,17 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
      `content` container at all: a `content` query here would resolve against
      the nearest ancestor container, landing on `panel` by luck rather than by
      contract.
+     """},
+    {"bp-ae", "width <= 640px", ".bp-ae-root { flex-direction: column;",
+     """
+     The media library's one-column stack (task-c196ca78349ea153) asks how
+     wide the EXPLORER is given to be: its 200px library rail and 300px
+     inspector stop fitting beside a usable grid below 640px. The box is
+     `.bp-ae-host`, the wrapper both mounts (the Media page and the Studio
+     media pane) put around `<bp-asset-explorer>`, because that element IS
+     `.bp-ae-root` and a container query cannot restyle its own container.
+     Measuring the viewport instead would leave a narrow Studio pane on a
+     wide screen crushed.
      """}
   ]
 
