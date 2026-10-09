@@ -4189,7 +4189,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 phx-value-kind="row"
                 phx-value-index={r}
                 phx-target={@myself}
-                aria-label={"Row #{r} menu"}
+                aria-label={gettext("Row %{row} menu", row: r)}
                 aria-haspopup="menu"
                 aria-expanded={to_string(@menu == {:row, r})}
                 data-test-id={"sheet-rowmenu-#{r}"}
@@ -4198,7 +4198,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 :if={@menu == {:row, r}}
                 class="sheet-menu"
                 role="menu"
-                aria-label={"Row #{r} menu"}
+                aria-label={gettext("Row %{row} menu", row: r)}
                 data-test-id="sheet-menu"
               >
                 <button type="button" role="menuitem" phx-click="rowcol-insert" phx-value-kind="row" phx-value-at={r} phx-value-where="before" phx-target={@myself}><%= gettext("Insert above") %></button>

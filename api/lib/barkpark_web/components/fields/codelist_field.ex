@@ -161,7 +161,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-id={"#{@plugin_name}:#{@list_id}"}
             data-codelist-version={@field.version && to_string(@field.version)}
             data-codelist-combobox="true"
-            placeholder={"Search " <> @plugin_name <> ":" <> @list_id <> "…"}
+            placeholder={gettext("Search %{list}…", list: @plugin_name <> ":" <> @list_id)}
           />
           <datalist id={"datalist-" <> @input_id}>
             <%= for opt <- @options do %>

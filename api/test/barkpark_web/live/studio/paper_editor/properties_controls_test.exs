@@ -51,6 +51,31 @@ defmodule BarkparkWeb.Studio.PaperEditor.PropertiesControlsTest do
     :ok
   end
 
+  # task-88ccab21dd4989e9: the unbind button's accessible name was the literal
+  # "Unbind <prop>" whatever the Studio language.
+  test "the Unbind control is named in the Studio language", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    {:ok, view, _html} =
+      live(conn, scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{@doc_id}"))
+
+    view |> element(~s([data-test-id="editor-mode-beta"])) |> render_click()
+
+    view
+    |> element(~s([data-test-id="paper-add-property"]))
+    |> render_submit(%{"fieldName" => "accent", "if_rev" => current_rev(view)})
+
+    added = Enum.find(stored_blocks(), &(&1["fieldName"] == "accent"))
+
+    unbind =
+      view
+      |> element(~s([data-prop-block-id="#{added["id"]}"] [data-test-id="paper-unbind-property"]))
+      |> render()
+
+    assert unbind =~ ~s(aria-label="Koble fra Accent")
+  end
+
   test "Add property and Unbind controls persist projection changes across reload", %{conn: conn} do
     {:ok, view, _html} =
       live(conn, scoped_studio("/d/#{@dataset}/studio/#{@doc_type}/#{@doc_id}"))

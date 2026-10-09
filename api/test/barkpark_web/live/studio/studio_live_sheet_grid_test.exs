@@ -2037,6 +2037,19 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert input =~ ~s(aria-label="Gi nytt navn til Inntekt")
   end
 
+  # task-88ccab21dd4989e9: row header menus were labelled "Row N menu" in
+  # English beside column twins already reading "Meny for kolonne A".
+  test "row header menus are named in the Studio language", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    create_sheet!("sg-rowmenu-nb", [%{"name" => "Inntekt", "cells" => %{"A1" => %{"v" => 1}}}])
+    {view, _target, _html} = open!(conn, "sg-rowmenu-nb")
+
+    assert has_element?(view, ~s([aria-label="Meny for rad 1"]))
+    refute has_element?(view, ~s([aria-label="Row 1 menu"]))
+  end
+
   # task-12b3b4e250901169: F2 opened the input but nothing focused it, and
   # Enter/Escape dropped focus to <body> when the button came back. The
   # SheetTabRename hook moves focus (pinned in assets/sheet-grid/
