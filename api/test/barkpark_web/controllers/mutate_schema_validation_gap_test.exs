@@ -443,4 +443,165 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       assert doc.content["slug"] == "NOT A SLUG 42"
     end
   end
+
+  describe "WARNING-LEVEL-ONLY rules (task-292d6677b94916ef)" do
+    # Bug report from barkpark-studio, found while using #22406: a warning-level
+    # rule with NO co-occurring error-level violation produced zero `warnings`
+    # at all. `validate_document_findings/5` only ever consulted
+    # `Validation.validate/3` (ERROR-level only) to decide `:ok` vs `:error`,
+    # and on `:ok` returned immediately without reading `check_findings/3`'s
+    # `warnings` half — so `do_check_document_schema/4`'s `{:ok, _content} ->
+    # :ok` branch never called an advisory emitter for them. Proven first for
+    # an array `max`, then `min`, then a non-array rule (string `max` length)
+    # to show the fix is general, not array-specific.
+    defp array_max_type!(dataset) do
+      type = "msvgap_arrmax_#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "Array Max Warning Type",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{
+                "name" => "tags",
+                "type" => "arrayOf",
+                "of" => %{"type" => "string"},
+                "validation" => %{"max" => 3, "level" => "warning"}
+              }
+            ]
+          },
+          dataset
+        )
+
+      type
+    end
+
+    defp array_min_type!(dataset) do
+      type = "msvgap_arrmin_#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "Array Min Warning Type",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{
+                "name" => "tags",
+                "type" => "arrayOf",
+                "of" => %{"type" => "string"},
+                "validation" => %{"min" => 2, "level" => "warning"}
+              }
+            ]
+          },
+          dataset
+        )
+
+      type
+    end
+
+    defp string_max_warning_type!(dataset) do
+      type = "msvgap_strmax_#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "String Max Warning Type",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{
+                "name" => "summary",
+                "type" => "string",
+                "validation" => %{"max" => 5, "level" => "warning"}
+              }
+            ]
+          },
+          dataset
+        )
+
+      type
+    end
+
+    test "an array `max` rule at warning level, violated ALONE, still warns", ctx do
+      type = array_max_type!(@advise_dataset)
+      doc_id = "msvgap-arrmax-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, @advise_dataset, doc_id, %{
+          "content" => %{"title" => "Too many", "tags" => ["a", "b", "c", "d"]}
+        })
+
+      # The write still lands — a warning-level rule never blocks (same as the
+      # ADVISE arm above).
+      assert resp.status == 200
+      body = json_response(resp, 200)
+      assert {:ok, doc} = read_back(type, @advise_dataset, doc_id)
+      assert doc.content["tags"] == ["a", "b", "c", "d"]
+
+      # THE GAP: before the fix this is `[]`. An array-length violation at
+      # level warning, with no error-level violation anywhere else in the
+      # document, must still produce an advisory naming the field and rule.
+      assert [warning] = schema_warnings(body)
+      assert warning["severity"] == "warning"
+      assert warning["message"] =~ "tags"
+
+      assert [%{"code" => code, "path" => "/tags"}] = warning["findings"]
+      assert to_string(code) =~ "list_too_long"
+    end
+
+    test "an array `min` rule at warning level, violated ALONE, still warns", ctx do
+      type = array_min_type!(@advise_dataset)
+      doc_id = "msvgap-arrmin-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, @advise_dataset, doc_id, %{
+          "content" => %{"title" => "Too few", "tags" => ["a"]}
+        })
+
+      assert resp.status == 200
+      body = json_response(resp, 200)
+
+      assert [warning] = schema_warnings(body)
+      assert warning["message"] =~ "tags"
+      assert [%{"code" => code, "path" => "/tags"}] = warning["findings"]
+      assert to_string(code) =~ "list_too_short"
+    end
+
+    test "a NON-ARRAY warning rule (string max length), violated alone, still warns — proves the fix is general",
+         ctx do
+      type = string_max_warning_type!(@advise_dataset)
+      doc_id = "msvgap-strmax-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, @advise_dataset, doc_id, %{
+          "content" => %{"title" => "x", "summary" => "way too long for five chars"}
+        })
+
+      assert resp.status == 200
+      body = json_response(resp, 200)
+
+      assert [warning] = schema_warnings(body)
+      assert warning["message"] =~ "summary"
+      assert [%{"path" => "/summary"}] = warning["findings"]
+    end
+
+    test "content satisfying the warning-level rule: same status, no advisory", ctx do
+      type = array_max_type!(@advise_dataset)
+      doc_id = "msvgap-arrok-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, @advise_dataset, doc_id, %{
+          "content" => %{"title" => "Fine", "tags" => ["a", "b"]}
+        })
+
+      assert resp.status == 200
+      assert schema_warnings(json_response(resp, 200)) == []
+    end
+  end
 end

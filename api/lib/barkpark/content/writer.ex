@@ -73,8 +73,8 @@ defmodule Barkpark.Content.Writer do
   """
   def validate_document(type, title, content, dataset, opts \\ []) do
     case validate_document_findings(type, title, content, dataset, opts) do
-      {:ok, content} -> {:ok, content}
-      {:error, errors, _findings} -> {:error, errors}
+      {:ok, content, _warning_findings} -> {:ok, content}
+      {:error, errors, _findings, _warning_findings} -> {:error, errors}
     end
   end
 
@@ -100,25 +100,37 @@ defmodule Barkpark.Content.Writer do
           String.t(),
           keyword()
         ) ::
-          {:ok, map() | nil} | {:error, map(), [Barkpark.Content.Validation.finding()]}
+          {:ok, map() | nil, [Barkpark.Content.Validation.finding()]}
+          | {:error, map(), [Barkpark.Content.Validation.finding()],
+             [Barkpark.Content.Validation.finding()]}
   def validate_document_findings(type, title, content, dataset, opts \\ []) do
     scope = Keyword.take(opts, [:workspace_id, :project_id])
 
     case Content.get_schema(type, dataset, scope) do
       {:ok, schema} ->
+        # task-292d6677b94916ef — the ERROR-level `validate/3` call alone
+        # decided `:ok` vs `:error` and, on `:ok`, returned immediately
+        # WITHOUT ever reading `check_findings/3`'s `warnings` half — so a
+        # document whose ONLY violated rule is `"level": "warning"` (an array
+        # max/min, or any other rule the schema marks advisory-only) produced
+        # zero findings at ALL, errors or warnings, and
+        # `do_check_document_schema/4`'s `{:ok, _content} -> :ok` branch never
+        # called `emit_schema_advisories/4`. `warning_findings` now rides on
+        # BOTH outcomes so the caller can advise on them regardless of
+        # whether the write also has an error-level problem.
+        %{errors: error_findings, warnings: warning_findings} =
+          Barkpark.Content.Validation.check_findings(content, title, schema)
+
         case Barkpark.Content.Validation.validate(content, title, schema) do
           {:ok, content} ->
-            {:ok, content}
+            {:ok, content, warning_findings}
 
           {:error, errors} ->
-            %{errors: findings} =
-              Barkpark.Content.Validation.check_findings(content, title, schema)
-
-            {:error, errors, findings}
+            {:error, errors, error_findings, warning_findings}
         end
 
       _ ->
-        {:ok, content}
+        {:ok, content, []}
     end
   end
 
@@ -197,19 +209,26 @@ defmodule Barkpark.Content.Writer do
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
 
     case validate_document_findings(type, title, content, dataset, stamped_scope(attrs)) do
-      {:ok, _content} ->
+      {:ok, _content, warning_findings} ->
+        # task-292d6677b94916ef — a write with NO error-level violation used to
+        # stop here with nothing emitted; a warning-level-only violation (an
+        # array max/min, or any other rule the schema marks advisory) was lost.
+        emit_warning_advisories(type, attrs, warning_findings)
         :ok
 
-      {:error, errors, findings} when is_map(errors) and map_size(errors) > 0 ->
-        if enforce? do
-          {:error, {:schema_validation_failed, errors, findings}}
+      {:error, errors, findings, warning_findings} ->
+        emit_warning_advisories(type, attrs, warning_findings)
+
+        if is_map(errors) and map_size(errors) > 0 do
+          if enforce? do
+            {:error, {:schema_validation_failed, errors, findings}}
+          else
+            emit_schema_advisories(type, attrs, errors, findings)
+            :ok
+          end
         else
-          emit_schema_advisories(type, attrs, errors, findings)
           :ok
         end
-
-      _ ->
-        :ok
     end
   end
 
@@ -244,6 +263,36 @@ defmodule Barkpark.Content.Writer do
           "(schema advisory; this dataset does not enforce schema validation)",
         "warning",
         %{findings: field_findings}
+      )
+    end)
+
+    :ok
+  end
+
+  # task-292d6677b94916ef — the parallel advisory path for findings that never
+  # reach `emit_schema_advisories/4` because `errors` (ERROR-level only) is
+  # empty: a warning-level-only rule violation (array max/min today; any rule
+  # the schema marks `"level": "warning"`). Fires regardless of `enforce?`,
+  # since a warning-level rule never blocks a write either way — it only ever
+  # feeds the advisory channel. Same grouped-by-field, `findings:`-keyed shape
+  # `emit_schema_advisories/4` uses, so a consumer reads both the same way.
+  defp emit_warning_advisories(_type, _attrs, []), do: :ok
+
+  defp emit_warning_advisories(type, attrs, warning_findings) do
+    pid = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || "(new)"
+
+    warning_findings
+    |> Enum.group_by(&top_level_field(&1.path))
+    |> Enum.sort_by(fn {field, _} -> to_string(field) end)
+    |> Enum.each(fn {field, field_findings} ->
+      messages = field_findings |> Enum.map(& &1.message) |> Enum.join("; ")
+      wire_findings = Enum.map(field_findings, &finding_wire/1)
+
+      Barkpark.Content.Warnings.put(
+        "schema_validation",
+        "#{type}/#{pid}: #{field} — #{messages} (schema advisory; warning-level rule)",
+        "warning",
+        %{findings: wire_findings}
       )
     end)
 
