@@ -73,7 +73,10 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
     # A overwrites its OWN documents config on the shared scope.
     a_resp =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> as(token_a())
       |> put("/v1/data/search/#{@scope}/settings", %{"zeroHitStrategy" => "typo_widen"})
       |> json_response(200)
@@ -84,7 +87,7 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
     # "typo_widen" (the shared row A just wrote) → this assertion FAILS → RED.
     after_b =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> as(token_b())
       |> get("/v1/data/search/#{@scope}/settings")
       |> json_response(200)
@@ -104,7 +107,7 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
 
     a_resp =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> as(token_a())
       |> put("/v1/media/#{@scope}/search/settings", %{"zeroHitStrategy" => "typo_widen"})
       |> json_response(200)
@@ -113,7 +116,7 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
 
     after_b =
       conn
-      |> recycle()
+      |> recycle_scoped()
       |> as(token_b())
       |> get("/v1/media/#{@scope}/search/settings")
       |> json_response(200)
@@ -130,7 +133,7 @@ defmodule Barkpark.Search.SurfaceConfigCrossTenantTest do
     |> json_response(200)
 
     conn
-    |> recycle()
+    |> recycle_scoped()
     |> as(token_b())
     |> put("/v1/data/search/#{@scope}/settings", %{"zeroHitStrategy" => "none"})
     |> json_response(200)
