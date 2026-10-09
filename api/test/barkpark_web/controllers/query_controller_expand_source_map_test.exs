@@ -144,10 +144,13 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     assert name_mapping["source"]["document"] == 1
     path_idx = name_mapping["source"]["path"]
 
-    # The author's OWN rendered keys are "email" (private, redacted away),
-    # "name", and "title" (every envelope carries one, task-13711) —
-    # alphabetically "name" sorts first among the two survivors, index 0.
-    assert path_idx == 0
+    # task-d0c2bd670e2d8a87: `path_idx` indexes a table SHARED across the
+    # root document and every expanded sub-document, so its numeric value
+    # depends on what else the walk has already seen — never pin a literal
+    # index. The invariant that must hold is that `paths[path_idx]` names
+    # the author's OWN bare in-document field, "name" — not the root's
+    # "title", and not the author's own redacted "email".
+    assert Enum.at(source_map["paths"], path_idx) == ~s($["name"])
 
     # The redacted `email` field never appears — same chokepoint `source_map`
     # already relies on for the root document.
@@ -283,6 +286,155 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
     # The row's OWN flat field still addresses the row's own slot, unchanged.
     title_row0 = source_map["mappings"][~s($[0]["title"])]
     assert title_row0["source"]["document"] == 0
+  end
+
+  test "every mapping's paths[source.path] names exactly the field it addresses, across rows and expanded refs (task-d0c2bd670e2d8a87)",
+       %{conn: conn, scope: scope} do
+    author_a = mk_author!(uniq("auth"), "Ada", "ada@example.com", scope)
+    author_b = mk_author!(uniq("auth"), "Bea", "bea@example.com", scope)
+
+    id_a = mk_post!(uniq("post"), %{"title" => "A", "author" => author_a}, scope)
+    id_b = mk_post!(uniq("post"), %{"title" => "B", "author" => author_b}, scope)
+
+    body =
+      conn
+      |> bearer(@read_token)
+      |> get("/v1/data/query/#{@dataset}/post", %{
+        "perspective" => "drafts",
+        "sourceMap" => "true",
+        "expand" => "author",
+        "order" => "title:asc"
+      })
+      |> json_response(200)
+
+    rows = body["result"]["documents"]
+    assert Enum.map(rows, & &1["_id"]) == ["drafts." <> id_a, "drafts." <> id_b]
+
+    source_map = body["sourceMap"]
+    refute is_nil(source_map)
+
+    # THE BUG, pinned generically rather than at one hand-picked index:
+    # `paths[source.path]` must be the BARE in-document path of the exact
+    # field the mapping's own (prefixed) result key names — never the
+    # alphabetically-unrelated field a global sort or a per-document-local
+    # counter happened to land on. `result_path/1`'s shape means that bare
+    # path is always a suffix of the full result key once `"$"` is dropped.
+    for {result_path, %{"source" => %{"path" => path_idx}}} <- source_map["mappings"] do
+      bare_path = Enum.at(source_map["paths"], path_idx)
+
+      assert is_binary(bare_path) and
+               String.ends_with?(result_path, String.trim_leading(bare_path, "$")),
+             "mapping #{inspect(result_path)} points at paths[#{path_idx}] = " <>
+               "#{inspect(bare_path)}, which does not name the field #{inspect(result_path)} addresses"
+    end
+
+    # And the two concrete pairs the live repro actually hit, named directly:
+    # the root `title` on EACH row, and the expanded author's OWN `name`.
+    for row <- [0, 1] do
+      title_idx = source_map["mappings"][~s($[#{row}]["title"])]["source"]["path"]
+      assert Enum.at(source_map["paths"], title_idx) == ~s($["title"])
+
+      name_idx = source_map["mappings"][~s($[#{row}]["author"]["name"])]["source"]["path"]
+      assert Enum.at(source_map["paths"], name_idx) == ~s($["name"])
+    end
+  end
+
+  test "repro-shaped regression (live report): a root `title` mapping and an expanded author's " <>
+         "`name` mapping never cross-resolve to an unrelated field like `format`/`expertise'",
+       %{conn: conn, scope: scope} do
+    # Widen both schemas with an EXTRA field whose alphabetical position
+    # falls BETWEEN the field the live report named and some other one —
+    # exactly the shape ("format" sorting after "author", "expertise"
+    # sorting after "email") that let the old global-sort/local-counter
+    # mismatch land on a plausible-looking but WRONG field.
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "author",
+          "title" => "Author",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "name", "type" => "string"},
+            %{"name" => "email", "type" => "string", "private" => true},
+            %{"name" => "expertise", "type" => "string"}
+          ]
+        },
+        @dataset,
+        scope
+      )
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "post",
+          "title" => "Post",
+          "visibility" => "public",
+          "fields" => [
+            %{"name" => "title", "type" => "string"},
+            %{"name" => "format", "type" => "string"},
+            %{"name" => "author", "type" => "reference", "refType" => "author"},
+            %{
+              "name" => "tags",
+              "type" => "arrayOf",
+              "of" => %{"type" => "reference", "refType" => "tag"}
+            }
+          ]
+        },
+        @dataset,
+        scope
+      )
+
+    author_id = mk_author!(uniq("auth"), "Ada", "ada@example.com", scope)
+
+    {:ok, _} =
+      Content.create_document(
+        "author",
+        %{
+          "doc_id" => author_id,
+          "name" => "Ada",
+          "email" => "ada@example.com",
+          "expertise" => "ML"
+        },
+        @dataset,
+        scope
+      )
+
+    id_a =
+      mk_post!(
+        uniq("post"),
+        %{"title" => "A", "format" => "article", "author" => author_id},
+        scope
+      )
+
+    id_b = mk_post!(uniq("post"), %{"title" => "B", "format" => "note"}, scope)
+
+    body =
+      conn
+      |> bearer(@read_token)
+      |> get("/v1/data/query/#{@dataset}/post", %{
+        "perspective" => "drafts",
+        "sourceMap" => "true",
+        "expand" => "author",
+        "order" => "title:asc"
+      })
+      |> json_response(200)
+
+    assert Enum.map(body["result"]["documents"], & &1["_id"]) ==
+             ["drafts." <> id_a, "drafts." <> id_b]
+
+    source_map = body["sourceMap"]
+    refute is_nil(source_map)
+
+    title_idx = source_map["mappings"][~s($[0]["title"])]["source"]["path"]
+    format_idx = source_map["mappings"][~s($[0]["format"])]["source"]["path"]
+    assert Enum.at(source_map["paths"], title_idx) == ~s($["title"])
+    assert Enum.at(source_map["paths"], format_idx) == ~s($["format"])
+    refute title_idx == format_idx
+
+    name_idx = source_map["mappings"][~s($[0]["author"]["name"])]["source"]["path"]
+    assert Enum.at(source_map["paths"], name_idx) == ~s($["name"])
+    refute Enum.at(source_map["paths"], name_idx) == ~s($["expertise"])
+    refute Enum.at(source_map["paths"], name_idx) == ~s($["format"])
   end
 
   test "REFUSED/IGNORED under published perspective, same as the flat-fields rule", %{
