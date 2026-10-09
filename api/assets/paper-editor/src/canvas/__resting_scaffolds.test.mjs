@@ -83,5 +83,47 @@ try {
     initialAtom.host.querySelector('button[aria-label="Select hidden divider"]').click();
     assert.equal(initialAtom.host.querySelectorAll(".bp-resting-scaffold").length, 0, "focused node selection still reveals the native divider");
   } finally { initialAtom.parent.remove(); }
+  // task-b4113f8cd893aa8e: the gutter button speaks the workspace's language.
+  const nb = {
+    "Edit empty ingress": "Rediger tom ingress",
+    "Edit empty paragraph": "Rediger tomt avsnitt",
+    "Select hidden divider": "Velg skjult skillelinje",
+    "%{label} (first of %{count} hidden blocks)": "%{label} (første av %{count} skjulte blokker)",
+  };
+  const localized = (blockList) => {
+    const parent = document.createElement("div");
+    parent.dataset.paperContainerKind = "document";
+    parent.setAttribute("data-strings", JSON.stringify(nb));
+    const host = document.createElement("bp-paper-canvas");
+    host.blocks = structuredClone(blockList);
+    parent.appendChild(host);
+    document.body.appendChild(parent);
+    return { parent, host };
+  };
+  const grouped = localized(blocks);
+  try {
+    const button = grouped.host.querySelector(".bp-scaffold-control");
+    assert.equal(button.getAttribute("aria-label"), "Rediger tom ingress (første av 2 skjulte blokker)",
+      "a grouped run reads Norwegian");
+    assert.equal(button.title, button.getAttribute("aria-label"));
+  } finally { grouped.parent.remove(); }
+  const single = localized([
+    { id: "lead", type: "paragraph", content: [{ type: "text", value: "Lead" }] },
+    { id: "gap", type: "paragraph", content: [] },
+    { id: "rule", type: "divider", audit: "keep" },
+    { id: "body", type: "paragraph", content: [{ type: "text", value: "Body" }] },
+    { id: "rule2", type: "divider", audit: "keep" },
+    { id: "heading", type: "heading", level: 2, content: [{ type: "text", value: "Section" }] },
+  ]);
+  try {
+    const labels = [...single.host.querySelectorAll(".bp-scaffold-control")].map(b => b.getAttribute("aria-label"));
+    assert.deepEqual(labels, ["Rediger tomt avsnitt", "Velg skjult skillelinje"],
+      "an empty paragraph and a hidden divider read Norwegian");
+  } finally { single.parent.remove(); }
+  const english = mount("document");
+  try {
+    assert.ok(english.host.querySelector('button[aria-label="Edit empty ingress (first of 2 hidden blocks)"]'),
+      "without strings the label stays English");
+  } finally { english.parent.remove(); }
   console.log("resting scaffolds preserve geometry, access, and source history");
 } finally { window.close(); }
