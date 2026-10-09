@@ -714,7 +714,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   to the group div and neither mode fires. At phone width the
                   toggle was always the first child collapsed. --%>
             <%= render_slot(@extra_actions) %>
-            <bp-overflow-menu class="bp-overflow-menu">
+            <bp-overflow-menu class="bp-overflow-menu" data-label={gettext("More actions")}>
               <%= for action <- @doc_actions do %>
                 <.doc_action_button
                   action={action}
