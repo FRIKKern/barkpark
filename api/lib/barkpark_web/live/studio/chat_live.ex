@@ -3429,7 +3429,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
           :for={f <- @context_identity.fields}
           data-test-id={"chat-context-#{f.name}"}
           data-mismatch={to_string(f.mismatch?)}
-          style={f.mismatch? && "color: var(--warn);"}
+          style={f.mismatch? && "color: var(--warn-text);"}
         >
           <%= if f.mismatch?, do: "⚠ " %><%= context_field_text(f) %>
         </span>
@@ -3946,7 +3946,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
                     stopping… / offline) — the honest state affordance the old
                     header line carried, now a quiet cockpit fact beside the
                     ring. Tests assert these words render; keep them visible. --%>
-              <span class="text-xs text-dim" style="font-family: var(--font-mono); opacity: 0.8;">
+              <%!-- No opacity: --fg-dim is already the AA-tuned dim tier, and
+                    0.8 on top read 3.2:1 (task-42d4ac3dbd2b7b64). --%>
+              <span class="text-xs text-dim" style="font-family: var(--font-mono);">
                 <%= status_label(@status) %>
               </span>
               <.context_ring ring={@ring} size={:sm} show_cost={false} />
@@ -3967,13 +3969,16 @@ defmodule BarkparkWeb.Studio.ChatLive do
               <%!-- Attach an image (charter D44/D25): a <label> for the hidden
                     live_file_input (whose id is the upload ref) opens the native
                     picker with ZERO hook change. The strip / paste-drop are below. --%>
+              <%!-- aria-label is prohibited on a <label> (axe aria-prohibited-attr,
+                    task-42d4ac3dbd2b7b64): the name rides visually hidden text,
+                    which also names the file input the label is for. --%>
               <label
                 for={@uploads.attachments.ref}
                 class="bp-iconbtn"
-                aria-label={gettext("Attach an image")}
                 title={gettext("Attach an image")}
               >
                 <.icon name="image" size={16} />
+                <span class="sr-only">{gettext("Attach an image")}</span>
               </label>
               <%!-- While a turn runs the primary button becomes Stop (interrupt),
                     but pressing ↵ still submits: a mid-turn send is queued honestly
