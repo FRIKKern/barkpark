@@ -681,7 +681,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         >
           <:status_pill>
             <span class={"badge badge-#{if @editor_is_draft, do: "draft", else: @editor_doc.status}"}>
-              <%= if @editor_is_draft, do: "draft", else: @editor_doc.status %>
+              <%= BarkparkWeb.StudioComponents.Panes.status_word(if @editor_is_draft, do: "draft", else: @editor_doc.status) %>
             </span>
           </:status_pill>
           <:presence>

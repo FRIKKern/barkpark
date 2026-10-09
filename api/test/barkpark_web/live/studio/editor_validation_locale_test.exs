@@ -93,6 +93,27 @@ defmodule BarkparkWeb.Studio.EditorValidationLocaleTest do
     {:ok, conn: conn, ws: ws, proj: proj, doc: doc}
   end
 
+  # task-809fce9f3a8a53a5: the header's status pill read "draft"/"published".
+  test "the header status pill names the state in Norwegian", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    doc: doc
+  } do
+    {:ok, view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/frontpage/#{doc.doc_id}")
+
+    assert html =~ ~r{<span class="badge badge-published">\s*publisert\s*</span>}
+
+    html =
+      view
+      |> form("#editor-form", %{"doc[ingress]" => "Velkommen hjem"})
+      |> render_change(%{"_target" => ["doc[ingress]"]})
+
+    assert html =~ ~r{<span class="badge badge-draft">\s*utkast\s*</span>}
+    refute html =~ ~r{<span class="badge badge-draft">\s*draft\s*</span>}
+  end
+
   test "an nb-NO workspace renders Norwegian findings under the field and the row, and refuses in Norwegian",
        %{conn: conn, ws: ws, proj: proj, doc: doc} do
     {:ok, view, html} =
