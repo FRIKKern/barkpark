@@ -219,7 +219,7 @@
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
         '<div class="bp-ae-search-wrap">' +
-        '<input type="search" class="bp-ae-search form-input" placeholder="' + this._e("Find assets…  (/ to focus)") + '" aria-label="' + this._e("Search assets") + '" autocomplete="off" aria-expanded="false" aria-controls="bp-ae-suggest-list" />' +
+        '<input type="search" class="bp-ae-search form-input" placeholder="' + this._e("Find assets…  (/ to focus)") + '" aria-label="' + this._e("Search assets") + '" autocomplete="off" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="bp-ae-suggest-list" />' +
         '<div class="bp-ae-suggest" id="bp-ae-suggest-list" hidden role="listbox"></div>' +
         "</div>" +
         '<div class="bp-ae-toolbar-pills"></div>' +
