@@ -9455,3 +9455,24 @@ msgstr "Kunne ikke laste inn mediebiblioteket."
 #, elixir-autogen, elixir-format
 msgid "No matching assets"
 msgstr "Ingen filer passer"
+
+#: lib/barkpark_web/live_auth.ex:84
+#: lib/barkpark_web/live_auth.ex:520
+#, elixir-autogen, elixir-format
+msgid "Admin access required"
+msgstr "Administratortilgang kreves"
+
+#: lib/barkpark_web/live_auth.ex:120
+#, elixir-autogen, elixir-format
+msgid "Operator access required"
+msgstr "Operatørtilgang kreves"
+
+#: lib/barkpark_web/live_auth.ex:375
+#, elixir-autogen, elixir-format
+msgid "You were signed out — sign in again"
+msgstr "Du ble logget ut — logg inn igjen"
+
+#: lib/barkpark_web/live_auth.ex:385
+#, elixir-autogen, elixir-format
+msgid "Your access token was revoked — sign in again"
+msgstr "Tilgangstokenet ditt er trukket tilbake — logg inn igjen"

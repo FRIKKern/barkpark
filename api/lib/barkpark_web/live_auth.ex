@@ -66,8 +66,12 @@ defmodule BarkparkWeb.LiveAuth do
   import Phoenix.LiveView
   import Phoenix.Component, only: [assign: 3]
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias Barkpark.Auth
+  alias Barkpark.Tenancy
   alias BarkparkWeb.Studio.ReturnTo
+  alias BarkparkWeb.StudioLocale
 
   # A chat-session deep link (`/studio/chat/:id`) — the shape the notifier emails
   # point at (charter D69). ONLY these earn a `return_to` round-trip; the bare
@@ -75,8 +79,9 @@ defmodule BarkparkWeb.LiveAuth do
   # admin surface keep the `/studio` funnel, so the gate suite stays byte-stable.
   @chat_deep_link ~r{^/studio/chat/[^/?#]+$}
 
-  def on_mount(:admin, _params, session, socket) do
-    authorize(socket, session, ["admin"], "Admin access required")
+  def on_mount(:admin, params, session, socket) do
+    put_denial_locale(params)
+    authorize(socket, session, ["admin"], gettext("Admin access required"))
   end
 
   # W26 (charter D219-D222) — authorize against the workspace IN THE URL, not a
@@ -110,8 +115,9 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
-  def on_mount(:ops, _params, session, socket) do
-    authorize(socket, session, ["ops", "admin"], "Operator access required")
+  def on_mount(:ops, params, session, socket) do
+    put_denial_locale(params)
+    authorize(socket, session, ["ops", "admin"], gettext("Operator access required"))
   end
 
   def on_mount(:require_org_mfa, _params, session, socket) do
@@ -253,6 +259,23 @@ defmodule BarkparkWeb.LiveAuth do
 
   defp admin_seat_ok?(_allowed_perms, _api_token), do: true
 
+  # task-7efa49ea242a3e04 — `:admin`/`:ops` run FIRST in the on_mount chain,
+  # before `StudioChrome.on_mount` ever sets the workspace locale, so a
+  # denial flash from either hook used to be hardcoded English for every
+  # member regardless of their workspace's language. Both hooks also front
+  # some `/w/:workspace_slug/...` live_sessions (`:scoped_plugin_ops`,
+  # `:scoped_admin_studio_dataset`, router.ex) alongside the pure-global ones
+  # (`/studio/settings`), so `scoped_target_workspace/1` — the SAME resolver
+  # `:scoped_admin` uses — is tried first; a route with no workspace_slug
+  # param (and the actual authorization decision in `authorize_user/3`,
+  # unchanged, still checks the DEFAULT workspace, not this one) falls back
+  # to the Default workspace's own locale, which is what the denial is
+  # actually about on those routes.
+  defp put_denial_locale(params) do
+    ws = scoped_target_workspace(params) || Tenancy.get_default_workspace()
+    StudioLocale.put(ws)
+  end
+
   defp authorize(socket, session, allowed_perms, denial_flash) do
     candidates = [
       Auth.resolve_session_credential(nil, dev_browser_token_fallback()),
@@ -337,13 +360,19 @@ defmodule BarkparkWeb.LiveAuth do
     end
   end
 
+  # task-7efa49ea242a3e04 — unlike the on_mount denial flashes above, these
+  # two need NO locale resolution of their own: `handle_info` runs in the
+  # SAME long-lived LiveView process as the `mount`/`handle_params` that got
+  # this far, which only happens after `StudioChrome.on_mount` already put
+  # the workspace's locale into THIS process's Gettext dictionary. `gettext/1`
+  # here reads whatever that earlier call set.
   defp revocation_teardown(
          %Phoenix.Socket.Broadcast{event: "disconnect", topic: "user_socket:user_session:" <> _},
          socket
        ) do
     {:halt,
      socket
-     |> put_flash(:error, "You were signed out — sign in again")
+     |> put_flash(:error, gettext("You were signed out — sign in again"))
      |> redirect(to: "/login")}
   end
 
@@ -353,7 +382,7 @@ defmodule BarkparkWeb.LiveAuth do
        ) do
     {:halt,
      socket
-     |> put_flash(:error, "Your access token was revoked — sign in again")
+     |> put_flash(:error, gettext("Your access token was revoked — sign in again"))
      |> redirect(to: "/login")}
   end
 
@@ -470,14 +499,25 @@ defmodule BarkparkWeb.LiveAuth do
          true <- Barkpark.Tenancy.Auth.workspace_admin?(user, ws.id) do
       {:cont, socket |> assign(:current_user, user) |> arm_session_teardown(session)}
     else
-      _ -> scoped_admin_deny(socket)
+      # The TARGET workspace is already resolved here (it is this function's
+      # own `ws` argument) — a denied member still gets the denial in THEIR
+      # workspace's language, not English, before StudioChrome ever mounts.
+      _ -> scoped_admin_deny(socket, ws)
     end
   end
 
-  defp scoped_admin_deny(socket) do
+  # `ws` is `nil` from the two call sites where the URL's workspace_slug
+  # never resolved at all (task-7efa49ea242a3e04) — an unknown workspace has
+  # no locale to put, so those stay on whatever the process already carries
+  # (English, same as before this fix). The one call site that DOES hold a
+  # resolved target workspace (`scoped_admin_authorize_user/3` above) passes
+  # it, and that is the real-world case the task's repro hits.
+  defp scoped_admin_deny(socket, ws \\ nil) do
+    if ws, do: StudioLocale.put(ws)
+
     {:halt,
      socket
-     |> put_flash(:error, "Admin access required")
+     |> put_flash(:error, gettext("Admin access required"))
      |> redirect(to: "/studio")}
   end
 
