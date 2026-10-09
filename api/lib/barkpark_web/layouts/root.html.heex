@@ -263,10 +263,15 @@
       --accent: hsl(33 92% 60%);
       --primary-hsl: 152.92 60% 52.94%;
       --primary-soft: hsl(var(--primary-hsl) / 0.2);
+      --ok-hsl: 142 52% 52%; --warn-hsl: 38 94% 56%; --danger-hsl: 0 82% 66%; --info-hsl: 217.2 91.2% 59.8%;
+      --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+      --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
+      --warn-strong: hsl(var(--warn-hsl) / 0.34);
       --ok-fg: hsl(0 0% 100%);
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(38 94% 56%);
       --bg-accent: hsl(240 3.7% 13%);
       --border-muted: hsl(240 3.7% 11%);
       --fg-dim: hsl(240 5% 51%);
@@ -291,6 +296,13 @@
         --warn-strong: hsl(var(--warn-hsl) / 0.34);
         --warn-text: hsl(38 94% 56%);
       }
+    }
+    html[data-theme="light"] {
+      --ok-hsl: 142 72% 26%; --warn-hsl: 35 92% 38%; --danger-hsl: 0 68% 42%; --info-hsl: 217.2 91.2% 59.8%;
+      --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
+      --ok-soft: hsl(var(--ok-hsl) / 0.15); --warn-soft: hsl(var(--warn-hsl) / 0.15); --danger-soft: hsl(var(--danger-hsl) / 0.15); --info-soft: hsl(var(--info-hsl) / 0.15);
+      --warn-strong: hsl(var(--warn-hsl) / 0.28);
+      --warn-text: hsl(35 92% 30%);
     }
     /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
     html[data-bp-theme="evergreen"] {
