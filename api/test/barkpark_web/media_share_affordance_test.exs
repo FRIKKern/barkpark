@@ -312,4 +312,36 @@ defmodule BarkparkWeb.MediaShareAffordanceTest do
       assert after_doc.rev == before.rev
     end
   end
+
+  # task-90c789949a41f057: a Norwegian Studio shows the notice in Norwegian. The
+  # copy module and bp's output keep the English, so the API contract is unchanged.
+  describe "the notice in a Norwegian workspace" do
+    test "Studio reads Norwegian, bp media get keeps the English copy", %{ws: ws, proj: proj} do
+      {:ok, ws} = Tenancy.set_workspace_locale(ws, "nb-NO")
+      file = put_media!(ws, proj)
+      raw = admin_token!(ws)
+
+      {:ok, view, html} = live(signed_in(raw), studio_media_path(ws, proj))
+      assert html =~ "Offentlig — innenfor delingen i dette området"
+      assert html =~ "ikke for hele verden"
+      assert html =~ "Område #{scope(ws, proj)}: ikke delt"
+      assert html =~ "Publiser mediene i dette området"
+      refute html =~ MediaVisibilityCopy.public_label()
+      refute html =~ "Publish this scope&#39;s media"
+
+      assert render_click(view, "publish_scope_media", %{}) =~
+               "Mediene i dette området er publisert"
+
+      notice =
+        scoped_conn()
+        |> put_req_header("authorization", "Bearer #{raw}")
+        |> get(asset_path(ws, proj, file))
+        |> json_response(200)
+        |> bp_media_get_notice()
+
+      assert notice["label"] == "Public — within this scope's sharing"
+      assert notice["copy"] == MediaVisibilityCopy.public_copy()
+      assert notice["copy"] =~ "not world-readable"
+    end
+  end
 end

@@ -82,17 +82,20 @@ defmodule BarkparkWeb.Studio.MediaLive do
     ~H"""
     <div style="flex: 1; display: flex; flex-direction: column; min-height: 0; overflow: hidden;">
       <div id="media-visibility-notice" style="padding: 0.75rem 1rem; font-size: 0.8125rem;">
-        <strong>{@visibility_notice.label}</strong>
-        <p style="margin: 0.25rem 0;">{@visibility_notice.copy}</p>
+        <strong>{MediaVisibilityCopy.translate(@visibility_notice.label)}</strong>
+        <p style="margin: 0.25rem 0;">{MediaVisibilityCopy.translate(@visibility_notice.copy)}</p>
         <p style="margin: 0.25rem 0;">
-          Scope {@visibility_notice.scope}: {@visibility_notice.media_share_state}
+          {gettext("Scope %{scope}: %{state}",
+            scope: @visibility_notice.scope,
+            state: MediaVisibilityCopy.translate(@visibility_notice.media_share_state)
+          )}
         </p>
         <button
           :if={!@visibility_notice.media_shared && @shares_admin?}
           type="button"
           phx-click="publish_scope_media"
         >
-          Publish this scope's media
+          {gettext("Publish this scope's media")}
         </button>
       </div>
       <div
@@ -123,10 +126,14 @@ defmodule BarkparkWeb.Studio.MediaLive do
       # media anonymously until the socket reconnected (task-a0d8bdd7b5a518cc).
       not BarkparkWeb.Studio.Caps.admin?(socket) ->
         {:noreply,
-         put_flash(socket, :error, "Admin access required to publish this scope's media.")}
+         put_flash(
+           socket,
+           :error,
+           gettext("Admin access required to publish this scope's media.")
+         )}
 
       is_nil(scope_string(socket)) ->
-        {:noreply, put_flash(socket, :error, "No resolved scope to publish.")}
+        {:noreply, put_flash(socket, :error, gettext("No resolved scope to publish."))}
 
       true ->
         case Sharing.publish_media(scope_string(socket)) do
@@ -134,10 +141,14 @@ defmodule BarkparkWeb.Studio.MediaLive do
             {:noreply,
              socket
              |> assign_visibility_notice()
-             |> put_flash(:info, "This scope's media is published — the :media share is live.")}
+             |> put_flash(
+               :info,
+               gettext("This scope's media is published — the :media share is live.")
+             )}
 
           {:error, _reason} ->
-            {:noreply, put_flash(socket, :error, "Could not publish this scope's media.")}
+            {:noreply,
+             put_flash(socket, :error, gettext("Could not publish this scope's media."))}
         end
     end
   end
