@@ -64,27 +64,26 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   delete; a real dataset's schema, corpus size and infra push that higher,
   which is the gap between "50 works" and "250 500s" on barkpark-studio's box.
 
-  WHY 50, NOT A LOOSER NUMBER. The candidate timeouts a long-held connection
-  could cross in prod: Postgres `statement_timeout` (30s, `runtime.exs`,
-  PER STATEMENT — cancels one slow query, not the sum of many fast ones) and
-  Ecto/Postgrex's client-side `:timeout` (15_000 ms default, PER CALL, still
-  unset in `repo_opts` — same file). Neither bounds a TRANSACTION making many
-  FAST sequential statements, which is exactly this shape: 100 deletes
-  against a 3-reference-field schema on a near-empty LOCAL corpus already
-  measured ~4.8 s — no real data, no concurrent load, no network hop to
-  Postgres. A real dataset's schema (e2e-sanity-builder plausibly carries
-  4-8 reference fields, not 3), its corpus size, and a busier box all push
-  that higher, and this gate cannot see any of them without a schema query
-  of its own (which would cost room on an already-oversize request) — so it
-  cannot PROVE a looser cap stays under either timeout. `@max_delete_mutations`
-  is set to 50 — the size barkpark-studio measured actually working in
-  production — rather than a number only proven safe on an empty local
-  table. The real fix — batching `ensure_unreferenced`'s query across the
-  whole to-be-deleted id set instead of once per id — is filed as a separate
-  follow-up; this cap is the unconditional backstop so no mutate size
-  reaches a 500 in the meantime, matching this gate's own "refuse before the
-  transaction, name the cap"
-  shape for `@max_mutations`.
+  WHY 500 NOW (task-6b5e4b3e572d38c9), RAISED FROM 50 WITH EVIDENCE.
+  `ensure_unreferenced/5`'s query-per-field-per-delete cost is now BATCHED
+  (`ReferenceIntegrity.referrers_for_ids/3`, `Content.Mutations.apply_all/4`)
+  across a whole consecutive run of deletes — one pass per reference field
+  for the WHOLE run, not per delete — so the multiplier this cap originally
+  existed to bound is gone for the realistic "bulk delete N things" shape.
+  What is left is the remaining PER-DELETE work (the write itself, hooks,
+  broadcast, audit, and the still-unbatched `delete_target/4` existence
+  lookup) — linear in N, not multiplied by field count. Measured locally
+  (near-empty corpus, no concurrent load, so a BEST case exactly like the
+  50-cap's own measurement): 250 deletes / 4 reference fields ~1-1.5s, 500
+  deletes / 8 reference fields ~2.6s, 1000 deletes / 8 reference fields
+  ~6.4s. The candidate timeouts are unchanged (Postgres `statement_timeout`
+  30s per statement; Ecto/Postgrex client `:timeout` 15_000ms per call,
+  neither bounding a transaction's CUMULATIVE time) — 500 gives roughly
+  5.7× headroom under the 15s figure even on this best-case measurement,
+  comfortably past the 250 that previously 500'd, without reaching for
+  1000 (measured ~6.4s, real dataset/corpus/load headroom less comfortable)
+  or dropping the cap altogether (this gate still cannot see the dataset's
+  schema/corpus size without a query of its own).
 
   ## Room for the WHOLE batch, not room for one
 
@@ -156,13 +155,14 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   # plugin's module — so the number is restated here with its owner named.
   @max_mutations 1_000
 
-  # task-c801daf4efd35a74 — see "## The delete cap" above. `delete` costs
-  # ZERO quota room but a per-op reference-integrity scan `@max_mutations`
-  # never bounds. 50, not a looser number proven only on an empty local
-  # table: the production-measured working size, below either candidate
-  # timeout (Postgres `statement_timeout` 30s, Ecto/Postgrex client
-  # `:timeout` 15_000ms) with real headroom this gate cannot otherwise prove.
-  @max_delete_mutations 50
+  # task-c801daf4efd35a74 (originally 50) / task-6b5e4b3e572d38c9 (raised to
+  # 500) — see "## The delete cap" above. `delete` costs ZERO quota room but
+  # the per-delete work `@max_mutations` never bounds. 500 is evidence-backed
+  # headroom under both candidate timeouts (Postgres `statement_timeout`
+  # 30s, Ecto/Postgrex client `:timeout` 15_000ms) now that the
+  # reference-integrity query no longer multiplies by field count — see the
+  # measurements above.
+  @max_delete_mutations 500
 
   # Ops that can add a `documents` row. Everything else (delete, discardDraft,
   # patch) consumes ZERO room; see the moduledoc.
