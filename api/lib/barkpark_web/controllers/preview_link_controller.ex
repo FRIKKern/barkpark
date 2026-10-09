@@ -159,6 +159,10 @@ defmodule BarkparkWeb.PreviewLinkController do
   @doc "GET /v1/shares/preview-links?scope=&ref_type=&doc_id= — list a document's preview links."
   def list(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
+         # task-4ad625842939ae8f — same gap, same fix, as
+         # ShareLinkController.list/2: the caller named this dataset in the
+         # request, so refusing it is never an existence oracle.
+         :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
@@ -169,6 +173,9 @@ defmodule BarkparkWeb.PreviewLinkController do
 
       json(conn, %{links: links})
     else
+      {:error, :forbidden_dataset} ->
+        ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       {:error, :forbidden} ->
         forbidden(conn)
 
