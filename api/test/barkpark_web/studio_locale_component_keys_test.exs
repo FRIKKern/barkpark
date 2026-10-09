@@ -13,6 +13,8 @@ defmodule BarkparkWeb.StudioLocaleComponentKeysTest do
   @components [
     reference: "bp-reference-picker.js",
     media: "bp-media-picker.js",
+    # The asset browser speaks with the words its opener (the media picker) hands it.
+    media: "bp-asset-browser.js",
     asset_explorer: "bp-asset-explorer.js"
   ]
 
