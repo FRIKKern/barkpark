@@ -198,6 +198,52 @@ defmodule Barkpark.PortableDoc.Patch do
     end)
   end
 
+  @doc """
+  The set of block ids a batch of `ops` WRITES — inserts a new block under,
+  or overwrites the content of. For a caller that only needs to re-check the
+  blocks a batch actually changed (task-bbd13e5a46240cc1 — a field's
+  declared vocabulary check, which must not refuse a batch over an untouched
+  block it never read or wrote), this is the set to check against, in place
+  of the whole result.
+
+  `"append-block"` / `"insert-after"` contribute the NEW block's own id.
+  `"patch-block"` / `"replace-block"` contribute the id they target — their
+  block's CONTENT changes, so it is re-checked exactly like a fresh insert.
+
+  `"remove-block"` and `"move-block"` contribute NOTHING: a removed block is
+  gone from the result (nothing left to check), and a moved block's content
+  is byte-identical to before — only its position shifted (see this module's
+  op-dispatch clauses) — so a block already sitting in the tree stays
+  "untouched" by this definition even when a batch moves it.
+
+  Pure, like every other function here: reads the ops, performs no lookup
+  against any particular block list. A malformed/unrecognised op (no
+  `"op"` key, or one outside the six `apply_to_blocks/2` knows) contributes
+  nothing — `apply_patches/3` already halts the whole batch on one before a
+  caller would ever reach this with the failing op's result.
+  """
+  @spec touched_block_ids([op()]) :: MapSet.t()
+  def touched_block_ids(ops) when is_list(ops) do
+    Enum.reduce(ops, MapSet.new(), &add_touched_ids/2)
+  end
+
+  defp add_touched_ids(%{"op" => op, "block" => block}, acc)
+       when op in ["append-block", "insert-after"],
+       do: put_touched_id(acc, block)
+
+  defp add_touched_ids(%{"op" => op, "id" => id}, acc)
+       when op in ["patch-block", "replace-block"] and is_binary(id),
+       do: MapSet.put(acc, id)
+
+  defp add_touched_ids(_op, acc), do: acc
+
+  defp put_touched_id(acc, block) do
+    case block_id(block) do
+      id when is_binary(id) -> MapSet.put(acc, id)
+      _ -> acc
+    end
+  end
+
   # ── op dispatch — one clause per discriminator ─────────────────────────────
 
   defp apply_to_blocks(blocks, %{"op" => "append-block", "block" => block}) do

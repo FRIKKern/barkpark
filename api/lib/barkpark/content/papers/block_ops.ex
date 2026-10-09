@@ -3173,7 +3173,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   The batch is checked against the field's declared vocabulary
   (`FieldVocabulary.validate/2`) BEFORE anything is written — the client
-  vetoes the same vocabulary calmly, this is the truth.
+  vetoes the same vocabulary calmly, this is the truth. ONLY the blocks this
+  batch inserts or modifies are checked (`Patch.touched_block_ids/1`,
+  task-bbd13e5a46240cc1) — not the field's whole block list. A field can
+  carry a block outside today's declared vocabulary that no op here ever
+  wrote (seeded by another producer — e.g. a Sanity inline object type
+  nothing has decided on yet, task-85fee859cf3bfef6 is the owner question on
+  deciding inline objects generally); such a block round-trips
+  byte-identical on a batch that never touches it, and is still refused the
+  moment a batch tries to insert or edit it.
 
   `opts[:if_rev]` fences the batch: a document whose `rev` differs answers
   `{:error, {:rev_mismatch, %{expected, actual}}}` before any op runs, and the
@@ -3197,7 +3205,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
          {:ok, field_def} <- field_definition(type, dataset, field, opts),
          blocks = field_blocks(Map.get(doc.content || %{}, field)),
          {:ok, new_blocks} <- Patch.apply_patches(blocks, ops),
-         :ok <- FieldVocabulary.validate(FieldVocabulary.from_field(field_def), new_blocks) do
+         :ok <-
+           FieldVocabulary.validate(
+             FieldVocabulary.from_field(field_def),
+             touched_vocabulary_targets(new_blocks, ops)
+           ) do
       scope = [workspace_id: doc.workspace_id, project_id: doc.project_id]
 
       content =
@@ -3234,6 +3246,18 @@ defmodule Barkpark.Content.Papers.BlockOps do
     else
       {:error, _reason} = err -> err
     end
+  end
+
+  # The subset of `new_blocks` the vocabulary check actually needs to look at
+  # (task-bbd13e5a46240cc1): the blocks `ops` inserted or modified, per
+  # `Patch.touched_block_ids/1`. A block whose id is NOT in that set is
+  # exactly as it was stored before this batch ran — this function never
+  # reads its content, only its id — so it is dropped here rather than handed
+  # to `FieldVocabulary.validate/2`, which cannot tell "always been this way"
+  # from "this batch just wrote this".
+  defp touched_vocabulary_targets(new_blocks, ops) do
+    touched = Patch.touched_block_ids(ops)
+    Enum.filter(new_blocks, &MapSet.member?(touched, Map.get(&1, "id")))
   end
 
   # The field's raw schema map — the vocabulary rides on it. A field that did
