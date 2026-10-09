@@ -11,11 +11,16 @@ name: paper-editor
 #   2. stale committed bundle             -> rebuild + git diff --exit-code
 #   3. stale committed stylesheet         -> rebuild + git diff --exit-code
 #   4. @barkpark/paper-editor package     -> npm run pack:check
-# `npm run build` emits TWO artifacts from src/ -- the IIFE bundle and
+# `npm run build` emits THREE artifacts -- the IIFE bundle and
 # bp-paper-editor.css (the stylesheet the LiveView editor and the web demo
-# load). The css was ungated until 2026-09-01 and went stale once (#11816
-# added framed rules to src/styles.css that the committed css never got).
-# Both artifacts are diffed here, and both are trigger paths below.
+# load) from src/, plus bp-paper-surface.css (task-7fb8088ab39c7a36: the SAME
+# api/assets/paper-surface/paper-surface.css this file already reads for its
+# own trigger path, re-bundled so an external host can load the task/fleet
+# block styles GET /v1/papers/:slug/fleet-blocks renders, the way it already
+# loads bp-paper-editor.css for the canvas). The editor css was ungated until
+# 2026-09-01 and went stale once (#11816 added framed rules to src/styles.css
+# that the committed css never got) -- all three artifacts are diffed here,
+# and all three are trigger paths below.
 # The freshness check is deterministic: `npm ci` pins esbuild via the
 # lockfile, and esbuild's minified output is reproducible per version.
 #
@@ -37,6 +42,7 @@ on:
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - "api/priv/static/assets/bp-paper-editor.css"
+      - "api/priv/static/assets/bp-paper-surface.css"
       # Files the unit tests READ from outside api/assets/paper-editor. A move of a
       # sink without this line goes blind: #16022 lifted the Studio inline CSS out
       # of root.html.heex and main was red for 14 h with no run to say so.
@@ -79,6 +85,7 @@ on:
       - "api/assets/paper-surface/**"
       - "api/priv/static/assets/bp-paper-editor.bundle.js"
       - "api/priv/static/assets/bp-paper-editor.css"
+      - "api/priv/static/assets/bp-paper-surface.css"
       # Files the unit tests READ from outside api/assets/paper-editor. A move of a
       # sink without this line goes blind: #16022 lifted the Studio inline CSS out
       # of root.html.heex and main was red for 14 h with no run to say so.
@@ -156,6 +163,10 @@ jobs:
           fi
           if ! git diff --exit-code ../../priv/static/assets/bp-paper-editor.css; then
             echo "::error file=api/priv/static/assets/bp-paper-editor.css::Committed stylesheet is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
+            stale=1
+          fi
+          if ! git diff --exit-code ../../priv/static/assets/bp-paper-surface.css; then
+            echo "::error file=api/priv/static/assets/bp-paper-surface.css::Committed stylesheet is stale — run 'npm run build' in api/assets/paper-editor and commit the result."
             stale=1
           fi
           exit "$stale"
