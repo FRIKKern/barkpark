@@ -971,6 +971,9 @@ function buildPickerNodeView({ node, editor, getPos, fieldType }) {
   // scope-prefix ("" on the flat surface) — byte-identical fetch paths when empty, so
   // only set it when non-empty.
   if (scope.scopePrefix) picker.setAttribute("scope-prefix", scope.scopePrefix);
+  // The workspace's picker strings; absent, the WC keeps its English defaults.
+  const strings = fieldType === "field-image" ? scope.mediaStrings : scope.referenceStrings;
+  if (strings) picker.setAttribute("data-strings", strings);
 
   if (fieldType === "field-image") {
     // GHOST chrome (pd-doctrine rule 6): in the canvas the picker is an atom that
@@ -1215,14 +1218,22 @@ function reportNodeViewFailure(editor, node, fieldType, error) {
   } catch (_e) {}
 }
 
-// Read the canvas-host scope (dataset / scope-prefix / bearer token) for the pickers.
+// Read the canvas-host scope (dataset / scope-prefix / bearer token / picker strings)
+// for the pickers.
 // The host <bp-paper-canvas> carries data-dataset / data-scope-prefix / data-token
 // (stamped by the BarkparkPaperCanvas hook from the run wrapper). The node-view reaches
 // it via editor.options.element (the mount .bp-paper-editor-body) → closest(
 // "bp-paper-canvas"). All optional — a missing host or missing attr yields "" so the
 // picker keeps its own defaults (dataset="production", no token → upload disabled).
 export function canvasScope(editor) {
-  const empty = { dataset: "", scopePrefix: "", token: "", pickerBrowse: true };
+  const empty = {
+    dataset: "",
+    scopePrefix: "",
+    token: "",
+    pickerBrowse: true,
+    mediaStrings: "",
+    referenceStrings: "",
+  };
   try {
     const mount = editor && editor.options && editor.options.element;
     if (!mount || typeof mount.closest !== "function") return empty;
@@ -1233,6 +1244,8 @@ export function canvasScope(editor) {
       scopePrefix: host.getAttribute("data-scope-prefix") || "",
       token: host.getAttribute("data-token") || "",
       pickerBrowse: host.getAttribute("data-picker-browse") !== "false",
+      mediaStrings: host.getAttribute("data-media-strings") || "",
+      referenceStrings: host.getAttribute("data-reference-strings") || "",
     };
   } catch (_e) {
     return empty;

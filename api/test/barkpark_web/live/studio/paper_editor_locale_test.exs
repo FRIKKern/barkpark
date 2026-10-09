@@ -89,6 +89,28 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
     refute html =~ "Save block as master"
   end
 
+  # task-8f6507ea3a5c79c6: the pickers the canvas mounts in JS read their words off
+  # the run wrapper, so it must carry the workspace's picker strings.
+  test "the nb-NO canvas run carries Norwegian picker strings", %{conn: conn, ws: ws, proj: proj} do
+    html = editor_html(conn, ws, proj)
+
+    assert canvas_strings(html, "media") =~ "Bytt bilde"
+    assert canvas_strings(html, "reference") =~ "Ingen treff"
+  end
+
+  test "an English canvas run carries English picker strings", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, ws} = Tenancy.set_workspace_locale(ws, "en")
+    html = editor_html(conn, ws, proj)
+
+    assert canvas_strings(html, "media") =~ "Replace image"
+    assert canvas_strings(html, "reference") =~ "No matches"
+  end
+
+  defp canvas_strings(html, kind) do
+    [_, value] = Regex.run(~r/data-canvas-#{kind}-strings="([^"]*)"/, html)
+    value
+  end
+
   test "an English workspace keeps the English paper editor chrome", %{
     conn: conn,
     ws: ws,

@@ -281,6 +281,7 @@ export const Card = Node.create({
       if (scope.dataset) mediaPicker.setAttribute("dataset", scope.dataset);
       if (scope.scopePrefix) mediaPicker.setAttribute("scope-prefix", scope.scopePrefix);
       if (scope.token) mediaPicker.setAttribute("data-token", scope.token);
+      if (scope.mediaStrings) mediaPicker.setAttribute("data-strings", scope.mediaStrings);
       {
         const seedMedia = node.attrs && node.attrs.media;
         const seedSrc = (seedMedia && seedMedia.src) || "";

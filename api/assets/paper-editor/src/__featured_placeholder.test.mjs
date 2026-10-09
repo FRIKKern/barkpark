@@ -56,6 +56,7 @@ check("canvasScope carries scoped picker confinement from the canvas host", () =
     ["data-scope-prefix", "/w/acme/p/books"],
     ["data-token", ""],
     ["data-picker-browse", "false"],
+    ["data-media-strings", '{"replace":"Bytt bilde"}'],
   ]);
   const editor = {
     options: {
@@ -70,6 +71,8 @@ check("canvasScope carries scoped picker confinement from the canvas host", () =
     scopePrefix: "/w/acme/p/books",
     token: "",
     pickerBrowse: false,
+    mediaStrings: '{"replace":"Bytt bilde"}',
+    referenceStrings: "",
   });
 });
 
