@@ -193,7 +193,7 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
        when is_map_key(objects, type) do
     case Validation.object_block_findings(Map.fetch!(objects, type), block, type) do
       [] -> :ok
-      [{path, msg} | _] -> {:error, {:out_of_vocabulary, "#{path}: #{msg}"}}
+      [{path, msg, _code, _params} | _] -> {:error, {:out_of_vocabulary, "#{path}: #{msg}"}}
     end
   end
 
