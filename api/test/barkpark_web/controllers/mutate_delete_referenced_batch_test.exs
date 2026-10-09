@@ -70,7 +70,7 @@ defmodule BarkparkWeb.MutateDeleteReferencedBatchTest do
     {:ok, token} = Auth.create_token(raw, "mdrb writer", @dataset, ["read", "write"])
     {:ok, _} = TenancyAuth.create_membership(ws.id, token.id)
 
-    {:ok, ws: ws, slug: ws.slug, raw: raw}
+    {:ok, ws: ws, proj: proj, slug: ws.slug, raw: raw}
   end
 
   defp mutate(conn, slug, raw, mutations) do
@@ -93,28 +93,59 @@ defmodule BarkparkWeb.MutateDeleteReferencedBatchTest do
 
   defp body(conn), do: Jason.decode!(conn.resp_body)
 
-  test "a batch of 250 consecutive deletes (several reference fields, no cross-refs) succeeds, fast",
+  test "a batch of 250 consecutive deletes (several reference fields, no cross-refs) succeeds",
        %{conn: conn, slug: slug, raw: raw} do
     ids = for i <- 1..250, do: "mdrb-#{i}"
     seed = mutate(conn, slug, raw, Enum.map(ids, &create/1))
     assert seed.status == 200, "seeding failed: #{seed.status} #{seed.resp_body}"
 
-    {elapsed_us, resp} = :timer.tc(fn -> mutate(conn, slug, raw, Enum.map(ids, &delete_op/1)) end)
-
-    IO.puts(
-      "[mdrb] 250 consecutive deletes, 4 reference fields: #{Float.round(elapsed_us / 1000, 1)}ms"
-    )
+    resp = mutate(conn, slug, raw, Enum.map(ids, &delete_op/1))
 
     assert resp.status == 200, "#{resp.status} #{resp.resp_body}"
     assert length(body(resp)["results"]) == 250
+  end
 
-    # Generous, non-flaky ceiling: the point is the query count no longer
-    # scales with the run's length, not a tight timing assertion. The
-    # SAME-shaped 100-delete / 3-field case (task-c801daf4efd35a74's PR body)
-    # measured ~4.8s UNBATCHED; this batched 250-delete / 4-field case should
-    # be nowhere near that, let alone a multiple of it.
-    assert elapsed_us < 3_000_000,
-           "250 batched deletes took #{elapsed_us / 1000}ms -- expected the query count to stay flat, not scale with the run length"
+  # task-6b5e4b3e572d38c9 review (main red, run 37956140637): the sibling
+  # test above used to ALSO assert a wall-clock ceiling on the HTTP request
+  # ("stays fast"). CI measured 3836ms against a 3000ms bound -- a
+  # load-dependent number that will always eventually flap, on a box this
+  # test does not control. What the batching claim actually says is a QUERY
+  # COUNT claim ("one pass per reference field, not one per field per
+  # delete"), so prove THAT directly: call the batched function itself for
+  # two very different id-list sizes and assert the query count is the
+  # same -- deterministic, independent of machine speed or load, and a
+  # tighter proof than timing ever was (a flat query count PROVES the
+  # multiplier is gone; a fast wall-clock time merely suggests it).
+  test "the batched reference-integrity query count is independent of the delete-run length", %{
+    conn: conn,
+    slug: slug,
+    raw: raw,
+    ws: ws,
+    proj: proj
+  } do
+    ids250 = for i <- 1..250, do: "mdrb-qc-#{i}"
+    seed = mutate(conn, slug, raw, Enum.map(ids250, &create/1))
+    assert seed.status == 200, "seeding failed: #{seed.status} #{seed.resp_body}"
+
+    ids50 = Enum.take(ids250, 50)
+    scope = [workspace_id: ws.id, project_id: proj.id]
+
+    {_, count250} =
+      Barkpark.QueryCounter.count(fn ->
+        Barkpark.Content.ReferenceIntegrity.referrers_for_ids(ids250, @dataset, scope)
+      end)
+
+    {_, count50} =
+      Barkpark.QueryCounter.count(fn ->
+        Barkpark.Content.ReferenceIntegrity.referrers_for_ids(ids50, @dataset, scope)
+      end)
+
+    assert count250 == count50,
+           "query count scaled with the id-list length: #{count50} queries for 50 ids, " <>
+             "#{count250} for 250 -- the whole point of batching is that this is flat " <>
+             "(one pass per reference field), not O(ids)"
+
+    assert count250 > 0, "the measurement counted nothing -- this assertion would pass vacuously"
   end
 
   test "an EXTERNAL referrer still blocks the whole batched run, 409 naming the referrer", %{
