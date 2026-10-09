@@ -1053,7 +1053,7 @@ function onStatusVars(theme, indent, t = tokens) {
 // a darker step in light so it clears AA there (task-98bc0a831eecc140). Studio-only
 // like onStatus; its dark value rides the same prefers-color-scheme block as the
 // status roles it shadows, so --warn-text and --warn always flip together.
-const ON_TINT = ["warn-text"];
+const ON_TINT = ["warn-text", "primary-text"];
 function onTintVars(theme, indent, t = tokens) {
   const ot = t.color.onTint;
   return ON_TINT.map((r) => indent + `--${r}: ${hsl(ot[r][theme])};`).join("\n");
