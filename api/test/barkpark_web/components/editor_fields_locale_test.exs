@@ -68,6 +68,51 @@ defmodule BarkparkWeb.StudioComponents.EditorFieldsLocaleTest do
     assert card =~ "Skrivebeskyttet — rediger i hovedruten."
   end
 
+  # task-be0be91122ed21f0: the header read "draft antologi Fjellsanger" in an
+  # nb-NO workspace — a literal English badge, the raw schema name, and
+  # booleans as true/false.
+  defp typed_secondary(locale) do
+    in_locale(locale, fn ->
+      render_component(&EditorFields.secondary_editor_card/1,
+        secondary_doc: %{
+          doc_id: "drafts.antologi-1",
+          title: "Fjellsanger",
+          status: "draft",
+          content: %{"ferdig" => true, "trykket" => false}
+        },
+        secondary_schema: %{
+          title: "Antologi",
+          fields: [
+            %{"name" => "ferdig", "title" => "Ferdig", "type" => "boolean"},
+            %{"name" => "trykket", "title" => "Trykket", "type" => "boolean"}
+          ]
+        },
+        secondary_type: "antologi"
+      )
+    end)
+  end
+
+  defp text_of(html, selector) do
+    html
+    |> LazyHTML.from_fragment()
+    |> LazyHTML.query(selector)
+    |> LazyHTML.text()
+    |> String.trim()
+  end
+
+  test "the secondary header names the state and type in the Studio language" do
+    card = typed_secondary("nb_NO")
+    assert text_of(card, ".badge-draft") == "utkast"
+    assert text_of(card, ".bp-secondary-pane-type") == "Antologi"
+    assert card =~ "<dd>Ja</dd>"
+    assert card =~ "<dd>Nei</dd>"
+
+    en = typed_secondary("en")
+    assert text_of(en, ".badge-draft") == "draft"
+    assert text_of(en, ".bp-secondary-pane-type") == "Antologi"
+    assert en =~ "<dd>Yes</dd>"
+  end
+
   test "English reads as before" do
     assert presence("en") =~ "Jump to Kari — editing missing-doc"
     assert bulk("en") =~ "Publish selected"

@@ -130,12 +130,12 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
         <header class="bp-secondary-pane-header">
           <div class="bp-secondary-pane-title">
             <span class="badge badge-draft" :if={Barkpark.Content.draft?(@secondary_doc.doc_id)}>
-              draft
+              <%= BarkparkWeb.StudioComponents.Panes.status_word("draft") %>
             </span>
             <span class="badge" :if={!Barkpark.Content.draft?(@secondary_doc.doc_id)}>
               <%= BarkparkWeb.StudioComponents.Panes.status_word(@secondary_doc.status) %>
             </span>
-            <span class="bp-secondary-pane-type"><%= @secondary_type %></span>
+            <span class="bp-secondary-pane-type"><%= secondary_type_word(@secondary_type, @secondary_schema) %></span>
             <strong><%= @secondary_doc.title || gettext("Untitled") %></strong>
           </div>
           <button
@@ -186,10 +186,21 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
 
   defp secondary_visible_fields(_), do: []
 
+  # The same word the rest of Studio uses for this type (task-7b0c9b8ae4ac6f79):
+  # a plugin type's own word, else the schema title, never the raw name.
+  defp secondary_type_word(type, %{title: title}) when is_binary(type),
+    do: BarkparkWeb.Studio.PaneBuilder.type_word(type, title)
+
+  defp secondary_type_word(type, _schema) when is_binary(type),
+    do: BarkparkWeb.Studio.PaneBuilder.type_word(type)
+
+  defp secondary_type_word(_type, _schema), do: nil
+
   defp secondary_format_value(nil), do: "—"
   defp secondary_format_value(""), do: "—"
   defp secondary_format_value(v) when is_binary(v), do: v
-  defp secondary_format_value(v) when is_boolean(v), do: to_string(v)
+  defp secondary_format_value(true), do: pgettext("boolean", "Yes")
+  defp secondary_format_value(false), do: pgettext("boolean", "No")
   defp secondary_format_value(v) when is_number(v), do: to_string(v)
   # Structured values read the way a person (and the API) would read them, not
   # as Elixir source: an image or file is its URL, a {_ref} reference its id,

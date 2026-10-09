@@ -282,7 +282,7 @@ msgstr "Logg inn med et API-token i stedet"
 msgid "Sign in with token"
 msgstr "Logg inn med token"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:602
+#: lib/barkpark_web/components/studio_components/nav.ex:609
 #: lib/barkpark_web/components/studio_components/panes.ex:644
 #, elixir-autogen, elixir-format
 msgid "Structure"
@@ -315,7 +315,7 @@ msgid "Unpublish"
 msgstr "Avpubliser"
 
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:139
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:382
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:401
 #: lib/barkpark_web/components/studio_components/modals.ex:793
 #: lib/barkpark_web/components/studio_components/modals.ex:907
 #: lib/barkpark_web/live/studio/sheet_grid.ex:2968
@@ -324,8 +324,8 @@ msgstr "Avpubliser"
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1350
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1357
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1978
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2209
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2281
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2211
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2285
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #: lib/barkpark_web/studio_locale.ex:738
 #, elixir-autogen, elixir-format
@@ -420,7 +420,7 @@ msgstr "Bla i mediebiblioteket"
 msgid "Change"
 msgstr "Endre"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:267
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:283
 #: lib/barkpark_web/components/studio_components/modals.ex:70
 #: lib/barkpark_web/components/studio_components/modals.ex:146
 #: lib/barkpark_web/components/studio_components/modals.ex:265
@@ -431,9 +431,9 @@ msgstr "Endre"
 #: lib/barkpark_web/components/studio_components/modals.ex:886
 #: lib/barkpark_web/components/studio_components/modals.ex:956
 #: lib/barkpark_web/components/studio_components/modals.ex:1017
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2195
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2257
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2313
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2197
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2261
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2318
 #: lib/barkpark_web/studio_locale.ex:101
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -502,7 +502,7 @@ msgstr "dokumenter"
 
 #: lib/barkpark_web/components/studio_components/editor.ex:800
 #: lib/barkpark_web/components/studio_components/panes.ex:639
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2361
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2366
 #: lib/barkpark_web/studio_locale.ex:755
 #, elixir-autogen, elixir-format
 msgid "draft"
@@ -593,8 +593,8 @@ msgstr "Tøm søket"
 msgid "No documents match “%{query}”"
 msgstr "Ingen dokumenter treffer «%{query}»"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:273
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:274
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:289
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:290
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1568
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1569
 #, elixir-autogen, elixir-format
@@ -632,12 +632,12 @@ msgstr "%{names} redigerer"
 msgid "%{name} is editing"
 msgstr "%{name} redigerer"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:379
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:398
 #, elixir-autogen, elixir-format
 msgid "%{name} — open your profile"
 msgstr "%{name} — åpne profilen din"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:379
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:398
 #, elixir-autogen, elixir-format
 msgid "%{name} — profile"
 msgstr "%{name} — profil"
@@ -736,8 +736,8 @@ msgstr "Bytt bilde"
 msgid "Show more"
 msgstr "Vis flere"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:348
-#: lib/barkpark_web/components/studio_components/nav.ex:348
+#: lib/barkpark_web/components/studio_components/nav.ex:355
+#: lib/barkpark_web/components/studio_components/nav.ex:355
 #, elixir-autogen, elixir-format
 msgid "Sign out"
 msgstr "Logg ut"
@@ -762,7 +762,7 @@ msgstr "Opplastingen mislyktes (%{reason})."
 msgid "This body is written in blocks, which the Classic form cannot save. Edit it in Beta."
 msgstr "Denne brødteksten er skrevet i blokker, som Classic-skjemaet ikke kan lagre. Rediger den i Beta."
 
-#: lib/barkpark_web/live/studio/studio_live.ex:300
+#: lib/barkpark_web/live/studio/studio_live.ex:303
 #, elixir-autogen, elixir-format
 msgid "This project has no dataset named “%{asked}”, so Studio opened “%{opened}”."
 msgstr "Dette prosjektet har ikke noe datasett som heter «%{asked}», så Studio åpnet «%{opened}»."
@@ -772,14 +772,14 @@ msgstr "Dette prosjektet har ikke noe datasett som heter «%{asked}», så Studi
 msgid "This tab as CSV (.csv)"
 msgstr "Denne fanen som CSV (.csv)"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:376
-#: lib/barkpark_web/components/studio_components/nav.ex:377
+#: lib/barkpark_web/components/studio_components/nav.ex:383
+#: lib/barkpark_web/components/studio_components/nav.ex:384
 #, elixir-autogen, elixir-format
 msgid "Toggle dark / light theme"
 msgstr "Bytt mellom mørkt og lyst tema"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:370
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:382
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:389
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:401
 #, elixir-autogen, elixir-format
 msgid "browsing"
 msgstr "blar"
@@ -1505,8 +1505,8 @@ msgstr "USD ($)"
 #: lib/barkpark_web/live/studio/connectors_live.ex:812
 #: lib/barkpark_web/live/studio/connectors_live.ex:1088
 #: lib/barkpark_web/live/studio/connectors_live.ex:1111
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2216
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2300
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2218
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2305
 #: lib/barkpark_web/studio_locale.ex:136
 #: lib/barkpark_web/studio_locale.ex:752
 #, elixir-autogen, elixir-format
@@ -1751,7 +1751,7 @@ msgid "May"
 msgstr "mai"
 
 #: lib/barkpark_web/components/studio_components/modals.ex:737
-#: lib/barkpark_web/components/studio_components/nav.ex:515
+#: lib/barkpark_web/components/studio_components/nav.ex:522
 #: lib/barkpark_web/studio/structure_copy.ex:76
 #, elixir-autogen, elixir-format
 msgid "Media"
@@ -2075,7 +2075,7 @@ msgstr "(%{type}) ble lagret som HTML som ikke viser noe en leser kan se, og har
 msgid "(%{type}) was stored without a body block list and without saved HTML, so there is nothing here to show or edit yet. The document itself is intact — its metadata is in the panel beside this message."
 msgstr "(%{type}) ble lagret uten liste med innholdsblokker og uten lagret HTML, så det er ingenting her å vise eller redigere ennå. Selve dokumentet er intakt – metadataene står i panelet ved siden av denne meldingen."
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2269
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2273
 #, elixir-autogen, elixir-format
 msgid "(unset)"
 msgstr "(ikke satt)"
@@ -2095,12 +2095,12 @@ msgstr "Legg til etikett"
 msgid "Back to %{title}"
 msgstr "Tilbake til %{title}"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2372
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2377
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
 msgstr "Blokkredigering er ikke tilgjengelig fordi dette dokumentet har dupliserte blokk-ID-er. Ingenting ble endret."
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2366
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2371
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
 msgstr "Blokkredigering er ikke tilgjengelig fordi det lagrede innholdet i dette dokumentet ikke kan redigeres trygt som blokker. Ingenting ble endret."
@@ -2115,7 +2115,7 @@ msgstr "Skjul dokumentpanelet"
 msgid "Context"
 msgstr "Kontekst"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2268
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2272
 #, elixir-autogen, elixir-format
 msgid "Current canonical value:"
 msgstr "Gjeldende kanonisk verdi:"
@@ -2141,7 +2141,7 @@ msgstr "Beskrivelse"
 msgid "Desk breadcrumb"
 msgstr "Brødsmulesti for skrivebordet"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2222
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2224
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and unpublish"
 msgstr "Koble fra referanser og avpubliser"
@@ -2318,7 +2318,7 @@ msgstr "Del denne artikkelen (direktelenke)"
 msgid "Share this workspace's media library"
 msgstr "Del mediebiblioteket til dette arbeidsområdet"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2256
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2260
 #, elixir-autogen, elixir-format
 msgid "Shared value"
 msgstr "Delt verdi"
@@ -2373,7 +2373,7 @@ msgstr "Etikettstyrke, 1 til 100"
 msgid "This %{type} ("
 msgstr "Denne %{type} ("
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2308
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2313
 #, elixir-autogen, elixir-format
 msgid "This value lives on a canonical document you do not have write access to. It can only be changed at its source."
 msgstr "Denne verdien ligger i et kanonisk dokument du ikke har skrivetilgang til. Den kan bare endres ved kilden."
@@ -2383,12 +2383,12 @@ msgstr "Denne verdien ligger i et kanonisk dokument du ikke har skrivetilgang ti
 msgid "This workspace has no public page for papers, so only members and share-link holders can read it."
 msgstr "Dette arbeidsområdet har ingen offentlig side for artikler, så bare medlemmer og de som har en delingslenke kan lese den."
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2227
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2229
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
 msgstr "Avpubliser likevel"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2194
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2196
 #, elixir-autogen, elixir-format
 msgid "Unpublish document"
 msgstr "Avpubliser dokumentet"
@@ -2404,19 +2404,19 @@ msgstr "Brukt av"
 msgid "Visibility"
 msgstr "Synlighet"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2302
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2307
 #, elixir-autogen, elixir-format
 msgid "Write to canonical"
 msgstr "Skriv til kanonisk kilde"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2272
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2276
 #, elixir-autogen, elixir-format
 msgid "Writing to the canonical source changes %{count} doc:"
 msgid_plural "Writing to the canonical source changes %{count} docs:"
 msgstr[0] "Å skrive til den kanoniske kilden endrer %{count} dokument:"
 msgstr[1] "Å skrive til den kanoniske kilden endrer %{count} dokumenter:"
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2200
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2202
 #, elixir-autogen, elixir-format
 msgid "is referenced by %{count} document. Unpublishing it will leave those references dangling:"
 msgid_plural "is referenced by %{count} documents. Unpublishing it will leave those references dangling:"
@@ -2430,7 +2430,7 @@ msgid "label"
 msgstr "etikett"
 
 #: lib/barkpark_web/components/studio_components/panes.ex:640
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2362
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2367
 #, elixir-autogen, elixir-format
 msgid "published"
 msgstr "publisert"
@@ -2754,7 +2754,7 @@ msgstr "Vis i nettleser"
 msgid "chapter"
 msgstr "kapittel"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:359
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:378
 #: lib/barkpark_web/live/bulldocs_live.ex:1767
 #, elixir-autogen, elixir-format
 msgid "editing"
@@ -6103,42 +6103,42 @@ msgstr "videoadresse"
 msgid "warn or info card"
 msgstr "advarsel- eller infokort"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:516
+#: lib/barkpark_web/components/studio_components/nav.ex:523
 #, elixir-autogen, elixir-format
 msgid "API"
 msgstr "API"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:518
+#: lib/barkpark_web/components/studio_components/nav.ex:525
 #: lib/barkpark_web/live/studio/connectors_live.ex:82
 #: lib/barkpark_web/live/studio/connectors_live.ex:708
 #, elixir-autogen, elixir-format
 msgid "Connectors"
 msgstr "Tilkoblinger"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:536
+#: lib/barkpark_web/components/studio_components/nav.ex:543
 #, elixir-autogen, elixir-format
 msgid "Disabled in this workspace"
 msgstr "Slått av i dette arbeidsområdet"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:521
+#: lib/barkpark_web/components/studio_components/nav.ex:528
 #: lib/barkpark_web/studio/structure_copy.ex:40
 #, elixir-autogen, elixir-format
 msgid "Fleet"
 msgstr "Flåte"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:525
+#: lib/barkpark_web/components/studio_components/nav.ex:532
 #: lib/barkpark_web/studio/structure_copy.ex:43
 #, elixir-autogen, elixir-format
 msgid "Form submissions"
 msgstr "Skjemainnsendinger"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:520
+#: lib/barkpark_web/components/studio_components/nav.ex:527
 #: lib/barkpark_web/studio/structure_copy.ex:39
 #, elixir-autogen, elixir-format
 msgid "Projects"
 msgstr "Prosjekter"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:524
+#: lib/barkpark_web/components/studio_components/nav.ex:531
 #: lib/barkpark_web/studio/structure_copy.ex:33
 #, elixir-autogen, elixir-format
 msgid "Quizzes"
@@ -6155,37 +6155,37 @@ msgstr "Kjør alle"
 msgid "Running…"
 msgstr "Kjører …"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:519
+#: lib/barkpark_web/components/studio_components/nav.ex:526
 #: lib/barkpark_web/live/admin/plugins_live.ex:221
 #: lib/barkpark_web/studio/structure_copy.ex:75
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr "Innstillinger"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:517
+#: lib/barkpark_web/components/studio_components/nav.ex:524
 #, elixir-autogen, elixir-format
 msgid "Style"
 msgstr "Stil"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:523
+#: lib/barkpark_web/components/studio_components/nav.ex:530
 #: lib/barkpark_web/studio/structure_copy.ex:38
 #, elixir-autogen, elixir-format
 msgid "Tasks"
 msgstr "Oppgaver"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:522
+#: lib/barkpark_web/components/studio_components/nav.ex:529
 #: lib/barkpark_web/studio/structure_copy.ex:42
 #, elixir-autogen, elixir-format
 msgid "Tickets"
 msgstr "Saker"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:526
+#: lib/barkpark_web/components/studio_components/nav.ex:533
 #: lib/barkpark_web/live/studio/chat_live.ex:174
 #, elixir-autogen, elixir-format
 msgid "chat"
 msgstr "chat"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:534
+#: lib/barkpark_web/components/studio_components/nav.ex:541
 #, elixir-autogen, elixir-format
 msgid "Disabled in this workspace — enabled in %{workspace}"
 msgstr "Slått av i dette arbeidsområdet — slått på i %{workspace}"
@@ -7638,7 +7638,7 @@ msgstr "Eget svar …"
 msgid "Deny"
 msgstr "Avslå"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:143
+#: lib/barkpark_web/components/studio_components/nav.ex:150
 #: lib/barkpark_web/live/studio/chat_live.ex:7141
 #, elixir-autogen, elixir-format
 msgid "Dismiss"
@@ -8940,7 +8940,7 @@ msgstr "%{count} valgt"
 msgid "Bulk actions"
 msgstr "Massehandlinger"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:360
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:379
 #, elixir-autogen, elixir-format
 msgid "Click to jump there"
 msgstr "Klikk for å gå dit"
@@ -8950,17 +8950,17 @@ msgstr "Klikk for å gå dit"
 msgid "Close secondary pane"
 msgstr "Lukk sideruten"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:349
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:368
 #, elixir-autogen, elixir-format
 msgid "Jump to %{name} — editing %{title}"
 msgstr "Gå til %{name} — redigerer %{title}"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:293
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:312
 #, elixir-autogen, elixir-format
 msgid "No matches."
 msgstr "Ingen treff."
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:266
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:282
 #, elixir-autogen, elixir-format
 msgid "Open in new pane"
 msgstr "Åpne i ny rute"
@@ -8980,9 +8980,9 @@ msgstr "Skrivebeskyttet — rediger i hovedruten."
 msgid "Unpublish selected"
 msgstr "Avpubliser valgte"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:350
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:358
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:369
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:377
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:388
 #, elixir-autogen, elixir-format
 msgid "User"
 msgstr "Bruker"
@@ -9008,12 +9008,12 @@ msgstr "Kolonne %{n}"
 msgid "Criterion %{n}"
 msgstr "Kriterium %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:194
+#: lib/barkpark_web/components/studio_components/nav.ex:201
 #, elixir-autogen, elixir-format
 msgid "Current with your fork — but open-source Barkpark is ahead at %{release}; consider syncing the fork."
 msgstr "Oppdatert med forken din — men Barkpark med åpen kildekode er foran på %{release}; vurder å synkronisere forken."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:142
+#: lib/barkpark_web/components/studio_components/nav.ex:149
 #, elixir-autogen, elixir-format
 msgid "Dismiss update notice"
 msgstr "Lukk oppdateringsvarselet"
@@ -9023,7 +9023,7 @@ msgstr "Lukk oppdateringsvarselet"
 msgid "Entry %{n}"
 msgstr "Oppføring %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:167
+#: lib/barkpark_web/components/studio_components/nav.ex:174
 #, elixir-autogen, elixir-format
 msgid "Full release notes ↗"
 msgstr "Fullstendige versjonsnotater ↗"
@@ -9033,27 +9033,27 @@ msgstr "Fullstendige versjonsnotater ↗"
 msgid "Gauge %{n}"
 msgstr "Måler %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:136
+#: lib/barkpark_web/components/studio_components/nav.ex:143
 #, elixir-autogen, elixir-format
 msgid "How to update"
 msgstr "Slik oppdaterer du"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:108
+#: lib/barkpark_web/components/studio_components/nav.ex:115
 #, elixir-autogen, elixir-format
 msgid "New update available — Barkpark"
 msgstr "Ny oppdatering tilgjengelig — Barkpark"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:53
+#: lib/barkpark_web/components/studio_components/nav.ex:60
 #, elixir-autogen, elixir-format
 msgid "Not authorised — sign in as an admin and retry."
 msgstr "Ikke autorisert — logg inn som administrator og prøv igjen."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:56
+#: lib/barkpark_web/components/studio_components/nav.ex:63
 #, elixir-autogen, elixir-format
 msgid "One-click update isn't enabled on this instance."
 msgstr "Ettklikksoppdatering er ikke slått på for denne installasjonen."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:173
+#: lib/barkpark_web/components/studio_components/nav.ex:180
 #, elixir-autogen, elixir-format
 msgid "One-click update isn't enabled on this instance. Deploy it with"
 msgstr "Ettklikksoppdatering er ikke slått på for denne installasjonen. Rull den ut med"
@@ -9083,12 +9083,12 @@ msgstr "Spørsmål %{n}"
 msgid "Range %{n}"
 msgstr "Intervall %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:54
+#: lib/barkpark_web/components/studio_components/nav.ex:61
 #, elixir-autogen, elixir-format
 msgid "Rebuilding & restarting…"
 msgstr "Bygger og starter på nytt…"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:51
+#: lib/barkpark_web/components/studio_components/nav.ex:58
 #, elixir-autogen, elixir-format
 msgid "Rebuilding…"
 msgstr "Bygger på nytt…"
@@ -9098,7 +9098,7 @@ msgstr "Bygger på nytt…"
 msgid "Reference %{n}"
 msgstr "Referanse %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:42
+#: lib/barkpark_web/components/studio_components/nav.ex:49
 #, elixir-autogen, elixir-format
 msgid "Starting update…"
 msgstr "Starter oppdateringen…"
@@ -9108,58 +9108,58 @@ msgstr "Starter oppdateringen…"
 msgid "Step %{n}"
 msgstr "Trinn %{n}"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:45
+#: lib/barkpark_web/components/studio_components/nav.ex:52
 #, elixir-autogen, elixir-format
 msgid "Taking longer than expected — reload to check."
 msgstr "Det tar lengre tid enn ventet — last inn siden på nytt for å sjekke."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:49
+#: lib/barkpark_web/components/studio_components/nav.ex:56
 #, elixir-autogen, elixir-format
 msgid "Update failed (exit %{code}) — check server logs."
 msgstr "Oppdateringen feilet (kode %{code}) — sjekk serverloggene."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:43
-#: lib/barkpark_web/components/studio_components/nav.ex:127
+#: lib/barkpark_web/components/studio_components/nav.ex:50
+#: lib/barkpark_web/components/studio_components/nav.ex:134
 #, elixir-autogen, elixir-format
 msgid "Update now"
 msgstr "Oppdater nå"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:47
+#: lib/barkpark_web/components/studio_components/nav.ex:54
 #, elixir-autogen, elixir-format
 msgid "Updated to %{release} — reloading…"
 msgstr "Oppdatert til %{release} — laster inn på nytt…"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:50
+#: lib/barkpark_web/components/studio_components/nav.ex:57
 #, elixir-autogen, elixir-format
 msgid "Updated — reloading…"
 msgstr "Oppdatert — laster inn på nytt…"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:41
+#: lib/barkpark_web/components/studio_components/nav.ex:48
 #, elixir-autogen, elixir-format
 msgid "Updating…"
 msgstr "Oppdaterer…"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:124
+#: lib/barkpark_web/components/studio_components/nav.ex:131
 #, elixir-autogen, elixir-format
 msgid "What's changed"
 msgstr "Hva er nytt"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:182
+#: lib/barkpark_web/components/studio_components/nav.ex:189
 #, elixir-autogen, elixir-format
 msgid "Your fork's upstream, open-source Barkpark, is further ahead at %{release} — consider syncing the fork."
 msgstr "Forkens opphav, Barkpark med åpen kildekode, er lenger fremme på %{release} — vurder å synkronisere forken."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:175
+#: lib/barkpark_web/components/studio_components/nav.ex:182
 #, elixir-autogen, elixir-format
 msgid "on the server (the post-merge hook rebuilds & restarts), or set"
 msgstr "på serveren (post-merge-hooken bygger og starter på nytt), eller sett"
 
-#: lib/barkpark_web/components/studio_components/nav.ex:177
+#: lib/barkpark_web/components/studio_components/nav.ex:184
 #, elixir-autogen, elixir-format
 msgid "to turn on the button here."
 msgstr "for å slå på knappen her."
 
-#: lib/barkpark_web/components/studio_components/nav.ex:111
+#: lib/barkpark_web/components/studio_components/nav.ex:118
 #, elixir-autogen, elixir-format
 msgid "· you run %{release}"
 msgstr "· du kjører %{release}"
@@ -9865,7 +9865,7 @@ msgstr "Logg inn for å dele tilgang."
 msgid "That “+” already created an untitled %{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
 msgstr "«+» har allerede laget et utkast uten tittel (%{type}) — åpner det i stedet for å lage et til. Skriv i det, eller vent litt, for å starte et nytt."
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2332
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2337
 #, elixir-autogen, elixir-format
 msgid "this item"
 msgstr "dette elementet"
@@ -10099,7 +10099,7 @@ msgstr "Endringen mislyktes"
 msgid "Failed to create"
 msgstr "Kunne ikke opprette"
 
-#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:124
+#: lib/barkpark_web/live/studio/studio_live/handlers/delete.ex:125
 #, elixir-autogen, elixir-format
 msgid "Failed to delete"
 msgstr "Kunne ikke slette"
@@ -10309,12 +10309,12 @@ msgstr "Arbeidsområdet er opprettet"
 msgid "Workspace has no projects yet — create one first"
 msgstr "Arbeidsområdet har ingen prosjekter ennå — opprett ett først"
 
-#: lib/barkpark_web/live/studio/studio_live.ex:341
+#: lib/barkpark_web/live/studio/studio_live.ex:344
 #, elixir-autogen, elixir-format
 msgid "You've been granted access — check your email to claim it."
 msgstr "Du har fått tilgang — sjekk e-posten din for å ta den i bruk."
 
-#: lib/barkpark_web/live/studio/studio_live.ex:234
+#: lib/barkpark_web/live/studio/studio_live.ex:236
 #, elixir-autogen, elixir-format
 msgid "Your access grant is no longer valid."
 msgstr "Tilgangen din er ikke lenger gyldig."
@@ -10373,3 +10373,15 @@ msgstr "%{action} mislyktes: %{errors}"
 #, elixir-autogen, elixir-format
 msgid "%{name} enqueued"
 msgstr "%{name} er satt i kø"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:203
+#, elixir-autogen, elixir-format
+msgctxt "boolean"
+msgid "No"
+msgstr "Nei"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:202
+#, elixir-autogen, elixir-format
+msgctxt "boolean"
+msgid "Yes"
+msgstr "Ja"
