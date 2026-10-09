@@ -10,9 +10,10 @@ defmodule BarkparkWeb.MutateController do
   action_fallback BarkparkWeb.FallbackController
 
   def mutate(conn, %{"dataset" => dataset, "mutations" => mutations}) when is_list(mutations) do
-    with {:ok, mutations} <- apply_if_match_header(conn, mutations),
+    with {:ok, dry_run} <- dry_run_flag(conn.params["dryRun"]),
+         {:ok, mutations} <- apply_if_match_header(conn, mutations),
          {:ok, scope, resolved} <- resolve_write_scope(conn) do
-      opts = [source: :api] ++ scope
+      opts = [source: :api, dry_run: dry_run] ++ scope
 
       # The advisory channel (authoring-excellence D5): the publish wall queues
       # non-blocking warnings ([{code, severity, message}]) while the batch
@@ -23,6 +24,7 @@ defmodule BarkparkWeb.MutateController do
       case Content.apply_mutations(mutations, dataset, opts) do
         {:ok, {tx_id, results}} ->
           body = %{transactionId: tx_id, results: results}
+          body = if dry_run, do: Map.put(body, :dryRun, true), else: body
 
           # The INFER half of the unscoped-write ruling NAMES the workspace it
           # chose. Present ONLY when the scope was inferred — a request that
@@ -56,6 +58,15 @@ defmodule BarkparkWeb.MutateController do
   def mutate(conn, _params) do
     respond_with_error(conn, :malformed)
   end
+
+  # `dryRun` — body field or query param (Phoenix merges both into params).
+  # The batch runs every gate and write, then rolls back (Content.Mutations):
+  # 200 with the would-be results, nothing persisted. Anything but a boolean
+  # is refused, so a mistyped flag can never fall through to a real write.
+  defp dry_run_flag(nil), do: {:ok, false}
+  defp dry_run_flag(flag) when flag in [true, "true"], do: {:ok, true}
+  defp dry_run_flag(flag) when flag in [false, "false"], do: {:ok, false}
+  defp dry_run_flag(other), do: {:error, {:invalid_dry_run, other}}
 
   # Tenancy scope opts come from BarkparkWeb.ScopeHelpers.scope_opts/1, the
   # shared seam over the conn assigns set by ResolveWorkspace / ResolveProject

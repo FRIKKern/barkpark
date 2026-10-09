@@ -746,6 +746,16 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # `dryRun` on the mutate door must be a boolean; a value that is neither is
+  # refused rather than read as false, which would write for real.
+  defp build({:error, {:invalid_dry_run, value}}),
+    do: %{
+      code: "malformed",
+      message: "dryRun must be true or false, got: #{inspect(value)}",
+      status: 400,
+      details: %{field: "dryRun"}
+    }
+
   defp build({:error, {:malformed_blocks, details}}),
     do: %{
       code: "malformed",

@@ -901,6 +901,16 @@ defmodule Barkpark.Content.WriteScope do
   end
 
   def fire_after({:ok, doc}, event, payload) do
+    # A dryRun batch rolls back, so nothing may fire for a write that never
+    # lands (see `Content.Mutations.dry_run?/0`).
+    if Barkpark.Content.Mutations.dry_run?(),
+      do: {:ok, doc},
+      else: do_fire_after(doc, event, payload)
+  end
+
+  def fire_after(other, _event, _payload), do: other
+
+  defp do_fire_after(doc, event, payload) do
     after_payload = %{payload | event: event, doc: doc}
     _ = Barkpark.Plugins.Hooks.fire(event, after_payload)
 
@@ -938,8 +948,6 @@ defmodule Barkpark.Content.WriteScope do
 
     {:ok, doc}
   end
-
-  def fire_after(other, _event, _payload), do: other
 
   # ── The inverted after-write listener seam ─────────────────────────────────
   # Every listener is called with the SAME after-payload `fire_after/3` hands
