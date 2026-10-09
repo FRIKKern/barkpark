@@ -489,6 +489,16 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     {:delete, "/v1/schemas/:dataset/:name"} =>
       {:tenant_bound, "scope_opts(conn)", "Content.delete_schema under scope_opts/1."},
 
+    # ── :flat_admin_api — preview JWT mint (task-8f7cba7f65cb343c) ──
+    {:post, "/v1/preview-tokens"} =>
+      {:tenant_bound, "scope_opts(conn)",
+       "PreviewTokenController.mint/2 signs workspace_id/project_id from scope_opts/1 (the " <>
+         "ADMIN's own token-derived scope) into the minted JWT -- never from the caller's " <>
+         "`dataset` string or any other param, so the token can only ever read within the " <>
+         "minting admin's own tenant. No DELETE /v1/preview-tokens/:jti route exists: " <>
+         "preview_token_jti carries no workspace column to fence a bare-jti selector with " <>
+         "(see that controller's moduledoc)."},
+
     # ── :flat_admin_api — fleet support tokens ──
     {:post, "/v1/fleet/support-tokens"} =>
       {:tenant_bound, "conn.assigns[:current_workspace]",

@@ -947,6 +947,13 @@ defmodule PDS.Census do
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},
+    # Preview JWT mint (task-8f7cba7f65cb343c). Renders fields taken straight off
+    # the just-signed claims map (`token`, `jti`, `dataset`, `workspace_id`,
+    # `expires_at`, …) — a request-echo-shaped receipt, never an `ok: true`
+    # literal this lens keys on. For a `multi_use` mint the signing call ALSO
+    # inserts the `preview_token_jti` row (`PreviewToken.record_jti/1`), but the
+    # response is built from the in-memory claims, never a re-read of that row.
+    {:post, "/v1/preview-tokens", "BarkparkWeb.PreviewTokenController", :mint, :status_only_receipt},
     # THE FOUR PAPER-MASTERS WRITES (task-2dc7b441443f3aaf). Each answers the op
     # receipt `Content.apply_paper_block_ops_once/6` returns (`slug`, `opCount`,
     # `rev`, `blockIds` — a store-derived position and row-id array), or the

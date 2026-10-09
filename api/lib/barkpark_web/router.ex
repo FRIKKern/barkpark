@@ -2825,6 +2825,32 @@ defmodule BarkparkWeb.Router do
     get("/:dataset", StructureController, :show)
   end
 
+  # ── Preview JWT mint — admin-only (task-8f7cba7f65cb343c) ───────────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: no existing admin route
+  # minted a preview token before this one, so there is no naive pipeline to
+  # regress — picked to match every other flat admin-management surface on
+  # this list (schemas, structure, plugin roster) rather than invent a
+  # second convention. Not under `/v1/preview/*`: that prefix is the UNRELATED
+  # :api_preview read-tunnel pipeline a minted token is presented TO, and
+  # PreviewLinkController's own moduledoc already warns against colliding a
+  # second auth scheme into that path.
+  #
+  # NO revoke route here, deliberately: `preview_token_jti` carries no
+  # workspace/tenant column at all (migration 20260417230200), so a
+  # `DELETE .../:jti` HTTP front door would be a bare-id selector with no
+  # tenant re-derivation possible — `:exploitable` under
+  # `RequireAdminRouteCensusTest`'s own vocabulary, unlike
+  # `PreviewLinkController.revoke/2`'s sibling route, which reads its row's
+  # STORED workspace_id first. `Barkpark.PreviewToken.revoke/1` still exists
+  # and is still the backstop the multi_use ruling asked for; it is simply
+  # not wired to an HTTP route by this slice. Exposing it needs its own
+  # workspace-scoping column + fence, not a bare revoke-by-jti door.
+  scope "/v1/preview-tokens", BarkparkWeb do
+    pipe_through(:flat_admin_api)
+
+    post("/", PreviewTokenController, :mint)
+  end
+
   # ── Schema management — requires admin token ────────────────────────────
   # `:flat_admin_api`, not `[:api, :require_admin]`: `upsert`/`delete` stamp and
   # filter on `scope_opts(conn)`, so on the naive pipeline a non-Default
