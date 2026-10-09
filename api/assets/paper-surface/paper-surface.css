@@ -588,7 +588,10 @@ html[data-theme="dark"] .bp-paper-body {
    leave the ink alone so selected prose stays as readable as unselected prose. */
 .bp-paper-surface ::selection { background: var(--paper-accent-soft); color: inherit; }
 /* `margin: 0 0 24px` bottom-gap is VIEW-ONLY (Edit omits it — see token block). */
-.bp-paper-surface ul, .bp-paper-surface ol { margin: 0 0 24px; padding-left: var(--bp-list-indent); }
+/* Top-only, like p: a list sits one paragraph-beat below the prose above it and
+   adds nothing below (the next block owns that gap), so a list never doubles it. */
+.bp-paper-surface ul, .bp-paper-surface ol { margin: var(--bp-para-margin-top) 0 0; padding-left: var(--bp-list-indent); }
+.bp-paper-surface li > :is(ul, ol) { margin-top: var(--bp-li-gap); }
 .bp-paper-surface li { margin: var(--bp-li-gap) 0 0; }
 .bp-paper-surface ul > li { list-style: disc; }
 .bp-paper-surface ol > li { list-style: decimal; }
