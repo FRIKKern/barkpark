@@ -627,7 +627,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"}></bp-rich-text-editor>
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}></bp-rich-text-editor>
     </div>
     """
   end

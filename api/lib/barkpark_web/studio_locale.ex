@@ -682,6 +682,70 @@ defmodule BarkparkWeb.StudioLocale do
     })
   end
 
+  # The Studio graph pane (bp-graph.js), keyed by the English it falls back to.
+  def component_strings(:graph) do
+    Jason.encode!(%{
+      "Document blast-radius graph. Press Tab to enter, arrow keys to traverse." =>
+        gettext("Document blast-radius graph. Press Tab to enter, arrow keys to traverse."),
+      "Document graph" => gettext("Document graph"),
+      "Couldn't load graph data" => gettext("Couldn't load graph data"),
+      "No connections yet" => gettext("No connections yet"),
+      "Zoom in" => gettext("Zoom in"),
+      "Zoom out" => gettext("Zoom out"),
+      "Fit to view" => gettext("Fit to view"),
+      "Reset view" => gettext("Reset view"),
+      "Types" => gettext("Types"),
+      "Legend" => gettext("Legend"),
+      "Full color" => gettext("Full color"),
+      "Flow" => gettext("Flow"),
+      "Search…" => gettext("Search…"),
+      "Search the graph" => gettext("Search the graph"),
+      "1 connection" => pgettext("graph", "1 connection"),
+      "%{count} connections" => pgettext("graph", "%{count} connections", count: "%{count}"),
+      "Broken reference: %{id} via %{via}" =>
+        gettext("Broken reference: %{id} via %{via}", id: "%{id}", via: "%{via}"),
+      "Broken reference: %{id}" => gettext("Broken reference: %{id}", id: "%{id}"),
+      "Status: %{status}" => gettext("Status: %{status}", status: "%{status}"),
+      "document" => gettext("document"),
+      "active" => gettext("active"),
+      "broken ref" => gettext("broken ref"),
+      "broken reference" => gettext("broken reference"),
+      "via %{via}" => gettext("via %{via}", via: "%{via}"),
+      "Focused: %{title}. Connected to: %{names}." =>
+        gettext("Focused: %{title}. Connected to: %{names}.",
+          title: "%{title}",
+          names: "%{names}"
+        )
+    })
+  end
+
+  # bp-rich-text-editor's toolbar, keyed by the English.
+  def component_strings(:rich_text) do
+    Jason.encode!(%{
+      "Bold (mod+B)" => gettext("Bold (mod+B)"),
+      "Italic (mod+I)" => gettext("Italic (mod+I)"),
+      "Link" => gettext("Link"),
+      "Set" => gettext("Set"),
+      "Remove" => gettext("Remove")
+    })
+  end
+
+  # bp-document-preview, keyed by the English.
+  def component_strings(:document_preview) do
+    Jason.encode!(%{
+      "No document selected" => gettext("No document selected"),
+      "Could not parse document JSON" => gettext("Could not parse document JSON"),
+      "Untitled" => gettext("Untitled"),
+      "Title" => gettext("Title"),
+      "Type" => gettext("Type"),
+      "Document ID" => gettext("Document ID"),
+      "Contributors" => gettext("Contributors"),
+      "Identifiers" => gettext("Identifiers"),
+      "Blurb" => gettext("Blurb"),
+      "Full content (JSON)" => gettext("Full content (JSON)")
+    })
+  end
+
   def component_strings(:reference) do
     Jason.encode!(%{
       "change" => gettext("Change"),

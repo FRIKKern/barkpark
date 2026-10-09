@@ -296,6 +296,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
       <bp-document-preview
         document-json={@json}
         schema-name={@schema_name}
+        data-strings={BarkparkWeb.StudioLocale.component_strings(:document_preview)}
       ></bp-document-preview>
     </div>
     """

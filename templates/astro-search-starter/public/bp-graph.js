@@ -47,12 +47,6 @@
   // a hand edit inside the marker is deleted by the next regeneration and reds
   // design/check.mjs. Non-colour constants (alphas, radii, fade multipliers, the
   // font stack) stay hand-written OUTSIDE the marker.
-  // "1 connection", "2 connections" — the accessible names and the focus
-  // announcement said "1 connections" (task-880a2d3f48ccbfcb).
-  function connectionCount(n) {
-    return n === 1 ? "1 connection" : n + " connections";
-  }
-
   /* BEGIN GENERATED: bp-graph-palette (design/tokens.json color.graphCanvas.graph via design/emit.mjs — node design/emit.mjs --write; do not hand-edit) */
   // Obsidian-faithful restyle: small flat dots, thin faint threads, near-
   // monochrome, generous void. Beauty through restraint.
@@ -375,6 +369,22 @@
   // ════════════════════════════════════════════════════════════ RENDERER ══
   function BarkparkGraphRenderer(containerEl, data, opts) {
     opts = opts || {};
+    // The host's words (opts.strings, keyed by the English); English otherwise.
+    var graphStrings = opts.strings || {};
+    function gt(text, vars) {
+      var out = typeof graphStrings[text] === "string" ? graphStrings[text] : text;
+      if (vars) {
+        out = out.replace(/%\{(\w+)\}/g, function (slot, k) {
+          return Object.prototype.hasOwnProperty.call(vars, k) ? String(vars[k]) : slot;
+        });
+      }
+      return out;
+    }
+    // "1 connection", "2 connections" — the accessible names and the focus
+    // announcement said "1 connections" (task-880a2d3f48ccbfcb).
+    function gtCount(n) {
+      return n === 1 ? gt("1 connection") : gt("%{count} connections", { count: n });
+    }
 
     // ── theme + motion resolution ──
     var prefersDark = true;
@@ -404,7 +414,7 @@
     // keys traverse nodes. Without this, the clipped tree had no real entry.
     canvas.setAttribute("tabindex", "0");
     canvas.setAttribute("role", "application");
-    canvas.setAttribute("aria-label", "Document blast-radius graph. Press Tab to enter, arrow keys to traverse.");
+    canvas.setAttribute("aria-label", gt("Document blast-radius graph. Press Tab to enter, arrow keys to traverse."));
     canvas.style.cssText =
       "display:block;width:100%;height:100%;position:absolute;inset:0;touch-action:none;outline:none;";
     var ctx;
@@ -433,7 +443,7 @@
     // a11y tree (parallel invisible DOM).
     var a11yRoot = document.createElement("div");
     a11yRoot.setAttribute("role", "tree");
-    a11yRoot.setAttribute("aria-label", "Document graph");
+    a11yRoot.setAttribute("aria-label", gt("Document graph"));
     a11yRoot.style.cssText =
       "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;";
     containerEl.appendChild(a11yRoot);
@@ -1492,14 +1502,14 @@
 
       // ── authored empty / error states share this bed ──
       if (errorState) {
-        drawCenterMessage(amber(), 0.8, "Couldn't load graph data");
+        drawCenterMessage(amber(), 0.8, gt("Couldn't load graph data"));
         return;
       }
       if (nodes.length === 0) {
         if (fetching) {
           drawFetchRing(t);
         } else {
-          drawCenterMessage(slate(), 0.65, "No connections yet");
+          drawCenterMessage(slate(), 0.65, gt("No connections yet"));
         }
         return;
       }
@@ -2142,13 +2152,13 @@
         "border-bottom:1.5px solid " + rgba(hue, 0.55) + "'>" + esc(title) + "</div>";
       if (node.phantom) {
         var line = node.via
-          ? esc(node.broken_id) + " · via " + esc(node.via)
-          : esc(node.broken_id) + " · broken reference";
+          ? esc(node.broken_id) + " · " + esc(gt("via %{via}", { via: node.via }))
+          : esc(node.broken_id) + " · " + esc(gt("broken reference"));
         html += "<div style='color:" + (light ? MONO_LIGHT : SLATE) + "'>" + line + "</div>";
       } else {
         html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(node.type) + "</div>";
         var cc = Object.keys(adj[node.id] || {}).length;
-        html += "<div style='color:" + (light ? TOOLTIP_META_LIGHT : TOOLTIP_META_DARK) + ";margin-top:2px'>" + cc + " connection" + (cc === 1 ? "" : "s") + "</div>";
+        html += "<div style='color:" + (light ? TOOLTIP_META_LIGHT : TOOLTIP_META_DARK) + ";margin-top:2px'>" + esc(gtCount(cc)) + "</div>";
       }
       tooltip.innerHTML = html;
       tooltip.style.background = light ? TOOLTIP_BG_LIGHT : TOOLTIP_BG_DARK;
@@ -2832,14 +2842,16 @@
           div.setAttribute("aria-disabled", "true");
           div.setAttribute(
             "aria-label",
-            n.via ? "Broken reference: " + n.broken_id + " via " + n.via : "Broken reference: " + n.broken_id
+            n.via
+              ? gt("Broken reference: %{id} via %{via}", { id: n.broken_id, via: n.via })
+              : gt("Broken reference: %{id}", { id: n.broken_id })
           );
         } else {
           var statusPart =
-            n.type === "task" && n.status ? ". Status: " + n.status : "";
+            n.type === "task" && n.status ? ". " + gt("Status: %{status}", { status: n.status }) : "";
           div.setAttribute(
             "aria-label",
-            n.title + ". " + n.type + statusPart + ". " + connectionCount(nb) + "."
+            n.title + ". " + n.type + statusPart + ". " + gtCount(nb) + "."
           );
         }
         div.addEventListener("focus", function () {
@@ -2886,7 +2898,8 @@
         }
         var cc = nbNames.length;
         liveRegion.textContent =
-          "Focused: " + n.title + ". Connected to: " + nbNames.slice(0, 5).join(", ") + ". " + connectionCount(cc) + ".";
+          gt("Focused: %{title}. Connected to: %{names}.", { title: n.title, names: nbNames.slice(0, 5).join(", ") }) +
+          " " + gtCount(cc) + ".";
       }, 80);
     }
 
@@ -2926,10 +2939,10 @@
       // zoom strip (always)
       var strip = mkPanel("position:absolute;right:16px;bottom:16px;display:flex;flex-direction:column;gap:6px;");
       [
-        ["＋", function () { zoomBy(1.25); }, "Zoom in"],
-        ["－", function () { zoomBy(0.8); }, "Zoom out"],
-        ["⤢", function () { fitInternal(true); }, "Fit to view"],
-        ["↺", function () { fitInternal(true); }, "Reset view"]
+        ["＋", function () { zoomBy(1.25); }, gt("Zoom in")],
+        ["－", function () { zoomBy(0.8); }, gt("Zoom out")],
+        ["⤢", function () { fitInternal(true); }, gt("Fit to view")],
+        ["↺", function () { fitInternal(true); }, gt("Reset view")]
       ].forEach(function (pair) {
         var b = document.createElement("button");
         b.textContent = pair[0];
@@ -2985,7 +2998,7 @@
       var legend = mkPanel("position:absolute;left:12px;top:12px;padding:9px 11px;max-width:200px;");
       var title = document.createElement("div");
       title.style.cssText = "font-size:10px;letter-spacing:0.04em;text-transform:uppercase;color:" + cc.title + ";margin-bottom:6px;";
-      title.textContent = fullColor ? "Types" : "Legend";
+      title.textContent = fullColor ? gt("Types") : gt("Legend");
       legend.appendChild(title);
       if (fullColor) {
         typeList.slice(0, 8).forEach(function (ty) {
@@ -3002,21 +3015,21 @@
       } else {
         var mrow = document.createElement("div");
         mrow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
-        mrow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + cc.mono + "'></span> document";
+        mrow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + cc.mono + "'></span> " + esc(gt("document"));
         legend.appendChild(mrow);
         var arow = document.createElement("div");
         arow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.row + ";";
-        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + accent() + "'></span> active";
+        arow.innerHTML = "<span style='width:9px;height:9px;flex:0 0 auto;border-radius:50%;background:" + accent() + "'></span> " + esc(gt("active"));
         legend.appendChild(arow);
       }
       // phantom ghost entry
       var prow = document.createElement("div");
       prow.style.cssText = "display:flex;align-items:center;gap:7px;margin:3px 0;font-size:11px;color:" + cc.rowDim + ";font-style:italic;";
-      prow.innerHTML = "<span style='width:9px;height:9px;border-radius:50%;border:1px solid " + cc.phantomRing + "'></span> broken ref";
+      prow.innerHTML = "<span style='width:9px;height:9px;border-radius:50%;border:1px solid " + cc.phantomRing + "'></span> " + esc(gt("broken ref"));
       legend.appendChild(prow);
 
       // full-color toggle (pill with state dot)
-      var fcBtn = mkToggle("Full color", fullColor, function () {
+      var fcBtn = mkToggle(gt("Full color"), fullColor, function () {
         fullColor = !fullColor;
         saveView();
         buildChrome();
@@ -3024,7 +3037,7 @@
       });
       legend.appendChild(fcBtn);
       // flow toggle (pill with state dot)
-      var flBtn = mkToggle("Flow", flowOn, function () {
+      var flBtn = mkToggle(gt("Flow"), flowOn, function () {
         flowOn = !flowOn;
         saveView();
         buildChrome();
@@ -3039,7 +3052,8 @@
       // setMatches(), so a second in-canvas box would be a confusing duplicate.
       if (n > 30 && !opts.externalSearch) {
         var sw = document.createElement("input");
-        sw.placeholder = "Search…";
+        sw.placeholder = gt("Search…");
+        sw.setAttribute("aria-label", gt("Search the graph"));
         sw.style.cssText =
           "position:absolute;right:16px;top:12px;width:160px;pointer-events:auto;" +
           "padding:6px 10px;border-radius:8px;background:" + cc.panelBg + ";" +
@@ -3386,6 +3400,9 @@
           // Absent the attr this is false, so Studio's GraphPane (the same hook
           // object) keeps its in-canvas box unchanged.
           externalSearch: this.el.dataset.externalSearch === "true",
+          strings: (function (raw) {
+            try { return JSON.parse(raw || "{}"); } catch (e) { return {}; }
+          })(this.el.dataset.strings),
           onNodeClick: function (n) {
             if (n && n.id) self.pushEvent("node-clicked", { id: n.id });
           }
