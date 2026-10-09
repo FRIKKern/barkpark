@@ -186,6 +186,7 @@ defmodule Barkpark.Tenancy.Members do
   """
   @spec add_user_member(binary(), String.t(), String.t(), keyword()) ::
           {:ok, member_row()}
+          | {:ok, {:reclaimed, member_row()}}
           | {:ok, {:invited, invitation_row()}}
           | {:error, atom() | Ecto.Changeset.t()}
   def add_user_member(workspace_id, email, role, opts \\ [])
@@ -214,10 +215,15 @@ defmodule Barkpark.Tenancy.Members do
   defp invite?(%User{confirmed_at: %{}}, opts), do: not is_nil(opts[:actor])
   defp invite?(_existing, _opts), do: false
 
+  # An unconfirmed account answers `{:reclaimed, row}` so the door can tell
+  # the admin that the account's password and sessions are gone. A confirmed
+  # or JIT-created account answers the bare row.
   defp seat_now(workspace_id, user, email, role) do
-    with {:ok, user} <- Accounts.Privacy.reclaim_unconfirmed(user),
-         {:ok, membership} <- TenancyAuth.create_membership(workspace_id, user.id, role, "user") do
-      {:ok, decorate(membership, %{user.id => email}, %{})}
+    with {:ok, reclaimed} <- Accounts.Privacy.reclaim_unconfirmed(user),
+         {:ok, membership} <-
+           TenancyAuth.create_membership(workspace_id, reclaimed.id, role, "user") do
+      row = decorate(membership, %{reclaimed.id => email}, %{})
+      if is_nil(user.confirmed_at), do: {:ok, {:reclaimed, row}}, else: {:ok, row}
     end
   end
 
