@@ -80,6 +80,23 @@ defmodule Barkpark.Content.Mutations do
     Writer
   }
 
+  # ── dryRun (task-ca600d55736bc9ca) ──────────────────────────────────────────
+  #
+  # `opts[:dry_run]` (the mutate door's `dryRun`) runs the batch inside its
+  # transaction and then ROLLS IT BACK: the document, revision, event and audit
+  # rows go with it, and the deferred broadcast/webhook queue is cleared instead
+  # of flushed. The door used to ignore the flag, so a `dryRun: true` request
+  # committed a real draft.
+  #
+  # The rollback cannot reach the one thing that runs during the batch and
+  # outside its connection: `WriteScope.fire_after/3`'s after_* hooks, edge
+  # projector and after-write listeners. This process flag tells it to skip
+  # them; `dry_run?/0` is how it asks.
+  @dry_run_key :barkpark_mutate_dry_run
+
+  @doc "True while this process is inside a dryRun batch (see `apply_mutations/3`)."
+  def dry_run?, do: Process.get(@dry_run_key) == true
+
   @doc """
   Apply a batch of mutations atomically. Returns `{:ok, {transaction_id, results}}`
   or `{:error, reason}` with rollback on any failure.
@@ -116,6 +133,8 @@ defmodule Barkpark.Content.Mutations do
   end
 
   defp do_apply_mutations(mutations, dataset, opts) do
+    dry_run? = Keyword.get(opts, :dry_run, false) == true
+
     # Initialise the deferred-broadcast queue for this process so
     # tap_broadcast/5 knows to queue instead of broadcast immediately, and CLAIM
     # it: the claim is what tells `maybe_dispatch_webhook/7` that this queue has
@@ -123,6 +142,7 @@ defmodule Barkpark.Content.Mutations do
     # used to leave alone — a stale webhook entry stranded on this process by an
     # unowned transaction would otherwise be dispatched by the next mutate.
     Broadcast.claim_deferred_queue()
+    if dry_run?, do: Process.put(@dry_run_key, true)
 
     try do
       result =
@@ -159,12 +179,25 @@ defmodule Barkpark.Content.Mutations do
               end
             end)
 
-          {tx_id, results}
+          # DRY RUN: every gate, fence and write above ran for real, so the
+          # results are exactly what a real batch would answer — then the whole
+          # transaction is thrown away.
+          if dry_run?, do: Repo.rollback({@dry_run_key, {tx_id, results}}), else: {tx_id, results}
         end)
 
       case result do
         {:ok, _} ->
           Broadcast.flush_deferred_broadcasts()
+          result
+
+        {:error, {@dry_run_key, would_be}} ->
+          Broadcast.clear_deferred_broadcasts()
+          {:ok, would_be}
+
+        # A failed dry run answers the real error, but never runs the
+        # compensating discard: that is a write of its own.
+        _ when dry_run? ->
+          Broadcast.clear_deferred_broadcasts()
           result
 
         _ ->
@@ -179,6 +212,8 @@ defmodule Barkpark.Content.Mutations do
           {:ok, reason} -> {:error, reason}
           :no -> reraise(e, __STACKTRACE__)
         end
+    after
+      Process.delete(@dry_run_key)
     end
   end
 

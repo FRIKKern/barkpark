@@ -72,19 +72,19 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Mutations applied atomically (one failure rolls back all). Body: `{"mutations":[…]}`.
+Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true` (or `?dryRun=true`): full run, then rollback — `results` + `dryRun:true`, nothing persists; non-boolean → `400`.
 
-**Write gate.** Needs `write` permission (read-only token → `403`, even on its own workspace); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
+**Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
-**`Idempotency-Key`** (optional, this route). A repeat with the same key replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
+**`Idempotency-Key`** (optional, this route). A repeat replays the original response, never re-applies; concurrent → `409 idempotency_key_in_use`. Token+path, 24h.
 
 ### Mutation kinds
 
 **`deleteExactDraft`** — `{ "deleteExactDraft": { "id": "drafts.my-post", "type": "post", "ifRevisionID": "<rev>" } }`. Exact draft ID + revision (missing →404, stale →412). Removes only that draft, with recovery history; generic `delete` removes both variants. On a lost reply, reconcile; never retry against a recreated row.
 
-**`create`** — new draft; `conflict` if a draft already exists at that id: `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
+**`create`** — new draft (`conflict` if one exists): `{ "create": { "_type": "post", "_id": "my-post", "title": "New Post" } }`.
 
-**`createOrReplace`** — upsert (creates or overwrites the draft); **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
+**`createOrReplace`** — upserts the draft; **`createIfNotExists`** — creates only if no draft or published row holds the id, else `operation: "noop"` (`drafts.<id>` checks the draft only). Both shaped as `create`.
 
 **`replace`** — overwrites an *existing* draft (`not_found` if none); honors `ifRevisionID`. Same shape (`doc_id` = `_id` alias).
 
@@ -96,7 +96,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 
 - **`publish`** — copies `drafts.<id>` to `<id>`, deletes the draft.
 - **`unpublish`** — deletes `<id>`; keeps `drafts.<id>`, else copies `<id>` there.
-- **`discardDraft`** — deletes `drafts.<id>` without touching the published document.
+- **`discardDraft`** — deletes `drafts.<id>` only.
 - **`delete`** — deletes `<id>` and `drafts.<id>` if they exist; honors `ifRevisionID`.
 
 **Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
