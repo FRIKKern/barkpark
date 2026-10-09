@@ -625,6 +625,48 @@ test("paper form option ring clears 3:1 non-text contrast on bg AND bg-deep, eve
   }
 });
 
+test("paper ghost-slot hint clears AA 4.5 on its tinted slot (rest and hover) over bg AND bg-deep, every theme × mode (task-4fe2840b400afeb1)", () => {
+  // The hint is text on the slot's accent-soft tint (hover: edit-hover), not on
+  // the bare paper ground — measuring it on bg alone is how a 4.19 shipped.
+  // Read the token each rule paints from the shell stylesheet.
+  const css = readFileSync(new URL("../api/priv/static/assets/bp-paper-editor-shell.css", import.meta.url), "utf8");
+  const rule = (sel) => {
+    const m = css.match(new RegExp(sel.replace(/[.:]/g, "\\$&") + "\\s*\\{[^}]*\\}"));
+    assert.ok(m, `bp-paper-editor-shell.css must carry a ${sel} rule`);
+    return m[0];
+  };
+  const tokenOf = (sel, prop) => {
+    const t = rule(sel).match(new RegExp(`(?:^|[\\s;{])${prop}:\\s*var\\(--paper-([a-z-]+)`));
+    assert.ok(t, `${sel} must paint ${prop} from a var(--paper-<role>) token`);
+    return t[1];
+  };
+  const hint = tokenOf(".bp-paper-ghost-hint", "color");
+  const rest = tokenOf(".bp-paper-ghost-slot", "background");
+  const hover = tokenOf(".bp-paper-ghost-slot:hover", "background");
+  const over = (top, ground) => {
+    const m = String(top).match(/rgba?\(([^)]*)\)/);
+    if (!m) return parseColor(top);
+    const [r, g, b, a = 1] = m[1].split(",").map(Number);
+    const base = parseColor(ground);
+    return [r / 255, g / 255, b / 255].map((c, i) => c * a + base[i] * (1 - a));
+  };
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const v = (role) => values[`paper.surface.${role}.${mode}`];
+      for (const g of ["bg", "bg-deep"]) {
+        for (const [state, tint] of [["rest", rest], ["hover", hover]]) {
+          const ratio = contrast(v(hint), over(v(tint), v(g)));
+          assert.ok(
+            ratio >= 4.5,
+            `${name} ${mode}: ghost hint (--paper-${hint}) on the ${state} slot (--paper-${tint} over --paper-${g}) = ${ratio.toFixed(3)} < 4.5`,
+          );
+        }
+      }
+    }
+  }
+});
+
 test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {
   // The elevation requirement: a raised card must separate from the page in dark.
   // Measured as OKLCH lightness delta (perceptual), evergreen is the shipped skin.
