@@ -29,7 +29,9 @@ defmodule BarkparkWeb.Studio.StudioLive do
   require Logger
 
   alias Barkpark.Access
+  alias Barkpark.Content
   alias Barkpark.Content.CallerContext
+  alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.{Mount, Path, Shared}
 
@@ -276,6 +278,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
     # every handle_params — the workspace is resolved just above, and a
     # mid-session scope switch re-stamps it exactly like the log metadata.
     BarkparkWeb.StudioLocale.put(socket.assigns[:current_workspace])
+    socket = assign_type_labels(socket, dataset)
 
     # Tenant log attribution (both-surfaces parity with the HTTP TenantLogMetadata
     # plug). Logger.metadata is per-process; the connected Studio runs on this
@@ -741,4 +744,31 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # assigns straight through.
   @impl true
   def render(assigns), do: studio_live_shell(assigns)
+
+  # The word each type in scope reads as in Studio copy — its plugin word or
+  # schema title (task-a3bedc86f8a6a517, the task-7b0c9b8ae4ac6f79 ruling).
+  # Stamped once on the shell for the client pickers; recomputed only when
+  # the scope or dataset (and so the language) changes, not per navigation.
+  defp assign_type_labels(socket, dataset) do
+    key = {
+      socket.assigns[:current_workspace] && socket.assigns.current_workspace.id,
+      socket.assigns[:current_project] && socket.assigns.current_project.id,
+      dataset
+    }
+
+    if socket.assigns[:type_labels_key] == key do
+      socket
+    else
+      labels =
+        dataset
+        |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
+        |> Map.new(fn schema ->
+          {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
+        end)
+
+      assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
+    end
+  rescue
+    _ -> socket
+  end
 end

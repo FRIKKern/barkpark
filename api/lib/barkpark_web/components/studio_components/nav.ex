@@ -857,11 +857,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   caller needs a different shell (rare — kept as an escape hatch).
   """
   attr :class, :string, default: "studio-shell"
+  # JSON {type => word} for the client pickers (task-a3bedc86f8a6a517).
+  attr :type_labels, :string, default: nil
   slot :inner_block, required: true
 
   def studio_shell(assigns) do
     ~H"""
-    <div class={@class}>
+    <div class={@class} data-type-labels={@type_labels}>
       <%= render_slot(@inner_block) %>
     </div>
     """

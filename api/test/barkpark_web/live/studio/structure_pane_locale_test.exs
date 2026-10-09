@@ -135,4 +135,24 @@ defmodule BarkparkWeb.Studio.StructurePaneLocaleTest do
     {:ok, view, _html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet")
     assert has_element?(view, ~s(button[aria-label="Opprett regneark"]))
   end
+
+  # task-a3bedc86f8a6a517: the shell carries each type's word for the client
+  # pickers — its schema title, or a plugin type's own word.
+  test "the Studio shell carries the type words the pickers read", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
+
+    [json] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query("[data-type-labels]")
+      |> LazyHTML.attribute("data-type-labels")
+
+    labels = Jason.decode!(json)
+    assert labels["forfatter"] == "Forfatter"
+    assert labels["paper"] == "artikkel"
+  end
 end
