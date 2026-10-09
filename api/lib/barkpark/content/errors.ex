@@ -688,6 +688,27 @@ defmodule Barkpark.Content.Errors do
       hint: "Split the batch into requests of at most #{max} mutations and resend."
     }
 
+  # task-c801daf4efd35a74 — a NARROWER sibling of the clause above, same
+  # code/status (still "your batch exceeds this endpoint's cap — split and
+  # resend"), but the overall-count cap's message would be WRONG here: a
+  # batch can sit well under `@max_mutations` (1000) while still carrying
+  # too many DELETE mutations specifically (each pays a per-op
+  # reference-integrity scan the overall cap cannot see — see
+  # `BarkparkWeb.Plugs.RequireWithinQuota`'s "## The delete cap"). `kind`
+  # in `details` lets a machine caller tell the two shapes apart without
+  # parsing the message.
+  defp build({:error, {:delete_batch_too_large, n, max}}) when is_integer(n) and is_integer(max),
+    do: %{
+      code: "batch_too_large",
+      message:
+        "the mutations list carries #{n} delete mutations; the cap is #{max} deletes per request",
+      status: 422,
+      details: %{count: n, max: max, kind: "delete"},
+      hint:
+        "Split the delete mutations into requests of at most #{max} and resend; " <>
+          "non-delete mutations in the same batch are unaffected by this cap."
+    }
+
   defp build({:error, :forbidden_origin}),
     do: %{code: "cors_forbidden", message: "origin not allowed for dataset", status: 403}
 

@@ -44,6 +44,36 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
       `workspace.quota_exceeded` audit line so the wall being hit is observable.
     * oversize batch → 422 `batch_too_large` (see below), written BEFORE the
       quota is consulted so an absurd batch is refused on shape, not on money.
+    * too many DELETES → 422 `batch_too_large` (see "## The delete cap" below),
+      checked alongside the overall cap, also before the quota and before the
+      transaction opens.
+
+  ## The delete cap (task-c801daf4efd35a74)
+
+  `delete` consumes ZERO quota room (see below), so the `@max_mutations`
+  (1000) cap alone let a batch of 250 plain deletes through — reported by
+  barkpark-studio's scale scout: that request answered 500 `DBConnection`
+  while 50 worked. The cost a quota check cannot see is
+  `Content.Mutations.ensure_unreferenced/5`, run inside the transaction once
+  PER delete: it loads every reference-typed field across every schema in the
+  dataset (`Content.Edges.find_referencing_docs/3`) and queries each one, so
+  one delete's reference-integrity check costs O(reference fields in the
+  dataset's schema) queries, and a batch of N deletes costs O(N × fields) —
+  unbounded by `@max_mutations`, which only bounds N, never the per-op
+  multiplier. Measured locally (empty corpus, 8 reference fields): ~33ms per
+  delete; a real dataset's schema, corpus size and infra push that higher,
+  which is the gap between "50 works" and "250 500s" on barkpark-studio's box.
+
+  `@max_delete_mutations` (100) is a flat, schema-independent cap chosen with
+  headroom under the measured-working 50 and well under the measured-failing
+  250 — a conservative choice, not a precise computed bound (this gate cannot
+  see the dataset's schema without a query of its own, which would itself
+  cost room on an already-oversize request). The real fix — batching
+  `ensure_unreferenced`'s query across the whole to-be-deleted id set
+  instead of once per id — is filed as a separate follow-up; this cap is the
+  unconditional backstop so no mutate size reaches a 500 in the meantime,
+  matching this gate's own "refuse before the transaction, name the cap"
+  shape for `@max_mutations`.
 
   ## Room for the WHOLE batch, not room for one
 
@@ -115,6 +145,11 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   # plugin's module — so the number is restated here with its owner named.
   @max_mutations 1_000
 
+  # task-c801daf4efd35a74 — see "## The delete cap" above. `delete` costs
+  # ZERO quota room but a per-op reference-integrity scan `@max_mutations`
+  # never bounds; this is the schema-independent, conservative backstop.
+  @max_delete_mutations 100
+
   # Ops that can add a `documents` row. Everything else (delete, discardDraft,
   # patch) consumes ZERO room; see the moduledoc.
   @room_consuming_ops ~w(create createOrReplace createIfNotExists replace publish unpublish)
@@ -124,6 +159,13 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   """
   @spec max_mutations() :: pos_integer()
   def max_mutations, do: @max_mutations
+
+  @doc """
+  The per-request DELETE-mutation cap enforced by this gate (422
+  `batch_too_large`, `details.kind == "delete"`). See "## The delete cap".
+  """
+  @spec max_delete_mutations() :: pos_integer()
+  def max_delete_mutations, do: @max_delete_mutations
 
   def init(opts), do: opts
 
@@ -144,6 +186,9 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
     case batch_demand(conn) do
       {:error, {:batch_too_large, n}} ->
         halt_with(conn, {:error, {:batch_too_large, n, @max_mutations}})
+
+      {:error, {:delete_batch_too_large, n}} ->
+        halt_with(conn, {:error, {:delete_batch_too_large, n, @max_delete_mutations}})
 
       {:ok, needed} ->
         quota_gate(conn, ws, opts, needed)
@@ -174,8 +219,14 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
     case conn.body_params do
       %{"mutations" => mutations} when is_list(mutations) ->
         case length(mutations) do
-          n when n > @max_mutations -> {:error, {:batch_too_large, n}}
-          _ -> {:ok, count_room_consuming(mutations)}
+          n when n > @max_mutations ->
+            {:error, {:batch_too_large, n}}
+
+          _ ->
+            case count_deletes(mutations) do
+              d when d > @max_delete_mutations -> {:error, {:delete_batch_too_large, d}}
+              _ -> {:ok, count_room_consuming(mutations)}
+            end
         end
 
       _ ->
@@ -186,6 +237,18 @@ defmodule BarkparkWeb.Plugs.RequireWithinQuota do
   defp count_room_consuming(mutations) do
     Enum.count(mutations, fn
       m when is_map(m) -> Enum.any?(@room_consuming_ops, &Map.has_key?(m, &1))
+      _ -> false
+    end)
+  end
+
+  # task-c801daf4efd35a74 — `delete` is the ONE op shape whose cost this gate
+  # cannot read off room consumed; see "## The delete cap". Counts
+  # `"delete"` only (not `deleteExactDraft`, `discardDraft`, `unpublish`):
+  # `Content.Mutations.ensure_unreferenced/5` runs only from the plain
+  # `"delete"` clause.
+  defp count_deletes(mutations) do
+    Enum.count(mutations, fn
+      m when is_map(m) -> Map.has_key?(m, "delete")
       _ -> false
     end)
   end
