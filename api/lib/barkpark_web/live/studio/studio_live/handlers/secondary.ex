@@ -23,7 +23,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Secondary do
         )
         |> Enum.map(fn d ->
           pub = Content.published_id(d.doc_id)
-          %{id: pub, title: d.title || "Untitled", type: type}
+          %{id: pub, title: d.title || gettext("Untitled"), type: type}
         end)
         |> Enum.reject(fn c ->
           socket.assigns[:editor_doc] &&
