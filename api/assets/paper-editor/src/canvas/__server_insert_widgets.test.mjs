@@ -8,7 +8,8 @@
 // and the author saw a false "changed elsewhere" banner. "+ Add block" worked
 // because the server built the block.
 //
-// The canvas now hands these two types to the server like "+ Add block":
+// When the host builds blocks (Barkpark's LiveView marks its editor
+// `data-server-insert`), the canvas hands these types to the server like "+ Add block":
 //
 //   * SLASH PICK — "/terminal" on a new line, choose Terminal: the "/query" line is
 //     removed (and that removal flushed first), no terminal node is inserted locally,
@@ -109,8 +110,8 @@ try {
   // image + equation: task-f92354b415b486f5 (they re-rendered as boundary
   // editors and dropped what was typed into the transient canvas node).
   for (const type of ["terminal", "stage", "image", "equation"]) {
-    // terminal + stage go to the host by contract; image + equation when it builds them.
-    const canvas = await mount({ hostBuilds: type === "image" || type === "equation" });
+    // Only a host that builds blocks (data-server-insert) is asked.
+    const canvas = await mount({ hostBuilds: true });
     const editor = canvas._editor;
     const events = [];
     canvas.addEventListener("bp-canvas-ops", (e) => events.push(["ops", e.detail.ops]));
@@ -150,7 +151,7 @@ try {
 
   // ── PALETTE ───────────────────────────────────────────────────────────────
   {
-    const canvas = await mount();
+    const canvas = await mount({ hostBuilds: true });
     const editor = canvas._editor;
     const inserts = [];
     canvas.addEventListener("bp-server-insert", (e) => inserts.push(e.detail));
@@ -168,9 +169,10 @@ try {
     canvas.closest(".bp-paper-editor").remove();
   }
 
-  // ── an embedder that does not build on the server: image + equation land in the
-  // canvas (task-9c04bcc87b3da42f — the pick removed "/" and inserted nothing).
-  for (const type of ["image", "equation"]) {
+  // ── an embedder that does not build on the server: all four land in the canvas
+  // (the pick removed "/" and inserted nothing — image + equation:
+  // task-9c04bcc87b3da42f; terminal + stage in barkpark-studio: task-d170de40027ea448).
+  for (const type of ["terminal", "stage", "image", "equation"]) {
     const canvas = await mount();
     const editor = canvas._editor;
     const inserts = [];
