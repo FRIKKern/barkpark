@@ -516,9 +516,9 @@ defmodule Barkpark.Accounts.Privacy do
   domain), stripping every credential the PRIOR holder could have set
   (task-0abbf88fd420360d).
 
-  Registration does not require confirming the email before password login,
-  so anyone can register `victim@example.com`, set a password, and add a
-  passkey or token. Adopting that account for the real owner must not leave
+  Anyone can register `victim@example.com` and set a password. Password login
+  now refuses an unconfirmed account (`email_unconfirmed`,
+  task-0f1fd3d17e5f4edb), but older sessions, passkeys and tokens may exist. Adopting that account for the real owner must not leave
   the squatter in control. Mirrors the cloud fix (task-b3eb09e83fbb7cbc):
   the password becomes unknowable, sessions, pending email tokens, passkeys,
   prior social links and owned API tokens are removed or revoked, TOTP is

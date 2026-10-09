@@ -18,7 +18,13 @@ Emails are lower-cased on write; duplicates are rejected by a unique constraint.
 
 Email confirmation and password reset run through single-use, context-bound
 tokens (`build_email_token/2` with context `"confirm"` / `"reset"`): a confirm
-token cannot drive a reset, and consuming a token invalidates it. A consumed
+token cannot drive a reset, and consuming a token invalidates it.
+**Password login refuses an unconfirmed account** (API and browser): after the
+password verifies it answers `403 email_unconfirmed`, mints no session and
+mails a fresh confirm link; a wrong password stays the generic 401. A
+consumed reset also confirms. No mailbox (seeded editor, no SMTP): an operator
+runs `mix barkpark.user.confirm <email>` on the box
+(`Accounts.confirm_user_by_operator/1`; keeps the password). A consumed
 reset also revokes every live session of that user, and the JSON door reports
 the count: `POST /v1/auth/reset` answers `{ok: true, sessionsRevoked: n}`
 (`AuthController`, PDS-D503) — a receipt, not a promise; `n` is what the revoke
@@ -36,7 +42,8 @@ confirmed existing account stores a `workspace_invitations` row and answers
 `202 {invitation}`; nothing is seated until the user accepts
 (`GET /v1/auth/invitations`, `POST …/:id/accept`, `DELETE …/:id` declines;
 admins list/withdraw at `…/v1/invitations`). New emails and unconfirmed
-accounts are still seated at once. A user-owned token is rotated only by its
+accounts are still seated at once; an unconfirmed one is reclaimed first
+(`Privacy.reclaim_unconfirmed/1`: password replaced, sessions deleted). A user-owned token is rotated only by its
 owner (`403 owner_only`); admins revoke instead. `POST /v1/auth/tokens` takes
 `workspace` (slug/id); a user in several workspaces without it gets `422
 workspace_required` listing them.

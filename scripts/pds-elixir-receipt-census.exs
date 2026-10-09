@@ -1551,7 +1551,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{629, 629}],
+      basis_spans: [{634, 634}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1569,7 +1569,7 @@ defmodule PDS.Census do
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
           "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
           "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
-          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19.",
+          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19. RE-ANCHORED again 2026-10-09 (task-0f1fd3d17e5f4edb): login/2, above this def, took the email_unconfirmed refusal (+5) — comment slid :629 -> :634, still the def's first body line.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1578,7 +1578,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{644, 649}],
+      basis_spans: [{649, 654}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1597,7 +1597,7 @@ defmodule PDS.Census do
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
           "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
           "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
-          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647).",
+          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647). RE-ANCHORED again 2026-10-09 (task-0f1fd3d17e5f4edb): login/2 took the email_unconfirmed refusal (+5) — doc slid :644-649 -> :649-654, the token `anti-enumeration` now on :652.",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>

@@ -124,6 +124,7 @@ defmodule BarkparkWeb.Studio.ImagePickerAnonVisibilityClampTest do
         password: @password
       })
 
+    {:ok, user} = Accounts.confirm_user_by_operator(user.email)
     {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
 
     conn =
