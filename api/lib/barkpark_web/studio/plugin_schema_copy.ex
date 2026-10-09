@@ -2,8 +2,9 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
   @moduledoc """
   The content plugins' schema chrome, in the viewer's Studio language.
 
-  Quiz and Forms register their document types from core
-  (`Barkpark.Quiz.Content.schema/0`, `Barkpark.Plugins.Forms`), and those
+  Quiz, Forms and the paper forms register their document types from core
+  (`Barkpark.Quiz.Content.schema/0`, `Barkpark.Plugins.Forms`, Bulldocs'
+  `form_response.json`), and those
   schemas stay English: they are data, stored per dataset and read by more than
   Studio. Studio owns the translation instead, as `ConnectorsCopy` does for the
   connector catalog (ruling on task-0ded99e28e620ba5, pattern (a)). Each
@@ -18,7 +19,7 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
   use Gettext, backend: BarkparkWeb.Gettext
 
   # The document types whose schemas a content plugin registers.
-  @schemas ~w(quiz form_submission form_endpoint)
+  @schemas ~w(quiz form_submission form_endpoint form_response)
 
   @markers [
     # Quiz (Barkpark.Quiz.Content.schema/0)
@@ -43,7 +44,12 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
     gettext_noop("Form endpoints"),
     gettext_noop("Accepting submissions"),
     gettext_noop("Allowed origins"),
-    gettext_noop("Field names")
+    gettext_noop("Field names"),
+    # Bulldocs paper forms (priv/plugins/bulldocs/schemas/form_response.json)
+    gettext_noop("Form responses"),
+    gettext_noop("Paper"),
+    gettext_noop("Submitted at"),
+    gettext_noop("Answers")
   ]
 
   @doc "The document types whose schema chrome this module translates."

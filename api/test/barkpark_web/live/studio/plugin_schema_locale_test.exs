@@ -100,12 +100,18 @@ defmodule BarkparkWeb.Studio.PluginSchemaLocaleTest do
     assert html =~ "Time limit (seconds)"
   end
 
-  test "every Quiz and Forms schema string has a translation marker" do
+  test "every Quiz, Forms and paper-form schema string has a translation marker" do
     forms =
       Barkpark.Plugins.Forms.register_schemas(dataset: @dataset)
       |> Enum.filter(&(&1.name in PluginSchemaCopy.schemas()))
 
-    schemas = [Barkpark.Quiz.Content.schema() | forms]
+    form_response =
+      Path.expand("../../../../priv/plugins/bulldocs/schemas/form_response.json", __DIR__)
+      |> File.read!()
+      |> Jason.decode!()
+      |> then(&%{name: &1["name"], title: &1["title"], fields: &1["fields"]})
+
+    schemas = [Barkpark.Quiz.Content.schema(), form_response | forms]
     assert Enum.map(schemas, & &1.name) |> Enum.sort() == Enum.sort(PluginSchemaCopy.schemas())
 
     strings =

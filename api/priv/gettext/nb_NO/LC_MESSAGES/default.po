@@ -10807,3 +10807,13 @@ msgstr "Status"
 #, elixir-autogen, elixir-format
 msgid "Time limit (seconds)"
 msgstr "Tidsgrense (sekunder)"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Submitted at"
+msgstr "Sendt inn"
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Answers"
+msgstr "Svar"
