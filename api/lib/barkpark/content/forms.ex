@@ -324,11 +324,13 @@ defmodule Barkpark.Content.Forms do
       coerced === coerce_field_value(field, form_image(field, stored)) ->
         stored
 
-      # A plugin-owned type keeps Portable Text blocks blocks when edited
-      # (`@keep_shape`: the posted HTML was not coerced).
+      # Edited Portable Text is rebuilt from the posted HTML against the
+      # stored blocks, so a block the edit did not touch is kept verbatim and
+      # a mark the editor has no UI for survives. A plugin-owned type
+      # (`@keep_shape`) posts HTML that was not coerced; it gets blocks too.
       plain_rich_text?(field) and is_list(stored) and PortableText.blocks?(stored) and
-        is_binary(coerced) and String.trim(coerced) != "" ->
-        PortableText.from_html(coerced)
+        is_binary(posted) and String.trim(posted) != "" ->
+        PortableText.from_html(posted, stored)
 
       field["type"] == "composite" and is_map(coerced) and is_map(stored) ->
         restore_composite(field, coerced, stored)
