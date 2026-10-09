@@ -958,6 +958,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:300
 #: lib/barkpark_web/components/studio_components/modals.ex:420
+#: lib/barkpark_web/live/studio/connectors_live.ex:1010
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3803
 #: lib/barkpark_web/studio_locale.ex:144
 #, elixir-autogen, elixir-format
@@ -1483,6 +1484,9 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:1081
 #: lib/barkpark_web/live/studio/chat_live.ex:4089
 #: lib/barkpark_web/live/studio/chat_live.ex:4092
+#: lib/barkpark_web/live/studio/connectors_live.ex:812
+#: lib/barkpark_web/live/studio/connectors_live.ex:1088
+#: lib/barkpark_web/live/studio/connectors_live.ex:1111
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2212
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2296
 #: lib/barkpark_web/studio_locale.ex:130
@@ -6050,6 +6054,8 @@ msgid "API"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:485
+#: lib/barkpark_web/live/studio/connectors_live.ex:82
+#: lib/barkpark_web/live/studio/connectors_live.ex:708
 #, elixir-autogen, elixir-format
 msgid "Connectors"
 msgstr ""
@@ -8297,4 +8303,429 @@ msgstr ""
 #: lib/barkpark_web/media_visibility_copy.ex:47
 #, elixir-autogen, elixir-format
 msgid "shared — this scope carries a :media share, so anonymous reads of its public assets resolve"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:17
+#, elixir-autogen, elixir-format
+msgid "About 60 seconds — message @BotFather, create a bot, paste its token."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:21
+#, elixir-autogen, elixir-format
+msgid "About five steps in the Discord developer portal — create an application, add a bot, enable the Message Content intent, invite it to your server, then paste its token."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:641
+#, elixir-autogen, elixir-format
+msgid "Add to Slack"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:564
+#, elixir-autogen, elixir-format
+msgid "Add to Slack is not configured on this instance — it needs a Slack app (a client id from api.slack.com and a public callback URL). See docs/ops/slack-app.md."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:590
+#, elixir-autogen, elixir-format
+msgid "Add to Slack is unavailable right now: %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1081
+#, elixir-autogen, elixir-format
+msgid "Barkpark checks the token with %{name} before storing anything. It is sealed on this box and never leaves it."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:18
+#, elixir-autogen, elixir-format
+msgid "Bot token"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:750
+#, elixir-autogen, elixir-format
+msgid "Channels"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1096
+#, elixir-autogen, elixir-format
+msgid "Check token"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1093
+#, elixir-autogen, elixir-format
+msgid "Checking with the provider…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:911
+#, elixir-autogen, elixir-format
+msgid "Connect"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:642
+#: lib/barkpark_web/live/studio/connectors_live.ex:1049
+#, elixir-autogen, elixir-format
+msgid "Connect %{name}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:614
+#, elixir-autogen, elixir-format
+msgid "Connect Linear is not configured on this instance — it needs a Linear OAuth app (a client id from linear.app/settings/api and a public callback URL). See docs/ops/linear-app.md."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:677
+#, elixir-autogen, elixir-format
+msgid "Connect is not configured on this instance (no CONNECTORS_CONNECT_SECRET). The catalog is read-only."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:722
+#, elixir-autogen, elixir-format
+msgid "Connect is not configured on this instance."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1130
+#, elixir-autogen, elixir-format
+msgid "Connected"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:874
+#, elixir-autogen, elixir-format
+msgid "Connected %{at}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1105
+#, elixir-autogen, elixir-format
+msgid "Connecting mints a chat token for this workspace, hands it to the bridge, and mounts the bot — no restart."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1117
+#, elixir-autogen, elixir-format
+msgid "Connecting…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1008
+#, elixir-autogen, elixir-format
+msgid "Copy webhook URL"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:307
+#, elixir-autogen, elixir-format
+msgid "Could not disconnect: %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:405
+#, elixir-autogen, elixir-format
+msgid "Could not mint a workspace chat token."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:598
+#, elixir-autogen, elixir-format
+msgid "Could not prepare Add to Slack."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:628
+#, elixir-autogen, elixir-format
+msgid "Could not prepare Connect Linear."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:224
+#, elixir-autogen, elixir-format
+msgid "Could not sign a connect ticket (%{reason})."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:57
+#, elixir-autogen, elixir-format
+msgid "Deploy the route and let Discord PING-validate it BEFORE you Save — the portal refuses an unreachable URL, and a later failing endpoint is silently removed. See connectors/docs/discord-byo-bot.md (deploy the webhook route before you save the URL)."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:821
+#: lib/barkpark_web/live/studio/connectors_live.ex:943
+#, elixir-autogen, elixir-format
+msgid "Disconnect"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:802
+#, elixir-autogen, elixir-format
+msgid "Disconnect %{provider}?"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:293
+#, elixir-autogen, elixir-format
+msgid "Disconnected %{provider}. %{count} token revoked."
+msgid_plural "Disconnected %{provider}. %{count} tokens revoked."
+msgstr[0] ""
+msgstr[1] ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:818
+#, elixir-autogen, elixir-format
+msgid "Disconnecting…"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1020
+#, elixir-autogen, elixir-format
+msgid "Endpoint unavailable — public base not configured."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:60
+#, elixir-autogen, elixir-format
+msgid "Event Subscriptions Request URL"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:24
+#, elixir-autogen, elixir-format
+msgid "From Developer Portal → your application → Bot → Reset Token."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:953
+#, elixir-autogen, elixir-format
+msgid "How to get a token"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:872
+#, elixir-autogen, elixir-format
+msgid "Install"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:56
+#, elixir-autogen, elixir-format
+msgid "Interactions Endpoint URL"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:52
+#, elixir-autogen, elixir-format
+msgid "Let your agent create and update Linear issues from your conversations."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:46
+#, elixir-autogen, elixir-format
+msgid "Let your agent open pull requests, file issues, and comment on GitHub."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1132
+#, elixir-autogen, elixir-format
+msgid "Loading…"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:19
+#, elixir-autogen, elixir-format
+msgid "Looks like 123456789:AA… — BotFather hands it to you once."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:64
+#, elixir-autogen, elixir-format
+msgid "Messaging Endpoint"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:42
+#, elixir-autogen, elixir-format
+msgid "Needs a Mac you own, running all the time, with Full Disk Access."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:731
+#, elixir-autogen, elixir-format
+msgid "No"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1131
+#, elixir-autogen, elixir-format
+msgid "Not connected"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:65
+#, elixir-autogen, elixir-format
+msgid "One app-wide URL; Teams demuxes tenants from the payload. See docs/ops/teams-azure-bot.md."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:26
+#, elixir-autogen, elixir-format
+msgid "One click — Add to Slack, pick your workspace, and approve the bot. No token to paste."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:53
+#, elixir-autogen, elixir-format
+msgid "One click — Connect Linear, authorize Barkpark in Linear, and you are done. No token to paste."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:47
+#, elixir-autogen, elixir-format
+msgid "Paste a fine-grained personal access token — GitHub Settings → Developer settings → Fine-grained tokens. Scope it to the repos and permissions you want the agent to have."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:69
+#, elixir-autogen, elixir-format
+msgid "Paste as the Meta webhook Callback URL (HTTPS only); the phone number id is the install key. See docs/ops/whatsapp-meta.md."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:61
+#, elixir-autogen, elixir-format
+msgid "Paste into Event Subscriptions → Request URL — one app-wide URL for every workspace (Slack demuxes the team from the payload). See docs/ops/slack-app.md."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:215
+#, elixir-autogen, elixir-format
+msgid "Paste the token first."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:50
+#, elixir-autogen, elixir-format
+msgid "Personal access token"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:752
+#, elixir-autogen, elixir-format
+msgid "Places your team already talks — connect one and messages reach your agent there."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:43
+#, elixir-autogen, elixir-format
+msgid "Self-hosted only (CONNECTORS_PROFILE=self-hosted). iMessage has no official adapter: it drives a real Mac with a real Apple ID, one workspace per Mac, and any macOS update can break it. Barkpark Cloud will never run it for you."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:771
+#, elixir-autogen, elixir-format
+msgid "Services your agent can ACT on — connect one and it can open pull requests, file issues, and more on your behalf."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:51
+#, elixir-autogen, elixir-format
+msgid "Starts with github_pat_… — GitHub shows it once when you create it."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:41
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent from Messages on Apple devices."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:29
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent from Teams."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:25
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent from a Slack channel or DM."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:710
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent from the places your team already is. Each connector belongs to"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:16
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent in a Telegram DM or group."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:20
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent in your Discord server."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:34
+#, elixir-autogen, elixir-format
+msgid "Talk to your agent over WhatsApp Business."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:31
+#, elixir-autogen, elixir-format
+msgid "Teams runs on one multi-tenant Azure bot, so there is no token to paste — instead your org's Azure admin has to grant consent. Barkpark cannot do that on your behalf. See docs/ops/teams-azure-bot.md."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:178
+#, elixir-autogen, elixir-format
+msgid "That provider cannot be connected here."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1103
+#, elixir-autogen, elixir-format
+msgid "That token belongs to"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:673
+#, elixir-autogen, elixir-format
+msgid "The bridge failed: %{reason}"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:356
+#: lib/barkpark_web/live/studio/connectors_live.ex:390
+#, elixir-autogen, elixir-format
+msgid "The bridge installed %{other}, not %{key}. Nothing was connected."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:670
+#, elixir-autogen, elixir-format
+msgid "The bridge returned HTTP %{status}."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:805
+#, elixir-autogen, elixir-format
+msgid "The bridge unmounts"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:663
+#, elixir-autogen, elixir-format
+msgid "The connectors bridge is not answering on this instance. Nothing was connected — check that barkpark-connectors is running."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:743
+#, elixir-autogen, elixir-format
+msgid "The installation admin has not set up connectors yet, so the catalog below is read-only. Ask them to enable connectors for this installation."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:769
+#, elixir-autogen, elixir-format
+msgid "Tools"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:68
+#, elixir-autogen, elixir-format
+msgid "Webhook Callback URL"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:35
+#, elixir-autogen, elixir-format
+msgid "Weeks, not minutes — Meta Business verification, a WABA phone number, and App Review for Advanced Access."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:862
+#, elixir-autogen, elixir-format
+msgid "What it takes:"
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:38
+#, elixir-autogen, elixir-format
+msgid "WhatsApp needs a Meta app you own (access token, app secret, phone number id, verify token) plus App Review — without it your number can only message about five test recipients. Paste-a-token cannot express that yet."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:1120
+#, elixir-autogen, elixir-format
+msgid "Yes, connect it"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:459
+#, elixir-autogen, elixir-format
+msgid "You need to be an owner or admin of this workspace to change its connectors."
+msgstr ""
+
+#: lib/barkpark_web/studio/connectors_copy.ex:30
+#, elixir-autogen, elixir-format
+msgid "Your organisation's Azure admin must consent to the Barkpark bot."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:806
+#, elixir-autogen, elixir-format
+msgid "and deletes the install, and Barkpark revokes the chat token it was using. Messages sent to it will stop reaching your agent immediately. You can reconnect by pasting the token again."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:732
+#, elixir-autogen, elixir-format
+msgid "is set, so Barkpark cannot authorize a connect against the bridge. The catalog below is read-only. A deploy generates the secret once — see"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:712
+#, elixir-autogen, elixir-format
+msgid "this workspace"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/connectors_live.ex:713
+#, elixir-autogen, elixir-format
+msgid "— its credentials never leave it."
 msgstr ""
