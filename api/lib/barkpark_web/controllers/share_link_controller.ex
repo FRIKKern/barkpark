@@ -458,6 +458,11 @@ defmodule BarkparkWeb.ShareLinkController do
   @doc "GET /v1/shares/links?scope=&kind=&ref_type=&ref_id= — list an item's links."
   def list(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
+         # task-4ad625842939ae8f — same ordering/reasoning as mint's
+         # ensure_dataset_bound/2 call: the CALLER named this dataset in the
+         # request, so refusing it reveals nothing beyond the caller's own
+         # token binding. Runs first, before any workspace/project lookup.
+         :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
@@ -480,6 +485,9 @@ defmodule BarkparkWeb.ShareLinkController do
     else
       # Explicit, ahead of the catch-all — without it the denial is 422 and the
       # foreign-token confinement reads as a validation error.
+      {:error, :forbidden_dataset} ->
+        ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       {:error, :forbidden} ->
         forbidden(conn)
 
