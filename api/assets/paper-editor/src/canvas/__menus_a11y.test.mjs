@@ -130,6 +130,31 @@ try {
     assert.equal(slash.getAttribute("aria-label"), "Sett inn blokk");
   });
   canvas._closeSlash();
+
+  // The [[ / # / : popup had the same gap, and no accessible name at all.
+  const { WikilinkMenu } = await import("../wikilink-menu.js");
+  const host = document.createElement("div");
+  host.setAttribute("contenteditable", "true");
+  document.body.appendChild(host);
+  host.focus();
+  const wiki = new WikilinkMenu({});
+  wiki.open({ left: 0, top: 0, bottom: 0 }, "");
+  wiki.setResults([{ title: "Alpha", id: "a" }, { title: "Beta", id: "b" }]);
+  wiki.move(1);
+  const wikiEl = document.querySelector(".bp-wikilink-menu");
+  check("wikilink menu: named, and the editor points at the selected option", () => {
+    assert.equal(wikiEl.getAttribute("aria-label"), "Link to page");
+    assert.equal(host.getAttribute("aria-controls"), wikiEl.id);
+    const [a, b] = [...wikiEl.querySelectorAll('[role="option"]')];
+    assert.equal(a.getAttribute("aria-selected"), "false");
+    assert.equal(b.getAttribute("aria-selected"), "true");
+    assert.equal(host.getAttribute("aria-activedescendant"), b.id);
+  });
+  wiki.close();
+  check("wikilink menu: closing clears the editor's pointers", () => {
+    assert.equal(host.getAttribute("aria-activedescendant"), null);
+    assert.equal(host.getAttribute("aria-controls"), null);
+  });
 } finally {
   dom.window.close();
 }
