@@ -4425,23 +4425,13 @@
        editor View surface only, with `!important` to beat inline. The values
        map to the paper tokens — in light mode `--paper-ink` ≈ #1f1a14 and the
        container bg goes transparent over the same cream page, so the light
-       View is visually unchanged; in dark it becomes warm ink on warm paper. */
+       View is visually unchanged; in dark it becomes warm ink on warm paper.
+       Only the container rule is left: the renderer no longer emits #111827
+       ink, #1d4ed8 links or a #f3f4f6 inline-code ground (task-d9bd9d91ba2be654),
+       but two themes still paint paper #ffffff. */
     .bp-paper-surface [data-block-id] div[style*="background:#ffffff"],
     .bp-paper-surface article div[style*="background:#ffffff"] {
       background: transparent !important;
-      color: var(--paper-ink) !important;
-    }
-    .bp-paper-surface [data-block-id] span[style*="color:#111827"],
-    .bp-paper-surface article span[style*="color:#111827"] {
-      color: var(--paper-ink) !important;
-    }
-    .bp-paper-surface [data-block-id] a[style*="color:#1d4ed8"],
-    .bp-paper-surface article a[style*="color:#1d4ed8"] {
-      color: var(--paper-accent) !important;
-    }
-    .bp-paper-surface [data-block-id] code[style*="background:#f3f4f6"],
-    .bp-paper-surface article code[style*="background:#f3f4f6"] {
-      background: var(--paper-bg-deep) !important;
       color: var(--paper-ink) !important;
     }
 
