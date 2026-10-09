@@ -10,21 +10,25 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
   adds:
 
     * `POST .../v1/preview-tokens` — same `PreviewTokenController.mint/2`,
-      mounted on `[:scoped_api, :scoped_admin]` so the signed scope comes
-      from the URL's resolved (role-gated) workspace/project, never from the
-      minting admin's own token.
+      mounted on `[:scoped_api, :flat_within_quota, :require_write]`
+      (task-ea6c9abb868593f8 widened this from `:scoped_admin` to any
+      write-capable member — barkpark-studio's gap) so the signed scope
+      comes from the URL's resolved (membership-gated) workspace/project,
+      never from the minting caller's own token.
     * `.../v1/preview/{query,doc,listen}` accepting that token when its
       signed scope matches the URL — refusing it, in BOTH directions, when
       it does not.
 
   Also covers the tenant-scoped revoke (task-49a6a686bb88d9e5):
-  `DELETE .../v1/preview-tokens/:jti`, same `[:scoped_api, :scoped_admin]`
-  gate as the mint. Deliberately only ONE revoke route exists — a flat
-  mint (#22299) is recorded under whatever workspace `:flat_admin_api`
-  resolved for the minting admin (the seeded Default workspace absent a
-  `DeriveWorkspaceFromToken` hit), so it is still revocable through this
-  SAME scoped route at `/w/default/p/default/...` — proven below,
-  rather than a second, flat revoke door.
+  `DELETE .../v1/preview-tokens/:jti`, STILL `[:scoped_api, :scoped_admin]`
+  (task-ea6c9abb868593f8 widened mint, deliberately not revoke — revoking a
+  token is privileged over whatever else already holds it). Deliberately
+  only ONE revoke route exists — a flat mint (#22299) is recorded under
+  whatever workspace `:flat_admin_api` resolved for the minting admin (the
+  seeded Default workspace absent a `DeriveWorkspaceFromToken` hit), so it
+  is still revocable through this SAME scoped route at
+  `/w/default/p/default/...` — proven below, rather than a second, flat
+  revoke door.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -75,13 +79,25 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
 
     {:ok, _} = TenancyAuth.create_membership(ws_b.id, admin_b.id, "admin")
 
-    # MEMBER (not admin) of A, global admin perms — must NOT be able to mint.
+    # WRITE-capable MEMBER (not admin ROLE) of A — task-ea6c9abb868593f8 widened
+    # the scoped mint from :scoped_admin to :require_write, so this fixture
+    # now CAN mint (scoped to A, single-use only). `TenancyAuth.permits?/2`
+    # reads the TOKEN's own flat permissions, not its workspace ROLE.
     member_a_raw = "spt-member-a-#{suffix}"
 
     {:ok, member_a} =
       Auth.create_token(member_a_raw, "member-a", @dataset, ["read", "write", "admin"])
 
     {:ok, _} = TenancyAuth.create_membership(ws_a.id, member_a.id)
+
+    # READ-ONLY member of A — no "write" in its own perms, no admin ROLE
+    # either. The widened gate is :require_write, not bare membership, so
+    # this one must still be refused.
+    reader_a_raw = "spt-reader-a-#{suffix}"
+
+    {:ok, reader_a} = Auth.create_token(reader_a_raw, "reader-a", @dataset, ["read"])
+
+    {:ok, _} = TenancyAuth.create_membership(ws_a.id, reader_a.id)
 
     # ADMIN of BOTH A and B — isolates `revoke_scoped/3`'s own workspace_id
     # comparison from `RequireWorkspaceRole` (the route gate). A stranger to B
@@ -103,6 +119,7 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
       admin_a_raw: admin_a_raw,
       admin_b_raw: admin_b_raw,
       member_a_raw: member_a_raw,
+      reader_a_raw: reader_a_raw,
       admin_both_raw: admin_both_raw
     }
   end
@@ -136,9 +153,22 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     refute body["workspace_id"] == Tenancy.get_default_workspace().id
   end
 
-  test "a member of A (global admin perms, not an admin ROLE in A) cannot mint", %{
+  test "task-ea6c9abb868593f8 — a WRITE-capable member of A (not an admin ROLE) CAN mint, scoped to A",
+       %{
+         ws_a: ws_a,
+         member_a_raw: raw,
+         conn: conn
+       } do
+    body = mint!(conn, ws_a.slug, raw, %{"dataset" => @dataset})
+
+    assert body["workspace_id"] == ws_a.id
+    refute body["workspace_id"] == Tenancy.get_default_workspace().id
+    assert body["multi_use"] == false
+  end
+
+  test "a READ-ONLY member of A (no write perm, no admin ROLE) still cannot mint", %{
     ws_a: ws_a,
-    member_a_raw: raw,
+    reader_a_raw: raw,
     conn: conn
   } do
     resp =
@@ -148,6 +178,35 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
       |> post("/w/#{ws_a.slug}/p/default/v1/preview-tokens", %{"dataset" => @dataset})
 
     assert resp.status == 403
+  end
+
+  test "a write-capable member's multi_use: true request is refused — admin-only knob", %{
+    ws_a: ws_a,
+    member_a_raw: raw,
+    conn: conn
+  } do
+    resp =
+      conn
+      |> bearer(raw)
+      |> put_req_header("content-type", "application/json")
+      |> post("/w/#{ws_a.slug}/p/default/v1/preview-tokens", %{
+        "dataset" => @dataset,
+        "multi_use" => true
+      })
+
+    assert resp.status == 422,
+           "a non-admin member's multi_use request must be REFUSED, not silently downgraded " <>
+             "to single-use: #{resp.status} #{resp.resp_body}"
+  end
+
+  test "an admin's multi_use: true request still works — the knob is admin-only, not removed", %{
+    ws_a: ws_a,
+    admin_a_raw: raw,
+    conn: conn
+  } do
+    body = mint!(conn, ws_a.slug, raw, %{"dataset" => @dataset, "multi_use" => true})
+
+    assert body["multi_use"] == true
   end
 
   test "an admin of A cannot mint on /w/B/...", %{

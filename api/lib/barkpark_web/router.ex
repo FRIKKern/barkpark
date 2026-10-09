@@ -3658,27 +3658,38 @@ defmodule BarkparkWeb.Router do
     post("/v1/tokens/elevated", ElevatedTokenController, :create)
   end
 
-  # Scoped preview-JWT mint (task-88e9094df76d31c6) — SAME :scoped_admin gate
-  # (owner/admin ROLE in the resolved target workspace) as the token mint
-  # above, so an admin of workspace A reaches 403 at RequireWorkspaceRole on
-  # `/w/B/...`, never the controller. `PreviewTokenController.mint/2` is
-  # UNCHANGED from the flat mint (#22299): it already signs workspace_id/
+  # Scoped preview-JWT mint (task-88e9094df76d31c6, widened to any WRITE
+  # member by task-ea6c9abb868593f8 — barkpark-studio's gap: Sanity lets any
+  # editor mint a preview link, not just an admin). A write-capable member of
+  # workspace A reaches 403 at ResolveWorkspace on `/w/B/...`, never the
+  # controller — mirrors the (write, not admin) gate `HistoryController.restore/2`
+  # already uses on this same pipeline shape. `PreviewTokenController.mint/2`
+  # is UNCHANGED from the flat mint (#22299): it already signs workspace_id/
   # project_id from `ScopeHelpers.scope_opts(conn)`, never from a request
   # param, and on THIS pipeline `:scoped_api` has already resolved those
-  # assigns from the URL (role-gated) rather than from the admin's own
+  # assigns from the URL (membership-gated) rather than from the caller's own
   # token scope — the flat route's "defaults to whatever the admin's OWN
-  # token resolves to, usually Default" gap this task exists to close.
+  # token resolves to, usually Default" gap task-88e9094df76d31c6 closed.
+  # `multi_use: true` stays admin-only — `mint/2` itself refuses it for a
+  # non-admin caller, since its wider TTL/no-record_jti-replay shape is a
+  # bigger blast radius than the single-use default every member gets.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api, :flat_within_quota, :require_write])
+
+    post("/v1/preview-tokens", PreviewTokenController, :mint)
+  end
+
+  # Tenant-scoped revoke (task-49a6a686bb88d9e5) — the flat mint deliberately
+  # grew no revoke twin (preview_token_jti carried no tenant column; see
+  # PreviewTokenController's own moduledoc). STAYS admin-only (task-ea6c9abb868593f8
+  # widened mint, not revoke): revoking a token is a privileged action over
+  # whatever OTHER members/integrations already hold it, not a "manage my own
+  # read" action the mint widening is about. An admin of A reaches 403 on
+  # `/w/B/.../:jti`, never the controller; `revoke/2` additionally checks the
+  # ROW's own stored owner_workspace_id before touching it.
   scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
     pipe_through([:scoped_api, :scoped_admin])
 
-    post("/v1/preview-tokens", PreviewTokenController, :mint)
-
-    # Tenant-scoped revoke (task-49a6a686bb88d9e5) — the flat mint deliberately
-    # grew no revoke twin (preview_token_jti carried no tenant column; see
-    # PreviewTokenController's own moduledoc). SAME gate as the mint above,
-    # so an admin of A reaches 403 on `/w/B/.../:jti`, never the controller;
-    # `revoke/2` additionally checks the ROW's own stored owner_workspace_id
-    # before touching it.
     delete("/v1/preview-tokens/:jti", PreviewTokenController, :revoke)
   end
 
