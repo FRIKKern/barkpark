@@ -3,7 +3,7 @@
 
 Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
 (SHA256 hash + permission list); LiveViews read `session["api_token_session"]`
-(or `session["api_token"]`) via `on_mount`.
+via `on_mount`.
 
 > Accounts, sessions, MFA, login tickets, field visibility, row ownership:
 > [auth-user-sessions.md](auth-user-sessions.md).
@@ -23,8 +23,9 @@ no `workspace_memberships` row for the token → `403 forbidden`, reason
 `not_a_member`, naming the workspace (`bp whoami` lists seats); member → on to
 permission checks. Flat paths (`/v1/data/:dataset/*`, …) resolve to the `"Default"` scope.
 
-`POST …/v1/data/mutate/:dataset` enforces `write` **after** tenancy: a member
-lacking `write` gets `403`; reads stay available.
+Mutate needs `write` after tenancy (else `403`). Minted with an explicit
+`dataset` (`dataset_bound`), a token gets `403 dataset_not_bound` elsewhere;
+unbound, `dataset` binds nothing.
 
 ## Roles (`ApiToken.permissions`)
 
@@ -34,7 +35,7 @@ lacking `write` gets `403`; reads stay available.
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
 | `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
-| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
+| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
