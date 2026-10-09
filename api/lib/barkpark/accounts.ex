@@ -732,6 +732,17 @@ defmodule Barkpark.Accounts do
   def confirm_provisioned_user(%User{} = user),
     do: Repo.update!(User.confirm_changeset(user))
 
+  # The password-reset-confirms-account step (task-5adb9639803f4fb7, see
+  # `reset_user_password_counting/2`). An already-confirmed account is
+  # returned untouched — a reset must never move `confirmed_at` backwards or
+  # re-stamp it, and a confirmed account's later member-add must stay a
+  # no-op reclaim (`Privacy.reclaim_unconfirmed/1`'s own first clause reads
+  # the SAME field this sets).
+  defp confirm_if_unconfirmed!(%User{confirmed_at: nil} = user),
+    do: Repo.update!(User.confirm_changeset(user))
+
+  defp confirm_if_unconfirmed!(%User{} = user), do: user
+
   @doc """
   Confirm an account's email on an OPERATOR's word, with no token
   (task-bb41f3a2f5a843a7). The doors are `mix barkpark.user.confirm <email>`
@@ -817,6 +828,17 @@ defmodule Barkpark.Accounts do
         Repo.transaction(fn ->
           case do_reset_password(user, attrs, reset_mfa: true, keep_token_id: tok.id) do
             {:ok, reset_user, revoked} ->
+              # The reset link proved mailbox control, and every credential a
+              # prior holder set is about to be stripped below, so the address
+              # is confirmed now (task-5adb9639803f4fb7). Without this, an
+              # account that lost its confirm mail could reset its password
+              # and still be refused at login (`email_unconfirmed`) — and a
+              # LATER member-add would still see `confirmed_at: nil` and
+              # reclaim it (`Privacy.reclaim_unconfirmed/1`), replacing the
+              # password this reset just set. An already-confirmed account is
+              # untouched (`confirm_if_unconfirmed!/1`'s second clause).
+              reset_user = confirm_if_unconfirmed!(reset_user)
+
               # Owner ruling #13 (task-f4cfc3e2ab4bd6b8): recovery also removes
               # every passkey, social link and owned personal token — whatever a
               # thief added with a stolen session. Same transaction: a failed
