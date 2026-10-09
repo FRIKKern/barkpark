@@ -686,8 +686,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
         border-radius: 4px; font-size: 10px; font-weight: 700;
         font-family: var(--font-mono); letter-spacing: 0.04em;
       }
-      .api-method-get { background: var(--primary-soft); color: var(--primary); }
-      .api-method-post { background: var(--ok-soft); color: var(--success); }
+      .api-method-get { background: var(--primary-soft); color: var(--primary-text); }
+      .api-method-post { background: var(--ok-soft); color: var(--ok-text); }
       .api-url { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--fg); }
 
       /* Section headings inside the docs column */
@@ -760,8 +760,8 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       }
 
       /* Verdict badges — reuse .badge, provide colours */
-      .badge-verdict-pass { background: var(--ok-soft); color: var(--success); }
-      .badge-verdict-fail { background: var(--danger-soft); color: var(--destructive); }
+      .badge-verdict-pass { background: var(--ok-soft); color: var(--ok-text); }
+      .badge-verdict-fail { background: var(--danger-soft); color: var(--danger-text); }
       .badge-verdict-error { background: var(--warn-soft); color: var(--warn-text); }
       .badge-verdict-unverified { background: var(--bg-muted); color: var(--fg-muted); }
 

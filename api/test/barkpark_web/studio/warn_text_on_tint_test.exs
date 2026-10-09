@@ -37,9 +37,16 @@ defmodule BarkparkWeb.Studio.WarnTextOnTintTest do
            "amber text on the warn tint without --warn-text:\n" <> Enum.join(offenders, "\n")
   end
 
-  test "the Studio root defines --warn-text in light and dark" do
+  # warn-text is now the per-theme AA walk (ruling on task-399a8a237f339eb1):
+  # evergreen light lands at 29.5% (the old fixed step gave 30%), clearing AA on the tint over
+  # both bg and muted-surface.
+  test "the Studio root defines the text-on-tint voices in light and dark" do
     css = File.read!(@root)
-    assert css =~ "--warn-text: hsl(35 92% 30%);"
+    assert css =~ "--warn-text: hsl(35 92% 29.5%);"
     assert css =~ "--warn-text: hsl(38 94% 56%);"
+
+    for voice <- ~w(ok-text danger-text info-text primary-text) do
+      assert css =~ "--#{voice}: hsl(", "the Studio root emits --#{voice}"
+    end
   end
 end

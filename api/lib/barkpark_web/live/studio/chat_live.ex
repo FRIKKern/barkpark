@@ -2960,7 +2960,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
         }
         .bp-chat-menuitem:hover { background: hsl(var(--primary-hsl) / 0.12); }
         .bp-chat-menuitem-danger { color: var(--danger); }
-        .bp-chat-menuitem-danger:hover { background: hsl(var(--danger-hsl) / 0.12); }
+        .bp-chat-menuitem-danger:hover { background: hsl(var(--danger-hsl) / 0.12); color: var(--danger-text); }
         .bp-chat-rename-input {
           width: 100%; box-sizing: border-box; font: inherit;
           background: var(--bg); color: var(--text);
