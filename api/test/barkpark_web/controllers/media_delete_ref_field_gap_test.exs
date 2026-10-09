@@ -141,11 +141,11 @@ defmodule BarkparkWeb.MediaDeleteRefFieldGapTest do
       refute Repo.get(MediaFile, file.id)
     end
 
-    test "a DRAFT-only structural reference does not refuse — only published documents count" do
+    test "a DRAFT-only structural reference (never published) STILL refuses — a draft losing its image is the same data loss" do
       file = media_file!()
       asset_doc_id = asset_doc_id!(file)
 
-      {:ok, _draft} =
+      {:ok, draft} =
         Content.create_document(
           "refgap_post",
           %{"title" => "Draft only", "hero" => %{"asset" => %{"_ref" => asset_doc_id}}},
@@ -155,10 +155,11 @@ defmodule BarkparkWeb.MediaDeleteRefFieldGapTest do
       body =
         admin(scoped_conn())
         |> delete("/v1/media/#{@ds}/#{file.id}")
-        |> json_response(200)
+        |> json_response(409)
 
-      assert body["result"]["deleted"] == file.id
-      refute Repo.get(MediaFile, file.id)
+      assert Repo.get(MediaFile, file.id)
+      referrers = Enum.map(body["error"]["details"]["referencedBy"], & &1["doc_id"])
+      assert draft.doc_id in referrers
     end
 
     test "a structural reference to an UNRELATED asset does not refuse" do

@@ -40,6 +40,15 @@ defmodule Barkpark.Media.WhereUsed do
   document that lives in its OWN dataset's row space; there is no cross-
   dataset structural case the way there is a cross-dataset URL-string one.
 
+  UNLIKE the textual scan, the structural lookup counts DRAFT references too
+  (a draft edit's `_ref`, or a never-published document's). Deleting a blob a
+  draft references is the same unrecoverable data loss as deleting one a
+  published page references, and nothing scopes the textual scan to
+  published-only for a REASON that also applies here — it is a corpus-wide
+  text scan with its own churn/cost tradeoffs the structural lookup (a single
+  indexed read) does not share. So an author editing a draft, or one who never
+  published at all, is protected exactly as a live page is.
+
   ## The census that sets the urgency (measured 2026-09-01, guerrilla prod)
 
   `GET /v1/data/query/production/paper` over the whole corpus (1050 papers, two
@@ -154,17 +163,25 @@ defmodule Barkpark.Media.WhereUsed do
   # resolve a companion asset document from at all.
   defp structural_referrers(%MediaFile{id: nil}), do: %{count: 0, sample: []}
 
-  # task-5f6e7ae324334044 — the structural half: does any PUBLISHED document in
-  # the blob's own dataset hold a schema image/file field whose `{"asset":
-  # {"_ref": ...}}` names this blob's companion `mediaAsset` document?
+  # task-5f6e7ae324334044 — the structural half: does any document (draft OR
+  # published) in the blob's own dataset hold a schema image/file field whose
+  # `{"asset": {"_ref": ...}}` names this blob's companion `mediaAsset`
+  # document?
   #
   # Admin/full-visibility context on purpose: this is an internal delete-guard
   # read, not a client-facing one, and it must see a PRIVATE image/file field's
   # reference exactly as readily as a public one — the blob is just as
-  # unrecoverable either way. `require_published: true` matches the textual
-  # scan's own "published documents only" promise (the moduledoc's "What it
-  # does NOT claim"): a draft-only `_ref` must not refuse a delete the
-  # equivalent raw-URL embed in a draft would not refuse either.
+  # unrecoverable either way.
+  #
+  # DRAFTS COUNT HERE, unlike the textual scan (which is published-only by
+  # design — see the moduledoc's "What it does NOT claim"). Deleting a blob a
+  # draft references is the SAME unrecoverable data loss as deleting one a
+  # published page references; nothing in the textual scan's own published-
+  # only scoping is written as a reason to exclude a draft, only as an
+  # ACKNOWLEDGED gap in what a raw-text containment scan can promise (ruling,
+  # 2026-10-09). The structural lookup has no equivalent reason to narrow
+  # itself the same way: it is a single indexed read, not a corpus-wide text
+  # scan, so there is no churn/cost tradeoff pushing it toward published-only.
   defp structural_referrers(%MediaFile{} = file) do
     case Barkpark.Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)) do
       nil ->
@@ -181,8 +198,7 @@ defmodule Barkpark.Media.WhereUsed do
 
         rows =
           Barkpark.Content.Query.list_reference_holders(asset_doc_id, file.dataset,
-            caller_context: ctx,
-            require_published: true
+            caller_context: ctx
           )
 
         sample =
@@ -261,7 +277,7 @@ defmodule Barkpark.Media.WhereUsed do
     %{
       code: "conflict",
       message:
-        "refusing to delete #{file.filename}: #{count} published " <>
+        "refusing to delete #{file.filename}: #{count} " <>
           "#{if count == 1, do: "document references", else: "documents reference"} " <>
           "#{delivery_path(file)}. Deleting it would blank the media in " <>
           "#{if count == 1, do: "that document", else: "those documents"} behind a 200 " <>
