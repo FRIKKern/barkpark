@@ -79,6 +79,8 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       # remedies, so if this row ever collapses into the one above, the envelope
       # has gone back to telling an insider it is a stranger.
       {"forbidden_capability", {:error, :forbidden_capability}, "forbidden", 403, [:reason]},
+      # A dataset-bound token on another dataset (task-4418b517649a58ce).
+      {"forbidden_dataset", {:error, :forbidden_dataset}, "forbidden", 403, [:reason]},
       {"workspace_suspended", {:error, :workspace_suspended}, "workspace_suspended", 403, []},
       {"workspace_suspended/reason", {:error, {:workspace_suspended, "abuse"}},
        "workspace_suspended", 403, [:details]},
