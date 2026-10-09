@@ -11,11 +11,11 @@ Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
 A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Documents** (§3). Canonical paths start `/w/:workspace_slug/p/:project_slug/v1/data/...`.
 
-**Flat alias.** Unprefixed `/v1/*` routes resolve to `Default`/`Default`. One with a scoped twin answers `Deprecation: true` and a `rel="successor-version"` `Link` to it; no `Sunset` yet.
+**Flat alias.** Unprefixed `/v1/*` resolves to `Default`/`Default`. A scoped twin answers `Deprecation: true` + `rel="successor-version"` `Link`; no `Sunset`.
 
 ## 2. Base URL & Authentication
 
-Base URL: `http://<host>:4000`. Private endpoints need `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + configured defaults + Cloud origins.
+`http://<host>:4000`. Private endpoints need `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + defaults + Cloud origins.
 
 **Tenancy.** Path workspace/project are authoritative and must match the token: unknown → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
@@ -144,7 +144,7 @@ Immutable Epic/Legendary ledger; scoped routes canonical, flat = projectless leg
 
 ## 8d. Media — asset record (`absoluteUrl`) + `/v1/media/*` list envelope
 
-Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
+Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md). `GET /v1/i18n/paper_canvas`: [contract](contracts/paper-canvas-i18n.md).
 
 ## 9. Error Codes
 
