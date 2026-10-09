@@ -25,6 +25,7 @@ defmodule BarkparkWeb.UnconfirmedLoginMemberAddTest do
 
   alias Barkpark.{Accounts, Auth, Repo}
   alias Barkpark.Accounts.UserSession
+  alias Barkpark.BootModeSandbox
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @password "correct-horse-battery"
@@ -159,14 +160,16 @@ defmodule BarkparkWeb.UnconfirmedLoginMemberAddTest do
     assert register(email) |> json_response(201)
     assert login(email) |> json_response(403)
 
-    Mix.Tasks.Barkpark.User.Confirm.run([email])
+    BootModeSandbox.protecting(fn -> Mix.Tasks.Barkpark.User.Confirm.run([email]) end)
 
     assert login(email) |> json_response(201)
 
     assert_raise Mix.Error, ~r/no account/, fn ->
-      Mix.Tasks.Barkpark.User.Confirm.run([
-        "nobody-#{System.unique_integer([:positive])}@example.com"
-      ])
+      BootModeSandbox.protecting(fn ->
+        Mix.Tasks.Barkpark.User.Confirm.run([
+          "nobody-#{System.unique_integer([:positive])}@example.com"
+        ])
+      end)
     end
   end
 

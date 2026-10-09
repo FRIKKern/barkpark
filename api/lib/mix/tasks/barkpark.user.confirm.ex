@@ -16,7 +16,10 @@ defmodule Mix.Tasks.Barkpark.User.Confirm do
 
   @impl Mix.Task
   def run([email]) do
-    Mix.Task.run("app.start")
+    # The narrowed tree: no listener, no Oban, so it runs beside the live
+    # server without taking its port.
+    Mix.Task.run("app.config")
+    Barkpark.OneShot.boot!()
 
     case Barkpark.Accounts.confirm_user_by_operator(email) do
       {:ok, user} ->
