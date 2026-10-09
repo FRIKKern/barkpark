@@ -29,6 +29,15 @@ await tick();
 const pressed = (sel) =>
   Array.from(el.querySelectorAll(sel)).map((b) => `${b.textContent.trim()}=${b.getAttribute("aria-pressed")}`);
 
+// task-c83e2f5bc6be8182: the search box drives a role=listbox of suggestions
+// through aria-expanded/aria-controls, which are only allowed (and only
+// announced) on a combobox (axe aria-allowed-attr).
+const search = el.querySelector(".bp-ae-search");
+assert.equal(search.getAttribute("role"), "combobox", "the suggesting search box is a combobox");
+assert.equal(search.getAttribute("aria-autocomplete"), "list");
+assert.equal(search.getAttribute("aria-controls"), "bp-ae-suggest-list");
+assert.equal(el.querySelector("#bp-ae-suggest-list").getAttribute("role"), "listbox");
+
 // Upload is a real, focusable button that opens the file input.
 const upload = el.querySelector(".bp-ae-upload");
 assert.equal(upload.tagName, "BUTTON", "Upload is a button, so Tab reaches it");
