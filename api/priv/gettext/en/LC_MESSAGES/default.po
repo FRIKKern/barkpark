@@ -330,7 +330,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #: lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:22
 #: lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex:26
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:2591
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:2593
 #: lib/barkpark_web/studio_locale.ex:742
 #, elixir-autogen, elixir-format
 msgid "Untitled"
@@ -528,6 +528,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3131
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3773
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4612
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:26
 #: lib/barkpark_web/studio_locale.ex:659
 #: lib/barkpark_web/studio_locale.ex:743
 #, elixir-autogen, elixir-format
@@ -578,6 +579,7 @@ msgid "Required"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor.ex:779
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:40
 #, elixir-autogen, elixir-format
 msgid "Fields"
 msgstr ""
@@ -4179,6 +4181,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4704
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4798
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:500
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:32
 #, elixir-autogen, elixir-format
 msgid "Label"
 msgstr ""
@@ -4773,6 +4776,7 @@ msgid "Snapshot data is preserved; grouping changes how it is displayed."
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2855
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:41
 #, elixir-autogen, elixir-format
 msgid "Source"
 msgstr ""
@@ -6146,6 +6150,7 @@ msgid "Fleet"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:532
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:35
 #: lib/barkpark_web/studio/structure_copy.ex:43
 #, elixir-autogen, elixir-format
 msgid "Form submissions"
@@ -8833,6 +8838,7 @@ msgstr ""
 msgid "Facts"
 msgstr ""
 
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:43
 #: lib/barkpark_web/studio/structure_copy.ex:44
 #, elixir-autogen, elixir-format
 msgid "Form endpoints"
@@ -8869,6 +8875,7 @@ msgstr ""
 msgid "Paper masters"
 msgstr ""
 
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:25
 #: lib/barkpark_web/studio/structure_copy.ex:32
 #, elixir-autogen, elixir-format
 msgid "Quiz"
@@ -10729,4 +10736,84 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/controls.ex:252
 #, elixir-autogen, elixir-format
 msgid "On"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:44
+#, elixir-autogen, elixir-format
+msgid "Accepting submissions"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:45
+#, elixir-autogen, elixir-format
+msgid "Allowed origins"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:30
+#, elixir-autogen, elixir-format
+msgid "Choices"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:33
+#, elixir-autogen, elixir-format
+msgid "Correct?"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:42
+#, elixir-autogen, elixir-format
+msgid "Endpoint"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:46
+#, elixir-autogen, elixir-format
+msgid "Field names"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:31
+#, elixir-autogen, elixir-format
+msgid "Id"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:28
+#, elixir-autogen, elixir-format
+msgid "Question image"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:27
+#, elixir-autogen, elixir-format
+msgid "Question prompt"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:39
+#, elixir-autogen, elixir-format
+msgid "Received at"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:36
+#, elixir-autogen, elixir-format
+msgid "Site"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:38
+#, elixir-autogen, elixir-format
+msgid "Spam"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:37
+#, elixir-autogen, elixir-format
+msgid "State"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex:29
+#, elixir-autogen, elixir-format
+msgid "Time limit (seconds)"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Submitted at"
+msgstr ""
+
+#: lib/barkpark_web/studio/plugin_schema_copy.ex
+#, elixir-autogen, elixir-format
+msgid "Answers"
 msgstr ""
