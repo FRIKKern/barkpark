@@ -16,7 +16,6 @@ defmodule BarkparkWeb.AuthPasswordTest do
 
   defp session_token(email) do
     {:ok, _u} = Accounts.register_user(%{email: email, password: @password})
-    {:ok, _u} = Accounts.confirm_user_by_operator(email)
 
     scoped_conn()
     |> json_conn()

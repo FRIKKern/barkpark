@@ -26,7 +26,6 @@ defmodule BarkparkWeb.OrgRequireMfaTest do
 
   defp register_and_login!(conn, email) do
     post_json(conn, "/v1/auth/register", %{email: email, password: @password})
-    {:ok, _} = Accounts.confirm_user_by_operator(email)
 
     body =
       post_json(conn, "/v1/auth/login", %{email: email, password: @password})

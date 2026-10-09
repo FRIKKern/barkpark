@@ -26,7 +26,6 @@ defmodule BarkparkWeb.StudioUserLoginTest do
 
   defp register!(email) do
     {:ok, user} = Accounts.register_user(%{email: email, password: @password})
-    {:ok, user} = Accounts.confirm_user_by_operator(email)
     user
   end
 

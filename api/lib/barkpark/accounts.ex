@@ -732,59 +732,6 @@ defmodule Barkpark.Accounts do
   def confirm_provisioned_user(%User{} = user),
     do: Repo.update!(User.confirm_changeset(user))
 
-  defp confirm_if_unconfirmed!(%User{confirmed_at: nil} = user),
-    do: Repo.update!(User.confirm_changeset(user))
-
-  defp confirm_if_unconfirmed!(%User{} = user), do: user
-
-  @doc """
-  Confirm an account's email on an OPERATOR's word, with no token
-  (task-0f1fd3d17e5f4edb). The door is `mix barkpark.user.confirm <email>`, run
-  on the box: there is no HTTP route to it, so only someone with shell access
-  can vouch for an address.
-
-  Password login refuses an unconfirmed account (`email_unconfirmed`), so a
-  seeded editor at an address with no mailbox, or any account on a box with no
-  SMTP, needs this to sign in. The password is KEPT: the operator is vouching
-  that the person who set it owns the address. Do not run it for an account
-  you did not create or cannot vouch for; seating that account in a workspace
-  (`Members.add_user_member/4`) reclaims it instead.
-
-  Pending confirm tokens are deleted. An already-confirmed account is returned
-  as `{:ok, user, :already_confirmed}` and not touched.
-  """
-  @spec confirm_user_by_operator(String.t()) ::
-          {:ok, User.t()} | {:ok, User.t(), :already_confirmed} | {:error, :not_found}
-  def confirm_user_by_operator(email) when is_binary(email) do
-    case get_user_by_email(String.trim(email)) do
-      nil ->
-        {:error, :not_found}
-
-      %User{confirmed_at: %DateTime{}} = user ->
-        {:ok, user, :already_confirmed}
-
-      %User{} = user ->
-        {:ok, confirmed} =
-          Repo.transaction(fn ->
-            Repo.delete_all(
-              from t in UserEmailToken, where: t.user_id == ^user.id and t.context == "confirm"
-            )
-
-            Repo.update!(User.confirm_changeset(user))
-          end)
-
-        Audit.emit_best_effort(%{
-          category: "auth",
-          action: "email_confirmed_by_operator",
-          subject: user.id,
-          actor_type: "system",
-          metadata: %{}
-        })
-
-        {:ok, confirmed}
-    end
-  end
-
   @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
@@ -826,12 +773,6 @@ defmodule Barkpark.Accounts do
               # thief added with a stolen session. Same transaction: a failed
               # revoke keeps the old password and the reset link.
               stripped = Barkpark.Accounts.Privacy.strip_added_credentials!(reset_user)
-
-              # The reset link proved mailbox control, and every credential a
-              # prior holder set is gone, so the address is now confirmed.
-              # Without this, a user who lost the confirm mail could reset and
-              # still be refused at login (`email_unconfirmed`).
-              reset_user = confirm_if_unconfirmed!(reset_user)
 
               case Repo.delete(tok, stale_error_field: :id) do
                 {:ok, _} -> {reset_user, revoked, stripped}
