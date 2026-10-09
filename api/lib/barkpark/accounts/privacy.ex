@@ -52,6 +52,13 @@ defmodule Barkpark.Accounts.Privacy do
 
   Takes and returns a list of maps/structs carrying `:actor_kind`, `:actor_id`,
   `:actor_label`. One query, however many rows.
+
+  Prefers the account's `display_name` (task-cfb6ca3f5ffaf099, #22161) over
+  its email — the same J15/J16 attribution preference Studio's own account
+  settings exist to let a person set. An account with no display name (the
+  pre-#22161 default, and `display_name_changeset/2`'s own trimmed-blank-to-
+  nil normalization) falls back to email exactly as this function always
+  resolved before #22161 existed.
   """
   #
   # An `"api_token"` row is named the same way through the token's owner
@@ -63,25 +70,27 @@ defmodule Barkpark.Accounts.Privacy do
     token_owners = token_owner_ids(actor_ids(rows, "api_token"))
     user_ids = Enum.uniq(actor_ids(rows, "user") ++ Map.values(token_owners))
 
-    emails =
+    labels =
       case user_ids do
         [] ->
           %{}
 
         ids ->
-          from(u in User, where: u.id in ^ids, select: {u.id, u.email})
+          from(u in User, where: u.id in ^ids, select: {u.id, {u.display_name, u.email}})
           |> Repo.all()
-          |> Map.new()
+          |> Map.new(fn {id, {display_name, email}} ->
+            {id, preferred_label(display_name, email)}
+          end)
       end
 
-    if emails == %{} do
+    if labels == %{} do
       rows
     else
       Enum.map(rows, fn row ->
         case label_owner(row, token_owners) do
           id when is_binary(id) ->
-            case Map.fetch(emails, id) do
-              {:ok, email} -> Map.put(row, :actor_label, email)
+            case Map.fetch(labels, id) do
+              {:ok, label} -> Map.put(row, :actor_label, label)
               :error -> row
             end
 
@@ -91,6 +100,15 @@ defmodule Barkpark.Accounts.Privacy do
       end)
     end
   end
+
+  defp preferred_label(display_name, email) when is_binary(display_name) do
+    case String.trim(display_name) do
+      "" -> email
+      trimmed -> trimmed
+    end
+  end
+
+  defp preferred_label(_display_name, email), do: email
 
   defp actor_ids(rows, kind) do
     rows
@@ -395,7 +413,14 @@ defmodule Barkpark.Accounts.Privacy do
         totp_enabled: false,
         recovery_codes_hashed: [],
         last_totp_at: nil,
-        confirmed_at: nil
+        confirmed_at: nil,
+        # task-cfb6ca3f5ffaf099/#22161 postdates this function: a display
+        # name is free-text a person sets (often their real name), and
+        # `redact_actor_labels/1` now PREFERS it over email. Leaving it
+        # standing here would un-pseudonymise exactly the row this function
+        # exists to pseudonymise — erasure clears it the same way it already
+        # clears every other re-identifying field.
+        display_name: nil
       })
       |> Repo.update!()
 
