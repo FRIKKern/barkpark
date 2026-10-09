@@ -585,6 +585,25 @@ test("sup-w1: --fg-dim stays the DIMMEST text tier (lower contrast on --bg than 
   }
 });
 
+test("paper faint ink clears AA 4.5 on bg AND bg-deep and stays below ink-soft, every theme × mode (task-f7bbcc0256a563d3)", () => {
+  // Faint paper ink is text (dates, captions, meta lines) on either paper ground.
+  // Decorative dots and borders ride ink-faint-line and are not held to 4.5.
+  for (const { name, theme } of ALL_THEMES) {
+    const { values, misses } = derive(theme);
+    assert.deepEqual(misses.filter((m) => /ink-faint/.test(m.slot)), [], `${name}: faint ink walk reported a miss`);
+    for (const mode of ["light", "dark"]) {
+      for (const g of ["bg", "bg-deep"]) {
+        const ground = values[`paper.surface.${g}.${mode}`];
+        const faint = contrast(values[`paper.surface.ink-faint.${mode}`], ground);
+        const soft = contrast(values[`paper.surface.ink-soft.${mode}`], ground);
+        assert.ok(faint >= 4.5, `${name} ${mode}: contrast(--paper-ink-faint, --paper-${g}) = ${faint.toFixed(3)} < 4.5`);
+        assert.ok(faint < soft, `${name} ${mode}: --paper-ink-faint (${faint.toFixed(3)}) is not below --paper-ink-soft (${soft.toFixed(3)}) on --paper-${g}`);
+      }
+      assert.ok(values[`paper.surface.ink-faint-line.${mode}`], `${name} ${mode}: paper.surface.ink-faint-line must resolve`);
+    }
+  }
+});
+
 test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {
   // The elevation requirement: a raised card must separate from the page in dark.
   // Measured as OKLCH lightness delta (perceptual), evergreen is the shipped skin.

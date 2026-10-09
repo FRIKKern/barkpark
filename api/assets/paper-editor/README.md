@@ -97,7 +97,7 @@ A host that syncs with a server uses `applyServerBlocks`, `resolveConflictWithSe
 
 `bp-paper-editor.css` declares every token on `:root, :host` at its light value, so the editor renders styled with no host theme. Set `data-theme="dark"` on the `<html>` element for the dark values. Override these tokens on any ancestor to restyle the editor.
 
-- Colours: `--paper-bg`, `--paper-bg-deep`, `--paper-ink`, `--paper-ink-soft`, `--paper-ink-faint`, `--paper-accent`, `--paper-accent-soft`, `--paper-reading-accent`, `--paper-rule`, `--paper-chrome-bg`, `--paper-chrome-border`, `--paper-edit-hover`.
+- Colours: `--paper-bg`, `--paper-bg-deep`, `--paper-ink`, `--paper-ink-soft`, `--paper-ink-faint` (faint text), `--paper-ink-faint-line` (decorative dots and borders), `--paper-accent`, `--paper-accent-soft`, `--paper-reading-accent`, `--paper-rule`, `--paper-chrome-bg`, `--paper-chrome-border`, `--paper-edit-hover`.
 - Fonts: `--paper-font-serif`, `--paper-font-mono`.
 - Reading scale: the `--tok-reading-*` and `--bp-*` sizes, line heights and spacing.
 - Callout tones: `--bp-tone-{info,success,warning,danger,neutral}-{bg,fg}`.

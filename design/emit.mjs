@@ -385,7 +385,7 @@ const kebab = (s) => s.replace(/[A-Z]/g, (c) => "-" + c.toLowerCase());
 // color.paper.surface for paper-surface.css (paperBlock) and color.paper.reader
 // for the bulldocs reader skin (bulldocsBlock). VERBATIM (rgba/hex as-authored).
 export const PAPER_ROLES = [
-  "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule",
+  "bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule",
   "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border",
 ];
 // Callout tones in the SAME order util.ex tone_palette/1 clauses read them, so
@@ -2705,6 +2705,7 @@ const bulldocsThemeBlock = (name, t) => {
     ].map((l) => "        " + l);
   const darkExtra = [
     `--paper-ink-faint: ${rd["ink-faint"]};`,
+    `--paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `--paper-chrome-bg: ${rd["chrome-bg"]};`,
     `--paper-chrome-border: ${rd["chrome-border"]};`,
     `--bp-tone-info-bg: ${cd.info.bg}; --bp-tone-info-fg: ${cd.info.fg};`,
@@ -2724,6 +2725,7 @@ const bulldocsThemeBlock = (name, t) => {
   const cl = t.color.paperCallout.light;
   const lightExtra = [
     `--paper-ink-faint: ${sf["ink-faint"].light};`,
+    `--paper-ink-faint-line: ${sf["ink-faint-line"].light};`,
     `--paper-chrome-bg: ${sf["chrome-bg"].light};`,
     `--paper-chrome-border: ${sf["chrome-border"].light};`,
     `--bp-tone-info-bg: ${cl.info.bg}; --bp-tone-info-fg: ${cl.info.fg};`,
@@ -2781,7 +2783,7 @@ function bulldocsBlock(themes = loadThemes()) {
   const cd = tokens.color.paperCallout.dark; // dark callout tone re-stamps
   const cl = tokens.color.paperCallout.light; // light re-stamps for [data-theme="light"]
   const sfl = Object.fromEntries(
-    ["ink-faint", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
+    ["ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"].map((r) => [r, tokens.color.paper.surface[r].light])
   );
   // S7 stub: the warm reading accent (color.reading-accent), UNCONSUMED until S8.
   const ra = (theme) => hslToHex(tokens.color["reading-accent"][theme]);
@@ -2886,6 +2888,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "           stamp data-theme and get those directly; this is the reader's",
     "           prefers-color-scheme companion. */",
     `        --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `        --paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `        --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `        --paper-chrome-border: ${rd["chrome-border"]};`,
     `        --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
@@ -2935,6 +2938,7 @@ function bulldocsBlock(themes = loadThemes()) {
     "         scheme keeps dark callout tones / faint ink / chrome (the mirror",
     "         image of the #1217 bug). Values match the un-stamped light path. */",
     `      --paper-ink-faint:    ${sfl["ink-faint"]};`,
+    `      --paper-ink-faint-line: ${sfl["ink-faint-line"]};`,
     `      --paper-chrome-bg:    ${sfl["chrome-bg"]};`,
     `      --paper-chrome-border: ${sfl["chrome-border"]};`,
     `      --bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,
@@ -2954,6 +2958,7 @@ function bulldocsBlock(themes = loadThemes()) {
     `      --paper-accent-soft: ${rd["accent-soft"]};`,
     `      --paper-reading-accent: ${ra("dark")}; /* S7 stub — S8 consumes */`,
     `      --paper-ink-faint:    ${rd["ink-faint"]};`,
+    `      --paper-ink-faint-line: ${rd["ink-faint-line"]};`,
     `      --paper-chrome-bg:    ${rd["chrome-bg"]};`,
     `      --paper-chrome-border: ${rd["chrome-border"]};`,
     `      --bp-tone-info-bg:    ${cd.info.bg}; --bp-tone-info-fg:    ${cd.info.fg};`,
@@ -2980,6 +2985,7 @@ function bulldocsBlock(themes = loadThemes()) {
       `--paper-accent-soft: ${rl["accent-soft"]};`,
       `--paper-reading-accent: ${ra("light")}; /* S7 stub — S8 consumes */`,
       `--paper-ink-faint:    ${sfl["ink-faint"]};`,
+      `--paper-ink-faint-line: ${sfl["ink-faint-line"]};`,
       `--paper-chrome-bg:    ${sfl["chrome-bg"]};`,
       `--paper-chrome-border: ${sfl["chrome-border"]};`,
       `--bp-tone-info-bg:    ${cl.info.bg}; --bp-tone-info-fg:    ${cl.info.fg};`,

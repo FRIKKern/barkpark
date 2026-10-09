@@ -100,7 +100,8 @@
   --paper-bg-deep: #eaf1ee;
   --paper-ink: #15211d;
   --paper-ink-soft: #55635e;
-  --paper-ink-faint: #82918b;
+  --paper-ink-faint: #62706b;
+  --paper-ink-faint-line: #82918b;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(21, 33, 29, 0.08);
   --paper-accent: #1e5347;
@@ -185,7 +186,8 @@
   --paper-bg-deep: #131d19;
   --paper-ink: #e7ede9;
   --paper-ink-soft: #9aaaa3;
-  --paper-ink-faint: #6c7a74;
+  --paper-ink-faint: #788680;
+  --paper-ink-faint-line: #6c7a74;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(231, 237, 233, 0.09);
   --paper-accent: #45b394;
@@ -222,7 +224,8 @@
   --paper-bg-deep: #eaf1ee;
   --paper-ink: #15211d;
   --paper-ink-soft: #55635e;
-  --paper-ink-faint: #82918b;
+  --paper-ink-faint: #62706b;
+  --paper-ink-faint-line: #82918b;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(21, 33, 29, 0.08);
   --paper-accent: #1e5347;
@@ -254,7 +257,8 @@
   --paper-bg-deep: #131d19;
   --paper-ink: #e7ede9;
   --paper-ink-soft: #9aaaa3;
-  --paper-ink-faint: #6c7a74;
+  --paper-ink-faint: #788680;
+  --paper-ink-faint-line: #6c7a74;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(231, 237, 233, 0.09);
   --paper-accent: #45b394;
@@ -286,7 +290,8 @@
   --paper-bg-deep: #f0ecf3;
   --paper-ink: #241e27;
   --paper-ink-soft: #565059;
-  --paper-ink-faint: #7e7a81;
+  --paper-ink-faint: #6e6a71;
+  --paper-ink-faint-line: #7e7a81;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(36, 30, 39, 0.08);
   --paper-accent: #7b3a96;
@@ -318,7 +323,8 @@
   --paper-bg-deep: #151117;
   --paper-ink: #e1dde3;
   --paper-ink-soft: #a29da4;
-  --paper-ink-faint: #6f6b70;
+  --paper-ink-faint: #807c81;
+  --paper-ink-faint-line: #6f6b70;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(225, 221, 227, 0.09);
   --paper-accent: #c78ae0;
@@ -350,7 +356,8 @@
   --paper-bg-deep: #f4ece9;
   --paper-ink: #291d19;
   --paper-ink-soft: #5b504c;
-  --paper-ink-faint: #827a76;
+  --paper-ink-faint: #726a66;
+  --paper-ink-faint-line: #827a76;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(41, 29, 25, 0.08);
   --paper-accent: #b34e1e;
@@ -382,7 +389,8 @@
   --paper-bg-deep: #18110e;
   --paper-ink: #e5ddd9;
   --paper-ink-soft: #a69d99;
-  --paper-ink-faint: #726b68;
+  --paper-ink-faint: #837c79;
+  --paper-ink-faint-line: #726b68;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(229, 221, 217, 0.09);
   --paper-accent: #e8875a;
@@ -414,7 +422,8 @@
   --paper-bg-deep: #e7f0f2;
   --paper-ink: #162327;
   --paper-ink-soft: #495559;
-  --paper-ink-faint: #747e81;
+  --paper-ink-faint: #646e71;
+  --paper-ink-faint-line: #747e81;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(22, 35, 39, 0.08);
   --paper-accent: #0e6e85;
@@ -446,7 +455,8 @@
   --paper-bg-deep: #0c1417;
   --paper-ink: #d8e0e3;
   --paper-ink-soft: #97a1a4;
-  --paper-ink-faint: #666e70;
+  --paper-ink-faint: #777f81;
+  --paper-ink-faint-line: #666e70;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(216, 224, 227, 0.09);
   --paper-accent: #6cc4dd;
@@ -478,7 +488,8 @@
   --paper-bg-deep: #ecedf5;
   --paper-ink: #1f1f2a;
   --paper-ink-soft: #51525b;
-  --paper-ink-faint: #7a7b83;
+  --paper-ink-faint: #6a6b73;
+  --paper-ink-faint-line: #7a7b83;
   --paper-rule: rgba(0, 0, 0, 0.07);
   --paper-edit-hover: rgba(31, 31, 42, 0.08);
   --paper-accent: #5b46d6;
@@ -510,7 +521,8 @@
   --paper-bg-deep: #121219;
   --paper-ink: #dedee5;
   --paper-ink-soft: #9e9ea6;
-  --paper-ink-faint: #6c6c72;
+  --paper-ink-faint: #7d7d83;
+  --paper-ink-faint-line: #6c6c72;
   --paper-rule: rgba(255, 255, 255, 0.08);
   --paper-edit-hover: rgba(222, 222, 229, 0.09);
   --paper-accent: #9d8cff;
@@ -1050,12 +1062,12 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 .bp-paper-editor-body .bp-callout { margin: var(--bp-air-callout) 0 0; padding: 18px 22px 20px; border: 1px solid var(--paper-rule); border-radius: 12px; background: transparent; color: var(--paper-ink); }
 .bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong, .bp-paper-editor-body .bp-callout__summary { font-size: 0.72em; font-weight: 600; letter-spacing: 0.09em; text-transform: uppercase; color: var(--paper-ink-soft); }
 .bp-paper-editor-body .bp-callout > strong:first-child, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child { display: block; margin: 0 0 6px; }
-.bp-paper-editor-body .bp-callout > strong:first-child::before, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint)); vertical-align: middle; }
+.bp-paper-editor-body .bp-callout > strong:first-child::before, .bp-paper-editor-body .bp-callout > span[contenteditable="false"]:first-child > strong::before { content: ""; display: inline-block; width: 6px; height: 6px; margin: 0 9px 0.15em 0; border-radius: 50%; background: var(--bp-callout-dot, var(--paper-ink-faint-line)); vertical-align: middle; }
 .bp-paper-editor-body .bp-callout--info    { --bp-callout-dot: var(--bp-tone-info-fg); }
 .bp-paper-editor-body .bp-callout--success { --bp-callout-dot: var(--bp-tone-success-fg); }
 .bp-paper-editor-body .bp-callout--warning { --bp-callout-dot: var(--bp-tone-warning-fg); }
 .bp-paper-editor-body .bp-callout--danger  { --bp-callout-dot: var(--bp-tone-danger-fg); }
-.bp-paper-editor-body .bp-callout--neutral { --bp-callout-dot: var(--paper-ink-faint); }
+.bp-paper-editor-body .bp-callout--neutral { --bp-callout-dot: var(--paper-ink-faint-line); }
 /* The two SEMANTIC VERDICT tones ride the SAME mirror but a DIFFERENT token
  * family: `--bp-verdict-{loss,peace}` + its `-soft` wash, not `--bp-tone-*`
  * (design/tokens.json color.verdict — pe-bl-verdict-accent-tokens). Byte-copied
@@ -1132,7 +1144,7 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
  * `.bp-pnode*` — keep BYTE-ALIGNED with those reader rules. Inputs are transparent so
  * they read as the cell's own text, edited in place. */
 .bp-paper-editor-body .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-ink-faint); }
+.bp-paper-editor-body .bp-canvas-stage--src { border-color: var(--paper-ink-faint-line); }
 .bp-paper-editor-body .bp-canvas-stage__k, .bp-paper-editor-body .bp-canvas-stage__t, .bp-paper-editor-body .bp-canvas-stage__d, .bp-paper-editor-body .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; font-family: inherit; line-height: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
 .bp-paper-editor-body .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
 .bp-paper-editor-body .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
