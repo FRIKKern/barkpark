@@ -103,6 +103,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           <a href={@back_href} class="btn btn-ghost btn-sm" aria-label={gettext("Back to Studio")}>&larr;</a>
         <% end %>
         <%= render_slot(@status_pill) %>
+        <%!-- The document's heading for screen readers (task-50c06dba12b3e908);
+              the visible title stays the span its pins and CSS expect. --%>
+        <h1 class="sr-only"><%= @title %></h1>
         <span class="pane-header-title"><%= @title %></span>
         <%= render_slot(@presence) %>
         <%= if @meta != [] do %>

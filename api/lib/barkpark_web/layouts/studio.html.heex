@@ -1,4 +1,8 @@
 <.studio_shell type_labels={assigns[:type_labels]}>
+  <%!-- Bypass block (task-50c06dba12b3e908): the first Tab stop on every Studio
+        page skips the ~15-control top bar to the page content. Visible only
+        while focused. --%>
+  <a href="#studio-content" class="bp-skip-link">{gettext("Skip to content")}</a>
   <%!-- Self-update bar: INSTANCE admins only (instance_admin? chrome flag —
         HOST-level, deliberately NOT the workspace-scoped shares_admin?: this
         bar offers to upgrade the BEAM every workspace runs on, so a host
@@ -120,6 +124,9 @@
 
   <.studio_flash flash={@flash} />
 
+  <%!-- The skip link's target: a zero-size focus anchor right before the page
+        content, so it lands past the top bar on every Studio page. --%>
+  <span id="studio-content" tabindex="-1" class="bp-skip-target"></span>
   {@inner_content}
 
   <%!-- Build-version footer: last child of the shell flex column, so it

@@ -58,11 +58,13 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   """
   attr :id, :string, default: nil
   attr :phx_hook, :string, default: nil
+  # The desk is the page's main region (task-50c06dba12b3e908); nil renders no role.
+  attr :role, :string, default: nil
   slot :inner_block, required: true
 
   def pane_layout(assigns) do
     ~H"""
-    <div class="pane-layout" id={@id} phx-hook={@phx_hook}>
+    <div class="pane-layout" id={@id} phx-hook={@phx_hook} role={@role}>
       <%= render_slot(@inner_block) %>
     </div>
     """
