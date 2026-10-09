@@ -64,18 +64,32 @@ describe('filter-builder', () => {
     expect(() => makeFilterExpression('tag', 'nin', [])).toThrow(BarkparkValidationError)
   })
 
+  it('nbetween requires an array of EXACTLY two bounds', () => {
+    expect(() => makeFilterExpression('_createdAt', 'nbetween', 'x' as any)).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => makeFilterExpression('_createdAt', 'nbetween', ['a'])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => makeFilterExpression('_createdAt', 'nbetween', ['a', 'b', 'c'])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() => makeFilterExpression('_createdAt', 'nbetween', [])).toThrow(
+      BarkparkValidationError,
+    )
+    expect(() =>
+      makeFilterExpression('_createdAt', 'nbetween', ['2026-01-01', '2026-01-02']),
+    ).not.toThrow()
+  })
+
   it('in()/nin() fail closed when a candidate value contains a comma', () => {
     // The wire format joins candidates with ',' and the server splits on it, so
     // `['A,B']` would silently become two candidates (A OR B) — throw instead.
-    expect(() => createDocsBuilder(async () => []).in('sku', ['A,B'])).toThrow(
-      /comma/,
-    )
+    expect(() => createDocsBuilder(async () => []).in('sku', ['A,B'])).toThrow(/comma/)
     expect(() => createDocsBuilder(async () => []).in('sku', ['A,B'])).toThrow(
       BarkparkValidationError,
     )
-    expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(
-      /comma/,
-    )
+    expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(/comma/)
     expect(() => createDocsBuilder(async () => []).nin('sku', ['A,B'])).toThrow(
       BarkparkValidationError,
     )
@@ -277,9 +291,7 @@ describe('filter-builder', () => {
     expect(() => makeFilterExpression('author', 'eq', { _ref: 'x' } as any)).toThrow(
       BarkparkValidationError,
     )
-    expect(() => makeFilterExpression('author', 'eq', { _ref: 'x' } as any)).toThrow(
-      /scalar value/,
-    )
+    expect(() => makeFilterExpression('author', 'eq', { _ref: 'x' } as any)).toThrow(/scalar value/)
     // Dates and primitives on scalar ops are still accepted.
     expect(() => makeFilterExpression('publishedAt', 'gt', new Date())).not.toThrow()
     expect(() => makeFilterExpression('title', 'eq', 'hello')).not.toThrow()

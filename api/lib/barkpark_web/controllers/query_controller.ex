@@ -1500,7 +1500,7 @@ defmodule BarkparkWeb.QueryController do
   # 400 `internal_error` reading "unknown error (Ecto.Query.CastError)" with a
   # "Retry shortly" hint — a permanently malformed request dressed as a
   # transient server fault. The rule is now stated once, from the list side.
-  @list_value_ops ~w(in nin)
+  @list_value_ops Content.Query.list_value_ops()
 
   # Returns nil when every clause is honourable, or the FIRST offence as either
   #   * `{field, op}` — an operator outside @valid_filter_ops, rendered by
@@ -1585,11 +1585,21 @@ defmodule BarkparkWeb.QueryController do
              "filter[#{field}][#{op}] takes a whole number (an array length), got " <>
                "#{inspect(Map.get(ops, op))}", %{field: field, op: op}}
 
+          # `nbetween` (task-cecd2cb193365b71) binds EXACTLY two bounds — a
+          # door-level check, same reason `hasStrong`/count ops get one: catch
+          # the malformed shape here with a specific message, rather than
+          # falling through to `Content.Query`'s own generic refusal.
+          Map.has_key?(ops, "nbetween") and not match?([_, _], Map.get(ops, "nbetween")) ->
+            {:clause,
+             "filter[#{field}][nbetween] takes exactly two bounds, a comma list (a,b) or " <>
+               "the repeated form filter[#{field}][nbetween][]=a&filter[#{field}][nbetween][]=b, " <>
+               "got #{inspect(Map.get(ops, "nbetween"))}", %{field: field, op: "nbetween"}}
+
           op = Enum.find(Map.keys(ops), &non_scalar_op_value?(ops, &1)) ->
             {:clause,
              "filter[#{field}][#{op}] takes a single value, not a list or object; " <>
-               "the list form filter[#{field}][#{op}][]=… is only valid for in/nin",
-             %{field: field, op: op}}
+               "the list form filter[#{field}][#{op}][]=… is only valid for " <>
+               Enum.join(@list_value_ops, "/"), %{field: field, op: op}}
 
           op = Enum.find(@list_value_ops, &non_list_op_value?(ops, &1)) ->
             {:clause,
@@ -2100,7 +2110,7 @@ defmodule BarkparkWeb.QueryController do
     end
   end
 
-  defp normalize_filter_op({op, csv}) when op in ["in", "nin"] and is_binary(csv) do
+  defp normalize_filter_op({op, csv}) when op in ["in", "nin", "nbetween"] and is_binary(csv) do
     {op, csv |> String.split(",", trim: true) |> Enum.map(&String.trim/1)}
   end
 

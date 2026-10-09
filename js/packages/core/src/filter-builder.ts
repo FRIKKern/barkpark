@@ -40,8 +40,10 @@ const VALID_OPS: readonly FilterOp[] = FILTER_OPS
 // here so `.where(f, 'is', true)` is a self-explaining client error instead of
 // an opaque 400 from the door.
 const IS_VALUES: readonly string[] = ['null', 'notnull']
-// Ops whose value is a list of candidates rather than a scalar.
-const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin']
+// Ops whose value is a list of candidates rather than a scalar. `nbetween`
+// binds exactly two bounds (an exclusion range), unlike `in`/`nin`'s
+// arbitrary-length list — checked separately below.
+const ARRAY_OPS: readonly FilterOp[] = ['in', 'nin', 'nbetween']
 
 /**
  * Eagerly validate `limit`/`offset` for the ad-hoc read paths (search + media
@@ -94,6 +96,13 @@ export function makeFilterExpression(
     )
   }
   if (arrayOp && Array.isArray(value)) {
+    // `nbetween` binds exactly two bounds (an exclusion range), unlike
+    // `in`/`nin`'s arbitrary-length candidate list.
+    if (op === 'nbetween' && value.length !== 2) {
+      throw new BarkparkValidationError(`'nbetween' needs 2 bounds, got ${value.length}`, {
+        field: 'value',
+      })
+    }
     // buildQueryString joins candidates with ',' (the wire format the server
     // splits on), so a comma inside a value would silently split into extra
     // candidates — `.in('sku', ['A,B'])` would query A OR B, not the literal
@@ -116,12 +125,7 @@ export function makeFilterExpression(
       { field: 'value', issues: [{ op, allowed: IS_VALUES }] },
     )
   }
-  if (
-    !arrayOp &&
-    value !== null &&
-    typeof value === 'object' &&
-    !(value instanceof Date)
-  ) {
+  if (!arrayOp && value !== null && typeof value === 'object' && !(value instanceof Date)) {
     // A non-Date object value has no meaningful filter wire form: buildQueryString
     // would `String(value)` it to the opaque '[object Object]' (so
     // `eq('author', {_ref:'x'})` becomes `filter[author][eq]=[object Object]`),

@@ -809,7 +809,7 @@ defmodule BarkparkWeb.Contract.FilterOpsTest do
     test "the door's operator list is DERIVED from the builder's, never re-spelled" do
       assert Content.Query.valid_filter_ops() ==
                ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is
-                  notContains nhas countEq countNeq countGt countGte countLt countLte)
+                  notContains nhas countEq countNeq countGt countGte countLt countLte nbetween)
 
       body =
         conn_for_ops()
