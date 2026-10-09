@@ -4909,7 +4909,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             name="src"
             class="bp-paper-edit-text"
             value={Blocks.form_value(Map.get(@block, "src"))}
-            placeholder="/media/video.mp4 or https://…"
+            placeholder={gettext("/media/video.mp4 or https://…")}
             data-test-id="paper-field-video-src"
           />
           <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}><%= gettext("Poster image") %></label>

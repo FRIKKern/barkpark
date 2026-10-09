@@ -10591,3 +10591,13 @@ msgstr "— Velg —"
 #, elixir-autogen, elixir-format
 msgid "— divider —"
 msgstr "— skillelinje —"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4912
+#, elixir-autogen, elixir-format
+msgid "/media/video.mp4 or https://…"
+msgstr "/media/video.mp4 eller https://…"
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:377
+#, elixir-autogen, elixir-format
+msgid "Search codes or labels…"
+msgstr "Søk i koder eller etiketter…"
