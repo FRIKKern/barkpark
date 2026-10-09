@@ -319,8 +319,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1350
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1357
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1978
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2205
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2277
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2209
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2281
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #, elixir-autogen, elixir-format
 msgid "Untitled"
@@ -423,9 +423,9 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:885
 #: lib/barkpark_web/components/studio_components/modals.ex:955
 #: lib/barkpark_web/components/studio_components/modals.ex:1016
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2191
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2253
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2309
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2195
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2257
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2313
 #: lib/barkpark_web/studio_locale.ex:101
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -491,7 +491,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor.ex:800
 #: lib/barkpark_web/components/studio_components/panes.ex:638
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2356
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2360
 #: lib/barkpark_web/studio_locale.ex:555
 #, elixir-autogen, elixir-format
 msgid "draft"
@@ -1488,8 +1488,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/connectors_live.ex:812
 #: lib/barkpark_web/live/studio/connectors_live.ex:1088
 #: lib/barkpark_web/live/studio/connectors_live.ex:1111
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2212
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2296
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2216
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2300
 #: lib/barkpark_web/studio_locale.ex:130
 #: lib/barkpark_web/studio_locale.ex:552
 #, elixir-autogen, elixir-format
@@ -2053,7 +2053,7 @@ msgstr ""
 msgid "(%{type}) was stored without a body block list and without saved HTML, so there is nothing here to show or edit yet. The document itself is intact — its metadata is in the panel beside this message."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2265
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2269
 #, elixir-autogen, elixir-format
 msgid "(unset)"
 msgstr ""
@@ -2073,12 +2073,12 @@ msgstr ""
 msgid "Back to %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2367
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2371
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2361
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2365
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
 msgstr ""
@@ -2093,7 +2093,7 @@ msgstr ""
 msgid "Context"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2264
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2268
 #, elixir-autogen, elixir-format
 msgid "Current canonical value:"
 msgstr ""
@@ -2119,7 +2119,7 @@ msgstr ""
 msgid "Desk breadcrumb"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2218
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2222
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and unpublish"
 msgstr ""
@@ -2295,7 +2295,7 @@ msgstr ""
 msgid "Share this workspace's media library"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2252
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2256
 #, elixir-autogen, elixir-format
 msgid "Shared value"
 msgstr ""
@@ -2349,7 +2349,7 @@ msgstr ""
 msgid "This %{type} ("
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2304
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2308
 #, elixir-autogen, elixir-format
 msgid "This value lives on a canonical document you do not have write access to. It can only be changed at its source."
 msgstr ""
@@ -2359,12 +2359,12 @@ msgstr ""
 msgid "This workspace has no public page for papers, so only members and share-link holders can read it."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2223
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2227
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2190
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2194
 #, elixir-autogen, elixir-format
 msgid "Unpublish document"
 msgstr ""
@@ -2380,19 +2380,19 @@ msgstr ""
 msgid "Visibility"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2298
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2302
 #, elixir-autogen, elixir-format
 msgid "Write to canonical"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2268
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2272
 #, elixir-autogen, elixir-format
 msgid "Writing to the canonical source changes %{count} doc:"
 msgid_plural "Writing to the canonical source changes %{count} docs:"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2196
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2200
 #, elixir-autogen, elixir-format
 msgid "is referenced by %{count} document. Unpublishing it will leave those references dangling:"
 msgid_plural "is referenced by %{count} documents. Unpublishing it will leave those references dangling:"
@@ -2406,7 +2406,7 @@ msgid "label"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/panes.ex:639
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2357
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2361
 #, elixir-autogen, elixir-format
 msgid "published"
 msgstr ""
@@ -8823,4 +8823,10 @@ msgstr ""
 #: lib/barkpark_web/studio/structure_copy.ex:74
 #, elixir-autogen, elixir-format
 msgid "…Rest"
+msgstr ""
+
+#: lib/barkpark_web/components/studio_components/editor.ex:717
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1995
+#, elixir-autogen, elixir-format
+msgid "More actions"
 msgstr ""

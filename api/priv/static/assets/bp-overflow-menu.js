@@ -97,7 +97,8 @@
       btn.className = "bp-overflow-trigger";
       btn.setAttribute("aria-haspopup", "menu");
       btn.setAttribute("aria-expanded", "false");
-      btn.setAttribute("aria-label", "More actions");
+      // The host stamps the word in the viewer's language; English otherwise.
+      btn.setAttribute("aria-label", this.getAttribute("data-label") || "More actions");
       btn.textContent = "•••";
       btn.dataset.overflowSkip = "true";
       btn.style.display = "none";

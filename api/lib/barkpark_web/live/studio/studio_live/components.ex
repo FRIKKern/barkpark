@@ -1990,7 +1990,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       leaving Beta (task-fc4102c1e2f9b606). The two that toggle a
                       Classic-only panel are left out: Beta has no diff or
                       content-preview pane to show. --%>
-                <bp-overflow-menu class="bp-overflow-menu" data-test-id="studio-beta-doc-actions">
+                <bp-overflow-menu
+                  class="bp-overflow-menu"
+                  data-label={gettext("More actions")}
+                  data-test-id="studio-beta-doc-actions"
+                >
                   <%= for action <- beta_doc_actions(assigns) do %>
                     <.doc_action_button
                       action={action}
