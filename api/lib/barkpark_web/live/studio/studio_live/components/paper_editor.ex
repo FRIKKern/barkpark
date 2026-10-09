@@ -2365,7 +2365,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <input type="hidden" name="paper-link-ref-slug" value={@card.admission.slug} />
       <input type="hidden" name="paper-link-ref-field" value={@field} />
       <input type="hidden" name="paper-link-ref-guard" value={@card.admission.guard} />
-      <label class="sr-only" for={@dom_id}>Related paper <%= @field %></label>
+      <label class="sr-only" for={@dom_id}><%= gettext("Related paper %{field}", field: @field) %></label>
       <textarea
         id={@dom_id}
         name="paper-link-ref-value"
@@ -2618,7 +2618,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-code-emphasis-row"
                   data-emphasis-index={index}
                 >
-                  <legend>Range <%= index + 1 %></legend>
+                  <legend><%= gettext("Range %{n}", n: index + 1) %></legend>
                   <%= if is_map(range) do %>
                     <label class="bp-paper-edit-fieldlabel" for={"emphasis-#{index}-from-#{@id}"}><%= gettext("First line") %></label>
                     <input id={"emphasis-#{index}-from-#{@id}"} type="text" inputmode="numeric"
@@ -3400,7 +3400,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-api-endpoint-param-row"
                   data-param-index={index}
                 >
-                  <legend>Parameter <%= index + 1 %></legend>
+                  <legend><%= gettext("Parameter %{n}", n: index + 1) %></legend>
                   <%= if is_map(param) do %>
                     <label class="bp-paper-edit-fieldlabel">
                       <%= gettext("Name") %>
@@ -3492,7 +3492,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-toc-row"
                   data-toc-index={index}
                 >
-                  <legend>Entry <%= index + 1 %></legend>
+                  <legend><%= gettext("Entry %{n}", n: index + 1) %></legend>
                   <%= if is_map(item) do %>
                     <label class="bp-paper-edit-fieldlabel" for={"toc-#{index}-text-#{@id}"}><%= gettext("Text") %></label>
                     <input id={"toc-#{index}-text-#{@id}"} type="text" name={"toc-#{index}-text"}
@@ -3566,7 +3566,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-criteria-progress-row"
                   data-criterion-index={index}
                 >
-                  <legend>Criterion <%= index + 1 %></legend>
+                  <legend><%= gettext("Criterion %{n}", n: index + 1) %></legend>
                   <%= if is_map(row) do %>
                     <label class="bp-paper-edit-fieldlabel" for={"criterion-#{index}-label-#{@id}"}><%= gettext("Label") %></label>
                     <input id={"criterion-#{index}-label-#{@id}"} type="text"
@@ -3774,7 +3774,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="section-new-child-id" value={Blocks.new_block_id()} />
                   <p :if={SectionLayout.grid(@block)} class="bp-paper-edit-readonly" data-test-id="paper-section-grid-order-note"><%= gettext("Move changes source order; existing grid placement is retained.") %></p>
                   <fieldset :for={{child, index} <- Enum.with_index(@block["blocks"])} class="bp-paper-edit-form">
-                    <legend>Child <%= index + 1 %> · <%= child["type"] %></legend>
+                    <legend><%= gettext("Child %{n} · %{type}", n: index + 1, type: child["type"]) %></legend>
                     <input type="hidden" name={"section-child-#{index}-id"} value={child["id"]} />
                     <button type="submit" name="section-action" value={"up:" <> child["id"]} disabled={index == 0} class="btn btn-ghost btn-sm"><%= gettext("Move up") %></button>
                     <button type="submit" name="section-action" value={"down:" <> child["id"]} disabled={index == length(@block["blocks"]) - 1} class="btn btn-ghost btn-sm"><%= gettext("Move down") %></button>
@@ -3841,14 +3841,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="column-new-child-id" value={Blocks.new_block_id()} />
                   <button type="submit" name="column-action" value="add-column" class="btn btn-ghost btn-sm"><%= gettext("Add column") %></button>
                   <fieldset :for={{column, column_index} <- Enum.with_index(@block["columns"])} class="bp-paper-edit-form" data-column-index={column_index}>
-                    <legend>Column <%= column_index + 1 %></legend>
+                    <legend><%= gettext("Column %{n}", n: column_index + 1) %></legend>
                     <input type="hidden" name={"column-#{column_index}-child-count"} value={length(column)} />
                     <% remove_reason = column_track_remove_reason(@block["columns"], column_index) %>
                     <% remove_reason_id = column_track_remove_reason_id(@id, column_index) %>
                     <button type="submit" name="column-action" value={"remove-column:#{column_index}"} disabled={not is_nil(remove_reason)} aria-describedby={remove_reason && remove_reason_id} class="btn btn-destructive btn-sm"><%= gettext("Remove column") %></button>
                     <span :if={remove_reason} id={remove_reason_id} class="bp-paper-lock-note" data-test-id="paper-column-remove-reason"><%= remove_reason %></span>
                     <div :for={{child, child_index} <- Enum.with_index(column)} class="bp-paper-edit-actions">
-                      <span>Child <%= child_index + 1 %> · <%= child["type"] %></span>
+                      <span><%= gettext("Child %{n} · %{type}", n: child_index + 1, type: child["type"]) %></span>
                       <input type="hidden" name={"column-#{column_index}-child-#{child_index}-id"} value={child["id"]} />
                       <button type="submit" name="column-action" value={"up:#{column_index}:#{child["id"]}"} disabled={child_index == 0} class="btn btn-ghost btn-sm"><%= gettext("Move up") %></button>
                       <button type="submit" name="column-action" value={"down:#{column_index}:#{child["id"]}"} disabled={child_index == length(column) - 1} class="btn btn-ghost btn-sm"><%= gettext("Move down") %></button>
@@ -3914,7 +3914,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   data-test-id="paper-link-ref-row"
                   data-ref-index={index}
                 >
-                  <legend>Reference <%= index + 1 %></legend>
+                  <legend><%= gettext("Reference %{n}", n: index + 1) %></legend>
                   <% reference_copy_admission =
                     Blocks.paper_link_reference_copy_admission(@block, index) %>
                   <label class="bp-paper-edit-fieldlabel">
@@ -4063,7 +4063,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                     class="bp-paper-edit-form"
                     data-test-id="paper-form-question"
                   >
-                    <legend>Question <%= index + 1 %></legend>
+                    <legend><%= gettext("Question %{n}", n: index + 1) %></legend>
                     <input
                       type="hidden"
                       name={"question-#{index}-original-id"}
@@ -4127,7 +4127,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         class="bp-paper-edit-form"
                         data-test-id="paper-form-option"
                       >
-                        <legend>Option <%= option_index + 1 %></legend>
+                        <legend><%= gettext("Option %{n}", n: option_index + 1) %></legend>
                         <label class="bp-paper-edit-fieldlabel">
                           <%= gettext("Label") %>
                           <input
@@ -4308,7 +4308,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="panel-new-child-id" value={Blocks.new_block_id()} />
                   <fieldset :for={{row, index} <- Enum.with_index(editable_tab_rows(@block))}
                             class="bp-paper-edit-form">
-                    <legend>Panel <%= index + 1 %></legend>
+                    <legend><%= gettext("Panel %{n}", n: index + 1) %></legend>
                     <input type="hidden" name={"panel-#{index}-id"} value={row["id"]} />
                     <label class="bp-paper-edit-fieldlabel">
                       <%= gettext("Label") %>
@@ -4429,7 +4429,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 <input type="hidden" name="step-new-row-id" value={Blocks.new_block_id()} />
                 <input type="hidden" name="step-new-child-id" value={Blocks.new_block_id()} />
                 <fieldset :for={{row, index} <- Enum.with_index(editable_step_rows(@block))}>
-                  <legend>Step <%= index + 1 %></legend>
+                  <legend><%= gettext("Step %{n}", n: index + 1) %></legend>
                   <input type="hidden" name={"step-#{index}-id"} value={row["id"]} />
                   <button type="button" class="btn btn-ghost btn-sm"
                           phx-click={contextual_panel_focus(step_title_dom_id(@id, row["id"]))}
@@ -4616,7 +4616,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                   <input type="hidden" name="gauge-count" value={length(Blocks.gauge_list_rows(@block))} />
                   <fieldset :for={{row, index} <- Enum.with_index(Blocks.gauge_list_rows(@block))}
                             class="bp-paper-edit-form" data-test-id="paper-gauge-list-row">
-                    <legend>Gauge <%= index + 1 %></legend>
+                    <legend><%= gettext("Gauge %{n}", n: index + 1) %></legend>
                       <label class="bp-paper-edit-fieldlabel" for={"gauge-#{index}-label-#{@id}"}><%= gettext("Label") %></label>
                       <input id={"gauge-#{index}-label-#{@id}"} type="text" name={"gauge-#{index}-label"}
                              class="bp-paper-edit-text" value={Blocks.form_value(Map.get(row, "label"))} />
@@ -4922,7 +4922,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-video-caption-row"
             data-caption-index={index}
           >
-            <legend>Caption track <%= index + 1 %></legend>
+            <legend><%= gettext("Caption track %{n}", n: index + 1) %></legend>
             <div :if={is_map(caption)} class="bp-paper-edit-form">
               <label class="bp-paper-edit-fieldlabel" for={"video-caption-lang-#{@id}-#{index}"}>
                 <%= gettext("Language") %>
