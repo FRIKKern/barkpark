@@ -209,8 +209,15 @@ defmodule Barkpark.PortableDoc.Render do
   # A standalone export has NO `html[data-theme]` ancestor, so the stylesheet's
   # unscoped `.bp-paper-surface` fallback token block paints its LIGHT values;
   # dark mode only engages under a host that stamps `data-theme` on an ancestor.
+  #
+  # The export therefore stamps that ancestor itself: `data-theme="light"`. The
+  # `--paper-*` ground follows only `data-theme`, but the status tones and the
+  # `--ok/--warn` hues also follow `prefers-color-scheme`, so with no data-theme a
+  # dark-mode OS painted dark tones on this light paper ("done" #2dd4bf on
+  # #f6faf9, 1.76:1). The explicit-light rules outrank the media query
+  # (task-0282e7bb116faf7c).
   defp document(body, %{style: :article} = palette) do
-    ~s(<!doctype html><html><head><meta charset="utf-8"><style>) <>
+    ~s(<!doctype html><html data-theme="light"><head><meta charset="utf-8"><style>) <>
       Stylesheet.css() <>
       ~s(</style></head>) <>
       ~s(<body class="bp-paper-surface" style="background:#{palette.bg};margin:0;padding:0;">) <>

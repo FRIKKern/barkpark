@@ -49,7 +49,7 @@ defmodule Barkpark.PortableDoc.Render.DocumentTest do
       # bg keeps its `var(--paper-bg-deep, …)` inline value as the no-CSS
       # fallback; frozen here too.
       expected =
-        "<!doctype html><html><head><meta charset=\"utf-8\"><style>" <>
+        "<!doctype html><html data-theme=\"light\"><head><meta charset=\"utf-8\"><style>" <>
           Stylesheet.css() <>
           "</style></head>" <>
           "<body class=\"bp-paper-surface\" style=\"background:var(--paper-bg-deep, #eaf1ee);margin:0;padding:0;\">" <>
@@ -57,6 +57,44 @@ defmodule Barkpark.PortableDoc.Render.DocumentTest do
           "</body></html>"
 
       assert Render.render_html(@trivial, %{style: :article}) == expected
+    end
+
+    # task-0282e7bb116faf7c: the export is a light paper, whatever the viewer's
+    # OS scheme. It pins data-theme="light", and that pin only holds if every
+    # custom property a `prefers-color-scheme: dark` block sets on the surface
+    # has an explicit-light twin to outrank it.
+    test "the article document pins the light theme, and the pin covers every dark-media token" do
+      out = Render.render_html(@trivial, %{style: :article})
+      assert String.starts_with?(out, ~s(<!doctype html><html data-theme="light">))
+
+      css = Stylesheet.css()
+
+      props = fn block ->
+        Regex.scan(~r/(--[a-z0-9-]+)\s*:/, block, capture: :all_but_first)
+        |> List.flatten()
+        |> MapSet.new()
+      end
+
+      dark_media =
+        Regex.scan(
+          ~r/@media \(prefers-color-scheme: dark\)\s*\{\s*\.bp-paper-surface, \.bp-paper-body \{([^}]*)\}/,
+          css,
+          capture: :all_but_first
+        )
+        |> List.flatten()
+
+      explicit_light =
+        Regex.scan(~r/html\[data-theme="light"\] \.bp-paper-surface[^{]*\{([^}]*)\}/, css,
+          capture: :all_but_first
+        )
+        |> List.flatten()
+
+      assert dark_media != [], "the stylesheet has dark-media surface blocks to check"
+      flipped = dark_media |> Enum.map(props) |> Enum.reduce(MapSet.new(), &MapSet.union/2)
+      pinned = explicit_light |> Enum.map(props) |> Enum.reduce(MapSet.new(), &MapSet.union/2)
+      assert MapSet.size(flipped) > 0
+      assert MapSet.difference(flipped, pinned) |> MapSet.to_list() == []
+      assert MapSet.member?(flipped, "--st-ok") and MapSet.member?(pinned, "--st-ok")
     end
 
     test "the article document contains the full Stylesheet.css() bytes verbatim" do
