@@ -17,9 +17,11 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   ## Event → op routing
 
     * `:after_save`      — a doc was created/updated → REBUILD op (flag OFF,
-      default) | UPSERT op (flag ON)
-    * `:after_publish`   — a draft was published     → REBUILD op (flag OFF,
-      default) | UPSERT op (flag ON)
+      default) | UPSERT op (flag ON) — debounced (autosave bursts collapse).
+    * `:after_publish`   — a draft was published      → SYNCHRONOUS per-doc
+      UPSERT, inline, before this hook returns (task-3fd3c0c53d08a6bd — see
+      below). Falls back to the debounced path (same as `:after_save`) on any
+      failure, so the graph is never left stale.
     * `:after_unpublish` — a published doc went back to draft → DELETE op
       (always — the published graph must stop showing it the moment it leaves
       published state; the next publish re-projects it). Modelled as a delete,
@@ -28,16 +30,50 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
 
   ## The feature flag (default OFF)
 
-  `Settings.get().incremental_project` gates the add/update path ONLY:
+  `Settings.get().incremental_project` gates the `:after_save` add/update path
+  ONLY:
 
-    * OFF (the DEFAULT) → save/publish take the deterministic full per-scope
-      REBUILD path. Inert incremental path.
-    * ON  → save/publish route to the per-document incremental UPSERT op. A
-      mis-diff strands stale edges in the durable table (no blue/green to
-      discard, unlike Indx) — UNPROVEN, spike-gated.
+    * OFF (the DEFAULT) → save takes the deterministic full per-scope REBUILD
+      path. Inert incremental path.
+    * ON  → save routes to the per-document incremental UPSERT op. A mis-diff
+      strands stale edges in the durable table (no blue/green to discard,
+      unlike Indx) — UNPROVEN, spike-gated.
 
-  delete/unpublish are ALWAYS incremental (no flag): the doc's edges just need
-  to be GONE.
+  `:after_publish` no longer reads this flag (see below) — it always runs the
+  bounded per-doc upsert, synchronously. delete/unpublish are ALWAYS
+  incremental (no flag): the doc's edges just need to be GONE.
+
+  ## Why `:after_publish` is synchronous (task-3fd3c0c53d08a6bd)
+
+  Both `:after_save` and `:after_publish` used to share the SAME 5-second
+  debounced `ProjectorWorker` job (`@debounce_seconds` there). That gave
+  neither direction of an edge change (add OR remove) any promptness
+  GUARANTEE: `publish_document/4` — and the broadcast/listen-frame it fires —
+  returned the instant the job was *enqueued*, long before the job *ran*.
+
+  Measured (barkpark-studio, guerrilla e2e-sanity, 2026-10-09): a reference
+  change looked "prompt" (visible in well under 50ms) on some docs and
+  "laggy" (3-6s) on others. The difference was never the write path (`patch`
+  vs `createOrReplace` — both resolve to the SAME stable published-row PK;
+  `Projector.upsert_record/2` diffs and prunes correctly either way, confirmed
+  directly). It was purely Oban's own unique-job dedup: `ProjectorWorker`
+  dedups `(op, …, _id, types)` across `:available`/`:scheduled`/`:executing`,
+  so repeated writes to the same doc within the SAME 5s window are silently
+  swallowed (no new schedule) — meaning the APPARENT latency any later read
+  observes is just "however much of some EARLIER job's window happened to be
+  left," which can look anywhere from instant (a stale, nearly-due job) to a
+  full fresh 5s (a job that just (re)armed on the most recent write). A doc
+  that received an extra write shortly before the one under test (e.g. a
+  `createOrReplace` re-save) simply re-armed a fresh window right before the
+  measurement, while a doc with only one prior write often had an already-due
+  job by the time it was measured — same mechanism, different luck.
+
+  The fix makes `:after_publish` NOT rely on that luck: it runs
+  `Projector.upsert_record/2` for the one just-published doc inline, so by the
+  time `publish_document/4` returns, `content_edges` already reflects both the
+  new edge and the pruned stale one. This is safe to always run (regardless of
+  the `incremental_project` flag) because it is bounded to ONE document's own
+  extract + diff — not a corpus-wide rebuild.
 
   ## Recursion guard
 
@@ -51,11 +87,13 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
 
   require Logger
 
+  alias Barkpark.EdgeProjector.Projector
   alias Barkpark.EdgeProjector.ProjectorWorker
   alias Barkpark.EdgeProjector.Settings
+  alias Barkpark.Tenancy
 
   @after_events [:after_save, :after_publish, :after_unpublish, :after_delete]
-  @rebuild_events [:after_save, :after_publish]
+  @save_events [:after_save]
   @delete_events [:after_unpublish, :after_delete]
 
   @doc """
@@ -67,9 +105,12 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
     * a payload with no resolvable dataset
 
   Routes:
-    * `:after_save` / `:after_publish` → debounced REBUILD job (flag OFF,
-      default) or debounced UPSERT job carrying the doc `_id` (flag ON);
-      falls through to a rebuild when ON if the doc has no resolvable `_id`.
+    * `:after_save` → debounced REBUILD job (flag OFF, default) or debounced
+      UPSERT job carrying the doc `_id` (flag ON); falls through to a rebuild
+      when ON if the doc has no resolvable `_id`.
+    * `:after_publish` → SYNCHRONOUS per-doc upsert, inline (see moduledoc);
+      falls back to the same debounced path as `:after_save` on any failure
+      or a doc with no resolvable `_id`.
     * `:after_unpublish` / `:after_delete` → debounced DELETE job (carries the
       doc `_id`); falls through to a rebuild only if the doc has no resolvable
       `_id`.
@@ -87,7 +128,10 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       event in @delete_events ->
         do_enqueue_delete(doc, dataset)
 
-      event in @rebuild_events ->
+      event == :after_publish ->
+        route_publish(doc, dataset)
+
+      event in @save_events ->
         route_save(doc, dataset)
 
       true ->
@@ -117,6 +161,69 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
       do_enqueue_rebuild(doc, dataset)
     end
   end
+
+  # PUBLISH: a bounded, synchronous per-doc upsert — no flag, no debounce (see
+  # moduledoc, task-3fd3c0c53d08a6bd). A doc with no resolvable `_id` cannot be
+  # targeted at all, so it takes the same debounced-rebuild fallback `:after_save`
+  # uses. A resolvable doc that fails to upsert synchronously (a raised
+  # exception, or `{:error, _}` from the projector) falls back to the
+  # debounced per-doc upsert job rather than losing the write outright — the
+  # graph ends up correct a little late instead of not at all.
+  defp route_publish(doc, dataset) do
+    case doc_id(doc) do
+      id when is_binary(id) and id != "" ->
+        case upsert_now(doc, id, dataset) do
+          :ok -> :ok
+          :fallback -> do_enqueue_upsert(doc, dataset)
+        end
+
+      _ ->
+        do_enqueue_rebuild(doc, dataset)
+    end
+  end
+
+  defp upsert_now(doc, id, dataset) do
+    ws = scope_field(doc, :workspace_id)
+
+    project_opts =
+      [dataset: dataset]
+      |> maybe_scope(:workspace_id, ws)
+      |> maybe_scope(:project_id, scope_field(doc, :project_id))
+      |> maybe_scope(:require_workspace, require_workspace?(ws))
+
+    case Projector.upsert_record(doc, project_opts) do
+      {:ok, %{added: added, removed: removed}} ->
+        Logger.info(
+          "EdgeProjector.Lifecycle: synchronous publish-upsert _id=#{id} dataset=#{dataset} " <>
+            "added=#{added} removed=#{removed}"
+        )
+
+        :ok
+
+      {:error, reason} ->
+        Logger.error(
+          "EdgeProjector.Lifecycle: synchronous publish-upsert FAILED for _id=#{id} " <>
+            "dataset=#{dataset}: #{inspect(reason)} — falling back to the debounced path"
+        )
+
+        :fallback
+    end
+  rescue
+    e ->
+      Logger.error(
+        "EdgeProjector.Lifecycle: synchronous publish-upsert RAISED for _id=#{id} " <>
+          "dataset=#{dataset}, falling back to the debounced path: " <> Exception.message(e)
+      )
+
+      :fallback
+  end
+
+  # Mirrors `ProjectorWorker`'s own `require_workspace?/1`: a nil workspace in
+  # a multi-tenant install fails the endpoint resolution closed rather than
+  # resolving across tenants; a single-tenant install (or a resolved
+  # workspace) keeps the or-global back-compat resolution.
+  defp require_workspace?(nil), do: Tenancy.multi_tenant?()
+  defp require_workspace?(ws) when is_binary(ws), do: false
 
   defp incremental_project? do
     Settings.get().incremental_project == true
