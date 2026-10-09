@@ -31,6 +31,8 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
             },
             %{"name" => "mainImage", "type" => "image"},
             %{"name" => "gallery", "type" => "arrayOf", "of" => %{"type" => "image"}},
+            %{"name" => "attachment", "type" => "file"},
+            %{"name" => "attachments", "type" => "arrayOf", "of" => %{"type" => "file"}},
             %{"name" => "details", "type" => "object"},
             %{"name" => "secret", "type" => "reference", "private" => true},
             %{"name" => "description", "type" => "string", "private" => true}
@@ -131,6 +133,34 @@ defmodule BarkparkWeb.Contract.BacklinksLiveTest do
 
     assert Map.new(rows, &{&1["from_doc_id"], &1["via_field"]}) ==
              %{"scalar-image" => "mainImage", "gallery-image" => "gallery"}
+  end
+
+  test "a file field's asset ref is found, same shape as image (task-7150f77eb6fbc640)" do
+    # A post whose `file` field "attachment" holds {asset: {_ref}} was
+    # invisible to backlinks entirely (#22042 added the image/arrayOf-image
+    # arms, not file) -- confirmed live: filter[_references]=<id> (the
+    # generic cross-field filter, task-cecd2cb193365b71) matched it, but
+    # backlinks did not.
+    draft!("scalar-file", %{"attachment" => %{"asset" => %{"_ref" => "target"}}})
+
+    draft!("gallery-file", %{
+      "attachments" => [
+        %{"asset" => %{"_ref" => "target"}},
+        %{"asset" => %{"_ref" => "other-asset"}}
+      ]
+    })
+
+    draft!("unrelated-file", %{"attachment" => %{"asset" => %{"_ref" => "other-asset"}}})
+
+    assert %{"count" => 2, "backlinks" => rows} = backlinks("target")
+
+    assert Enum.sort(Enum.map(rows, & &1["from_doc_id"])) == [
+             "gallery-file",
+             "scalar-file"
+           ]
+
+    assert Map.new(rows, &{&1["from_doc_id"], &1["via_field"]}) ==
+             %{"scalar-file" => "attachment", "gallery-file" => "attachments"}
   end
 
   test "draft and published twins plus two projected edges produce one card" do
