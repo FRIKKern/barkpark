@@ -39,6 +39,7 @@ defmodule BarkparkWeb.ElevatedTokenController do
              label: params["label"],
              permissions: perms,
              dataset: fetch_dataset(params),
+             dataset_bound: dataset_named?(params),
              expires_at: expiry
            ) do
       conn
@@ -135,6 +136,13 @@ defmodule BarkparkWeb.ElevatedTokenController do
   end
 
   defp fetch_dataset(_), do: "production"
+
+  # Named dataset = a binding the caller asked for; the fallback is a default
+  # (task-4418b517649a58ce). `nil` when absent: unbound, as every legacy row.
+  defp dataset_named?(%{"dataset" => dataset}) when is_binary(dataset),
+    do: if(String.trim(dataset) == "", do: nil, else: true)
+
+  defp dataset_named?(_), do: nil
 
   defp fetch_expiry(params) do
     case {Map.get(params, "expires_at"), Map.get(params, "no_expiry")} do

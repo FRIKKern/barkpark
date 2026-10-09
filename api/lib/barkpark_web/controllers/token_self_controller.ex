@@ -24,6 +24,9 @@ defmodule BarkparkWeb.TokenSelfController do
       permissions: token.permissions || [],
       tier: TenancyAuth.tier_of(token),
       dataset: token.dataset,
+      # true = the token is refused on every other dataset; false = `dataset`
+      # is only the mint default and binds nothing (task-4418b517649a58ce).
+      dataset_bound: token.dataset_bound == true,
       expires_at: token.expires_at,
       workspace: workspace(ws_id),
       seat: seat(token, ws_id)
