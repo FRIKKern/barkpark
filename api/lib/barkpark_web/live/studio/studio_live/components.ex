@@ -2184,6 +2184,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <div
           class="delete-modal"
           data-test-id="unpublish-guard-modal"
+          id="unpublish-guard-dialog"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="unpublish-guard-modal-title"
@@ -2213,7 +2215,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               </div>
             </div>
             <div class="delete-modal-actions">
-              <button class="btn btn-sm" phx-click="close-unpublish-guard">{gettext("Cancel")}</button>
+              <button class="btn btn-sm" phx-click="close-unpublish-guard" data-modal-focus>{gettext("Cancel")}</button>
               <button
                 class="btn btn-sm"
                 phx-click="confirm-unpublish"
@@ -2246,6 +2248,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <div
           class="delete-modal"
           data-test-id="valueref-writeback-modal"
+          id="valueref-writeback-dialog"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="valueref-writeback-modal-title"
@@ -2295,6 +2299,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   class="form-input"
                   value={@valueref_panel.current_value}
                   autocomplete="off"
+                  data-modal-focus
                 />
                 <div class="delete-modal-actions" style="margin-top: 12px;">
                   <button type="button" class="btn btn-sm" phx-click="valueref-writeback-close">{gettext("Cancel")}</button>
