@@ -77,7 +77,7 @@ Go TUI is **read-only** for v1 plugin schemas: v2 docs render as JSON, editor me
 ## Code anchors
 
 - `api/lib/barkpark/content/schema_definition.ex` — `parse/2`, `flat?/1`, `plugin_custom_prefix/0`, `plugin_reserved_prefix/0`; `Field.surface` + `parse_field_surface/1` (the sidebar test)
-- `api/lib/barkpark/content/validation.ex` — `validate/3`, flat_mode dispatch
+- `api/lib/barkpark/content/validation.ex` — `validate/3`, `check_findings/3`, flat_mode
 - `api/lib/barkpark/content/validation/rules.ex` — `Rules.compile/1`
 - `api/lib/barkpark/content/codelists.ex` — `register/3`, `get/2`, `lookup/3`, `tree/2`
 - `api/lib/barkpark/content/localized_text.ex` — `LocalizedText.resolve/2`
