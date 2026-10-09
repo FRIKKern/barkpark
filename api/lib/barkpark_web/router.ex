@@ -400,15 +400,23 @@ defmodule BarkparkWeb.Router do
   # `conn.path_params["workspace_slug"]` is absent, and EVERY :scoped_api route
   # is mounted under /w/:workspace_slug, so the predicate is false on this
   # pipeline by construction.
+  # task-2366a212d58a1700 — `strict_on_presented: true` on BOTH branches: a
+  # PRESENTED-but-invalid bearer (revoked, expired, never existed) halts 401
+  # here instead of silently degrading to anonymous and letting
+  # `ResolveWorkspace` answer the misleading 403 `not_a_member` every
+  # anonymous caller gets. Each plug's own `strict_on_presented` fallback
+  # (a valid session, or a valid `:current_user`, recovering the request) is
+  # unchanged — this only tightens the ONE row that used to fall all the
+  # way through to pure anonymous.
   defp scoped_api_optional_credential(%Plug.Conn{} = conn, _opts) do
     if cookie_credential_admissible?(conn) do
       conn
       |> Plug.Conn.fetch_session()
-      |> BarkparkWeb.Plugs.OptionalSessionToken.call([])
+      |> BarkparkWeb.Plugs.OptionalSessionToken.call(strict_on_presented: true)
     else
       BarkparkWeb.Plugs.OptionalToken.call(
         conn,
-        BarkparkWeb.Plugs.OptionalToken.init([])
+        BarkparkWeb.Plugs.OptionalToken.init(strict_on_presented: true)
       )
     end
   end
@@ -501,7 +509,10 @@ defmodule BarkparkWeb.Router do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict: a revoked/expired bearer halts 401 here
+    # instead of degrading to anonymous and landing on ResolveWorkspace's
+    # misleading not_a_member 403. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareScope, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -547,7 +558,10 @@ defmodule BarkparkWeb.Router do
     plug(:accepts, ["json"])
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict: a revoked/expired bearer halts 401 here
+    # instead of degrading to anonymous and landing on ResolveWorkspace's
+    # misleading not_a_member 403. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :docs)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -585,7 +599,9 @@ defmodule BarkparkWeb.Router do
     # session (browser Studio member), so the membership gate below sees a
     # session-only browser member too — and a bearer edit token reaches
     # RequireShareEditToken. Anon passes through to be denied by ResolveWorkspace.
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict: a PRESENTED-but-invalid bearer (revoked,
+    # expired) halts 401 here instead; a valid session still recovers it.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     plug(BarkparkWeb.Plugs.RequireShareEditToken, surface: :media)
     plug(BarkparkWeb.Plugs.ResolveWorkspace)
     plug(BarkparkWeb.Plugs.ResolveProject)
@@ -898,7 +914,13 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
     plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
     plug(BarkparkWeb.Plugs.RateLimit)
-    plug(BarkparkWeb.Plugs.OptionalSessionToken)
+    # task-2366a212d58a1700 — strict, the SAME fix `:api_grant_read` already
+    # carries for its sibling flat pipeline: this bucket falls to
+    # AssignDefaultScope's Default-workspace branch for anything that isn't a
+    # verified token (see the DeriveWorkspaceFromToken comment below), so a
+    # revoked/expired bearer must halt here rather than silently resolve
+    # Default. A valid session still recovers it, unchanged.
+    plug(BarkparkWeb.Plugs.OptionalSessionToken, strict_on_presented: true)
     # TENANCY (task-298e4a93456b1fc3). This bucket was hand-copied from `:api`'s
     # SHAPE and missed the ONE line that makes that shape safe. Its sibling
     # `:token_root` is `[:api, :require_token, ...]`, so it INHERITS this plug;
