@@ -489,7 +489,8 @@ defmodule BarkparkWeb.AppTokenController do
       # above stays — it is what the token acts through.
       case Auth.create_token(raw, label, dataset, permissions, workspace.id,
              class: :app,
-             owner_user_id: user.id
+             owner_user_id: user.id,
+             dataset_bound: dataset_named?(params)
            ) do
         {:ok, minted} ->
           # Credential lifecycle event (the `revoke_token` twin): THAT a mint
@@ -666,6 +667,15 @@ defmodule BarkparkWeb.AppTokenController do
     do: dataset
 
   defp fetch_dataset(_), do: "production"
+
+  # A NAMED dataset is a binding the caller asked for (task-4418b517649a58ce);
+  # the "production" fallback above is a default, never a binding. `nil`, not
+  # `false`, when absent, so an unbound app token reads exactly like every row
+  # minted before the column existed.
+  defp dataset_named?(%{"dataset" => dataset}) when is_binary(dataset) and dataset != "",
+    do: true
+
+  defp dataset_named?(_), do: nil
 
   defp unprocessable(conn, message) do
     conn

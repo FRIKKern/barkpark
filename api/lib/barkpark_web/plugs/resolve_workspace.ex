@@ -96,6 +96,7 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
       %Tenancy.Workspace{} = workspace ->
         conn
         |> authorize(workspace, opts)
+        |> refuse_off_binding()
         |> refuse_if_archived()
 
       _ ->
@@ -137,6 +138,22 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   end
 
   defp refuse_if_archived(conn), do: conn
+
+  # DATASET-BOUND TOKENS (task-4418b517649a58ce). Every scoped pipeline
+  # resolves its credential (`OptionalToken` or `OptionalSessionToken`, bearer
+  # or session) before this plug. So the fence lives here once for all of
+  # `/w/:workspace_slug/p/:project_slug/...`: a token minted with an explicit
+  # `dataset` is refused on any other dataset. Unbound tokens (NULL — every
+  # legacy row) pass untouched. The predicate is `RequireToken`'s, so both
+  # doors refuse identically. It runs AFTER admission, like the archive check:
+  # a caller the membership gate refused keeps its own 403 reason.
+  defp refuse_off_binding(%Plug.Conn{halted: true} = conn), do: conn
+
+  defp refuse_off_binding(conn) do
+    if BarkparkWeb.Plugs.RequireToken.dataset_off_binding?(conn, conn.assigns[:api_token]),
+      do: halt_envelope(conn, {:error, :forbidden_dataset}),
+      else: conn
+  end
 
   defp authorize(conn, workspace, opts) do
     token = conn.assigns[:api_token]

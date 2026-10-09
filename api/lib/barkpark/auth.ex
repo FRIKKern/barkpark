@@ -948,6 +948,7 @@ defmodule Barkpark.Auth do
       name: old.name,
       kind: old.kind,
       dataset: old.dataset,
+      dataset_bound: old.dataset_bound,
       permissions: old.permissions,
       workspace_id: old.workspace_id,
       share_scope: old.share_scope,
@@ -1395,6 +1396,10 @@ defmodule Barkpark.Auth do
       exactly what it minted before this option existed.
     * `:class` — `:api` / `:share` / `:app`; inferred from `permissions` when
       absent (`public-read` → `:share`). The app-token mint passes `:app`.
+    * `:dataset_bound` — `true` when the mint request NAMED `dataset`; the
+      token is then refused on every other dataset
+      (`BarkparkWeb.Plugs.RequireToken.dataset_off_binding?/2`). Absent → NULL,
+      unbound, today's behaviour (task-4418b517649a58ce).
     * `:actor` — the minting principal. `:no_expiry` is admitted only when it
       is an `%ApiToken{}` holding the flat `"admin"` permission, and the mint +
       its `token/token_no_expiry_opt_out` audit row commit together.
@@ -1414,6 +1419,7 @@ defmodule Barkpark.Auth do
         token_hash: ApiToken.hash_token(raw_token),
         label: label,
         dataset: dataset,
+        dataset_bound: Keyword.get(opts, :dataset_bound),
         permissions: permissions,
         workspace_id: ws_id,
         expires_at: expires_at,
@@ -1498,6 +1504,7 @@ defmodule Barkpark.Auth do
 
   `opts`: `:label` (required), `:permissions` (required, a non-empty subset of
   `#{inspect(@delegable_permissions)}`), `:dataset` (default `"production"`),
+  `:dataset_bound` (true when the request named `dataset` — see `create_token/6`),
   `:expires_at` (`nil` → the class default, a `DateTime`, or `:no_expiry`).
 
   Errors: `:admin_required` (no flat admin), `:not_workspace_admin`,
@@ -1519,7 +1526,11 @@ defmodule Barkpark.Auth do
          :ok <- if(label == "", do: {:error, :missing_label}, else: :ok) do
       raw = Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
 
-      mint_opts = [expires_at: Keyword.get(opts, :expires_at), actor: actor]
+      mint_opts = [
+        expires_at: Keyword.get(opts, :expires_at),
+        actor: actor,
+        dataset_bound: Keyword.get(opts, :dataset_bound)
+      ]
 
       Repo.transaction(fn ->
         with {:ok, token} <- create_token(raw, label, dataset, perms, workspace_id, mint_opts),

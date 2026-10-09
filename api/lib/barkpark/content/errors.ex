@@ -534,6 +534,20 @@ defmodule Barkpark.Content.Errors do
         "The principal DOES hold a seat in this workspace — do NOT add a membership it already has. What is missing is the capability: an API token needs `read` (or `admin`) in its permissions, and a user account needs a membership role that grants read. Re-mint the token with the right permissions, or raise the role."
     }
 
+  # A dataset-BOUND token (minted with an explicit `dataset`) presented on a
+  # request for another dataset (task-4418b517649a58ce). `code` and status match
+  # the two arms above; `reason` names the remedy, which is neither a seat nor
+  # a permission: use the bound dataset, or mint a token for this one.
+  defp build({:error, :forbidden_dataset}),
+    do: %{
+      code: "forbidden",
+      message: "this token is bound to another dataset",
+      status: 403,
+      reason: "dataset_not_bound",
+      hint:
+        "The token was minted with an explicit `dataset` and only works on that dataset. `GET /v1/auth/token` shows it (`dataset`, `dataset_bound`). Call the bound dataset, or mint a token for this one."
+    }
+
   # Per-workspace quota gate (perfect-plan-build W1, D11). Suspended = a hard
   # 403 write-block; over-quota = 402 Payment Required (the honest "you hit your
   # plan's write cap" semantic, distinct from a 429 rate limit that clears on
