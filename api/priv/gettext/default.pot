@@ -523,7 +523,7 @@ msgstr ""
 msgid "Upload"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:575
+#: lib/barkpark_web/studio_locale.ex:586
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr ""
@@ -533,28 +533,28 @@ msgstr ""
 msgid "Fix validation errors before publishing"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:586
+#: lib/barkpark_web/studio_locale.ex:597
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:580
+#: lib/barkpark_web/studio_locale.ex:591
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:589
+#: lib/barkpark_web/studio_locale.ex:600
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:583
+#: lib/barkpark_web/studio_locale.ex:594
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3425
-#: lib/barkpark_web/studio_locale.ex:572
+#: lib/barkpark_web/studio_locale.ex:583
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr ""
@@ -2754,6 +2754,7 @@ msgid "%{count} assets match"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:114
+#: lib/barkpark_web/studio_locale.ex:568
 #, elixir-autogen, elixir-format
 msgid "%{count} searches"
 msgstr ""
@@ -3038,6 +3039,7 @@ msgid "No folders yet — click + to create one."
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:191
+#: lib/barkpark_web/studio_locale.ex:566
 #, elixir-autogen, elixir-format
 msgid "No matches before"
 msgstr ""
@@ -3063,6 +3065,7 @@ msgid "Other"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:197
+#: lib/barkpark_web/studio_locale.ex:565
 #, elixir-autogen, elixir-format
 msgid "Popular"
 msgstr ""
@@ -3078,6 +3081,7 @@ msgid "Public share link"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:205
+#: lib/barkpark_web/studio_locale.ex:564
 #, elixir-autogen, elixir-format
 msgid "Recent"
 msgstr ""
@@ -8829,4 +8833,33 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1995
 #, elixir-autogen, elixir-format
 msgid "More actions"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:570
+#, elixir-autogen, elixir-format
+msgid "%{count} docs"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "%{count} results"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:569
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 doc"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:562
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 result"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:567
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 search"
 msgstr ""

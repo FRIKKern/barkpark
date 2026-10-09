@@ -523,7 +523,7 @@ msgstr "Tittel"
 msgid "Upload"
 msgstr "Last opp"
 
-#: lib/barkpark_web/studio_locale.ex:575
+#: lib/barkpark_web/studio_locale.ex:586
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr "Har ikke riktig format"
@@ -533,28 +533,28 @@ msgstr "Har ikke riktig format"
 msgid "Fix validation errors before publishing"
 msgstr "Rett valideringsfeilene før du publiserer"
 
-#: lib/barkpark_web/studio_locale.ex:586
+#: lib/barkpark_web/studio_locale.ex:597
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr "Må være minst %{min}"
 
-#: lib/barkpark_web/studio_locale.ex:580
+#: lib/barkpark_web/studio_locale.ex:591
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr "Må være minst %{min} tegn"
 
-#: lib/barkpark_web/studio_locale.ex:589
+#: lib/barkpark_web/studio_locale.ex:600
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr "Kan være høyst %{max}"
 
-#: lib/barkpark_web/studio_locale.ex:583
+#: lib/barkpark_web/studio_locale.ex:594
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr "Kan være høyst %{max} tegn"
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3425
-#: lib/barkpark_web/studio_locale.ex:572
+#: lib/barkpark_web/studio_locale.ex:583
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr "Påkrevd"
@@ -2754,6 +2754,7 @@ msgid "%{count} assets match"
 msgstr "%{count} filer passer"
 
 #: lib/barkpark_web/studio_locale.ex:114
+#: lib/barkpark_web/studio_locale.ex:568
 #, elixir-autogen, elixir-format
 msgid "%{count} searches"
 msgstr "%{count} søk"
@@ -3038,6 +3039,7 @@ msgid "No folders yet — click + to create one."
 msgstr "Ingen mapper ennå — klikk + for å opprette en."
 
 #: lib/barkpark_web/studio_locale.ex:191
+#: lib/barkpark_web/studio_locale.ex:566
 #, elixir-autogen, elixir-format
 msgid "No matches before"
 msgstr "Ga ingen treff før"
@@ -3063,6 +3065,7 @@ msgid "Other"
 msgstr "Annet"
 
 #: lib/barkpark_web/studio_locale.ex:197
+#: lib/barkpark_web/studio_locale.ex:565
 #, elixir-autogen, elixir-format
 msgid "Popular"
 msgstr "Populære"
@@ -3078,6 +3081,7 @@ msgid "Public share link"
 msgstr "Offentlig delingslenke"
 
 #: lib/barkpark_web/studio_locale.ex:205
+#: lib/barkpark_web/studio_locale.ex:564
 #, elixir-autogen, elixir-format
 msgid "Recent"
 msgstr "Nylige"
@@ -8830,3 +8834,32 @@ msgstr "…Resten"
 #, elixir-autogen, elixir-format
 msgid "More actions"
 msgstr "Flere handlinger"
+
+#: lib/barkpark_web/studio_locale.ex:570
+#, elixir-autogen, elixir-format
+msgid "%{count} docs"
+msgstr "%{count} dokumenter"
+
+#: lib/barkpark_web/studio_locale.ex:563
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "%{count} results"
+msgstr "%{count} treff"
+
+#: lib/barkpark_web/studio_locale.ex:569
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 doc"
+msgstr "1 dokument"
+
+#: lib/barkpark_web/studio_locale.ex:562
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 result"
+msgstr "1 treff"
+
+#: lib/barkpark_web/studio_locale.ex:567
+#, elixir-autogen, elixir-format
+msgctxt "reference picker"
+msgid "1 search"
+msgstr "1 søk"

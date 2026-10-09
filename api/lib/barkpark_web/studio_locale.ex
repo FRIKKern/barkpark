@@ -556,7 +556,18 @@ defmodule BarkparkWeb.StudioLocale do
       # The picker fills %{types} client-side (the joined ref-type set), so the
       # placeholder is handed through verbatim instead of bound here.
       "search" => gettext("Search %{types}…", types: "%{types}"),
-      "documents" => gettext("documents")
+      "documents" => gettext("documents"),
+      # A context of its own: "1 result" is also a plural msgid elsewhere,
+      # and the picker needs both forms with the slot left in.
+      "one_result" => pgettext("reference picker", "1 result"),
+      "n_results" => pgettext("reference picker", "%{count} results", count: "%{count}"),
+      "recent" => gettext("Recent"),
+      "popular" => gettext("Popular"),
+      "no_matches_before" => gettext("No matches before"),
+      "one_search" => pgettext("reference picker", "1 search"),
+      "n_searches" => gettext("%{count} searches", count: "%{count}"),
+      "one_doc" => pgettext("reference picker", "1 doc"),
+      "n_docs" => gettext("%{count} docs", count: "%{count}")
     })
   end
 
