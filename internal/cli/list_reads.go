@@ -43,6 +43,7 @@ var listReadCommands = map[string]bool{
 	"access.ls":          true, // access_controller.ex  -> grants
 	"access.mine":        true, // access_controller.ex  -> grants
 	"app_token.ls":       true, // app_token_controller.ex -> tokens
+	"auth.invitation-ls": true, // invitation_controller.ex -> invitations
 	"chat.list_sessions": true, // chat_controller.ex    -> sessions
 	"dataset.stats":      true, // analytics_controller.ex -> types
 	"doc.actions":        true, // document_actions_controller.ex -> actions
@@ -55,31 +56,32 @@ var listReadCommands = map[string]bool{
 	// whose envelope key for it is recorded in commandListEnvelopes. Leaving
 	// the row would make TestEveryNonPaginatedCoreReadIsClassified measure a
 	// command the API source no longer classifies this way.
-	"doc.related":           true, // query_controller.ex   -> result.related
-	"graph.corpus":          true, // tasks_controller.ex  -> nodes
-	"graph.dangling":        true, // tasks_controller.ex  -> dangling
-	"graph.orphans":         true, // tasks_controller.ex  -> orphans
-	"graph.show":            true, // tasks_controller.ex  -> nodes
-	"graph.tasks":           true, // tasks_controller.ex  -> tasks
-	"media.search-synonyms": true, // v1/media_controller.ex -> result (bare array)
-	"paper.access":          true, // paper_access_controller.ex -> access
-	"paper.masters":         true, // paper_masters_controller.ex -> masters
-	"plugin.ls":             true, // plugins_controller.ex  -> plugins
-	"schema.ls":             true, // schema_controller.ex   -> schemas
-	"search.synonyms":       true, // search_controller.ex  -> result (bare array)
-	"secret.ls":             true, // secret_controller.ex   -> secrets
-	"secret.scoped-ls":      true, // secret_controller.ex   -> secrets (scoped twin)
-	"share.link-ls":         true, // share_link_controller.ex -> links
-	"share.ls":              true, // share_controller.ex   -> shares
-	"share.preview-link-ls": true, // preview_link_controller.ex -> links
-	"share.token-ls":        true, // share_controller.ex   -> tokens
-	"tag.browse":            true, // query_controller.ex   -> result.tags
-	"tag.docs":              true, // query_controller.ex   -> result.documents
-	"webhook.deliveries":    true, // webhook_controller.ex  -> deliveries
-	"webhook.ls":            true, // webhook_controller.ex  -> webhooks
-	"workspace.dataset-ls":  true, // workspace_controller.ex -> datasets
-	"workspace.ls":          true, // workspace_controller.ex -> workspaces
-	"workspace.project-ls":  true, // workspace_controller.ex -> projects
+	"doc.related":             true, // query_controller.ex   -> result.related
+	"graph.corpus":            true, // tasks_controller.ex  -> nodes
+	"graph.dangling":          true, // tasks_controller.ex  -> dangling
+	"graph.orphans":           true, // tasks_controller.ex  -> orphans
+	"graph.show":              true, // tasks_controller.ex  -> nodes
+	"graph.tasks":             true, // tasks_controller.ex  -> tasks
+	"media.search-synonyms":   true, // v1/media_controller.ex -> result (bare array)
+	"paper.access":            true, // paper_access_controller.ex -> access
+	"paper.masters":           true, // paper_masters_controller.ex -> masters
+	"plugin.ls":               true, // plugins_controller.ex  -> plugins
+	"schema.ls":               true, // schema_controller.ex   -> schemas
+	"search.synonyms":         true, // search_controller.ex  -> result (bare array)
+	"secret.ls":               true, // secret_controller.ex   -> secrets
+	"secret.scoped-ls":        true, // secret_controller.ex   -> secrets (scoped twin)
+	"share.link-ls":           true, // share_link_controller.ex -> links
+	"share.ls":                true, // share_controller.ex   -> shares
+	"share.preview-link-ls":   true, // preview_link_controller.ex -> links
+	"share.token-ls":          true, // share_controller.ex   -> tokens
+	"tag.browse":              true, // query_controller.ex   -> result.tags
+	"tag.docs":                true, // query_controller.ex   -> result.documents
+	"webhook.deliveries":      true, // webhook_controller.ex  -> deliveries
+	"webhook.ls":              true, // webhook_controller.ex  -> webhooks
+	"workspace.dataset-ls":    true, // workspace_controller.ex -> datasets
+	"workspace.invitation-ls": true, // member_controller.ex -> invitations
+	"workspace.ls":            true, // workspace_controller.ex -> workspaces
+	"workspace.project-ls":    true, // workspace_controller.ex -> projects
 }
 
 // carriesRowArray reports whether a 2xx body is SHAPED like a list answer: a
