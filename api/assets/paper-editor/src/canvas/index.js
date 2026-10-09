@@ -1190,6 +1190,10 @@ class BpPaperCanvas extends HTMLElement {
       ],
       content: runToTiptap(this._blocks),
       editorProps: {
+        // The editable root is ProseMirror's role=textbox: name it, or a screen
+        // reader lands in an unnamed "edit text" (axe aria-input-field-name,
+        // task-3dbe834e19630e74).
+        attributes: { "aria-label": t("Paper text"), "aria-multiline": "true" },
         // P4: while a `[[` / `#` / `/` popup is open it OWNS the navigation keys
         // (↑/↓/Enter/Tab/Esc) — _onKeyDown returns true so ProseMirror does not also
         // act on them (Enter must PICK the active item, NOT split the doc, while a

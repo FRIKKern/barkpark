@@ -45,6 +45,7 @@ const NB = {
   Text: "Tekst",
   Paragraph: "Avsnitt",
   Heading: "Overskrift",
+  "Paper text": "Artikkeltekst",
 };
 const BLOCKS = [
   { id: "p-a", type: "paragraph", content: [{ type: "text", value: "Alpha" }] },
@@ -125,6 +126,15 @@ try {
     assert.ok(s.labels.includes("Avsnitt"), s.labels.slice(0, 5).join(","));
   });
 
+  // task-3dbe834e19630e74: ProseMirror's editable root is role=textbox; with no
+  // name a screen reader lands in an unnamed "edit text" (axe
+  // aria-input-field-name).
+  check("the editable root is a named, multiline textbox in the stamped word", () => {
+    const root = nb.querySelector(".ProseMirror");
+    assert.equal(root.getAttribute("aria-label"), "Artikkeltekst");
+    assert.equal(root.getAttribute("aria-multiline"), "true");
+  });
+
   check("the slash filter finds a block by its shown name", () => {
     const s = slashTexts(nb, "avsnitt");
     assert.equal(s.labels[0], "Avsnitt");
@@ -137,6 +147,7 @@ try {
     assert.equal(en.querySelector(".bp-block-handle__add").getAttribute("aria-label"), "Add a block below");
     assert.equal(en.querySelector(".bp-canvas-field-label").getAttribute("aria-label"), "Field label");
     assert.equal(boldOf(en).getAttribute("aria-label"), "Bold");
+    assert.equal(en.querySelector(".ProseMirror").getAttribute("aria-label"), "Paper text");
     const s = slashTexts(en);
     assert.equal(s.eyebrow, "Insert block");
     assert.ok(s.labels.includes("Paragraph"));
@@ -145,9 +156,9 @@ try {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.message}`);
 } finally {
-  if (ran !== 7) {
+  if (ran !== 8) {
     failures += 1;
-    console.log(`FAIL  ran ${ran} of 7 checks`);
+    console.log(`FAIL  ran ${ran} of 8 checks`);
   }
   if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
   console.log("\ncanvas strings: all checks passed");
