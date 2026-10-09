@@ -31,10 +31,15 @@ defmodule BarkparkWeb.StudioComponents.HistoryModalWordingTest do
     assert html =~ "Edited"
     assert html =~ "Published"
 
-    assert html =~ ~s|aria-label="Restore the version from Oct 06, 2026 at 07:25:45 (Edited)"|
+    # The server names the clock (UTC); Hooks.LocalTime swaps in the viewer's
+    # own from data-local-label (task-7a12da688a06f880).
+    assert html =~
+             ~s|aria-label="Restore the version from Oct 06, 2026 at 07:25:45 UTC (Edited)"|
+
+    assert html =~ ~s|data-local-label="Restore the version from {time} (Edited)"|
 
     assert html =~
-             ~s|aria-label="Restore the version from Oct 06, 2026 at 03:48:59 (Draft discarded)"|
+             ~s|aria-label="Restore the version from Oct 06, 2026 at 03:48:59 UTC (Draft discarded)"|
   end
 
   test "an action with no label falls back to its code" do

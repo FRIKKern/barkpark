@@ -5543,6 +5543,38 @@
     if (window.BarkparkChatKeys) Hooks.ChatKeys = window.BarkparkChatKeys;
     if (window.BarkparkChatPalette) Hooks.ChatPalette = window.BarkparkChatPalette;
 
+    // LocalTime — a server time in the viewer's own clock (task-7a12da688a06f880).
+    // The server renders <time datetime=ISO> whose text says UTC, so a page
+    // without this hook is never silently wrong. Here each time[data-local-time]
+    // is rewritten with Intl.DateTimeFormat in the page language and the
+    // browser's zone, and each [data-local-label] gets its aria-label from its
+    // template with {time} filled the same way.
+    Hooks.LocalTime = {
+      mounted() { this.localize(); },
+      updated() { this.localize(); },
+      localize() {
+        var fmt;
+        try {
+          fmt = new Intl.DateTimeFormat(document.documentElement.lang || undefined, {
+            day: "2-digit", month: "short", year: "numeric",
+            hour: "2-digit", minute: "2-digit", second: "2-digit"
+          });
+        } catch (_e) { return; }
+        var local = function (iso) {
+          var d = new Date(iso);
+          return isNaN(d.getTime()) ? null : fmt.format(d);
+        };
+        this.el.querySelectorAll("time[datetime][data-local-time]").forEach(function (t) {
+          var text = local(t.getAttribute("datetime"));
+          if (text) t.textContent = text;
+        });
+        this.el.querySelectorAll("[data-local-label][data-datetime]").forEach(function (el) {
+          var text = local(el.getAttribute("data-datetime"));
+          if (text) el.setAttribute("aria-label", el.getAttribute("data-local-label").replace("{time}", text));
+        });
+      }
+    };
+
     Hooks.PresenceIdentity = {
       mounted() {
         this.handleEvent("save-identity", ({name, color}) => {

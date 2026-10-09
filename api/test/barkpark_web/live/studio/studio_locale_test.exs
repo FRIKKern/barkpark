@@ -245,6 +245,34 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     refute html =~ ~r/[A-Z][a-z]{2} \d\d, \d{4} at \d\d:/
   end
 
+  # task-7a12da688a06f880: history printed the stored UTC time with no zone, so
+  # an Oslo editor saw their own edit as two hours old. The server render now
+  # says UTC and carries the instant, for Hooks.LocalTime to show the viewer's
+  # own clock (its jsdom test covers that side).
+  test "nb-NO history times say UTC and carry the instant for the viewer's clock", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} = live(conn, editor(ws, proj))
+    html = render_click(view, "show-history", %{})
+
+    assert has_element?(view, ~s(#history-list[phx-hook="LocalTime"]))
+
+    assert [_, iso, hms, text] =
+             Regex.run(
+               ~r|<time[^>]*datetime="(\d{4}-\d\d-\d\dT(\d\d:\d\d:\d\d)Z)"[^>]*data-local-time[^>]*>\s*([^<]*?)\s*</time>|,
+               html
+             )
+
+    assert {:ok, _, 0} = DateTime.from_iso8601(iso)
+    assert text =~ ~r/kl\. #{hms} UTC$/
+
+    assert html =~ ~s|data-local-label="Gjenopprett versjonen fra {time} (Opprettet)"|
+    assert html =~ ~s(data-datetime="#{iso}")
+    assert html =~ ~r/aria-label="Gjenopprett versjonen fra [^"]*kl\. #{hms} UTC \(Opprettet\)"/
+  end
+
   # task-d4c382b7aa8ad9ef: the document panel beside a paper stayed English in
   # an nb-NO workspace, around a half-translated Studio.
   test "the nb-NO document panel is Norwegian", %{conn: conn, ws: ws, proj: proj} do
