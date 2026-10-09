@@ -564,6 +564,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
             cross_violations: compute_cross_violations(schema, form)
           )
           |> maybe_refresh_content_preview()
+          |> assign_page_title()
 
         {:error, {:halted, reason}} ->
           socket
@@ -2561,5 +2562,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
       %{grants: grants} when is_list(grants) -> grants
       _ -> []
     end
+  end
+
+  # The browser tab names the open document (task-fee30130f015c416): every
+  # document tab read "Studio · Barkpark", and a screen reader's page
+  # announcement never said which document it was. The root layout's
+  # live_title adds the " · Barkpark" suffix.
+  # It is recomputed wherever the open document changes in place, not only on
+  # navigation: a save that renames it, and the block editor's sync
+  # (task-72e1de4c53c5ed9f).
+  # Same order as the document header names it (Editor's document_header):
+  # the stored title, else the schema's derived preview title (a titleless
+  # author is its name), else a singleton's schema title, else "Untitled".
+  def assign_page_title(socket) do
+    title =
+      case socket.assigns[:editor_doc] do
+        %{title: t} when is_binary(t) and t != "" -> t
+        %{} = doc -> derived_title(doc, socket.assigns[:editor_schema])
+        _ -> "Studio"
+      end
+
+    assign(socket, page_title: title)
+  end
+
+  defp derived_title(doc, schema) do
+    Barkpark.Content.TitleDerivation.preview_title(doc, schema) ||
+      (schema && Map.get(schema, :singleton) == true && Map.get(schema, :title)) ||
+      gettext("Untitled")
   end
 end
