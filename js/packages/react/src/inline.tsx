@@ -261,7 +261,8 @@ export function spinnerRole(name: string): boolean {
  * static glyph, both keyed `bp-g bp-g--<role>`. */
 export function glyphHtml(name: string): string {
   if (spinnerRole(name)) {
-    return `<span class="bp-g bp-g--${name}" aria-label="${escapeHtml(labelForRole(name))}"></span>`
+    // role="img": an aria-label on a role-less span is prohibited (task-21231dd5be0ca72c).
+    return `<span class="bp-g bp-g--${name}" role="img" aria-label="${escapeHtml(labelForRole(name))}"></span>`
   }
   return `<span class="bp-g bp-g--${name}">${glyphChar(name)}</span>`
 }

@@ -1843,8 +1843,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   defp glyph_html(role) do
     if StatusVocab.spinner?(role) do
-      # a spinner role is an empty span whose ::before CSS-animates the Braille frames
-      ~s|<span class="bp-g bp-g--#{role}" aria-label="#{StatusVocab.label_for_role(role)}"></span>|
+      # a spinner role is an empty span whose ::before CSS-animates the Braille frames.
+      # role="img" makes it a named image: an aria-label on a role-less span is
+      # prohibited and never read (axe aria-prohibited-attr, task-21231dd5be0ca72c).
+      ~s|<span class="bp-g bp-g--#{role}" role="img" aria-label="#{StatusVocab.label_for_role(role)}"></span>|
     else
       ~s|<span class="bp-g bp-g--#{role}">#{glyph_char(role)}</span>|
     end
