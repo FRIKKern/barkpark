@@ -959,6 +959,11 @@ defmodule PDS.Census do
     # a second ROUTE onto an already-disposed action still needs its own row).
     {:post, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens", "BarkparkWeb.PreviewTokenController",
      :mint, :status_only_receipt},
+    # task-49a6a686bb88d9e5 — the scoped revoke. Renders a bare literal
+    # `revoked: true` plus the request's OWN `jti` echoed back — never a
+    # stored read, never the `ok: true` shape this lens keys on.
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens/:jti",
+     "BarkparkWeb.PreviewTokenController", :revoke, :status_only_receipt},
     # THE FOUR PAPER-MASTERS WRITES (task-2dc7b441443f3aaf). Each answers the op
     # receipt `Content.apply_paper_block_ops_once/6` returns (`slug`, `opCount`,
     # `rev`, `blockIds` — a store-derived position and row-id array), or the
@@ -1392,6 +1397,7 @@ defmodule PDS.Census do
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member} => {"BarkparkWeb.V1.MediaCollectionsController.remove_member/2", 1, "131296069"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share} => {"BarkparkWeb.V1.MediaCollectionsController.revoke_share/2", 1, "8149217"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete} => {"BarkparkWeb.TicketKeysController.delete/2", 1, "872583"},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/preview-tokens/:jti", "BarkparkWeb.PreviewTokenController", :revoke} => {"BarkparkWeb.PreviewTokenController.revoke/2", 1, "78846380"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke} => {"BarkparkWeb.ChatHostController.revoke/2", 1, "131654882"},

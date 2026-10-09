@@ -360,11 +360,19 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/plugins/settings/:*"} => @census_task,
     {"DELETE", "/v1/plugins/settings/:*"} => @census_task,
 
-    # BarkparkWeb.PreviewTokenController (1) — task-8f7cba7f65cb343c. A site's
-    # server (or the Studio, handing a token to its preview frame) is the
-    # intended caller, not a terminal operator, but an operator plausibly
-    # wants to mint one for testing too — a real gap, not a "never" surface.
+    # BarkparkWeb.PreviewTokenController (2) — task-8f7cba7f65cb343c /
+    # task-88e9094df76d31c6 / task-49a6a686bb88d9e5. A site's server (or the
+    # Studio, handing a token to its preview frame) is the intended caller
+    # of the mint, not a terminal operator, but an operator plausibly wants
+    # `bp` to mint/revoke one for testing too — a real gap, not a "never"
+    # surface, same reasoning for both the flat mint and the scoped
+    # mint/revoke pair below.
     {"POST", "/v1/preview-tokens"} => @census_task,
+    # The scoped-only DELETE (no flat twin — see PreviewTokenController's own
+    # moduledoc for why) collapses onto this canonical, scope-stripped
+    # spelling, same as the scoped mint collapses onto the flat mint's row
+    # above.
+    {"DELETE", "/v1/preview-tokens/:*"} => @census_task,
 
     # BarkparkWeb.PulseController (3)
     {"POST", "/v1/plugins/pulse/:*/events"} => @census_task,

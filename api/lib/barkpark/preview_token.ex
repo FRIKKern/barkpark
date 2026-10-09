@@ -82,6 +82,17 @@ defmodule Barkpark.PreviewToken do
         token_id: Map.get(claims, "token_id"),
         dataset: ds,
         doc_ids: Map.get(claims, "doc_ids", []),
+        # task-49a6a686bb88d9e5 — nil for a flat, unscoped mint (unchanged),
+        # populated whenever the claims carry a workspace/project (the scoped
+        # mint always does). This is what `revoke_scoped/3` matches against.
+        # `dump_uuid/1`, not the bare claim string: `insert_all/3` here takes
+        # a TABLE NAME, not a schema, so Ecto has no column-type information
+        # to encode a UUID string against a `:binary_id` column with — the
+        # 16-byte binary Postgrex's default types expect has to be produced
+        # by hand (`Ecto.UUID.dump/1`), the same gap `token_id` above has
+        # always carried silently because nothing has ever populated it.
+        workspace_id: dump_uuid(Map.get(claims, "workspace_id")),
+        project_id: dump_uuid(Map.get(claims, "project_id")),
         issued_at: from_unix(Map.get(claims, "iat"), now),
         expires_at: from_unix(Map.get(claims, "exp"), now)
       }
@@ -122,6 +133,47 @@ defmodule Barkpark.PreviewToken do
       |> Repo.update_all(set: [revoked_at: DateTime.utc_now()])
 
     if n == 0, do: {:error, :not_found}, else: :ok
+  end
+
+  @doc """
+  Revoke `jti`, CONFINED to the caller's own resolved `workspace_id` /
+  `project_id` (task-49a6a686bb88d9e5) — never trusted from anywhere else,
+  the same posture `PreviewTokenController.mint/2` already holds for
+  signing a scope into a token in the first place. A row whose STORED
+  `workspace_id` does not equal the one given (including a row with no
+  `workspace_id` at all — a flat, unscoped mint predates this column or
+  named no workspace) is `{:error, :not_found}`, identical to an unknown
+  jti: this never distinguishes "exists under a different tenant" from
+  "does not exist" to the caller, the same existence-hiding rule every
+  other tenant-scoped resolver in this tree follows.
+
+  `project_id` is matched the same way when given (`nil` compares the
+  query to the row's OWN nil, i.e. a workspace-only mint); omit it
+  entirely (pass `nil`) to match on workspace alone.
+  """
+  @spec revoke_scoped(binary(), binary(), binary() | nil) :: :ok | {:error, :not_found}
+  def revoke_scoped(jti, workspace_id, project_id \\ nil)
+      when is_binary(jti) and is_binary(workspace_id) do
+    # Same reason as `record_jti/1`'s `dump_uuid/1`: this `from/2` names a
+    # bare TABLE, not a schema, so Ecto has no `:binary_id` type info for
+    # `workspace_id`/`project_id` to encode a dashed UUID string against —
+    # the 16-byte binary has to be produced by hand.
+    with ws_bin when is_binary(ws_bin) <- dump_uuid(workspace_id),
+         proj_bin <- if(is_nil(project_id), do: nil, else: dump_uuid(project_id)),
+         true <- is_nil(project_id) or is_binary(proj_bin) do
+      query =
+        from(j in "preview_token_jti",
+          where: j.jti == ^jti,
+          where: j.workspace_id == ^ws_bin
+        )
+
+      query = if is_nil(proj_bin), do: query, else: where(query, [j], j.project_id == ^proj_bin)
+
+      {n, _} = Repo.update_all(query, set: [revoked_at: DateTime.utc_now()])
+      if n == 0, do: {:error, :not_found}, else: :ok
+    else
+      _ -> {:error, :not_found}
+    end
   end
 
   @doc """
@@ -204,6 +256,23 @@ defmodule Barkpark.PreviewToken do
 
   defp b64url(bin), do: Base.url_encode64(bin, padding: false)
   defp b64url_decode(str), do: Base.url_decode64(str, padding: false)
+
+  # task-49a6a686bb88d9e5 — see the comment at the `record_jti/1` call site:
+  # `Ecto.UUID.dump/1` turns the canonical-dashed STRING a JWT claim carries
+  # into the 16-byte binary a schema-less `insert_all/3` must hand Postgrex
+  # for a `:binary_id` column. An already-malformed string (should never
+  # happen — it only ever came from a value THIS module itself signed) fails
+  # closed to nil rather than raising mid-insert.
+  defp dump_uuid(nil), do: nil
+
+  defp dump_uuid(id) when is_binary(id) do
+    case Ecto.UUID.dump(id) do
+      {:ok, bin} -> bin
+      :error -> nil
+    end
+  end
+
+  defp dump_uuid(_), do: nil
 
   defp from_unix(nil, default), do: default
 

@@ -3656,6 +3656,14 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api, :scoped_admin])
 
     post("/v1/preview-tokens", PreviewTokenController, :mint)
+
+    # Tenant-scoped revoke (task-49a6a686bb88d9e5) — the flat mint deliberately
+    # grew no revoke twin (preview_token_jti carried no tenant column; see
+    # PreviewTokenController's own moduledoc). SAME gate as the mint above,
+    # so an admin of A reaches 403 on `/w/B/.../:jti`, never the controller;
+    # `revoke/2` additionally checks the ROW's own stored workspace_id before
+    # touching it.
+    delete("/v1/preview-tokens/:jti", PreviewTokenController, :revoke)
   end
 
   # Scoped MEMBER administration (admin) — the workspace roster: who holds a
