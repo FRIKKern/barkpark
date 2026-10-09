@@ -18,22 +18,22 @@ msgid_plural "%{count} warnings — publishing is still allowed"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1060
+#: lib/barkpark_web/studio/pane_builder.ex:1064
 #, elixir-autogen, elixir-format
 msgid "%{n}d ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1059
+#: lib/barkpark_web/studio/pane_builder.ex:1063
 #, elixir-autogen, elixir-format
 msgid "%{n}h ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1058
+#: lib/barkpark_web/studio/pane_builder.ex:1062
 #, elixir-autogen, elixir-format
 msgid "%{n}m ago"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1061
+#: lib/barkpark_web/studio/pane_builder.ex:1065
 #, elixir-autogen, elixir-format
 msgid "%{n}mo ago"
 msgstr ""
@@ -326,12 +326,12 @@ msgstr ""
 msgid "Untitled"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1017
+#: lib/barkpark_web/studio/pane_builder.ex:1021
 #, elixir-autogen, elixir-format
 msgid "Untitled %{type} · %{tail}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1049
+#: lib/barkpark_web/studio/pane_builder.ex:1053
 #, elixir-autogen, elixir-format
 msgid "Updated %{ago}"
 msgstr ""
@@ -351,7 +351,7 @@ msgstr ""
 msgid "but your access grant does not cover it"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1021
+#: lib/barkpark_web/studio/pane_builder.ex:1025
 #: lib/barkpark_web/studio_locale.ex:151
 #, elixir-autogen, elixir-format
 msgid "document"
@@ -383,7 +383,7 @@ msgstr ""
 msgid "it covers %{scope}"
 msgstr ""
 
-#: lib/barkpark_web/studio/pane_builder.ex:1057
+#: lib/barkpark_web/studio/pane_builder.ex:1061
 #, elixir-autogen, elixir-format
 msgid "just now"
 msgstr ""
@@ -773,6 +773,7 @@ msgstr ""
 #: lib/barkpark_web/live/admin/plugins_live.ex:70
 #: lib/barkpark_web/live/admin/plugins_live.ex:177
 #: lib/barkpark_web/live/studio/settings_live.ex:943
+#: lib/barkpark_web/studio/structure_copy.ex:73
 #, elixir-autogen, elixir-format
 msgid "Plugins"
 msgstr ""
@@ -1733,6 +1734,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:736
 #: lib/barkpark_web/components/studio_components/nav.ex:482
+#: lib/barkpark_web/studio/structure_copy.ex:76
 #, elixir-autogen, elixir-format
 msgid "Media"
 msgstr ""
@@ -1799,6 +1801,7 @@ msgid "Oct"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:734
+#: lib/barkpark_web/studio/structure_copy.ex:25
 #, elixir-autogen, elixir-format
 msgid "Papers"
 msgstr ""
@@ -6066,21 +6069,25 @@ msgid "Disabled in this workspace"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:488
+#: lib/barkpark_web/studio/structure_copy.ex:40
 #, elixir-autogen, elixir-format
 msgid "Fleet"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:492
+#: lib/barkpark_web/studio/structure_copy.ex:43
 #, elixir-autogen, elixir-format
 msgid "Form submissions"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:487
+#: lib/barkpark_web/studio/structure_copy.ex:39
 #, elixir-autogen, elixir-format
 msgid "Projects"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:491
+#: lib/barkpark_web/studio/structure_copy.ex:33
 #, elixir-autogen, elixir-format
 msgid "Quizzes"
 msgstr ""
@@ -6098,6 +6105,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:486
 #: lib/barkpark_web/live/admin/plugins_live.ex:221
+#: lib/barkpark_web/studio/structure_copy.ex:75
 #, elixir-autogen, elixir-format
 msgid "Settings"
 msgstr ""
@@ -6108,11 +6116,13 @@ msgid "Style"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:490
+#: lib/barkpark_web/studio/structure_copy.ex:38
 #, elixir-autogen, elixir-format
 msgid "Tasks"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:489
+#: lib/barkpark_web/studio/structure_copy.ex:42
 #, elixir-autogen, elixir-format
 msgid "Tickets"
 msgstr ""
@@ -8728,4 +8738,89 @@ msgstr ""
 #: lib/barkpark_web/live/studio/connectors_live.ex:713
 #, elixir-autogen, elixir-format
 msgid "— its credentials never leave it."
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:81
+#, elixir-autogen, elixir-format
+msgid "All %{type}"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:34
+#, elixir-autogen, elixir-format
+msgid "Commands"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:72
+#, elixir-autogen, elixir-format
+msgid "Content"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:29
+#, elixir-autogen, elixir-format
+msgid "Facts"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:44
+#, elixir-autogen, elixir-format
+msgid "Form endpoints"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:26
+#, elixir-autogen, elixir-format
+msgid "Form responses"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:37
+#, elixir-autogen, elixir-format
+msgid "Listener"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:30
+#, elixir-autogen, elixir-format
+msgid "Media Asset"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:31
+#, elixir-autogen, elixir-format
+msgid "Media Collection"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:77
+#, elixir-autogen, elixir-format
+msgid "Media Library"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:28
+#, elixir-autogen, elixir-format
+msgid "Paper masters"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:32
+#, elixir-autogen, elixir-format
+msgid "Quiz"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:27
+#, elixir-autogen, elixir-format
+msgid "Session"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:35
+#, elixir-autogen, elixir-format
+msgid "Sheets"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:36
+#, elixir-autogen, elixir-format
+msgid "Task"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:41
+#, elixir-autogen, elixir-format
+msgid "Ticket"
+msgstr ""
+
+#: lib/barkpark_web/studio/structure_copy.ex:74
+#, elixir-autogen, elixir-format
+msgid "…Rest"
 msgstr ""
