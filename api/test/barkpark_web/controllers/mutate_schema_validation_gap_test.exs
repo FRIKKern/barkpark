@@ -167,6 +167,61 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
       assert [warning] = schema_warnings(body)
       assert warning["message"] =~ "slug"
     end
+
+    test "two distinct rule violations get two warnings, each carrying its own code+params (task-3f46241a2a9c3656)",
+         ctx do
+      type = "msvgap_codes_#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "Mutate Gap Codes Type",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{
+                "name" => "slug",
+                "type" => "string",
+                "validation" => %{"required" => true}
+              },
+              %{
+                "name" => "handle",
+                "type" => "string",
+                "validation" => %{"pattern" => "^[a-z-]+$"}
+              }
+            ]
+          },
+          @advise_dataset
+        )
+
+      doc_id = "msvgap-codes-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, @advise_dataset, doc_id, %{
+          "content" => %{"title" => "Two breaks", "handle" => "NOT A SLUG 42"}
+        })
+
+      assert resp.status == 200
+      body = json_response(resp, 200)
+
+      warnings = schema_warnings(body)
+
+      assert length(warnings) == 2,
+             "expected one advisory per offending field, got #{inspect(warnings)}"
+
+      by_field = Map.new(warnings, fn w -> {Enum.at(w["findings"], 0)["path"], w} end)
+
+      slug_warning = Map.fetch!(by_field, "/slug")
+      assert [%{"code" => "required", "path" => "/slug"}] = slug_warning["findings"]
+
+      handle_warning = Map.fetch!(by_field, "/handle")
+      assert [%{"code" => "pattern_mismatch", "path" => "/handle"}] = handle_warning["findings"]
+
+      # ADDITIVE: the message-joining the mount has always done is unchanged.
+      assert slug_warning["message"] =~ "slug"
+      assert handle_warning["message"] =~ "handle"
+    end
   end
 
   describe "ENFORCE (per-dataset opt-in) — refused 422, and the row is NOT there afterwards" do

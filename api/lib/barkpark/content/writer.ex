@@ -204,7 +204,7 @@ defmodule Barkpark.Content.Writer do
         if enforce? do
           {:error, {:schema_validation_failed, errors, findings}}
         else
-          emit_schema_advisories(type, attrs, errors)
+          emit_schema_advisories(type, attrs, errors, findings)
           :ok
         end
 
@@ -220,21 +220,50 @@ defmodule Barkpark.Content.Writer do
   # error: promotion is charter-forbidden (D5). `Warnings.put/3` drops silently
   # when no collector opened the queue, so a Studio LiveView calling the writer
   # directly never grows one.
-  defp emit_schema_advisories(type, attrs, errors) do
+  #
+  # `findings` (task-3f46241a2a9c3656) is the SAME check_findings/3-derived
+  # list the ENFORCE arm above already carries — grouped here by top-level
+  # field (its `path`'s first segment) and attached as each entry's additive
+  # `findings:` key, the same path/message/code/params shape
+  # task-1dac662bed153203 standardized for the 422 `details`/`findings` pair.
+  # `message`/`errors` grouping is UNCHANGED; only a new key is added.
+  defp emit_schema_advisories(type, attrs, errors, findings) do
     pid = Map.get(attrs, "doc_id") || Map.get(attrs, :doc_id) || "(new)"
 
     errors
     |> Enum.sort_by(fn {field, _} -> to_string(field) end)
     |> Enum.each(fn {field, messages} ->
+      field_findings =
+        findings
+        |> Enum.filter(&(top_level_field(&1.path) == to_string(field)))
+        |> Enum.map(&finding_wire/1)
+
       Barkpark.Content.Warnings.put(
         "schema_validation",
         "#{type}/#{pid}: #{field} — #{messages |> List.wrap() |> Enum.join("; ")} " <>
           "(schema advisory; this dataset does not enforce schema validation)",
-        "warning"
+        "warning",
+        %{findings: field_findings}
       )
     end)
 
     :ok
+  end
+
+  # A finding's `path` is always `"/" <> top-level-field-name[<rest>]` —
+  # `Validation.run_findings/4`'s own convention for both flat and v2 schemas
+  # (`top_path = "/" <> field.name`, nested paths extend it). Splitting on "/"
+  # and taking the first segment reads the field name regardless of nesting.
+  defp top_level_field("/" <> rest), do: rest |> String.split("/") |> List.first()
+  defp top_level_field(_), do: nil
+
+  # `Validation.finding()` (`%{path:, message:, code:, params:}`) onto the
+  # wire — the same shape `Barkpark.Content.Errors`'s `finding_wire/1` builds
+  # for the 422 `findings` array (task-1dac662bed153203), duplicated here
+  # rather than exposed cross-module since both are tiny, one-line transforms
+  # owned by the door that renders them.
+  defp finding_wire(%{path: path, message: message, code: code, params: params}) do
+    %{path: path, message: message, code: Atom.to_string(code), params: params}
   end
 
   @doc """
