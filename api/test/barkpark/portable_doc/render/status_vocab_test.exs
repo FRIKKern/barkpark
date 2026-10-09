@@ -38,7 +38,7 @@ defmodule Barkpark.PortableDoc.Render.StatusVocabTest do
     assert StatusVocab.roles() ==
              ~w(open ready progress blocked done cancel considering researching)
 
-    assert StatusVocab.tones()["ok"] == %{"light" => "#0d9488", "dark" => "#2dd4bf"}
+    assert StatusVocab.tones()["ok"] == %{"light" => "#0f766e", "dark" => "#2dd4bf"}
     assert StatusVocab.tones()["danger"]["dark"] == "#f87171"
   end
 end

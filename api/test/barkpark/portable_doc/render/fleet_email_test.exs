@@ -114,8 +114,9 @@ defmodule Barkpark.PortableDoc.Render.FleetEmailTest do
     assert html =~ "color:#{@progress}"
     assert html =~ "color:#{@done}"
     assert html =~ "color:#{@blocked}"
-    # sanity: the manifest values are the lifecycle hexes, not the health greens
-    assert @done == "#0d9488"
+    # sanity: the manifest's tones, not the health greens. The light ok tone is
+    # #0f766e since task-21231dd5be0ca72c (4.5:1 on the light paper ground).
+    assert @done == "#0f766e"
     assert @progress == "#2563eb"
     assert @blocked == "#d97706"
   end
