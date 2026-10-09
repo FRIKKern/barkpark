@@ -511,6 +511,14 @@ defmodule Barkpark.Content.Query do
   Live reference holders for the authenticated backlinks read, including both
   stored versions. SQL selects matching rows only; no projected edges are needed.
   Row/grant scope and reference-field visibility apply before a source is emitted.
+
+  `opts[:require_published]` (default `false`) restricts the result to
+  `status == "published"` rows — the backlinks LiveView read wants both
+  versions (the default), but `Media.WhereUsed`'s structural delete guard
+  (task-5f6e7ae324334044) wants the SAME "does a published document hold
+  this?" question `WhereUsed.referrers/1`'s textual scan already answers, so a
+  draft-only `_ref` cannot trigger a refusal the textual scan itself would
+  never raise for the equivalent raw-URL embed.
   """
   def list_reference_holders(target_id, dataset, opts) do
     pub_id = Barkpark.Content.published_id(target_id)
@@ -643,6 +651,7 @@ defmodule Barkpark.Content.Query do
       |> restrict_to_visible_types(dataset, opts)
       |> where([d], d.doc_id not in ^ids)
       |> where(^predicate)
+      |> maybe_require_published(opts)
       |> order_by([d], desc: fragment("? LIKE 'drafts.%'", d.doc_id), asc: d.doc_id)
       # Return only card fields, not every matching document's content payload.
       |> select([d], %{
@@ -2868,6 +2877,14 @@ defmodule Barkpark.Content.Query do
   end
 
   defp tenancy_opts(opts), do: Keyword.take(opts, [:workspace_id, :project_id])
+
+  defp maybe_require_published(query, opts) do
+    if Keyword.get(opts, :require_published, false) do
+      where(query, [d], d.status == "published")
+    else
+      query
+    end
+  end
 
   @doc """
   Fetch a document with draft-first preference. Returns the draft if it
