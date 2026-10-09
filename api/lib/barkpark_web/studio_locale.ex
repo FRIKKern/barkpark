@@ -268,9 +268,17 @@ defmodule BarkparkWeb.StudioLocale do
       "7 blocks · kicker → TOC" => gettext("7 blocks · kicker → TOC"),
       "a quoted passage" => gettext("a quoted passage"),
       "Action" => gettext("Action"),
+      "Edit empty ingress" => gettext("Edit empty ingress"),
+      "Edit empty paragraph" => gettext("Edit empty paragraph"),
+      "Select hidden divider" => gettext("Select hidden divider"),
       "action href" => gettext("action href"),
       "action label" => gettext("action label"),
       "Action label" => gettext("Action label"),
+      "%{label} (first of %{count} hidden blocks)" =>
+        gettext("%{label} (first of %{count} hidden blocks)",
+          label: "%{label}",
+          count: "%{count}"
+        ),
       "Add a block below" => gettext("Add a block below"),
       "Add a block below (click)" => gettext("Add a block below (click)"),
       "Add a kicker…" => gettext("Add a kicker…"),

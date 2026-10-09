@@ -78,6 +78,12 @@ defmodule BarkparkWeb.Studio.CanvasStringsTest do
              "Begynn å skrive, eller trykk / for blokker …"
 
     assert nb["Insert %{block}"] == "Sett inn: %{block}"
+    # task-b4113f8cd893aa8e: the resting-scaffold gutter button.
+    assert nb["Edit empty paragraph"] == "Rediger tomt avsnitt"
+    assert nb["Select hidden divider"] == "Velg skjult skillelinje"
+
+    assert nb["%{label} (first of %{count} hidden blocks)"] ==
+             "%{label} (første av %{count} skjulte blokker)"
 
     Gettext.put_locale(BarkparkWeb.Gettext, "en")
     en = Jason.decode!(StudioLocale.component_strings(:paper_canvas))

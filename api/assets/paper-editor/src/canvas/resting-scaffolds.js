@@ -1,6 +1,10 @@
 import { Extension } from "@tiptap/core";
 import { AllSelection, NodeSelection, Plugin, TextSelection } from "@tiptap/pm/state";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
+import { t } from "../i18n.js";
+
+// Whole sentences, so a translation never has to agree with a node type name.
+const EMPTY_LABELS = { paragraph: "Edit empty paragraph", ingress: "Edit empty ingress" };
 
 // Reader-suppressed scaffolds stay in the document and history. Only their
 // resting presentation collapses; a keyboard-reachable gutter button selects
@@ -28,8 +32,8 @@ export function restingScaffolds(host) {
                 button.type = "button";
                 button.className = "bp-scaffold-control";
                 button.contentEditable = "false";
-                const label = divider ? "Select hidden divider" : `Edit empty ${node.type.name}`;
-                button.setAttribute("aria-label", count > 1 ? `${label} (first of ${count} hidden blocks)` : label);
+                const label = divider ? t("Select hidden divider") : t(EMPTY_LABELS[node.type.name] || `Edit empty ${node.type.name}`);
+                button.setAttribute("aria-label", count > 1 ? t("%{label} (first of %{count} hidden blocks)", { label, count }) : label);
                 button.title = button.getAttribute("aria-label");
                 button.textContent = divider ? "§" : "+";
                 button.addEventListener("click", () => {
