@@ -63,7 +63,9 @@ defmodule BarkparkWeb.Studio.StudioAccountIdentityTest do
 
     assert account =~ "Signed in as #{email}"
     name = String.replace_suffix(label, " — open your profile", "")
-    assert profile =~ ~s(value="#{name}")
+    # A generated name is the field's placeholder, not its value, so Save does
+    # not store it as the display name (task-acae5df91728ca9d).
+    assert profile =~ ~s(placeholder="#{name}")
   end
 
   test "the email never enters presence, so another viewer on the topic never receives it", %{

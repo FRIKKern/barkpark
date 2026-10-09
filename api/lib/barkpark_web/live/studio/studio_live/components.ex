@@ -2159,6 +2159,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.studio_modals
         show_profile={@show_profile}
         user_name={@user_name}
+        user_name_fallback={assigns[:user_name_fallback]}
         user_color={@user_color}
         account_label={assigns[:account_label]}
         account_path={account_path(assigns)}

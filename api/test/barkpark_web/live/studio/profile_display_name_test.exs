@@ -86,6 +86,31 @@ defmodule BarkparkWeb.Studio.ProfileDisplayNameTest do
     render_submit(view, "save-profile", %{"name" => "   ", "color" => "#3b82f6"})
 
     assert Accounts.get_user(user.id).display_name == nil
+    # The session falls back to its generated name, not to an empty one.
+    assert render(view) =~ ~r/User [0-9a-f]{4} — open your profile/
+  end
+
+  # task-acae5df91728ca9d: the field was prefilled with the generated
+  # "User <hex>", so saving the dialog for a color change stored that
+  # placeholder as the account's display name. It is now the placeholder,
+  # and the form submitted as rendered leaves the display name unset.
+  test "an account with no display name sees its generated name as a placeholder, and saving keeps it unset",
+       %{conn: conn} do
+    user = register!()
+    {:ok, view, _} = open_studio(session_conn(conn, user))
+    render_click(view, "show-profile", %{})
+
+    input = view |> element("#profile-name-input") |> render()
+    assert input =~ ~s(value="")
+    assert [placeholder] = Regex.run(~r/placeholder="([^"]*)"/, input, capture: :all_but_first)
+    assert placeholder =~ ~r/^User [0-9a-f]{4}$/
+
+    view
+    |> form("#profile-modal-dialog form")
+    |> render_submit(%{"color" => "#ef4444"})
+
+    assert Accounts.get_user(user.id).display_name == nil
+    assert render(view) =~ "#{placeholder} — open your profile"
   end
 
   test "a session without an account still saves its name in the browser only", %{conn: conn} do

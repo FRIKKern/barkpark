@@ -992,6 +992,10 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, required: true
   attr :user_color, :string, required: true
+  # The generated name of a session with no name of its own. While it is the
+  # name, the field shows it as a placeholder, not as a value that Save would
+  # store as the account's display name (task-acae5df91728ca9d).
+  attr :user_name_fallback, :string, default: nil
   # The signed-in account's email, shown ONLY here, in the viewer's own dialog:
   # never on the avatar or in presence (task-9f31f04ab4882f7d). nil when the
   # session has no account.
@@ -1039,7 +1043,8 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               type="text"
               id="profile-name-input"
               name="name"
-              value={@user_name}
+              value={if @user_name_fallback && @user_name == @user_name_fallback, do: "", else: @user_name}
+              placeholder={@user_name_fallback}
               class="form-input"
               maxlength="80"
               autofocus
@@ -1108,6 +1113,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   attr :show_profile, :boolean, default: false
   attr :user_name, :string, default: ""
   attr :user_color, :string, default: ""
+  attr :user_name_fallback, :string, default: nil
   attr :account_path, :string, default: nil
 
   attr :image_picker_field, :string, default: nil
@@ -1133,6 +1139,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
     <.profile_modal
       show_profile={@show_profile}
       user_name={@user_name}
+      user_name_fallback={@user_name_fallback}
       user_color={@user_color}
       account_label={@account_label}
       account_path={@account_path}
