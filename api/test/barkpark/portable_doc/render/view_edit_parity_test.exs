@@ -560,15 +560,15 @@ defmodule Barkpark.PortableDoc.Render.ViewEditParityTest do
     end
   end
 
-  test "View list keeps its bottom margin; Edit list omits it (documented divergence)" do
+  test "View list owns its top-only margin; Edit list omits it (documented divergence)" do
     view = view_css()
     edit = edit_css()
 
     view_ul = declarations_for(view, "bp-paper-surface", "ul")
     edit_ul = declarations_for(edit, "bp-paper-editor-body", "ul")
 
-    assert view_ul["margin"] == "0 0 24px",
-           "View list bottom-margin changed — update the parity doc + Edit divergence note."
+    assert view_ul["margin"] == "var(--bp-para-margin-top) 0 0",
+           "View list margin changed — update the parity doc + Edit divergence note."
 
     refute Map.has_key?(edit_ul, "margin"),
            """
