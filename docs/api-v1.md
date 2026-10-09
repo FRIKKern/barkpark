@@ -50,7 +50,7 @@ List documents. 404 if the schema is `"private"`; 404/403 per §2.
 | `order` | `_updatedAt:desc` | `<field>:asc\|desc`, comma-join secondaries |
 | `count` | `false` | `true` adds `result.total` |
 | `filter[<field>]` | — | Exact match: `filter[title]=Alpha` |
-| `filter[<field>][<op>]` | — | `eq` `neq` `in` `nin` (`A,B`) `has` `nhas` `hasStrong` (`tag:min`, strength ≥ min) `contains` `notContains` `startsWith` `endsWith` `gt` `gte` `lt` `lte` `is` (`null`/`notnull`) `count{Eq,Neq,Gt,Gte,Lt,Lte}` (array length). `neq`/`nin` exclude NULL. `filter[_references]=<id>`: refs `id` |
+| `filter[<field>][<op>]` | — | `eq` `neq` `in` `nin` `nbetween` (`A,B`) `has` `nhas` `hasStrong` (`tag:min`) `contains` `notContains` `startsWith` `endsWith` `gt` `gte` `lt` `lte` `is` (`null`/`notnull`) `count{Eq,Neq,Gt,Gte,Lt,Lte}`. `neq`/`nin`/`nbetween` exclude NULL. `filter[_references]=<id>`: refs `id` |
 | `filter[]` (repeated) | — | `filter[]=status=published&filter[]=price>10` — each parses like a lone `filter=`; clauses **AND** (no OR); different ops on one field compose; **same field+op twice → 400 `invalid_filter`** (use `in`); **one unparseable element fails the request** (400, never an unfiltered 200) |
 | `expand` | — | `true` (all refs) \| `field1,field2` (named refs, §5a) |
 

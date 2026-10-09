@@ -111,6 +111,7 @@ export const FILTER_OPS = [
   'countGte',
   'countLt',
   'countLte',
+  'nbetween',
 ] as const
 
 export type FilterOp = (typeof FILTER_OPS)[number]

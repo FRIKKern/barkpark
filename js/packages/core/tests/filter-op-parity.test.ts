@@ -59,7 +59,14 @@ describe('FILTER_OPS mirrors the Elixir filter vocabulary', () => {
     // The criterion the union failed: the API accepts fourteen ops and the SDK
     // typed thirteen. This drives each one through the runtime guard.
     for (const op of fixture) {
-      const value = op === 'in' || op === 'nin' ? ['a'] : op === 'is' ? 'null' : 'x'
+      const value =
+        op === 'in' || op === 'nin'
+          ? ['a']
+          : op === 'nbetween'
+            ? ['a', 'b']
+            : op === 'is'
+              ? 'null'
+              : 'x'
       expect(() => makeFilterExpression('field', op as FilterOp, value)).not.toThrow()
     }
   })
@@ -72,15 +79,15 @@ describe('FILTER_OPS mirrors the Elixir filter vocabulary', () => {
     // 400 for.
     for (const builderOnly of ['starts_with', 'not_starts_with']) {
       expect(fixture).not.toContain(builderOnly)
-      expect(() =>
-        makeFilterExpression('doc_id', builderOnly as unknown as FilterOp, 'x'),
-      ).toThrow(BarkparkValidationError)
+      expect(() => makeFilterExpression('doc_id', builderOnly as unknown as FilterOp, 'x')).toThrow(
+        BarkparkValidationError,
+      )
     }
   })
 })
 
-describe("the `is` operator serialises to the wire form the API expects", () => {
-  test("`is` builds `filter[<field>][is]=null` / `=notnull`", () => {
+describe('the `is` operator serialises to the wire form the API expects', () => {
+  test('`is` builds `filter[<field>][is]=null` / `=notnull`', () => {
     // api-v1.md §4: "`is` (`null`/`notnull`)". query.ex refuses any other value
     // before the query is built.
     const qs = buildQueryString({

@@ -20,5 +20,6 @@
   "countGt",
   "countGte",
   "countLt",
-  "countLte"
+  "countLte",
+  "nbetween"
 ]

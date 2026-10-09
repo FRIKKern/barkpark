@@ -638,7 +638,7 @@ defmodule Barkpark.Content.Query do
     |> maybe_scope_to_owner(type, dataset, opts)
     |> maybe_scope_to_grants(opts)
     |> maybe_only_doc_ids(Keyword.get(opts, :only_doc_ids))
-    |> apply_filter_map(filter_map, dataset, opts)
+    |> apply_filter_map(filter_map, type, dataset, opts)
   end
 
   # A preview token that names documents (owner ruling #17) lists only those,
@@ -720,7 +720,7 @@ defmodule Barkpark.Content.Query do
 
   # The documented public filter operators (docs/api-v1.md §4).
   @valid_filter_ops ~w(eq neq in nin has hasStrong contains startsWith endsWith gt gte lt lte is
-                       notContains nhas countEq countNeq countGt countGte countLt countLte)
+                       notContains nhas countEq countNeq countGt countGte countLt countLte nbetween)
 
   # Array-length ops (task-aaf4d51bf8a51aec): Sanity's search-filter "count"
   # family. The value is an INTEGER; `parse_count/1` is the one parser the door
@@ -752,7 +752,7 @@ defmodule Barkpark.Content.Query do
   # side rather than enumerating the scalar ops is deliberate: an op added later
   # is scalar-checked by default, and enumerating gt/gte/lt/lte was exactly how
   # `has` kept its 500 after the range ops were fixed.
-  @list_value_ops ~w(in nin)
+  @list_value_ops ~w(in nin nbetween)
 
   # The columns the prefix ops above are spelled against.
   @id_fields ~w(doc_id _id)
@@ -806,8 +806,8 @@ defmodule Barkpark.Content.Query do
     "_id" => ~w(eq neq in nin contains startsWith endsWith),
     "type" => ~w(eq neq in nin contains startsWith endsWith),
     "_type" => ~w(eq neq in nin contains startsWith endsWith),
-    "_createdAt" => ~w(eq neq gt gte lt lte),
-    "_updatedAt" => ~w(eq neq gt gte lt lte),
+    "_createdAt" => ~w(eq neq gt gte lt lte nbetween),
+    "_updatedAt" => ~w(eq neq gt gte lt lte nbetween),
     # `references(id)` — not a column, the whole document: it references `id`
     # anywhere in its content (task-aaf4d51bf8a51aec).
     "_references" => ~w(eq)
@@ -839,6 +839,17 @@ defmodule Barkpark.Content.Query do
   """
   @spec valid_filter_ops() :: [String.t()]
   def valid_filter_ops, do: @valid_filter_ops
+
+  @doc """
+  The ops whose VALUE is a LIST rather than a scalar (`in`, `nin`,
+  `nbetween`) — the single source of truth `QueryController`'s own door-level
+  guard derives from, same as `valid_filter_ops/0` above. A second,
+  independently-maintained copy of this set at the door is exactly how
+  `nbetween` first shipped unable to pass its own list value through: the
+  builder accepted it, the door's OWN hardcoded `@list_value_ops` did not.
+  """
+  @spec list_value_ops() :: [String.t()]
+  def list_value_ops, do: @list_value_ops
 
   # ── `?id_prefix=` — THE ONE DERIVATION OF A STABLE-ID PREFIX FILTER ───────
   #
@@ -958,20 +969,64 @@ defmodule Barkpark.Content.Query do
   # its own guard. `QueryController` still pre-guards so the HTTP surface keeps
   # its field-naming envelope (and its ordering behind `forbidden_query_field/4`);
   # this is the floor under every OTHER door.
-  defp apply_filter_map(query, map, _dataset, _opts) when map_size(map) == 0, do: query
+  defp apply_filter_map(query, map, _type, _dataset, _opts) when map_size(map) == 0, do: query
 
-  defp apply_filter_map(query, map, dataset, opts) do
+  defp apply_filter_map(query, map, type, dataset, opts) do
     case validate_filter_map(map) do
       :ok -> :ok
       {:error, {field, op}} -> raise Barkpark.Content.InvalidFilterError.new(field, op)
     end
 
-    map = resolve_reference_count_ops(map, dataset, opts)
+    map =
+      map
+      |> resolve_reference_count_ops(dataset, opts)
+      |> resolve_references_eq(type, dataset, opts)
 
     Enum.reduce(map, query, fn
       {field, %{} = ops}, q -> apply_field_ops(q, field, ops)
       {field, value}, q -> apply_field_op(q, field, "eq", value)
     end)
+  end
+
+  # task-cecd2cb193365b71 — `filter[_references]=<id>` needs THIS type's own
+  # reference-shaped field names (same `reference_field_names/1` the
+  # `referencedBy`-family ops above already resolve through), so its SQL arm
+  # can ALSO match a scalar reference field stored as a bare id string — the
+  # shape `jsonb_path_exists`'s `{"_ref": id}` structural check alone can
+  # never see. Scoped to fields the schema actually declares as references, so
+  # an ordinary string field holding the same value as the probed id is never
+  # mistaken for one. Same chokepoint, same two-arg schema lookup
+  # `resolve_reference_count_ops/3` already runs for `referencedBy`.
+  defp resolve_references_eq(%{"_references" => %{} = ops} = map, type, dataset, opts) do
+    case Map.fetch(ops, "eq") do
+      {:ok, id} when is_binary(id) ->
+        ref_fields = type_reference_field_names(type, dataset, opts)
+        Map.put(map, "_references", Map.put(ops, "eq", {id, ref_fields}))
+
+      _ ->
+        map
+    end
+  end
+
+  # `filter[_references]=<id>` with NO bracketed op is `eq` SUGAR (the bare
+  # scalar form every field supports) — reaches here as `"_references" => id`
+  # directly, never the `%{"eq" => id}` shape the clause above matches. This
+  # is the form the live report's own repro actually used.
+  defp resolve_references_eq(%{"_references" => id} = map, type, dataset, opts)
+       when is_binary(id) do
+    ref_fields = type_reference_field_names(type, dataset, opts)
+    Map.put(map, "_references", {id, ref_fields})
+  end
+
+  defp resolve_references_eq(map, _type, _dataset, _opts), do: map
+
+  defp type_reference_field_names(type, dataset, opts) do
+    schemas = Barkpark.Content.Schema.list_schemas(dataset, tenancy_opts(opts))
+
+    case Enum.find(schemas, &(&1.name == type)) do
+      nil -> []
+      schema -> reference_field_names(schema)
+    end
   end
 
   # `referencedBy: "publication"` names a TYPE; the clause needs that type's
@@ -1119,6 +1174,14 @@ defmodule Barkpark.Content.Query do
       Map.has_key?(ops, "hasStrong") and parse_has_strong(Map.get(ops, "hasStrong")) == :error ->
         {field, "hasStrong"}
 
+      # `nbetween` binds exactly TWO bounds (task-cecd2cb193365b71); any other
+      # length has no clause and would fall to the catch-all and return every
+      # row unfiltered — the same silent-unfiltered-set shape `hasStrong`
+      # refuses. The list-shape-at-all check lives in the `@list_value_ops`
+      # clause below; this is the length check ON TOP of it.
+      Map.has_key?(ops, "nbetween") and not match?([_, _], Map.get(ops, "nbetween")) ->
+        {field, "nbetween"}
+
       op = Enum.find(@reference_count_ops, fn op -> blank_type_value?(ops, op) end) ->
         {field, op}
 
@@ -1128,9 +1191,9 @@ defmodule Barkpark.Content.Query do
           end) ->
         {field, op}
 
-      # `in`/`nin` bind a LIST (the HTTP door splits its comma string into one
-      # via `normalize_filter_op/1`); a scalar has no clause and would fall to
-      # the catch-all.
+      # `in`/`nin`/`nbetween` bind a LIST (the HTTP door splits their comma
+      # form into one via `normalize_filter_op/1`); a scalar has no clause and
+      # would fall to the catch-all.
       op = Enum.find(@list_value_ops, fn op -> non_list_op_value?(ops, op) end) ->
         {field, op}
 
@@ -1206,7 +1269,48 @@ defmodule Barkpark.Content.Query do
   defp apply_field_op(query, "title", "notContains", v),
     do: where(query, [d], not ilike(fragment("coalesce(?, '')", d.title), ^like_contains(v)))
 
-  # `references(id)`: some `_ref` anywhere in the content names `id`.
+  # `references(id)`: some `_ref` anywhere in the content names `id` (the
+  # structural {"_ref": id} shape, unscoped — unchanged), OR `id` is held as a
+  # BARE STRING by a field THIS type's schema declares reference-shaped
+  # (task-cecd2cb193365b71; task-da600cdc8482d1ca's ruling that both storage
+  # shapes count, already honored by `reference_exists/4`'s referencedBy arm,
+  # extended here). `ref_fields` is resolved by `resolve_references_eq/4`
+  # before this clause ever runs, so the match stays schema-scoped: an
+  # ordinary non-reference string field holding the same value as `id` is
+  # never mistaken for a reference, because its name is never in `scalars` or
+  # `arrays`.
+  defp apply_field_op(query, "_references", "eq", {id, ref_fields})
+       when is_binary(id) and is_list(ref_fields) do
+    scalars = for {name, "reference"} <- ref_fields, do: name
+    arrays = for {name, "arrayOf"} <- ref_fields, do: name
+
+    where(
+      query,
+      [d],
+      fragment(
+        "jsonb_path_exists(?, '$.** \\? (@._ref == $id)', jsonb_build_object('id', ?::text))",
+        d.content,
+        ^id
+      ) or
+        fragment(
+          "EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE ?->>k = ?)",
+          ^scalars,
+          d.content,
+          ^id
+        ) or
+        fragment(
+          "EXISTS (SELECT 1 FROM unnest(?::text[]) k WHERE jsonb_typeof(?->k) = 'array' AND ?->k @> to_jsonb(?::text))",
+          ^arrays,
+          d.content,
+          d.content,
+          ^id
+        )
+    )
+  end
+
+  # No type/schema resolved `ref_fields` for (an internal caller that never
+  # ran `resolve_references_eq/4`, or a type with no schema at all) — degrade
+  # to the original structural-only check rather than raising.
   defp apply_field_op(query, "_references", "eq", v) when is_binary(v),
     do:
       where(
@@ -1247,6 +1351,16 @@ defmodule Barkpark.Content.Query do
 
   defp apply_field_op(query, "_updatedAt", op, v) when op in ~w(gt gte lt lte eq neq),
     do: apply_ts_op(query, :updated_at, op, v)
+
+  # task-cecd2cb193365b71 — Sanity's "is not [that day]" needs the EXCLUSION
+  # of a range, which the filter grammar had no op for at all (not an
+  # inversion of an existing `between`; there was none). Inclusive on both
+  # bounds, matching how `gte`/`lte` already read.
+  defp apply_field_op(query, "_createdAt", "nbetween", [a, b]),
+    do: apply_ts_nbetween(query, :inserted_at, a, b)
+
+  defp apply_field_op(query, "_updatedAt", "nbetween", [a, b]),
+    do: apply_ts_nbetween(query, :updated_at, a, b)
 
   defp apply_field_op(query, "status", "eq", v), do: where(query, [d], d.status == ^v)
 
@@ -1610,6 +1724,50 @@ defmodule Barkpark.Content.Query do
     end
   end
 
+  # task-cecd2cb193365b71 — the content-field sibling of `_createdAt`/
+  # `_updatedAt`'s `nbetween` arm above, same number-or-text CASE the
+  # `gt`/`gte`/`lt`/`lte` arms use: a JSON number compares numerically
+  # (ISO date/datetime STRINGS compare correctly as plain text, same as every
+  # other range op on this field already does), anything else stays text.
+  # `NOT (a <= value <= b)`, both bounds inclusive.
+  defp apply_field_op(query, field, "nbetween", [a, b]) do
+    segs = nested_segments(field)
+
+    case {parse_number(a), parse_number(b)} do
+      {{:ok, na}, {:ok, nb}} ->
+        where(
+          query,
+          [d],
+          fragment(
+            "CASE WHEN jsonb_typeof(jsonb_extract_path(?, VARIADIC ?)) = 'number' THEN NOT ((jsonb_extract_path_text(?, VARIADIC ?))::numeric BETWEEN ? AND ?) ELSE NOT (jsonb_extract_path_text(?, VARIADIC ?) BETWEEN ? AND ?) END",
+            d.content,
+            ^segs,
+            d.content,
+            ^segs,
+            ^na,
+            ^nb,
+            d.content,
+            ^segs,
+            ^a,
+            ^b
+          )
+        )
+
+      _ ->
+        where(
+          query,
+          [d],
+          fragment(
+            "NOT (jsonb_extract_path_text(?, VARIADIC ?) BETWEEN ? AND ?)",
+            d.content,
+            ^segs,
+            ^a,
+            ^b
+          )
+        )
+    end
+  end
+
   # `has` — array-membership: matches docs whose array field contains the value,
   # as a Sanity-style `{_ref}` object (references) OR a plain scalar. The scalar
   # arm matches on the element's TEXT form (`e #>> '{}'` renders 2021 → "2021",
@@ -1830,6 +1988,19 @@ defmodule Barkpark.Content.Query do
   defp apply_ts_op(query, col, op, v) do
     case parse_ts(v) do
       {:ok, dt} -> apply_ts_compare(query, col, op, dt)
+      :error -> query
+    end
+  end
+
+  # task-cecd2cb193365b71 — `NOT (col BETWEEN a AND b)`, both bounds
+  # inclusive. Either bound failing to parse answers an untouched `query`
+  # (the same quiet no-op `apply_ts_op/4` takes above) rather than raising on
+  # a malformed date string.
+  defp apply_ts_nbetween(query, col, a, b) do
+    with {:ok, dt_a} <- parse_ts(a),
+         {:ok, dt_b} <- parse_ts(b) do
+      where(query, [d], not (field(d, ^col) >= ^dt_a and field(d, ^col) <= ^dt_b))
+    else
       :error -> query
     end
   end
