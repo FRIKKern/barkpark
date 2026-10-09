@@ -236,6 +236,58 @@ defmodule Barkpark.Content.Envelope do
   end
 
   @doc """
+  Content source map (task-f18edb4599e06308, candidate 1) — a `{result path
+  -> source document + field}` map for click-to-edit, computed from an
+  ALREADY-RENDERED envelope rather than by re-deriving field visibility: a
+  key present in `rendered` already survived `render/3`'s redaction (a
+  `private`/`owner_only`/encrypted field was deleted from the map, never
+  merely hidden), so iterating `rendered`'s own keys gets "a redacted field
+  never appears in the map" for free — no separate visibility check, no risk
+  of the two decisions drifting apart.
+
+  FLAT FIELDS ONLY (scope cut, recorded on the task row): a nested
+  object/array value's OWN sub-fields are not walked — the whole value is one
+  mapping entry naming its top-level key. Provenance through `?expand=`
+  (a different source document), computed fields (no single source to name)
+  and aggregate/derived views each need their own rule, filed separately as
+  task-0e0cb2167c6fcdea rather than guessed at here.
+
+  Returns `nil` for a non-document result (nothing to map) or a `rendered`
+  with no user-content keys at all.
+
+  Shape mirrors `@sanity/client`'s `resultSourceMap` loosely (documents/paths/
+  mappings, JSON-Pointer-ish result keys) — NOT byte-compatible, since
+  Barkpark has no stega/visual-editing client to match today; the shape is
+  chosen to be obviously extensible toward that if it is ever built.
+  """
+  @spec source_map(Content.Document.t(), map()) :: map() | nil
+  def source_map(%{doc_id: doc_id, type: type}, rendered) when is_map(rendered) do
+    case rendered |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort() do
+      [] ->
+        nil
+
+      paths ->
+        mappings =
+          paths
+          |> Enum.with_index()
+          |> Map.new(fn {key, idx} ->
+            {result_path(key),
+             %{"source" => %{"document" => 0, "path" => idx}, "type" => "value"}}
+          end)
+
+        %{
+          "documents" => [%{"_id" => doc_id, "_type" => type}],
+          "paths" => Enum.map(paths, &result_path/1),
+          "mappings" => mappings
+        }
+    end
+  end
+
+  def source_map(_doc, _rendered), do: nil
+
+  defp result_path(key), do: "$[#{inspect(key)}]"
+
+  @doc """
   Redact an ALREADY-rendered envelope map under a subscriber's caller context —
   the same single chokepoint as `render/3`, but for the rare path that holds a
   frozen envelope snapshot rather than a live `%Document{}`.

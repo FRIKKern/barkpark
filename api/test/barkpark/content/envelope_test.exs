@@ -365,4 +365,56 @@ defmodule Barkpark.Content.EnvelopeTest do
       refute Map.has_key?(doc, "not_a_field")
     end
   end
+
+  describe "source_map/2 (task-f18edb4599e06308)" do
+    test "maps each flat field to its {document, path} index", %{doc: doc} do
+      rendered = Envelope.render(doc)
+      map = Envelope.source_map(doc, rendered)
+
+      assert [%{"_id" => "drafts.env-1", "_type" => "post"}] = map["documents"]
+      title_path = ~s($["title"])
+      assert title_idx = map["mappings"][title_path]["source"]["path"]
+      assert Enum.at(map["paths"], title_idx) == title_path
+      assert map["mappings"][title_path]["source"]["document"] == 0
+    end
+
+    test "a reserved key never appears in paths or mappings", %{doc: doc} do
+      rendered = Envelope.render(doc)
+      map = Envelope.source_map(doc, rendered)
+
+      for reserved <- ~w(_id _type _rev _draft _publishedId _createdAt _updatedAt) do
+        refute Enum.member?(map["paths"], ~s($["#{reserved}"]))
+        refute Map.has_key?(map["mappings"], ~s($["#{reserved}"]))
+      end
+    end
+
+    test "a field DROPPED by render/3's redaction never appears — same chokepoint, no drift" do
+      {:ok, doc} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "env-sm-redact", "title" => "T", "ssn" => "111-22-3333"},
+          "test"
+        )
+
+      schema = %SchemaDefinition{
+        name: "post",
+        fields: [
+          %SchemaDefinition.Field{name: "title", type: "string"},
+          %SchemaDefinition.Field{name: "ssn", type: "string", private: true}
+        ]
+      }
+
+      rendered = Envelope.render(doc, schema, CallerContext.anonymous())
+      refute Map.has_key?(rendered, "ssn")
+
+      map = Envelope.source_map(doc, rendered)
+      refute Map.has_key?(map["mappings"], ~s($["ssn"]))
+      refute Enum.member?(map["paths"], ~s($["ssn"]))
+    end
+
+    test "an envelope with no user-content keys returns nil" do
+      doc = %Barkpark.Content.Document{doc_id: "env-sm-empty", type: "post"}
+      assert Envelope.source_map(doc, %{}) == nil
+    end
+  end
 end

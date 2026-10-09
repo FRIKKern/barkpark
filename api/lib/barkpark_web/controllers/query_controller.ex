@@ -938,8 +938,10 @@ defmodule BarkparkWeb.QueryController do
          {:ok, doc} <- get_document_for_perspective(conn, doc_id, type, dataset, params) do
       caller_context = CallerContext.from_conn(conn)
 
+      base_rendered = Envelope.render(doc, schema, caller_context)
+
       rendered =
-        [Envelope.render(doc, schema, caller_context)]
+        [base_rendered]
         |> Expand.expand(
           expand_spec,
           dataset,
@@ -953,6 +955,7 @@ defmodule BarkparkWeb.QueryController do
       schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
+      source_map = maybe_source_map(conn, params, doc, base_rendered)
 
       respond(
         conn,
@@ -961,8 +964,26 @@ defmodule BarkparkWeb.QueryController do
         sync_tags,
         etag,
         cache_validator(etag, schema_hash),
-        t0
+        t0,
+        source_map
       )
+    end
+  end
+
+  # task-f18edb4599e06308 (candidate 1) — `?sourceMap=true`, DRAFTS/RAW ONLY.
+  # Never published: a published/production read returning a source map leaks
+  # internal doc_id/field-path structure to a public caller for no reason,
+  # mirroring AnonPerspective's own anon-pinning and PreviewToken's doc-scoped
+  # posture — the same rule this session applied twice already, not a new one.
+  # "Refused or ignored": ignored, not erred — the query is well-formed, the
+  # FLAG just isn't honoured outside drafts/raw, the same way `AnonPerspective.
+  # resolve/2` silently clamps `?perspective=drafts` for an anonymous caller
+  # rather than 400ing it.
+  defp maybe_source_map(conn, params, doc, base_rendered) do
+    truthy = params["sourceMap"] in ["true", "1", true]
+
+    if truthy and AnonPerspective.resolve(conn, params) != :published do
+      Envelope.source_map(doc, base_rendered)
     end
   end
 
@@ -1218,7 +1239,7 @@ defmodule BarkparkWeb.QueryController do
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
-  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0) do
+  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0, source_map \\ nil) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
@@ -1237,7 +1258,7 @@ defmodule BarkparkWeb.QueryController do
       if IfNoneMatch.match?(conn, entity_tag) do
         conn |> send_resp(304, "") |> halt()
       else
-        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
+        respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map)
       end
     else
       # No header, and therefore no 304 branch: a validator we would refuse to
@@ -1245,13 +1266,13 @@ defmodule BarkparkWeb.QueryController do
       # UNCHANGED — it is the SDK's change-detection token, not a cache
       # validator (the SDK never sends If-None-Match itself — see runFetch in
       # js/packages/nextjs/src/server/core.ts), so consumers keep working.
-      respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash)
+      respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map)
     end
   end
 
-  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash) do
+  defp respond_json(conn, inner, sync_tags, etag, elapsed_ms, schema_hash, source_map) do
     if Map.get(conn.assigns, :barkpark_filterresponse, true) do
-      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, schema_hash))
+      json(conn, envelope(inner, sync_tags, etag, elapsed_ms, schema_hash, source_map))
     else
       json(conn, inner)
     end
@@ -1270,7 +1291,7 @@ defmodule BarkparkWeb.QueryController do
   # is now folded into the cache validator. Recomputing it here would be a
   # second identical DB read AND — worse — could disagree with the value the
   # ETag was built from if a schema landed in between.
-  defp envelope(result, sync_tags, etag, ms, schema_hash) do
+  defp envelope(result, sync_tags, etag, ms, schema_hash, source_map) do
     %{
       result: result,
       syncTags: sync_tags,
@@ -1278,7 +1299,14 @@ defmodule BarkparkWeb.QueryController do
       etag: etag,
       schemaHash: schema_hash
     }
+    |> maybe_put_source_map(source_map)
   end
+
+  # Key OMITTED (never `sourceMap: null`) when absent — the opt-in param is
+  # absent, the perspective is published, or there were no user-content keys
+  # to map — so a consumer that never asked for it sees a byte-identical body.
+  defp maybe_put_source_map(envelope, nil), do: envelope
+  defp maybe_put_source_map(envelope, source_map), do: Map.put(envelope, :sourceMap, source_map)
 
   # Fold each doc's `_id` AND `_rev` into the ETag IN LIST ORDER (not a sorted
   # set): an in-place edit (same id, new rev) or a reorder must change the ETag,
