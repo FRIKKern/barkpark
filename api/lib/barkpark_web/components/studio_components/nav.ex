@@ -488,8 +488,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
               uses for its label. Anything without the flag renders exactly as
               before. --%>
         <%= if tab[:disabled] do %>
+          <%!-- role="link": it stands in for the tab's link, and aria-label
+                is prohibited on a role-less span (axe aria-prohibited-attr,
+                task-5907c5d41ac77c8b). No href or tabindex, so it stays a
+                non-link; assistive tech reads "link, unavailable" + reason. --%>
           <span
             class="studio-tab studio-tab-disabled"
+            role="link"
             aria-disabled="true"
             style="opacity:0.45;cursor:not-allowed;"
             title={"#{tab_label(tab.label)} — #{disabled_reason(tab)}"}

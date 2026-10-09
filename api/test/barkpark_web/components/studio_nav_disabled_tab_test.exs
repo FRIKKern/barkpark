@@ -73,6 +73,21 @@ defmodule BarkparkWeb.StudioComponents.NavDisabledTabTest do
 
       assert html =~ "aria-disabled=\"true\""
       assert html =~ "studio-tab-disabled"
+
+      # task-5907c5d41ac77c8b: aria-label is prohibited on a role-less span
+      # (axe aria-prohibited-attr), so the disabled tab carries role="link"
+      # and still no href or tabindex.
+      [tab] =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="top-menu-tab-disabled"]))
+        |> Enum.to_list()
+
+      assert LazyHTML.attribute(tab, "role") == ["link"]
+      assert LazyHTML.attribute(tab, "aria-disabled") == ["true"]
+      assert [_label] = LazyHTML.attribute(tab, "aria-label")
+      assert LazyHTML.attribute(tab, "href") == []
+      assert LazyHTML.attribute(tab, "tabindex") == []
       assert html =~ "ScopedNavTab"
       assert html =~ "Disabled in this workspace"
       assert html =~ enabling.name
