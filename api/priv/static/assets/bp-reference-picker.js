@@ -89,6 +89,12 @@ class BpReferencePicker extends HTMLElement {
     return typeof strings[key] === "string" ? strings[key] : fallback;
   }
 
+  // A count in the viewer's words: the singular form for one, else the plural
+  // with its %{count} slot filled.
+  _count(n, oneKey, one, manyKey, many) {
+    return n === 1 ? this._t(oneKey, one) : this._t(manyKey, many).replace("%{count}", String(n));
+  }
+
   disconnectedCallback() {
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = null;
@@ -471,21 +477,27 @@ class BpReferencePicker extends HTMLElement {
 
     if (recent.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Recent</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("recent", "Recent")) +
+        "</div>" +
         recent.map((item, i) => this._suggestRow(item, "recent", i)).join("") +
         "</div>";
     }
 
     if (popular.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">Popular</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("popular", "Popular")) +
+        "</div>" +
         popular.map((item, i) => this._suggestRow(item, "popular", i, item.count)).join("") +
         "</div>";
     }
 
     if (nohits.length) {
       html +=
-        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">No matches before</div>' +
+        '<div class="bp-ref-suggest-section"><div class="bp-ref-suggest-title">' +
+        bpRefEsc(this._t("no_matches_before", "No matches before")) +
+        "</div>" +
         nohits
           .map((item, i) =>
             this._suggestRow({ query: item.query, filters: {} }, "nohits", i, item.count)
@@ -523,9 +535,13 @@ class BpReferencePicker extends HTMLElement {
     const label = bpRefEsc(item.query || "");
     const meta =
       typeof count === "number"
-        ? '<span class="bp-ref-suggest-meta">' + count + " searches</span>"
+        ? '<span class="bp-ref-suggest-meta">' +
+          bpRefEsc(this._count(count, "one_search", "1 search", "n_searches", "%{count} searches")) +
+          "</span>"
         : item.resultCount != null
-          ? '<span class="bp-ref-suggest-meta">' + item.resultCount + " docs</span>"
+          ? '<span class="bp-ref-suggest-meta">' +
+            bpRefEsc(this._count(item.resultCount, "one_doc", "1 doc", "n_docs", "%{count} docs")) +
+            "</span>"
           : "";
     return (
       '<button type="button" class="bp-ref-suggest-item" role="option" data-section="' +
@@ -583,8 +599,7 @@ class BpReferencePicker extends HTMLElement {
     this._dropdown.hidden = false;
     if (this._searchInput) this._searchInput.setAttribute("aria-expanded", "true");
     this._announce(
-      matches.length === 1 ? this._t("one_result", "1 result") :
-        this._t("n_results", "%{count} results").replace("%{count}", String(matches.length)),
+      this._count(matches.length, "one_result", "1 result", "n_results", "%{count} results"),
     );
   }
 
