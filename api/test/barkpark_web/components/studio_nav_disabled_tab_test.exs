@@ -84,6 +84,7 @@ defmodule BarkparkWeb.StudioComponents.NavDisabledTabTest do
         |> Enum.to_list()
 
       assert LazyHTML.attribute(tab, "role") == ["link"]
+      assert LazyHTML.attribute(tab, "aria-disabled") == ["true"]
       assert [_label] = LazyHTML.attribute(tab, "aria-label")
       assert LazyHTML.attribute(tab, "href") == []
       assert LazyHTML.attribute(tab, "tabindex") == []
