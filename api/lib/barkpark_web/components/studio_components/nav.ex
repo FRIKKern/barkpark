@@ -34,6 +34,29 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     """
   end
 
+  # The update script's status words, keyed by the English it falls back to;
+  # %{slots} are left for the script to fill.
+  defp update_strings do
+    Jason.encode!(%{
+      "Updating…" => gettext("Updating…"),
+      "Starting update…" => gettext("Starting update…"),
+      "Update now" => gettext("Update now"),
+      "Taking longer than expected — reload to check." =>
+        gettext("Taking longer than expected — reload to check."),
+      "Updated to %{release} — reloading…" =>
+        gettext("Updated to %{release} — reloading…", release: "%{release}"),
+      "Update failed (exit %{code}) — check server logs." =>
+        gettext("Update failed (exit %{code}) — check server logs.", code: "%{code}"),
+      "Updated — reloading…" => gettext("Updated — reloading…"),
+      "Rebuilding…" => gettext("Rebuilding…"),
+      "Not authorised — sign in as an admin and retry." =>
+        gettext("Not authorised — sign in as an admin and retry."),
+      "Rebuilding & restarting…" => gettext("Rebuilding & restarting…"),
+      "One-click update isn't enabled on this instance." =>
+        gettext("One-click update isn't enabled on this instance.")
+    })
+  end
+
   @doc """
   Self-update bar for the Studio chrome — a slim strip pinned above the
   topbar. Renders ONLY when the caller is an INSTANCE admin (`@admin?`,
@@ -77,12 +100,16 @@ defmodule BarkparkWeb.StudioComponents.Nav do
         data-release={@update_status.latest_release}
         data-apply={to_string(@apply_enabled?)}
         data-token={@api_token_raw}
+        data-strings={update_strings()}
       >
         <div class="bp-update-bar-main">
           <span class="bp-update-dot" aria-hidden="true"></span>
           <span class="bp-update-msg">
-            New update available — Barkpark <strong><%= @update_status.latest_release %></strong>
-            <span class="bp-update-run">· you run <%= @update_status.running_release %></span>
+            <%= gettext("New update available — Barkpark") %>
+            <strong><%= @update_status.latest_release %></strong>
+            <span class="bp-update-run">
+              <%= gettext("· you run %{release}", release: @update_status.running_release) %>
+            </span>
           </span>
           <span class="bp-update-status" data-bp-update-status role="status" aria-live="polite"></span>
           <div class="bp-update-actions">
@@ -94,10 +121,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 data-bp-update-target="bp-update-changelog"
                 aria-expanded="false"
                 aria-controls="bp-update-changelog"
-              >What's changed</button>
+              ><%= gettext("What's changed") %></button>
             <% end %>
             <%= if @apply_enabled? do %>
-              <button type="button" class="bp-update-btn" data-bp-update-action="apply">Update now</button>
+              <button type="button" class="bp-update-btn" data-bp-update-action="apply"><%= gettext("Update now") %></button>
             <% else %>
               <button
                 type="button"
@@ -106,14 +133,14 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 data-bp-update-target="bp-update-howto"
                 aria-expanded="false"
                 aria-controls="bp-update-howto"
-              >How to update</button>
+              ><%= gettext("How to update") %></button>
             <% end %>
             <button
               type="button"
               class="bp-update-dismiss"
               data-bp-update-action="dismiss"
-              aria-label="Dismiss update notice"
-              title="Dismiss"
+              aria-label={gettext("Dismiss update notice")}
+              title={gettext("Dismiss")}
             >×</button>
           </div>
         </div>
@@ -137,21 +164,25 @@ defmodule BarkparkWeb.StudioComponents.Nav do
                 href={@update_status.notes_url}
                 target="_blank"
                 rel="noopener noreferrer"
-              >Full release notes ↗</a>
+              ><%= gettext("Full release notes ↗") %></a>
             <% end %>
           </div>
         <% end %>
         <%= unless @apply_enabled? do %>
           <div id="bp-update-howto" class="bp-update-changelog" hidden>
-            One-click update isn't enabled on this instance. Deploy it with <code>git pull</code>
-            on the server (the post-merge hook rebuilds &amp; restarts), or set
-            <code>BARKPARK_SELF_UPDATE_APPLY=1</code> to turn on the button here.
+            <%= gettext("One-click update isn't enabled on this instance. Deploy it with") %>
+            <code>git pull</code>
+            <%= gettext("on the server (the post-merge hook rebuilds & restarts), or set") %>
+            <code>BARKPARK_SELF_UPDATE_APPLY=1</code>
+            <%= gettext("to turn on the button here.") %>
           </div>
         <% end %>
         <%= if @update_status.canonical_release do %>
           <div class="bp-update-fork">
-            Your fork's upstream, open-source Barkpark, is further ahead at
-            <%= @update_status.canonical_release %> — consider syncing the fork.
+            <%= gettext(
+              "Your fork's upstream, open-source Barkpark, is further ahead at %{release} — consider syncing the fork.",
+              release: @update_status.canonical_release
+            ) %>
           </div>
         <% end %>
       </div>
@@ -160,8 +191,10 @@ defmodule BarkparkWeb.StudioComponents.Nav do
       <div id="bp-update-fork-only" class="bp-update-bar bp-update-bar--muted">
         <div class="bp-update-bar-main">
           <span class="bp-update-msg bp-update-run">
-            Current with your fork — but open-source Barkpark is ahead at
-            <%= @update_status.canonical_release %>; consider syncing the fork.
+            <%= gettext(
+              "Current with your fork — but open-source Barkpark is ahead at %{release}; consider syncing the fork.",
+              release: @update_status.canonical_release
+            ) %>
           </span>
         </div>
       </div>

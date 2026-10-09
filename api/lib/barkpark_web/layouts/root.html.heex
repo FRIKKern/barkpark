@@ -5114,6 +5114,16 @@
         } catch (e) {}
       }
 
+      // The bar's data-strings map holds the Studio-language words, keyed by
+      // the English; %{name} slots are filled from vars.
+      function t(el, text, vars) {
+        var map = {};
+        try { map = JSON.parse(el.dataset.strings || "{}"); } catch (e) {}
+        var out = typeof map[text] === "string" ? map[text] : text;
+        if (vars) out = out.replace(/%\{(\w+)\}/g, function (slot, k) { return k in vars ? String(vars[k]) : slot; });
+        return out;
+      }
+
       function setStatus(el, msg) {
         var s = el.querySelector("[data-bp-update-status]");
         if (s) s.textContent = msg || "";
@@ -5136,17 +5146,17 @@
         var sawDrop = false;   // a connection drop = the box is restarting
         var sawActive = false; // observed OUR run go "running" at least once
 
-        if (btn) { btn.disabled = true; btn.textContent = "Updating…"; }
-        setStatus(el, "Starting update…");
+        if (btn) { btn.disabled = true; btn.textContent = t(el, "Updating…"); }
+        setStatus(el, t(el, "Starting update…"));
 
         function fail(msg) {
           setStatus(el, msg);
-          if (btn) { btn.disabled = false; btn.textContent = "Update now"; }
+          if (btn) { btn.disabled = false; btn.textContent = t(el, "Update now"); }
         }
 
         function poll() {
           if (Date.now() - startedAt > MAX_MS) {
-            return fail("Taking longer than expected — reload to check.");
+            return fail(t(el, "Taking longer than expected — reload to check."));
           }
           fetch("/v1/admin/self-update", { headers: authed, credentials: "same-origin" })
             .then(function (r) {
@@ -5160,7 +5170,7 @@
               // Server came back after a restart on a release that's no longer
               // behind → the update landed.
               if (sawDrop && check.state && check.state !== "behind") {
-                setStatus(el, "Updated to " + (check.running_release || target) + " — reloading…");
+                setStatus(el, t(el, "Updated to %{release} — reloading…", { release: check.running_release || target }));
                 return setTimeout(function () { location.reload(); }, 1200);
               }
               // A clean finish WITHOUT a restart drop (rare: e.g. a container
@@ -5169,29 +5179,29 @@
               // a first-poll "done" is stale, not us.
               if (runner === "done" && (sawActive || sawDrop)) {
                 if (data.exit_code && data.exit_code !== 0) {
-                  return fail("Update failed (exit " + data.exit_code + ") — check server logs.");
+                  return fail(t(el, "Update failed (exit %{code}) — check server logs.", { code: data.exit_code }));
                 }
-                setStatus(el, "Updated — reloading…");
+                setStatus(el, t(el, "Updated — reloading…"));
                 return setTimeout(function () { location.reload(); }, 1200);
               }
-              setStatus(el, sawActive || sawDrop ? "Rebuilding…" : "Updating…");
+              setStatus(el, t(el, sawActive || sawDrop ? "Rebuilding…" : "Updating…"));
               setTimeout(poll, POLL_MS);
             })
             .catch(function (err) {
               if (err && err.message === "unauthorized") {
-                return fail("Not authorised — sign in as an admin and retry.");
+                return fail(t(el, "Not authorised — sign in as an admin and retry."));
               }
               // Connection refused mid-rebuild is the EXPECTED restart window.
               sawDrop = true;
-              setStatus(el, "Rebuilding & restarting…");
+              setStatus(el, t(el, "Rebuilding & restarting…"));
               setTimeout(poll, POLL_MS);
             });
         }
 
         fetch("/v1/admin/self-update", { method: "POST", headers: authed, credentials: "same-origin" })
           .then(function (r) {
-            if (r.status === 401 || r.status === 403) return fail("Not authorised — sign in as an admin and retry.");
-            if (r.status === 503) return fail("One-click update isn't enabled on this instance.");
+            if (r.status === 401 || r.status === 403) return fail(t(el, "Not authorised — sign in as an admin and retry."));
+            if (r.status === 503) return fail(t(el, "One-click update isn't enabled on this instance."));
             // 202 started, or 409 already-running — either way, poll to completion.
             poll();
           })

@@ -57,7 +57,12 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
               "type" => "paragraph",
               "content" => [%{"type" => "text", "value" => "Ein stad i fjellet."}]
             },
-            %{"id" => "eq1", "type" => "equation", "tex" => "E = mc^2"}
+            %{"id" => "eq1", "type" => "equation", "tex" => "E = mc^2"},
+            %{
+              "id" => "st1",
+              "type" => "steps",
+              "steps" => [%{"id" => "st1-a", "title" => "Gå", "blocks" => []}]
+            }
           ],
           "workspace_id" => ws.id,
           "project_id" => proj.id
@@ -87,6 +92,9 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
     refute html =~ "Undo content change"
     refute html =~ "Move equation block up"
     refute html =~ "Save block as master"
+    # task-34cf5768b10b3c79: a repeated item's legend.
+    assert html =~ "<legend>Trinn 1</legend>"
+    refute html =~ "<legend>Step 1</legend>"
   end
 
   # task-8f6507ea3a5c79c6: the pickers the canvas mounts in JS read their words off
@@ -125,5 +133,6 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
     assert html =~ ~s(aria-label="Save block as master")
     assert html =~ ~s(title="Drag to reorder")
     refute html =~ "Angre innholdsendringen"
+    assert html =~ "<legend>Step 1</legend>"
   end
 end
