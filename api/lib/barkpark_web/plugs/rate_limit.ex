@@ -21,8 +21,16 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   (60/min): a server-side proxy fronting many human editors through one
   egress IP and/or one shared credential (Barkpark Studio) otherwise collapses
   every editor into one 60/min bucket the moment two of them type at once.
-  Bearer/SCIM/anonymous budgets are untouched by this -- only a resolved
-  SESSION principal ever sees the wider default.
+
+  A Bearer token whose `owner_user_id` names ONE human -- a personal PAT, or
+  an app token minted via `POST /v1/auth/app-tokens` (one per editor email,
+  `owner_user_id` always set) -- gets that SAME wider default too, keyed
+  `:owned` (task-2c31de0cf6597d32 follow-up): Studio's editors authenticate
+  to Barkpark with a per-editor Bearer, not a session cookie, so the session
+  branch alone left them on the flat 60/min default. A Bearer with no owner
+  (a shared/service credential) stays `:verified`, at 60/min, unchanged.
+  SCIM/anonymous budgets are untouched by either of these -- only a resolved
+  SESSION or OWNED principal ever sees the wider default.
 
   ## The `:browser` class — SHADOW ONLY (charter D2/D4 Gate A)
 
@@ -266,16 +274,17 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     end
   end
 
-  # `principal_class` (`:session` | `:verified` | `:anonymous`, from
-  # `bucket_key/3`) only ever widens the WRITE default, and only for a bucket
-  # keyed on an editor's OWN resolved session (task-2c31de0cf6597d32: Studio
-  # proxies many editors through one server-side credential/egress IP, so
-  # without this every editor shared one 60/min bucket). A dataset override,
-  # when set, still wins outright — an operator clamping a specific dataset's
-  # abuse ceiling means it regardless of who is asking. api_token/scim/
-  # anonymous(IP) traffic is UNCHANGED: default_per_minute/3 only branches on
-  # `:session`, so every other principal_class keeps the exact byte-identical
-  # :write_per_minute default this function always returned.
+  # `principal_class` (`:session` | `:owned` | `:verified` | `:anonymous`,
+  # from `bucket_key/3`) only ever widens the WRITE default, and only for a
+  # bucket keyed on an editor's OWN resolved session or OWN owned token
+  # (task-2c31de0cf6597d32 and its follow-up: Studio proxies many editors
+  # through one server-side credential/egress IP, so without this every
+  # editor shared one 60/min bucket). A dataset override, when set, still
+  # wins outright — an operator clamping a specific dataset's abuse ceiling
+  # means it regardless of who is asking. Plain Bearer/scim/anonymous(IP)
+  # traffic is UNCHANGED: default_per_minute/3 only branches on `:session`
+  # and `:owned`, so every other principal_class keeps the exact
+  # byte-identical :write_per_minute default this function always returned.
   defp limit_per_minute(class, dataset, principal_class) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
     default = default_per_minute(cfg, class, principal_class)
@@ -290,7 +299,11 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp default_per_minute(cfg, :read, _principal_class),
     do: Keyword.get(cfg, :read_per_minute, 300)
 
-  defp default_per_minute(cfg, :write, :session) do
+  # `:session` (a cookie-resolved editor, task-2c31de0cf6597d32) and `:owned`
+  # (a Bearer whose owner_user_id names that same ONE human, the follow-up)
+  # are the same interactive-editor budget by the same config knob — the
+  # distinction is HOW the principal was resolved, not what it should get.
+  defp default_per_minute(cfg, :write, class) when class in [:session, :owned] do
     case Keyword.get(cfg, :session_write_per_minute, 180) do
       n when is_integer(n) and n > 0 -> n
       _ -> Keyword.get(cfg, :write_per_minute, 60)
@@ -343,6 +356,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
         {:session, token_id} ->
           {:session, "token:#{token_id}:#{class}:#{scope}"}
+
+        {:owned, token_id} ->
+          {:owned, "token:#{token_id}:#{class}:#{scope}"}
 
         token_id ->
           {:verified, "token:#{token_id}:#{class}:#{scope}"}
@@ -419,26 +435,37 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   # None of it runs for a request that presents no bearer, which is the whole
   # anonymous surface.
   @principal_resolvers [
-    # kind, {module, function} resolving a raw bearer to a stable id or nil.
-    # The kind is part of the bucket key, so ids from two credential tables can
-    # never collide into one bucket.
-    {"api", {Barkpark.Auth, :verify_token_id}},
+    # kind, {module, function} resolving a raw bearer to a stable id, an
+    # `{id, owner_user_id}` pair, or nil. The kind is part of the bucket key,
+    # so ids from two credential tables can never collide into one bucket.
+    # `Auth.verify_token_principal/1` returns the pair (api_token carries
+    # `owner_user_id`); `Scim.resolve_token_id/1` returns a bare id — a SCIM
+    # token has no owner concept, so it is never `:owned`.
+    {"api", {Barkpark.Auth, :verify_token_principal}},
     {"scim", {Barkpark.Scim, :resolve_token_id}}
   ]
 
-  # Returns a bare id/kind-string for a `:verified` (Bearer-resolved) principal,
+  # Returns a bare id/kind-string for a `:verified` (Bearer-resolved, no
+  # owner) principal, `{:owned, id}` for a Bearer-resolved principal whose
+  # `owner_user_id` names ONE human (task-2c31de0cf6597d32 follow-up),
   # `{:session, id}` for a session-cookie-resolved one, or nil for anonymous.
-  # The `{:session, _}` wrapper is how `bucket_key/3` tells the two apart —
-  # a Bearer-presenting caller is `:verified` even if ITS token also happens to
-  # ride a cookie elsewhere, because the Bearer branch always wins here first
-  # (same precedence `OptionalSessionToken` documents for token resolution).
+  # The wrappers are how `bucket_key/3` tells the three apart — a
+  # Bearer-presenting caller is `:verified`/`:owned` even if ITS token also
+  # happens to ride a cookie elsewhere, because the Bearer branch always wins
+  # here first (same precedence `OptionalSessionToken` documents for token
+  # resolution).
   defp principal_id(conn) do
     case conn.assigns[:api_token] do
       # Free path: a plug ahead of us already resolved this bearer. Nothing in
       # the tree mounts RateLimit after token resolution today, so this is a
-      # forward-compatibility branch, not the hot one.
-      %Barkpark.Auth.ApiToken{id: id} when is_binary(id) -> "api:" <> id
-      _ -> verified_bearer_id(conn) || session_principal_id(conn)
+      # forward-compatibility branch, not the hot one. The struct already
+      # carries owner_user_id, so this path gets the same :owned treatment as
+      # the live resolver below, at zero extra cost.
+      %Barkpark.Auth.ApiToken{id: id, owner_user_id: owner} when is_binary(id) ->
+        if is_binary(owner), do: {:owned, "api:" <> id}, else: "api:" <> id
+
+      _ ->
+        verified_bearer_id(conn) || session_principal_id(conn)
     end
   end
 
@@ -518,8 +545,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   defp resolve(raw, [{kind, {mod, fun}} | rest]) do
     case apply(mod, fun, [raw]) do
-      id when is_binary(id) -> kind <> ":" <> id
-      _ -> resolve(raw, rest)
+      # `verify_token_principal/1`'s shape: owned iff owner_user_id is set.
+      {id, owner_user_id} when is_binary(id) and is_binary(owner_user_id) ->
+        {:owned, kind <> ":" <> id}
+
+      {id, _owner_user_id} when is_binary(id) ->
+        kind <> ":" <> id
+
+      # A bare-id resolver (e.g. Scim.resolve_token_id/1) — no owner concept.
+      id when is_binary(id) ->
+        kind <> ":" <> id
+
+      _ ->
+        resolve(raw, rest)
     end
   rescue
     # The limiter must never be the thing that 500s a request. A database blip

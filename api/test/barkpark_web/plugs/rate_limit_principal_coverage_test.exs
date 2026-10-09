@@ -135,15 +135,25 @@ defmodule BarkparkWeb.Plugs.RateLimitPrincipalCoverageTest do
     src = File.read!(Path.expand("../../../lib/barkpark_web/plugs/rate_limit.ex", __DIR__))
 
     # The registry is the code's own statement of which kinds it can verify.
-    assert src =~ "{\"api\", {Barkpark.Auth, :verify_token_id}}"
+    #
+    # The "api" entry resolves through `verify_token_principal/1`, not
+    # `verify_token_id/1` (task-2c31de0cf6597d32 follow-up): it returns
+    # `{id, owner_user_id}` so RateLimit can key a Bearer whose owner names
+    # ONE human into the wider :owned/:session budget rather than the flat
+    # per-token default. `verify_token_id/1` still exists — it is what the
+    # SESSION cookie branch below calls — so this is a widened resolver
+    # pairing, not a replaced function.
+    assert src =~ "{\"api\", {Barkpark.Auth, :verify_token_principal}}"
     assert src =~ "{\"scim\", {Barkpark.Scim, :resolve_token_id}}"
 
-    # And both of those functions exist with the arity the registry applies.
-    # `ensure_loaded?` first: in :test the modules are lazily loaded, and
-    # `function_exported?` on an unloaded module answers FALSE — a red that
-    # would look exactly like a deleted function.
+    # And all three of those functions exist with the arity the registry (or
+    # the session branch below) applies. `ensure_loaded?` first: in :test the
+    # modules are lazily loaded, and `function_exported?` on an unloaded
+    # module answers FALSE — a red that would look exactly like a deleted
+    # function.
     assert Code.ensure_loaded?(Barkpark.Auth)
     assert Code.ensure_loaded?(Barkpark.Scim)
+    assert function_exported?(Barkpark.Auth, :verify_token_principal, 1)
     assert function_exported?(Barkpark.Auth, :verify_token_id, 1)
     assert function_exported?(Barkpark.Scim, :resolve_token_id, 1)
 
