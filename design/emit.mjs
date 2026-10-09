@@ -1049,6 +1049,15 @@ function onStatusVars(theme, indent, t = tokens) {
   const os = t.color.onStatus;
   return STATUS_FG.map((r) => indent + `--${r}: ${hsl(os[r][theme])};`).join("\n");
 }
+// Text-on-tint voices (color.onTint): a status hue as TEXT on its own -soft tint,
+// a darker step in light so it clears AA there (task-98bc0a831eecc140). Studio-only
+// like onStatus; its dark value rides the same prefers-color-scheme block as the
+// status roles it shadows, so --warn-text and --warn always flip together.
+const ON_TINT = ["warn-text"];
+function onTintVars(theme, indent, t = tokens) {
+  const ot = t.color.onTint;
+  return ON_TINT.map((r) => indent + `--${r}: ${hsl(ot[r][theme])};`).join("\n");
+}
 function chromeVars(theme, indent, t = tokens) {
   const ch = t.color.studioChrome;
   return CHROME_ALIASES.map((r) => indent + `--${r}: ${chromeVal(ch[r][theme])};`).join("\n");
@@ -1089,6 +1098,7 @@ const studioThemeBlock = (name, t) => {
     primaryVars("light", ind + "  ", t),
     statusVars("light", ind + "  ", t),
     onStatusVars("light", ind + "  ", t),
+    onTintVars("light", ind + "  ", t),
     chromeVars("light", ind + "  ", t),
     ind + "}",
     ind + `html[data-bp-theme="${name}"][data-theme="dark"] {`,
@@ -1096,6 +1106,7 @@ const studioThemeBlock = (name, t) => {
     primaryVars("dark", ind + "  ", t),
     statusVars("dark", ind + "  ", t),
     onStatusVars("dark", ind + "  ", t),
+    onTintVars("dark", ind + "  ", t),
     chromeVars("dark", ind + "  ", t),
     ind + "}",
   ].join("\n");
@@ -1109,6 +1120,7 @@ function studioBlock(themes = loadThemes()) {
     primaryVars("light", ind + "  "),
     statusVars("light", ind + "  "),
     onStatusVars("light", ind + "  "),
+    onTintVars("light", ind + "  "),
     chromeVars("light", ind + "  "),
     chromeTypeVars(ind + "  "),
     motionVars(ind + "  "),
@@ -1124,6 +1136,7 @@ function studioBlock(themes = loadThemes()) {
     ind + "@media (prefers-color-scheme: dark) {",
     ind + "  :root {",
     statusVars("dark", ind + "    "),
+    onTintVars("dark", ind + "    "),
     ind + "  }",
     ind + "}",
   ];

@@ -762,7 +762,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       /* Verdict badges — reuse .badge, provide colours */
       .badge-verdict-pass { background: var(--ok-soft); color: var(--success); }
       .badge-verdict-fail { background: var(--danger-soft); color: var(--destructive); }
-      .badge-verdict-error { background: var(--warn-soft); color: var(--warning); }
+      .badge-verdict-error { background: var(--warn-soft); color: var(--warn-text); }
       .badge-verdict-unverified { background: var(--bg-muted); color: var(--fg-muted); }
 
       /* Slim the verdict badge when it sits in place of a chevron in a pane-item row */

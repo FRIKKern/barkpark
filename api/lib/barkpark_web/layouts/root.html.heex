@@ -221,6 +221,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 98%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(35 92% 30%);
       --bg-accent: hsl(240 4.8% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(240 4% 47%);
@@ -288,6 +289,7 @@
         --ok: hsl(var(--ok-hsl)); --warn: hsl(var(--warn-hsl)); --danger: hsl(var(--danger-hsl)); --info: hsl(var(--info-hsl));
         --ok-soft: hsl(var(--ok-hsl) / 0.2); --warn-soft: hsl(var(--warn-hsl) / 0.2); --danger-soft: hsl(var(--danger-hsl) / 0.2); --info-soft: hsl(var(--info-hsl) / 0.2);
         --warn-strong: hsl(var(--warn-hsl) / 0.34);
+        --warn-text: hsl(38 94% 56%);
       }
     }
     /* ── theme identity (data-bp-theme) — orthogonal to light/dark mode; the bare declarations above are the evergreen fallback (no attribute → renders exactly as today) ── */
@@ -313,6 +315,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 98%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(35 92% 30%);
       --bg-accent: hsl(240 4.8% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(240 4% 47%);
@@ -342,6 +345,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(38 94% 56%);
       --bg-accent: hsl(240 3.7% 13%);
       --border-muted: hsl(240 3.7% 11%);
       --fg-dim: hsl(240 5% 51%);
@@ -371,6 +375,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(40.11 100% 21.89%);
       --bg-accent: hsl(279.91 9.75% 92%);
       --border-muted: var(--border);
       --fg-dim: hsl(279.98 2.03% 44.89%);
@@ -400,6 +405,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(36.55 62.65% 53.22%);
       --bg-accent: hsl(281.67 8.5% 5.9%);
       --border-muted: hsl(281.68 9.75% 5.06%);
       --fg-dim: hsl(235.39 2.93% 56%);
@@ -429,6 +435,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(40.11 100% 21.89%);
       --bg-accent: hsl(16.92 16.51% 91.79%);
       --border-muted: var(--border);
       --fg-dim: hsl(16.96 3.53% 44.65%);
@@ -458,6 +465,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(36.39 61.56% 53.68%);
       --bg-accent: hsl(18.16 15.24% 5.74%);
       --border-muted: hsl(18.17 17.56% 4.9%);
       --fg-dim: hsl(18.06 4.14% 50.97%);
@@ -487,6 +495,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(36.2 52.84% 29.17%);
       --bg-accent: hsl(195.15 15.67% 91.41%);
       --border-muted: var(--border);
       --fg-dim: hsl(195.12 3.58% 44.2%);
@@ -516,6 +525,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(35.21 48.85% 57.57%);
       --bg-accent: hsl(194.23 16.15% 5.49%);
       --border-muted: hsl(194.22 18.78% 4.66%);
       --fg-dim: hsl(194.33 4.06% 50.41%);
@@ -545,6 +555,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(40.11 100% 21.89%);
       --bg-accent: hsl(235.49 12.31% 92.3%);
       --border-muted: var(--border);
       --fg-dim: hsl(235.64 2.43% 45.25%);
@@ -574,6 +585,7 @@
       --warn-fg: hsl(0 0% 100%);
       --danger-fg: hsl(0 0% 100%);
       --info-fg: hsl(0 0% 100%);
+      --warn-text: hsl(38.55 77.19% 47.99%);
       --bg-accent: hsl(243.27 9.27% 6.12%);
       --border-muted: hsl(243.33 10.58% 5.27%);
       --fg-dim: hsl(242.78 2.72% 51.82%);
@@ -953,9 +965,9 @@
       letter-spacing: 0.02em;
     }
     .badge-published { background: var(--ok-soft); color: var(--success); }
-    .badge-draft { background: var(--warn-soft); color: var(--warning); }
+    .badge-draft { background: var(--warn-soft); color: var(--warn-text); }
     .badge-public { background: var(--ok-soft); color: var(--success); }
-    .badge-private { background: var(--warn-soft); color: var(--warning); }
+    .badge-private { background: var(--warn-soft); color: var(--warn-text); }
     .badge-active { background: var(--primary-soft); color: var(--primary); }
     /* Neutral "off/none" badge — a dimmed pill for an inactive status. */
     .badge-muted { background: var(--bg-muted); color: var(--fg-muted); }
@@ -967,7 +979,7 @@
     .badge-chat-approval { background: var(--warn); color: var(--warn-fg); }
     .badge-chat-working { background: var(--primary-soft); color: var(--primary); }
     .badge-chat-idle { background: var(--ok-soft); color: var(--success); }
-    .badge-chat-offline { background: var(--warn-soft); color: var(--warning); }
+    .badge-chat-offline { background: var(--warn-soft); color: var(--warn-text); }
     .badge::before {
       content: ''; width: 6px; height: 6px; border-radius: 50%;
       background: currentColor;
@@ -1132,7 +1144,7 @@
     .mode-tab.active { background: var(--bg-card); color: var(--fg); box-shadow: 0 1px 2px hsl(var(--bp-shadow-hsl) / 0.2); }
     .mode-tab-plan.active { background: var(--info-soft); color: var(--info); }
     .mode-tab-autopilot.active { background: var(--ok-soft); color: var(--ok); }
-    .mode-tab-other.active { background: var(--warn-soft); color: var(--warn); cursor: default; }
+    .mode-tab-other.active { background: var(--warn-soft); color: var(--warn-text); cursor: default; }
     .mode-tab-bypass.active { background: var(--danger-soft); color: var(--danger); cursor: default; }
 
     /* ── Media grid ───────────────────────────────────────────────────── */
@@ -3326,7 +3338,7 @@
     .history-action-create { background: var(--primary-soft); color: var(--primary); }
     .history-action-update { background: var(--muted-surface); color: var(--fg-muted); }
     .history-action-publish { background: var(--ok-soft); color: var(--success); }
-    .history-action-unpublish { background: var(--warn-soft); color: var(--warning); }
+    .history-action-unpublish { background: var(--warn-soft); color: var(--warn-text); }
 
     /* Delete modal */
     .delete-modal {

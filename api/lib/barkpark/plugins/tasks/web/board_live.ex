@@ -1961,7 +1961,7 @@ defmodule Barkpark.Plugins.Tasks.Web.BoardLive do
       }
       .bp-pip { background: var(--muted-surface); color: var(--muted-text); font-weight: 600; }
       .bp-pip[data-priority="0"] { background: var(--danger-soft); color: var(--danger); }
-      .bp-pip[data-priority="1"] { background: var(--warn-soft); color: var(--warn); }
+      .bp-pip[data-priority="1"] { background: var(--warn-soft); color: var(--warn-text); }
       .bp-goal { background: var(--info-soft); color: var(--info); }
       .bp-goal::before { content: "↳ "; opacity: 0.7; }
       .bp-label { background: var(--muted-surface); color: var(--muted-text); }
