@@ -1,9 +1,9 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`
-(SHA256 hash + permission list); LiveViews read `session["api_token_session"]`
-via `on_mount`.
+Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`;
+LiveViews read `session["api_token_session"]`
+(or `session["api_token"]`) via `on_mount`.
 
 > Accounts, sessions, MFA, login tickets, field visibility, row ownership:
 > [auth-user-sessions.md](auth-user-sessions.md).
@@ -35,7 +35,7 @@ unbound, `dataset` binds nothing.
 | `write` | Mutations (create/patch/publish/unpublish/delete) | `POST …/v1/data/mutate/:dataset` |
 | `public-read` | Anonymous-equivalent GET-only reads | Membership, `"public-read" in permissions` (`PublicRead`), not list equality; also satisfies `:read`. Mint: `mix barkpark.rotate_public_read` / `POST …/v1/tokens` |
 | `chat` | Drive `/v1/chat` sessions of THIS workspace | `/v1/chat/*`; 403 if unbound; minted only by `create_chat_token/3` |
-| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` |
+| `ops` | Operate the Bokbasen publish pipeline | `/admin/onixedit/bokbasen` (old `/admin/bokbasen` 301s) |
 | `admin` | The above + plugin-settings reveal/audit + schema CRUD | `/studio/settings`, `/v1/schemas/*`, `/v1/plugins/settings/*`, `/v1/webhooks/*` |
 
 > **Media upload** (`POST /media/upload`, `POST /v1/media/:dataset/upload`) needs
@@ -51,8 +51,7 @@ Three tiers (seat rule since ruling #2, 2026-10-03):
 `RequireAdmin`: `admin` permission, plus admin authority in the token's
 workspace (bound token) or its owner's (workspace-less PAT); a workspace-less
 machine token needs no seat. `Tenancy.Auth.authorize/3`: seat AND
-`permissions` AND the seat role (and a PAT owner's role) allow the action, so
-demotion bites at once. `workspace_admin?/2`: the membership ROLE alone.
+`permissions` AND the seat role (and a PAT owner's role) allow the action. `workspace_admin?/2`: the membership ROLE alone.
 
 **The bug class:** gate on `has_permission?(_, "admin")`, then act
 per-workspace off `current_workspace` — which `AssignDefaultScope` stamps as
