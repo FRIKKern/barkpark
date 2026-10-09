@@ -86,7 +86,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:918
 #: lib/barkpark_web/layouts/bulldocs.html.heex:2312
-#: lib/barkpark_web/live/studio/chat_live.ex:3370
+#: lib/barkpark_web/live/studio/chat_live.ex:3372
 #: lib/barkpark_web/live/studio/settings_live.ex:1069
 #: lib/barkpark_web/live/studio/settings_live.ex:1100
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3154
@@ -330,7 +330,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
 #: lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:22
 #: lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex:26
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:2593
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:2596
 #: lib/barkpark_web/studio_locale.ex:743
 #, elixir-autogen, elixir-format
 msgid "Untitled"
@@ -614,7 +614,7 @@ msgstr ""
 msgid "Type at least 2 characters"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3338
+#: lib/barkpark_web/live/studio/chat_live.ex:3340
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3010
 #, elixir-autogen, elixir-format
 msgid "Rename"
@@ -1515,8 +1515,8 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:939
 #: lib/barkpark_web/components/studio_components/modals.ex:989
 #: lib/barkpark_web/components/studio_components/modals.ex:1112
-#: lib/barkpark_web/live/studio/chat_live.ex:4089
-#: lib/barkpark_web/live/studio/chat_live.ex:4092
+#: lib/barkpark_web/live/studio/chat_live.ex:4091
+#: lib/barkpark_web/live/studio/chat_live.ex:4094
 #: lib/barkpark_web/live/studio/connectors_live.ex:816
 #: lib/barkpark_web/live/studio/connectors_live.ex:1096
 #: lib/barkpark_web/live/studio/connectors_live.ex:1119
@@ -2072,7 +2072,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:666
-#: lib/barkpark_web/live/studio/chat_live.ex:8074
+#: lib/barkpark_web/live/studio/chat_live.ex:8076
 #, elixir-autogen, elixir-format
 msgid "project"
 msgstr ""
@@ -2484,7 +2484,7 @@ msgid "Accepted %{branch}"
 msgstr ""
 
 #: lib/barkpark_web/layouts/bulldocs.html.heex:2309
-#: lib/barkpark_web/live/studio/chat_live.ex:3360
+#: lib/barkpark_web/live/studio/chat_live.ex:3362
 #, elixir-autogen, elixir-format
 msgid "Archive"
 msgstr ""
@@ -2596,7 +2596,7 @@ msgid "Image size"
 msgstr ""
 
 #: lib/barkpark_web/layouts/bulldocs.html.heex:2301
-#: lib/barkpark_web/live/studio/chat_live.ex:3128
+#: lib/barkpark_web/live/studio/chat_live.ex:3130
 #, elixir-autogen, elixir-format
 msgid "Inbox"
 msgstr ""
@@ -3351,7 +3351,7 @@ msgstr ""
 msgid "public"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8134
+#: lib/barkpark_web/live/studio/chat_live.ex:8136
 #: lib/barkpark_web/studio_locale.ex:214
 #, elixir-autogen, elixir-format
 msgid "ready"
@@ -6206,7 +6206,6 @@ msgid "Tickets"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:538
-#: lib/barkpark_web/live/studio/chat_live.ex:174
 #, elixir-autogen, elixir-format
 msgid "chat"
 msgstr ""
@@ -6664,8 +6663,8 @@ msgstr ""
 msgid "You need to be an owner or admin of this workspace to change its execution profile."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8120
-#: lib/barkpark_web/live/studio/chat_live.ex:8121
+#: lib/barkpark_web/live/studio/chat_live.ex:8122
+#: lib/barkpark_web/live/studio/chat_live.ex:8123
 #: lib/barkpark_web/live/studio/settings_live.ex:978
 #, elixir-autogen, elixir-format
 msgid "default"
@@ -7395,905 +7394,905 @@ msgstr ""
 msgid "unverified"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4381
-#: lib/barkpark_web/live/studio/chat_live.ex:7906
+#: lib/barkpark_web/live/studio/chat_live.ex:4383
+#: lib/barkpark_web/live/studio/chat_live.ex:7908
 #, elixir-autogen, elixir-format
 msgid "%{count} agent"
 msgid_plural "%{count} agents"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4387
-#: lib/barkpark_web/live/studio/chat_live.ex:7944
+#: lib/barkpark_web/live/studio/chat_live.ex:4389
+#: lib/barkpark_web/live/studio/chat_live.ex:7946
 #, elixir-autogen, elixir-format
 msgid "%{count} failed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7942
+#: lib/barkpark_web/live/studio/chat_live.ex:7944
 #, elixir-autogen, elixir-format
 msgid "%{count} skipped"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2723
-#: lib/barkpark_web/live/studio/chat_live.ex:2787
+#: lib/barkpark_web/live/studio/chat_live.ex:2725
+#: lib/barkpark_web/live/studio/chat_live.ex:2789
 #, elixir-autogen, elixir-format
 msgid "%{count} step"
 msgid_plural "%{count} steps"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7087
+#: lib/barkpark_web/live/studio/chat_live.ex:7089
 #, elixir-autogen, elixir-format
 msgid "%{done}/%{total} answered"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3305
+#: lib/barkpark_web/live/studio/chat_live.ex:3307
 #, elixir-autogen, elixir-format
 msgid "%{done}/%{total} slices"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8376
+#: lib/barkpark_web/live/studio/chat_live.ex:8378
 #, elixir-autogen, elixir-format
 msgid "%{n}d"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8375
+#: lib/barkpark_web/live/studio/chat_live.ex:8377
 #, elixir-autogen, elixir-format
 msgid "%{n}h"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8374
+#: lib/barkpark_web/live/studio/chat_live.ex:8376
 #, elixir-autogen, elixir-format
 msgid "%{n}m"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8377
+#: lib/barkpark_web/live/studio/chat_live.ex:8379
 #, elixir-autogen, elixir-format
 msgid "%{n}w"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4218
+#: lib/barkpark_web/live/studio/chat_live.ex:4220
 #, elixir-autogen, elixir-format
 msgid "%{provider} is installed but has no usable local credentials. Authenticate on the execution host, then Re-check."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4175
+#: lib/barkpark_web/live/studio/chat_live.ex:4177
 #, elixir-autogen, elixir-format
 msgid "%{provider} isn't installed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4182
+#: lib/barkpark_web/live/studio/chat_live.ex:4184
 #, elixir-autogen, elixir-format
 msgid "%{provider} isn't logged in on this execution host"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7925
-#: lib/barkpark_web/live/studio/chat_live.ex:7937
+#: lib/barkpark_web/live/studio/chat_live.ex:7927
+#: lib/barkpark_web/live/studio/chat_live.ex:7939
 #, elixir-autogen, elixir-format
 msgid "%{running} running · %{done} done"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7903
+#: lib/barkpark_web/live/studio/chat_live.ex:7905
 #, elixir-autogen, elixir-format
 msgid "%{run} of %{total} phases"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8083
+#: lib/barkpark_web/live/studio/chat_live.ex:8085
 #, elixir-autogen, elixir-format
 msgid "(not a git repo)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8081
+#: lib/barkpark_web/live/studio/chat_live.ex:8083
 #, elixir-autogen, elixir-format
 msgid "(not set)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8084
+#: lib/barkpark_web/live/studio/chat_live.ex:8086
 #, elixir-autogen, elixir-format
 msgid "(server-local)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2527
+#: lib/barkpark_web/live/studio/chat_live.ex:2529
 #, elixir-autogen, elixir-format
 msgid "(the plan has no text)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8082
+#: lib/barkpark_web/live/studio/chat_live.ex:8084
 #, elixir-autogen, elixir-format
 msgid "(unknown)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2431
+#: lib/barkpark_web/live/studio/chat_live.ex:2433
 #, elixir-autogen, elixir-format
 msgid "+%{count} line"
 msgid_plural "+%{count} lines"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3625
+#: lib/barkpark_web/live/studio/chat_live.ex:3627
 #, elixir-autogen, elixir-format
 msgid "+%{count} more claims"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3316
-#: lib/barkpark_web/live/studio/chat_live.ex:3326
+#: lib/barkpark_web/live/studio/chat_live.ex:3318
+#: lib/barkpark_web/live/studio/chat_live.ex:3328
 #, elixir-autogen, elixir-format
 msgid "Actions for %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3136
+#: lib/barkpark_web/live/studio/chat_live.ex:3138
 #, elixir-autogen, elixir-format
 msgid "All quiet — nothing waiting on you."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2467
+#: lib/barkpark_web/live/studio/chat_live.ex:2469
 #, elixir-autogen, elixir-format
 msgid "Allow"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2455
+#: lib/barkpark_web/live/studio/chat_live.ex:2457
 #, elixir-autogen, elixir-format
 msgid "Allow %{tool}?"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3442
+#: lib/barkpark_web/live/studio/chat_live.ex:3444
 #, elixir-autogen, elixir-format
 msgid "An agent chat backed by"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7149
+#: lib/barkpark_web/live/studio/chat_live.ex:7151
 #, elixir-autogen, elixir-format
 msgid "Answer"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2549
+#: lib/barkpark_web/live/studio/chat_live.ex:2551
 #, elixir-autogen, elixir-format
 msgid "Approve plan"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3173
+#: lib/barkpark_web/live/studio/chat_live.ex:3175
 #, elixir-autogen, elixir-format
 msgid "Archived chats rest here. Archive one from its"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4083
+#: lib/barkpark_web/live/studio/chat_live.ex:4085
 #, elixir-autogen, elixir-format
 msgid "Arm bypass"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4037
-#: lib/barkpark_web/live/studio/chat_live.ex:4080
+#: lib/barkpark_web/live/studio/chat_live.ex:4039
+#: lib/barkpark_web/live/studio/chat_live.ex:4082
 #, elixir-autogen, elixir-format
 msgid "Arm bypass permissions"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3971
-#: lib/barkpark_web/live/studio/chat_live.ex:3972
+#: lib/barkpark_web/live/studio/chat_live.ex:3973
+#: lib/barkpark_web/live/studio/chat_live.ex:3974
 #, elixir-autogen, elixir-format
 msgid "Attach an image"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3878
-#: lib/barkpark_web/live/studio/chat_live.ex:8047
+#: lib/barkpark_web/live/studio/chat_live.ex:3880
+#: lib/barkpark_web/live/studio/chat_live.ex:8049
 #, elixir-autogen, elixir-format
 msgid "Autopilot"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3388
+#: lib/barkpark_web/live/studio/chat_live.ex:3390
 #, elixir-autogen, elixir-format
 msgid "Back to active chats"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4225
+#: lib/barkpark_web/live/studio/chat_live.ex:4227
 #, elixir-autogen, elixir-format
 msgid "Barkpark refused to mint this session's task credential — the agent can chat, but its bp task tools are offline. Check that your admin token has write access to this workspace, then Re-check."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3961
+#: lib/barkpark_web/live/studio/chat_live.ex:3963
 #, elixir-autogen, elixir-format
 msgid "Barkpark tasks"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3959
+#: lib/barkpark_web/live/studio/chat_live.ex:3961
 #, elixir-autogen, elixir-format
 msgid "Barkpark tasks — hand ready work to Claude"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4049
+#: lib/barkpark_web/live/studio/chat_live.ex:4051
 #, elixir-autogen, elixir-format
 msgid "Bypass disarmed — re-arm to enable. This session remembers bypassPermissions, but arming never survives a reopen."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4052
+#: lib/barkpark_web/live/studio/chat_live.ex:4054
 #, elixir-autogen, elixir-format
 msgid "Bypass permissions runs tools WITHOUT asking — full shell reach, no approval cards."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3056
+#: lib/barkpark_web/live/studio/chat_live.ex:3058
 #, elixir-autogen, elixir-format
 msgid "Chats"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4242
+#: lib/barkpark_web/live/studio/chat_live.ex:4244
 #, elixir-autogen, elixir-format
 msgid "Checking %{provider} readiness…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4194
+#: lib/barkpark_web/live/studio/chat_live.ex:4196
 #, elixir-autogen, elixir-format
 msgid "Checking readiness"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3819
+#: lib/barkpark_web/live/studio/chat_live.ex:3821
 #, elixir-autogen, elixir-format
 msgid "Choose local hardware…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3657
+#: lib/barkpark_web/live/studio/chat_live.ex:3659
 #, elixir-autogen, elixir-format
 msgid "Claim-first: Claude claims it, reads the brief, stamps evidence, closes"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4172
+#: lib/barkpark_web/live/studio/chat_live.ex:4174
 #, elixir-autogen, elixir-format
 msgid "Claude Code isn't installed on this host"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4178
+#: lib/barkpark_web/live/studio/chat_live.ex:4180
 #, elixir-autogen, elixir-format
 msgid "Claude Code isn't logged in on this host"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8170
+#: lib/barkpark_web/live/studio/chat_live.ex:8172
 #, elixir-autogen, elixir-format
 msgid "Claude is working — esc or Stop to interrupt…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7128
+#: lib/barkpark_web/live/studio/chat_live.ex:7130
 #, elixir-autogen, elixir-format
 msgid "Custom answer (comma-separated)…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7128
+#: lib/barkpark_web/live/studio/chat_live.ex:7130
 #, elixir-autogen, elixir-format
 msgid "Custom answer…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2475
+#: lib/barkpark_web/live/studio/chat_live.ex:2477
 #, elixir-autogen, elixir-format
 msgid "Deny"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/nav.ex:150
-#: lib/barkpark_web/live/studio/chat_live.ex:7141
+#: lib/barkpark_web/live/studio/chat_live.ex:7143
 #, elixir-autogen, elixir-format
 msgid "Dismiss"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3933
+#: lib/barkpark_web/live/studio/chat_live.ex:3935
 #, elixir-autogen, elixir-format
 msgid "Effort"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3836
+#: lib/barkpark_web/live/studio/chat_live.ex:3838
 #, elixir-autogen, elixir-format
 msgid "Execution target"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3047
+#: lib/barkpark_web/live/studio/chat_live.ex:3049
 #, elixir-autogen, elixir-format
 msgid "Filter chats by title"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:6146
+#: lib/barkpark_web/live/studio/chat_live.ex:6148
 #, elixir-autogen, elixir-format
 msgid "Image is larger than 3 MB."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3029
+#: lib/barkpark_web/live/studio/chat_live.ex:3031
 #, elixir-autogen, elixir-format
 msgid "Jump to a chat"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3048
+#: lib/barkpark_web/live/studio/chat_live.ex:3050
 #, elixir-autogen, elixir-format
 msgid "Jump to a chat…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2557
+#: lib/barkpark_web/live/studio/chat_live.ex:2559
 #, elixir-autogen, elixir-format
 msgid "Keep planning"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3837
+#: lib/barkpark_web/live/studio/chat_live.ex:3839
 #, elixir-autogen, elixir-format
 msgid "Managed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8166
+#: lib/barkpark_web/live/studio/chat_live.ex:8168
 #, elixir-autogen, elixir-format
 msgid "Message Claude to resume this chat…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3902
-#: lib/barkpark_web/live/studio/chat_live.ex:3905
+#: lib/barkpark_web/live/studio/chat_live.ex:3904
+#: lib/barkpark_web/live/studio/chat_live.ex:3907
 #, elixir-autogen, elixir-format
 msgid "Model"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3108
+#: lib/barkpark_web/live/studio/chat_live.ex:3110
 #, elixir-autogen, elixir-format
 msgid "New"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:411
+#: lib/barkpark_web/live/studio/chat_live.ex:413
 #, elixir-autogen, elixir-format
 msgid "No Studio Chat provider is enabled on this instance."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3170
+#: lib/barkpark_web/live/studio/chat_live.ex:3172
 #, elixir-autogen, elixir-format
 msgid "No archived chats"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3185
+#: lib/barkpark_web/live/studio/chat_live.ex:3187
 #, elixir-autogen, elixir-format
 msgid "No chats yet"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3637
+#: lib/barkpark_web/live/studio/chat_live.ex:3639
 #, elixir-autogen, elixir-format
 msgid "Nothing ready — file new work with /task new <wish>."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:6147
+#: lib/barkpark_web/live/studio/chat_live.ex:6149
 #, elixir-autogen, elixir-format
 msgid "Only PNG, JPEG, GIF, or WebP images."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3868
-#: lib/barkpark_web/live/studio/chat_live.ex:8045
+#: lib/barkpark_web/live/studio/chat_live.ex:3870
+#: lib/barkpark_web/live/studio/chat_live.ex:8047
 #, elixir-autogen, elixir-format
 msgid "Plan"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8163
+#: lib/barkpark_web/live/studio/chat_live.ex:8165
 #, elixir-autogen, elixir-format
 msgid "Plan, build… · / for commands · ↵ to send · esc to interrupt"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3805
+#: lib/barkpark_web/live/studio/chat_live.ex:3807
 #, elixir-autogen, elixir-format
 msgid "Provider"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4164
+#: lib/barkpark_web/live/studio/chat_live.ex:4166
 #, elixir-autogen, elixir-format
 msgid "Re-check"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4161
+#: lib/barkpark_web/live/studio/chat_live.ex:4163
 #, elixir-autogen, elixir-format
 msgid "Re-check readiness"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3930
+#: lib/barkpark_web/live/studio/chat_live.ex:3932
 #, elixir-autogen, elixir-format
 msgid "Reasoning effort"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3818
-#: lib/barkpark_web/live/studio/chat_live.ex:3839
+#: lib/barkpark_web/live/studio/chat_live.ex:3820
+#: lib/barkpark_web/live/studio/chat_live.ex:3841
 #, elixir-autogen, elixir-format
 msgid "Registered host"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3725
+#: lib/barkpark_web/live/studio/chat_live.ex:3727
 #, elixir-autogen, elixir-format
 msgid "Remove attachment"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3215
+#: lib/barkpark_web/live/studio/chat_live.ex:3217
 #, elixir-autogen, elixir-format
 msgid "Rename %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4249
+#: lib/barkpark_web/live/studio/chat_live.ex:4251
 #, elixir-autogen, elixir-format
 msgid "Restart this session"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2812
+#: lib/barkpark_web/live/studio/chat_live.ex:2814
 #, elixir-autogen, elixir-format
 msgid "Running: %{progress}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8167
+#: lib/barkpark_web/live/studio/chat_live.ex:8169
 #, elixir-autogen, elixir-format
 msgid "Send a message to resume this session…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3999
+#: lib/barkpark_web/live/studio/chat_live.ex:4001
 #, elixir-autogen, elixir-format
 msgid "Send message"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3858
+#: lib/barkpark_web/live/studio/chat_live.ex:3860
 #, elixir-autogen, elixir-format
 msgid "Session mode"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3388
+#: lib/barkpark_web/live/studio/chat_live.ex:3390
 #, elixir-autogen, elixir-format
 msgid "Show archived"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2540
+#: lib/barkpark_web/live/studio/chat_live.ex:2542
 #, elixir-autogen, elixir-format
 msgid "Show full plan"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2539
+#: lib/barkpark_web/live/studio/chat_live.ex:2541
 #, elixir-autogen, elixir-format
 msgid "Show less"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3780
+#: lib/barkpark_web/live/studio/chat_live.ex:3782
 #, elixir-autogen, elixir-format
 msgid "Slash commands"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3989
+#: lib/barkpark_web/live/studio/chat_live.ex:3991
 #, elixir-autogen, elixir-format
 msgid "Stop (esc)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3988
+#: lib/barkpark_web/live/studio/chat_live.ex:3990
 #, elixir-autogen, elixir-format
 msgid "Stop the current turn"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3588
+#: lib/barkpark_web/live/studio/chat_live.ex:3590
 #, elixir-autogen, elixir-format
 msgid "Stop to interrupt"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3989
-#: lib/barkpark_web/live/studio/chat_live.ex:8172
+#: lib/barkpark_web/live/studio/chat_live.ex:3991
+#: lib/barkpark_web/live/studio/chat_live.ex:8174
 #, elixir-autogen, elixir-format
 msgid "Stopping…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4186
+#: lib/barkpark_web/live/studio/chat_live.ex:4188
 #, elixir-autogen, elixir-format
 msgid "Task hands are offline"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4192
+#: lib/barkpark_web/live/studio/chat_live.ex:4194
 #, elixir-autogen, elixir-format
 msgid "Task hands re-armed — restart to hand them over"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:1130
+#: lib/barkpark_web/live/studio/chat_live.ex:1132
 #, elixir-autogen, elixir-format
 msgid "That chat has a recorded runtime ledger and can't be deleted — archive it instead."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:442
+#: lib/barkpark_web/live/studio/chat_live.ex:444
 #, elixir-autogen, elixir-format
 msgid "That chat is no longer available."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:6149
+#: lib/barkpark_web/live/studio/chat_live.ex:6151
 #, elixir-autogen, elixir-format
 msgid "That file could not be attached."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4206
+#: lib/barkpark_web/live/studio/chat_live.ex:4208
 #, elixir-autogen, elixir-format
 msgid "The %{provider} runtime is not available on the selected execution host."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4212
+#: lib/barkpark_web/live/studio/chat_live.ex:4214
 #, elixir-autogen, elixir-format
 msgid "The `claude` binary is installed, but it has no credentials. Log in on this host, then Re-check — the composer unlocks in place, no reload."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4200
+#: lib/barkpark_web/live/studio/chat_live.ex:4202
 #, elixir-autogen, elixir-format
 msgid "The `claude` binary is not installed on this host. Install Claude Code and run `claude auth login`."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7085
+#: lib/barkpark_web/live/studio/chat_live.ex:7087
 #, elixir-autogen, elixir-format
 msgid "The agent is asking you"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3916
+#: lib/barkpark_web/live/studio/chat_live.ex:3918
 #, elixir-autogen, elixir-format
 msgid "The answering model, as reported by the CLI"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4189
+#: lib/barkpark_web/live/studio/chat_live.ex:4191
 #, elixir-autogen, elixir-format
 msgid "The chat's task credential expired"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3188
+#: lib/barkpark_web/live/studio/chat_live.ex:3190
 #, elixir-autogen, elixir-format
 msgid "This is your remembered agent workspace. Provider and execution location are stored with every conversation — reopen one to pick up exactly where you left off. Admins only."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4231
+#: lib/barkpark_web/live/studio/chat_live.ex:4233
 #, elixir-autogen, elixir-format
 msgid "This session's minted Barkpark task token has expired and Barkpark could not mint a replacement, so its bp task tools are offline. The chat itself still works. Start a new session to mint fresh task hands."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4237
+#: lib/barkpark_web/live/studio/chat_live.ex:4239
 #, elixir-autogen, elixir-format
 msgid "This session's task credential was about to expire, so Barkpark minted a fresh one and revoked the old. The new credential is already wired into this session's MCP config; the running agent's shell still holds the retired one until the session restarts — a live process's environment cannot be rewritten."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3191
+#: lib/barkpark_web/live/studio/chat_live.ex:3193
 #, elixir-autogen, elixir-format
 msgid "Try:"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4071
+#: lib/barkpark_web/live/studio/chat_live.ex:4073
 #, elixir-autogen, elixir-format
 msgid "Type bypass to confirm"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3349
+#: lib/barkpark_web/live/studio/chat_live.ex:3351
 #, elixir-autogen, elixir-format
 msgid "Unarchive"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:6148
+#: lib/barkpark_web/live/studio/chat_live.ex:6150
 #, elixir-autogen, elixir-format
 msgid "Up to 4 images per message."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4570
+#: lib/barkpark_web/live/studio/chat_live.ex:4572
 #, elixir-autogen, elixir-format
 msgid "about"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8046
+#: lib/barkpark_web/live/studio/chat_live.ex:8048
 #, elixir-autogen, elixir-format
 msgid "accept edits"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3610
+#: lib/barkpark_web/live/studio/chat_live.ex:3612
 #, elixir-autogen, elixir-format
 msgid "acceptance criteria met"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2398
-#: lib/barkpark_web/live/studio/chat_live.ex:4498
-#: lib/barkpark_web/live/studio/chat_live.ex:7874
+#: lib/barkpark_web/live/studio/chat_live.ex:2400
+#: lib/barkpark_web/live/studio/chat_live.ex:4500
+#: lib/barkpark_web/live/studio/chat_live.ex:7876
 #, elixir-autogen, elixir-format
 msgid "agent"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4272
+#: lib/barkpark_web/live/studio/chat_live.ex:4274
 #, elixir-autogen, elixir-format
 msgid "agents · %{count}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8154
+#: lib/barkpark_web/live/studio/chat_live.ex:8156
 #, elixir-autogen, elixir-format
 msgid "allowed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8280
+#: lib/barkpark_web/live/studio/chat_live.ex:8282
 #, elixir-autogen, elixir-format
 msgid "answer"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7174
+#: lib/barkpark_web/live/studio/chat_live.ex:7176
 #, elixir-autogen, elixir-format
 msgid "answered"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8279
+#: lib/barkpark_web/live/studio/chat_live.ex:8281
 #, elixir-autogen, elixir-format
 msgid "approve"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8051
+#: lib/barkpark_web/live/studio/chat_live.ex:8053
 #, elixir-autogen, elixir-format
 msgid "ask (legacy)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2316
+#: lib/barkpark_web/live/studio/chat_live.ex:2318
 #, elixir-autogen, elixir-format
 msgid "attachment"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2311
+#: lib/barkpark_web/live/studio/chat_live.ex:2313
 #, elixir-autogen, elixir-format
 msgid "attachment missing"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4561
+#: lib/barkpark_web/live/studio/chat_live.ex:4563
 #, elixir-autogen, elixir-format
 msgid "attempt %{n}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8050
+#: lib/barkpark_web/live/studio/chat_live.ex:8052
 #, elixir-autogen, elixir-format
 msgid "bypass · dangerous"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7175
-#: lib/barkpark_web/live/studio/chat_live.ex:7230
-#: lib/barkpark_web/live/studio/chat_live.ex:8155
+#: lib/barkpark_web/live/studio/chat_live.ex:7177
+#: lib/barkpark_web/live/studio/chat_live.ex:7232
+#: lib/barkpark_web/live/studio/chat_live.ex:8157
 #, elixir-autogen, elixir-format
 msgid "canceled"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3101
+#: lib/barkpark_web/live/studio/chat_live.ex:3103
 #, elixir-autogen, elixir-format
 msgid "chats"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4017
+#: lib/barkpark_web/live/studio/chat_live.ex:4019
 #, elixir-autogen, elixir-format
 msgid "checking %{provider} readiness…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2799
-#: lib/barkpark_web/live/studio/chat_live.ex:4341
+#: lib/barkpark_web/live/studio/chat_live.ex:2801
+#: lib/barkpark_web/live/studio/chat_live.ex:4343
 #, elixir-autogen, elixir-format
 msgid "collapse"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8075
+#: lib/barkpark_web/live/studio/chat_live.ex:8077
 #, elixir-autogen, elixir-format
 msgid "dataset"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8156
+#: lib/barkpark_web/live/studio/chat_live.ex:8158
 #, elixir-autogen, elixir-format
 msgid "denied"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4517
+#: lib/barkpark_web/live/studio/chat_live.ex:4519
 #, elixir-autogen, elixir-format
 msgid "detail"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7176
+#: lib/barkpark_web/live/studio/chat_live.ex:7178
 #, elixir-autogen, elixir-format
 msgid "dismissed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8048
+#: lib/barkpark_web/live/studio/chat_live.ex:8050
 #, elixir-autogen, elixir-format
 msgid "don't ask"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4597
-#: lib/barkpark_web/live/studio/chat_live.ex:7946
+#: lib/barkpark_web/live/studio/chat_live.ex:4599
+#: lib/barkpark_web/live/studio/chat_live.ex:7948
 #, elixir-autogen, elixir-format
 msgid "done"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2799
-#: lib/barkpark_web/live/studio/chat_live.ex:4341
+#: lib/barkpark_web/live/studio/chat_live.ex:2801
+#: lib/barkpark_web/live/studio/chat_live.ex:4343
 #, elixir-autogen, elixir-format
 msgid "expand"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4517
+#: lib/barkpark_web/live/studio/chat_live.ex:4519
 #, elixir-autogen, elixir-format
 msgid "hide"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8071
+#: lib/barkpark_web/live/studio/chat_live.ex:8073
 #, elixir-autogen, elixir-format
 msgid "host"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7921
-#: lib/barkpark_web/live/studio/chat_live.ex:7947
+#: lib/barkpark_web/live/studio/chat_live.ex:7923
+#: lib/barkpark_web/live/studio/chat_live.ex:7949
 #, elixir-autogen, elixir-format
 msgid "interrupted"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7914
+#: lib/barkpark_web/live/studio/chat_live.ex:7916
 #, elixir-autogen, elixir-format
 msgid "interrupted in %{phase} (%{index}/%{total})"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7231
+#: lib/barkpark_web/live/studio/chat_live.ex:7233
 #, elixir-autogen, elixir-format
 msgid "kept planning"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3538
+#: lib/barkpark_web/live/studio/chat_live.ex:3540
 #, elixir-autogen, elixir-format
 msgid "live preview truncated — the full response arrives on completion"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8049
+#: lib/barkpark_web/live/studio/chat_live.ex:8051
 #, elixir-autogen, elixir-format
 msgid "manual approve"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3174
+#: lib/barkpark_web/live/studio/chat_live.ex:3176
 #, elixir-autogen, elixir-format
 msgid "menu to tuck it away without deleting it — it stays fully resumable."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8131
+#: lib/barkpark_web/live/studio/chat_live.ex:8133
 #, elixir-autogen, elixir-format
 msgid "new chat"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8373
+#: lib/barkpark_web/live/studio/chat_live.ex:8375
 #, elixir-autogen, elixir-format
 msgid "now"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3825
-#: lib/barkpark_web/live/studio/chat_live.ex:8138
+#: lib/barkpark_web/live/studio/chat_live.ex:3827
+#: lib/barkpark_web/live/studio/chat_live.ex:8140
 #, elixir-autogen, elixir-format
 msgid "offline"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3442
+#: lib/barkpark_web/live/studio/chat_live.ex:3444
 #, elixir-autogen, elixir-format
 msgid "on the selected execution location. Plan mode can read approved files, but cannot edit or execute anything."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3825
+#: lib/barkpark_web/live/studio/chat_live.ex:3827
 #, elixir-autogen, elixir-format
 msgid "online"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4553
+#: lib/barkpark_web/live/studio/chat_live.ex:4555
 #, elixir-autogen, elixir-format
 msgid "open session"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7229
+#: lib/barkpark_web/live/studio/chat_live.ex:7231
 #, elixir-autogen, elixir-format
 msgid "plan approved"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2503
-#: lib/barkpark_web/live/studio/chat_live.ex:8281
+#: lib/barkpark_web/live/studio/chat_live.ex:2505
+#: lib/barkpark_web/live/studio/chat_live.ex:8283
 #, elixir-autogen, elixir-format
 msgid "plan ready"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2501
+#: lib/barkpark_web/live/studio/chat_live.ex:2503
 #, elixir-autogen, elixir-format
 msgid "proposed plan"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2574
+#: lib/barkpark_web/live/studio/chat_live.ex:2576
 #, elixir-autogen, elixir-format
 msgid "published as Paper"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:2343
+#: lib/barkpark_web/live/studio/chat_live.ex:2345
 #, elixir-autogen, elixir-format
 msgid "queued"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3635
+#: lib/barkpark_web/live/studio/chat_live.ex:3637
 #, elixir-autogen, elixir-format
 msgid "ready tasks"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4638
+#: lib/barkpark_web/live/studio/chat_live.ex:4640
 #, elixir-autogen, elixir-format
 msgid "rendering %{kind}…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8076
+#: lib/barkpark_web/live/studio/chat_live.ex:8078
 #, elixir-autogen, elixir-format
 msgid "repo"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8132
+#: lib/barkpark_web/live/studio/chat_live.ex:8134
 #, elixir-autogen, elixir-format
 msgid "resumable"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7948
-#: lib/barkpark_web/live/studio/chat_live.ex:8282
+#: lib/barkpark_web/live/studio/chat_live.ex:7950
+#: lib/barkpark_web/live/studio/chat_live.ex:8284
 #, elixir-autogen, elixir-format
 msgid "running"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8072
+#: lib/barkpark_web/live/studio/chat_live.ex:8074
 #, elixir-autogen, elixir-format
 msgid "server"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4390
+#: lib/barkpark_web/live/studio/chat_live.ex:4392
 #, elixir-autogen, elixir-format
 msgid "skipped"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:7933
-#: lib/barkpark_web/live/studio/chat_live.ex:8133
+#: lib/barkpark_web/live/studio/chat_live.ex:7935
+#: lib/barkpark_web/live/studio/chat_live.ex:8135
 #, elixir-autogen, elixir-format
 msgid "starting"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3563
-#: lib/barkpark_web/live/studio/chat_live.ex:8137
+#: lib/barkpark_web/live/studio/chat_live.ex:3565
+#: lib/barkpark_web/live/studio/chat_live.ex:8139
 #, elixir-autogen, elixir-format
 msgid "stopping…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3614
+#: lib/barkpark_web/live/studio/chat_live.ex:3616
 #, elixir-autogen, elixir-format
 msgid "the claim's pulse now-line"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4055
+#: lib/barkpark_web/live/studio/chat_live.ex:4057
 #, elixir-autogen, elixir-format
 msgid "to confirm, then Arm. It takes effect on the next spawn, not the running turn."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8135
-#: lib/barkpark_web/live/studio/chat_live.ex:8136
+#: lib/barkpark_web/live/studio/chat_live.ex:8137
+#: lib/barkpark_web/live/studio/chat_live.ex:8138
 #, elixir-autogen, elixir-format
 msgid "working"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8073
+#: lib/barkpark_web/live/studio/chat_live.ex:8075
 #, elixir-autogen, elixir-format
 msgid "workspace"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3516
+#: lib/barkpark_web/live/studio/chat_live.ex:3518
 #, elixir-autogen, elixir-format
 msgid "~%{count} tokens"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8103
+#: lib/barkpark_web/live/studio/chat_live.ex:8105
 #, elixir-autogen, elixir-format
 msgid "— %{dir} on the execution host, which reports no repository root"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8096
+#: lib/barkpark_web/live/studio/chat_live.ex:8098
 #, elixir-autogen, elixir-format
 msgid "— the chat mount substitutes %{dataset}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8090
+#: lib/barkpark_web/live/studio/chat_live.ex:8092
 #, elixir-autogen, elixir-format
 msgid "— the last report came from %{host}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8099
+#: lib/barkpark_web/live/studio/chat_live.ex:8101
 #, elixir-autogen, elixir-format
 msgid "— the scope names %{dataset}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:8093
+#: lib/barkpark_web/live/studio/chat_live.ex:8095
 #, elixir-autogen, elixir-format
 msgid "— the viewer is scoped to %{workspace}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3191
+#: lib/barkpark_web/live/studio/chat_live.ex:3193
 #, elixir-autogen, elixir-format
 msgid "“Walk the studio LiveViews and sketch how a request flows.”"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:3093
+#: lib/barkpark_web/live/studio/chat_live.ex:3095
 #, elixir-autogen, elixir-format
 msgid "↑↓ move · Enter open · Esc close · ⌘/Ctrl+1–9 jump"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/chat_live.ex:4055
+#: lib/barkpark_web/live/studio/chat_live.ex:4057
 #, elixir-autogen, elixir-format
 msgctxt "verb"
 msgid "Type"
@@ -10824,4 +10823,24 @@ msgstr ""
 #: lib/barkpark_web/studio_locale.ex:600
 #, elixir-autogen, elixir-format
 msgid "Paper text"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/chat_live.ex:176
+#, elixir-autogen, elixir-format
+msgid "Chat"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/chat_live.ex:8432
+#, elixir-autogen, elixir-format
+msgid "Context window unknown until the first result"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/chat_live.ex:8429
+#, elixir-autogen, elixir-format
+msgid "Context: %{used} / %{window} tokens"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/chat_live.ex:3661
+#, elixir-autogen, elixir-format
+msgid "Hand to Claude"
 msgstr ""
