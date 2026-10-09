@@ -195,4 +195,147 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
     [%{"sessionId" => sid}] = frames(close(t), "session")
     assert sid =~ ~r/\A[0-9a-f]{12}\z/
   end
+
+  # task-d47c05259837093f — shared carets. `selection` rides the focus POST
+  # and is relayed in the room entry and the stream frame.
+  describe "focus selection" do
+    @sel %{
+      "anchor" => %{"blockId" => "b1", "offset" => 3},
+      "head" => %{"blockId" => "b2", "path" => "rows[1].cells[0]", "offset" => 0}
+    }
+
+    test "a selection is accepted, read back in the entry, and relayed in the frame", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "sel-a", "name" => "Ann"})
+      b = open(ctx.conn, ctx.base, %{"sessionId" => "sel-b", "name" => "Bob"})
+      wait_for(fn -> keys(ctx.topic) == ["api:sel-a", "api:sel-b"] end)
+
+      resp =
+        focus(ctx.conn, ctx.base, %{
+          "sessionId" => "sel-a",
+          "documentId" => "p1",
+          "field" => "body",
+          "selection" => @sel
+        })
+
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["result"]["selection"] == @sel
+
+      wait_for(fn ->
+        match?(%{metas: [%{selection: @sel}]}, Presence.get_by_key(ctx.topic, "api:sel-a"))
+      end)
+
+      Process.sleep(100)
+      bob_body = close(b)
+
+      assert Enum.any?(frames(bob_body, "presence"), fn %{"presences" => list} ->
+               Enum.any?(list, &(&1["sessionId"] == "sel-a" and &1["selection"] == @sel))
+             end)
+
+      # A focus without a selection clears it, and the entry carries no key.
+      resp = focus(ctx.conn, ctx.base, %{"sessionId" => "sel-a", "documentId" => "p1"})
+      assert resp.status == 200
+      refute Map.has_key?(Jason.decode!(resp.resp_body)["result"], "selection")
+
+      # An explicit null is the blurred state: accepted, no key.
+      resp = focus(ctx.conn, ctx.base, %{"sessionId" => "sel-a", "selection" => nil})
+      assert resp.status == 200
+      refute Map.has_key?(Jason.decode!(resp.resp_body)["result"], "selection")
+      close(a)
+    end
+
+    test "a selection over 512 bytes of JSON is a 413, and nothing is applied", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "sel-big"})
+      wait_for(fn -> keys(ctx.topic) == ["api:sel-big"] end)
+
+      big = put_in(@sel, ["anchor", "blockId"], String.duplicate("x", 500))
+      assert byte_size(Jason.encode!(big)) > 512
+
+      resp = focus(ctx.conn, ctx.base, %{"sessionId" => "sel-big", "selection" => big})
+      assert resp.status == 413
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "payload_too_large"
+
+      # The boundary is inclusive: exactly 512 bytes is accepted.
+      pad = 512 - byte_size(Jason.encode!(put_in(@sel, ["anchor", "blockId"], "")))
+      at_cap = put_in(@sel, ["anchor", "blockId"], String.duplicate("y", pad))
+      assert byte_size(Jason.encode!(at_cap)) == 512
+
+      assert focus(ctx.conn, ctx.base, %{"sessionId" => "sel-big", "selection" => at_cap}).status ==
+               200
+
+      refute Enum.any?(
+               Presence.get_by_key(ctx.topic, "api:sel-big").metas,
+               &(&1[:selection] == big)
+             )
+
+      close(a)
+    end
+
+    test "a malformed selection is a 422", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "sel-bad"})
+      wait_for(fn -> keys(ctx.topic) == ["api:sel-bad"] end)
+
+      point = %{"blockId" => "b1", "offset" => 0}
+
+      bad = [
+        "b1:3",
+        [point, point],
+        %{"anchor" => point},
+        %{"anchor" => point, "head" => point, "extra" => 1},
+        %{"anchor" => %{"offset" => 0}, "head" => point},
+        %{"anchor" => %{"blockId" => "", "offset" => 0}, "head" => point},
+        %{"anchor" => %{"blockId" => 7, "offset" => 0}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1", "offset" => -1}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1", "offset" => 1.5}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1"}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1", "offset" => 0, "path" => 3}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1", "offset" => 0, "path" => ""}, "head" => point},
+        %{"anchor" => %{"blockId" => "b1", "offset" => 0, "name" => "x"}, "head" => point}
+      ]
+
+      for sel <- bad do
+        resp = focus(ctx.conn, ctx.base, %{"sessionId" => "sel-bad", "selection" => sel})
+        assert resp.status == 422, "expected 422 for #{inspect(sel)}, got #{resp.status}"
+        assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+      end
+
+      assert %{metas: [meta]} = Presence.get_by_key(ctx.topic, "api:sel-bad")
+      assert meta[:selection] == nil
+      close(a)
+    end
+
+    test "another token cannot set a selection on a session it does not own", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "sel-own"})
+      wait_for(fn -> keys(ctx.topic) == ["api:sel-own"] end)
+
+      assert focus(ctx.other_conn, ctx.base, %{"sessionId" => "sel-own", "selection" => @sel}).status ==
+               404
+
+      assert %{metas: [meta]} = Presence.get_by_key(ctx.topic, "api:sel-own")
+      assert meta[:selection] == nil
+      close(a)
+    end
+
+    test "the focus POST stays in the presence_focus rate class, and has no flat twin" do
+      info =
+        Phoenix.Router.route_info(
+          BarkparkWeb.Router,
+          "POST",
+          "/w/ws/p/proj/v1/data/presence/production/focus",
+          "localhost"
+        )
+
+      assert info.plug == BarkparkWeb.PresenceController
+      assert info.plug_opts == :focus
+      assert :scoped_api_presence_focus in info.pipe_through
+
+      # Presence is scoped-only (the room is workspace + project): there is no
+      # flat route a selection could ride outside a workspace.
+      assert Phoenix.Router.route_info(
+               BarkparkWeb.Router,
+               "POST",
+               "/v1/data/presence/production/focus",
+               "localhost"
+             ) == :error
+    end
+  end
 end
