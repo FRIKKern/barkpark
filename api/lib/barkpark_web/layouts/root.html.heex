@@ -4696,6 +4696,8 @@
       display: flex; align-items: center; gap: 2px;
       padding: 4px 12px; border-top: 1px solid var(--border); overflow-x: auto;
     }
+    /* The tablist holds only the tabs; the strip lays it out as one item. */
+    .sheet-tab-list { display: flex; align-items: center; gap: 2px; flex: none; }
     /* flex:none + max-width keeps a long tab name from squishing its siblings
        or stretching the strip — it ellipsizes and the strip scrolls (20 tabs). */
     .sheet-tab {
