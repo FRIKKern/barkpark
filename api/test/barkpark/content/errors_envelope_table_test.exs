@@ -148,6 +148,9 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"unknown_mutation_verb",
        {:error, {:unknown_mutation_verb, ["frobnicate"], ["create", "patch"]}}, "malformed", 400,
        [:details]},
+      # The mutate door's `dryRun` was neither true nor false
+      # (task-ca600d55736bc9ca): refused, never read as a real write.
+      {"invalid_dry_run", {:error, {:invalid_dry_run, "yes"}}, "malformed", 400, [:details]},
       {"unsupported_if_match_for_batch", {:error, :unsupported_if_match_for_batch},
        "unsupported_if_match_for_batch", 400, []},
       {"invalid_filter_op", {:error, {:invalid_filter_op, "status", "bogus"}}, "invalid_filter",

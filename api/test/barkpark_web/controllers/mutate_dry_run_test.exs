@@ -223,16 +223,25 @@ defmodule BarkparkWeb.MutateDryRunTest do
 
     test "publish, discardDraft, delete and deleteExactDraft leave the draft in place" do
       for mutation <- [
-            fn id -> %{"publish" => %{"id" => id, "type" => "post"}} end,
-            fn id -> %{"discardDraft" => %{"id" => id, "type" => "post"}} end,
-            fn id -> %{"delete" => %{"id" => id, "type" => "post"}} end,
-            fn id -> %{"deleteExactDraft" => %{"id" => "drafts." <> id, "type" => "post"}} end
+            fn id, _rev -> %{"publish" => %{"id" => id, "type" => "post"}} end,
+            fn id, _rev -> %{"discardDraft" => %{"id" => id, "type" => "post"}} end,
+            fn id, _rev -> %{"delete" => %{"id" => id, "type" => "post"}} end,
+            fn id, rev ->
+              %{
+                "deleteExactDraft" => %{
+                  "id" => "drafts." <> id,
+                  "type" => "post",
+                  "ifRevisionID" => rev
+                }
+              }
+            end
           ] do
         id = uid("dry-lifecycle")
         draft!(id)
         before = footprint(id)
+        [{_draft_id, rev}] = before.documents
 
-        resp = mutate(%{"mutations" => [mutation.(id)], "dryRun" => true})
+        resp = mutate(%{"mutations" => [mutation.(id, rev)], "dryRun" => true})
         assert_nothing_happened(id, before, resp)
       end
     end
@@ -289,10 +298,8 @@ defmodule BarkparkWeb.MutateDryRunTest do
 
   describe "control: the same write without dryRun" do
     test "writes the row, revision and event, and fires broadcast, webhook and after_save" do
-      id = uid("real-create")
-
       for flag <- [:absent, false, "false"] do
-        id = "#{id}-#{flag}"
+        id = uid("real-create")
 
         body = %{
           "mutations" => [%{"create" => %{"_id" => id, "_type" => "post", "title" => "Real"}}]
