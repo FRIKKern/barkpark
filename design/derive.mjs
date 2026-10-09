@@ -740,8 +740,32 @@ const PAPER_BASE_II = {
   "bg-deep":   { light: { L: 0.948, C: 0.010 }, dark: { L: 0.186, C: 0.014 } },
   "ink":       { light: { L: 0.245, C: 0.020 }, dark: { L: 0.902, C: 0.010 } },
   "ink-soft":  { light: { L: 0.440, C: 0.016 }, dark: { L: 0.702, C: 0.012 } },
-  "ink-faint": { light: { L: 0.585, C: 0.012 }, dark: { L: 0.532, C: 0.010 } },
+  // ink-faint-line: the decorative faint tone (dots, borders, fills). Faint TEXT
+  // (paper.surface.ink-faint) walks from here to clear AA 4.5 on bg AND bg-deep
+  // (task-f7bbcc0256a563d3) — see paperFaintII.
+  "ink-faint-line": { light: { L: 0.585, C: 0.012 }, dark: { L: 0.532, C: 0.010 } },
 };
+
+// Faint paper TEXT — starts at the (resolved) line tone, same hue and chroma, and walks lightness away from the
+// grounds until it clears AA 4.5 on BOTH bg and bg-deep (the meta line, dates,
+// captions sit on either). A residual on either ground is a reported miss (D15).
+function paperFaintII(c, mode) {
+  const { L, C, h } = srgbToOklch(parseColor(c.resolve(`paper.surface.ink-faint-line.${mode}`)));
+  const grounds = ["bg", "bg-deep"].map((g) => parseColor(c.resolve(`paper.surface.${g}.${mode}`)));
+  const step = mode === "light" ? -0.002 : 0.002;
+  // Measure the SHIPPED hex, not the float: rounding to 8-bit can cost ~0.01.
+  const ratios = (hex) => grounds.map((g) => contrast(parseColor(hex), g));
+  let l = L;
+  let hex = toHex(oklchToSrgb(l, C, h));
+  for (let i = 0; i < 300 && ratios(hex).some((r) => r < 4.5) && l > 0.04 && l < 0.98; i++) {
+    l += step;
+    hex = toHex(oklchToSrgb(l, C, h));
+  }
+  ratios(hex).forEach((got, i) => {
+    if (got < 4.5) c.misses.push({ slot: `paper.surface.ink-faint.${mode}`, ground: ["bg", "bg-deep"][i], got, want: 4.5 });
+  });
+  return hex;
+}
 
 // Status roles — OKLCH hue-lock + chroma dial + AA lightness-walk (D15). Each
 // status.<role>.<mode> is a SINGLE readable tone (the shipped tokens shape),
@@ -961,6 +985,7 @@ function buildFormulas() {
   // — paper.surface: hue-tinted bases from the skin, then hairlines/tints/chrome —
   for (const role of Object.keys(PAPER_BASE_II))
     M((m) => [`paper.surface.${role}.${m}`, (c) => oklchHex(PAPER_BASE_II[role][m].L, PAPER_BASE_II[role][m].C, accentHueOf(c.skin, m))]);
+  M((m) => [`paper.surface.ink-faint.${m}`, (c) => paperFaintII(c, m)]);
   M((m) => [`paper.surface.accent.${m}`, (c) => hslToHex(c.skin[m].accent)]);
   for (const role of ["rule", "chrome-border"])
     M((m) => [`paper.surface.${role}.${m}`, () => rgbaFrom(LINE_INK[m], PAPER_ALPHA[role][m])]);
@@ -972,7 +997,7 @@ function buildFormulas() {
   // — paper.reader: overlay of paper.surface; only the two hairline rules diverge —
   const readerMap = {
     light: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft" },
-    dark: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft", "ink-faint": "ink-faint", "chrome-bg": "chrome-bg", "chrome-border": "chrome-border" },
+    dark: { bg: "bg", "bg-deep": "bg-deep", ink: "ink", "ink-soft": "ink-soft", accent: "accent", "accent-soft": "accent-soft", "ink-faint": "ink-faint", "ink-faint-line": "ink-faint-line", "chrome-bg": "chrome-bg", "chrome-border": "chrome-border" },
   };
   for (const m of modes)
     for (const [rk, sk] of Object.entries(readerMap[m]))
@@ -1033,10 +1058,10 @@ export const SLOTS = (() => {
   const s = [];
   for (const r of base) for (const m of ["light", "dark"]) s.push(`${r}.${m}`);
   for (const r of ["fg", "bg"]) for (const m of ["light", "dark"]) s.push(`code.${r}.${m}`);
-  const paperRoles = ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"];
+  const paperRoles = ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"];
   for (const r of paperRoles) for (const m of ["light", "dark"]) s.push(`paper.surface.${r}.${m}`);
   for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft"]) s.push(`paper.reader.light.${r}`);
-  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) s.push(`paper.reader.dark.${r}`);
+  for (const r of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"]) s.push(`paper.reader.dark.${r}`);
   for (const r of ["paper", "bar", "rule", "ink", "soft", "accent"]) for (const m of ["light", "dark"]) s.push(`mailChrome.${r}.${m}`);
   for (const m of ["light", "dark"]) s.push(`cliCalloutNeutral.${m}`);
   for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);

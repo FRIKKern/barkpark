@@ -172,7 +172,7 @@ hslList((color.matchQuality || {}).spectrum, "color.matchQuality.spectrum", 7);
 const HEX_OR_RGBA = /^(#[0-9a-fA-F]{6}|rgba?\([0-9]{1,3},\s*[0-9]{1,3},\s*[0-9]{1,3}(,\s*[0-9.]+)?\))$/;
 const paper = color.paper || {};
 const psurf = paper.surface || {};
-for (const role of ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"]) {
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "ink-faint", "ink-faint-line", "rule", "edit-hover", "accent", "accent-soft", "chrome-bg", "chrome-border"]) {
   const o = psurf[role];
   ok(o && typeof o === "object", `color.paper.surface.${role} is required`);
   if (o) {
@@ -187,8 +187,28 @@ for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accen
 }
 const preadDark = (paper.reader || {}).dark || {};
 ok((paper.reader || {}).dark && typeof (paper.reader || {}).dark === "object", "color.paper.reader.dark is required");
-for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "chrome-bg", "chrome-border"]) {
+for (const role of ["bg", "bg-deep", "ink", "ink-soft", "rule", "accent", "accent-soft", "ink-faint", "ink-faint-line", "chrome-bg", "chrome-border"]) {
   ok(HEX_OR_RGBA.test(preadDark[role] || ""), `color.paper.reader.dark.${role} must be #rrggbb or rgba(), got ${JSON.stringify(preadDark[role])}`);
+}
+// Faint paper ink is TEXT (dates, captions, meta lines) on either paper ground:
+// it must clear AA 4.5 on bg AND bg-deep in both modes, and stay a tier below
+// ink-soft (task-f7bbcc0256a563d3). Decorative uses ride ink-faint-line instead.
+for (const [where, get] of [
+  ["paper.surface", (role, m) => psurf[role] && psurf[role][m]],
+  ["paper.reader.dark", (role, m) => (m === "dark" ? preadDark[role] : null)],
+]) {
+  for (const m of ["light", "dark"]) {
+    const faint = get("ink-faint", m);
+    if (!faint || !HEX.test(faint)) continue;
+    for (const g of ["bg", "bg-deep"]) {
+      const ground = get(g, m);
+      if (!ground || !HEX.test(ground)) continue;
+      const ratio = contrast(faint, ground);
+      const soft = contrast(get("ink-soft", m), ground);
+      ok(ratio >= 4.5, `color.${where}.ink-faint (${m}) must clear AA 4.5 on ${g}; got ${ratio.toFixed(2)}`);
+      ok(ratio < soft, `color.${where}.ink-faint (${m}) must stay below ink-soft on ${g}; got ${ratio.toFixed(2)} vs ${soft.toFixed(2)}`);
+    }
+  }
 }
 
 // --- mail-client popup chrome (color.mailChrome): 6 hex pairs ----------------
