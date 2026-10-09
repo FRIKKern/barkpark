@@ -523,6 +523,27 @@ defmodule BarkparkWeb.Studio.ConnectorsLiveTest do
     end
   end
 
+  # ── LAYOUT ─────────────────────────────────────────────────────────────────
+
+  # task-93b8a691113cec0d: minmax(380px, 1fr) kept one 380px column in a 321px
+  # phone container, so every card was clipped. A column may shrink to 100%.
+  test "the card grids never hold a column wider than their container", %{
+    conn: conn,
+    path: path,
+    admin_raw: raw,
+    ws: ws
+  } do
+    script(ws, %{})
+    {:ok, _view, html} = live(as(conn, raw), path)
+
+    grids =
+      Regex.scan(~r/style="[^"]*grid-template-columns: ([^;"]+)/, html)
+      |> Enum.map(&List.last/1)
+
+    assert grids != []
+    refute Enum.any?(grids, &(&1 =~ ~r/minmax\(\d+px/)), "fixed-px minimum in #{inspect(grids)}"
+  end
+
   # ── KEYBOARD ───────────────────────────────────────────────────────────────
 
   # task-bafeea95152b571a: Enter on Connect opened the dialog with focus still on

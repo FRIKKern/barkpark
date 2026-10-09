@@ -753,7 +753,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
             "Places your team already talks — connect one and messages reach your agent there."
           )}
         </p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 16px; margin-top: 8px;">
           <.provider_card
             :for={provider <- @providers}
             provider={provider}
@@ -772,7 +772,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
             "Services your agent can ACT on — connect one and it can open pull requests, file issues, and more on your behalf."
           )}
         </p>
-        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: 16px; margin-top: 8px;">
+        <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: 16px; margin-top: 8px;">
           <.provider_card
             :for={provider <- @tool_providers}
             provider={provider}
