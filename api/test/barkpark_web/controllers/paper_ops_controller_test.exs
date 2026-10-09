@@ -341,4 +341,57 @@ defmodule BarkparkWeb.PaperOpsControllerTest do
       assert [%{actor_label: ^email}] = Privacy.redact_actor_labels([Map.from_struct(latest)])
     end
   end
+
+  describe "POST /v1/papers/:slug/ops — emits an IMMEDIATE /v1/data/listen frame (task-dba598ed804f02a5)" do
+    test "a listener on the paper's workspace receives a document_changed frame carrying the new rev",
+         %{ws: ws, project: project, member_raw: raw, slug: slug, rev: rev} do
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Barkpark.Content.Broadcast.workspace_list_topic(@dataset, ws.id)
+      )
+
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("listen1", "live")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      # Document ops/mutate deliver this frame WITHOUT the editor waiting on
+      # Papers.ChangeEvents' settle debounce (settle_seconds/0, default 10s) —
+      # a plain `assert_receive` default timeout only catches an IMMEDIATE
+      # frame, which is the whole point of this test. The broadcast's `rev`
+      # is the Document row's own storage rev (an opaque hex string), NOT
+      # the paper's logical `content["rev"]` block-op counter the HTTP
+      # receipt's `body["rev"]` reports — compare against the reloaded row.
+      assert_receive {:document_changed, %{doc_id: ^slug, rev: new_rev, type: "paper"}}
+
+      reloaded =
+        Content.get_paper(slug, @dataset, workspace_id: ws.id, project_id: project.id)
+
+      assert new_rev == reloaded.rev
+    end
+
+    test "a listener on a DIFFERENT workspace gets nothing from this paper's op", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      slug: slug,
+      rev: rev
+    } do
+      other_ws = create_workspace!("po-other-#{System.unique_integer([:positive])}")
+
+      Phoenix.PubSub.subscribe(
+        Barkpark.PubSub,
+        Barkpark.Content.Broadcast.workspace_list_topic(@dataset, other_ws.id)
+      )
+
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("listen2", "cross-ws")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      refute_receive {:document_changed, _}, 200
+    end
+  end
 end

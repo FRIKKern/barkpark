@@ -1779,10 +1779,30 @@ defmodule Barkpark.Content.Papers.BlockOps do
     broadcast_paper_block(slug, saved.workspace_id, dataset, frame)
     enqueue_edge_projection(saved)
     maybe_save_batch_revision(saved, dataset, opts)
-    # One combined change event once the editing burst settles (#40). The
-    # batch frame does not carry the pre-batch rev; the job compares against
-    # the rev it finds when it fires.
-    ChangeEvents.settle(saved, Keyword.get(opts, :previous_rev))
+
+    # task-dba598ed804f02a5: a paper op only ever fanned out on the internal
+    # `paper_topic` PubSub frame (`broadcast_paper_block/4` above) plus a
+    # SETTLED change event (#40, below) — never the document-list/`doc_topic`
+    # frames `Broadcast.broadcast_document_mutation/3` fires, which is what
+    # `/v1/data/listen/:dataset` actually subscribes to. For the canvas's own
+    # autosave (`apply_paper_block_ops/4`, called every few hundred ms while
+    # typing) that settled event is deliberate — one combined event per
+    # editing burst, not one per keystroke batch, and the batch frame here
+    # does not carry the pre-batch rev, so the job compares against the rev
+    # it finds when it fires. A single discrete HTTP call (the `:ops` route,
+    # `apply_paper_block_ops_once/6`) is not a keystroke-grade burst, so it
+    # opts into an IMMEDIATE event instead — `opts[:change_event] ==
+    # :immediate` — matching what any other document write's listen frame
+    # does: the editor hits save, the listen stream tells every other viewer
+    # right away, not up to `settle_seconds/0` later.
+    case Keyword.get(opts, :change_event, :settle) do
+      :immediate ->
+        ChangeEvents.announce(saved, "update", previous_rev: Keyword.get(opts, :previous_rev))
+
+      _ ->
+        ChangeEvents.settle(saved, Keyword.get(opts, :previous_rev))
+    end
+
     :ok
   end
 
