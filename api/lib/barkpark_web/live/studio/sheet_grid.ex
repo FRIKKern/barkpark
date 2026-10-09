@@ -2959,6 +2959,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       class={"editor-panel sheet-editor" <> if(@chrome == :reader, do: " sheet-reader", else: "")}
       data-role="content"
       data-test-id={if @chrome == :reader, do: "sheet-reader", else: "studio-sheet-editor"}
+      role={if @chrome == :studio, do: "main"}
     >
       <%!-- CHROME axis: the header belongs to the Studio surface, not to write
             capability. A write-denied member is in Studio and keeps it — the
