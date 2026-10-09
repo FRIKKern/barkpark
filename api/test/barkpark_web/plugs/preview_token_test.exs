@@ -44,6 +44,52 @@ defmodule BarkparkWeb.Plugs.PreviewTokenTest do
     assert conn.assigns.forced_perspective == "drafts"
   end
 
+  # task-500b916ecdb0d1c0 — a Preview read used to force "drafts" no matter
+  # what `?perspective=` asked for (Presentation's Published-view switch
+  # reading through the SAME scoped token could never see the published
+  # page). Drafts stays the default; an EXPLICIT published/raw now rides
+  # through.
+  defp conn_for_qs(jwt, qs) do
+    %{
+      build_conn(:get, "/v1/preview/doc/production/post/p1?" <> qs)
+      | path_params: %{"dataset" => "production", "type" => "post", "doc_id" => "p1"}
+    }
+    |> put_req_header("authorization", "Preview " <> jwt)
+  end
+
+  test "?perspective=published rides through instead of being forced to drafts" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, secret())
+
+    conn = run_plug(conn_for_qs(jwt, "perspective=published"))
+
+    refute conn.halted
+    assert conn.assigns.forced_perspective == "published"
+  end
+
+  test "?perspective=raw rides through instead of being forced to drafts" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, secret())
+
+    conn = run_plug(conn_for_qs(jwt, "perspective=raw"))
+
+    refute conn.halted
+    assert conn.assigns.forced_perspective == "raw"
+  end
+
+  test "?perspective=drafts and an absent param both still force drafts" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, secret())
+
+    explicit = run_plug(conn_for_qs(jwt, "perspective=drafts"))
+    assert explicit.assigns.forced_perspective == "drafts"
+  end
+
+  test "a garbage perspective value is NOT widened -- it falls back to drafts, never published" do
+    {jwt, _claims} = PreviewToken.sign(%{dataset: "production", doc_ids: ["p1"]}, secret())
+
+    conn = run_plug(conn_for_qs(jwt, "perspective=whatever-this-is"))
+
+    assert conn.assigns.forced_perspective == "drafts"
+  end
+
   test "replay: second use of same token → 401 with reason \"replay\"" do
     {jwt, _claims} = PreviewToken.sign(%{dataset: "production"}, secret())
 
