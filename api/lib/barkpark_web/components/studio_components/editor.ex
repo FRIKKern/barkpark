@@ -768,6 +768,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-value-view=""
                 role="tab"
                 aria-selected={to_string(@nav_view == nil)}
+                tabindex={if @nav_view == nil, do: "0", else: "-1"}
                 class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
                 data-test-id="document-view-form"
               ><%= gettext("Fields") %></button>
@@ -778,6 +779,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-value-view={v["id"]}
                 role="tab"
                 aria-selected={to_string(@nav_view == v["id"])}
+                tabindex={if @nav_view == v["id"], do: "0", else: "-1"}
                 title={v["title"]}
                 class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
                 data-test-id="document-view-tab"
@@ -802,14 +804,20 @@ defmodule BarkparkWeb.StudioComponents.Editor do
             </div>
 
             <%= if @nav_view == nil and schema_groups(@editor_schema) != [] do %>
+              <%!-- A roving tabindex: only the selected group is a Tab stop, and
+                    bp-tab-keys.js moves between groups on the arrow keys
+                    (task-9bf415c3d78b42d6). The editor form is the panel. --%>
               <div class="bp-tab-bar" role="tablist">
                 <%= for grp <- schema_groups(@editor_schema) do %>
                   <button
                     type="button"
+                    id={"bp-group-tab-" <> grp["name"]}
                     phx-click="select-group"
                     phx-value-group={grp["name"]}
                     role="tab"
                     aria-selected={to_string(@nav_group == grp["name"])}
+                    aria-controls="editor-form"
+                    tabindex={if tab_stop_group(@editor_schema, @nav_group) == grp["name"], do: "0", else: "-1"}
                     title={grp["title"]}
                     aria-label={grp["title"]}
                     class={"bp-tab " <> if(@nav_group == grp["name"], do: "is-active", else: "")}
@@ -826,7 +834,15 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                   — a draft with no keystroke, and before Forms.coerce_params a
                   corrupt one. Autosave already persists each change within its
                   500 ms debounce, so recovery has nothing to restore. --%>
-            <form :if={@nav_view == nil} phx-submit="save" phx-change="autosave" phx-auto-recover="ignore" id="editor-form">
+            <form
+              :if={@nav_view == nil}
+              phx-submit="save"
+              phx-change="autosave"
+              phx-auto-recover="ignore"
+              id="editor-form"
+              role={if schema_groups(@editor_schema) != [], do: "tabpanel"}
+              aria-labelledby={if schema_groups(@editor_schema) != [], do: "bp-group-tab-" <> tab_stop_group(@editor_schema, @nav_group)}
+            >
               <%!-- The synthetic Title input backs the `title` column every
                     list row shows. A SINGLETON that declares no `title`
                     field (the twin's Forside — Sanity's `preview.prepare`
@@ -1307,6 +1323,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       list when is_list(list) -> list
       _ -> []
     end
+  end
+
+  # The group tab that is the bar's one Tab stop: the selected group, else the
+  # first, so the bar is never unreachable from the keyboard.
+  defp tab_stop_group(schema, nav_group) do
+    names = Enum.map(schema_groups(schema), & &1["name"])
+    if nav_group in names, do: nav_group, else: List.first(names)
   end
 
   # Per-group icon (task barkpark-sfzn). Plugins that omit "icon" still

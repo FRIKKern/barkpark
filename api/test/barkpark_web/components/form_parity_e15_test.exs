@@ -279,6 +279,11 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
                ~r{<button[^>]*data-group="content"[^>]*aria-selected="false"[^>]*>2\. Innhold</button>}
 
       assert html =~ ~r{<div class="bp-subfield" data-subfield-name="title" data-group="content">}
+
+      # task-9bf415c3d78b42d6: a roving tabindex — only the default group is a
+      # Tab stop; bp-tab-keys.js moves between groups on the arrow keys.
+      assert html =~ ~r{<button[^>]*data-group="link"[^>]*tabindex="0"}
+      assert html =~ ~r{<button[^>]*data-group="content"[^>]*tabindex="-1"}
     end
 
     test "a composite without groups renders no tab strip and no hook (byte-compat)" do

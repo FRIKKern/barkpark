@@ -139,6 +139,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           role="tab"
           data-group={g["name"]}
           aria-selected={to_string(g["name"] == default_group(@groups))}
+          tabindex={if g["name"] == default_group(@groups), do: "0", else: "-1"}
         ><%= g["title"] || g["name"] %></button>
       </div>
       <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>

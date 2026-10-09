@@ -161,6 +161,10 @@ defmodule BarkparkWeb.Studio.DocumentViewsTest do
     assert html =~ ~s(data-test-id="document-view-list")
     refute html =~ ~s(id="editor-form")
 
+    # task-9bf415c3d78b42d6: a roving tabindex follows the open view.
+    assert html =~ ~r{<button[^>]*tabindex="0"[^>]*data-test-id="document-view-tab"}
+    assert html =~ ~r{<button[^>]*tabindex="-1"[^>]*data-test-id="document-view-form"}
+
     titles =
       Regex.scan(~r/class="pane-doc-title">([^<]+)</, html) |> Enum.map(fn [_, t] -> t end)
 
