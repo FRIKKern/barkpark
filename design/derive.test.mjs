@@ -667,6 +667,28 @@ test("paper ghost-slot hint clears AA 4.5 on its tinted slot (rest and hover) ov
   }
 });
 
+test("media picker broken-image notice clears AA 4.5 at its painted opacity, every theme × mode (task-0abfa028a9b454bc)", () => {
+  // .bp-mp-broken paints the danger token as TEXT; an opacity on the rule
+  // blends that text toward the ground (0.8 read 4.26 in dark). Composite the
+  // token at the rule's own opacity over the Studio ground.
+  const css = readFileSync(new URL("../api/priv/static/assets/bp-media-picker.css", import.meta.url), "utf8");
+  const rule = css.match(/\.bp-mp-broken\s*\{[^}]*\}/);
+  assert.ok(rule, "bp-media-picker.css must carry a .bp-mp-broken rule");
+  assert.match(rule[0], /color:\s*var\(--destructive/, ".bp-mp-broken paints the danger token");
+  const op = rule[0].match(/(?:^|[\s;{])opacity:\s*([0-9.]+)/);
+  const alpha = op ? Number(op[1]) : 1;
+  for (const { name, theme } of ALL_THEMES) {
+    const { values } = derive(theme);
+    for (const mode of ["light", "dark"]) {
+      const fg = parseColor(values[`status.danger.${mode}`]);
+      const bg = parseColor(values[`bg.${mode}`]);
+      const seen = fg.map((c, i) => c * alpha + bg[i] * (1 - alpha));
+      const ratio = contrast(seen, bg);
+      assert.ok(ratio >= 4.5, `${name} ${mode}: broken-image notice at opacity ${alpha} = ${ratio.toFixed(3)} < 4.5`);
+    }
+  }
+});
+
 test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {
   // The elevation requirement: a raised card must separate from the page in dark.
   // Measured as OKLCH lightness delta (perceptual), evergreen is the shipped skin.
