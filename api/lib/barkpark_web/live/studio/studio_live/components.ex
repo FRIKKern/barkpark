@@ -1416,6 +1416,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       sidebar_user_opened={Map.get(assigns, :sidebar_user_opened, false) == true}
     />
 
+    <%!-- No landmark role on the desk: it holds the navigation columns too.
+          The open document's panel is the page's main (task-8e2fa7915ed7faa0);
+          a paper or beta shell carries its own labelled <main>. --%>
     <.pane_layout id="studio-panes" phx_hook="WidthBucket">
       <% has_editor = @editor_doc != nil %>
       <% num_panes = length(@panes) %>
