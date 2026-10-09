@@ -28,7 +28,10 @@ defmodule BarkparkWeb.Contract.SearchSettingsTest do
 
     conn =
       conn
-      |> recycle()
+      # recycle_scoped/1 (task-4eb2008fa0910603): a bare recycle() drops
+      # conn.private's rate-limit test scope, silently sharing the whole-suite
+      # IP bucket on this METERED route (RateLimit plug in its pipeline).
+      |> recycle_scoped()
       |> put_req_header("authorization", "Bearer barkpark-dev-token")
       |> put("/v1/data/search/test/settings", %{"zeroHitStrategy" => "typo_widen"})
 
