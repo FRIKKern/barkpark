@@ -304,4 +304,132 @@ defmodule BarkparkWeb.QueryControllerExpandSourceMapTest do
 
     refute Map.has_key?(body, "sourceMap")
   end
+
+  # ── security: the expanded doc's OWN redaction/perspective still binds ───
+
+  test "a private field on the expanded document never appears in ITS OWN mappings", %{
+    conn: conn,
+    scope: scope
+  } do
+    author_id = mk_author!(uniq("auth"), "Ada", "ada@secret.example", scope)
+    post_id = mk_post!(uniq("post"), %{"title" => "T", "author" => author_id}, scope)
+
+    body =
+      conn
+      |> bearer(@read_token)
+      |> get("/v1/data/doc/#{@dataset}/post/#{post_id}", %{
+        "perspective" => "drafts",
+        "sourceMap" => "true",
+        "expand" => "author"
+      })
+      |> json_response(200)
+
+    # The actual RESULT never carries the private field either — this is
+    # `Envelope.render/3`'s own chokepoint, unchanged by this task — but the
+    # property under test is specifically the SOURCE MAP: a click-to-edit
+    # overlay that could point an editor at a field the result body itself
+    # never rendered would be its own, narrower leak.
+    refute Map.has_key?(body["result"]["author"], "email")
+
+    source_map = body["sourceMap"]
+    refute Map.has_key?(source_map["mappings"], ~s($["author"]["email"]))
+
+    # Not "absent because nothing matched" — "name" (same document, same
+    # redaction pass) DOES appear, so the absence of "email" is the
+    # redaction working, not an empty/vacuous map.
+    assert Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+  end
+
+  test "a reference to a document in a DIFFERENT workspace is never expanded, and leaks nothing into sourceMap",
+       %{conn: conn} do
+    ws_a = TenancyFixtures.create_workspace!(uniq("expws-a"))
+    proj_a = TenancyFixtures.create_project!(ws_a, uniq("proj-a"))
+    scope_a = [workspace_id: ws_a.id, project_id: proj_a.id]
+
+    ws_b = TenancyFixtures.create_workspace!(uniq("expws-b"))
+    proj_b = TenancyFixtures.create_project!(ws_b, uniq("proj-b"))
+    scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
+
+    for {dataset_scope, suffix} <- [{scope_a, "a"}, {scope_b, "b"}] do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "author",
+            "title" => "Author",
+            "visibility" => "public",
+            "fields" => [%{"name" => "name", "type" => "string"}]
+          },
+          @dataset,
+          dataset_scope
+        )
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => "post",
+            "title" => "Post",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{"name" => "author", "type" => "reference", "refType" => "author"}
+            ]
+          },
+          @dataset,
+          dataset_scope
+        )
+
+      _ = suffix
+    end
+
+    # B's own author, under an id A's post will also reference. SAME doc_id,
+    # DIFFERENT dataset_id (the unique index is (doc_id, type, dataset_id),
+    # not globally unique) -- the exact bare-id-collision shape this
+    # codebase's tenancy fences exist for.
+    shared_author_id = uniq("auth-shared")
+
+    {:ok, _} =
+      Content.create_document(
+        "author",
+        %{"doc_id" => shared_author_id, "name" => "SECRET_B_NAME"},
+        @dataset,
+        scope_b
+      )
+
+    # A's post references that id. A has NO author doc under it at all.
+    post_id = uniq("post-a")
+
+    {:ok, _} =
+      Content.create_document(
+        "post",
+        %{"doc_id" => post_id, "title" => "T", "author" => shared_author_id},
+        @dataset,
+        scope_a
+      )
+
+    admin_a_raw = "spt-expand-a-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(admin_a_raw, "expand-a", @dataset, ["read", "write"], ws_a.id)
+
+    body =
+      conn
+      |> bearer(admin_a_raw)
+      |> get("/v1/data/doc/#{@dataset}/post/#{post_id}", %{
+        "perspective" => "drafts",
+        "sourceMap" => "true",
+        "expand" => "author"
+      })
+      |> json_response(200)
+
+    # Expand found NOTHING under A's own scope: the field stays the bare id,
+    # never B's rendered document. If this ever assembled to a map, B's
+    # content would already be in the RESULT body, before sourceMap even
+    # enters the picture.
+    assert body["result"]["author"] == shared_author_id
+
+    source_map = body["sourceMap"]
+    refute is_nil(source_map)
+    # Root only -- no second documents[] entry, because nothing was expanded.
+    assert [_root] = source_map["documents"]
+    refute Map.has_key?(source_map["mappings"], ~s($["author"]["name"]))
+    refute inspect(source_map) =~ "SECRET_B_NAME"
+  end
 end
