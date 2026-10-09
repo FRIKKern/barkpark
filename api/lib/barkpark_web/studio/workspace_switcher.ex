@@ -58,10 +58,14 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         aria-controls="scope-menu"
         aria-expanded={if @menu, do: "true", else: "false"}
         title={scope_hint(@current_workspace, @current_project, @current_dataset)}
+        aria-label={scope_hint(@current_workspace, @current_project, @current_dataset)}
       >
         <%!-- The avatar IS the workspace: its initial in the brand square, the
-              full name riding the button tooltip + aria (scope_hint) — so the
-              visible text shrinks to project + dataset-badge. --%>
+              full name riding the button tooltip + aria-label (scope_hint) — so
+              the visible text shrinks to project + dataset-badge. A title alone
+              never named it: a button with text content is named by that text,
+              so a screen reader heard "A Default Project production" and no
+              workspace (task-38237bf3ee280012). --%>
         <span class="scope-avatar" aria-hidden="true"><%= initial_of(@current_workspace) %></span>
         <span class="scope-title-trail"><%= name_of(@current_project) %></span>
         <span class="scope-dataset-badge"><%= @current_dataset || "—" %></span>
@@ -78,10 +82,10 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
         id="scope-menu"
         class="scope-menu"
         role="group"
-        aria-label="Switch workspace, project and dataset"
+        aria-label={gettext("Switch workspace, project and dataset")}
       >
         <div class="scope-menu-col">
-          <div class="scope-menu-col-title">Workspace</div>
+          <div class="scope-menu-col-title"><%= gettext("Workspace") %></div>
           <div class="scope-menu-col-items">
             <button
               :for={ws <- @menu.workspaces}
@@ -97,7 +101,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
               phx-value-id={ws.id}
             >
               <span class="scope-menu-item-name"><%= ws.name %></span>
-              <span :if={same?(@current_workspace, ws)} class="scope-menu-dot" title="Current"></span>
+              <span :if={same?(@current_workspace, ws)} class="scope-menu-dot" title={gettext("Current")}></span>
             </button>
           </div>
           <%= if @can_create do %>
@@ -106,7 +110,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
               class="scope-menu-create"
               phx-click="toggle-create"
               phx-value-target="workspace"
-            >＋ New workspace</button>
+            ><span aria-hidden="true">＋ </span><%= gettext("New workspace") %></button>
             <form
               :if={@create_open == "workspace"}
               class="scope-menu-create-form"
@@ -116,19 +120,20 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
                 type="text"
                 name="name"
                 class="workspace-switcher-create-input"
-                placeholder="Workspace name"
+                placeholder={gettext("Workspace name")}
+                aria-label={gettext("Workspace name")}
                 autocomplete="off"
                 autofocus
               />
-              <button type="submit" class="workspace-switcher-create-submit">Create</button>
+              <button type="submit" class="workspace-switcher-create-submit"><%= gettext("Create") %></button>
             </form>
           <% end %>
         </div>
 
         <div class="scope-menu-col">
-          <div class="scope-menu-col-title">Project</div>
+          <div class="scope-menu-col-title"><%= gettext("Project") %></div>
           <div class="scope-menu-col-items">
-            <span :if={@menu.projects == []} class="scope-menu-empty">No projects yet</span>
+            <span :if={@menu.projects == []} class="scope-menu-empty"><%= gettext("No projects yet") %></span>
             <button
               :for={p <- @menu.projects}
               type="button"
@@ -143,7 +148,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
               phx-value-id={p.id}
             >
               <span class="scope-menu-item-name"><%= p.name %></span>
-              <span :if={same?(@current_project, p)} class="scope-menu-dot" title="Current"></span>
+              <span :if={same?(@current_project, p)} class="scope-menu-dot" title={gettext("Current")}></span>
             </button>
           </div>
           <%= if @can_create and same?(@current_workspace, @menu.ws) do %>
@@ -152,7 +157,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
               class="scope-menu-create"
               phx-click="toggle-create"
               phx-value-target="project"
-            >＋ New project</button>
+            ><span aria-hidden="true">＋ </span><%= gettext("New project") %></button>
             <form
               :if={@create_open == "project"}
               class="scope-menu-create-form"
@@ -162,19 +167,20 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
                 type="text"
                 name="name"
                 class="workspace-switcher-create-input"
-                placeholder="Project name"
+                placeholder={gettext("Project name")}
+                aria-label={gettext("Project name")}
                 autocomplete="off"
                 autofocus
               />
-              <button type="submit" class="workspace-switcher-create-submit">Create</button>
+              <button type="submit" class="workspace-switcher-create-submit"><%= gettext("Create") %></button>
             </form>
           <% end %>
         </div>
 
         <div class="scope-menu-col">
-          <div class="scope-menu-col-title">Dataset</div>
+          <div class="scope-menu-col-title"><%= gettext("Dataset") %></div>
           <div class="scope-menu-col-items">
-            <span :if={@menu.datasets == []} class="scope-menu-empty">No datasets</span>
+            <span :if={@menu.datasets == []} class="scope-menu-empty"><%= gettext("No datasets") %></span>
             <button
               :for={ds <- @menu.datasets}
               type="button"
@@ -186,7 +192,7 @@ defmodule BarkparkWeb.Studio.WorkspaceSwitcher do
               phx-value-ds={ds.slug}
             >
               <span class="scope-menu-item-name"><%= ds.name %></span>
-              <span :if={current_dataset?(assigns, ds)} class="scope-menu-dot" title="Current"></span>
+              <span :if={current_dataset?(assigns, ds)} class="scope-menu-dot" title={gettext("Current")}></span>
             </button>
           </div>
         </div>
