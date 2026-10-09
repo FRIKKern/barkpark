@@ -11,8 +11,14 @@ defmodule BarkparkWeb.PreviewLinkController do
       final sibling of this widening series, after task-ea6c9abb868593f8
       (preview tokens, #22468) and task-d50757dc446514e7 (share links,
       #22484). Mint (raw token shown once).
-    * `GET/DELETE /v1/shares/preview-links` — still ADMIN-only. List a
-      document's links, revoke one.
+    * `GET /v1/shares/preview-links` — an admin lists every link; a
+      write-capable member lists only the ones THEY minted
+      (task-0548f06277c4712e).
+    * `DELETE /v1/shares/preview-links/:id` — an admin revokes any link; a
+      write-capable member revokes only their own
+      (`PreviewLinks.revoke_scoped/2`, task-0548f06277c4712e). A foreign id
+      (another member's link) answers the SAME `{:error, :not_found}` as a
+      nonexistent one — no existence leak.
 
   Deliberately NOT mounted under `/v1/preview/*`: that prefix already belongs
   to the unrelated `PreviewToken` JWT mechanism (header-borne signed token,
@@ -24,15 +30,24 @@ defmodule BarkparkWeb.PreviewLinkController do
   it: `Barkpark.Sharing.Links.published_ref_id/1` would strip exactly the
   prefix this feature exists to keep.
 
-  Tenancy confinement mirrors `ShareLinkController` verbatim (pre-widening):
-  `list`/`revoke` additionally require the caller to administer the TARGET
-  workspace (`PreviewLinks.workspace_admin?/2`, which delegates to the same
-  `Tenancy.Auth.workspace_admin?/2` chokepoint `Links.workspace_admin?/2`
-  does).
+  ## Own-link list/revoke (task-0548f06277c4712e)
+
+  Since #22488 a write member can mint, but `list`/`revoke` stayed
+  admin-only: there was no way to tell "my own link" from "someone else's"
+  short of workspace admin authority, so a member who minted a link by
+  mistake could not take it back, and CI runs left 24h-TTL links behind.
+  `created_by` (`PreviewLinks.actor_ref/1`, `"api_token:<id>"` /
+  `"user:<id>"`, the same ref shape `Tenancy.Members.invited_by` already
+  uses) is stamped at mint time — additive and nullable, so a link minted
+  before this field existed stays admin-only-manageable rather than
+  silently becoming anyone's. `ensure_can_list/2` resolves the admin-vs-member
+  split for `list`; `PreviewLinks.revoke_scoped/2` resolves it internally for
+  `revoke` (admin OR `created_by == actor_ref(caller)`), so neither needs a
+  SEPARATE "is this my link" check bolted onto the controller.
 
   ## Member mint confinement (task-9cfe08fe1e91b6c9)
 
-  Two checks `ensure_workspace_admin/2` never needed, because only a
+  Two checks mint never needed before this widening, because only a
   workspace's own admin could reach `mint` at all — the SAME two
   task-d50757dc446514e7 added to `ShareLinkController.mint/2`, applied here
   verbatim because this controller takes the identical composite `scope`
@@ -129,7 +144,11 @@ defmodule BarkparkWeb.PreviewLinkController do
         doc_id: doc_id,
         ref_type: ref_type,
         label: params["label"],
-        ttl: parse_ttl(params["ttl"])
+        ttl: parse_ttl(params["ttl"]),
+        # task-0548f06277c4712e — stamped so the creator can later list/revoke
+        # their own; nil for a caller `actor_ref/1` does not recognise (never
+        # claimed by a later "mine" filter).
+        created_by: PreviewLinks.actor_ref(conn.assigns[:api_token])
       }
 
       case PreviewLinks.create(attrs) do
@@ -156,7 +175,11 @@ defmodule BarkparkWeb.PreviewLinkController do
     end
   end
 
-  @doc "GET /v1/shares/preview-links?scope=&ref_type=&doc_id= — list a document's preview links."
+  @doc """
+  GET /v1/shares/preview-links?scope=&ref_type=&doc_id= — list a document's
+  preview links. An admin lists every link; a write-capable member lists only
+  the ones THEY minted (task-0548f06277c4712e).
+  """
   def list(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
          # task-4ad625842939ae8f — same gap, same fix, as
@@ -164,11 +187,11 @@ defmodule BarkparkWeb.PreviewLinkController do
          # request, so refusing it is never an existence oracle.
          :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
-         :ok <- ensure_workspace_admin(conn, workspace.id),
+         {:ok, list_scope} <- ensure_can_list(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, doc_id, _ref_type} <- doc_ref(params) do
       links =
-        PreviewLinks.list_for(workspace.id, project.id, dataset, doc_id)
+        PreviewLinks.list_for(workspace.id, project.id, dataset, doc_id, list_scope)
         |> Enum.map(&link_json/1)
 
       json(conn, %{links: links})
@@ -221,15 +244,24 @@ defmodule BarkparkWeb.PreviewLinkController do
 
   defp doc_ref(_), do: {:error, "ref_type and doc_id are required"}
 
-  defp ensure_workspace_admin(conn, workspace_id) do
-    if PreviewLinks.workspace_admin?(conn.assigns[:api_token], workspace_id),
-      do: :ok,
-      else: {:error, :forbidden}
+  # task-0548f06277c4712e — an admin lists EVERY link (`:all`); a
+  # write-capable member lists only the ones they minted (`{:mine, ref}`,
+  # `ref` their own `actor_ref/1`). Neither -> forbidden. `revoke`'s
+  # equivalent split lives inside `PreviewLinks.revoke_scoped/2` itself,
+  # since that door already took a bare `principal` and needed no new
+  # controller-side branch.
+  defp ensure_can_list(conn, workspace_id) do
+    token = conn.assigns[:api_token]
+
+    cond do
+      PreviewLinks.workspace_admin?(token, workspace_id) -> {:ok, :all}
+      write_member?(conn, workspace_id) -> {:ok, {:mine, PreviewLinks.actor_ref(token)}}
+      true -> {:error, :forbidden}
+    end
   end
 
   # task-9cfe08fe1e91b6c9 — `mint` alone admits a write-capable MEMBER, not
-  # just an admin. `list`/`revoke` stay on `ensure_workspace_admin/2`
-  # unchanged, above. `TenancyAuth.authorize/3`'s api_token arm is
+  # just an admin. `TenancyAuth.authorize/3`'s api_token arm is
   # member?(token, ws) AND permits?(token, :write) -- the same
   # write-capable-member primitive task-ea6c9abb868593f8 and
   # task-d50757dc446514e7 both used.

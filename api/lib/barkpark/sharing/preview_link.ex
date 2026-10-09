@@ -44,6 +44,11 @@ defmodule Barkpark.Sharing.PreviewLink do
     field :label, :string
     field :expires_at, :utc_datetime
     field :revoked_at, :utc_datetime
+    # task-0548f06277c4712e — "api_token:<id>" or "user:<id>" (additive,
+    # nullable; every row minted before this field existed stays NULL — an
+    # admin still manages it, it simply claims no one member's own). See
+    # `PreviewLinks.actor_ref/1`.
+    field :created_by, :string
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
@@ -60,7 +65,8 @@ defmodule Barkpark.Sharing.PreviewLink do
     :ref_type,
     :label,
     :expires_at,
-    :revoked_at
+    :revoked_at,
+    :created_by
   ]
 
   def changeset(link, attrs) do

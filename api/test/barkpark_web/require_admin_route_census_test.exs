@@ -394,11 +394,21 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "ensure_workspace_admin",
        "ShareLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
 
-    # task-6812c3100d7aedbc — same confinement shape as /v1/shares/links above.
-    {:get, "/v1/shares/preview-links"} =>
-      {:tenant_bound, "ensure_workspace_admin",
-       "PreviewLinkController.list/2 resolves the workspace THEN " <>
-         "ensure_workspace_admin/2 -> PreviewLinks.workspace_admin?/2."},
+    # task-6812c3100d7aedbc — same confinement shape as /v1/shares/links above,
+    # UNTIL task-0548f06277c4712e.
+    #
+    # {:get, "/v1/shares/preview-links"} and
+    # {:delete, "/v1/shares/preview-links/:id"} REMOVED (task-0548f06277c4712e):
+    # both moved off `[:api, :require_admin]` onto the SAME
+    # `[:api, :require_token, :flat_within_quota, :require_write]` scope
+    # `:post` already lives on (see the {:post, ...} removal note below), so
+    # neither falls in THIS census's population any more. A write-capable
+    # member now reaches both -- list sees only the links THEY minted
+    # (`ensure_can_list/2`), revoke only lets them revoke their own
+    # (`PreviewLinks.revoke_scoped/2`'s creator check); an admin keeps
+    # list-all/revoke-all through the same functions. See
+    # preview_link_own_list_revoke_test.exs for the refusal-case coverage.
+    #
     # {:post, "/v1/shares/preview-links"} REMOVED (task-9cfe08fe1e91b6c9):
     # mint/2 moved off `[:api, :require_admin]` onto its own
     # `[:api, :require_token, :flat_within_quota, :require_write]` scope, so
@@ -408,9 +418,6 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
     # write-capable member) -- a stronger requirement than `RequireAdmin`
     # ever was; see preview_link_member_mint_test.exs for its own
     # refusal-case coverage.
-    {:delete, "/v1/shares/preview-links/:id"} =>
-      {:tenant_bound, "ensure_workspace_admin",
-       "PreviewLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
 
     # ── /api/workspaces/:workspace_slug/media ──
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path"} =>
