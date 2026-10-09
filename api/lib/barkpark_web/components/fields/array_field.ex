@@ -81,7 +81,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               data-field-name={@field.name} data-ordered={@ordered? && "true"}>
       <legend class="bp-field-title">
         <%= @title %><%= if @progress do %>
-          <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= @progress.met %>/<%= @progress.total %> met</span>
+          <span class="bp-array-progress" data-met={@progress.met} data-total={@progress.total}><%= gettext("%{met}/%{total} met", met: @progress.met, total: @progress.total) %></span>
         <% end %>
       </legend>
       <p :if={@description} class="bp-field-description"><%= @description %></p>
@@ -319,6 +319,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           wrap_id: ref_row_id(assigns.field, row_path, row_value, idx),
           input_name: row_path,
           row_value: BarkparkWeb.Components.FieldInputs.reference_id(row_value),
+          row_label: row_label(assigns, idx),
           ref_type: ref_type_of(item),
           dataset: assigns[:dataset] || "production",
           scope_prefix: assigns[:scope_prefix] || "",
@@ -332,6 +333,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
           input_id: "f-#{assigns.field.name}-#{idx}",
           input_name: row_path,
           row_value: row_value,
+          row_label: row_label(assigns, idx),
           on_change: assigns.on_change,
           readonly: assigns.readonly
         }
@@ -497,6 +499,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
         ref-type={@ref_type}
         dataset={@dataset}
         scope-prefix={@scope_prefix}
+        data-field-label={@row_label}
         data-bridge-target={"#{@wrap_id}-h"}
       ></bp-reference-picker>
     </div>
@@ -590,11 +593,17 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       id={@input_id}
       name={@input_name}
       value={leaf_display(@row_value)}
+      aria-label={@row_label}
       phx-change={@on_change}
       disabled={@readonly}
     />
     """
   end
+
+  # A row's own name: the fieldset legend names the group, not each input,
+  # so a screen reader heard only "edit text" per row.
+  defp row_label(assigns, idx),
+    do: gettext("%{field} %{n}", field: assigns.title, n: idx + 1)
 
   # Never let a structured row value crash the render: a map/list reaching the
   # leaf fallback (e.g. a block missing its `of` descriptor) has no

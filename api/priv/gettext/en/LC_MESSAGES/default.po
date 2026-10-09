@@ -8863,3 +8863,13 @@ msgstr ""
 msgctxt "reference picker"
 msgid "1 search"
 msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:606
+#, elixir-autogen, elixir-format
+msgid "%{field} %{n}"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:84
+#, elixir-autogen, elixir-format
+msgid "%{met}/%{total} met"
+msgstr ""
