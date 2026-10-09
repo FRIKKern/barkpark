@@ -101,8 +101,29 @@
       });
     }
 
+    // The opener's words (bp-media-picker hands over its stamped media map),
+    // English otherwise.
+    _t(key, fallback) {
+      const strings = this._strings || {};
+      return typeof strings[key] === "string" ? strings[key] : fallback;
+    }
+
+    _applyStrings() {
+      if (!this._dialog) return;
+      const title = this._t("library", "Media library");
+      this._dialog.setAttribute("aria-label", title);
+      this.querySelector(".bp-ab-title").textContent = title;
+      this._search.placeholder = this._t("search_assets_placeholder", "Search assets…");
+      this._search.setAttribute("aria-label", this._t("search_assets", "Search assets"));
+      this.querySelector(".bp-ab-close").setAttribute("aria-label", this._t("close", "Close"));
+      this._empty.textContent = this._t("no_matching_assets", "No matching assets");
+      this._loading.textContent = this._t("loading", "Loading…");
+    }
+
     open(opts) {
       opts = opts || {};
+      this._strings = opts.strings || null;
+      this._applyStrings();
       if (!this._open) {
         const active = document.activeElement;
         this._returnFocus = active && active !== document.body && active !== document.documentElement
@@ -212,8 +233,10 @@
         if (generation !== this._loadGeneration || context !== this._requestContext || !this._open) return;
         this._assets = [];
         if (this._grid) {
-          this._grid.innerHTML =
-            '<div class="bp-ab-grid-empty text-sm text-muted">Could not load media library.</div>';
+          const failed = document.createElement("div");
+          failed.className = "bp-ab-grid-empty text-sm text-muted";
+          failed.textContent = this._t("library_error", "Could not load media library.");
+          this._grid.replaceChildren(failed);
         }
       } finally {
         if (generation === this._loadGeneration && this._loading) this._loading.hidden = true;

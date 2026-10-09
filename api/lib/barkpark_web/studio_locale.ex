@@ -98,7 +98,13 @@ defmodule BarkparkWeb.StudioLocale do
       "options" => gettext("Right-click for image options"),
       "library" => gettext("Media library"),
       "search" => gettext("Search assets…"),
-      "close" => gettext("Close")
+      "close" => gettext("Close"),
+      "image_options" => gettext("Image options"),
+      "search_assets" => gettext("Search assets"),
+      "search_assets_placeholder" => gettext("Search assets…"),
+      "no_matching_assets" => gettext("No matching assets"),
+      "loading" => gettext("Loading…"),
+      "library_error" => gettext("Could not load media library.")
     })
   end
 

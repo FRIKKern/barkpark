@@ -536,6 +536,7 @@ class BpMediaPicker extends HTMLElement {
       token: this._token(),
       scopePrefix: this._scopePrefix(),
       accept: "image/*",
+      strings: this._strings,
       onSelect: (detail) => this._selectAsset(detail)
     });
     return true;
@@ -593,7 +594,7 @@ class BpMediaPicker extends HTMLElement {
     const menu = document.createElement("div");
     menu.className = "bp-mp-menu";
     menu.setAttribute("role", "menu");
-    menu.setAttribute("aria-label", "Image options");
+    menu.setAttribute("aria-label", this._t("image_options", "Image options"));
     menu.style.cssText =
       "position:fixed;z-index:1000;display:flex;flex-direction:column;gap:2px;" +
       "min-width:160px;padding:4px;border-radius:8px;" +
