@@ -2887,7 +2887,12 @@
     .item-share-access-edit { color: var(--primary); }
     .item-share-url { flex: 1; min-width: 0; font-family: var(--font-mono); font-size: var(--text-2xs); }
     .item-share-revoke { color: var(--destructive); }
-    .item-share-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
+    .item-share-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding-top: 6px; border-top: 1px solid var(--border-muted); margin-top: 2px; }
+    /* The note shares the row on a wide dialog and takes its own above the
+       buttons on a narrow one; nowrap clipped the primary button at phone
+       width (task-27f26cb43a3c59c7). */
+    .item-share-footer > .shares-note { flex: 1 1 12rem; min-width: 0; }
+    .item-share-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
 
     /* Access panel (airdrop-grants slice 3) — read/revoke view of scoped grants. */
     .access-panel { width: 560px; max-width: min(560px, calc(100vw - 24px)); max-height: 82vh; }
