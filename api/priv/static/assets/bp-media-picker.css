@@ -98,7 +98,7 @@ bp-media-picker.bp-mp-drag-over .bp-mp-empty,
 bp-media-picker.bp-mp-drag-over .bp-mp-preview-img {
   border-color: var(--primary, var(--paper-accent)); border-style: dashed;
 }
-.bp-mp-broken { color: var(--destructive, var(--paper-ink)); border-color: var(--destructive, var(--paper-rule)); opacity: 0.8; }
+.bp-mp-broken { color: var(--destructive, var(--paper-ink)); border-color: var(--destructive, var(--paper-rule)); }
 bp-media-picker.bp-mp-busy { opacity: 0.7; pointer-events: none; }
 .bp-mp-error { display: none; margin-top: 6px; font-size: var(--text-xs, 0.75rem); color: var(--destructive, var(--paper-ink)); }
 @media (max-width: 600px) {
