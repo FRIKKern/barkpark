@@ -187,6 +187,9 @@ export function readMasterItems(root = document) {
     });
 }
 
+// Unique per popup so two menus on one page never share option ids.
+let menuSeq = 0;
+
 export class SlashMenu {
   // `eyebrow`, `extraClass`, `footHtml`, and `filter` are OPTIONAL parameterization
   // seams (added for the Phase-5 command palette, which subclasses this popup). When
@@ -235,6 +238,9 @@ export class SlashMenu {
     this._active = 0; // index into the FLAT selectable (filtered) item list
     this._el = null; // popup root
     this._rowEls = []; // parallel to selectable items, for active styling
+    // The editable the menu was opened from. Focus stays there while the user
+    // arrows, so it carries aria-activedescendant → the active option.
+    this._owner = null;
 
     // Bound once so add/removeEventListener match.
     this._onDocPointer = (e) => this._handlePointer(e);
@@ -259,6 +265,11 @@ export class SlashMenu {
     this._applyFilter(); // → this._items (filtered view)
     if (!this._open) {
       this._open = true;
+      const active = document.activeElement;
+      const editable =
+        active && (active.isContentEditable || active.getAttribute?.("contenteditable") === "true");
+      this._owner = editable && !this._el.contains(active) ? active : null;
+      if (this._owner) this._owner.setAttribute("aria-controls", this._el.id);
       document.addEventListener("mousedown", this._onDocPointer, true);
       // Capture-phase Escape so the menu reliably closes even when the
       // keydown does not route through TipTap's editorProps.handleKeyDown
@@ -333,6 +344,11 @@ export class SlashMenu {
     if (!this._open) return;
     this._open = false;
     if (this._el) this._el.style.display = "none";
+    if (this._owner) {
+      this._owner.removeAttribute("aria-activedescendant");
+      this._owner.removeAttribute("aria-controls");
+      this._owner = null;
+    }
     document.removeEventListener("mousedown", this._onDocPointer, true);
     document.removeEventListener("keydown", this._onDocKeydown, true);
   }
@@ -375,9 +391,7 @@ export class SlashMenu {
       ? `bp-slash-menu ${this._extraClass}`
       : "bp-slash-menu";
     el.setAttribute("role", "listbox");
-    // A listbox needs an accessible name (axe aria-input-field-name); the
-    // eyebrow already says what the list is.
-    el.setAttribute("aria-label", this._eyebrow || "Insert block");
+    el.id = `bp-slash-menu-${++menuSeq}`;
     el.style.display = "none";
     document.body.appendChild(el);
     this._el = el;
@@ -386,6 +400,9 @@ export class SlashMenu {
   _render() {
     this._el.innerHTML = "";
     this._rowEls = [];
+    // A listbox needs an accessible name (axe aria-input-field-name); the
+    // eyebrow already says what the list is, in the viewer's language.
+    this._el.setAttribute("aria-label", t(this._eyebrow || "Insert block"));
 
     // Eyebrow — uppercase, letter-spaced "Insert block" header (Portable-Doc
     // `.paper-slash-popover__head`). Sits above the scrollable row list.
@@ -430,6 +447,7 @@ export class SlashMenu {
       row.type = "button";
       row.className = "bp-slash-item";
       row.setAttribute("role", "option");
+      row.id = `${this._el.id}-opt-${idx}`;
       row.dataset.type = item.type;
       // EXPECTED-group rows carry the field name (for the bound insert) and a
       // data-expected marker so the ✦ hint + "expected" tag recolor to accent.
@@ -485,13 +503,15 @@ export class SlashMenu {
 
   _syncActive() {
     this._rowEls.forEach((row, idx) => {
-      if (idx === this._active) {
-        row.classList.add("is-active");
-        row.scrollIntoView({ block: "nearest" });
-      } else {
-        row.classList.remove("is-active");
-      }
+      const on = idx === this._active;
+      row.classList.toggle("is-active", on);
+      row.setAttribute("aria-selected", on ? "true" : "false");
+      if (on) row.scrollIntoView({ block: "nearest" });
     });
+    if (!this._owner) return;
+    const row = this._rowEls[this._active];
+    if (row) this._owner.setAttribute("aria-activedescendant", row.id);
+    else this._owner.removeAttribute("aria-activedescendant");
   }
 
   // Place the popup just below the caret; flip above if it would overflow the

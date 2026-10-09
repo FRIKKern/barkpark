@@ -89,6 +89,72 @@ try {
     assert.equal(slash.getAttribute("role"), "listbox");
     assert.equal(slash.getAttribute("aria-label"), "Insert block");
   });
+
+  // task-5f171731bacb8ebe: arrowing moved only an `is-active` class, so a screen reader heard
+  // nothing. The active option is aria-selected, and the editor — which keeps
+  // focus — points at it.
+  // The menu opens from typing "/" in the editor, so focus is there.
+  const pm = canvas._editor.view.dom;
+  canvas._closeSlash();
+  canvas._editor.view.focus();
+  canvas._openSlash("");
+  const options = () => [...slash.querySelectorAll('[role="option"]')];
+  check("slash menu: the active option is selected and the editor points at it", () => {
+    assert.ok(slash.id, "the listbox has an id");
+    assert.equal(pm.getAttribute("aria-controls"), slash.id);
+    const [first, second] = options();
+    assert.ok(first.id && second.id && first.id !== second.id, "options have unique ids");
+    assert.equal(first.getAttribute("aria-selected"), "true");
+    assert.equal(second.getAttribute("aria-selected"), "false");
+    assert.equal(pm.getAttribute("aria-activedescendant"), first.id);
+  });
+  canvas._slash.move(1);
+  check("slash menu: moving the selection moves aria-selected and activedescendant", () => {
+    const [first, second] = options();
+    assert.equal(first.getAttribute("aria-selected"), "false");
+    assert.equal(second.getAttribute("aria-selected"), "true");
+    assert.equal(pm.getAttribute("aria-activedescendant"), second.id);
+  });
+  canvas._closeSlash();
+  check("slash menu: closing clears the editor's pointers", () => {
+    assert.equal(pm.getAttribute("aria-activedescendant"), null);
+    assert.equal(pm.getAttribute("aria-controls"), null);
+  });
+
+  // The name is in the viewer's language: it read "Insert block" in nb-NO.
+  root.setAttribute("data-strings", JSON.stringify({ "Insert block": "Sett inn blokk" }));
+  (await import("../i18n.js")).loadStringsFrom(canvas);
+  canvas._editor.view.focus();
+  canvas._openSlash("");
+  check("slash menu: the listbox name is translated", () => {
+    assert.equal(slash.getAttribute("aria-label"), "Sett inn blokk");
+  });
+  canvas._closeSlash();
+
+  // The [[ / # / : popup had the same gap, and no accessible name at all.
+  const { WikilinkMenu } = await import("../wikilink-menu.js");
+  const host = document.createElement("div");
+  host.setAttribute("contenteditable", "true");
+  document.body.appendChild(host);
+  host.focus();
+  const wiki = new WikilinkMenu({});
+  wiki.open({ left: 0, top: 0, bottom: 0 }, "");
+  wiki.setResults([{ title: "Alpha", id: "a" }, { title: "Beta", id: "b" }]);
+  wiki.move(1);
+  const wikiEl = document.querySelector(".bp-wikilink-menu");
+  check("wikilink menu: named, and the editor points at the selected option", () => {
+    assert.equal(wikiEl.getAttribute("aria-label"), "Link to page");
+    assert.equal(host.getAttribute("aria-controls"), wikiEl.id);
+    const [a, b] = [...wikiEl.querySelectorAll('[role="option"]')];
+    assert.equal(a.getAttribute("aria-selected"), "false");
+    assert.equal(b.getAttribute("aria-selected"), "true");
+    assert.equal(host.getAttribute("aria-activedescendant"), b.id);
+  });
+  wiki.close();
+  check("wikilink menu: closing clears the editor's pointers", () => {
+    assert.equal(host.getAttribute("aria-activedescendant"), null);
+    assert.equal(host.getAttribute("aria-controls"), null);
+  });
 } finally {
   dom.window.close();
 }

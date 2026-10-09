@@ -720,6 +720,16 @@ export class CommandPalette extends SlashMenu {
       this._input = input;
     }
     parentEl.appendChild(this._input);
+    // Focus lives in this input while the palette is open, so it (not the editor
+    // SlashMenu recorded on open) points at the active row.
+    if (this._open && this._owner !== this._input) {
+      if (this._owner) {
+        this._owner.removeAttribute("aria-activedescendant");
+        this._owner.removeAttribute("aria-controls");
+      }
+      this._owner = this._input;
+      this._owner.setAttribute("aria-controls", this._el.id);
+    }
   }
 
   // Drop the persistent input on destroy (the base destroy removes the popup root).
