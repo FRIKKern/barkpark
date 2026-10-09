@@ -4024,10 +4024,12 @@
     }
     .bp-secondary-candidate {
       display: flex; align-items: center; justify-content: space-between;
+      width: 100%; border: 0; background: none; font: inherit; color: inherit; text-align: left;
       padding: 8px 10px; border-radius: 4px; cursor: pointer;
       transition: background var(--dur-1);
     }
-    .bp-secondary-candidate:hover { background: var(--bg-muted); }
+    .bp-secondary-candidate:hover,
+    .bp-secondary-candidate:focus-visible { background: var(--bg-muted); }
     .bp-secondary-candidate-id {
       font-size: var(--text-2xs); color: var(--fg-dim); font-family: var(--font-mono);
     }

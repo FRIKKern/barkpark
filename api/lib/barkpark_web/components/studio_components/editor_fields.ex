@@ -213,7 +213,10 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
   Secondary-doc picker modal — reuses the reference-picker visual
   treatment so users get a familiar interaction. Filter is client-side
   string-contains against the candidates list bound on `open-secondary-picker`.
-  Selecting a row fires `select-secondary`; the ✕ and Escape fire
+  Selecting a row fires `select-secondary`. Each row is a `<button>` and the
+  card carries the `ModalFocus` hook, so a keyboard user lands in the search
+  field, can Tab to a row, and gets focus back on the opener when it closes.
+  The ✕ and Escape fire
   `close-secondary-picker`, and so does a click on the backdrop — via
   `phx-click-away` on the card, never via a `phx-click` on the backdrop
   plus an inline stop-propagation (see the markup comment / charter D96).
@@ -258,6 +261,8 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           role="dialog"
           aria-modal="true"
           aria-labelledby="secondary-picker-title"
+          id="secondary-picker-dialog"
+          phx-hook="ModalFocus"
           phx-click-away="close-secondary-picker"
           phx-window-keydown="close-secondary-picker"
           phx-key="escape"
@@ -279,14 +284,17 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
             />
             <ul class="bp-secondary-candidates">
               <%= for c <- @filtered do %>
-                <li
-                  class="bp-secondary-candidate"
-                  phx-click="select-secondary"
-                  phx-value-id={c.id}
-                  data-test-id={"secondary-candidate-#{c.id}"}
-                >
-                  <strong><%= c.title %></strong>
-                  <span class="bp-secondary-candidate-id"><%= c.id %></span>
+                <li>
+                  <button
+                    type="button"
+                    class="bp-secondary-candidate"
+                    phx-click="select-secondary"
+                    phx-value-id={c.id}
+                    data-test-id={"secondary-candidate-#{c.id}"}
+                  >
+                    <strong><%= c.title %></strong>
+                    <span class="bp-secondary-candidate-id"><%= c.id %></span>
+                  </button>
                 </li>
               <% end %>
               <%= if @filtered == [] do %>
