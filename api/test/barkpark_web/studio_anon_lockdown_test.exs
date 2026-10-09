@@ -53,7 +53,6 @@ defmodule BarkparkWeb.StudioAnonLockdownTest do
 
     test "a signed-in Default member still enters", %{conn: conn} do
       {:ok, user} = Accounts.register_user(%{email: "insider@example.com", password: @password})
-      {:ok, user} = Accounts.confirm_user_by_operator("insider@example.com")
       %{id: default_ws_id} = Tenancy.get_default_workspace()
       {:ok, _} = TenancyAuth.create_membership(default_ws_id, user.id, "member", "user")
 

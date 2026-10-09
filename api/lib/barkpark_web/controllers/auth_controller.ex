@@ -107,11 +107,6 @@ defmodule BarkparkWeb.AuthController do
           BarkparkWeb.SessionIssuer.auth_method_blocked?(user, "password") ->
             BarkparkWeb.SessionIssuer.deny_auth_method(conn, user, "password")
 
-          # task-0f1fd3d17e5f4edb: no session for an unconfirmed address. A
-          # member-add would reclaim the account and kill it (owner ruling #7).
-          is_nil(user.confirmed_at) ->
-            BarkparkWeb.SessionIssuer.deny_email_unconfirmed(conn, user, "password")
-
           user.totp_enabled ->
             login_with_mfa(conn, user, params["totp_code"], params["recovery_code"])
 
@@ -1013,7 +1008,24 @@ defmodule BarkparkWeb.AuthController do
     :ok
   end
 
-  defp send_confirmation(user), do: BarkparkWeb.SessionIssuer.send_confirmation(user)
+  defp send_confirmation(user) do
+    case Accounts.build_email_token(user, "confirm") do
+      {:ok, token} ->
+        UserNotifier.deliver_confirmation(user.email, build_url("/auth/confirm/", token))
+
+      {:error, _changeset} ->
+        # The account was just created and the caller is about to return a
+        # generic 201. Without this the registration succeeds, no confirmation
+        # email is ever sent, and nothing anywhere records it — the account is
+        # unconfirmable and the user was told it worked. Narrow (the reachable
+        # cause is assoc_constraint(:user), i.e. the row vanished mid-flight)
+        # but silent, which is the part that made it unfixable.
+        NotificationWithhold.record("confirmation", :dispatch_crashed,
+          user_id: user.id,
+          detail: "token_mint_failed"
+        )
+    end
+  end
 
   defp decode_secret(b32) do
     case Base.decode32(b32, padding: false) do

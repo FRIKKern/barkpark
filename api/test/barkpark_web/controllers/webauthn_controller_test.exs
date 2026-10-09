@@ -24,8 +24,6 @@ defmodule BarkparkWeb.WebauthnControllerTest do
     |> json_conn()
     |> post("/v1/auth/register", Jason.encode!(%{email: "pk@example.com", password: @password}))
 
-    {:ok, _} = Accounts.confirm_user_by_operator("pk@example.com")
-
     token =
       scoped_conn()
       |> json_conn()
@@ -507,8 +505,6 @@ defmodule BarkparkWeb.WebauthnControllerTest do
         Jason.encode!(%{email: "intruder@example.com", password: @password})
       )
 
-      {:ok, _} = Accounts.confirm_user_by_operator("intruder@example.com")
-
       other_token =
         scoped_conn()
         |> json_conn()
@@ -611,8 +607,6 @@ defmodule BarkparkWeb.WebauthnControllerTest do
         "/v1/auth/register",
         Jason.encode!(%{email: "pk-other@example.com", password: @password})
       )
-
-      {:ok, _} = Accounts.confirm_user_by_operator("pk-other@example.com")
 
       other_token =
         scoped_conn()

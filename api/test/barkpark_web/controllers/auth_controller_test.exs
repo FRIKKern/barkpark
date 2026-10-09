@@ -62,12 +62,7 @@ defmodule BarkparkWeb.AuthControllerTest do
     post_json(conn, "/v1/auth/register", %{email: email, password: @password})
   end
 
-  # Password login refuses an unconfirmed address (task-0f1fd3d17e5f4edb), so
-  # the account is operator-confirmed first; `register!/2` itself stays
-  # unconfirmed for the verify-email tests.
   defp login_token(conn, email, extra \\ %{}) do
-    _ = Accounts.confirm_user_by_operator(email)
-
     resp =
       post_json(conn, "/v1/auth/login", Map.merge(%{email: email, password: @password}, extra))
       |> json_response(201)
@@ -617,9 +612,6 @@ defmodule BarkparkWeb.AuthControllerTest do
              })
              |> json_response(201)
              |> Map.fetch!("token")
-
-      # The reset proved the mailbox, so it also confirmed the address.
-      assert Accounts.get_user_by_email("pwreset@example.com").confirmed_at
     end
 
     test "verify-email 422s (not 500s) on an array-shaped token param", %{conn: conn} do

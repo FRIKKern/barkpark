@@ -150,8 +150,6 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
   describe "the magic-link branches no longer collapse two outcomes into one" do
     @auth_source "lib/barkpark_web/controllers/auth_controller.ex"
     @session_source "lib/barkpark_web/controllers/session_controller.ex"
-    # Registration and the `email_unconfirmed` login refusal share one sender.
-    @confirmation_source "lib/barkpark_web/session_issuer.ex"
 
     test "AuthController names BOTH outcomes of build_login_token/1" do
       source = File.read!(@auth_source)
@@ -178,8 +176,7 @@ defmodule BarkparkWeb.AuthNotificationWithholdTest do
     end
 
     test "the registration path records a withheld confirmation instead of swallowing it" do
-      assert File.read!(@auth_source) =~ "SessionIssuer.send_confirmation(user)"
-      source = File.read!(@confirmation_source)
+      source = File.read!(@auth_source)
 
       assert source =~ "NotificationWithhold.record(\"confirmation\", :dispatch_crashed"
     end
