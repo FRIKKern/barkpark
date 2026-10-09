@@ -101,23 +101,54 @@ defmodule Barkpark.StructureDeclaredDeskTest do
 
   # task-9eafad70d2249770 — Sanity's `S.list().title('Innhold')`: the declared
   # root title names the desk; without one the root keeps "Structure".
-  test "the declared root title names the desk" do
+  #
+  # task-b40b41f8d21992ae — the title an author types in Studio lands in the
+  # document's ROW `title` column (`doc.title`), never in `content["title"]`.
+  # #22112 read only `content["title"]`, so a real deskStructure (row title
+  # "Innhold", nothing special in content) still resolved to "Structure".
+  test "the declared root title names the desk, from the row title column" do
     declare!(@tree)
-    assert Structure.build(@dataset).title == "Structure"
+    # `declare!` writes row title "Desk" — the declared desk now names itself
+    # from it, with no need to duplicate the title into `content`.
+    assert Structure.build(@dataset).title == "Desk"
 
     {:ok, _} =
       Content.create_document(
         "deskStructure",
-        %{
-          "doc_id" => "deskStructure",
-          "title" => "Desk",
-          "content" => %{"title" => "Innhold", "items" => @tree}
-        },
+        %{"doc_id" => "deskStructure", "title" => "Innhold", "content" => %{"items" => @tree}},
         @dataset
       )
 
     {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
     assert Structure.build(@dataset).title == "Innhold"
+  end
+
+  test "a blank row title falls back to content[\"title\"], then to \"Structure\"" do
+    schema!("deskStructure", "Desk", %{
+      "singleton" => true,
+      "visibility" => "private",
+      "fields" => [%{"name" => "items", "title" => "Items", "type" => "array"}]
+    })
+
+    {:ok, _} =
+      Content.create_document(
+        "deskStructure",
+        %{"doc_id" => "deskStructure", "title" => "", "content" => %{"title" => "Innhold"}},
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+    assert Structure.build(@dataset).title == "Innhold"
+
+    {:ok, _} =
+      Content.create_document(
+        "deskStructure",
+        %{"doc_id" => "deskStructure", "title" => "", "content" => %{}},
+        @dataset
+      )
+
+    {:ok, _} = Content.publish_document("deskStructure", "deskStructure", @dataset)
+    assert Structure.build(@dataset).title == "Structure"
   end
 
   test "without a deskStructure document the default tree stands" do

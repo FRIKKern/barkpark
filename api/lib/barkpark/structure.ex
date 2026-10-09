@@ -1106,14 +1106,31 @@ defmodule Barkpark.Structure do
       nil
   end
 
-  defp desk_root_title(%{content: %{"title" => title}}) when is_binary(title) do
-    case String.trim(title) do
-      "" -> "Structure"
+  # task-b40b41f8d21992ae: a document's title lives in the row `title` column
+  # (`Barkpark.Content.Document`'s `:title` field) — the same place Studio's
+  # own title field writes to, and the same place every other node in this
+  # module reads from (see `title: doc.title || key` above). `content["title"]`
+  # was never where an author's typed title landed; a deskStructure authored
+  # through Studio with title "Innhold" kept resolving to "Structure" because
+  # this read only looked in `content`. `content["title"]` stays a defensive
+  # secondary source (never required by any known document) for a row whose
+  # title column is itself blank but whose content happens to carry one.
+  defp desk_root_title(doc) do
+    row_title(doc) || content_title(doc) || "Structure"
+  end
+
+  defp row_title(%{title: title}) when is_binary(title), do: present(title)
+  defp row_title(_doc), do: nil
+
+  defp content_title(%{content: %{"title" => title}}) when is_binary(title), do: present(title)
+  defp content_title(_doc), do: nil
+
+  defp present(s) do
+    case String.trim(s) do
+      "" -> nil
       trimmed -> trimmed
     end
   end
-
-  defp desk_root_title(_doc), do: "Structure"
 
   defp declared_desk(_schemas, dataset, opts) do
     scope = Keyword.take(opts, [:workspace_id])
