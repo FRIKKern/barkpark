@@ -101,6 +101,43 @@ defmodule BarkparkWeb.Studio.ModalA11yTest do
     end
   end
 
+  # role/aria/Escape alone left focus on the opener behind the dialog: Tab
+  # walked the page underneath it. ModalFocus moves focus in, traps Tab and
+  # hands focus back to the opener on close, as on every Modals dialog.
+  defp dialog(html, test_id) do
+    html |> LazyHTML.from_fragment() |> LazyHTML.query(~s([data-test-id="#{test_id}"]))
+  end
+
+  describe "focus moves into the dialog" do
+    test "the unpublish guard carries ModalFocus and starts on Cancel", %{conn: conn} do
+      {:ok, view, _html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ma11y-target"))
+
+      guard = view |> render_click("unpublish", %{}) |> dialog("unpublish-guard-modal")
+
+      assert LazyHTML.attribute(guard, "phx-hook") == ["ModalFocus"]
+      assert LazyHTML.attribute(guard, "id") == ["unpublish-guard-dialog"]
+
+      first = LazyHTML.query(guard, "[data-modal-focus]")
+
+      assert LazyHTML.attribute(first, "phx-click") == ["close-unpublish-guard"],
+             "the safe choice, Cancel, must take focus first in a destructive dialog"
+    end
+
+    test "the shared-value dialog carries ModalFocus", %{conn: conn} do
+      {:ok, view, _html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/#{@schema_name}/ma11y-target"))
+
+      panel =
+        view
+        |> render_hook("paper-valueref-inspect", %{"target" => "ma11y-target", "field" => "title"})
+        |> dialog("valueref-writeback-modal")
+
+      assert LazyHTML.attribute(panel, "phx-hook") == ["ModalFocus"]
+      assert LazyHTML.attribute(panel, "id") == ["valueref-writeback-dialog"]
+    end
+  end
+
   describe "valueref-writeback-modal" do
     test "exposes dialog role, labelled title, and escape-close", %{conn: conn} do
       {:ok, view, _html} =
