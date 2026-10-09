@@ -19,6 +19,17 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
       signed scope matches the URL — refusing it, in BOTH directions, when
       it does not.
 
+  Also covers the #22393 `dataset_bound` escalation question raised in review
+  of #22468: a member's own token can be bound to one dataset, refused on
+  every other by `RequireToken.dataset_off_binding?/2` (flat) /
+  `OptionalToken`'s identical check (scoped) — BOTH run at credential
+  resolution, before `mint/2` runs, and both read the mint's own `dataset`
+  param the same way `mint/2` does. Confirmed by direct test below: a
+  dataset_bound member requesting a different dataset never reaches the
+  controller at all (403 `dataset_not_bound`), so the member-mint widening
+  opens no cross-dataset escalation — the confinement predates this slice
+  and already covers this route.
+
   Also covers the tenant-scoped revoke (task-49a6a686bb88d9e5):
   `DELETE .../v1/preview-tokens/:jti`, STILL `[:scoped_api, :scoped_admin]`
   (task-ea6c9abb868593f8 widened mint, deliberately not revoke — revoking a
@@ -207,6 +218,64 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     body = mint!(conn, ws_a.slug, raw, %{"dataset" => @dataset, "multi_use" => true})
 
     assert body["multi_use"] == true
+  end
+
+  # ── dataset_bound (task-ea6c9abb868593f8 escalation question, #22393) ───
+
+  # #22393 lets a member's OWN token be bound to one dataset
+  # (`dataset_bound: true`), refused on every other dataset by
+  # `BarkparkWeb.Plugs.RequireToken.dataset_off_binding?/2` /
+  # `OptionalToken`'s identical check. Both run at CREDENTIAL RESOLUTION,
+  # before this (or any) controller runs, and both read the request's
+  # `dataset` the same way mint does — `conn.params["dataset"]`. So a
+  # dataset_bound member asking THIS mint for a dataset other than the one
+  # their token is bound to never reaches `PreviewTokenController.mint/2`
+  # at all: `:api_token` is never assigned, :require_write sees no
+  # credential, and the plug's own 403 (`forbidden_dataset` /
+  # "dataset_not_bound") answers first. No widening exists for mint to
+  # close — the confinement is already total at the door.
+  test "a dataset_bound member cannot mint a token for a DIFFERENT dataset than their own token is bound to",
+       %{ws_a: ws_a, conn: conn} do
+    suffix = System.unique_integer([:positive])
+    raw = "spt-bound-member-#{suffix}"
+
+    {:ok, bound} =
+      Auth.create_token(raw, "bound-member", "staging", ["read", "write"], nil,
+        dataset_bound: true
+      )
+
+    {:ok, _} = TenancyAuth.create_membership(ws_a.id, bound.id)
+
+    resp =
+      conn
+      |> bearer(raw)
+      |> put_req_header("content-type", "application/json")
+      |> post("/w/#{ws_a.slug}/p/default/v1/preview-tokens", %{"dataset" => @dataset})
+
+    assert resp.status == 403
+
+    assert Jason.decode!(resp.resp_body)["error"]["reason"] == "dataset_not_bound",
+           "expected the pre-existing dataset-binding refusal, got: #{resp.resp_body}"
+  end
+
+  test "a dataset_bound member CAN mint a token for their OWN bound dataset", %{
+    ws_a: ws_a,
+    conn: conn
+  } do
+    suffix = System.unique_integer([:positive])
+    raw = "spt-bound-member-ok-#{suffix}"
+
+    {:ok, bound} =
+      Auth.create_token(raw, "bound-member-ok", "staging", ["read", "write"], nil,
+        dataset_bound: true
+      )
+
+    {:ok, _} = TenancyAuth.create_membership(ws_a.id, bound.id)
+
+    body = mint!(conn, ws_a.slug, raw, %{"dataset" => "staging"})
+
+    assert body["dataset"] == "staging"
+    assert body["workspace_id"] == ws_a.id
   end
 
   test "an admin of A cannot mint on /w/B/...", %{
