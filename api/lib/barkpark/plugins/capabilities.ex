@@ -2591,7 +2591,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "workspace.member-add",
         "workspace",
         "member-add",
-        "Seat a human in the workspace by e-mail (creates the account if new; sends no mail).",
+        "Seat a human in the workspace by e-mail. A new e-mail (or an " <>
+          "unconfirmed account) is created and seated directly. An EXISTING " <>
+          "confirmed account is invited instead (owner ruling #7) — the " <>
+          "answer is the invitation, and the seat appears only once the " <>
+          "invited user accepts it (workspace.invitation-ls / " <>
+          "auth.invitation-accept).",
         "POST",
         "/v1/members",
         "scoped_admin",
@@ -2599,6 +2604,34 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("role", "string", "owner | admin | member (or a custom role).", default: "member")
         ],
+        writes: true,
+        default_output: "minimal",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      # ── Seat consent, admin side (owner ruling #7, task-a08da65bc33083d0) ──
+      # workspace.member-add's invited-not-seated branch leaves a pending row
+      # an admin needs to see and, if it was sent to the wrong person, retract.
+      core_cmd(
+        "workspace.invitation-ls",
+        "workspace",
+        "invitation-ls",
+        "Pending invitations this workspace has sent, awaiting the invited user's accept.",
+        "GET",
+        "/v1/invitations",
+        "scoped_admin",
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
+      core_cmd(
+        "workspace.invitation-rm",
+        "workspace",
+        "invitation-rm",
+        "Withdraw a pending invitation before the invited user accepts it.",
+        "DELETE",
+        "/v1/invitations/:id",
+        "scoped_admin",
+        args: [arg("id", true, "string", "Invitation id.")],
         writes: true,
         default_output: "minimal",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
@@ -3600,6 +3633,42 @@ defmodule Barkpark.Plugins.Capabilities do
         args: [arg("password", true, "string", "Account password (re-auth).")],
         writes: true,
         default_output: "json"
+      ),
+      # ── Seat consent, invited user's side (owner ruling #7, task-a08da65bc33083d0) ──
+      core_cmd(
+        "auth.invitation-ls",
+        "auth",
+        "invitation-ls",
+        "Workspace invitations addressed to the signed-in account, awaiting accept or decline.",
+        "GET",
+        "/v1/auth/invitations",
+        "read",
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "auth.invitation-accept",
+        "auth",
+        "invitation-accept",
+        "Accept an invitation and take the seat.",
+        "POST",
+        "/v1/auth/invitations/:id/accept",
+        "read",
+        args: [arg("id", true, "string", "Invitation id.")],
+        writes: true,
+        default_output: "minimal"
+      ),
+      core_cmd(
+        "auth.invitation-decline",
+        "auth",
+        "invitation-decline",
+        "Decline an invitation. The seat is never created.",
+        "DELETE",
+        "/v1/auth/invitations/:id",
+        "read",
+        args: [arg("id", true, "string", "Invitation id.")],
+        writes: true,
+        default_output: "minimal"
       ),
       # ── Airdrop grants — the `access` noun (grantor surface) ──────────────
       # CORE (survives `:plugins, []`). All four sit behind `[:api,

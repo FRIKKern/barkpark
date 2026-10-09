@@ -2123,6 +2123,43 @@
         "x-barkpark-scope": "read"
       }
     },
+    "/v1/auth/invitations": {
+      "get": {
+        "operationId": "auth.invitation-ls",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Workspace invitations addressed to the signed-in account, awaiting accept or decline.",
+        "tags": [
+          "auth"
+        ],
+        "x-barkpark-scope": "read"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/backlinks/{dataset}/{id}": {
       "get": {
         "operationId": "doc.backlinks.scoped",
@@ -5136,7 +5173,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Seat a human in the workspace by e-mail (creates the account if new; sends no mail).",
+        "summary": "Seat a human in the workspace by e-mail. A new e-mail (or an unconfirmed account) is created and seated directly. An EXISTING confirmed account is invited instead (owner ruling #7) — the answer is the invitation, and the seat appears only once the invited user accepts it (workspace.invitation-ls / auth.invitation-accept).",
         "tags": [
           "workspace"
         ],
@@ -6517,6 +6554,64 @@
           "media"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/auth/invitations/{id}": {
+      "delete": {
+        "operationId": "auth.invitation-decline",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Decline an invitation. The seat is never created.",
+        "tags": [
+          "auth"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/auth/app-tokens/current": {
@@ -9076,6 +9171,80 @@
         "x-barkpark-scope": "write"
       }
     },
+    "/w/{workspace_slug}/p/{project_slug}/v1/invitations/{id}": {
+      "delete": {
+        "operationId": "workspace.invitation-rm.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw a pending invitation before the invited user accepts it.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/media/{dataset}/{id}/checkout": {
       "post": {
         "operationId": "media.checkout.scoped",
@@ -9772,6 +9941,75 @@
           "workspace"
         ],
         "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/v1/auth/invitations/{id}/accept": {
+      "post": {
+        "operationId": "auth.invitation-accept",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Accept an invitation and take the seat.",
+        "tags": [
+          "auth"
+        ],
+        "x-barkpark-scope": "read"
       }
     },
     "/v1/webhooks/{dataset}/{id}/rotate": {
@@ -11390,6 +11628,43 @@
         "x-barkpark-scope": "admin"
       }
     },
+    "/v1/invitations": {
+      "get": {
+        "operationId": "workspace.invitation-ls",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pending invitations this workspace has sent, awaiting the invited user's accept.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
+      }
+    },
     "/v1/data/search/{dataset}/synonyms": {
       "get": {
         "operationId": "search.synonyms",
@@ -12365,7 +12640,7 @@
             "bearerAuth": []
           }
         ],
-        "summary": "Seat a human in the workspace by e-mail (creates the account if new; sends no mail).",
+        "summary": "Seat a human in the workspace by e-mail. A new e-mail (or an unconfirmed account) is created and seated directly. An EXISTING confirmed account is invited instead (owner ruling #7) — the answer is the invitation, and the seat appears only once the invited user accepts it (workspace.invitation-ls / auth.invitation-accept).",
         "tags": [
           "workspace"
         ],
@@ -16718,6 +16993,63 @@
           "search"
         ],
         "x-barkpark-scope": "read"
+      }
+    },
+    "/w/{workspace_slug}/p/{project_slug}/v1/invitations": {
+      "get": {
+        "operationId": "workspace.invitation-ls.scoped",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "project_slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Pending invitations this workspace has sent, awaiting the invited user's accept.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     },
     "/v1/shares/tokens": {
@@ -21461,6 +21793,64 @@
           "chat"
         ],
         "x-barkpark-scope": "admin"
+      }
+    },
+    "/v1/invitations/{id}": {
+      "delete": {
+        "operationId": "workspace.invitation-rm",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Withdraw a pending invitation before the invited user accepts it.",
+        "tags": [
+          "workspace"
+        ],
+        "x-barkpark-scope": "scoped_admin"
       }
     }
   },
