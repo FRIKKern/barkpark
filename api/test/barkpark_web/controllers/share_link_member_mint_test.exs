@@ -47,11 +47,16 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
         scope
       )
 
-    {:ok, _} = Content.create_document("post", %{"doc_id" => "slmm-post", "title" => "T"}, @dataset, scope)
+    {:ok, _} =
+      Content.create_document("post", %{"doc_id" => "slmm-post", "title" => "T"}, @dataset, scope)
+
     {:ok, _} = Content.publish_document("slmm-post", "post", @dataset, scope)
 
     admin_raw = "slmm-admin-#{suffix}"
-    {:ok, admin_tok} = Auth.create_token(admin_raw, "slmm-admin", @dataset, ["read", "write", "admin"])
+
+    {:ok, admin_tok} =
+      Auth.create_token(admin_raw, "slmm-admin", @dataset, ["read", "write", "admin"])
+
     {:ok, _} = TenancyAuth.create_membership(ws.id, admin_tok.id, "admin")
 
     writer_raw = "slmm-writer-#{suffix}"
@@ -89,7 +94,10 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
       |> put_req_header("content-type", "application/json")
 
   defp mint_body(scope, overrides \\ %{}) do
-    Map.merge(%{"scope" => scope, "kind" => "doc", "ref_type" => "post", "ref_id" => "slmm-post"}, overrides)
+    Map.merge(
+      %{"scope" => scope, "kind" => "doc", "ref_type" => "post", "ref_id" => "slmm-post"},
+      overrides
+    )
   end
 
   test "a write-capable member mints a read-access link for their own workspace", %{
@@ -119,7 +127,9 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
     scope_str: scope,
     writer_raw: raw
   } do
-    resp = conn |> bearer(raw) |> post("/v1/shares/links", mint_body(scope, %{"access" => "edit"}))
+    resp =
+      conn |> bearer(raw) |> post("/v1/shares/links", mint_body(scope, %{"access" => "edit"}))
+
     assert resp.status == 403
 
     assert Jason.decode!(resp.resp_body)["error"]["code"] == "forbidden",
@@ -132,13 +142,20 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
     admin_raw: raw
   } do
     resp =
-      conn |> bearer(raw) |> post("/v1/shares/links", mint_body(scope, %{"access" => "edit"})) |> json_response(201)
+      conn
+      |> bearer(raw)
+      |> post("/v1/shares/links", mint_body(scope, %{"access" => "edit"}))
+      |> json_response(201)
 
     assert resp["link"]["access"] == "edit"
   end
 
   test "a totally anonymous caller cannot mint", %{conn: conn, scope_str: scope} do
-    resp = conn |> put_req_header("content-type", "application/json") |> post("/v1/shares/links", mint_body(scope))
+    resp =
+      conn
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/shares/links", mint_body(scope))
+
     assert resp.status in [401, 403]
   end
 
@@ -156,7 +173,11 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
            "expected the dataset-binding refusal, got: #{resp.resp_body}"
   end
 
-  test "a dataset_bound member CAN mint a link for their own bound dataset", %{conn: conn, ws: ws, bound_raw: raw} do
+  test "a dataset_bound member CAN mint a link for their own bound dataset", %{
+    conn: conn,
+    ws: ws,
+    bound_raw: raw
+  } do
     proj = Tenancy.get_project(ws.slug, "default")
 
     {:ok, _} =
@@ -168,7 +189,10 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
       )
 
     {:ok, _} =
-      Content.create_document("post", %{"doc_id" => "slmm-staging-post", "title" => "T"}, "staging",
+      Content.create_document(
+        "post",
+        %{"doc_id" => "slmm-staging-post", "title" => "T"},
+        "staging",
         workspace_id: ws.id,
         project_id: proj.id
       )
@@ -198,7 +222,11 @@ defmodule BarkparkWeb.ShareLinkMemberMintTest do
     scope_str: scope,
     writer_raw: raw
   } do
-    resp = conn |> bearer(raw) |> post("/v1/shares/links", mint_body(scope, %{"ref_id" => "does-not-exist"}))
+    resp =
+      conn
+      |> bearer(raw)
+      |> post("/v1/shares/links", mint_body(scope, %{"ref_id" => "does-not-exist"}))
+
     assert resp.status == 422
   end
 end
