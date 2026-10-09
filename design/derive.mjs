@@ -760,6 +760,16 @@ function statusII(role, skin, mode, misses) {
   return toHslTriplet(w.rgb);
 }
 
+// Text-on-tint voice (color.onTint.warn-text, task-98bc0a831eecc140): the
+// theme's own status amber as TEXT on its -soft tint. Light steps the resolved
+// status.warn.light 8 lightness points darker (evergreen 38% -> 30%, 4.83:1 on
+// the tint where the fill hue reads 3.26:1); dark is status.warn.dark itself.
+const WARN_TEXT_L_STEP = -8;
+function stepTripletL(triplet, step) {
+  const [h, sat, lit] = String(triplet).trim().split(/\s+/);
+  return `${h} ${sat} ${num(Math.max(0, parseFloat(lit) + step))}%`;
+}
+
 // Paper callout tones — TINTED from the status ramp: a pale tinted panel (bg) and
 // an AA-clearing ink (fg) at the role's locked hue; neutral rides the accent hue
 // at near-zero chroma (a gray callout). Output hex (tokens shape).
@@ -915,6 +925,10 @@ function buildFormulas() {
   for (const role of ["ok", "warn", "danger", "info"])
     M((m) => [`status.${role}.${m}`, (c) => statusII(role, c.skin, m, c.misses)]);
 
+  // — onTint: a status hue as text on its own tint (light one step darker) —
+  F["onTint.warn-text.light"] = (c) => stepTripletL(c.resolve("status.warn.light"), WARN_TEXT_L_STEP);
+  F["onTint.warn-text.dark"] = (c) => c.resolve("status.warn.dark");
+
   // — CLI chrome: skin-tinted gray ramp + 5 structural var() aliases —
   for (const role of Object.keys(CHROME_II))
     M((m) => [`cliChrome.${role}.${m}`, (c) => chromeII(c.skin, m, CHROME_II[role][m])]);
@@ -1027,6 +1041,7 @@ export const SLOTS = (() => {
   for (const m of ["light", "dark"]) s.push(`cliCalloutNeutral.${m}`);
   for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);
   for (const r of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) for (const m of ["light", "dark"]) s.push(`onStatus.${r}.${m}`);
+  for (const m of ["light", "dark"]) s.push(`onTint.warn-text.${m}`);
   for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent", "surface-raised", "border-subtle"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
   const cliHex = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
   for (const r of cliHex) for (const m of ["light", "dark"]) s.push(`cliChrome.${r}.${m}`);

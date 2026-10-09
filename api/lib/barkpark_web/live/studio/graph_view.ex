@@ -205,7 +205,7 @@ defmodule BarkparkWeb.Studio.GraphView do
       <div
         :if={@graph_truncation}
         class="bp-pane-notice"
-        style="color: var(--warn); background: var(--warn-soft);"
+        style="color: var(--warn-text); background: var(--warn-soft);"
         role="status"
         data-test-id="studio-graph-truncated"
       >

@@ -4556,7 +4556,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
       <div :if={@detail["attempt"] && @detail["attempt"] > 1}>
         <span
           class="text-xs"
-          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn);"
+          style="display: inline-block; padding: 0 6px; border-radius: 8px; background: var(--warn-soft); color: var(--warn-text);"
         >
           <%= gettext("attempt %{n}", n: @detail["attempt"]) %>
         </span>

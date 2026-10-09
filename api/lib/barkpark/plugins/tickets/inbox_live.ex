@@ -519,7 +519,7 @@ defmodule Barkpark.Plugins.Tickets.InboxLive do
         .bp-tk-topbar { display:flex; align-items:center; justify-content:space-between; padding:16px 24px; border-bottom:1px solid var(--border-muted); }
         .bp-tk-topbar-left { display:flex; align-items:center; gap:12px; }
         .bp-tk-topbar-right { display:flex; align-items:center; gap:8px; }
-        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:var(--warn-soft); color:var(--warn); }
+        .bp-tk-badge { display:inline-flex; align-items:center; height:22px; padding:0 10px; border-radius:999px; font-size:11px; font-weight:600; background:var(--warn-soft); color:var(--warn-text); }
         .bp-tk-body { flex:1; overflow-y:auto; padding:20px 24px; }
         .bp-tk-banner { padding:10px 24px; font-size:13px; }
         .bp-tk-banner-ok { background:var(--ok-soft); color:var(--ok); }
