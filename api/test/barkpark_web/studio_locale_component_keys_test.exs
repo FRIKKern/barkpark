@@ -52,7 +52,7 @@ defmodule BarkparkWeb.StudioLocaleComponentKeysTest do
   end
 
   # task-9b39b33f9b4e63c2: the media rail's closed-set facet values, keyed by
-  # the raw value; the context keeps the state apart from the field label.
+  # the raw value; the field label "Processing" keeps its own word.
   test "the media library's facet values are Norwegian under nb_NO and English otherwise" do
     nb =
       Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->

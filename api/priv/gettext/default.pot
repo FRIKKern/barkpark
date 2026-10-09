@@ -92,7 +92,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3151
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3420
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
-#: lib/barkpark_web/studio_locale.ex:480
+#: lib/barkpark_web/studio_locale.ex:474
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr ""
@@ -116,7 +116,7 @@ msgid "Discard draft"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:235
-#: lib/barkpark_web/studio_locale.ex:489
+#: lib/barkpark_web/studio_locale.ex:483
 #, elixir-autogen, elixir-format
 msgid "Duplicate"
 msgstr ""
@@ -129,7 +129,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3419
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:206
-#: lib/barkpark_web/studio_locale.ex:490
+#: lib/barkpark_web/studio_locale.ex:484
 #, elixir-autogen, elixir-format
 msgid "Edit"
 msgstr ""
@@ -170,8 +170,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4453
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4646
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:508
-#: lib/barkpark_web/studio_locale.ex:304
-#: lib/barkpark_web/studio_locale.ex:578
+#: lib/barkpark_web/studio_locale.ex:298
+#: lib/barkpark_web/studio_locale.ex:572
 #, elixir-autogen, elixir-format
 msgid "Move down"
 msgstr ""
@@ -191,8 +191,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4450
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4643
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:507
-#: lib/barkpark_web/studio_locale.ex:305
-#: lib/barkpark_web/studio_locale.ex:579
+#: lib/barkpark_web/studio_locale.ex:299
+#: lib/barkpark_web/studio_locale.ex:573
 #, elixir-autogen, elixir-format
 msgid "Move up"
 msgstr ""
@@ -230,7 +230,7 @@ msgid "Open it in %{workspace}"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:375
-#: lib/barkpark_web/studio_locale.ex:214
+#: lib/barkpark_web/studio_locale.ex:208
 #, elixir-autogen, elixir-format
 msgid "Preview"
 msgstr ""
@@ -327,7 +327,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2211
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2285
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
-#: lib/barkpark_web/studio_locale.ex:748
+#: lib/barkpark_web/studio_locale.ex:742
 #, elixir-autogen, elixir-format
 msgid "Untitled"
 msgstr ""
@@ -358,8 +358,8 @@ msgid "but your access grant does not cover it"
 msgstr ""
 
 #: lib/barkpark_web/studio/pane_builder.ex:1032
-#: lib/barkpark_web/studio_locale.ex:167
-#: lib/barkpark_web/studio_locale.ex:719
+#: lib/barkpark_web/studio_locale.ex:161
+#: lib/barkpark_web/studio_locale.ex:713
 #, elixir-autogen, elixir-format
 msgid "document"
 msgstr ""
@@ -415,7 +415,7 @@ msgstr ""
 msgid "Browse library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:761
+#: lib/barkpark_web/studio_locale.ex:755
 #, elixir-autogen, elixir-format
 msgid "Change"
 msgstr ""
@@ -449,7 +449,7 @@ msgstr ""
 msgid "No image selected — drop a file, or click to upload"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:764
+#: lib/barkpark_web/studio_locale.ex:758
 #, elixir-autogen, elixir-format
 msgid "No matches"
 msgstr ""
@@ -457,9 +457,9 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:213
 #: lib/barkpark_web/live/studio/paper_field_block.ex:189
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:509
-#: lib/barkpark_web/studio_locale.ex:620
-#: lib/barkpark_web/studio_locale.ex:739
-#: lib/barkpark_web/studio_locale.ex:763
+#: lib/barkpark_web/studio_locale.ex:614
+#: lib/barkpark_web/studio_locale.ex:733
+#: lib/barkpark_web/studio_locale.ex:757
 #, elixir-autogen, elixir-format
 msgid "Remove"
 msgstr ""
@@ -474,7 +474,7 @@ msgstr ""
 msgid "Right-click for image options"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:768
+#: lib/barkpark_web/studio_locale.ex:762
 #, elixir-autogen, elixir-format
 msgid "Search %{types}…"
 msgstr ""
@@ -491,12 +491,12 @@ msgid "Upload file"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:97
-#: lib/barkpark_web/studio_locale.ex:678
+#: lib/barkpark_web/studio_locale.ex:672
 #, elixir-autogen, elixir-format
 msgid "Uploading…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:769
+#: lib/barkpark_web/studio_locale.ex:763
 #, elixir-autogen, elixir-format
 msgid "documents"
 msgstr ""
@@ -504,7 +504,8 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/editor.ex:802
 #: lib/barkpark_web/components/studio_components/panes.ex:639
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2366
-#: lib/barkpark_web/studio_locale.ex:765
+#: lib/barkpark_web/studio_locale.ex:120
+#: lib/barkpark_web/studio_locale.ex:759
 #, elixir-autogen, elixir-format
 msgid "draft"
 msgstr ""
@@ -523,20 +524,20 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3131
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3773
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4612
-#: lib/barkpark_web/studio_locale.ex:665
-#: lib/barkpark_web/studio_locale.ex:749
+#: lib/barkpark_web/studio_locale.ex:659
+#: lib/barkpark_web/studio_locale.ex:743
 #, elixir-autogen, elixir-format
 msgid "Title"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:82
 #: lib/barkpark_web/studio_locale.ex:83
-#: lib/barkpark_web/studio_locale.ex:260
+#: lib/barkpark_web/studio_locale.ex:254
 #, elixir-autogen, elixir-format
 msgid "Upload"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:796
+#: lib/barkpark_web/studio_locale.ex:790
 #, elixir-autogen, elixir-format
 msgid "Does not match required format"
 msgstr ""
@@ -546,28 +547,28 @@ msgstr ""
 msgid "Fix validation errors before publishing"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:807
+#: lib/barkpark_web/studio_locale.ex:801
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:801
+#: lib/barkpark_web/studio_locale.ex:795
 #, elixir-autogen, elixir-format
 msgid "Must be at least %{min} characters"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:810
+#: lib/barkpark_web/studio_locale.ex:804
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:804
+#: lib/barkpark_web/studio_locale.ex:798
 #, elixir-autogen, elixir-format
 msgid "Must be at most %{max} characters"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3436
-#: lib/barkpark_web/studio_locale.ex:793
+#: lib/barkpark_web/studio_locale.ex:787
 #, elixir-autogen, elixir-format
 msgid "Required"
 msgstr ""
@@ -830,14 +831,14 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3358
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3358
-#: lib/barkpark_web/studio_locale.ex:435
+#: lib/barkpark_web/studio_locale.ex:429
 #, elixir-autogen, elixir-format
 msgid "Align left"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3360
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3360
-#: lib/barkpark_web/studio_locale.ex:436
+#: lib/barkpark_web/studio_locale.ex:430
 #, elixir-autogen, elixir-format
 msgid "Align right"
 msgstr ""
@@ -981,7 +982,7 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:421
 #: lib/barkpark_web/live/studio/connectors_live.ex:1014
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3805
-#: lib/barkpark_web/studio_locale.ex:160
+#: lib/barkpark_web/studio_locale.ex:154
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr ""
@@ -1437,7 +1438,7 @@ msgstr ""
 #: lib/barkpark_web/live/bulldocs_live.ex:1738
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3170
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
-#: lib/barkpark_web/studio_locale.ex:685
+#: lib/barkpark_web/studio_locale.ex:679
 #, elixir-autogen, elixir-format
 msgid "View"
 msgstr ""
@@ -1453,13 +1454,13 @@ msgid "contains “%{value}”"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3356
-#: lib/barkpark_web/studio_locale.ex:444
+#: lib/barkpark_web/studio_locale.ex:438
 #, elixir-autogen, elixir-format
 msgid "Bold"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3357
-#: lib/barkpark_web/studio_locale.ex:538
+#: lib/barkpark_web/studio_locale.ex:532
 #, elixir-autogen, elixir-format
 msgid "Italic"
 msgstr ""
@@ -1511,8 +1512,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/connectors_live.ex:1119
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2218
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2305
-#: lib/barkpark_web/studio_locale.ex:146
-#: lib/barkpark_web/studio_locale.ex:762
+#: lib/barkpark_web/studio_locale.ex:140
+#: lib/barkpark_web/studio_locale.ex:756
 #, elixir-autogen, elixir-format
 msgid "Cancel"
 msgstr ""
@@ -1610,7 +1611,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:1060
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:714
-#: lib/barkpark_web/studio_locale.ex:471
+#: lib/barkpark_web/studio_locale.ex:465
 #, elixir-autogen, elixir-format
 msgid "Color"
 msgstr ""
@@ -1622,7 +1623,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:298
 #: lib/barkpark_web/components/studio_components/modals.ex:419
-#: lib/barkpark_web/studio_locale.ex:161
+#: lib/barkpark_web/studio_locale.ex:155
 #, elixir-autogen, elixir-format
 msgid "Copy link"
 msgstr ""
@@ -1765,7 +1766,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/api_tester_live/components.ex:19
 #: lib/barkpark_web/live/studio/api_tester_live/components.ex:35
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3417
-#: lib/barkpark_web/studio_locale.ex:195
+#: lib/barkpark_web/studio_locale.ex:189
 #, elixir-autogen, elixir-format
 msgid "Name"
 msgstr ""
@@ -1873,7 +1874,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:316
 #: lib/barkpark_web/components/studio_components/modals.ex:613
-#: lib/barkpark_web/studio_locale.ex:232
+#: lib/barkpark_web/studio_locale.ex:226
 #, elixir-autogen, elixir-format
 msgid "Revoke"
 msgstr ""
@@ -2152,7 +2153,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:872
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1364
-#: lib/barkpark_web/studio_locale.ex:168
+#: lib/barkpark_web/studio_locale.ex:162
 #, elixir-autogen, elixir-format
 msgid "Document"
 msgstr ""
@@ -2297,7 +2298,7 @@ msgid "Refresh inbound references"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1102
-#: lib/barkpark_web/studio_locale.ex:224
+#: lib/barkpark_web/studio_locale.ex:218
 #, elixir-autogen, elixir-format
 msgid "Relations"
 msgstr ""
@@ -2330,7 +2331,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:947
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:709
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3932
-#: lib/barkpark_web/studio_locale.ex:635
+#: lib/barkpark_web/studio_locale.ex:629
 #, elixir-autogen, elixir-format
 msgid "Slug"
 msgstr ""
@@ -2347,7 +2348,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/draft_diff.ex:68
 #: lib/barkpark_web/live/studio/studio_live/components.ex:899
-#: lib/barkpark_web/studio_locale.ex:253
+#: lib/barkpark_web/studio_locale.ex:247
 #, elixir-autogen, elixir-format
 msgid "Status"
 msgstr ""
@@ -2404,7 +2405,7 @@ msgid "Used by"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:905
-#: lib/barkpark_web/studio_locale.ex:272
+#: lib/barkpark_web/studio_locale.ex:266
 #, elixir-autogen, elixir-format
 msgid "Visibility"
 msgstr ""
@@ -2429,13 +2430,14 @@ msgstr[0] ""
 msgstr[1] ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1043
-#: lib/barkpark_web/studio_locale.ex:540
+#: lib/barkpark_web/studio_locale.ex:534
 #, elixir-autogen, elixir-format
 msgid "label"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/panes.ex:640
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2367
+#: lib/barkpark_web/studio_locale.ex:121
 #, elixir-autogen, elixir-format
 msgid "published"
 msgstr ""
@@ -2775,574 +2777,574 @@ msgstr ""
 msgid "to me"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:128
+#: lib/barkpark_web/studio_locale.ex:122
 #, elixir-autogen, elixir-format
 msgid "%{count} assets"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:129
+#: lib/barkpark_web/studio_locale.ex:123
 #, elixir-autogen, elixir-format
 msgid "%{count} assets match"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:130
-#: lib/barkpark_web/studio_locale.ex:778
+#: lib/barkpark_web/studio_locale.ex:124
+#: lib/barkpark_web/studio_locale.ex:772
 #, elixir-autogen, elixir-format
 msgid "%{count} searches"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:132
+#: lib/barkpark_web/studio_locale.ex:126
 #, elixir-autogen, elixir-format
 msgid "%{loaded} in %{name}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:133
+#: lib/barkpark_web/studio_locale.ex:127
 #, elixir-autogen, elixir-format
 msgid "%{what} copied"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:134
+#: lib/barkpark_web/studio_locale.ex:128
 #, elixir-autogen, elixir-format
 msgid "1 asset"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:135
+#: lib/barkpark_web/studio_locale.ex:129
 #, elixir-autogen, elixir-format
 msgid "1 asset matches"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:136
+#: lib/barkpark_web/studio_locale.ex:130
 #, elixir-autogen, elixir-format
 msgid "Add selected to folder"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:137
+#: lib/barkpark_web/studio_locale.ex:131
 #, elixir-autogen, elixir-format
 msgid "Add to collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:138
+#: lib/barkpark_web/studio_locale.ex:132
 #, elixir-autogen, elixir-format
 msgid "Add to collection…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:139
+#: lib/barkpark_web/studio_locale.ex:133
 #, elixir-autogen, elixir-format
 msgid "Added to collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:140
+#: lib/barkpark_web/studio_locale.ex:134
 #, elixir-autogen, elixir-format
 msgid "All"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:141
+#: lib/barkpark_web/studio_locale.ex:135
 #, elixir-autogen, elixir-format
 msgid "All assets"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:142
+#: lib/barkpark_web/studio_locale.ex:136
 #, elixir-autogen, elixir-format
 msgid "Asset checked out"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:143
+#: lib/barkpark_web/studio_locale.ex:137
 #, elixir-autogen, elixir-format
 msgid "Audio"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:145
+#: lib/barkpark_web/studio_locale.ex:139
 #, elixir-autogen, elixir-format
 msgid "Best match"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:147
+#: lib/barkpark_web/studio_locale.ex:141
 #, elixir-autogen, elixir-format
 msgid "Check out"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:148
+#: lib/barkpark_web/studio_locale.ex:142
 #, elixir-autogen, elixir-format
 msgid "Checked out"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:149
+#: lib/barkpark_web/studio_locale.ex:143
 #, elixir-autogen, elixir-format
 msgid "Checked out by %{who}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:153
+#: lib/barkpark_web/studio_locale.ex:147
 #, elixir-autogen, elixir-format
 msgid "Checkout failed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:154
+#: lib/barkpark_web/studio_locale.ex:148
 #, elixir-autogen, elixir-format
 msgid "Checkout released"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:155
+#: lib/barkpark_web/studio_locale.ex:149
 #, elixir-autogen, elixir-format
 msgid "Clear all"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:156
+#: lib/barkpark_web/studio_locale.ex:150
 #, elixir-autogen, elixir-format
 msgid "Collection created"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:157
+#: lib/barkpark_web/studio_locale.ex:151
 #, elixir-autogen, elixir-format
 msgid "Collection name"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:158
+#: lib/barkpark_web/studio_locale.ex:152
 #, elixir-autogen, elixir-format
 msgid "Collection: %{value}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:159
+#: lib/barkpark_web/studio_locale.ex:153
 #, elixir-autogen, elixir-format
 msgid "Collections"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:162
+#: lib/barkpark_web/studio_locale.ex:156
 #, elixir-autogen, elixir-format
 msgid "Could not add to collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:163
+#: lib/barkpark_web/studio_locale.ex:157
 #, elixir-autogen, elixir-format
 msgid "Could not create collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:165
+#: lib/barkpark_web/studio_locale.ex:159
 #, elixir-autogen, elixir-format
 msgid "Couldn't load your media library — the request failed."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:166
+#: lib/barkpark_web/studio_locale.ex:160
 #, elixir-autogen, elixir-format
 msgid "Create folder"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:169
+#: lib/barkpark_web/studio_locale.ex:163
 #, elixir-autogen, elixir-format
 msgid "Documents"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:170
+#: lib/barkpark_web/studio_locale.ex:164
 #, elixir-autogen, elixir-format
 msgid "Edit metadata"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:171
+#: lib/barkpark_web/studio_locale.ex:165
 #, elixir-autogen, elixir-format
 msgid "Enter a collection name"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:173
+#: lib/barkpark_web/studio_locale.ex:167
 #, elixir-autogen, elixir-format
 msgid "Filtered search"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:174
+#: lib/barkpark_web/studio_locale.ex:168
 #, elixir-autogen, elixir-format
 msgid "Find assets…  (/ to focus)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:175
+#: lib/barkpark_web/studio_locale.ex:169
 #, elixir-autogen, elixir-format
 msgid "Folder"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:177
+#: lib/barkpark_web/studio_locale.ex:171
 #, elixir-autogen, elixir-format
 msgid "Folder collections hold curated sets of assets."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:178
-#: lib/barkpark_web/studio_locale.ex:512
+#: lib/barkpark_web/studio_locale.ex:172
+#: lib/barkpark_web/studio_locale.ex:506
 #, elixir-autogen, elixir-format
 msgid "Format"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:179
+#: lib/barkpark_web/studio_locale.ex:173
 #, elixir-autogen, elixir-format
 msgid "Generate link"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:180
+#: lib/barkpark_web/studio_locale.ex:174
 #, elixir-autogen, elixir-format
 msgid "Grid"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:181
+#: lib/barkpark_web/studio_locale.ex:175
 #, elixir-autogen, elixir-format
 msgid "Grid view"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:183
+#: lib/barkpark_web/studio_locale.ex:177
 #, elixir-autogen, elixir-format
 msgid "Images"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:184
+#: lib/barkpark_web/studio_locale.ex:178
 #, elixir-autogen, elixir-format
 msgid "Kind"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:185
+#: lib/barkpark_web/studio_locale.ex:179
 #, elixir-autogen, elixir-format
 msgid "Kind: %{value}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:186
+#: lib/barkpark_web/studio_locale.ex:180
 #, elixir-autogen, elixir-format
 msgid "Library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:187
-#: lib/barkpark_web/studio_locale.ex:554
-#: lib/barkpark_web/studio_locale.ex:737
+#: lib/barkpark_web/studio_locale.ex:181
+#: lib/barkpark_web/studio_locale.ex:548
+#: lib/barkpark_web/studio_locale.ex:731
 #, elixir-autogen, elixir-format
 msgid "Link"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:659
-#: lib/barkpark_web/studio_locale.ex:188
-#: lib/barkpark_web/studio_locale.ex:559
+#: lib/barkpark_web/studio_locale.ex:182
+#: lib/barkpark_web/studio_locale.ex:553
 #, elixir-autogen, elixir-format
 msgid "List"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:189
+#: lib/barkpark_web/studio_locale.ex:183
 #, elixir-autogen, elixir-format
 msgid "List view"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:190
+#: lib/barkpark_web/studio_locale.ex:184
 #, elixir-autogen, elixir-format
 msgid "Load more"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:192
+#: lib/barkpark_web/studio_locale.ex:186
 #, elixir-autogen, elixir-format
 msgid "Load more · %{count} remaining"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:193
+#: lib/barkpark_web/studio_locale.ex:187
 #, elixir-autogen, elixir-format
 msgid "Loading assets…"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:542
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1178
-#: lib/barkpark_web/studio_locale.ex:194
+#: lib/barkpark_web/studio_locale.ex:188
 #, elixir-autogen, elixir-format
 msgid "Locked"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:196
+#: lib/barkpark_web/studio_locale.ex:190
 #, elixir-autogen, elixir-format
 msgid "New folder"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:197
+#: lib/barkpark_web/studio_locale.ex:191
 #, elixir-autogen, elixir-format
 msgid "Newest first"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:198
+#: lib/barkpark_web/studio_locale.ex:192
 #, elixir-autogen, elixir-format
 msgid "No assets match"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:200
+#: lib/barkpark_web/studio_locale.ex:194
 #, elixir-autogen, elixir-format
 msgid "No assets match these filters — try removing one or search for something broader."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:204
+#: lib/barkpark_web/studio_locale.ex:198
 #, elixir-autogen, elixir-format
 msgid "No assets yet — upload a file to get started."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:206
+#: lib/barkpark_web/studio_locale.ex:200
 #, elixir-autogen, elixir-format
 msgid "No folders yet — click + to create one."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:207
-#: lib/barkpark_web/studio_locale.ex:776
+#: lib/barkpark_web/studio_locale.ex:201
+#: lib/barkpark_web/studio_locale.ex:770
 #, elixir-autogen, elixir-format
 msgid "No matches before"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:208
+#: lib/barkpark_web/studio_locale.ex:202
 #, elixir-autogen, elixir-format
 msgid "Oldest first"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:209
+#: lib/barkpark_web/studio_locale.ex:203
 #, elixir-autogen, elixir-format
 msgid "Open file"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:210
+#: lib/barkpark_web/studio_locale.ex:204
 #, elixir-autogen, elixir-format
 msgid "Original"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:211
+#: lib/barkpark_web/studio_locale.ex:205
 #, elixir-autogen, elixir-format
 msgid "Other"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:213
-#: lib/barkpark_web/studio_locale.ex:775
+#: lib/barkpark_web/studio_locale.ex:207
+#: lib/barkpark_web/studio_locale.ex:769
 #, elixir-autogen, elixir-format
 msgid "Popular"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:216
+#: lib/barkpark_web/studio_locale.ex:210
 #, elixir-autogen, elixir-format
 msgid "Processing"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:219
+#: lib/barkpark_web/studio_locale.ex:213
 #, elixir-autogen, elixir-format
 msgid "Public share link"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:221
-#: lib/barkpark_web/studio_locale.ex:774
+#: lib/barkpark_web/studio_locale.ex:215
+#: lib/barkpark_web/studio_locale.ex:768
 #, elixir-autogen, elixir-format
 msgid "Recent"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:222
+#: lib/barkpark_web/studio_locale.ex:216
 #, elixir-autogen, elixir-format
 msgid "Recently updated"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:223
+#: lib/barkpark_web/studio_locale.ex:217
 #, elixir-autogen, elixir-format
 msgid "Refine"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:225
+#: lib/barkpark_web/studio_locale.ex:219
 #, elixir-autogen, elixir-format
 msgid "Release"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:226
+#: lib/barkpark_web/studio_locale.ex:220
 #, elixir-autogen, elixir-format
 msgid "Release failed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:227
+#: lib/barkpark_web/studio_locale.ex:221
 #, elixir-autogen, elixir-format
 msgid "Remove failed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:228
+#: lib/barkpark_web/studio_locale.ex:222
 #, elixir-autogen, elixir-format
 msgid "Remove from collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:229
+#: lib/barkpark_web/studio_locale.ex:223
 #, elixir-autogen, elixir-format
 msgid "Removed from collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:230
+#: lib/barkpark_web/studio_locale.ex:224
 #, elixir-autogen, elixir-format
 msgid "Result view"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:231
+#: lib/barkpark_web/studio_locale.ex:225
 #, elixir-autogen, elixir-format
 msgid "Retry"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:233
+#: lib/barkpark_web/studio_locale.ex:227
 #, elixir-autogen, elixir-format
 msgid "Revoke failed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:234
+#: lib/barkpark_web/studio_locale.ex:228
 #, elixir-autogen, elixir-format
 msgid "Rotate link"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:103
-#: lib/barkpark_web/studio_locale.ex:235
+#: lib/barkpark_web/studio_locale.ex:229
 #, elixir-autogen, elixir-format
 msgid "Search assets"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:236
+#: lib/barkpark_web/studio_locale.ex:230
 #, elixir-autogen, elixir-format
 msgid "Search: %{value}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:237
+#: lib/barkpark_web/studio_locale.ex:231
 #, elixir-autogen, elixir-format
 msgid "Select an asset or collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:238
+#: lib/barkpark_web/studio_locale.ex:232
 #, elixir-autogen, elixir-format
 msgid "Share link"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:239
+#: lib/barkpark_web/studio_locale.ex:233
 #, elixir-autogen, elixir-format
 msgid "Share link created"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:240
+#: lib/barkpark_web/studio_locale.ex:234
 #, elixir-autogen, elixir-format
 msgid "Share link failed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:241
+#: lib/barkpark_web/studio_locale.ex:235
 #, elixir-autogen, elixir-format
 msgid "Share link revoked"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:243
+#: lib/barkpark_web/studio_locale.ex:237
 #, elixir-autogen, elixir-format
 msgid "Showing %{loaded} of %{total} assets"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:245
+#: lib/barkpark_web/studio_locale.ex:239
 #, elixir-autogen, elixir-format
 msgid "Showing %{loaded} of %{total} in %{name}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:250
+#: lib/barkpark_web/studio_locale.ex:244
 #, elixir-autogen, elixir-format
 msgid "Size"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:251
+#: lib/barkpark_web/studio_locale.ex:245
 #, elixir-autogen, elixir-format
 msgid "Smart collection"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:252
+#: lib/barkpark_web/studio_locale.ex:246
 #, elixir-autogen, elixir-format
 msgid "Sort results"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:254
+#: lib/barkpark_web/studio_locale.ex:248
 #, elixir-autogen, elixir-format
 msgid "Tags"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:256
+#: lib/barkpark_web/studio_locale.ex:250
 #, elixir-autogen, elixir-format
 msgid "This folder is empty — upload files or add assets from All assets."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:257
+#: lib/barkpark_web/studio_locale.ex:251
 #, elixir-autogen, elixir-format
 msgid "Thumb"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:258
+#: lib/barkpark_web/studio_locale.ex:252
 #, elixir-autogen, elixir-format
 msgid "Thumbnail"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:259
+#: lib/barkpark_web/studio_locale.ex:253
 #, elixir-autogen, elixir-format
 msgid "Updated"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:262
+#: lib/barkpark_web/studio_locale.ex:256
 #, elixir-autogen, elixir-format
 msgid "Upload blocked — your session has ended. Sign in again."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:263
+#: lib/barkpark_web/studio_locale.ex:257
 #, elixir-autogen, elixir-format
 msgid "Upload complete"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:264
+#: lib/barkpark_web/studio_locale.ex:258
 #, elixir-autogen, elixir-format
 msgid "Upload failed (%{status})"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:266
+#: lib/barkpark_web/studio_locale.ex:260
 #, elixir-autogen, elixir-format
 msgid "Upload failed — check that the API is running"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:268
+#: lib/barkpark_web/studio_locale.ex:262
 #, elixir-autogen, elixir-format
 msgid "Use Refine or clear filters to broaden"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:722
-#: lib/barkpark_web/studio_locale.ex:269
-#: lib/barkpark_web/studio_locale.ex:681
+#: lib/barkpark_web/studio_locale.ex:263
+#: lib/barkpark_web/studio_locale.ex:675
 #, elixir-autogen, elixir-format
 msgid "Video"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:271
+#: lib/barkpark_web/studio_locale.ex:265
 #, elixir-autogen, elixir-format
 msgid "Video preview"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:144
+#: lib/barkpark_web/studio_locale.ex:138
 #, elixir-autogen, elixir-format
 msgid "audio"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:172
+#: lib/barkpark_web/studio_locale.ex:166
 #, elixir-autogen, elixir-format
 msgid "failed"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1598
-#: lib/barkpark_web/studio_locale.ex:182
+#: lib/barkpark_web/studio_locale.ex:176
 #, elixir-autogen, elixir-format
 msgid "image"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:212
+#: lib/barkpark_web/studio_locale.ex:206
 #, elixir-autogen, elixir-format
 msgid "other"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:215
+#: lib/barkpark_web/studio_locale.ex:209
 #, elixir-autogen, elixir-format
 msgid "private"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:217
+#: lib/barkpark_web/studio_locale.ex:211
 #, elixir-autogen, elixir-format
 msgid "processing"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:218
+#: lib/barkpark_web/studio_locale.ex:212
 #, elixir-autogen, elixir-format
 msgid "public"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/chat_live.ex:8134
-#: lib/barkpark_web/studio_locale.ex:220
+#: lib/barkpark_web/studio_locale.ex:214
 #, elixir-autogen, elixir-format
 msgid "ready"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1605
-#: lib/barkpark_web/studio_locale.ex:270
+#: lib/barkpark_web/studio_locale.ex:264
 #, elixir-autogen, elixir-format
 msgid "video"
 msgstr ""
@@ -3363,7 +3365,7 @@ msgid "API endpoint"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:678
-#: lib/barkpark_web/studio_locale.ex:416
+#: lib/barkpark_web/studio_locale.ex:410
 #, elixir-autogen, elixir-format
 msgid "Action"
 msgstr ""
@@ -3374,7 +3376,7 @@ msgid "Action destination"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3158
-#: lib/barkpark_web/studio_locale.ex:422
+#: lib/barkpark_web/studio_locale.ex:416
 #, elixir-autogen, elixir-format
 msgid "Action label"
 msgstr ""
@@ -3473,7 +3475,7 @@ msgid "Add heading"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4179
-#: lib/barkpark_web/studio_locale.ex:433
+#: lib/barkpark_web/studio_locale.ex:427
 #, elixir-autogen, elixir-format
 msgid "Add option"
 msgstr ""
@@ -3555,13 +3557,13 @@ msgid "Answer type"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:728
-#: lib/barkpark_web/studio_locale.ex:438
+#: lib/barkpark_web/studio_locale.ex:432
 #, elixir-autogen, elixir-format
 msgid "Array of"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:669
-#: lib/barkpark_web/studio_locale.ex:439
+#: lib/barkpark_web/studio_locale.ex:433
 #, elixir-autogen, elixir-format
 msgid "Article chrome"
 msgstr ""
@@ -3606,7 +3608,7 @@ msgid "Bar chart"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:706
-#: lib/barkpark_web/studio_locale.ex:441
+#: lib/barkpark_web/studio_locale.ex:435
 #, elixir-autogen, elixir-format
 msgid "Basic fields"
 msgstr ""
@@ -3622,13 +3624,13 @@ msgid "Blockquote"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:711
-#: lib/barkpark_web/studio_locale.ex:445
+#: lib/barkpark_web/studio_locale.ex:439
 #, elixir-autogen, elixir-format
 msgid "Boolean"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:2724
-#: lib/barkpark_web/studio_locale.ex:450
+#: lib/barkpark_web/studio_locale.ex:444
 #, elixir-autogen, elixir-format
 msgid "Button label"
 msgstr ""
@@ -3639,20 +3641,20 @@ msgid "By line — separate names with ·"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:672
-#: lib/barkpark_web/studio_locale.ex:451
+#: lib/barkpark_web/studio_locale.ex:445
 #, elixir-autogen, elixir-format
 msgid "Byline"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:660
-#: lib/barkpark_web/studio_locale.ex:453
+#: lib/barkpark_web/studio_locale.ex:447
 #, elixir-autogen, elixir-format
 msgid "Callout"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3309
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3366
-#: lib/barkpark_web/studio_locale.ex:456
+#: lib/barkpark_web/studio_locale.ex:450
 #, elixir-autogen, elixir-format
 msgid "Caption"
 msgstr ""
@@ -3668,21 +3670,21 @@ msgid "Caption file"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:679
-#: lib/barkpark_web/studio_locale.ex:458
+#: lib/barkpark_web/studio_locale.ex:452
 #, elixir-autogen, elixir-format
 msgid "Card"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1804
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1810
-#: lib/barkpark_web/studio_locale.ex:459
+#: lib/barkpark_web/studio_locale.ex:453
 #, elixir-autogen, elixir-format
 msgid "Card action label"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1761
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1762
-#: lib/barkpark_web/studio_locale.ex:460
+#: lib/barkpark_web/studio_locale.ex:454
 #, elixir-autogen, elixir-format
 msgid "Card title"
 msgstr ""
@@ -3699,13 +3701,13 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:661
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:502
-#: lib/barkpark_web/studio_locale.ex:467
+#: lib/barkpark_web/studio_locale.ex:461
 #, elixir-autogen, elixir-format
 msgid "Code"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:729
-#: lib/barkpark_web/studio_locale.ex:469
+#: lib/barkpark_web/studio_locale.ex:463
 #, elixir-autogen, elixir-format
 msgid "Code list"
 msgstr ""
@@ -3716,13 +3718,13 @@ msgid "Code tabs"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:726
-#: lib/barkpark_web/studio_locale.ex:472
+#: lib/barkpark_web/studio_locale.ex:466
 #, elixir-autogen, elixir-format
 msgid "Columns"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:727
-#: lib/barkpark_web/studio_locale.ex:474
+#: lib/barkpark_web/studio_locale.ex:468
 #, elixir-autogen, elixir-format
 msgid "Composite"
 msgstr ""
@@ -3828,7 +3830,7 @@ msgid "Criteria progress"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:713
-#: lib/barkpark_web/studio_locale.ex:479
+#: lib/barkpark_web/studio_locale.ex:473
 #, elixir-autogen, elixir-format
 msgid "Date & time"
 msgstr ""
@@ -3840,7 +3842,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:531
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1167
-#: lib/barkpark_web/studio_locale.ex:290
+#: lib/barkpark_web/studio_locale.ex:284
 #, elixir-autogen, elixir-format
 msgid "Delete block"
 msgstr ""
@@ -3871,7 +3873,7 @@ msgid "Detail"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:684
-#: lib/barkpark_web/studio_locale.ex:481
+#: lib/barkpark_web/studio_locale.ex:475
 #, elixir-autogen, elixir-format
 msgid "Diagram"
 msgstr ""
@@ -3892,7 +3894,7 @@ msgid "Distance"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:663
-#: lib/barkpark_web/studio_locale.ex:486
+#: lib/barkpark_web/studio_locale.ex:480
 #, elixir-autogen, elixir-format
 msgid "Divider"
 msgstr ""
@@ -3925,7 +3927,7 @@ msgid "Duplicate authored identities must be repaired before editing; original c
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3156
-#: lib/barkpark_web/studio_locale.ex:491
+#: lib/barkpark_web/studio_locale.ex:485
 #, elixir-autogen, elixir-format
 msgid "Edit action label"
 msgstr ""
@@ -4041,7 +4043,7 @@ msgid "Encoded polyline"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:686
-#: lib/barkpark_web/studio_locale.ex:499
+#: lib/barkpark_web/studio_locale.ex:493
 #, elixir-autogen, elixir-format
 msgid "Equation"
 msgstr ""
@@ -4058,7 +4060,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:671
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3996
-#: lib/barkpark_web/studio_locale.ex:503
+#: lib/barkpark_web/studio_locale.ex:497
 #, elixir-autogen, elixir-format
 msgid "Eyebrow"
 msgstr ""
@@ -4079,7 +4081,7 @@ msgid "Featured reference"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:685
-#: lib/barkpark_web/studio_locale.ex:505
+#: lib/barkpark_web/studio_locale.ex:499
 #, elixir-autogen, elixir-format
 msgid "Figure"
 msgstr ""
@@ -4101,7 +4103,7 @@ msgid "First line"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:697
-#: lib/barkpark_web/studio_locale.ex:510
+#: lib/barkpark_web/studio_locale.ex:504
 #, elixir-autogen, elixir-format
 msgid "Footnotes"
 msgstr ""
@@ -4124,7 +4126,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:658
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3897
-#: lib/barkpark_web/studio_locale.ex:517
+#: lib/barkpark_web/studio_locale.ex:511
 #, elixir-autogen, elixir-format
 msgid "Heading"
 msgstr ""
@@ -4132,7 +4134,7 @@ msgstr ""
 #: lib/barkpark_web/components/draft_diff.ex:195
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:719
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4997
-#: lib/barkpark_web/studio_locale.ex:529
+#: lib/barkpark_web/studio_locale.ex:523
 #, elixir-autogen, elixir-format
 msgid "Image"
 msgstr ""
@@ -4145,7 +4147,7 @@ msgid "Image options"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:673
-#: lib/barkpark_web/studio_locale.ex:531
+#: lib/barkpark_web/studio_locale.ex:525
 #, elixir-autogen, elixir-format
 msgid "Ingress"
 msgstr ""
@@ -4174,7 +4176,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4939
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:56
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:501
-#: lib/barkpark_web/studio_locale.ex:544
+#: lib/barkpark_web/studio_locale.ex:538
 #, elixir-autogen, elixir-format
 msgid "Language"
 msgstr ""
@@ -4236,7 +4238,7 @@ msgid "Loading live tasks…"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:730
-#: lib/barkpark_web/studio_locale.ex:562
+#: lib/barkpark_web/studio_locale.ex:556
 #, elixir-autogen, elixir-format
 msgid "Localized text"
 msgstr ""
@@ -4258,7 +4260,7 @@ msgid "Locked content must be removed before this column."
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:710
-#: lib/barkpark_web/studio_locale.ex:563
+#: lib/barkpark_web/studio_locale.ex:557
 #, elixir-autogen, elixir-format
 msgid "Long text"
 msgstr ""
@@ -4272,13 +4274,13 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4621
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4692
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4816
-#: lib/barkpark_web/studio_locale.ex:572
+#: lib/barkpark_web/studio_locale.ex:566
 #, elixir-autogen, elixir-format
 msgid "Maximum"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:717
-#: lib/barkpark_web/studio_locale.ex:573
+#: lib/barkpark_web/studio_locale.ex:567
 #, elixir-autogen, elixir-format
 msgid "Media & reference"
 msgstr ""
@@ -4310,7 +4312,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4185
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4812
-#: lib/barkpark_web/studio_locale.ex:576
+#: lib/barkpark_web/studio_locale.ex:570
 #, elixir-autogen, elixir-format
 msgid "Minimum"
 msgstr ""
@@ -4358,13 +4360,13 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:683
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4638
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:498
-#: lib/barkpark_web/studio_locale.ex:591
+#: lib/barkpark_web/studio_locale.ex:585
 #, elixir-autogen, elixir-format
 msgid "Note"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1286
-#: lib/barkpark_web/studio_locale.ex:306
+#: lib/barkpark_web/studio_locale.ex:300
 #, elixir-autogen, elixir-format
 msgid "Nothing to show yet."
 msgstr ""
@@ -4435,7 +4437,7 @@ msgid "Paper links"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:657
-#: lib/barkpark_web/studio_locale.ex:605
+#: lib/barkpark_web/studio_locale.ex:599
 #, elixir-autogen, elixir-format
 msgid "Paragraph"
 msgstr ""
@@ -4446,8 +4448,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1082
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1087
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1176
-#: lib/barkpark_web/studio_locale.ex:307
-#: lib/barkpark_web/studio_locale.ex:606
+#: lib/barkpark_web/studio_locale.ex:301
+#: lib/barkpark_web/studio_locale.ex:600
 #, elixir-autogen, elixir-format
 msgid "Part of the document template"
 msgstr ""
@@ -4503,7 +4505,7 @@ msgid "Properties"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:674
-#: lib/barkpark_web/studio_locale.ex:616
+#: lib/barkpark_web/studio_locale.ex:610
 #, elixir-autogen, elixir-format
 msgid "Pullquote"
 msgstr ""
@@ -4565,7 +4567,7 @@ msgid "Redo content change"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:720
-#: lib/barkpark_web/studio_locale.ex:618
+#: lib/barkpark_web/studio_locale.ex:612
 #, elixir-autogen, elixir-format
 msgid "Reference"
 msgstr ""
@@ -4701,7 +4703,7 @@ msgid "Row data has a legacy shape; title, mode and maximum remain editable. Ori
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1130
-#: lib/barkpark_web/studio_locale.ex:628
+#: lib/barkpark_web/studio_locale.ex:622
 #, elixir-autogen, elixir-format
 msgid "Save as master"
 msgstr ""
@@ -4722,7 +4724,7 @@ msgid "Scale"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:664
-#: lib/barkpark_web/studio_locale.ex:631
+#: lib/barkpark_web/studio_locale.ex:625
 #, elixir-autogen, elixir-format
 msgid "Section"
 msgstr ""
@@ -4735,7 +4737,7 @@ msgid "Section title"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:712
-#: lib/barkpark_web/studio_locale.ex:632
+#: lib/barkpark_web/studio_locale.ex:626
 #, elixir-autogen, elixir-format
 msgid "Select"
 msgstr ""
@@ -4777,7 +4779,7 @@ msgid "Sport"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:682
-#: lib/barkpark_web/studio_locale.ex:638
+#: lib/barkpark_web/studio_locale.ex:632
 #, elixir-autogen, elixir-format
 msgid "Stage"
 msgstr ""
@@ -4794,7 +4796,7 @@ msgid "Stage title"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4820
-#: lib/barkpark_web/studio_locale.ex:642
+#: lib/barkpark_web/studio_locale.ex:636
 #, elixir-autogen, elixir-format
 msgid "Step"
 msgstr ""
@@ -4815,7 +4817,7 @@ msgid "Step title"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:666
-#: lib/barkpark_web/studio_locale.ex:643
+#: lib/barkpark_web/studio_locale.ex:637
 #, elixir-autogen, elixir-format
 msgid "Steps"
 msgstr ""
@@ -4826,19 +4828,19 @@ msgid "Sticky in article view"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:708
-#: lib/barkpark_web/studio_locale.ex:646
+#: lib/barkpark_web/studio_locale.ex:640
 #, elixir-autogen, elixir-format
 msgid "String"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:724
-#: lib/barkpark_web/studio_locale.ex:647
+#: lib/barkpark_web/studio_locale.ex:641
 #, elixir-autogen, elixir-format
 msgid "Structured"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4584
-#: lib/barkpark_web/studio_locale.ex:649
+#: lib/barkpark_web/studio_locale.ex:643
 #, elixir-autogen, elixir-format
 msgid "Summary"
 msgstr ""
@@ -4850,7 +4852,7 @@ msgid "Tab %{n}"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:680
-#: lib/barkpark_web/studio_locale.ex:651
+#: lib/barkpark_web/studio_locale.ex:645
 #, elixir-autogen, elixir-format
 msgid "Table"
 msgstr ""
@@ -4861,7 +4863,7 @@ msgid "Table of contents"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:667
-#: lib/barkpark_web/studio_locale.ex:654
+#: lib/barkpark_web/studio_locale.ex:648
 #, elixir-autogen, elixir-format
 msgid "Tabs"
 msgstr ""
@@ -4877,7 +4879,7 @@ msgid "Technical"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:681
-#: lib/barkpark_web/studio_locale.ex:659
+#: lib/barkpark_web/studio_locale.ex:653
 #, elixir-autogen, elixir-format
 msgid "Terminal"
 msgstr ""
@@ -4897,8 +4899,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:655
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3508
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5344
-#: lib/barkpark_web/studio_locale.ex:348
-#: lib/barkpark_web/studio_locale.ex:662
+#: lib/barkpark_web/studio_locale.ex:342
+#: lib/barkpark_web/studio_locale.ex:656
 #, elixir-autogen, elixir-format
 msgid "Text"
 msgstr ""
@@ -4986,7 +4988,7 @@ msgstr ""
 
 #: lib/barkpark_web/live/studio/api_tester_live/components.ex:19
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3428
-#: lib/barkpark_web/studio_locale.ex:750
+#: lib/barkpark_web/studio_locale.ex:744
 #, elixir-autogen, elixir-format
 msgid "Type"
 msgstr ""
@@ -5007,7 +5009,7 @@ msgid "Undo content change"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4824
-#: lib/barkpark_web/studio_locale.ex:676
+#: lib/barkpark_web/studio_locale.ex:670
 #, elixir-autogen, elixir-format
 msgid "Unit"
 msgstr ""
@@ -5040,7 +5042,7 @@ msgid "Visible depth"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:676
-#: lib/barkpark_web/studio_locale.ex:686
+#: lib/barkpark_web/studio_locale.ex:680
 #, elixir-autogen, elixir-format
 msgid "Visual"
 msgstr ""
@@ -5175,937 +5177,937 @@ msgstr ""
 msgid "Use at most 80 characters."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:152
+#: lib/barkpark_web/studio_locale.ex:146
 #, elixir-autogen, elixir-format
 msgid "another editor"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:151
+#: lib/barkpark_web/studio_locale.ex:145
 #, elixir-autogen, elixir-format
 msgid "you"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:412
+#: lib/barkpark_web/studio_locale.ex:406
 #, elixir-autogen, elixir-format
 msgid "+ footer"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:413
+#: lib/barkpark_web/studio_locale.ex:407
 #, elixir-autogen, elixir-format
 msgid "2-track grid · 2 cards"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:414
+#: lib/barkpark_web/studio_locale.ex:408
 #, elixir-autogen, elixir-format
 msgid "7 blocks · kicker → TOC"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:428
+#: lib/barkpark_web/studio_locale.ex:422
 #, elixir-autogen, elixir-format
 msgid "Add a block below"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:429
+#: lib/barkpark_web/studio_locale.ex:423
 #, elixir-autogen, elixir-format
 msgid "Add a block below (click)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:430
+#: lib/barkpark_web/studio_locale.ex:424
 #, elixir-autogen, elixir-format
 msgid "Add a kicker…"
 msgstr ""
 
 #: lib/barkpark_web/studio_locale.ex:91
-#: lib/barkpark_web/studio_locale.ex:431
+#: lib/barkpark_web/studio_locale.ex:425
 #, elixir-autogen, elixir-format
 msgid "Add an image"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:432
+#: lib/barkpark_web/studio_locale.ex:426
 #, elixir-autogen, elixir-format
 msgid "Add names, separated by · …"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:434
+#: lib/barkpark_web/studio_locale.ex:428
 #, elixir-autogen, elixir-format
 msgid "Align centre"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:437
+#: lib/barkpark_web/studio_locale.ex:431
 #, elixir-autogen, elixir-format
 msgid "Annotated figure"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:442
+#: lib/barkpark_web/studio_locale.ex:436
 #, elixir-autogen, elixir-format
 msgid "Block"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:443
+#: lib/barkpark_web/studio_locale.ex:437
 #, elixir-autogen, elixir-format
 msgid "Block options"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:446
+#: lib/barkpark_web/studio_locale.ex:440
 #, elixir-autogen, elixir-format
 msgid "Bullet list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:447
+#: lib/barkpark_web/studio_locale.ex:441
 #, elixir-autogen, elixir-format
 msgid "Bulleted list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:449
+#: lib/barkpark_web/studio_locale.ex:443
 #, elixir-autogen, elixir-format
 msgid "Button"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:454
+#: lib/barkpark_web/studio_locale.ex:448
 #, elixir-autogen, elixir-format
 msgid "Callout title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:461
+#: lib/barkpark_web/studio_locale.ex:455
 #, elixir-autogen, elixir-format
 msgid "Change image"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:463
+#: lib/barkpark_web/studio_locale.ex:457
 #, elixir-autogen, elixir-format
 msgid "Checklist"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:464
+#: lib/barkpark_web/studio_locale.ex:458
 #, elixir-autogen, elixir-format
 msgid "Clear formatting"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:466
+#: lib/barkpark_web/studio_locale.ex:460
 #, elixir-autogen, elixir-format
 msgid "Click, or press Enter, to choose from the media library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:473
+#: lib/barkpark_web/studio_locale.ex:467
 #, elixir-autogen, elixir-format
 msgid "Command palette filter"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:475
+#: lib/barkpark_web/studio_locale.ex:469
 #, elixir-autogen, elixir-format
 msgid "Configure table"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:477
+#: lib/barkpark_web/studio_locale.ex:471
 #, elixir-autogen, elixir-format
 msgid "Contents"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:483
+#: lib/barkpark_web/studio_locale.ex:477
 #, elixir-autogen, elixir-format
 msgid "Diagram caption"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:485
+#: lib/barkpark_web/studio_locale.ex:479
 #, elixir-autogen, elixir-format
 msgid "Display (own line)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:487
+#: lib/barkpark_web/studio_locale.ex:481
 #, elixir-autogen, elixir-format
 msgid "Drag to move · click for options"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:488
+#: lib/barkpark_web/studio_locale.ex:482
 #, elixir-autogen, elixir-format
 msgid "Drag to resize the column"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:501
+#: lib/barkpark_web/studio_locale.ex:495
 #, elixir-autogen, elixir-format
 msgid "EXPECTED"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:492
+#: lib/barkpark_web/studio_locale.ex:486
 #, elixir-autogen, elixir-format
 msgid "Edit diagram"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:496
+#: lib/barkpark_web/studio_locale.ex:490
 #, elixir-autogen, elixir-format
 msgid "Emoji"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:498
+#: lib/barkpark_web/studio_locale.ex:492
 #, elixir-autogen, elixir-format
 msgid "Entries (indent two spaces per level; `text | anchor`)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:504
+#: lib/barkpark_web/studio_locale.ex:498
 #, elixir-autogen, elixir-format
 msgid "Field label"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:55
-#: lib/barkpark_web/studio_locale.ex:507
+#: lib/barkpark_web/studio_locale.ex:501
 #, elixir-autogen, elixir-format
 msgid "File"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:513
+#: lib/barkpark_web/studio_locale.ex:507
 #, elixir-autogen, elixir-format
 msgid "Format %{mark}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:515
+#: lib/barkpark_web/studio_locale.ex:509
 #, elixir-autogen, elixir-format
 msgid "Grid of cards"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:518
+#: lib/barkpark_web/studio_locale.ex:512
 #, elixir-autogen, elixir-format
 msgid "Heading %{level}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:519
+#: lib/barkpark_web/studio_locale.ex:513
 #, elixir-autogen, elixir-format
 msgid "Heading 1"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:520
+#: lib/barkpark_web/studio_locale.ex:514
 #, elixir-autogen, elixir-format
 msgid "Heading 2"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:521
+#: lib/barkpark_web/studio_locale.ex:515
 #, elixir-autogen, elixir-format
 msgid "Heading 3"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:522
+#: lib/barkpark_web/studio_locale.ex:516
 #, elixir-autogen, elixir-format
 msgid "Heading 4"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:523
+#: lib/barkpark_web/studio_locale.ex:517
 #, elixir-autogen, elixir-format
 msgid "Heading 5"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:524
+#: lib/barkpark_web/studio_locale.ex:518
 #, elixir-autogen, elixir-format
 msgid "Heading 6"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:526
+#: lib/barkpark_web/studio_locale.ex:520
 #, elixir-autogen, elixir-format
 msgid "Highlight"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:530
+#: lib/barkpark_web/studio_locale.ex:524
 #, elixir-autogen, elixir-format
 msgid "Image field"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:532
+#: lib/barkpark_web/studio_locale.ex:526
 #, elixir-autogen, elixir-format
 msgid "Inline code"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:534
+#: lib/barkpark_web/studio_locale.ex:528
 #, elixir-autogen, elixir-format
 msgid "Insert"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:535
+#: lib/barkpark_web/studio_locale.ex:529
 #, elixir-autogen, elixir-format
 msgid "Insert %{block}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:536
+#: lib/barkpark_web/studio_locale.ex:530
 #, elixir-autogen, elixir-format
 msgid "Insert block"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:60
-#: lib/barkpark_web/studio_locale.ex:547
-#: lib/barkpark_web/studio_locale.ex:708
+#: lib/barkpark_web/studio_locale.ex:541
+#: lib/barkpark_web/studio_locale.ex:702
 #, elixir-autogen, elixir-format
 msgid "Legend"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:558
+#: lib/barkpark_web/studio_locale.ex:552
 #, elixir-autogen, elixir-format
 msgid "Link URL"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:556
+#: lib/barkpark_web/studio_locale.ex:550
 #, elixir-autogen, elixir-format
 msgid "Link preview"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:557
+#: lib/barkpark_web/studio_locale.ex:551
 #, elixir-autogen, elixir-format
 msgid "Link to page"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:561
+#: lib/barkpark_web/studio_locale.ex:555
 #, elixir-autogen, elixir-format
 msgid "Live dashboard section"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:564
+#: lib/barkpark_web/studio_locale.ex:558
 #, elixir-autogen, elixir-format
 msgid "Loop"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:565
+#: lib/barkpark_web/studio_locale.ex:559
 #, elixir-autogen, elixir-format
 msgid "Markdown source"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:567
+#: lib/barkpark_web/studio_locale.ex:561
 #, elixir-autogen, elixir-format
 msgid "Markdown source is unavailable inside a Figure because it could create extra blocks."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:570
+#: lib/barkpark_web/studio_locale.ex:564
 #, elixir-autogen, elixir-format
 msgid "Masters"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:571
+#: lib/barkpark_web/studio_locale.ex:565
 #, elixir-autogen, elixir-format
 msgid "Masthead"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:574
+#: lib/barkpark_web/studio_locale.ex:568
 #, elixir-autogen, elixir-format
 msgid "Mermaid diagram"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:575
+#: lib/barkpark_web/studio_locale.ex:569
 #, elixir-autogen, elixir-format
 msgid "Mermaid source"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:584
+#: lib/barkpark_web/studio_locale.ex:578
 #, elixir-autogen, elixir-format
 msgid "No blocks match"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:585
+#: lib/barkpark_web/studio_locale.ex:579
 #, elixir-autogen, elixir-format
 msgid "No commands match"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:587
+#: lib/barkpark_web/studio_locale.ex:581
 #, elixir-autogen, elixir-format
 msgid "No image yet — paste or drop a picture, or enter a URL below"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:588
+#: lib/barkpark_web/studio_locale.ex:582
 #, elixir-autogen, elixir-format
 msgid "No matching pages"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:590
+#: lib/barkpark_web/studio_locale.ex:584
 #, elixir-autogen, elixir-format
 msgid "No video yet — paste a video url below"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:592
+#: lib/barkpark_web/studio_locale.ex:586
 #, elixir-autogen, elixir-format
 msgid "Notes, one per line"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:593
+#: lib/barkpark_web/studio_locale.ex:587
 #, elixir-autogen, elixir-format
 msgid "Numbered"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:594
+#: lib/barkpark_web/studio_locale.ex:588
 #, elixir-autogen, elixir-format
 msgid "Numbered list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:598
+#: lib/barkpark_web/studio_locale.ex:592
 #, elixir-autogen, elixir-format
 msgid "One footnote per line"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:599
+#: lib/barkpark_web/studio_locale.ex:593
 #, elixir-autogen, elixir-format
 msgid "Open"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:602
+#: lib/barkpark_web/studio_locale.ex:596
 #, elixir-autogen, elixir-format
 msgid "Ordered list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:607
+#: lib/barkpark_web/studio_locale.ex:601
 #, elixir-autogen, elixir-format
 msgid "Paste link, ↵ to apply"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:612
+#: lib/barkpark_web/studio_locale.ex:606
 #, elixir-autogen, elixir-format
 msgid "Poster url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:614
+#: lib/barkpark_web/studio_locale.ex:608
 #, elixir-autogen, elixir-format
 msgid "Presets"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:615
+#: lib/barkpark_web/studio_locale.ex:609
 #, elixir-autogen, elixir-format
 msgid "Primary"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:617
+#: lib/barkpark_web/studio_locale.ex:611
 #, elixir-autogen, elixir-format
 msgid "Quote"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:626
+#: lib/barkpark_web/studio_locale.ex:620
 #, elixir-autogen, elixir-format
 msgid "Run command"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:627
+#: lib/barkpark_web/studio_locale.ex:621
 #, elixir-autogen, elixir-format
 msgid "Runbook step"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:629
+#: lib/barkpark_web/studio_locale.ex:623
 #, elixir-autogen, elixir-format
 msgid "Searching…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:630
+#: lib/barkpark_web/studio_locale.ex:624
 #, elixir-autogen, elixir-format
 msgid "Secondary"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:633
+#: lib/barkpark_web/studio_locale.ex:627
 #, elixir-autogen, elixir-format
 msgid "Sheet"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:639
+#: lib/barkpark_web/studio_locale.ex:633
 #, elixir-autogen, elixir-format
 msgid "Start typing, or press / for blocks…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:640
+#: lib/barkpark_web/studio_locale.ex:634
 #, elixir-autogen, elixir-format
 msgid "Starters"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:645
+#: lib/barkpark_web/studio_locale.ex:639
 #, elixir-autogen, elixir-format
 msgid "Strikethrough"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:648
+#: lib/barkpark_web/studio_locale.ex:642
 #, elixir-autogen, elixir-format
 msgid "Subscript (Ctrl+,)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:650
+#: lib/barkpark_web/studio_locale.ex:644
 #, elixir-autogen, elixir-format
 msgid "Superscript (Ctrl+.)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:652
+#: lib/barkpark_web/studio_locale.ex:646
 #, elixir-autogen, elixir-format
 msgid "Table columns"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:653
+#: lib/barkpark_web/studio_locale.ex:647
 #, elixir-autogen, elixir-format
 msgid "Table rows"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:655
+#: lib/barkpark_web/studio_locale.ex:649
 #, elixir-autogen, elixir-format
 msgid "Task list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:657
+#: lib/barkpark_web/studio_locale.ex:651
 #, elixir-autogen, elixir-format
 msgid "Task list title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:660
+#: lib/barkpark_web/studio_locale.ex:654
 #, elixir-autogen, elixir-format
 msgid "TeX"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:661
+#: lib/barkpark_web/studio_locale.ex:655
 #, elixir-autogen, elixir-format
 msgid "TeX math"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:668
+#: lib/barkpark_web/studio_locale.ex:662
 #, elixir-autogen, elixir-format
 msgid "Toggle"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:669
+#: lib/barkpark_web/studio_locale.ex:663
 #, elixir-autogen, elixir-format
 msgid "Toggle Markdown source"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:672
+#: lib/barkpark_web/studio_locale.ex:666
 #, elixir-autogen, elixir-format
 msgid "Turn into"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:673
+#: lib/barkpark_web/studio_locale.ex:667
 #, elixir-autogen, elixir-format
 msgid "Turn into %{block}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:674
+#: lib/barkpark_web/studio_locale.ex:668
 #, elixir-autogen, elixir-format
 msgid "Type a command…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:675
+#: lib/barkpark_web/studio_locale.ex:669
 #, elixir-autogen, elixir-format
 msgid "Underline"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:683
+#: lib/barkpark_web/studio_locale.ex:677
 #, elixir-autogen, elixir-format
 msgid "Video url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:688
+#: lib/barkpark_web/studio_locale.ex:682
 #, elixir-autogen, elixir-format
 msgid "Wikilink"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:689
+#: lib/barkpark_web/studio_locale.ex:683
 #, elixir-autogen, elixir-format
 msgid "Write the highlighted quote…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:690
+#: lib/barkpark_web/studio_locale.ex:684
 #, elixir-autogen, elixir-format
 msgid "Write the introduction…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:691
+#: lib/barkpark_web/studio_locale.ex:685
 #, elixir-autogen, elixir-format
 msgid "Write the quote…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:415
+#: lib/barkpark_web/studio_locale.ex:409
 #, elixir-autogen, elixir-format
 msgid "a quoted passage"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:420
+#: lib/barkpark_web/studio_locale.ex:414
 #, elixir-autogen, elixir-format
 msgid "action href"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:421
+#: lib/barkpark_web/studio_locale.ex:415
 #, elixir-autogen, elixir-format
 msgid "action label"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:440
+#: lib/barkpark_web/studio_locale.ex:434
 #, elixir-autogen, elixir-format
 msgid "author / credit line"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:448
+#: lib/barkpark_web/studio_locale.ex:442
 #, elixir-autogen, elixir-format
 msgid "bulleted or ordered"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:452
+#: lib/barkpark_web/studio_locale.ex:446
 #, elixir-autogen, elixir-format
 msgid "call-to-action button"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:455
+#: lib/barkpark_web/studio_locale.ex:449
 #, elixir-autogen, elixir-format
 msgid "caption"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:457
+#: lib/barkpark_web/studio_locale.ex:451
 #, elixir-autogen, elixir-format
 msgid "captioned block"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:462
+#: lib/barkpark_web/studio_locale.ex:456
 #, elixir-autogen, elixir-format
 msgid "chart · regions, refline, callout"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:468
+#: lib/barkpark_web/studio_locale.ex:462
 #, elixir-autogen, elixir-format
 msgid "code language"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:470
+#: lib/barkpark_web/studio_locale.ex:464
 #, elixir-autogen, elixir-format
 msgid "collapsible details"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:476
+#: lib/barkpark_web/studio_locale.ex:470
 #, elixir-autogen, elixir-format
 msgid "console frame"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:478
+#: lib/barkpark_web/studio_locale.ex:472
 #, elixir-autogen, elixir-format
 msgid "contents — no entries yet"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:482
+#: lib/barkpark_web/studio_locale.ex:476
 #, elixir-autogen, elixir-format
 msgid "diagram caption"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:484
+#: lib/barkpark_web/studio_locale.ex:478
 #, elixir-autogen, elixir-format
 msgid "dismiss"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:495
+#: lib/barkpark_web/studio_locale.ex:489
 #, elixir-autogen, elixir-format
 msgid "embed a spreadsheet"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:500
+#: lib/barkpark_web/studio_locale.ex:494
 #, elixir-autogen, elixir-format
 msgid "equation — no tex source"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:502
+#: lib/barkpark_web/studio_locale.ex:496
 #, elixir-autogen, elixir-format
 msgid "expected"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:506
+#: lib/barkpark_web/studio_locale.ex:500
 #, elixir-autogen, elixir-format
 msgid "figure caption"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:508
+#: lib/barkpark_web/studio_locale.ex:502
 #, elixir-autogen, elixir-format
 msgid "filter (e.g. proj:x)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:509
+#: lib/barkpark_web/studio_locale.ex:503
 #, elixir-autogen, elixir-format
 msgid "footer"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:511
+#: lib/barkpark_web/studio_locale.ex:505
 #, elixir-autogen, elixir-format
 msgid "footnotes — none yet"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:514
+#: lib/barkpark_web/studio_locale.ex:508
 #, elixir-autogen, elixir-format
 msgid "grid"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:516
+#: lib/barkpark_web/studio_locale.ex:510
 #, elixir-autogen, elixir-format
 msgid "h1 — section title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:525
+#: lib/barkpark_web/studio_locale.ex:519
 #, elixir-autogen, elixir-format
 msgid "hex swatch value"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:527
+#: lib/barkpark_web/studio_locale.ex:521
 #, elixir-autogen, elixir-format
 msgid "highlighted quote"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:528
+#: lib/barkpark_web/studio_locale.ex:522
 #, elixir-autogen, elixir-format
 msgid "horizontal rule"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:533
+#: lib/barkpark_web/studio_locale.ex:527
 #, elixir-autogen, elixir-format
 msgid "insert"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:537
+#: lib/barkpark_web/studio_locale.ex:531
 #, elixir-autogen, elixir-format
 msgid "insert link"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:539
+#: lib/barkpark_web/studio_locale.ex:533
 #, elixir-autogen, elixir-format
 msgid "kicker over the title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:541
+#: lib/barkpark_web/studio_locale.ex:535
 #, elixir-autogen, elixir-format
 msgid "labelled annotation"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:542
+#: lib/barkpark_web/studio_locale.ex:536
 #, elixir-autogen, elixir-format
 msgid "labelled panels"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:543
+#: lib/barkpark_web/studio_locale.ex:537
 #, elixir-autogen, elixir-format
 msgid "lang"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:545
+#: lib/barkpark_web/studio_locale.ex:539
 #, elixir-autogen, elixir-format
 msgid "language"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:546
+#: lib/barkpark_web/studio_locale.ex:540
 #, elixir-autogen, elixir-format
 msgid "lead paragraph"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:548
+#: lib/barkpark_web/studio_locale.ex:542
 #, elixir-autogen, elixir-format
 msgid "legend"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:549
+#: lib/barkpark_web/studio_locale.ex:543
 #, elixir-autogen, elixir-format
 msgid "level 2 heading"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:550
+#: lib/barkpark_web/studio_locale.ex:544
 #, elixir-autogen, elixir-format
 msgid "level 3 heading"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:551
+#: lib/barkpark_web/studio_locale.ex:545
 #, elixir-autogen, elixir-format
 msgid "level 4 heading"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:552
+#: lib/barkpark_web/studio_locale.ex:546
 #, elixir-autogen, elixir-format
 msgid "level 5 heading"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:553
+#: lib/barkpark_web/studio_locale.ex:547
 #, elixir-autogen, elixir-format
 msgid "level 6 heading"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:555
+#: lib/barkpark_web/studio_locale.ex:549
 #, elixir-autogen, elixir-format
 msgid "link another document"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:560
+#: lib/barkpark_web/studio_locale.ex:554
 #, elixir-autogen, elixir-format
 msgid "live"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:577
+#: lib/barkpark_web/studio_locale.ex:571
 #, elixir-autogen, elixir-format
 msgid "monospace block"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:580
+#: lib/barkpark_web/studio_locale.ex:574
 #, elixir-autogen, elixir-format
 msgid "multi-column layout"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:581
+#: lib/barkpark_web/studio_locale.ex:575
 #, elixir-autogen, elixir-format
 msgid "multi-language string"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:582
+#: lib/barkpark_web/studio_locale.ex:576
 #, elixir-autogen, elixir-format
 msgid "multi-line value"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:583
+#: lib/barkpark_web/studio_locale.ex:577
 #, elixir-autogen, elixir-format
 msgid "navigate"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:595
+#: lib/barkpark_web/studio_locale.ex:589
 #, elixir-autogen, elixir-format
 msgid "numbered notes"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:596
+#: lib/barkpark_web/studio_locale.ex:590
 #, elixir-autogen, elixir-format
 msgid "numbered steps with bodies"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:597
+#: lib/barkpark_web/studio_locale.ex:591
 #, elixir-autogen, elixir-format
 msgid "object of subfields"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:603
+#: lib/barkpark_web/studio_locale.ex:597
 #, elixir-autogen, elixir-format
 msgid "outline of entries"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:604
+#: lib/barkpark_web/studio_locale.ex:598
 #, elixir-autogen, elixir-format
 msgid "page title size"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:608
+#: lib/barkpark_web/studio_locale.ex:602
 #, elixir-autogen, elixir-format
 msgid "pick one option"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:609
+#: lib/barkpark_web/studio_locale.ex:603
 #, elixir-autogen, elixir-format
 msgid "picture from a url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:610
+#: lib/barkpark_web/studio_locale.ex:604
 #, elixir-autogen, elixir-format
 msgid "pipeline stage node"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:611
+#: lib/barkpark_web/studio_locale.ex:605
 #, elixir-autogen, elixir-format
 msgid "plain body text"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:613
+#: lib/barkpark_web/studio_locale.ex:607
 #, elixir-autogen, elixir-format
 msgid "poster url (optional)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:619
+#: lib/barkpark_web/studio_locale.ex:613
 #, elixir-autogen, elixir-format
 msgid "registry-backed enum"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:622
+#: lib/barkpark_web/studio_locale.ex:616
 #, elixir-autogen, elixir-format
 msgid "repeating list"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:623
+#: lib/barkpark_web/studio_locale.ex:617
 #, elixir-autogen, elixir-format
 msgid "rows and columns"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:624
+#: lib/barkpark_web/studio_locale.ex:618
 #, elixir-autogen, elixir-format
 msgid "ruled group"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:625
+#: lib/barkpark_web/studio_locale.ex:619
 #, elixir-autogen, elixir-format
 msgid "run"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:634
+#: lib/barkpark_web/studio_locale.ex:628
 #, elixir-autogen, elixir-format
 msgid "single-line value"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:636
+#: lib/barkpark_web/studio_locale.ex:630
 #, elixir-autogen, elixir-format
 msgid "source"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:637
+#: lib/barkpark_web/studio_locale.ex:631
 #, elixir-autogen, elixir-format
 msgid "stack"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:641
+#: lib/barkpark_web/studio_locale.ex:635
 #, elixir-autogen, elixir-format
 msgid "stat queries · chart · task board"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:644
+#: lib/barkpark_web/studio_locale.ex:638
 #, elixir-autogen, elixir-format
 msgid "steps · terminal · rollback callout"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:656
+#: lib/barkpark_web/studio_locale.ex:650
 #, elixir-autogen, elixir-format
 msgid "task list query filter"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:658
+#: lib/barkpark_web/studio_locale.ex:652
 #, elixir-autogen, elixir-format
 msgid "task list title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:663
+#: lib/barkpark_web/studio_locale.ex:657
 #, elixir-autogen, elixir-format
 msgid "timestamp value"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:392
-#: lib/barkpark_web/studio_locale.ex:664
+#: lib/barkpark_web/studio_locale.ex:386
+#: lib/barkpark_web/studio_locale.ex:658
 #, elixir-autogen, elixir-format
 msgid "title"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:666
+#: lib/barkpark_web/studio_locale.ex:660
 #, elixir-autogen, elixir-format
 msgid "titled content tile"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:667
+#: lib/barkpark_web/studio_locale.ex:661
 #, elixir-autogen, elixir-format
 msgid "to-do items"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:670
+#: lib/barkpark_web/studio_locale.ex:664
 #, elixir-autogen, elixir-format
 msgid "toggle summary"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:671
+#: lib/barkpark_web/studio_locale.ex:665
 #, elixir-autogen, elixir-format
 msgid "true / false toggle"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:677
+#: lib/barkpark_web/studio_locale.ex:671
 #, elixir-autogen, elixir-format
 msgid "upload or url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:679
+#: lib/barkpark_web/studio_locale.ex:673
 #, elixir-autogen, elixir-format
 msgid "url-safe key"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:682
+#: lib/barkpark_web/studio_locale.ex:676
 #, elixir-autogen, elixir-format
 msgid "video from a url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:684
+#: lib/barkpark_web/studio_locale.ex:678
 #, elixir-autogen, elixir-format
 msgid "video url"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:687
+#: lib/barkpark_web/studio_locale.ex:681
 #, elixir-autogen, elixir-format
 msgid "warn or info card"
 msgstr ""
@@ -6197,32 +6199,32 @@ msgstr ""
 msgid "Disabled in this workspace — enabled in %{workspace}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:493
+#: lib/barkpark_web/studio_locale.ex:487
 #, elixir-autogen, elixir-format
 msgid "Edit number"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:494
+#: lib/barkpark_web/studio_locale.ex:488
 #, elixir-autogen, elixir-format
 msgid "Edit options"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:600
+#: lib/barkpark_web/studio_locale.ex:594
 #, elixir-autogen, elixir-format
 msgid "Option %{n} label"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:601
+#: lib/barkpark_web/studio_locale.ex:595
 #, elixir-autogen, elixir-format
 msgid "Option %{n} value"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:621
+#: lib/barkpark_web/studio_locale.ex:615
 #, elixir-autogen, elixir-format
 msgid "Remove option %{n}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:680
+#: lib/barkpark_web/studio_locale.ex:674
 #, elixir-autogen, elixir-format
 msgid "value"
 msgstr ""
@@ -8305,22 +8307,22 @@ msgstr ""
 msgid "Drop a file, click to upload, or browse the library"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:424
+#: lib/barkpark_web/studio_locale.ex:418
 #, elixir-autogen, elixir-format
 msgid "%{label} (first of %{count} hidden blocks)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:417
+#: lib/barkpark_web/studio_locale.ex:411
 #, elixir-autogen, elixir-format
 msgid "Edit empty ingress"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:418
+#: lib/barkpark_web/studio_locale.ex:412
 #, elixir-autogen, elixir-format
 msgid "Edit empty paragraph"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:419
+#: lib/barkpark_web/studio_locale.ex:413
 #, elixir-autogen, elixir-format
 msgid "Select hidden divider"
 msgstr ""
@@ -8893,30 +8895,30 @@ msgstr ""
 msgid "More actions"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:780
+#: lib/barkpark_web/studio_locale.ex:774
 #, elixir-autogen, elixir-format
 msgid "%{count} docs"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:773
+#: lib/barkpark_web/studio_locale.ex:767
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "%{count} results"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:779
+#: lib/barkpark_web/studio_locale.ex:773
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 doc"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:772
+#: lib/barkpark_web/studio_locale.ex:766
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 result"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:777
+#: lib/barkpark_web/studio_locale.ex:771
 #, elixir-autogen, elixir-format
 msgctxt "reference picker"
 msgid "1 search"
@@ -9171,67 +9173,67 @@ msgstr ""
 msgid "· you run %{release}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:282
+#: lib/barkpark_web/studio_locale.ex:276
 #, elixir-autogen, elixir-format
 msgid "Auto-saved"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:283
+#: lib/barkpark_web/studio_locale.ex:277
 #, elixir-autogen, elixir-format
 msgid "Block actions"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:285
+#: lib/barkpark_web/studio_locale.ex:279
 #, elixir-autogen, elixir-format
 msgid "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:289
+#: lib/barkpark_web/studio_locale.ex:283
 #, elixir-autogen, elixir-format
 msgid "Could not save this block as a master."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:292
+#: lib/barkpark_web/studio_locale.ex:286
 #, elixir-autogen, elixir-format
 msgid "Discard old draft"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:293
+#: lib/barkpark_web/studio_locale.ex:287
 #, elixir-autogen, elixir-format
 msgid "Download old field draft"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:295
+#: lib/barkpark_web/studio_locale.ex:289
 #, elixir-autogen, elixir-format
 msgid "Download or copy this exact draft before explicitly discarding it."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:297
+#: lib/barkpark_web/studio_locale.ex:291
 #, elixir-autogen, elixir-format
 msgid "Enter a number greater than zero, or leave blank for automatic."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:298
+#: lib/barkpark_web/studio_locale.ex:292
 #, elixir-autogen, elixir-format
 msgid "Enter a number."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:299
+#: lib/barkpark_web/studio_locale.ex:293
 #, elixir-autogen, elixir-format
 msgid "Enter a positive whole number."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:300
+#: lib/barkpark_web/studio_locale.ex:294
 #, elixir-autogen, elixir-format
 msgid "Enter a whole number."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:301
+#: lib/barkpark_web/studio_locale.ex:295
 #, elixir-autogen, elixir-format
 msgid "Keep mine"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:303
+#: lib/barkpark_web/studio_locale.ex:297
 #, elixir-autogen, elixir-format
 msgid "Maximum must be at least the minimum."
 msgstr ""
@@ -9241,32 +9243,32 @@ msgstr ""
 msgid "Read-only"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:308
+#: lib/barkpark_web/studio_locale.ex:302
 #, elixir-autogen, elixir-format
 msgid "Redo was not confirmed. Try again."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:309
+#: lib/barkpark_web/studio_locale.ex:303
 #, elixir-autogen, elixir-format
 msgid "Redoing…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:310
+#: lib/barkpark_web/studio_locale.ex:304
 #, elixir-autogen, elixir-format
 msgid "Related Paper changed"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:311
+#: lib/barkpark_web/studio_locale.ex:305
 #, elixir-autogen, elixir-format
 msgid "Retained %{field} draft"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:312
+#: lib/barkpark_web/studio_locale.ex:306
 #, elixir-autogen, elixir-format
 msgid "Review"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:313
+#: lib/barkpark_web/studio_locale.ex:307
 #, elixir-autogen, elixir-format
 msgid "Review retained draft"
 msgstr ""
@@ -9276,32 +9278,32 @@ msgstr ""
 msgid "Save cancelled"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:314
+#: lib/barkpark_web/studio_locale.ex:308
 #, elixir-autogen, elixir-format
 msgid "Save paused"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:316
+#: lib/barkpark_web/studio_locale.ex:310
 #, elixir-autogen, elixir-format
 msgid "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:319
+#: lib/barkpark_web/studio_locale.ex:313
 #, elixir-autogen, elixir-format
 msgid "Save paused — retry required."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:320
+#: lib/barkpark_web/studio_locale.ex:314
 #, elixir-autogen, elixir-format
 msgid "Save paused — review required."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:322
+#: lib/barkpark_web/studio_locale.ex:316
 #, elixir-autogen, elixir-format
 msgid "Save paused: this browser cannot create a safe retry ID. Your edits are still here."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:326
+#: lib/barkpark_web/studio_locale.ex:320
 #, elixir-autogen, elixir-format
 msgid "Save paused: this nested editor lost its document position. Your edits are still here; copy them before reloading."
 msgstr ""
@@ -9313,133 +9315,133 @@ msgid "Saved"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:639
-#: lib/barkpark_web/studio_locale.ex:329
+#: lib/barkpark_web/studio_locale.ex:323
 #, elixir-autogen, elixir-format
 msgid "Saved as master: %{title}"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3518
-#: lib/barkpark_web/studio_locale.ex:330
+#: lib/barkpark_web/studio_locale.ex:324
 #, elixir-autogen, elixir-format
 msgid "Saving…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:332
+#: lib/barkpark_web/studio_locale.ex:326
 #, elixir-autogen, elixir-format
 msgid "Server revision %{revision}. Keep mine retries your edits on that revision; Use latest discards them."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:337
+#: lib/barkpark_web/studio_locale.ex:331
 #, elixir-autogen, elixir-format
 msgid "Server revision %{revision}. No exact retry payload is available. Use latest explicitly discards this retained draft."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:342
+#: lib/barkpark_web/studio_locale.ex:336
 #, elixir-autogen, elixir-format
 msgid "Server revision %{revision}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:346
+#: lib/barkpark_web/studio_locale.ex:340
 #, elixir-autogen, elixir-format
 msgid "Step must be greater than zero."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:347
+#: lib/barkpark_web/studio_locale.ex:341
 #, elixir-autogen, elixir-format
 msgid "Technical details"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:350
+#: lib/barkpark_web/studio_locale.ex:344
 #, elixir-autogen, elixir-format
 msgid "This change is more than one hour old and can no longer be restored."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:352
+#: lib/barkpark_web/studio_locale.ex:346
 #, elixir-autogen, elixir-format
 msgid "This change no longer matches the current document."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:354
+#: lib/barkpark_web/studio_locale.ex:348
 #, elixir-autogen, elixir-format
 msgid "This document changed elsewhere. Your edits are still here."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:356
+#: lib/barkpark_web/studio_locale.ex:350
 #, elixir-autogen, elixir-format
 msgid "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:360
+#: lib/barkpark_web/studio_locale.ex:354
 #, elixir-autogen, elixir-format
 msgid "This history step could not be validated."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:362
+#: lib/barkpark_web/studio_locale.ex:356
 #, elixir-autogen, elixir-format
 msgid "This history step is no longer available for this document."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:363
+#: lib/barkpark_web/studio_locale.ex:357
 #, elixir-autogen, elixir-format
 msgid "This history step is unavailable."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:365
+#: lib/barkpark_web/studio_locale.ex:359
 #, elixir-autogen, elixir-format
 msgid "This history step was already used. Make a new edit to continue."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:367
+#: lib/barkpark_web/studio_locale.ex:361
 #, elixir-autogen, elixir-format
 msgid "This related Paper was replaced before your %{field} draft was sent."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:371
+#: lib/barkpark_web/studio_locale.ex:365
 #, elixir-autogen, elixir-format
 msgid "This related Paper was replaced before your %{field} draft was sent. The draft was not applied to the replacement."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:376
+#: lib/barkpark_web/studio_locale.ex:370
 #, elixir-autogen, elixir-format
 msgid "This related Paper was replaced while your %{field} save was unresolved."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:380
+#: lib/barkpark_web/studio_locale.ex:374
 #, elixir-autogen, elixir-format
 msgid "This related Paper was replaced while your %{field} save was unresolved. Download the retained draft while its result is confirmed."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:385
+#: lib/barkpark_web/studio_locale.ex:379
 #, elixir-autogen, elixir-format
 msgid "This retained draft has no safe exact rebase path."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:387
+#: lib/barkpark_web/studio_locale.ex:381
 #, elixir-autogen, elixir-format
 msgid "This save has an unresolved server outcome and cannot be discarded here."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:389
+#: lib/barkpark_web/studio_locale.ex:383
 #, elixir-autogen, elixir-format
 msgid "This save may already have reached the server. It cannot be discarded safely here."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:393
+#: lib/barkpark_web/studio_locale.ex:387
 #, elixir-autogen, elixir-format
 msgid "Undo was not confirmed. Try again."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:394
+#: lib/barkpark_web/studio_locale.ex:388
 #, elixir-autogen, elixir-format
 msgid "Undoing…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:396
+#: lib/barkpark_web/studio_locale.ex:390
 #, elixir-autogen, elixir-format
 msgid "Unsaved changes — fix invalid fields."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:397
+#: lib/barkpark_web/studio_locale.ex:391
 #, elixir-autogen, elixir-format
 msgid "Unsaved draft payload"
 msgstr ""
@@ -9449,38 +9451,38 @@ msgstr ""
 msgid "Updated by another user"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:398
+#: lib/barkpark_web/studio_locale.ex:392
 #, elixir-autogen, elixir-format
 msgid "Use latest"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:400
+#: lib/barkpark_web/studio_locale.ex:394
 #, elixir-autogen, elixir-format
 msgid "Value must be at least %{min}."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:401
+#: lib/barkpark_web/studio_locale.ex:395
 #, elixir-autogen, elixir-format
 msgid "Value must be at most %{max}."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:291
+#: lib/barkpark_web/studio_locale.ex:285
 #, elixir-autogen, elixir-format
 msgid "description"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:302
+#: lib/barkpark_web/studio_locale.ex:296
 #, elixir-autogen, elixir-format
 msgid "master"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:395
+#: lib/barkpark_web/studio_locale.ex:389
 #, elixir-autogen, elixir-format
 msgid "unknown"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:639
-#: lib/barkpark_web/studio_locale.ex:402
+#: lib/barkpark_web/studio_locale.ex:396
 #, elixir-autogen, elixir-format
 msgid "✓ Auto-saved"
 msgstr ""
@@ -9590,168 +9592,168 @@ msgstr ""
 msgid "Save failed — retrying"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:754
+#: lib/barkpark_web/studio_locale.ex:748
 #, elixir-autogen, elixir-format
 msgid "Blurb"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:735
+#: lib/barkpark_web/studio_locale.ex:729
 #, elixir-autogen, elixir-format
 msgid "Bold (mod+B)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:717
+#: lib/barkpark_web/studio_locale.ex:711
 #, elixir-autogen, elixir-format
 msgid "Broken reference: %{id}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:716
+#: lib/barkpark_web/studio_locale.ex:710
 #, elixir-autogen, elixir-format
 msgid "Broken reference: %{id} via %{via}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:752
+#: lib/barkpark_web/studio_locale.ex:746
 #, elixir-autogen, elixir-format
 msgid "Contributors"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:747
+#: lib/barkpark_web/studio_locale.ex:741
 #, elixir-autogen, elixir-format
 msgid "Could not parse document JSON"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:701
+#: lib/barkpark_web/studio_locale.ex:695
 #, elixir-autogen, elixir-format
 msgid "Couldn't load graph data"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:751
+#: lib/barkpark_web/studio_locale.ex:745
 #, elixir-autogen, elixir-format
 msgid "Document ID"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:699
+#: lib/barkpark_web/studio_locale.ex:693
 #, elixir-autogen, elixir-format
 msgid "Document blast-radius graph. Press Tab to enter, arrow keys to traverse."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:700
+#: lib/barkpark_web/studio_locale.ex:694
 #, elixir-autogen, elixir-format
 msgid "Document graph"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:705
+#: lib/barkpark_web/studio_locale.ex:699
 #, elixir-autogen, elixir-format
 msgid "Fit to view"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:710
+#: lib/barkpark_web/studio_locale.ex:704
 #, elixir-autogen, elixir-format
 msgid "Flow"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:725
+#: lib/barkpark_web/studio_locale.ex:719
 #, elixir-autogen, elixir-format
 msgid "Focused: %{title}. Connected to: %{names}."
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:709
+#: lib/barkpark_web/studio_locale.ex:703
 #, elixir-autogen, elixir-format
 msgid "Full color"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:755
+#: lib/barkpark_web/studio_locale.ex:749
 #, elixir-autogen, elixir-format
 msgid "Full content (JSON)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:753
+#: lib/barkpark_web/studio_locale.ex:747
 #, elixir-autogen, elixir-format
 msgid "Identifiers"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:736
+#: lib/barkpark_web/studio_locale.ex:730
 #, elixir-autogen, elixir-format
 msgid "Italic (mod+I)"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:702
+#: lib/barkpark_web/studio_locale.ex:696
 #, elixir-autogen, elixir-format
 msgid "No connections yet"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:746
+#: lib/barkpark_web/studio_locale.ex:740
 #, elixir-autogen, elixir-format
 msgid "No document selected"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:706
+#: lib/barkpark_web/studio_locale.ex:700
 #, elixir-autogen, elixir-format
 msgid "Reset view"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:712
+#: lib/barkpark_web/studio_locale.ex:706
 #, elixir-autogen, elixir-format
 msgid "Search the graph"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:711
+#: lib/barkpark_web/studio_locale.ex:705
 #, elixir-autogen, elixir-format
 msgid "Search…"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:738
+#: lib/barkpark_web/studio_locale.ex:732
 #, elixir-autogen, elixir-format
 msgid "Set"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:718
+#: lib/barkpark_web/studio_locale.ex:712
 #, elixir-autogen, elixir-format
 msgid "Status: %{status}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:707
+#: lib/barkpark_web/studio_locale.ex:701
 #, elixir-autogen, elixir-format
 msgid "Types"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:703
+#: lib/barkpark_web/studio_locale.ex:697
 #, elixir-autogen, elixir-format
 msgid "Zoom in"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:704
+#: lib/barkpark_web/studio_locale.ex:698
 #, elixir-autogen, elixir-format
 msgid "Zoom out"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:720
+#: lib/barkpark_web/studio_locale.ex:714
 #, elixir-autogen, elixir-format
 msgid "active"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:721
+#: lib/barkpark_web/studio_locale.ex:715
 #, elixir-autogen, elixir-format
 msgid "broken ref"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:722
+#: lib/barkpark_web/studio_locale.ex:716
 #, elixir-autogen, elixir-format
 msgid "broken reference"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:723
+#: lib/barkpark_web/studio_locale.ex:717
 #, elixir-autogen, elixir-format
 msgid "via %{via}"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:714
+#: lib/barkpark_web/studio_locale.ex:708
 #, elixir-autogen, elixir-format
 msgctxt "graph"
 msgid "%{count} connections"
 msgstr ""
 
-#: lib/barkpark_web/studio_locale.ex:713
+#: lib/barkpark_web/studio_locale.ex:707
 #, elixir-autogen, elixir-format
 msgctxt "graph"
 msgid "1 connection"
@@ -10600,46 +10602,4 @@ msgstr ""
 #: lib/barkpark_web/components/fields/tree_codelist_field.ex:377
 #, elixir-autogen, elixir-format
 msgid "Search codes or labels…"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:126
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "draft"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:123
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "failed"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:125
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "private"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:122
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "processing"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:124
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "public"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:127
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "published"
-msgstr ""
-
-#: lib/barkpark_web/studio_locale.ex:121
-#, elixir-autogen, elixir-format
-msgctxt "media facet value"
-msgid "ready"
 msgstr ""
