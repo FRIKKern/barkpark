@@ -112,7 +112,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
            socket
            |> assign(show_delete: false, delete_refs: [])
            |> put_flash(:info, deleted_sentence(doc, params["disconnect"] == "true", refs))
-           |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
+           |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))
+           |> focus_after_delete(doc, type)}
 
         # A generic failure (not_found, rev_mismatch, …) must NOT be mistaken
         # for success: the doc still exists, so close the modal but stay put
@@ -152,5 +153,34 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
 
   defp delete_open_doc(socket, doc, type) do
     Content.delete_document(doc.doc_id, type, socket.assigns.dataset, Shared.hook_opts(socket))
+  end
+
+  # The editor that held focus is gone after a delete, so focus fell to
+  # <body> (task-bad96a2a1c3da132). Tell the client where the document sat in
+  # its list, so it can focus the row that takes its place — or the pane's New
+  # button when none is left.
+  defp focus_after_delete(socket, doc, type) do
+    published = Content.published_id(doc.doc_id)
+
+    index =
+      (socket.assigns[:panes] || [])
+      |> Enum.filter(&(Map.get(&1, :role) == :list and Map.get(&1, :type_name) == type))
+      |> List.last()
+      |> case do
+        %{items: items} when is_list(items) ->
+          Enum.find_index(items, fn item ->
+            id = Map.get(item, :id)
+            id == doc.doc_id or (is_binary(id) and Content.published_id(id) == published)
+          end)
+
+        _ ->
+          nil
+      end
+
+    push_event(socket, "bp:focus-after-delete", %{
+      type: type,
+      id: published,
+      index: index || 0
+    })
   end
 end

@@ -5352,6 +5352,36 @@
       editable.focus();
       return true;
     };
+    // After a document is deleted its editor is gone; focus the row that took
+    // its place in the list, else the pane's New button (task-bad96a2a1c3da132).
+    // The first patch may still carry the deleted row, so it is skipped by id,
+    // and the attempt repeats briefly in case a later patch replaces the rows.
+    window.addEventListener("phx:bp:focus-after-delete", (e) => {
+      const d = e.detail || {};
+      const type = String(d.type || "");
+      const gone = String(d.id || "");
+      const sameDoc = (id) => id === gone || id === "drafts." + gone;
+      let interrupted = false;
+      const interrupt = () => (interrupted = true);
+      document.addEventListener("keydown", interrupt, { capture: true, once: true });
+      document.addEventListener("pointerdown", interrupt, { capture: true, once: true });
+      const until = Date.now() + 1500;
+      const attempt = () => {
+        if (interrupted) return;
+        const add = Array.from(document.querySelectorAll("button.pane-add-btn"))
+          .find((b) => b.getAttribute("phx-value-type") === type);
+        const column = add && add.closest(".pane-column, .pane");
+        if (column) {
+          const rows = Array.from(column.querySelectorAll('button[phx-click="select"][phx-value-id]'))
+            .filter((b) => !sameDoc(b.getAttribute("phx-value-id")));
+          const target = rows.length ? rows[Math.min(d.index || 0, rows.length - 1)] : add;
+          const active = document.activeElement;
+          if (target && (!active || active === document.body || !active.isConnected)) target.focus();
+        }
+        if (Date.now() < until) setTimeout(attempt, 100);
+      };
+      setTimeout(attempt, 0);
+    });
     window.addEventListener("phx:bp:focus-new-doc", (e) => {
       const id = e.detail && e.detail.id;
       if (!id) return;
