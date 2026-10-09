@@ -5275,6 +5275,11 @@
         before the inline script below folds it into Hooks and connects the
         LiveSocket. Bottom of <body>, never <head> (Golden Rule #4). --%>
   <script src="/assets/bp-paper-editor-hooks.js"></script>
+  <%!-- Array fields keep keyboard focus on the row a button acted on
+        (task-278c7992ed05a30b): a document-level listener, no phx-hook
+        (array fields stay a pure round-trip, Decision 13). Bottom of
+        <body>, never <head> (Golden Rule #4). --%>
+  <script src="/assets/bp-array-focus.js"></script>
   <%!-- Studio datetime fields save a UTC instant (owner ruling #46). `defer`:
         nothing blocks parsing (Golden Rule 4). The inline Hooks entry below
         delegates to `window.BarkparkDatetimeFieldHook` and waits for

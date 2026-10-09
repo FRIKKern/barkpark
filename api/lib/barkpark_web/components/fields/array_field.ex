@@ -78,6 +78,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
 
     ~H"""
     <fieldset class="bp-field bp-field-array" data-field-type="arrayOf"
+              id={"bp-array-" <> sanitize_id("#{@field.name}#{@path}")}
               data-field-name={@field.name} data-ordered={@ordered? && "true"}>
       <legend class="bp-field-title">
         <%= @title %><%= if @progress do %>
