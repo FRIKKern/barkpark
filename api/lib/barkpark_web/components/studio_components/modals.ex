@@ -322,22 +322,26 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
             <div class="item-share-footer">
               <span class="shares-note"><%= gettext("An edit link opens this one paper in the reader's editor.") %></span>
-              <button
-                type="button"
-                class="btn btn-ghost btn-sm"
-                phx-click="item-share-create"
-                phx-value-access="read"
-              >
-                <%= gettext("Create view link") %>
-              </button>
-              <button
-                type="button"
-                class="btn btn-primary btn-sm"
-                phx-click="item-share-create"
-                phx-value-access="edit"
-              >
-                <%= gettext("Create edit link") %>
-              </button>
+              <%!-- One group, so a narrow dialog wraps the note above the pair
+                    rather than orphaning the primary action on a row of its own. --%>
+              <div class="item-share-actions">
+                <button
+                  type="button"
+                  class="btn btn-ghost btn-sm"
+                  phx-click="item-share-create"
+                  phx-value-access="read"
+                >
+                  <%= gettext("Create view link") %>
+                </button>
+                <button
+                  type="button"
+                  class="btn btn-primary btn-sm"
+                  phx-click="item-share-create"
+                  phx-value-access="edit"
+                >
+                  <%= gettext("Create edit link") %>
+                </button>
+              </div>
             </div>
           </div>
         <% else %>
