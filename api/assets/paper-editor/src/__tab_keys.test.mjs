@@ -88,6 +88,21 @@ check("a tablist outside .bp-tab-bar is left alone", () => {
   assert.equal(document.activeElement, other);
 });
 
+check("an object field's group strip (.bp-obj-tabs) moves and selects too", () => {
+  document.body.innerHTML =
+    `<div class="bp-field-body"><div class="bp-obj-tabs" role="tablist">` +
+    `<button type="button" class="bp-obj-tab" role="tab" data-group="a" aria-selected="true" tabindex="0">A</button>` +
+    `<button type="button" class="bp-obj-tab" role="tab" data-group="b" aria-selected="false" tabindex="-1">B</button>` +
+    `</div></div>`;
+  const [a, b] = document.querySelectorAll(".bp-obj-tab");
+  let picked = null;
+  b.addEventListener("click", () => (picked = "b"));
+  a.focus();
+  key(a, "ArrowRight");
+  assert.equal(document.activeElement, b);
+  assert.equal(picked, "b");
+});
+
 dom.window.close();
 if (failures) {
   console.log(`${failures} failure(s)`);

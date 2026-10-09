@@ -768,6 +768,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-value-view=""
                 role="tab"
                 aria-selected={to_string(@nav_view == nil)}
+                tabindex={if @nav_view == nil, do: "0", else: "-1"}
                 class={"bp-view-tab " <> if(@nav_view == nil, do: "is-active", else: "")}
                 data-test-id="document-view-form"
               ><%= gettext("Fields") %></button>
@@ -778,6 +779,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 phx-value-view={v["id"]}
                 role="tab"
                 aria-selected={to_string(@nav_view == v["id"])}
+                tabindex={if @nav_view == v["id"], do: "0", else: "-1"}
                 title={v["title"]}
                 class={"bp-view-tab " <> if(@nav_view == v["id"], do: "is-active", else: "")}
                 data-test-id="document-view-tab"

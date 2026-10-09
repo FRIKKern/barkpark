@@ -6501,6 +6501,9 @@
         const active = this.active;
         this.el.querySelectorAll(":scope > .bp-obj-tabs > .bp-obj-tab").forEach((t) => {
           t.setAttribute("aria-selected", String(t.dataset.group === active));
+          // Roving tabindex: only the active group is a Tab stop; bp-tab-keys.js
+          // moves between them on the arrow keys.
+          t.tabIndex = t.dataset.group === active ? 0 : -1;
         });
         this.el.querySelectorAll(":scope > .bp-subfield").forEach((f) => {
           const g = f.dataset.group;
