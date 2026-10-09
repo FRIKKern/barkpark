@@ -158,8 +158,29 @@ class BpReferencePicker extends HTMLElement {
   // (resolved with the title) until it is known, then the declared set.
   _typeLabel() {
     return this._refTypes.length > 1
-      ? this._selectedType || this._refTypes.join(" · ")
-      : this._refType;
+      ? (this._selectedType ? this._typeWord(this._selectedType) : this._typeWords().join(" · "))
+      : this._typeWord(this._refType);
+  }
+
+  // The word a type reads as for people: Studio stamps a {type => word} map
+  // (its plugin word or schema title) on the shell (task-a3bedc86f8a6a517).
+  // Elsewhere, or for a type it does not list, the type's own name.
+  _typeWord(type) {
+    if (!this._typeLabelMap) {
+      let map = {};
+      try {
+        const host = this.closest && this.closest("[data-type-labels]");
+        map = JSON.parse((host && host.getAttribute("data-type-labels")) || "{}") || {};
+      } catch (_e) {
+        map = {};
+      }
+      this._typeLabelMap = map;
+    }
+    return typeof this._typeLabelMap[type] === "string" ? this._typeLabelMap[type] : type;
+  }
+
+  _typeWords() {
+    return this._refTypes.map((type) => this._typeWord(type));
   }
 
   // A resolved title lands in the pill in place. A full render would replace
@@ -184,7 +205,7 @@ class BpReferencePicker extends HTMLElement {
     const input = document.createElement("input");
     input.type = "text";
     input.className = "form-input bp-ref-search-input";
-    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._refTypes.join(", ") : this._t("documents", "documents"));
+    input.placeholder = this._t("search", "Search %{types}…").replace("%{types}", this._refTypes.length ? this._typeWords().join(", ") : this._t("documents", "documents"));
     input.autocomplete = "off";
     // A combobox over the listbox below (task-06efa9925540f212): the input
     // announced as a plain textbox, arrows did nothing, and the options only
@@ -581,7 +602,7 @@ class BpReferencePicker extends HTMLElement {
         // Sanity shows the hit's type when a reference may point at several.
         const type = document.createElement("span");
         type.className = "bp-ref-suggest-meta bp-ref-hit-type";
-        type.textContent = doc.type;
+        type.textContent = this._typeWord(doc.type);
         btn.appendChild(type);
       }
       if (doc.draft) {
