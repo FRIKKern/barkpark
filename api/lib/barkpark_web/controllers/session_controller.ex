@@ -235,6 +235,10 @@ defmodule BarkparkWeb.SessionController do
         |> put_flash(:error, "Email or password is incorrect.")
         |> render(:new, new_assigns(return_to))
 
+      # Same door as `POST /v1/auth/login` (task-0f1fd3d17e5f4edb).
+      %{confirmed_at: nil} = user ->
+        BarkparkWeb.SessionIssuer.deny_email_unconfirmed(conn, user, "password")
+
       user ->
         complete_sign_in(conn, user, return_to, "password")
     end

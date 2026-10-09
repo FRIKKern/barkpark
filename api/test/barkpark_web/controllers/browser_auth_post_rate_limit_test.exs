@@ -71,6 +71,7 @@ defmodule BarkparkWeb.BrowserAuthPostRateLimitTest do
   test "a real sign-in inside the budget still lands in Studio" do
     email = "browser-auth-meter-#{System.unique_integer([:positive])}@example.test"
     {:ok, _user} = Accounts.register_user(%{email: email, password: "correct-horse-battery"})
+    {:ok, _user} = Accounts.confirm_user_by_operator(email)
 
     conn =
       post_from_one_ip("/login/account", %{
