@@ -106,7 +106,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     projects registered_chat_hosts revisions roles
     schema_definitions search_intel_crystals search_intel_events
     search_intel_merge_patterns search_surface_config search_synonyms
-    secrets secrets_audit share_links sync_cursors sync_dead_letters
+    secrets secrets_audit preview_links share_links sync_cursors sync_dead_letters
     sync_push_conflicts sync_push_cursors sync_push_doc_revs user_prefs webhooks
     workspace_invitations workspace_memberships
   )
@@ -747,7 +747,7 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Catalog do
     paper_access_log plugin_doc_state preview_token_jti registered_chat_hosts
     revisions search_intel_events
     secrets secrets_audit
-    share_links shares sync_cursors sync_dead_letters sync_push_conflicts
+    preview_links share_links shares sync_cursors sync_dead_letters sync_push_conflicts
     sync_push_cursors sync_push_doc_revs token_sessions webhook_deliveries webhooks
     workspace_invitations workspace_memberships user_prefs
   )
