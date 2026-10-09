@@ -154,7 +154,16 @@ defmodule BarkparkWeb.PaperOpsController do
         _ -> nil
       end
 
-    [if_rev: if_rev, revision_action: @revision_action, actor_user_id: user_id]
+    # task-dba598ed804f02a5: an HTTP ops call is one discrete request, never
+    # the canvas's own keystroke-grade autosave burst, so it gets an
+    # IMMEDIATE /v1/data/listen frame rather than Papers.BlockOps's default
+    # settled-burst debounce (see run_paper_batch_effects/3's moduledoc).
+    [
+      if_rev: if_rev,
+      revision_action: @revision_action,
+      actor_user_id: user_id,
+      change_event: :immediate
+    ]
   end
 
   defp requested_dataset(params) do
