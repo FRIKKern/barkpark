@@ -220,7 +220,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
       <.document_header dataset={@dataset} title={@title} focus_on_mount={@focus_on_mount}>
         <:status_pill>
-          <span class="badge badge-published">{@doc_type}</span>
+          <span class="badge badge-published">{BarkparkWeb.Studio.PaneBuilder.type_word(@doc_type)}</span>
         </:status_pill>
         <:actions>
           <%!-- spd-bl-publish-affordance-triple — the hand path's missing
