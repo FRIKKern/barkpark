@@ -253,6 +253,64 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/v1/shares/preview-links/{id}": {
+      "delete": {
+        "operationId": "share.preview-link-revoke",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Revoke one preview link by id.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      }
+    },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/query/{dataset}/{type}": {
       "get": {
         "operationId": "doc.query.scoped",
@@ -11535,6 +11593,126 @@
           "workspace"
         ],
         "x-barkpark-scope": "scoped_admin"
+      }
+    },
+    "/v1/shares/preview-links": {
+      "get": {
+        "operationId": "share.preview-link-ls",
+        "parameters": [
+          {
+            "description": "ws[/project[/dataset]] the document lives in.",
+            "in": "query",
+            "name": "scope",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "The document's id (a drafts. prefix is kept).",
+            "in": "query",
+            "name": "doc_id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Document type.",
+            "in": "query",
+            "name": "ref_type",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Success."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "List the draft-capable preview links (task-6812c3100d7aedbc) for one document.",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
+      },
+      "post": {
+        "operationId": "share.preview-link-mint",
+        "parameters": [],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Document"
+              }
+            }
+          },
+          "description": "Request body fields: scope, doc_id, ref_type.",
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Document"
+                }
+              }
+            },
+            "description": "Mutation applied."
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "$ref": "#/components/responses/Forbidden"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "412": {
+            "$ref": "#/components/responses/PreconditionFailed"
+          },
+          "422": {
+            "$ref": "#/components/responses/ValidationFailed"
+          },
+          "429": {
+            "$ref": "#/components/responses/RateLimited"
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Mint a draft-capable preview link (raw token shown once, TTL required).",
+        "tags": [
+          "share"
+        ],
+        "x-barkpark-scope": "admin"
       }
     },
     "/w/{workspace_slug}/p/{project_slug}/v1/data/tags/{dataset}": {

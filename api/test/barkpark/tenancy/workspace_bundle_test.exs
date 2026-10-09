@@ -23,12 +23,16 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
     # pins the full-schema E1 count, so it needs the plugin/fleet tables present
     # (`mix test.core_without_owned_tables` excludes it; task-d3ecc509d4ea227d).
     @tag :owned_tables
-    test "E1 = the 45 workspace_id tables including correction and release authority" do
+    test "E1 = the 46 workspace_id tables including correction and release authority" do
       e1 = Catalog.live_e1(Repo)
-      assert length(e1) == 45
+      assert length(e1) == 46
       # user_prefs (task-7d2a48dbf7e4bf34): per-account KV rows carry their own
       # workspace_id — E1 by the same shape as every other per-caller table.
       assert "user_prefs" in e1
+      # preview_links (task-6812c3100d7aedbc): draft-capable preview-link rows
+      # carry workspace_id + project_id FKs — same E1 shape as their share_links
+      # sibling one line below.
+      assert "preview_links" in e1
       # github_sync_conflicts joined in migration 20260911120000
       # (github-bridge-w9-health-workspace-isolation): the GitHub conflict
       # quarantine gained a real workspace_id, so it exports by

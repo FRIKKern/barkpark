@@ -2978,6 +2978,14 @@ defmodule BarkparkWeb.Router do
     get("/links", ShareLinkController, :list)
     post("/links", ShareLinkController, :mint)
     delete("/links/:id", ShareLinkController, :revoke)
+
+    # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of /links
+    # above, not a branch of it: Links.create/1 strips a `drafts.` prefix off
+    # ref_id unconditionally, so it can never name an unpublished row. Same
+    # admin mint/list/revoke shape; public reader is GET /sp/:token below.
+    get("/preview-links", PreviewLinkController, :list)
+    post("/preview-links", PreviewLinkController, :mint)
+    delete("/preview-links/:id", PreviewLinkController, :revoke)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound
@@ -2988,6 +2996,18 @@ defmodule BarkparkWeb.Router do
     pipe_through(:browser)
 
     get("/s/:token", ShareLinkController, :show)
+  end
+
+  # task-6812c3100d7aedbc preview-link PUBLIC reader. JSON-only :api pipeline,
+  # not :browser — there is no paper/media kind to special-case the way /s/
+  # does, only ever a document. Not under /v1/preview/*: that prefix is
+  # already the unrelated PreviewToken JWT mechanism (header-borne signed
+  # token, :api_preview pipeline); reusing the word there would collide two
+  # different auth schemes under one path.
+  scope "/", BarkparkWeb do
+    pipe_through(:api)
+
+    get("/sp/:token", PreviewLinkController, :show)
   end
 
   pipeline :media_processing_callback do

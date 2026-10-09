@@ -394,6 +394,17 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "ensure_workspace_admin",
        "ShareLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
 
+    # task-6812c3100d7aedbc — same confinement shape as /v1/shares/links above.
+    {:get, "/v1/shares/preview-links"} =>
+      {:tenant_bound, "ensure_workspace_admin",
+       "PreviewLinkController.list/2 resolves the workspace THEN " <>
+         "ensure_workspace_admin/2 -> PreviewLinks.workspace_admin?/2."},
+    {:post, "/v1/shares/preview-links"} =>
+      {:tenant_bound, "ensure_workspace_admin", "PreviewLinkController.mint/2, same shape."},
+    {:delete, "/v1/shares/preview-links/:id"} =>
+      {:tenant_bound, "ensure_workspace_admin",
+       "PreviewLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
+
     # ── /api/workspaces/:workspace_slug/media ──
     {:put, "/api/workspaces/:workspace_slug/media/blob/*path"} =>
       {:tenant_bound, "TenancyAuth.workspace_admin?",

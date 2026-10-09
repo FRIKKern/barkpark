@@ -71,6 +71,7 @@ var listReadCommands = map[string]bool{
 	"secret.scoped-ls":      true, // secret_controller.ex   -> secrets (scoped twin)
 	"share.link-ls":         true, // share_link_controller.ex -> links
 	"share.ls":              true, // share_controller.ex   -> shares
+	"share.preview-link-ls": true, // preview_link_controller.ex -> links
 	"share.token-ls":        true, // share_controller.ex   -> tokens
 	"tag.browse":            true, // query_controller.ex   -> result.tags
 	"tag.docs":              true, // query_controller.ex   -> result.documents

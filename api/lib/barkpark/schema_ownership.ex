@@ -48,7 +48,7 @@ defmodule Barkpark.SchemaOwnership do
     collapsed_schema_definitions_backup content_edges data_keys datasets documents
     idempotency_keys login_tickets media_files mutation_events oban_jobs oban_peers
     oidc_connections org_domains organizations paper_access_log paper_events
-    plugin_doc_state plugin_settings plugin_settings_audit preview_token_jti projects
+    plugin_doc_state plugin_settings plugin_settings_audit preview_links preview_token_jti projects
     pulse_counters pulse_events pulse_meters revisions role_permissions roles
     saml_assertion_replays saml_connections schema_definitions schema_migrations
     scim_groups scim_tokens search_intel_crystals search_intel_events
