@@ -123,6 +123,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-save-master` | block menu "Save as master" (Studio masters carrier only) | `{ block_id }` |
 | `bp-master-insert` | a Masters pick from the slash menu | `{ master_id, after_id, mode?: "linked" }` |
 | `bp-server-insert` | a `terminal`, `stage`, `image` or `equation` pick, only when the editor or an ancestor carries `data-server-insert` (the host inserts it); without it they insert in the canvas | `{ type, after_id }` |
+| `bp-canvas-selection` | the local selection changed, at most once per animation frame | `{ anchor: Point, head: Point }`, or `null` when blurred or none (see Shared carets) |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,
@@ -190,6 +191,31 @@ mount `findSet`/`findState` return `{ query: "", count: 0, index: -1 }` and
 | `findClear()` | nothing |
 | `replaceCurrent(text)` | `state` after replacing the active match (read-only: unchanged `state`) |
 | `replaceAll(text)` | `{ replaced, ...state }`, one transaction (read-only: `replaced: 0`) |
+
+### Shared carets
+
+`Point` is `{ blockId, path?, offset }`. `blockId` is the innermost block with a
+server id (the id ops use). `path` is present only below it, one `name[i]` per
+level: `items[i]` (list item), `rows[i]` then `cells[i]` (table, head row
+included), `steps[i]` / `tabs[i]`, `children[i]` otherwise; a list item's own
+text adds no segment. `offset` counts UTF-16 units of that node's text, an
+inline atom or hard break counting as one.
+
+| Method | Effect | Returns |
+|---|---|---|
+| `setRemoteSelections(list)` | replace the remote set: `[{ id, name, color, anchor: Point, head: Point }]`. Each draws a caret bar with a `name` label in `color`, plus a translucent range when `anchor` ≠ `head`. `[]` clears; set before mount, it waits for the editor | nothing |
+
+Remote selections are decorations: no ops, no history entry, and the local
+caret never moves. They map through local typing and `applyServerBlocks`; an
+end whose block was replaced is found again by its Point, and an entry with an
+end whose block or path is gone is dropped silently. `color` is plain CSS color
+syntax (anything else is grey); `name` is text. Classes: `.bp-remote-caret`,
+`.bp-remote-caret__label`, `.bp-remote-selection`, colored by
+`--bp-remote-color`.
+
+A host relays both halves through editor presence: post the event's `detail`
+as `selection` on `POST …/presence/:dataset/focus`, and hand the other
+sessions' entries to `setRemoteSelections` (`docs/api/presence.md`).
 
 ### Recipe: an HTTP host
 

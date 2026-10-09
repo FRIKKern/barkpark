@@ -164,6 +164,7 @@ import { Equation, Footnote, Toc, Video } from "./island-node.js";
 // The `:` emoji picker: a local shortcode table, plain text on pick (no server change).
 import { searchEmoji } from "../emoji.js";
 // Find in the paper + replace one/all: a decoration plugin driven by the host's bar.
+import { remoteSelections, setRemoteSelections as rsSet, pointsFromSelection } from "./remote-selections.js";
 import { findReplace, findSet as frSet, findClear as frClear, findStep as frStep, findState as frState, replaceCurrent as frReplaceCurrent, replaceAll as frReplaceAll } from "./find-replace.js";
 // editable-image: the `image` block as a self-painting atom with alt + url inputs.
 import { Image } from "./image-node.js";
@@ -710,6 +711,11 @@ class BpPaperCanvas extends HTMLElement {
     // injected async (file) => { src, alt?, width?, height? } — where a pasted or dropped
     // picture goes (the host's Barkpark media); unset → the image node says so.
     this._mediaUploader = null;
+    // Shared carets: the host's last setRemoteSelections list (re-applied on
+    // mount), and the rAF-coalesced bp-canvas-selection emit.
+    this._remoteSelections = [];
+    this._selectionFrame = null;
+    this._lastSelectionDetail = undefined;
     this._uploadSeq = 0;
     // Settled receipts survive native history while this editor is mounted.
     // They contain metadata only, never another upload request.
@@ -967,6 +973,9 @@ class BpPaperCanvas extends HTMLElement {
         BpAttrs,
         restingScaffolds(this),
         findReplace(),
+        // Shared carets: the host's remote selections as decorations. See
+        // ./remote-selections.js.
+        remoteSelections(),
         // A hydrated run rests on a caret, not on an AllSelection a first keystroke would
         // replace wholesale. See ./resting-selection.js.
         RestingSelection,
@@ -1242,6 +1251,7 @@ class BpPaperCanvas extends HTMLElement {
       // This is what makes the bubble track a MULTI-BLOCK selection.
       onSelectionUpdate: () => {
         if (this._bubble) this._bubble.update();
+        this._scheduleSelectionEmit();
       },
       onBlur: () => {
         const version = ++this._richFocusIntentVersion;
@@ -1251,16 +1261,19 @@ class BpPaperCanvas extends HTMLElement {
           }
         });
         if (this._bubble) this._bubble.update();
+        this._scheduleSelectionEmit();
       },
       onFocus: () => {
         this._richFocusIntentVersion += 1;
         this._richFocusIntent = true;
         if (this._bubble) this._bubble.update();
+        this._scheduleSelectionEmit();
       },
     }));
     // A node view that throws while the run is first painted leaves no editor
     // (construction threw) or an empty one: show the read-only fallback instead.
     if (!this._editor || !this._verifyPainted("create")) return;
+    if (this._remoteSelections.length) rsSet(this._editor, this._remoteSelections);
 
     // Selection format toolbar — REUSED verbatim from ../format-bubble.js. It is
     // agnostic to how many blocks the editor holds: it floats on any non-empty
@@ -1469,6 +1482,10 @@ class BpPaperCanvas extends HTMLElement {
 
   _teardownDisconnected() {
     this._uploadResults.clear();
+    if (this._selectionFrame != null) {
+      cancelAnimationFrame(this._selectionFrame);
+      this._selectionFrame = null;
+    }
     this._clearResumeFocusIntent();
     if (this._debounceTimer) {
       clearTimeout(this._debounceTimer);
@@ -1560,6 +1577,32 @@ class BpPaperCanvas extends HTMLElement {
   // Synchronous host seam for navigation / beforeunload guards. A debounced
   // transaction is unsaved before bp-canvas-ops exists; source-mode text and
   // edits queued behind an acknowledgement must also survive an attempted exit.
+  // ── shared carets (see canvas/remote-selections.js) ──
+  // Replace the host's remote selections: [{ id, name, color, anchor, head }],
+  // each end a Point. Decorations only — no ops, no history entry, the local
+  // caret untouched. [] clears. Before mount the list waits for the editor.
+  setRemoteSelections(list) {
+    this._remoteSelections = Array.isArray(list) ? list : [];
+    if (this._editor && !this._editor.isDestroyed) rsSet(this._editor, this._remoteSelections);
+  }
+
+  // bp-canvas-selection: the local selection as { anchor, head } Points, or null
+  // when the editor is blurred or has none. One per animation frame, and only
+  // when it changed.
+  _scheduleSelectionEmit() {
+    if (this._selectionFrame != null) return;
+    this._selectionFrame = requestAnimationFrame(() => {
+      this._selectionFrame = null;
+      const editor = this._editor;
+      if (!editor || editor.isDestroyed) return;
+      const detail = editor.isFocused ? pointsFromSelection(editor.state) : null;
+      const key = JSON.stringify(detail);
+      if (key === this._lastSelectionDetail) return;
+      this._lastSelectionDetail = key;
+      this.dispatchEvent(new CustomEvent("bp-canvas-selection", { bubbles: true, composed: true, detail }));
+    });
+  }
+
   // ── find and replace (the host draws the bar; see canvas/find-replace.js) ──
   findSet(query, opts) { return this._editor ? frSet(this._editor, query, opts) : { query: "", count: 0, index: -1 }; }
   findNext() { return this._editor ? frStep(this._editor, 1) : { count: 0, index: -1 }; }

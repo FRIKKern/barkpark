@@ -131,6 +131,25 @@ export interface BpPaperCanvasEventMap extends HTMLElementEventMap {
   "bp-save-master": CustomEvent<BpSaveMasterDetail>;
   "bp-master-insert": CustomEvent<BpMasterInsertDetail>;
   "bp-server-insert": CustomEvent<BpServerInsertDetail>;
+  /** The local selection, one per animation frame when it changes; null when blurred or none. */
+  "bp-canvas-selection": CustomEvent<CanvasSelection | null>;
+}
+
+/** A caret address. path only below the id-bearing block ("items[2]", "rows[1].cells[0]"); offset in UTF-16 units. */
+export interface CanvasPoint {
+  blockId: string;
+  path?: string;
+  offset: number;
+}
+export interface CanvasSelection {
+  anchor: CanvasPoint;
+  head: CanvasPoint;
+}
+export interface RemoteSelection extends CanvasSelection {
+  id: string;
+  name: string;
+  /** CSS color; anything but plain color syntax falls back to grey. */
+  color: string;
 }
 
 export interface WikilinkSuggestion {
@@ -208,6 +227,8 @@ export interface BpPaperCanvasElement extends HTMLElement {
   findState(): FindState;
   replaceCurrent(text: string): FindState;
   replaceAll(text: string): FindState & { replaced: number };
+  /** Replace the remote carets (decorations only; [] clears). */
+  setRemoteSelections(list: RemoteSelection[]): void;
 
   addEventListener<K extends keyof BpPaperCanvasEventMap>(
     type: K,
