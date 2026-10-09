@@ -295,6 +295,8 @@ check("S-slash: CANVAS_SLASH_TYPES holds exactly the insertable set", () => {
   // joined them (task-f92354b415b486f5): they are boundary blocks too, and a canvas
   // node of either re-rendered as a boundary editor, dropping what was typed. The
   // other 31 are inserted as canvas nodes. Both groups stay in the menu and the palette.
+  // The server builds them only for a host that marks `data-server-insert`; any other
+  // host gets the canvas node (task-d170de40027ea448).
   assert.deepEqual([...CANVAS_SERVER_INSERT_TYPES].sort(), ["equation", "image", "stage", "terminal"]);
   for (const t of CANVAS_SERVER_INSERT_TYPES) {
     assert.ok(CANVAS_SLASH_TYPES.has(t), `${t} is still offered`);

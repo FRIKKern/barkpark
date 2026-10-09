@@ -122,7 +122,7 @@ All events are `bubbles: true, composed: true`. Detail shapes:
 | `bp-canvas-node-failed` | a picker field (`field-image`, `field-reference`) could not be built | `{ blockId \| null, type, message }` |
 | `bp-save-master` | block menu "Save as master" (Studio masters carrier only) | `{ block_id }` |
 | `bp-master-insert` | a Masters pick from the slash menu | `{ master_id, after_id, mode?: "linked" }` |
-| `bp-server-insert` | a `terminal` or `stage` pick (the host inserts it); `image` and `equation` too when the editor or an ancestor carries `data-server-insert` — without it they insert in the canvas | `{ type, after_id }` |
+| `bp-server-insert` | a `terminal`, `stage`, `image` or `equation` pick, only when the editor or an ancestor carries `data-server-insert` (the host inserts it); without it they insert in the canvas | `{ type, after_id }` |
 
 `ops` is a non-empty array of: `patch-block { id, patch }`, `replace-block { id,
 block }`, `insert-after { afterId, block }`, `append-block { block }`,

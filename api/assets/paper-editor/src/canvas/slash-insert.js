@@ -107,14 +107,15 @@ export const CANVAS_SLASH_TYPES = new Set([
 // pushes `bp:focus-boundary` so the caret lands in the editor that persists.
 export const CANVAS_SERVER_INSERT_TYPES = new Set(["terminal", "stage", "image", "equation"]);
 
-// Image and equation go to the server ONLY when the host builds blocks there: Barkpark's
-// own LiveView marks its editor `data-server-insert` (bp-paper-editor-hooks.js). An
-// embedder that follows EMBED-CONTRACT (bp-server-insert covers terminal and stage) and a
-// field canvas whose ops route takes an image block get the canvas node instead — sent
-// to the server, the pick removed its "/" line and inserted nothing (task-9c04bcc87b3da42f).
-export const HOST_BUILT_INSERT_TYPES = new Set(["image", "equation"]);
+// All four go to the server ONLY when the host builds blocks there: Barkpark's own
+// LiveView marks its editor `data-server-insert` (bp-paper-editor-hooks.js), and only
+// its canvas fence refuses a canvas-built terminal or stage. Any other host (an HTTP
+// embedder such as barkpark-studio, a field canvas) gets the canvas node instead —
+// sent to a host that builds nothing, the pick removed its "/" line and inserted
+// nothing (image + equation: task-9c04bcc87b3da42f; terminal + stage:
+// task-d170de40027ea448).
 export function serverBuildsInsert(type, hostBuilds) {
-  return CANVAS_SERVER_INSERT_TYPES.has(type) && (!HOST_BUILT_INSERT_TYPES.has(type) || Boolean(hostBuilds));
+  return CANVAS_SERVER_INSERT_TYPES.has(type) && Boolean(hostBuilds);
 }
 
 // canvasDefaultBlock(type) → the minimal VALID portable-doc block for `type`,
