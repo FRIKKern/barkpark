@@ -196,9 +196,18 @@ defmodule Barkpark.Media.WhereUsed do
           roles: ["admin"]
         }
 
+        # task-4bffdfa43b24e4a5 — MUST carry the blob's OWN tenant scope, not
+        # just the caller context. Without workspace_id/project_id here,
+        # base_query/4's scope_to_workspace_or_global(query, nil, nil) falls
+        # to the NULL-workspace-only read, making any document stamped with a
+        # REAL workspace_id (i.e. every document outside the legacy default
+        # tenant) invisible to this lookup — a silent 0-hit false negative on
+        # the exact data-loss guard this module exists to be.
         rows =
-          Barkpark.Content.Query.list_reference_holders(asset_doc_id, file.dataset,
-            caller_context: ctx
+          Barkpark.Content.Query.list_reference_holders(
+            asset_doc_id,
+            file.dataset,
+            Keyword.merge(MediaFile.scope_opts(file), caller_context: ctx)
           )
 
         sample =
