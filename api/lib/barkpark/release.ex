@@ -211,6 +211,31 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Confirm a user's email on the operator's word, for an account whose
+  confirmation mail cannot arrive (a seeded editor, a box with no SMTP):
+
+      bin/barkpark eval 'Barkpark.Release.confirm_email("editor@example.com")'
+
+  The release twin of `mix barkpark.user.confirm`. Boots the narrowed
+  one-shot tree (`Barkpark.OneShot.boot!/0`: no listener, no Oban), so it runs
+  beside the serving node. A confirmed account is invited, not reclaimed, when
+  an admin seats it (owner ruling #7), so its password survives member-add.
+  The password is kept: only confirm an account you created or whose owner
+  you know. Delegates to `Barkpark.Accounts.confirm_user_by_operator/1`.
+  """
+  @spec confirm_email(String.t(), keyword()) ::
+          {:ok, String.t()} | {:ok, String.t(), :already_confirmed} | {:error, :not_found}
+  def confirm_email(email, opts \\ []) when is_binary(email) do
+    Keyword.get(opts, :boot, &Barkpark.OneShot.boot!/0).()
+
+    case Barkpark.Accounts.confirm_user_by_operator(email) do
+      {:ok, user} -> {:ok, user.email}
+      {:ok, user, :already_confirmed} -> {:ok, user.email, :already_confirmed}
+      {:error, :not_found} = err -> err
+    end
+  end
+
+  @doc """
   LOAD `:barkpark` without STARTING it.
 
   `Application.load/1` makes the app's environment (`:ecto_repos`, every

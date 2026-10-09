@@ -733,6 +733,55 @@ defmodule Barkpark.Accounts do
     do: Repo.update!(User.confirm_changeset(user))
 
   @doc """
+  Confirm an account's email on an OPERATOR's word, with no token
+  (task-bb41f3a2f5a843a7). The doors are `mix barkpark.user.confirm <email>`
+  and `Barkpark.Release.confirm_email/1`, both run on the box: there is no HTTP
+  route, so only someone with shell access can vouch for an address.
+
+  Seating an UNCONFIRMED account in a workspace reclaims it (owner ruling #7,
+  `Members.add_user_member/4`): its password is replaced and its sessions
+  deleted. A seeded editor at an address with no mailbox, or any account on a
+  box with no SMTP, can never confirm by mail, so an operator confirms it here
+  first and the seat becomes an invitation instead. The password is KEPT: the
+  operator is vouching that the person who set it owns the address. Do not run
+  it for an account you did not create or cannot vouch for.
+
+  Pending confirm tokens are deleted. An already-confirmed account is returned
+  as `{:ok, user, :already_confirmed}` and not touched.
+  """
+  @spec confirm_user_by_operator(String.t()) ::
+          {:ok, User.t()} | {:ok, User.t(), :already_confirmed} | {:error, :not_found}
+  def confirm_user_by_operator(email) when is_binary(email) do
+    case get_user_by_email(String.trim(email)) do
+      nil ->
+        {:error, :not_found}
+
+      %User{confirmed_at: %DateTime{}} = user ->
+        {:ok, user, :already_confirmed}
+
+      %User{} = user ->
+        {:ok, confirmed} =
+          Repo.transaction(fn ->
+            Repo.delete_all(
+              from t in UserEmailToken, where: t.user_id == ^user.id and t.context == "confirm"
+            )
+
+            Repo.update!(User.confirm_changeset(user))
+          end)
+
+        Audit.emit_best_effort(%{
+          category: "auth",
+          action: "email_confirmed_by_operator",
+          subject: user.id,
+          actor_type: "system",
+          metadata: %{}
+        })
+
+        {:ok, confirmed}
+    end
+  end
+
+  @doc """
   Reset a password from a `"reset"` token plaintext, then revoke all sessions.
 
   Drops the revoked-session count — use `reset_user_password_counting/2` on any

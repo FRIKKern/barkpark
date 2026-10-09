@@ -71,6 +71,20 @@ defmodule BarkparkWeb.MemberController do
     end
   end
 
+  # Owner ruling #7: an UNCONFIRMED account is reclaimed before it is seated
+  # (`Accounts.Privacy.reclaim_unconfirmed/1`). Whatever password and sessions
+  # it had stop working, which surprised every operator who seated an editor
+  # they had just registered (task-f583460d431d195c). The answer says so; `bp`
+  # prints top-level `warnings` on stderr.
+  @reclaimed_warning %{
+    code: "account_reclaimed",
+    severity: "warning",
+    message:
+      "this email's account was never confirmed, so it was reclaimed before seating " <>
+        "(owner ruling #7): its password was replaced and every session signed out. " <>
+        "No email was sent. The user signs in with a password reset or a magic link."
+  }
+
   @doc """
   `POST /w/:ws/p/:proj/v1/members` — seat a human.
 
@@ -81,7 +95,9 @@ defmodule BarkparkWeb.MemberController do
   An EXISTING, confirmed account is not seated at once (owner ruling #7): the
   answer is `202 {"invitation": …}` and the seat appears when the user
   accepts (`POST /v1/auth/invitations/:id/accept`). A new e-mail is seated
-  directly (`201 {"member": …}`), as before.
+  directly (`201 {"member": …}`), as before. An existing UNCONFIRMED account
+  is reclaimed, then seated: `201 {"member": …, "reclaimed": true,
+  "warnings": [{"code": "account_reclaimed", …}]}`.
   """
   def create(conn, params) do
     with %{id: ws_id} <- conn.assigns[:current_workspace],
@@ -90,6 +106,11 @@ defmodule BarkparkWeb.MemberController do
       case Members.add_user_member(ws_id, email, to_string(role), actor: caller(conn)) do
         {:ok, {:invited, invitation}} ->
           conn |> put_status(:accepted) |> json(%{invitation: invitation})
+
+        {:ok, {:reclaimed, member}} ->
+          conn
+          |> put_status(:created)
+          |> json(%{member: member, reclaimed: true, warnings: [@reclaimed_warning]})
 
         {:ok, member} ->
           conn |> put_status(:created) |> json(%{member: member})

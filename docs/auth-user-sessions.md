@@ -36,7 +36,13 @@ confirmed existing account stores a `workspace_invitations` row and answers
 `202 {invitation}`; nothing is seated until the user accepts
 (`GET /v1/auth/invitations`, `POST …/:id/accept`, `DELETE …/:id` declines;
 admins list/withdraw at `…/v1/invitations`). New emails and unconfirmed
-accounts are still seated at once. A user-owned token is rotated only by its
+accounts are still seated at once. An unconfirmed one is reclaimed first, by
+design (`Privacy.reclaim_unconfirmed/1`): password replaced, sessions deleted,
+no mail sent. The `201` says so (`reclaimed: true` plus an `account_reclaimed`
+warning, which `bp` prints). To keep a seeded editor's password, confirm it
+first: `mix barkpark.user.confirm <email>`, or in a release
+`bin/barkpark eval 'Barkpark.Release.confirm_email("<email>")'`
+(`Accounts.confirm_user_by_operator/1`). A user-owned token is rotated only by its
 owner (`403 owner_only`); admins revoke instead. `POST /v1/auth/tokens` takes
 `workspace` (slug/id); a user in several workspaces without it gets `422
 workspace_required` listing them.
