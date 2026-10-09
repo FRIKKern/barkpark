@@ -166,6 +166,7 @@ defmodule BarkparkWeb.ListenController do
     conn = arm_reauth(conn, workspace_id)
 
     try do
+      schedule_keepalive()
       listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       send(forwarder, :stop)
@@ -326,10 +327,20 @@ defmodule BarkparkWeb.ListenController do
       # Ignore legacy messages without event_id (defensive)
       {:document_changed, _} ->
         listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
-    after
-      30_000 ->
+
+      # task-a0fcffbe8799abe5 — scheduled with `Process.send_after/3`, NOT a `receive
+      # ... after` timeout: an `after` clause's clock restarts on EVERY
+      # message this `receive` handles, so a busy dataset whose other
+      # activity kept landing here (even a `:document_changed` for a type/
+      # perspective this subscriber's filter drops, or the legacy
+      # no-event-id shape above) could starve the keepalive indefinitely —
+      # the exact bug found and fixed in `PresenceController`'s loop
+      # (task-936472b77285df5b). A timer fired by `self()` keeps its own
+      # schedule no matter what else lands in this mailbox.
+      :keepalive ->
         with {:ok, conn} <- reauth_step(conn),
              {:ok, c} <- chunk(conn, ": keepalive\n\n") do
+          schedule_keepalive()
           listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
         else
           {:revoked, conn} -> conn
@@ -337,6 +348,10 @@ defmodule BarkparkWeb.ListenController do
         end
     end
   end
+
+  defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
+
+  defp keepalive_ms, do: Application.get_env(:barkpark, :listen_keepalive_ms, 30_000)
 
   defp forward_live(conn, msg, dataset, workspace_id, caller_context, scope, lf) do
     if forward_event?(msg, workspace_id) and ListenFilter.pass_meta?(lf, msg) do
