@@ -17,7 +17,10 @@ defmodule Barkpark.Content.Edges do
   alias Barkpark.Repo
   alias Barkpark.Content
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
-  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Writer, WriteScope}
+  alias Barkpark.Content.Papers.BlockOps
+  alias Barkpark.Content.{Broadcast, Document, DraftId, SchemaDefinition, Validation, WriteScope}
+  alias Barkpark.Content.Writer
+  alias Barkpark.PortableDoc.BodyWalk
 
   import Barkpark.Content.Scope,
     only: [
@@ -710,7 +713,77 @@ defmodule Barkpark.Content.Edges do
     |> Enum.map(fn value -> {value, field_name, ref_type} end)
   end
 
+  # richText field → every STRUCTURAL reference inside its block tree
+  # (task-e13285602dccceca, ruled: a markDef/annotation, inline object, or
+  # custom object block carrying a `_ref` — self-describing, no schema
+  # needed — OR a declared reference-typed field inside a custom object
+  # block's OWN schema, which may store a bare string id (the field's type
+  # tells us, `_ref` does not) — PLUS a wikilink resolving to a doc id. NOT
+  # a plain URL link: nothing here ever reads `"href"`.
+  #
+  # `BlockOps.field_blocks/1` resolves EITHER live shape a richText value
+  # holds (a bare list, or the block-editor's `%{"blocks", "html"}` wrapper
+  # — task-839f9bebf5628c03/#22575/#22576) before the walk ever starts, so
+  # this clause does not need its own shape test. `BodyWalk.collect/2` is
+  # the shared deep walker (wire §7.3) — generic over maps/lists, so it
+  # does not care about shape EITHER; it just needs the blocks `field_blocks/1`
+  # already found.
+  defp extract_field_edges(%{"type" => "richText", "name" => field_name} = field, content)
+       when is_binary(field_name) do
+    objects = Validation.object_block_types(field)
+
+    content
+    |> Map.get(field_name)
+    |> BlockOps.field_blocks()
+    |> BodyWalk.collect(&richtext_node_targets(&1, objects))
+    |> Enum.map(fn {target, ref_type} -> {target, field_name, ref_type} end)
+  end
+
   defp extract_field_edges(_field, _content), do: []
+
+  defp richtext_node_targets(node, objects) do
+    Enum.map(structural_ref_targets(node), &{&1, nil}) ++
+      typed_block_field_targets(node, objects)
+  end
+
+  # Self-describing: a bare `_ref` map, wherever it occurs — a markDef, an
+  # inline object, or a custom block's reference field that happens to use
+  # the wrapped convention. No schema lookup needed; `_ref` already says
+  # what it is.
+  defp structural_ref_targets(%{"_ref" => ref}) when is_binary(ref) and ref != "", do: [ref]
+
+  # A wikilink resolves by `docId` (pre-resolved) or its raw `target` —
+  # mirrors the Bulldocs body-walk extractor's own wikilink arm exactly.
+  # Deliberately does NOT read `"href"`: a plain URL link is ruled OUT.
+  defp structural_ref_targets(%{"type" => "wikilink"} = node) do
+    case node["docId"] || node["target"] do
+      t when is_binary(t) and t != "" -> [t]
+      _ -> []
+    end
+  end
+
+  defp structural_ref_targets(_node), do: []
+
+  # A custom object block's OWN declared field of `"type" => "reference"`
+  # may store a BARE STRING id (the legacy v1 convention `reference_target/1`
+  # already accepts for a top-level scalar reference field) — no `_ref`
+  # wrapper to self-describe it, so only the block's OWN schema (`objects`,
+  # from `Validation.object_block_types/1`) can tell a reference field from
+  # an ordinary string field of the same shape.
+  defp typed_block_field_targets(%{"type" => block_type} = node, objects)
+       when is_map_key(objects, block_type) do
+    objects
+    |> Map.fetch!(block_type)
+    |> Enum.filter(&(&1["type"] == "reference"))
+    |> Enum.flat_map(fn field_def ->
+      case node |> Map.get(field_def["name"]) |> reference_target() do
+        nil -> []
+        target -> [{target, dangling_ref_type(field_def)}]
+      end
+    end)
+  end
+
+  defp typed_block_field_targets(_node, _objects), do: []
 
   # The SHARED resolve-and-dangling helper (gap #2). TWO branches that MUST
   # agree on lens (:published) + scope so a typed and an untyped ref to the same
