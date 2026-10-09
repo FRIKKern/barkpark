@@ -1,18 +1,23 @@
 defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
   @moduledoc """
-  task-8f7cba7f65cb343c — the admin-only HTTP mint/revoke for
+  task-8f7cba7f65cb343c — the admin-only HTTP mint for
   `Barkpark.PreviewToken` JWTs, and the `multi_use` reusability ruling.
 
   Before this, nothing minted a preview JWT over HTTP (`PreviewToken.sign/2`
   had zero production callers). This file proves:
 
     * `POST /v1/preview-tokens` mints a token an admin can use; a non-admin
-      gets 403.
+      gets 403. The minted token is signed with the ADMIN'S OWN resolved
+      `workspace_id`/`project_id` (`ScopeHelpers.scope_opts/1`, never a
+      caller-supplied value) — `RequireAdminRouteCensusTest`'s
+      `:tenant_bound` guard for this route.
     * The DEFAULT mint is still single-use — unchanged behaviour, proven by
       reusing `preview_routes_test.exs`'s own replay assertion shape.
     * `multi_use: true` opts a token OUT of single-use: it serves many
       `/v1/preview/*` reads AND the `/v1/preview/listen/:dataset` stream,
-      until `DELETE /v1/preview-tokens/:jti` revokes it or its TTL expires.
+      until `Barkpark.PreviewToken.revoke/1` (called directly — there is no
+      HTTP revoke route; see `PreviewTokenController`'s moduledoc for why)
+      revokes it, or its TTL expires.
     * A `multi_use` TTL above the hard max (3600s) is clamped, never
       honoured as asked.
 
@@ -20,6 +25,8 @@ defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
   """
 
   use BarkparkWeb.ConnCase, async: false
+
+  import Barkpark.TenancyFixtures
 
   alias Barkpark.{Auth, Content, PreviewToken}
 
@@ -88,7 +95,7 @@ defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
     Jason.decode!(resp.resp_body)
   end
 
-  # ── mint / revoke access control ────────────────────────────────────────
+  # ── mint access control ──────────────────────────────────────────────────
 
   test "an admin mints a token", %{conn: conn} do
     body = mint!(conn, %{"dataset" => "production"})
@@ -160,6 +167,11 @@ defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
   end
 
   test "a revoked multi_use token is refused on the next request", %{conn: conn} do
+    # No HTTP revoke route exists (PreviewTokenController's moduledoc says
+    # why: preview_token_jti has no tenant column to fence a bare-jti DELETE
+    # with). The backstop the multi_use ruling asked for is the existing
+    # Barkpark.PreviewToken.revoke/1, called directly here -- same as any
+    # other in-process/ops caller would.
     body = mint!(conn, %{"dataset" => "production", "multi_use" => true})
     token = body["token"]
     jti = body["jti"]
@@ -167,20 +179,10 @@ defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
     first = conn |> preview(token) |> get("/v1/preview/query/production/post")
     assert first.status == 200
 
-    revoke_resp =
-      conn
-      |> authed(@admin_token)
-      |> delete("/v1/preview-tokens/#{jti}")
-
-    assert revoke_resp.status == 200
+    assert :ok = PreviewToken.revoke(jti)
 
     second = conn |> preview(token) |> get("/v1/preview/query/production/post")
     assert second.status == 401
-  end
-
-  test "revoking an unknown jti is a 404", %{conn: conn} do
-    resp = conn |> authed(@admin_token) |> delete("/v1/preview-tokens/not-a-real-jti")
-    assert resp.status == 404
   end
 
   test "an expired multi_use token is refused", %{conn: conn} do
@@ -214,6 +216,46 @@ defmodule BarkparkWeb.Integration.PreviewTokenMintTest do
 
     assert ttl_granted > 3600,
            "a plain (single-use) mint's TTL was clamped to the multi_use ceiling -- it should not be"
+  end
+
+  # ── tenant confinement (RequireAdminRouteCensusTest :tenant_bound) ──────
+
+  test "a mint ignores a caller-supplied workspace_id and signs the ADMIN'S OWN resolved one, " <>
+         "so the minted token cannot read a different tenant's document of the same dataset+type",
+       %{conn: conn} do
+    ws_a = create_workspace!()
+    _proj_a = create_project!(ws_a)
+    ws_b = create_workspace!()
+    proj_b = create_project!(ws_b)
+
+    {:ok, victim} =
+      create_document_in!(ws_b, proj_b, "post", %{"_id" => "cross-tenant-victim"}, "test")
+
+    admin_a_raw = "admin-a-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+    {:ok, _} = Auth.create_token(admin_a_raw, "dev", "test", ["read", "write", "admin"], ws_a.id)
+
+    resp =
+      conn
+      |> put_req_header("authorization", "Bearer " <> admin_a_raw)
+      |> put_req_header("content-type", "application/json")
+      # Trying to smuggle B's workspace in the body -- the controller never
+      # reads this param; it is included to prove that attempt is inert.
+      |> post("/v1/preview-tokens", %{"dataset" => "test", "workspace_id" => ws_b.id})
+
+    assert resp.status == 201
+    body = Jason.decode!(resp.resp_body)
+
+    assert body["workspace_id"] == ws_a.id,
+           "the mint signed the SMUGGLED workspace, not the admin's own"
+
+    leak =
+      conn
+      |> preview(body["token"])
+      |> get("/v1/preview/doc/test/post/#{victim.doc_id}")
+
+    assert leak.status in [401, 403, 404],
+           "a token minted for workspace A read workspace B's document: " <>
+             "#{leak.status} #{leak.resp_body}"
   end
 
   test "doc_ids rides through the mint into the token's scope", %{conn: conn} do

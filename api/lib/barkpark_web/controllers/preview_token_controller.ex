@@ -1,6 +1,6 @@
 defmodule BarkparkWeb.PreviewTokenController do
   @moduledoc """
-  Admin-only HTTP mint/revoke for `Barkpark.PreviewToken` JWTs
+  Admin-only HTTP mint for `Barkpark.PreviewToken` JWTs
   (task-8f7cba7f65cb343c).
 
   Every `/v1/preview/*` read (QueryController, ListenController, piped
@@ -21,22 +21,54 @@ defmodule BarkparkWeb.PreviewTokenController do
 
   A `multi_use` token's TTL defaults to 600s and is clamped to a hard max of
   3600s regardless of what the caller asks for — `BarkparkWeb.Plugs.PreviewToken`
-  skips the
-  replay-dedup `record_jti` call for a multi_use token on every read past the
-  first (see that module), so TTL + revocation (`PreviewToken.revoke/1`,
-  already wired to this controller's `revoke/2`) are the only things
-  bounding a leaked multi_use token's blast radius — tighter than single-use,
-  which self-destructs on first read regardless of TTL.
+  skips the replay-dedup `record_jti` call for a multi_use token on every
+  read past the first (see that module), so TTL + revocation
+  (`Barkpark.PreviewToken.revoke/1` — the existing function, NOT wired to an
+  HTTP route by this slice, see below) are the only things bounding a
+  leaked multi_use token's blast radius — tighter than single-use, which
+  self-destructs on first read regardless of TTL.
+
+  ## No HTTP revoke route, deliberately
+
+  `preview_token_jti` carries no workspace/tenant column at all (migration
+  20260417230200) — unlike `PreviewLinkController.revoke/2`'s sibling route,
+  which reads its row's STORED workspace_id before deciding. A
+  `DELETE .../:jti` front door here would be a bare-id selector reaching an
+  admin-mutable row with no tenant re-derivation possible:
+  `RequireAdminRouteCensusTest` classifies exactly that shape `:exploitable`.
+  `Barkpark.PreviewToken.revoke/1` still exists and is still the backstop
+  the multi_use ruling asked for — callable in-process (iex, a future mix
+  task) — it is just not exposed to an admin-anywhere Bearer over HTTP
+  until the table carries a real tenant column to fence it with.
 
   A single-use token minted here gets no such cap: it behaves exactly like
   one minted by calling `PreviewToken.sign/2` directly, which nothing ever
   prevented.
+
+  ## Tenant confinement (`RequireAdminRouteCensusTest`, :tenant_bound)
+
+  `RequireAdmin` only answers "is this bearer an admin SOMEWHERE" — it reads
+  no workspace at all. A caller-supplied `dataset` string alone would have let
+  an admin of workspace A mint a token scoped to workspace B's `dataset` name
+  (dataset names are not globally unique; they are scoped by
+  `workspace_id`/`project_id`, same as every other tenant row). So this mint
+  does NOT trust a caller-supplied workspace — it signs `workspace_id`/
+  `project_id` from `ScopeHelpers.scope_opts(conn)`, which `:flat_admin_api`
+  already resolved from the TOKEN (`DeriveWorkspaceFromToken`, fail-soft to
+  Default; never from request params) before this action ran. The minted
+  token can therefore only ever read within the calling admin's own tenant —
+  exactly the confinement `SchemaController`/`StructureController` get from
+  the same pipeline, and exactly what `BarkparkWeb.Plugs.PreviewToken`'s
+  `assign_claimed_scope/2` already enforces for a token presenting EITHER
+  claim (an unknown workspace/project is refused there, not here).
   """
 
   use BarkparkWeb, :controller
 
   alias Barkpark.PreviewToken
   alias BarkparkWeb.ErrorResponse
+
+  import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   @default_ttl 600
   @multi_use_max_ttl 3600
@@ -49,7 +81,10 @@ defmodule BarkparkWeb.PreviewTokenController do
       multi_use = params["multi_use"] == true
       ttl = clamp_ttl(params["ttl_seconds"], multi_use)
 
-      claims = %{dataset: dataset, doc_ids: doc_ids, ttl_seconds: ttl}
+      claims =
+        %{dataset: dataset, doc_ids: doc_ids, ttl_seconds: ttl}
+        |> put_tenant_claims(scope_opts(conn))
+
       claims = if multi_use, do: Map.put(claims, :multi_use, true), else: claims
 
       {raw, full_claims} = PreviewToken.sign(claims, secret)
@@ -71,6 +106,8 @@ defmodule BarkparkWeb.PreviewTokenController do
         jti: string_claims["jti"],
         dataset: string_claims["dataset"],
         doc_ids: string_claims["doc_ids"],
+        workspace_id: string_claims["workspace_id"],
+        project_id: string_claims["project_id"],
         multi_use: multi_use,
         expires_at: unix_to_iso8601(string_claims["exp"])
       })
@@ -80,15 +117,21 @@ defmodule BarkparkWeb.PreviewTokenController do
     end
   end
 
-  @doc "DELETE /v1/preview-tokens/:jti — revoke one preview token immediately."
-  def revoke(conn, %{"jti" => jti}) do
-    case PreviewToken.revoke(jti) do
-      :ok -> json(conn, %{revoked: true, jti: jti})
-      {:error, :not_found} -> not_found(conn)
-    end
+  # ── helpers ──────────────────────────────────────────────────────────────
+
+  # Reads the admin's OWN resolved tenant off `scope_opts/1` — never caller
+  # input — and signs it into the claims. `workspace_id`/`project_id` absent
+  # from `opts` (an instance-root/pre-tenancy token) signs neither claim,
+  # which is the SAME "unscoped, falls to Default at read time" shape every
+  # other claim-less preview token already has.
+  defp put_tenant_claims(claims, opts) do
+    claims
+    |> maybe_put_claim(:workspace_id, Keyword.get(opts, :workspace_id))
+    |> maybe_put_claim(:project_id, Keyword.get(opts, :project_id))
   end
 
-  # ── helpers ──────────────────────────────────────────────────────────────
+  defp maybe_put_claim(claims, _key, nil), do: claims
+  defp maybe_put_claim(claims, key, value), do: Map.put(claims, key, value)
 
   defp fetch_dataset(%{"dataset" => ds}) when is_binary(ds) and ds != "", do: {:ok, ds}
   defp fetch_dataset(_), do: {:error, "dataset is required"}
@@ -126,7 +169,4 @@ defmodule BarkparkWeb.PreviewTokenController do
 
   defp unprocessable(conn, msg),
     do: ErrorResponse.emit_custom(conn, 422, "validation_failed", msg)
-
-  defp not_found(conn),
-    do: ErrorResponse.emit(conn, {:error, :not_found}, "preview token not found")
 end
