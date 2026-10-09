@@ -58,6 +58,31 @@ defmodule BarkparkWeb.Studio.ProfileDisplayNameTest do
     refute html2 =~ ~r/User [0-9a-z]{4} — open your profile/
   end
 
+  test "an account with no display name keeps one fallback name on every render and in every browser",
+       %{conn: conn} do
+    # task-6db38e1365702602: the static render has no connect params, so a
+    # name keyed on the per-browser id was random on every load.
+    user = register!()
+    expected = "User #{String.slice(user.id, 0..3)} — open your profile"
+    path = scoped_studio("/d/#{@dataset}/studio")
+
+    for _ <- 1..3 do
+      static = conn |> session_conn(user) |> get(path) |> html_response(200)
+      assert static =~ expected
+    end
+
+    for browser <- ["aaaa1111", "bbbb2222"] do
+      {:ok, _view, html} =
+        build_conn_scoped()
+        |> session_conn(user)
+        |> put_connect_params(%{"user_id" => browser})
+        |> live(path)
+
+      assert html =~ expected
+      refute html =~ "User #{String.slice(browser, 0..3)}"
+    end
+  end
+
   test "a name over 80 characters is refused in the dialog and nothing is saved", %{conn: conn} do
     user = register!()
     {:ok, view, _} = open_studio(session_conn(conn, user))

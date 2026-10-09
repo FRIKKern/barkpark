@@ -33,7 +33,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     # A signed-in account's display name is the name peers see; it wins over
     # the per-browser name, so it follows the account to every browser
     # (task-8d8dabe8b693031d). Without an account, the browser's own name.
-    fallback = fallback_name(socket, user_id)
+    fallback = fallback_name(socket, fallback_id(socket, user_id))
 
     user_name =
       case socket.assigns[:current_user] do
@@ -408,6 +408,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   Re-evaluated in every shares-* handler, not just at mount.
   """
   def shares_admin?(socket), do: Caps.admin?(socket)
+
+  # The fallback name is keyed on the signed-in account, not the per-browser
+  # presence id: the static render has no connect params, so a per-browser key
+  # painted a random "User <hex>" on every load and a different one in every
+  # browser (task-6db38e1365702602). Anonymous sessions keep the browser's id.
+  defp fallback_id(socket, user_id) do
+    case socket.assigns[:current_user] do
+      %{id: id} when is_binary(id) -> id
+      _ -> user_id
+    end
+  end
 
   # A session with no display name and no stored name is "User <4 hex>" in
   # the workspace's language (task-af8133b738966b6c). Mount runs before
