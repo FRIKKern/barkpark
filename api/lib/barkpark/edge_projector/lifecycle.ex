@@ -19,15 +19,15 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
     * `:after_save`      — a doc was created/updated → REBUILD op (flag OFF,
       default) | UPSERT op (flag ON) — debounced (autosave bursts collapse).
     * `:after_publish`   — a draft was published      → SYNCHRONOUS per-doc
-      UPSERT, inline, before this hook returns (task-3fd3c0c53d08a6bd — see
-      below) — ONLY when this publish is NOT already inside a shared
-      transaction. Falls back to the debounced path (same as `:after_save`)
-      on any failure, on a doc with no resolvable `_id`, or — critically —
-      whenever `Repo.in_transaction?/0` says this publish is running inside a
-      transaction some OTHER caller opened (a batch `apply_mutations`/
-      `POST /v1/data/mutate` with multiple publishes). See "Why batch
-      publishes stay debounced" below for why that last case is load-bearing,
-      not an optimisation.
+      UPSERT, inline, before this hook returns, when this publish is NOT
+      inside a shared transaction (task-3fd3c0c53d08a6bd) | DEFERRED until
+      that transaction commits, when it IS inside one AND that transaction's
+      owner claimed the deferred queue (task-9231839aa8f5f891 — a batch
+      `apply_mutations`/`POST /v1/data/mutate` with multiple publishes) |
+      debounced UPSERT job, same as `:after_save`, on any failure, on a doc
+      with no resolvable `_id`, or on a shared transaction NOBODY claimed the
+      deferred queue for. See "Why a batch publish is DEFERRED, never run
+      inline" below — this is load-bearing, not an optimisation.
     * `:after_unpublish` — a published doc went back to draft → DELETE op
       (always — the published graph must stop showing it the moment it leaves
       published state; the next publish re-projects it). Modelled as a delete,
@@ -81,7 +81,7 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   the `incremental_project` flag) because it is bounded to ONE document's own
   extract + diff — not a corpus-wide rebuild.
 
-  ## Why batch publishes stay debounced
+  ## Why a batch publish is DEFERRED, never run inline (task-9231839aa8f5f891)
 
   `publish_document/4`'s OWN transaction always commits BEFORE `:after_publish`
   fires for a STANDALONE publish (`Content.Lifecycle.publish_after_commit/4`
@@ -109,16 +109,26 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   transaction already holds, and the outer transaction will not release it
   until the task — which it is synchronously awaiting — returns.
 
-  So for THIS event, inside someone else's open transaction, is the ONE case
-  where "run it inline" is not just slower but UNSAFE: a single doc's
-  projector hiccup could poison and roll back an entire unrelated batch. The
-  routing therefore checks `Repo.in_transaction?/0` first and takes the
-  debounced path whenever it is true — exactly the pre-fix behaviour for that
-  one case, so a batch publish is never less safe than before, at the cost of
-  not (yet) being prompt for a batch either. Making a BATCH publish's edges
-  prompt without this hazard needs a deferred-until-commit queue (mirroring
-  `Broadcast`'s own claim/flush/clear pattern for broadcasts and webhooks) —
-  that is follow-up work, not part of this fix.
+  So for THIS event, inside someone else's open transaction, running it
+  inline is not just slower, it is UNSAFE: a single doc's projector hiccup
+  could poison and roll back an entire unrelated batch. `route_publish/2`
+  instead DEFERS (`defer_upsert/3`) whenever the transaction's deferred queue
+  is OWNED (`Broadcast.claim_deferred_queue/0` — every caller of
+  `apply_mutations/3`, and the paper document-op path, already claims it
+  before opening their transaction, for the SAME reason broadcasts and
+  webhooks need it). The deferred upsert runs for real in
+  `flush_deferred_upserts/0`, called from
+  `Broadcast.flush_deferred_broadcasts/0` AFTER that transaction has
+  committed — by construction, with no transaction of its own (or anyone
+  else's) open on this process, so the batch is both prompt (correct by the
+  time the batch call returns) and exactly as safe as the standalone case.
+
+  The ONE remaining fallback is a transaction NOBODY claimed the deferred
+  queue for (the same situation `Broadcast.record_orphan_if_unowned/2` warns
+  about for a broadcast) — there, nothing will ever call
+  `flush_deferred_upserts/0`, so deferring would silently strand the upsert
+  forever. That case alone still takes the debounced `ProjectorWorker` path,
+  exactly the pre-defer-queue behaviour.
 
   ## Recursion guard
 
@@ -141,6 +151,17 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   @after_events [:after_save, :after_publish, :after_unpublish, :after_delete]
   @save_events [:after_save]
   @delete_events [:after_unpublish, :after_delete]
+
+  # task-9231839aa8f5f891's deferred-upsert queue. `@deferred_owner_key` MUST
+  # stay byte-identical to `Barkpark.Content.Broadcast`'s OWN
+  # `@deferred_owner_key` (`:barkpark_deferred_owner`) — process-dictionary
+  # keys are plain terms, not namespaced by module, so reading the SAME atom
+  # here needs no call back into Broadcast (which would make a cycle:
+  # Broadcast already calls INTO this module, at `flush_deferred_upserts/0`).
+  # `@deferred_edge_upserts_key` is this module's OWN queue, parallel to
+  # Broadcast's `:barkpark_deferred_broadcasts` / `:barkpark_deferred_webhooks`.
+  @deferred_owner_key :barkpark_deferred_owner
+  @deferred_edge_upserts_key :barkpark_deferred_edge_upserts
 
   @doc """
   The single fast hook fn for all four `after_*` events. Always returns `:ok`
@@ -211,30 +232,108 @@ defmodule Barkpark.EdgeProjector.Lifecycle do
   # PUBLISH: a bounded, synchronous per-doc upsert — no flag, no debounce (see
   # moduledoc, task-3fd3c0c53d08a6bd) — UNLESS this publish is already inside
   # someone else's open transaction (a batch mutate), in which case running it
-  # inline is not an optimisation question, it is a SAFETY one (see "Why batch
-  # publishes stay debounced" above): take the debounced path, unchanged from
-  # before this fix. A doc with no resolvable `_id` cannot be targeted at all,
-  # so it also takes the debounced-rebuild fallback `:after_save` uses. A
-  # resolvable, not-in-a-shared-transaction doc that fails to upsert
-  # synchronously (a raised exception, or `{:error, _}` from the projector)
-  # falls back to the debounced per-doc upsert job rather than losing the
-  # write outright — the graph ends up correct a little late instead of not
-  # at all.
+  # INLINE is not an optimisation question, it is a SAFETY one (see "Why batch
+  # publishes stay debounced" above). Three cases:
+  #
+  #   1. Not in a transaction (the standalone publish — by far the common
+  #      case): run `upsert_now/3` immediately, as before.
+  #   2. In a transaction whose owner CLAIMED the deferred queue
+  #      (`Broadcast.claim_deferred_queue/0` — `Content.Mutations` and
+  #      `Papers.BlockOps`'s own batch boundaries always do): DEFER. The
+  #      upsert runs for real once that transaction commits
+  #      (`flush_deferred_upserts/0`, called from
+  #      `Broadcast.flush_deferred_broadcasts/0`) — never while any
+  #      connection is still inside the risky transaction.
+  #   3. In a transaction nobody claimed (an UNOWNED deferred scope — the
+  #      same situation `Broadcast.record_orphan_if_unowned/2` warns about
+  #      for a broadcast/webhook): nothing will ever flush a deferred item
+  #      here, so take the debounced `ProjectorWorker` path instead —
+  #      byte-identical to this fix's very first (pre-defer-queue) cut.
+  #
+  # A doc with no resolvable `_id` cannot be targeted at all (deferred or
+  # not), so it always takes the debounced-rebuild fallback `:after_save`
+  # uses, regardless of which of the three cases above it would have hit.
   defp route_publish(doc, dataset) do
     case doc_id(doc) do
       id when is_binary(id) and id != "" ->
-        if Repo.in_transaction?() do
-          do_enqueue_upsert(doc, dataset)
-        else
-          case upsert_now(doc, id, dataset) do
-            :ok -> :ok
-            :fallback -> do_enqueue_upsert(doc, dataset)
-          end
+        cond do
+          not Repo.in_transaction?() ->
+            case upsert_now(doc, id, dataset) do
+              :ok -> :ok
+              :fallback -> do_enqueue_upsert(doc, dataset)
+            end
+
+          Process.get(@deferred_owner_key) ->
+            defer_upsert(doc, id, dataset)
+
+          true ->
+            do_enqueue_upsert(doc, dataset)
         end
 
       _ ->
         do_enqueue_rebuild(doc, dataset)
     end
+  end
+
+  # Queue this doc's upsert for `flush_deferred_upserts/0` instead of running
+  # it now. Stores the ALREADY-RESOLVED `id` (the caller just matched on it)
+  # so the flush never has to re-derive it, and prepends (flushed in reverse
+  # — the same "built by prepending" convention `Broadcast`'s own two queues
+  # use, for the same reason: O(1) here, one `Enum.reverse/1` at flush time).
+  defp defer_upsert(doc, id, dataset) do
+    queue = Process.get(@deferred_edge_upserts_key, [])
+    Process.put(@deferred_edge_upserts_key, [{doc, id, dataset} | queue])
+    :ok
+  end
+
+  @doc """
+  Run every edge-upsert `route_publish/2` deferred during a transaction that
+  just committed (task-9231839aa8f5f891 — the safe completion of
+  task-3fd3c0c53d08a6bd's batch-publish gap). Called from
+  `Barkpark.Content.Broadcast.flush_deferred_broadcasts/0`, AFTER it flushes
+  broadcasts and webhooks — so by the time any of these run, the write that
+  queued them has already committed and released its connection. This is the
+  one guarantee the inline path could not give a BATCH publish: every queued
+  upsert here runs with NO transaction of its own (or anyone else's) open on
+  this process, so a raised exception can only ever fall back to the
+  debounced job (`flush_one_deferred_upsert/1`), never touch — let alone
+  roll back — the commit that already happened.
+
+  A no-op when nothing was deferred (the overwhelmingly common case: most
+  committed transactions publish nothing, or publish standalone and never
+  reach `defer_upsert/3` at all).
+  """
+  @spec flush_deferred_upserts() :: :ok
+  def flush_deferred_upserts do
+    queue = Process.delete(@deferred_edge_upserts_key) || []
+
+    queue
+    |> Enum.reverse()
+    |> Enum.each(&flush_one_deferred_upsert/1)
+
+    :ok
+  end
+
+  # ONE queued upsert, isolated — mirrors `Broadcast.flush_one_webhook/1`
+  # exactly in intent: a raise here must not abort the `Enum.each` and drop
+  # every LATER queued upsert of the same committed batch. `upsert_now/3`
+  # already rescues internally (so this `rescue` is belt-and-suspenders for
+  # a raise in `do_enqueue_upsert/2` itself — an Oban insert failing in a way
+  # that raises rather than returning `{:error, _}`), but the isolation
+  # guarantee must hold at THIS boundary regardless of which layer catches it.
+  defp flush_one_deferred_upsert({doc, id, dataset}) do
+    case upsert_now(doc, id, dataset) do
+      :ok -> :ok
+      :fallback -> do_enqueue_upsert(doc, dataset)
+    end
+  rescue
+    e ->
+      Logger.error(
+        "EdgeProjector.Lifecycle: flushing a deferred publish-upsert RAISED for _id=#{id} " <>
+          "dataset=#{dataset}, falling back to the debounced path: " <> Exception.message(e)
+      )
+
+      do_enqueue_upsert(doc, dataset)
   end
 
   defp upsert_now(doc, id, dataset) do

@@ -56,6 +56,7 @@ defmodule Barkpark.Content.Broadcast do
   require Logger
 
   alias Barkpark.Audit
+  alias Barkpark.EdgeProjector.Lifecycle, as: EdgeProjectorLifecycle
   alias Barkpark.Repo
   alias Barkpark.ManagedRuntime.WriteAdmission.Door
 
@@ -495,6 +496,14 @@ defmodule Barkpark.Content.Broadcast do
   Flush broadcasts queued during a successful transaction, preserving their
   original order (the queue is built by prepending). Called by `apply_mutations`
   (concern H) on commit.
+
+  Also flushes the deferred edge-upsert queue (task-9231839aa8f5f891): a
+  `publish` mutation inside this same transaction deferred its
+  `Projector.upsert_record/2` call rather than risk it (see
+  `EdgeProjector.Lifecycle`'s moduledoc, "Why batch publishes stay
+  debounced") — now that the transaction has committed, those upserts run
+  for real, each isolated exactly like `flush_one_webhook/1` below, so one
+  doc's projector failure never drops the rest.
   """
   def flush_deferred_broadcasts do
     Process.delete(@deferred_owner_key)
@@ -511,6 +520,8 @@ defmodule Barkpark.Content.Broadcast do
     webhook_queue
     |> Enum.reverse()
     |> Enum.each(&flush_one_webhook/1)
+
+    EdgeProjectorLifecycle.flush_deferred_upserts()
   end
 
   # ONE queued webhook, isolated (r2c webhook audit). `Dispatcher.dispatch_async/7`
@@ -553,11 +564,17 @@ defmodule Barkpark.Content.Broadcast do
   @doc """
   Drop any queued broadcasts/webhooks without firing them — called by
   `apply_mutations` (concern H) on rollback.
+
+  Also drops any deferred edge-upsert (task-9231839aa8f5f891): the
+  transaction that would have published those docs rolled back, so there is
+  nothing to project — a doc that was never really published is not owed an
+  edge update.
   """
   def clear_deferred_broadcasts do
     Process.delete(@deferred_owner_key)
     Process.delete(:barkpark_deferred_broadcasts)
     Process.delete(:barkpark_deferred_webhooks)
+    Process.delete(:barkpark_deferred_edge_upserts)
     :ok
   end
 
@@ -617,6 +634,7 @@ defmodule Barkpark.Content.Broadcast do
   def claim_deferred_queue do
     Process.put(:barkpark_deferred_broadcasts, [])
     Process.put(:barkpark_deferred_webhooks, [])
+    Process.put(:barkpark_deferred_edge_upserts, [])
     Process.put(@deferred_owner_key, true)
     :ok
   end
