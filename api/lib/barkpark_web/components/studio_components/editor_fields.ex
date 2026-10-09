@@ -136,7 +136,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               <%= BarkparkWeb.StudioComponents.Panes.status_word(@secondary_doc.status) %>
             </span>
             <span class="bp-secondary-pane-type"><%= secondary_type_word(@secondary_type, @secondary_schema) %></span>
-            <strong><%= @secondary_doc.title || gettext("Untitled") %></strong>
+            <strong><%= BarkparkWeb.Studio.DocTitle.shown(@secondary_doc.title) || gettext("Untitled") %></strong>
           </div>
           <button
             type="button"
@@ -398,7 +398,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               title={gettext("%{name} — profile", name: me)} aria-label={gettext("%{name} — open your profile", name: me)}>
         <div class="presence-me-info">
           <span class="presence-me-name"><%= me %></span>
-          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: @editor_doc.title || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || gettext("Untitled"), else: gettext("browsing")), 24) %></span>
+          <span class="presence-me-location"><%= truncate_text(if(@editor_doc, do: BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || Barkpark.Content.TitleDerivation.preview_title(@editor_doc, @editor_schema) || gettext("Untitled"), else: gettext("browsing")), 24) %></span>
         </div>
         <div class="presence-me" style={"background: #{@user_color}"} aria-hidden="true">
           <%= String.first(me) %>
