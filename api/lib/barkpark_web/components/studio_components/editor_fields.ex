@@ -52,9 +52,9 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
 
     ~H"""
     <%= if @count > 0 do %>
-      <div class="bp-bulk-action-bar" role="region" aria-label="Bulk actions" data-test-id="bulk-action-bar">
+      <div class="bp-bulk-action-bar" role="region" aria-label={gettext("Bulk actions")} data-test-id="bulk-action-bar">
         <span class="bp-bulk-action-count">
-          <%= @count %> selected
+          <%= gettext("%{count} selected", count: @count) %>
         </span>
         <div class="bp-bulk-action-buttons">
           <button
@@ -63,20 +63,20 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
             class="btn btn-primary btn-sm"
             phx-click="bulk-publish"
             data-test-id="bulk-publish"
-          >Publish selected</button>
+          ><%= gettext("Publish selected") %></button>
           <button
             :if={@admin?}
             type="button"
             class="btn btn-sm"
             phx-click="bulk-unpublish"
             data-test-id="bulk-unpublish"
-          >Unpublish selected</button>
+          ><%= gettext("Unpublish selected") %></button>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             phx-click="bulk-clear"
             data-test-id="bulk-clear"
-          >Clear</button>
+          ><%= gettext("Clear") %></button>
         </div>
       </div>
     <% end %>
@@ -133,17 +133,17 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               draft
             </span>
             <span class="badge" :if={!Barkpark.Content.draft?(@secondary_doc.doc_id)}>
-              <%= @secondary_doc.status %>
+              <%= BarkparkWeb.StudioComponents.Panes.status_word(@secondary_doc.status) %>
             </span>
             <span class="bp-secondary-pane-type"><%= @secondary_type %></span>
-            <strong><%= @secondary_doc.title || "Untitled" %></strong>
+            <strong><%= @secondary_doc.title || gettext("Untitled") %></strong>
           </div>
           <button
             type="button"
             class="btn btn-ghost btn-sm"
             phx-click="close-secondary"
             data-test-id="close-secondary"
-            aria-label="Close secondary pane"
+            aria-label={gettext("Close secondary pane")}
           >×</button>
         </header>
         <div class="bp-secondary-pane-body">
@@ -154,7 +154,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               <dd><%= secondary_format_value(get_in(@secondary_doc.content || %{}, [key])) %></dd>
             <% end %>
           </dl>
-          <p class="bp-secondary-pane-readonly">Read-only — edit via primary pane.</p>
+          <p class="bp-secondary-pane-readonly"><%= gettext("Read-only — edit via primary pane.") %></p>
         </div>
       </aside>
     <% end %>
@@ -263,14 +263,15 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
           phx-key="escape"
         >
           <div class="modal-header">
-            <h3 id="secondary-picker-title">Open in new pane</h3>
-            <button class="btn btn-ghost btn-sm" phx-click="close-secondary-picker" aria-label="Close">×</button>
+            <h3 id="secondary-picker-title"><%= gettext("Open in new pane") %></h3>
+            <button class="btn btn-ghost btn-sm" phx-click="close-secondary-picker" aria-label={gettext("Close")}>×</button>
           </div>
           <div class="modal-body">
             <input
               type="text"
               class="form-input"
-              placeholder="Search documents…"
+              placeholder={gettext("Search documents…")}
+              aria-label={gettext("Search documents…")}
               value={@secondary_search}
               phx-keyup="secondary-search"
               phx-debounce="150"
@@ -289,7 +290,7 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
                 </li>
               <% end %>
               <%= if @filtered == [] do %>
-                <li class="bp-secondary-empty">No matches.</li>
+                <li class="bp-secondary-empty"><%= gettext("No matches.") %></li>
               <% end %>
             </ul>
           </div>
@@ -344,14 +345,19 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
         <%= if p.doc_id && p.type do %>
           <button type="button" class="presence-user-wrap"
                phx-click="jump-to-user" phx-value-type={p.type} phx-value-doc-id={p.doc_id}
-               aria-label={"Jump to " <> Map.get(p, :name, "User") <> " — editing " <> truncate_text(p_doc_title, 24)}>
+               aria-label={
+                 gettext("Jump to %{name} — editing %{title}",
+                   name: Map.get(p, :name, gettext("User")),
+                   title: truncate_text(p_doc_title, 24)
+                 )
+               }>
             <div class="presence-avatar clickable" style={"background: #{p.color}"} aria-hidden="true">
               <%= String.first(Map.get(p, :name, "U")) %>
             </div>
             <div class="presence-tooltip">
-              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-              <div class="presence-tooltip-location">editing <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
-              <div class="presence-tooltip-hint">Click to jump there</div>
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, gettext("User")) %></div>
+              <div class="presence-tooltip-location"><%= gettext("editing") %> <strong><%= truncate_text(p_doc_title, 24) %></strong></div>
+              <div class="presence-tooltip-hint"><%= gettext("Click to jump there") %></div>
             </div>
           </button>
         <% else %>
@@ -360,8 +366,8 @@ defmodule BarkparkWeb.StudioComponents.EditorFields do
               <%= String.first(Map.get(p, :name, "U")) %>
             </div>
             <div class="presence-tooltip">
-              <div class="presence-tooltip-name"><%= Map.get(p, :name, "User") %></div>
-              <div class="presence-tooltip-location">browsing</div>
+              <div class="presence-tooltip-name"><%= Map.get(p, :name, gettext("User")) %></div>
+              <div class="presence-tooltip-location"><%= gettext("browsing") %></div>
             </div>
           </div>
         <% end %>
