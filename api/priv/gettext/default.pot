@@ -11,7 +11,7 @@
 msgid ""
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:893
+#: lib/barkpark_web/components/studio_components/editor.ex:895
 #, elixir-autogen, elixir-format
 msgid "%{count} warning — publishing is still allowed"
 msgid_plural "%{count} warnings — publishing is still allowed"
@@ -89,15 +89,15 @@ msgstr ""
 #: lib/barkpark_web/live/studio/chat_live.ex:3370
 #: lib/barkpark_web/live/studio/settings_live.ex:1069
 #: lib/barkpark_web/live/studio/settings_live.ex:1100
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3153
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3422
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3154
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3423
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:319
 #: lib/barkpark_web/studio_locale.ex:474
 #, elixir-autogen, elixir-format
 msgid "Delete"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1524
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1527
 #, elixir-autogen, elixir-format
 msgid "Desk filters"
 msgstr ""
@@ -125,8 +125,8 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:679
 #: lib/barkpark_web/components/studio_components/modals.ex:745
 #: lib/barkpark_web/live/bulldocs_live.ex:1738
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3172
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3421
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3173
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3422
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:206
 #: lib/barkpark_web/studio_locale.ex:484
@@ -149,7 +149,7 @@ msgstr ""
 msgid "Hide preview"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3143
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3144
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:176
 #, elixir-autogen, elixir-format
 msgid "History"
@@ -197,8 +197,8 @@ msgstr ""
 msgid "Move up"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1501
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1502
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1504
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1505
 #, elixir-autogen, elixir-format
 msgid "New %{type}"
 msgstr ""
@@ -235,7 +235,7 @@ msgstr ""
 msgid "Preview"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3024
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3025
 #: lib/barkpark_web/live/studio/studio_live/components.ex:240
 #: lib/barkpark_web/live/studio/studio_live/components.ex:243
 #: lib/barkpark_web/live/studio/studio_live/components.ex:895
@@ -254,15 +254,15 @@ msgstr ""
 msgid "Remove row"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1490
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1491
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1950
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1493
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1494
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1953
 #, elixir-autogen, elixir-format
 msgid "Review scoped access grants"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1480
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1481
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1483
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1484
 #, elixir-autogen, elixir-format
 msgid "Share access to %{type}"
 msgstr ""
@@ -308,26 +308,29 @@ msgstr ""
 msgid "This desk has no section named"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3037
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3038
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:150
 #, elixir-autogen, elixir-format
 msgid "Unpublish"
 msgstr ""
 
+#: lib/barkpark_web/components/studio_components/editor.ex:684
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:139
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:401
 #: lib/barkpark_web/components/studio_components/modals.ex:797
 #: lib/barkpark_web/components/studio_components/modals.ex:911
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2970
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2971
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1218
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1222
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1350
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1357
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1978
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2211
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2285
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1981
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2214
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2288
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
-#: lib/barkpark_web/live/studio/studio_live/handlers/lifecycle.ex:69
+#: lib/barkpark_web/live/studio/studio_live/handlers/refs.ex:22
+#: lib/barkpark_web/live/studio/studio_live/handlers/secondary.ex:26
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:2591
 #: lib/barkpark_web/studio_locale.ex:742
 #, elixir-autogen, elixir-format
 msgid "Untitled"
@@ -432,9 +435,9 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:890
 #: lib/barkpark_web/components/studio_components/modals.ex:960
 #: lib/barkpark_web/components/studio_components/modals.ex:1021
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2197
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2261
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2318
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2200
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2264
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2321
 #: lib/barkpark_web/studio_locale.ex:101
 #, elixir-autogen, elixir-format
 msgid "Close"
@@ -502,9 +505,9 @@ msgstr ""
 msgid "documents"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:805
+#: lib/barkpark_web/components/studio_components/editor.ex:807
 #: lib/barkpark_web/components/studio_components/panes.ex:641
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2366
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2369
 #: lib/barkpark_web/studio_locale.ex:120
 #: lib/barkpark_web/studio_locale.ex:759
 #, elixir-autogen, elixir-format
@@ -521,7 +524,7 @@ msgstr ""
 msgid "Describe the image for people who cannot see it"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:1292
+#: lib/barkpark_web/components/studio_components/editor.ex:1294
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3131
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:3773
 #: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4612
@@ -574,48 +577,48 @@ msgstr ""
 msgid "Required"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:777
+#: lib/barkpark_web/components/studio_components/editor.ex:779
 #, elixir-autogen, elixir-format
 msgid "Fields"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:795
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1625
+#: lib/barkpark_web/components/studio_components/editor.ex:797
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1628
 #, elixir-autogen, elixir-format
 msgid "No documents yet"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1580
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1581
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1583
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1584
 #, elixir-autogen, elixir-format
 msgid "Clear search"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1606
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1609
 #, elixir-autogen, elixir-format
 msgid "No documents match “%{query}”"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:289
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:290
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1568
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1569
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1571
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1572
 #, elixir-autogen, elixir-format
 msgid "Search documents…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1601
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1604
 #, elixir-autogen, elixir-format
 msgid "Type at least 2 characters"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/chat_live.ex:3338
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3009
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3010
 #, elixir-autogen, elixir-format
 msgid "Rename"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:2991
+#: lib/barkpark_web/live/studio/sheet_grid.ex:2992
 #, elixir-autogen, elixir-format
 msgid "Sheet name"
 msgstr ""
@@ -625,12 +628,12 @@ msgstr ""
 msgid "The sheet's latest edits could not be saved, so it was not published. Try again."
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:933
+#: lib/barkpark_web/components/studio_components/editor.ex:935
 #, elixir-autogen, elixir-format
 msgid "%{names} are editing"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:932
+#: lib/barkpark_web/components/studio_components/editor.ex:934
 #, elixir-autogen, elixir-format
 msgid "%{name} is editing"
 msgstr ""
@@ -652,7 +655,7 @@ msgid_plural "%{count} blocks"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1597
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1600
 #, elixir-autogen, elixir-format
 msgid "1 result"
 msgid_plural "%{count} results"
@@ -682,13 +685,13 @@ msgstr ""
 msgid "Choose one file."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3055
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3056
 #, elixir-autogen, elixir-format
 msgid "Download"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3054
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3062
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3055
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3063
 #, elixir-autogen, elixir-format
 msgid "Download or import"
 msgstr ""
@@ -708,17 +711,17 @@ msgstr ""
 msgid "Editor mode"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3081
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3082
 #, elixir-autogen, elixir-format
 msgid "Excel workbook, all tabs (.xlsx)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3128
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3129
 #, elixir-autogen, elixir-format
 msgid "Import"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3107
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3108
 #, elixir-autogen, elixir-format
 msgid "Import a CSV or TSV file as a new tab"
 msgstr ""
@@ -734,7 +737,7 @@ msgstr ""
 msgid "Replace image"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1765
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1768
 #, elixir-autogen, elixir-format
 msgid "Show more"
 msgstr ""
@@ -745,7 +748,7 @@ msgstr ""
 msgid "Sign out"
 msgstr ""
 
-#: lib/barkpark_web/studio/workspace_switcher.ex:214
+#: lib/barkpark_web/studio/workspace_switcher.ex:220
 #, elixir-autogen, elixir-format
 msgid "Switch scope — %{workspace} · %{project} · %{dataset}"
 msgstr ""
@@ -770,7 +773,7 @@ msgstr ""
 msgid "This project has no dataset named “%{asked}”, so Studio opened “%{opened}”."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3092
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3093
 #, elixir-autogen, elixir-format
 msgid "This tab as CSV (.csv)"
 msgstr ""
@@ -806,66 +809,66 @@ msgstr ""
 msgid "Image unavailable — drop a file, or click to replace"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3373
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3486
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3374
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3487
 #, elixir-autogen, elixir-format
 msgid "%{color} background"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3496
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3497
 #, elixir-autogen, elixir-format
 msgid "Add rule"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3919
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3920
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3921
 #: lib/barkpark_web/live/studio/studio_live/components/technical_block_editor.ex:511
 #, elixir-autogen, elixir-format
 msgid "Add tab"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3361
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3361
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3362
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3362
 #, elixir-autogen, elixir-format
 msgid "Align center"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3360
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3360
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3361
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3361
 #: lib/barkpark_web/studio_locale.ex:429
 #, elixir-autogen, elixir-format
 msgid "Align left"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3362
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3362
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3363
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3363
 #: lib/barkpark_web/studio_locale.ex:430
 #, elixir-autogen, elixir-format
 msgid "Align right"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4157
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4158
 #, elixir-autogen, elixir-format
 msgid "Apply"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3432
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3433
 #, elixir-autogen, elixir-format
 msgid "Apply to range"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3712
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3713
 #, elixir-autogen, elixir-format
 msgid "Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3478
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3479
 #, elixir-autogen, elixir-format
 msgid "Background"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3372
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3485
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3373
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3486
 #, elixir-autogen, elixir-format
 msgid "Background %{color}"
 msgstr ""
@@ -875,32 +878,32 @@ msgstr ""
 msgid "Blue"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3358
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3359
 #, elixir-autogen, elixir-format
 msgid "Bold (Cmd/Ctrl+B)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3800
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3801
 #, elixir-autogen, elixir-format
 msgid "Cell actions"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3363
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3364
 #, elixir-autogen, elixir-format
 msgid "Cell background"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3196
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3197
 #, elixir-autogen, elixir-format
 msgid "Cell reference (name box)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3357
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3358
 #, elixir-autogen, elixir-format
 msgid "Cell style"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3347
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3348
 #, elixir-autogen, elixir-format
 msgid "Checkbox"
 msgstr ""
@@ -908,19 +911,19 @@ msgstr ""
 #: lib/barkpark_web/components/field_inputs.ex:348
 #: lib/barkpark_web/components/fields/tree_codelist_field.ex:390
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:79
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3809
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4156
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3810
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4157
 #, elixir-autogen, elixir-format
 msgid "Clear"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3377
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3377
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3378
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3378
 #, elixir-autogen, elixir-format
 msgid "Clear background"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3980
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3981
 #, elixir-autogen, elixir-format
 msgid "Clear tab color"
 msgstr ""
@@ -930,51 +933,51 @@ msgstr ""
 msgid "Clear the column filters before sorting"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3413
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3414
 #, elixir-autogen, elixir-format
 msgid "Close conditional-format panel"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4108
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4109
 #, elixir-autogen, elixir-format
 msgid "Close filter"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3589
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3590
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3591
 #, elixir-autogen, elixir-format
 msgid "Close find"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3298
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3299
 #, elixir-autogen, elixir-format
 msgid "Colon"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4039
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4048
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4040
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4049
 #, elixir-autogen, elixir-format
 msgid "Column %{col} menu"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3295
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3296
 #, elixir-autogen, elixir-format
 msgid "Comma"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3399
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3400
 #, elixir-autogen, elixir-format
 msgid "Cond. format"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3388
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3396
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3412
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3389
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3397
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3413
 #, elixir-autogen, elixir-format
 msgid "Conditional formatting"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3405
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3406
 #, elixir-autogen, elixir-format
 msgid "Conditional formatting rules"
 msgstr ""
@@ -982,62 +985,62 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:300
 #: lib/barkpark_web/components/studio_components/modals.ex:425
 #: lib/barkpark_web/live/studio/connectors_live.ex:1014
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3807
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3808
 #: lib/barkpark_web/studio_locale.ex:154
 #, elixir-autogen, elixir-format
 msgid "Copy"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3313
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3314
 #, elixir-autogen, elixir-format
 msgid "Currency ($1,234.50)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3313
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3314
 #, elixir-autogen, elixir-format
 msgid "Currency format"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3806
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3807
 #, elixir-autogen, elixir-format
 msgid "Cut"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3345
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3346
 #, elixir-autogen, elixir-format
 msgid "Date"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3346
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3347
 #, elixir-autogen, elixir-format
 msgid "Datetime"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3813
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4053
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3814
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4054
 #, elixir-autogen, elixir-format
 msgid "Delete column"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3811
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4206
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3812
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4207
 #, elixir-autogen, elixir-format
 msgid "Delete row"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3422
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3423
 #, elixir-autogen, elixir-format
 msgid "Delete rule %{rule}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3939
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3940
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3941
 #, elixir-autogen, elixir-format
 msgid "Delete the active tab"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3928
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3929
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3930
 #, elixir-autogen, elixir-format
 msgid "Duplicate the active tab"
 msgstr ""
@@ -1047,89 +1050,89 @@ msgstr ""
 msgid "Duplicated as Copy of %{tab}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4239
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4240
 #, elixir-autogen, elixir-format
 msgid "Edit cell %{ref}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3421
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3422
 #, elixir-autogen, elixir-format
 msgid "Edit rule %{rule}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3209
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3210
 #, elixir-autogen, elixir-format
 msgid "Enter a value or =FORMULA"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3710
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3711
 #, elixir-autogen, elixir-format
 msgid "F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes. Alt+Down opens the column filter, Alt+Shift+Down the column menu, and Shift+F10 the cell menu."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4107
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4108
 #, elixir-autogen, elixir-format
 msgid "Filter %{col}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4088
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4101
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4089
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4102
 #, elixir-autogen, elixir-format
 msgid "Filter column %{col}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4084
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4085
 #, elixir-autogen, elixir-format
 msgid "Filter column %{col} (active: %{filter})"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4091
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4092
 #, elixir-autogen, elixir-format
 msgid "Filter this column"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3563
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3564
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3565
 #, elixir-autogen, elixir-format
 msgid "Find in sheet"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3571
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3572
 #, elixir-autogen, elixir-format
 msgid "Find next"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3581
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3582
 #, elixir-autogen, elixir-format
 msgid "Find previous"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3344
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3345
 #, elixir-autogen, elixir-format
 msgid "Fixed"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3443
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3444
 #, elixir-autogen, elixir-format
 msgid "Format cells where the value"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3210
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3211
 #, elixir-autogen, elixir-format
 msgid "Formula bar for %{ref}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3252
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3253
 #, elixir-autogen, elixir-format
 msgid "Freeze"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3249
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3250
 #, elixir-autogen, elixir-format
 msgid "Freeze rows/cols above and left of the active cell"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3343
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3344
 #, elixir-autogen, elixir-format
 msgid "General"
 msgstr ""
@@ -1144,59 +1147,59 @@ msgstr ""
 msgid "Grey"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4204
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4205
 #, elixir-autogen, elixir-format
 msgid "Insert above"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4205
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4206
 #, elixir-autogen, elixir-format
 msgid "Insert below"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3812
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3813
 #, elixir-autogen, elixir-format
 msgid "Insert column"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4051
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4052
 #, elixir-autogen, elixir-format
 msgid "Insert left"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4052
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4053
 #, elixir-autogen, elixir-format
 msgid "Insert right"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3810
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3811
 #, elixir-autogen, elixir-format
 msgid "Insert row"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3359
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3360
 #, elixir-autogen, elixir-format
 msgid "Italic (Cmd/Ctrl+I)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3232
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3233
 #, elixir-autogen, elixir-format
 msgid "Merge"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3229
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3230
 #, elixir-autogen, elixir-format
 msgid "Merge the selected cells"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3899
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3900
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3901
 #, elixir-autogen, elixir-format
 msgid "Move sheet left"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3910
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3911
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3912
 #, elixir-autogen, elixir-format
 msgid "Move sheet right"
 msgstr ""
@@ -1211,12 +1214,12 @@ msgstr ""
 msgid "Moved %{tab} right"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3632
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3633
 #, elixir-autogen, elixir-format
 msgid "Next"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3570
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3571
 #, elixir-autogen, elixir-format
 msgid "Next match (Enter)"
 msgstr ""
@@ -1226,43 +1229,43 @@ msgstr ""
 msgid "Nothing to sort"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3312
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3349
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3313
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3350
 #, elixir-autogen, elixir-format
 msgid "Number format"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3808
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3809
 #, elixir-autogen, elixir-format
 msgid "Paste"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3336
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3337
 #, elixir-autogen, elixir-format
 msgid "Percent (25.00%)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3336
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3337
 #, elixir-autogen, elixir-format
 msgid "Percent format"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3299
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3300
 #, elixir-autogen, elixir-format
 msgid "Pipe"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3708
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3709
 #, elixir-autogen, elixir-format
 msgid "Press Escape then Tab to leave the grid."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3623
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3624
 #, elixir-autogen, elixir-format
 msgid "Prev"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3580
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3581
 #, elixir-autogen, elixir-format
 msgid "Previous match"
 msgstr ""
@@ -1277,12 +1280,12 @@ msgstr ""
 msgid "Red"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3506
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3507
 #, elixir-autogen, elixir-format
 msgid "Redo (Cmd/Ctrl+Shift+Z)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3506
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3507
 #, elixir-autogen, elixir-format
 msgid "Redo last undone change"
 msgstr ""
@@ -1292,30 +1295,30 @@ msgstr ""
 msgid "Renamed to %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3479
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3480
 #, elixir-autogen, elixir-format
 msgid "Rule background color"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3496
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3497
 #, elixir-autogen, elixir-format
 msgid "Save rule"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3296
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3297
 #, elixir-autogen, elixir-format
 msgid "Semicolon"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3957
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3958
 #, elixir-autogen, elixir-format
 msgid "Set this sheet's tab color"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:1376
 #: lib/barkpark_web/live/studio/sheet_grid.ex:2833
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3845
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3849
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3846
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3850
 #, elixir-autogen, elixir-format
 msgid "Sheet %{n}"
 msgstr ""
@@ -1325,48 +1328,48 @@ msgstr ""
 msgid "Sheet %{n} of %{count}: %{name}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3185
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3186
 #, elixir-autogen, elixir-format
 msgid "Sheet formatting"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3825
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3826
 #, elixir-autogen, elixir-format
 msgid "Sheet tabs"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4113
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4114
 #, elixir-autogen, elixir-format
 msgid "Show rows where"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/sheet_grid.ex:699
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3634
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3635
 #, elixir-autogen, elixir-format
 msgid "Showing rows %{first}–%{last} of %{rows}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3267
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3268
 #, elixir-autogen, elixir-format
 msgid "Sort ascending"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3279
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3280
 #, elixir-autogen, elixir-format
 msgid "Sort descending"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3268
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3269
 #, elixir-autogen, elixir-format
 msgid "Sort the selection A→Z"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3280
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3281
 #, elixir-autogen, elixir-format
 msgid "Sort the selection Z→A"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3297
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3298
 #, elixir-autogen, elixir-format
 msgid "Space"
 msgstr ""
@@ -1376,63 +1379,63 @@ msgstr ""
 msgid "Split %{cells} cell(s) across %{span} columns"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3301
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3302
 #, elixir-autogen, elixir-format
 msgid "Split text to columns"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3294
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3295
 #, elixir-autogen, elixir-format
 msgid "Split…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3688
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3689
 #, elixir-autogen, elixir-format
 msgid "Spreadsheet grid"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3958
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3965
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3959
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3966
 #, elixir-autogen, elixir-format
 msgid "Tab color"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3976
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3977
 #, elixir-autogen, elixir-format
 msgid "Tab color %{color}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3337
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3338
 #, elixir-autogen, elixir-format
 msgid "Thousands separator"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3337
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3338
 #, elixir-autogen, elixir-format
 msgid "Thousands separator (1,234)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3505
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3506
 #, elixir-autogen, elixir-format
 msgid "Undo (Cmd/Ctrl+Z)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3505
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3506
 #, elixir-autogen, elixir-format
 msgid "Undo last change"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3252
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3253
 #, elixir-autogen, elixir-format
 msgid "Unfreeze"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3242
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3243
 #, elixir-autogen, elixir-format
 msgid "Unmerge"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3239
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3240
 #, elixir-autogen, elixir-format
 msgid "Unmerge cells in the selection"
 msgstr ""
@@ -1440,7 +1443,7 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:486
 #: lib/barkpark_web/components/studio_components/modals.ex:678
 #: lib/barkpark_web/live/bulldocs_live.ex:1738
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3172
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3173
 #: lib/barkpark_web/live/studio/studio_live/components.ex:259
 #: lib/barkpark_web/studio_locale.ex:679
 #, elixir-autogen, elixir-format
@@ -1457,49 +1460,49 @@ msgstr ""
 msgid "contains “%{value}”"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3358
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3359
 #: lib/barkpark_web/studio_locale.ex:438
 #, elixir-autogen, elixir-format
 msgid "Bold"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3359
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3360
 #: lib/barkpark_web/studio_locale.ex:532
 #, elixir-autogen, elixir-format
 msgid "Italic"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3332
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3333
 #, elixir-autogen, elixir-format
 msgid "Currency"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3330
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3331
 #, elixir-autogen, elixir-format
 msgid "DKK (kr)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3326
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3327
 #, elixir-autogen, elixir-format
 msgid "EUR (€)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3327
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3328
 #, elixir-autogen, elixir-format
 msgid "GBP (£)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3328
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3329
 #, elixir-autogen, elixir-format
 msgid "NOK (kr)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3329
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3330
 #, elixir-autogen, elixir-format
 msgid "SEK (kr)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3325
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3326
 #, elixir-autogen, elixir-format
 msgid "USD ($)"
 msgstr ""
@@ -1514,8 +1517,8 @@ msgstr ""
 #: lib/barkpark_web/live/studio/connectors_live.ex:816
 #: lib/barkpark_web/live/studio/connectors_live.ex:1096
 #: lib/barkpark_web/live/studio/connectors_live.ex:1119
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2218
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2305
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2221
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2308
 #: lib/barkpark_web/studio_locale.ex:140
 #: lib/barkpark_web/studio_locale.ex:756
 #, elixir-autogen, elixir-format
@@ -1543,7 +1546,7 @@ msgid "5 hours"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:566
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1953
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1956
 #, elixir-autogen, elixir-format
 msgid "Access"
 msgstr ""
@@ -1938,7 +1941,7 @@ msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:394
 #: lib/barkpark_web/components/studio_components/modals.ex:515
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1939
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1942
 #, elixir-autogen, elixir-format
 msgid "Share access"
 msgstr ""
@@ -1999,7 +2002,7 @@ msgid "This is how others see you"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/modals.ex:831
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:768
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:769
 #, elixir-autogen, elixir-format
 msgid "Unpublished"
 msgstr ""
@@ -2007,6 +2010,7 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:669
 #: lib/barkpark_web/components/studio_components/modals.ex:670
 #: lib/barkpark_web/live/studio/studio_live/components.ex:986
+#: lib/barkpark_web/studio/workspace_switcher.ex:88
 #, elixir-autogen, elixir-format
 msgid "Workspace"
 msgstr ""
@@ -2084,7 +2088,7 @@ msgstr ""
 msgid "(%{type}) was stored without a body block list and without saved HTML, so there is nothing here to show or edit yet. The document itself is intact — its metadata is in the panel beside this message."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2273
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2276
 #, elixir-autogen, elixir-format
 msgid "(unset)"
 msgstr ""
@@ -2104,12 +2108,12 @@ msgstr ""
 msgid "Back to %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2377
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2380
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document has duplicate block IDs. No content was changed."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2371
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2374
 #, elixir-autogen, elixir-format
 msgid "Block editing is unavailable because this document's stored content cannot be safely edited as blocks. No content was changed."
 msgstr ""
@@ -2124,12 +2128,13 @@ msgstr ""
 msgid "Context"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2272
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2275
 #, elixir-autogen, elixir-format
 msgid "Current canonical value:"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:982
+#: lib/barkpark_web/studio/workspace_switcher.ex:181
 #, elixir-autogen, elixir-format
 msgid "Dataset"
 msgstr ""
@@ -2150,7 +2155,7 @@ msgstr ""
 msgid "Desk breadcrumb"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2224
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2227
 #, elixir-autogen, elixir-format
 msgid "Disconnect references and unpublish"
 msgstr ""
@@ -2213,7 +2218,7 @@ msgstr ""
 msgid "Members only"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1638
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1641
 #, elixir-autogen, elixir-format
 msgid "New document"
 msgstr ""
@@ -2307,12 +2312,12 @@ msgstr ""
 msgid "Relations"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1927
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1930
 #, elixir-autogen, elixir-format
 msgid "Share media"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1936
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1939
 #, elixir-autogen, elixir-format
 msgid "Share scoped access to this workspace"
 msgstr ""
@@ -2322,12 +2327,12 @@ msgstr ""
 msgid "Share this paper (direct link)"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1924
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1927
 #, elixir-autogen, elixir-format
 msgid "Share this workspace's media library"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2260
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2263
 #, elixir-autogen, elixir-format
 msgid "Shared value"
 msgstr ""
@@ -2383,7 +2388,7 @@ msgstr ""
 msgid "This %{type} ("
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2313
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2316
 #, elixir-autogen, elixir-format
 msgid "This value lives on a canonical document you do not have write access to. It can only be changed at its source."
 msgstr ""
@@ -2393,12 +2398,12 @@ msgstr ""
 msgid "This workspace has no public page for papers, so only members and share-link holders can read it."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2229
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2232
 #, elixir-autogen, elixir-format
 msgid "Unpublish anyway"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2196
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2199
 #, elixir-autogen, elixir-format
 msgid "Unpublish document"
 msgstr ""
@@ -2414,19 +2419,19 @@ msgstr ""
 msgid "Visibility"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2307
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2310
 #, elixir-autogen, elixir-format
 msgid "Write to canonical"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2276
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2279
 #, elixir-autogen, elixir-format
 msgid "Writing to the canonical source changes %{count} doc:"
 msgid_plural "Writing to the canonical source changes %{count} docs:"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2202
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2205
 #, elixir-autogen, elixir-format
 msgid "is referenced by %{count} document. Unpublishing it will leave those references dangling:"
 msgid_plural "is referenced by %{count} documents. Unpublishing it will leave those references dangling:"
@@ -2440,7 +2445,7 @@ msgid "label"
 msgstr ""
 
 #: lib/barkpark_web/components/studio_components/panes.ex:642
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2367
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2370
 #: lib/barkpark_web/studio_locale.ex:121
 #, elixir-autogen, elixir-format
 msgid "published"
@@ -8893,8 +8898,8 @@ msgstr ""
 msgid "…Rest"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:720
-#: lib/barkpark_web/live/studio/studio_live/components.ex:1995
+#: lib/barkpark_web/components/studio_components/editor.ex:722
+#: lib/barkpark_web/live/studio/studio_live/components.ex:1998
 #, elixir-autogen, elixir-format
 msgid "More actions"
 msgstr ""
@@ -9324,7 +9329,7 @@ msgstr ""
 msgid "Saved as master: %{title}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3520
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3521
 #: lib/barkpark_web/studio_locale.ex:324
 #, elixir-autogen, elixir-format
 msgid "Saving…"
@@ -9529,7 +9534,7 @@ msgid_plural "%{count} changes"
 msgstr[0] ""
 msgstr[1] ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:745
+#: lib/barkpark_web/components/studio_components/editor.ex:747
 #, elixir-autogen, elixir-format
 msgid "1 field"
 msgid_plural "%{count} fields"
@@ -9586,12 +9591,12 @@ msgstr ""
 msgid "no alt text"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3521
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3522
 #, elixir-autogen, elixir-format
 msgid "All changes saved · %{time}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3524
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3525
 #, elixir-autogen, elixir-format
 msgid "Save failed — retrying"
 msgstr ""
@@ -9878,7 +9883,7 @@ msgstr ""
 msgid "That “+” already created an untitled %{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/components.ex:2337
+#: lib/barkpark_web/live/studio/studio_live/components.ex:2340
 #, elixir-autogen, elixir-format
 msgid "this item"
 msgstr ""
@@ -10020,7 +10025,7 @@ msgstr ""
 msgid "Action %{name} not yet wired"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:937
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:938
 #, elixir-autogen, elixir-format
 msgid "Action failed"
 msgstr ""
@@ -10184,9 +10189,9 @@ msgstr ""
 msgid "Project created"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:844
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:855
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:866
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:845
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:856
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:867
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1254
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1261
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1268
@@ -10245,7 +10250,7 @@ msgstr ""
 msgid "Restored from history"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:571
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:572
 #: lib/barkpark_web/live/studio/studio_live/shared/paper.ex:1384
 #, elixir-autogen, elixir-format
 msgid "Save cancelled: %{reason}"
@@ -10282,7 +10287,7 @@ msgstr ""
 msgid "That grant is no longer active."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:902
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:903
 #, elixir-autogen, elixir-format
 msgid "The document changed since you loaded it — reload and retry."
 msgstr ""
@@ -10357,7 +10362,7 @@ msgstr ""
 msgid "Stopped sharing %{scope} — it is no longer shared. Every item /s/ link under it was revoked too."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:886
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:887
 #, elixir-autogen, elixir-format
 msgid "That document is no longer there — it may have been discarded, or already %{action} in another tab."
 msgstr ""
@@ -10372,12 +10377,12 @@ msgstr ""
 msgid "the stored share is gone, but this scope is also declared in %{baseline}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:832
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:833
 #, elixir-autogen, elixir-format
 msgid "%{action} cancelled: %{reason}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/studio_live/shared.ex:927
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:928
 #, elixir-autogen, elixir-format
 msgid "%{action} failed: %{errors}"
 msgstr ""
@@ -10399,7 +10404,7 @@ msgctxt "boolean"
 msgid "Yes"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3634
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3635
 #, elixir-autogen, elixir-format
 msgid "%{count} rows hidden by filter"
 msgid_plural "%{count} rows hidden by filter"
@@ -10446,7 +10451,7 @@ msgstr ""
 msgid "No matches for \"%{query}\"."
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:1236
+#: lib/barkpark_web/components/studio_components/editor.ex:1238
 #, elixir-autogen, elixir-format
 msgid "Reload"
 msgstr ""
@@ -10456,7 +10461,7 @@ msgstr ""
 msgid "Select…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3638
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3639
 #, elixir-autogen, elixir-format
 msgid "Showing the first %{cols} of %{used} columns"
 msgstr ""
@@ -10466,12 +10471,12 @@ msgstr ""
 msgid "Start collapsed"
 msgstr ""
 
-#: lib/barkpark_web/components/studio_components/editor.ex:1228
+#: lib/barkpark_web/components/studio_components/editor.ex:1230
 #, elixir-autogen, elixir-format
 msgid "Updated by another user — your unsaved edits are kept."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3634
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3635
 #, elixir-autogen, elixir-format
 msgid "first %{cols} of %{used} columns"
 msgstr ""
@@ -10531,32 +10536,32 @@ msgstr ""
 msgid "+ Add"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3987
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3988
 #, elixir-autogen, elixir-format
 msgid "Avg:"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3987
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3988
 #, elixir-autogen, elixir-format
 msgid "Count:"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3425
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3426
 #, elixir-autogen, elixir-format
 msgid "No rules yet — add one below."
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4059
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4060
 #, elixir-autogen, elixir-format
 msgid "Sort A→Z"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4060
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4061
 #, elixir-autogen, elixir-format
 msgid "Sort Z→A"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3987
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3988
 #, elixir-autogen, elixir-format
 msgid "Sum:"
 msgstr ""
@@ -10608,13 +10613,13 @@ msgstr ""
 msgid "Search codes or labels…"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:3849
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3850
 #, elixir-autogen, elixir-format
 msgid "Rename %{name}"
 msgstr ""
 
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4192
-#: lib/barkpark_web/live/studio/sheet_grid.ex:4201
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4193
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4202
 #, elixir-autogen, elixir-format
 msgid "Row %{row} menu"
 msgstr ""
@@ -10643,4 +10648,59 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/mount.ex:414
 #, elixir-autogen, elixir-format
 msgid "User %{id}"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:128
+#: lib/barkpark_web/studio/workspace_switcher.ex:175
+#, elixir-autogen, elixir-format
+msgid "Create"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:104
+#: lib/barkpark_web/studio/workspace_switcher.ex:151
+#: lib/barkpark_web/studio/workspace_switcher.ex:195
+#, elixir-autogen, elixir-format
+msgid "Current"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:160
+#, elixir-autogen, elixir-format
+msgid "New project"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:113
+#, elixir-autogen, elixir-format
+msgid "New workspace"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:183
+#, elixir-autogen, elixir-format
+msgid "No datasets"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:136
+#, elixir-autogen, elixir-format
+msgid "No projects yet"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:134
+#, elixir-autogen, elixir-format
+msgid "Project"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:170
+#: lib/barkpark_web/studio/workspace_switcher.ex:171
+#, elixir-autogen, elixir-format
+msgid "Project name"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:85
+#, elixir-autogen, elixir-format
+msgid "Switch workspace, project and dataset"
+msgstr ""
+
+#: lib/barkpark_web/studio/workspace_switcher.ex:123
+#: lib/barkpark_web/studio/workspace_switcher.ex:124
+#, elixir-autogen, elixir-format
+msgid "Workspace name"
 msgstr ""
