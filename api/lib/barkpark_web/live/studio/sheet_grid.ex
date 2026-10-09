@@ -1371,7 +1371,9 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
   def handle_event("tab-add", _params, socket) do
     n = length(GridData.tabs(socket)) + 1
-    socket = send_ops(socket, [%{"op" => "add_tab", "name" => "Sheet #{n}"}])
+    # Named in the Studio language, as a spreadsheet names a new tab ("Ark 2");
+    # the name is data from here on.
+    socket = send_ops(socket, [%{"op" => "add_tab", "name" => gettext("Sheet %{n}", n: n)}])
 
     if socket.assigns[:notice] == nil,
       do: {:noreply, assign(socket, follow_tab: n - 1)},
@@ -3840,10 +3842,12 @@ defmodule BarkparkWeb.Studio.SheetGrid do
               <input
                 name="name"
                 type="text"
-                value={Map.get(t, "name") || "Sheet #{i + 1}"}
+                value={Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1)}
                 class="sheet-tab-rename-input"
                 autocomplete="off"
-                aria-label={"Rename #{Map.get(t, "name") || "Sheet #{i + 1}"}"}
+                aria-label={
+                  gettext("Rename %{name}", name: Map.get(t, "name") || gettext("Sheet %{n}", n: i + 1))
+                }
                 phx-keydown="tab-rename-cancel"
                 phx-key="Escape"
                 phx-blur="tab-rename-cancel"

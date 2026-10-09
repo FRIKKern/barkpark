@@ -2017,6 +2017,26 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert has_element?(view, ~s([data-test-id="sheet-tab-0"]))
   end
 
+  # task-7a7d7a42381902e7: '+' named the new tab "Sheet 2" in English in an
+  # nb-NO workspace (stored as data), and the rename field's accessible name
+  # was the literal "Rename …".
+  test "a new tab and its rename field speak the Studio language", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    create_sheet!("sg-add-nb", [%{"name" => "Inntekt", "cells" => %{}}])
+    {view, target, _html} = open!(conn, "sg-add-nb")
+
+    view |> element(~s([data-test-id="sheet-tab-add"])) |> render_click()
+    tab = view |> element(~s([data-test-id="sheet-tab-1"])) |> render()
+    assert tab =~ "Ark 2"
+    refute tab =~ "Sheet 2"
+
+    render_keydown(target, "tab-rename-start", %{"tab" => "0", "key" => "F2"})
+    input = view |> element(~s([data-test-id="sheet-tab-rename-input"])) |> render()
+    assert input =~ ~s(aria-label="Gi nytt navn til Inntekt")
+  end
+
   # task-12b3b4e250901169: F2 opened the input but nothing focused it, and
   # Enter/Escape dropped focus to <body> when the button came back. The
   # SheetTabRename hook moves focus (pinned in assets/sheet-grid/
