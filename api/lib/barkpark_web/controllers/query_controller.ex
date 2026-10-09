@@ -379,7 +379,11 @@ defmodule BarkparkWeb.QueryController do
 
         base_rendered = Envelope.render_many(docs, schema, caller_context)
 
-        rendered =
+        # Same split as `show_doc!/5` (task-0e0cb2167c6fcdea): captured
+        # between Expand.expand/4 and project_fields/maybe_resolve_tasks, so
+        # `maybe_source_map_many/5` can diff it against `base_rendered` for
+        # expand provenance before `?fields=`/task-resolution touch it.
+        expanded =
           base_rendered
           |> Expand.expand(
             expand_spec,
@@ -387,10 +391,13 @@ defmodule BarkparkWeb.QueryController do
             [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
               scope_opts(conn)
           )
+
+        rendered =
+          expanded
           |> project_fields(parse_fields(params["fields"]))
           |> maybe_resolve_tasks(conn, params)
 
-        source_map = maybe_source_map_many(conn, params, docs, base_rendered)
+        source_map = maybe_source_map_many(conn, params, docs, base_rendered, expanded)
 
         inner =
           %{
@@ -945,7 +952,15 @@ defmodule BarkparkWeb.QueryController do
 
       base_rendered = Envelope.render(doc, schema, caller_context)
 
-      rendered =
+      # Captured BETWEEN Expand.expand/4 and project_fields/maybe_resolve_tasks
+      # (task-0e0cb2167c6fcdea) — `source_map` needs the post-expand,
+      # pre-projection envelope to diff against `base_rendered` and find which
+      # fields Expand actually resolved; `?fields=` narrowing or task
+      # resolution afterward would hide or further mutate those fields for no
+      # reason `maybe_source_map/5` cares about (it already reads from
+      # `base_rendered`, not the `?fields=`-projected `rendered`, for the
+      # SAME reason — see that function's doc).
+      expanded =
         [base_rendered]
         |> Expand.expand(
           expand_spec,
@@ -953,6 +968,10 @@ defmodule BarkparkWeb.QueryController do
           [published_only: AnonPerspective.anon_pinned?(conn), caller_context: caller_context] ++
             scope_opts(conn)
         )
+        |> hd()
+
+      rendered =
+        [expanded]
         |> project_fields(parse_fields(params["fields"]))
         |> maybe_resolve_tasks(conn, params)
         |> hd()
@@ -960,7 +979,7 @@ defmodule BarkparkWeb.QueryController do
       schema_hash = Content.schema_hash_for_dataset(dataset, scope_opts(conn))
       etag = doc_etag(doc)
       sync_tags = doc_sync_tags(dataset, type, doc.doc_id)
-      source_map = maybe_source_map(conn, params, doc, base_rendered)
+      source_map = maybe_source_map(conn, params, doc, base_rendered, expanded)
 
       respond(
         conn,
@@ -984,19 +1003,28 @@ defmodule BarkparkWeb.QueryController do
   # FLAG just isn't honoured outside drafts/raw, the same way `AnonPerspective.
   # resolve/2` silently clamps `?perspective=drafts` for an anonymous caller
   # rather than 400ing it.
-  defp maybe_source_map(conn, params, doc, base_rendered) do
+  # `expanded` (task-0e0cb2167c6fcdea) — the post-`Expand.expand/4` sibling
+  # of `base_rendered`, so a caller's `?expand=` gets provenance into the
+  # expanded sub-document too. `Envelope.source_map/3` already no-ops
+  # whenever `expanded` is identical to `base_rendered` (no `?expand=` was
+  # asked for — `Expand.expand/4`'s own `[]`-spec fast path returns its input
+  # untouched), so this is never gated on `expand_spec` here — one fewer
+  # thing for this function to get wrong relative to the one Expand.expand/4
+  # itself already decided.
+  defp maybe_source_map(conn, params, doc, base_rendered, expanded) do
     if source_map_requested?(conn, params) do
-      Envelope.source_map(doc, base_rendered)
+      Envelope.source_map(doc, base_rendered, expanded)
     end
   end
 
   # List-result sibling (task-b54d854d43769266) — SAME opt-in flag, SAME
   # drafts/raw-only rule as the doc-get candidate above; only the Envelope
-  # function differs (source_map_many/2, one row per result instead of one
-  # whole document).
-  defp maybe_source_map_many(conn, params, docs, base_rendered_list) do
+  # function differs (source_map_many/3, one row per result instead of one
+  # whole document). `expanded_list` is `source_map/3`'s `expanded` arg's
+  # per-row sibling — same task, same reasoning.
+  defp maybe_source_map_many(conn, params, docs, base_rendered_list, expanded_list) do
     if source_map_requested?(conn, params) do
-      Envelope.source_map_many(docs, base_rendered_list)
+      Envelope.source_map_many(docs, base_rendered_list, expanded_list)
     end
   end
 
