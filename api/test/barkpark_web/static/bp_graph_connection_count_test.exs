@@ -9,11 +9,16 @@ defmodule BarkparkWeb.Static.BpGraphConnectionCountTest do
 
   @js Path.expand("../../../priv/static/assets/bp-graph.js", __DIR__)
 
-  test "both announcements count through connectionCount/1" do
+  # task-d1c2ef3924bde715 moved the count into the renderer's gtCount/1 so it
+  # reads in the Studio language; the singular form stays.
+  test "both announcements count through gtCount/1" do
     js = File.read!(@js)
-    assert js =~ ~s|return n === 1 ? "1 connection" : n + " connections";|
-    assert js =~ ~s|". " + connectionCount(nb) + "."|
-    assert js =~ ~s|". " + connectionCount(cc) + ".";|
+
+    assert js =~
+             ~s|return n === 1 ? gt("1 connection") : gt("%{count} connections", { count: n });|
+
+    assert js =~ ~s|". " + gtCount(nb) + "."|
+    assert js =~ ~s|" " + gtCount(cc) + ".";|
     refute js =~ ~s|" connections."|
   end
 end

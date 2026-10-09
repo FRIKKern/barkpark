@@ -77,14 +77,21 @@ class BpRichTextEditor extends HTMLElement {
   _buildToolbar() {
     const bar = document.createElement("div");
     bar.className = "bp-rte-toolbar";
+    // The host's words (data-strings, keyed by the English); English otherwise.
+    let strings = {};
+    try { strings = JSON.parse(this.getAttribute("data-strings") || "{}") || {}; } catch (_e) { strings = {}; }
+    const t = (text) => {
+      const out = typeof strings[text] === "string" ? strings[text] : text;
+      return out.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
+    };
     bar.innerHTML =
-      '<button type="button" class="bp-rte-btn" data-cmd="bold" title="Bold (mod+B)"><b>B</b></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="italic" title="Italic (mod+I)"><i>I</i></button>' +
-      '<button type="button" class="bp-rte-btn bp-rte-link" title="Link">🔗</button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '"><b>B</b></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '"><i>I</i></button>' +
+      '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '">🔗</button>' +
       '<span class="bp-rte-linkrow" hidden>' +
       '<input type="text" class="bp-rte-url" placeholder="https://…" />' +
-      '<button type="button" class="bp-rte-btn bp-rte-set">Set</button>' +
-      '<button type="button" class="bp-rte-btn bp-rte-unset">Remove</button>' +
+      '<button type="button" class="bp-rte-btn bp-rte-set">' + t("Set") + "</button>" +
+      '<button type="button" class="bp-rte-btn bp-rte-unset">' + t("Remove") + "</button>" +
       "</span>";
     this.appendChild(bar);
 

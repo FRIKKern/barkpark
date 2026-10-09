@@ -226,6 +226,7 @@ defmodule BarkparkWeb.Studio.GraphView do
         data-edges={@edges_json}
         data-root={@root}
         data-rev={@rev}
+        data-strings={BarkparkWeb.StudioLocale.component_strings(:graph)}
         data-test-id="studio-graph-canvas"
       >
       </div>

@@ -124,6 +124,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
                 value={Map.get(@value_map, lang, "")}
                 data-bridge-target={"#{@base_id}-#{lang}"}
                 data-lang={lang}
+                data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}
                 class="bp-localized-rich"
               ></bp-rich-text-editor>
             </div>
