@@ -112,6 +112,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_visible_when_scopes()
     |> validate_desk_group_filters()
     |> validate_desk_block()
     |> validate_desk_views()
@@ -177,6 +178,95 @@ defmodule Barkpark.Content.SchemaDefinition do
         changeset
     end
   end
+
+  # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (default) or
+  # "parent". A top-level field has no parent, so "parent" there is refused with
+  # its path instead of silently reading the document root.
+  defp validate_visible_when_scopes(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        Enum.reduce(visible_when_scope_problems(fields, [], false), changeset, fn msg, cs ->
+          add_error(cs, :fields, msg)
+        end)
+
+      _ ->
+        changeset
+    end
+  end
+
+  @doc false
+  # One message per field whose `visibleWhen.scope` is not allowed where it sits.
+  def visible_when_scope_problems(fields, prefix, nested?) when is_list(fields) do
+    Enum.flat_map(fields, fn
+      field when is_map(field) ->
+        name = to_string(fget(field, "name") || "?")
+        path = Enum.join(prefix ++ [name], ".")
+        own = scope_problem(visible_when_of(field), path, nested?)
+
+        kids =
+          case fget(field, "fields") do
+            list when is_list(list) -> visible_when_scope_problems(list, prefix ++ [name], true)
+            _ -> []
+          end
+
+        of =
+          case fget(field, "of") do
+            %{} = d ->
+              # The single `of` descriptor has no name of its own: its predicate
+              # sits at the list path, its subfields under it.
+              item = prefix ++ [name <> "[]"]
+
+              scope_problem(visible_when_of(d), Enum.join(item, "."), true) ++
+                visible_when_scope_problems(List.wrap(fget(d, "fields")), item, true)
+
+            list when is_list(list) ->
+              visible_when_scope_problems(list, prefix ++ [name <> "[]"], true)
+
+            _ ->
+              []
+          end
+
+        own ++ kids ++ of
+
+      _ ->
+        []
+    end)
+  end
+
+  def visible_when_scope_problems(_fields, _prefix, _nested?), do: []
+
+  defp scope_problem(%{} = pred, path, nested?) do
+    path = String.trim_trailing(path, ".")
+
+    case Map.get(pred, "scope", Map.get(pred, :scope)) do
+      nil ->
+        []
+
+      "document" ->
+        []
+
+      "parent" when nested? ->
+        []
+
+      "parent" ->
+        [
+          ~s("#{path}": visibleWhen "scope": "parent" needs an enclosing object or array item, ) <>
+            ~s(and a top-level field has none; use "document" \(the default\) to read the document)
+        ]
+
+      other ->
+        [~s("#{path}": visibleWhen "scope" must be "document" or "parent", got #{inspect(other)})]
+    end
+  end
+
+  defp scope_problem(_, _, _), do: []
+
+  # `fget/2` falls back to `String.to_existing_atom/1`, which raises when no
+  # module has interned the atom yet; read the predicate by its string key and
+  # only use an atom key the map actually has.
+  defp visible_when_of(%{"visibleWhen" => pred}), do: pred
+  defp visible_when_of(%{visibleWhen: pred}), do: pred
+  defp visible_when_of(_), do: nil
 
   @doc false
   # Field paths (`seo.title`, `rows[].label`) whose definition carries the bare
@@ -792,10 +882,15 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_fields(fields, plugin) when is_list(fields) do
+  # `nested?` is true for every field inside a composite, an image/file's
+  # subfields or an array item: only those have a parent a `visibleWhen` with
+  # `"scope": "parent"` can read (task-9905a69475b1ff3b).
+  defp parse_fields(fields, plugin, nested? \\ false)
+
+  defp parse_fields(fields, plugin, nested?) when is_list(fields) do
     fields
     |> Enum.reduce_while({:ok, []}, fn raw_field, {:ok, acc} ->
-      case parse_field(raw_field, plugin) do
+      case parse_field(raw_field, plugin, nested?) do
         {:ok, f} -> {:cont, {:ok, [f | acc]}}
         {:error, _} = err -> {:halt, err}
       end
@@ -806,14 +901,15 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_fields(_, _), do: {:error, :fields_must_be_list}
+  defp parse_fields(_, _, _), do: {:error, :fields_must_be_list}
 
-  defp parse_field(raw, plugin) when is_map(raw) do
+  defp parse_field(raw, plugin, nested?) when is_map(raw) do
     f = stringify(raw)
     name = Map.get(f, "name")
     type = Map.get(f, "type")
 
     with :ok <- validate_field_name(name, plugin),
+         :ok <- validate_visible_when_scope(Map.get(f, "visibleWhen"), name, nested?),
          {:ok, surface} <- parse_field_surface(Map.get(f, "surface")),
          {:ok, %Field{} = base} <- parse_field_type(type, f, plugin) do
       {:ok,
@@ -835,7 +931,23 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
-  defp parse_field(_, _), do: {:error, :field_must_be_a_map}
+  defp parse_field(_, _, _), do: {:error, :field_must_be_a_map}
+
+  # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (the default — the
+  # path walks from the document root) or "parent" (the enclosing object or
+  # array item). A top-level field has no parent, so "parent" there is an error
+  # rather than a silent fallback.
+  @visible_when_scopes ~w(document parent)
+  defp validate_visible_when_scope(%{} = pred, name, nested?) do
+    case Map.get(pred, "scope", Map.get(pred, :scope)) do
+      nil -> :ok
+      "parent" when not nested? -> {:error, {:visible_when_parent_at_top_level, name}}
+      scope when scope in @visible_when_scopes -> :ok
+      scope -> {:error, {:visible_when_scope_invalid, name, scope}}
+    end
+  end
+
+  defp validate_visible_when_scope(_, _, _), do: :ok
 
   # sidebar-test classification (pd-doctrine t7, rule 4). Absent ⇒ nil
   # (unclassified — byte-compatible with every legacy schema). Only the two
@@ -865,7 +977,7 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   # composite — recursive object with named subfields
   defp parse_field_type("composite", f, plugin) do
-    case parse_fields(Map.get(f, "fields", []), plugin) do
+    case parse_fields(Map.get(f, "fields", []), plugin, true) do
       {:ok, kids} -> {:ok, %Field{fields: kids}}
       err -> err
     end
@@ -895,7 +1007,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       true ->
         item_raw = Map.put(stringify(of), "name", name <> "[item]")
 
-        case parse_field(item_raw, plugin) do
+        case parse_field(item_raw, plugin, true) do
           {:ok, child} -> {:ok, %Field{ordered: ordered, of: child}}
           err -> err
         end
@@ -955,7 +1067,7 @@ defmodule Barkpark.Content.SchemaDefinition do
         {:ok, %Field{}}
 
       kids when is_list(kids) ->
-        case parse_fields(kids, plugin) do
+        case parse_fields(kids, plugin, true) do
           {:ok, parsed} -> {:ok, %Field{fields: parsed}}
           err -> err
         end
@@ -976,7 +1088,7 @@ defmodule Barkpark.Content.SchemaDefinition do
         {:ok, %Field{}}
 
       kids when is_list(kids) ->
-        case parse_fields(kids, plugin) do
+        case parse_fields(kids, plugin, true) do
           {:ok, parsed} -> {:ok, %Field{fields: parsed}}
           err -> err
         end
@@ -1030,7 +1142,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       member_name when is_binary(member_name) and member_name != "" ->
         item_raw = Map.put(stringify(entry), "name", array_name <> "[" <> member_name <> "]")
 
-        case parse_field(item_raw, plugin) do
+        case parse_field(item_raw, plugin, true) do
           {:ok, child} -> {:ok, {member_name, child}}
           err -> err
         end

@@ -29,4 +29,5 @@ defmodule BarkparkWeb.Components.Fields.Visibility do
   state, `false` otherwise. Delegates to `Barkpark.Content.FieldVisibility`.
   """
   defdelegate visible?(field, doc), to: Barkpark.Content.FieldVisibility
+  defdelegate visible?(field, doc, parent), to: Barkpark.Content.FieldVisibility
 end

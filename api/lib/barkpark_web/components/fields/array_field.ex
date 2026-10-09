@@ -51,6 +51,9 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root, handed to each item's composite for `visibleWhen`
+  # (task-9905a69475b1ff3b); the item itself is the "parent" scope.
+  attr :root, :map, default: nil
   # Optional `phx-target` for the reorder/add/remove buttons. Defaults to nil —
   # buttons then bubble to the enclosing LiveView (StudioLive). When a
   # `Phoenix.LiveComponent.CID` is passed (e.g. `@myself` from PaperFieldBlock),
@@ -235,7 +238,8 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
               # search its own scope, not the flat default.
               dataset: assigns[:dataset] || "production",
               scope_prefix: assigns[:scope_prefix] || "",
-              api_token_raw: assigns[:api_token_raw] || ""
+              api_token_raw: assigns[:api_token_raw] || "",
+              root: assigns[:root]
             })
         })
 
