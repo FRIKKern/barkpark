@@ -33,6 +33,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
     # A signed-in account's display name is the name peers see; it wins over
     # the per-browser name, so it follows the account to every browser
     # (task-8d8dabe8b693031d). Without an account, the browser's own name.
+    fallback = fallback_name(socket, user_id)
+
     user_name =
       case socket.assigns[:current_user] do
         %{display_name: name} when is_binary(name) and name != "" ->
@@ -41,7 +43,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
         _ ->
           if stored_name && stored_name != "",
             do: stored_name,
-            else: fallback_name(socket, user_id)
+            else: fallback
       end
 
     # SELF-ONLY account label. The signed-in account's email, shown ONLY in the
@@ -156,6 +158,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       unpublish_refs: [],
       user_id: user_id,
       user_name: user_name,
+      # The generated name, kept so the profile dialog can show it as a
+      # placeholder rather than as a value to save (task-acae5df91728ca9d).
+      user_name_fallback: fallback,
       account_label: account_label,
       user_color: user_color,
       presences: [],

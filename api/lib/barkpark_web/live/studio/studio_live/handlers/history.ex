@@ -124,7 +124,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
   end
 
   def preview_profile(%{"name" => name, "color" => color}, socket) do
-    {:noreply, assign(socket, user_name: name, user_color: color)}
+    {:noreply, assign(socket, user_name: shown_name(name, socket), user_color: color)}
   end
 
   # A signed-in account saves the name as its display name (task-8d8dabe8b693031d),
@@ -137,7 +137,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
       {:ok, user} ->
         socket =
           socket
-          |> assign(user_name: name, user_color: color, show_profile: false, profile_error: nil)
+          |> assign(
+            user_name: shown_name(name, socket),
+            user_color: color,
+            show_profile: false,
+            profile_error: nil
+          )
           |> then(fn s -> if user, do: assign(s, current_user: user), else: s end)
           |> push_event("save-identity", %{name: name, color: color})
 
@@ -151,6 +156,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.History do
            profile_error: gettext("Use at most 80 characters.")
          )}
     end
+  end
+
+  # task-acae5df91728ca9d: the dialog shows the generated name as a
+  # placeholder, so an untouched field arrives blank. Blank saves no display
+  # name (Accounts stores nil) and the session keeps its generated name.
+  defp shown_name(name, socket) do
+    if String.trim(name) == "", do: socket.assigns[:user_name_fallback] || name, else: name
   end
 
   defp save_display_name(%Barkpark.Accounts.User{} = user, name),
