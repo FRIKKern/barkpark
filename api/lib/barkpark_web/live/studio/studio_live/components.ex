@@ -1477,8 +1477,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 class="pane-add-btn"
                 phx-click="airdrop-open"
                 phx-value-type={pane.type_name}
-                title={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name))}
-                aria-label={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name))}
+                title={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
+                aria-label={gettext("Share access to %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
                 data-test-id="airdrop-open-type"
               ><.icon name="share-2" size={14} /></button>
               <%!-- Access panel entry (airdrop-grants): review + revoke scoped
@@ -1498,8 +1498,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                 phx-click="new-document"
                 phx-value-type={pane.type_name}
                 phx-value-pane={"#{idx}"}
-                title={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name))}
-                aria-label={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name))}
+                title={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
+                aria-label={gettext("New %{type}", type: PaneBuilder.type_word(pane.type_name, pane[:type_title]))}
               ><.icon name="plus" size={14} /></button>
             <% end %>
           </:header_actions>
@@ -2329,7 +2329,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.item_share_popover
         show={@item_share_open}
         admin?={@caps.admin}
-        title={(@item_share && @item_share.title) || "this item"}
+        title={(@item_share && @item_share.title) || gettext("this item")}
         links={@item_share_links}
         error={@item_share_error}
       />
@@ -2337,6 +2337,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <.airdrop_sheet
         show={@airdrop_open}
         type={@airdrop_type}
+        type_word={@airdrop_type_word}
         caps={@airdrop_caps}
         link={@airdrop_link}
         error={@airdrop_error}
