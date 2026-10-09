@@ -261,6 +261,10 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
   # only prose and stayed in @filed_gaps).
   @served_by_a_builtin %{
     {"GET", "/v1/data/listen/:*"} => "bp listen — apiclient Client.Listen",
+    # task-78dc25a4f117fa07 — the SAME ListenController.listen/2 action,
+    # mounted a second time under the preview-JWT pipeline instead of a
+    # bearer token's. Same CLI story as its bearer twin one line above.
+    {"GET", "/v1/preview/listen/:*"} => "bp listen — apiclient Client.Listen",
     {"GET", "/v1/data/export/:*"} => "bp export — apiclient Client.Export",
     {"GET", "/v1/structure/:*"} => "the desk tree — apiclient Client.LoadStructure",
     {"POST", "/v1/tasks/:*/labels"} => "bp task relabel — apiclient Client.TaskRelabel",
