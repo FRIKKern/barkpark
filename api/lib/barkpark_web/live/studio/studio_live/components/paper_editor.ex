@@ -3048,6 +3048,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                           phx-update="ignore"
                         >
                           <bp-media-picker
+                            data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
                             value={state.media_src}
                             dataset={@dataset}
                             scope-prefix={@scope_prefix}
@@ -3210,6 +3211,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                         phx-update="ignore"
                       >
                         <bp-media-picker
+                          data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
                           value={image_block_src(child)}
                           dataset={@dataset}
                           scope-prefix={@scope_prefix}
@@ -4859,6 +4861,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <label class="bp-paper-edit-fieldlabel"><%= Map.get(@block, "label", "") %></label>
           <%= if @picker_browse do %>
             <bp-media-picker
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
               value={FieldInputs.image_form_value(Map.get(@block, "value", ""))}
               dataset={Map.get(@block, "dataset", @dataset)}
               scope-prefix={@scope_prefix}
@@ -4981,6 +4984,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           </label>
           <%= if @picker_browse do %>
             <bp-media-picker
+              data-strings={BarkparkWeb.StudioLocale.component_strings(:media)}
               value={image_block_src(@block)}
               dataset={@dataset}
               scope-prefix={@scope_prefix}

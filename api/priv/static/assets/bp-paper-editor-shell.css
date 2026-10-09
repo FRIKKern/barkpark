@@ -552,7 +552,7 @@
       justify-content: flex-start; background: transparent;
     }
     .bp-paper-edit-field[data-field-type="field-image"][data-field-name] .bp-mp-empty::before {
-      content: "+ Add image";
+      content: attr(data-label-short);
       font-family: var(--font); font-size: 13px;
       color: var(--paper-ink-faint);
     }
@@ -582,14 +582,14 @@
       background: var(--paper-edit-hover, rgba(21, 33, 29, 0.08));
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::before {
-      content: "Add an image";
+      content: attr(data-label-add);
       font-size: 14px; font-weight: 600; letter-spacing: 0.005em;
     }
     .bp-paper-edit-field[data-field-type="image"][data-block-role="featured"] .bp-mp-empty::before {
-      content: "Add a featured image";
+      content: attr(data-label-featured);
     }
     .bp-paper-edit-field[data-field-type="image"] .bp-mp-empty::after {
-      content: "Drop a file, click to upload, or browse the library";
+      content: attr(data-label-hint);
       font-size: 12px; font-weight: 500;
       color: var(--paper-ink-faint, #82918b);
     }
