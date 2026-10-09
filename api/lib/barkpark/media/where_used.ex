@@ -148,6 +148,12 @@ defmodule Barkpark.Media.WhereUsed do
     Barkpark.Content.Scope.scope_to_workspace_including_global(query, workspace_id, nil)
   end
 
+  # A struct with no `id` (e.g. a caller re-probing the textual scan alone
+  # after the real row was already deleted — `%MediaFile{path: file.path}`,
+  # pre-existing in delete_file_where_used_policy_test.exs) has no blob id to
+  # resolve a companion asset document from at all.
+  defp structural_referrers(%MediaFile{id: nil}), do: %{count: 0, sample: []}
+
   # task-5f6e7ae324334044 — the structural half: does any PUBLISHED document in
   # the blob's own dataset hold a schema image/file field whose `{"asset":
   # {"_ref": ...}}` names this blob's companion `mediaAsset` document?
