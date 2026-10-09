@@ -2514,6 +2514,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         editor_is_draft: Content.draft?(fresh.doc_id)
       )
       |> assign_published_twin(doc, fresh)
+      |> Shared.assign_page_title()
       |> push_document_table_echo(request_id)
     else
       _ -> socket

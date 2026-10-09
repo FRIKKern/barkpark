@@ -83,6 +83,35 @@ defmodule BarkparkWeb.Studio.StudioTabTitleTest do
     assert page_title(view) =~ ~r/^Studio/
   end
 
+  # task-72e1de4c53c5ed9f: the title was set only on navigation, so typing a
+  # new title renamed the header and the desk row while the tab kept the old
+  # one until the editor navigated away and back.
+  test "saving a new title renames the tab in place", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Content.upsert_schema(
+        %{
+          "name" => "tab_rename_note",
+          "title" => "Note",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "title" => "Title", "type" => "string"}]
+        },
+        "production"
+      )
+
+    {:ok, _} =
+      Barkpark.Content.create_document(
+        "tab_rename_note",
+        %{"doc_id" => "tr-1", "title" => "Vinterreise"},
+        "production"
+      )
+
+    {:ok, view, _} = live(conn, scoped_studio("/d/production/studio/tab_rename_note/tr-1"))
+    assert page_title(view) == "Vinterreise · Barkpark"
+
+    render_change(view, "autosave", %{"doc" => %{"title" => "Sommerreise"}})
+    assert page_title(view) =~ ~r/^Sommerreise/
+  end
+
   test "the root layout no longer hardcodes the tab title" do
     root = File.read!(Path.expand("../../../../lib/barkpark_web/layouts/root.html.heex", __DIR__))
 
