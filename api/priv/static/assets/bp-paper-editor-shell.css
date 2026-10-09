@@ -41,7 +41,7 @@
     .bp-paper-unrenderable {
       display: flex; flex-direction: column; gap: 10px;
       margin: 8px 0 4px; padding: 16px 18px;
-      border: 1px solid var(--paper-ink-faint);
+      border: 1px solid var(--paper-ink-faint-line);
       border-left: 3px solid var(--paper-accent);
       border-radius: 6px;
       background: var(--paper-bg-deep);
@@ -305,7 +305,7 @@
     .bp-paper-composite-block[data-array-variant="chips"] > form > button {
       margin-top: 6px; font-size: 14px; font-family: var(--font);
       color: var(--paper-ink-soft); background: transparent;
-      border: 1px dashed var(--paper-ink-faint); border-radius: 6px;
+      border: 1px dashed var(--paper-ink-faint-line); border-radius: 6px;
       padding: 2px 8px; cursor: pointer;
     }
     .bp-paper-composite-block[data-array-variant="chips"] > form > button:hover {
@@ -1091,7 +1091,7 @@
          inlined paper-surface.css `.bp-pnode*` rules — keep BYTE-ALIGNED with the
          styles.css + paper-surface.css copies (the card THREE-copy lockstep). */
     .bp-canvas-stage { display: flex; flex-direction: column; min-width: 130px; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); border-radius: 10px; padding: 11px 13px; }
-    .bp-canvas-stage--src { border-color: var(--paper-ink-faint); }
+    .bp-canvas-stage--src { border-color: var(--paper-ink-faint-line); }
     .bp-canvas-stage__k, .bp-canvas-stage__t, .bp-canvas-stage__d, .bp-canvas-stage__f { border: 0; background: transparent; width: 100%; padding: 0; outline: none; color: inherit; font-family: inherit; line-height: inherit; letter-spacing: inherit; word-spacing: inherit; text-rendering: inherit; font-feature-settings: inherit; font-variant-ligatures: inherit; }
     .bp-canvas-stage__k { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-accent); }
     .bp-canvas-stage__t { font-weight: 600; font-size: 0.88rem; color: var(--paper-ink); margin-top: 4px; }
@@ -1430,10 +1430,12 @@
       font-weight: 600;
       letter-spacing: 0.005em;
     }
+    /* Text on the slot's accent tint, not the bare paper: ink-soft clears AA
+       there in both modes where ink-faint did not (task-4fe2840b400afeb1). */
     .bp-paper-ghost-hint {
       font-size: 12px;
       font-weight: 500;
-      color: var(--paper-ink-faint, #82918b);
+      color: var(--paper-ink-soft, #55635e);
     }
 
     /* ── Curated slash popover (B2) — "1:1 with Portable-Doc". ─────────────
