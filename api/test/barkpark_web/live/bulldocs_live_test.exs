@@ -881,6 +881,23 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       assert rendered =~ "Rail demo body."
     end
 
+    # task-cb2e20ecf89522cf: the rows were <li phx-click> — no tabindex, so a
+    # keyboard user could neither select an event nor reach the diff.
+    test "every rail event is a button Tab can reach", %{conn: conn} do
+      seed_rail_paper()
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      rows =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s(#goal-path-events [phx-click="rail-select"]))
+
+      assert Enum.count(rows) == 3
+      assert rows |> Enum.flat_map(&LazyHTML.tag/1) |> Enum.uniq() == ["button"]
+      assert LazyHTML.attribute(rows, "type") == ["button", "button", "button"]
+      assert LazyHTML.attribute(rows, "aria-pressed") == ["false", "false", "false"]
+    end
+
     test "a paper WITHOUT a goal_id renders NO rail", %{conn: conn} do
       slug = "2026-05-25-no-goal-paper"
 
@@ -983,6 +1000,35 @@ defmodule BarkparkWeb.BulldocsLiveTest do
         |> element(~s(button.bp-diff-close))
         |> render_click()
 
+      refute closed =~ ~s(id="bp-diff-modal")
+    end
+
+    # task-cb2e20ecf89522cf: the dialog had no Escape and never took or
+    # returned focus.
+    test "the diff dialog closes on Escape and moves focus in and back", %{conn: conn} do
+      {_paper, a, b} = seed_diff_paper()
+      {:ok, view, _html} = live(conn, "/papers/#{@diff_slug}")
+
+      doc =
+        view
+        |> render_hook("open-diff", %{"from" => a.id, "to" => b.id})
+        |> LazyHTML.from_fragment()
+
+      ops = fn selector, attr ->
+        doc
+        |> LazyHTML.query(selector)
+        |> LazyHTML.attribute(attr)
+        |> List.first()
+        |> Jason.decode!()
+        |> Enum.map(&hd/1)
+      end
+
+      assert ops.("#bp-diff-modal", "phx-mounted") == ["focus"]
+      assert ops.(".bp-diff-panel", "phx-window-keydown") == ["pop_focus", "push"]
+      assert ops.("#bp-diff-close", "phx-click") == ["pop_focus", "push"]
+      assert LazyHTML.attribute(LazyHTML.query(doc, ".bp-diff-panel"), "phx-key") == ["escape"]
+
+      closed = render_keydown(view, "close-diff", %{"key" => "Escape"})
       refute closed =~ ~s(id="bp-diff-modal")
     end
 
