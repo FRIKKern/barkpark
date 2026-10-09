@@ -380,6 +380,12 @@
       }
       return out;
     }
+    // A node's type in the host's words (opts.typeLabels, {type: word}); the raw
+    // type id when the host names none (task-96f9a40da119c8c6).
+    var typeLabels = opts.typeLabels || {};
+    function typeWord(t) {
+      return typeof typeLabels[t] === "string" && typeLabels[t] !== "" ? typeLabels[t] : t;
+    }
     // "1 connection", "2 connections" — the accessible names and the focus
     // announcement said "1 connections" (task-880a2d3f48ccbfcb).
     function gtCount(n) {
@@ -2156,7 +2162,7 @@
           : esc(node.broken_id) + " · " + esc(gt("broken reference"));
         html += "<div style='color:" + (light ? MONO_LIGHT : SLATE) + "'>" + line + "</div>";
       } else {
-        html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(node.type) + "</div>";
+        html += "<div style='color:" + (light ? shiftL(ACCENT, -0.22) : rgba(ACCENT, 0.9)) + "'>" + esc(typeWord(node.type)) + "</div>";
         var cc = Object.keys(adj[node.id] || {}).length;
         html += "<div style='color:" + (light ? TOOLTIP_META_LIGHT : TOOLTIP_META_DARK) + ";margin-top:2px'>" + esc(gtCount(cc)) + "</div>";
       }
@@ -2851,7 +2857,7 @@
             n.type === "task" && n.status ? ". " + gt("Status: %{status}", { status: n.status }) : "";
           div.setAttribute(
             "aria-label",
-            n.title + ". " + n.type + statusPart + ". " + gtCount(nb) + "."
+            n.title + ". " + typeWord(n.type) + statusPart + ". " + gtCount(nb) + "."
           );
         }
         div.addEventListener("focus", function () {
@@ -3403,6 +3409,10 @@
           strings: (function (raw) {
             try { return JSON.parse(raw || "{}"); } catch (e) { return {}; }
           })(this.el.dataset.strings),
+          // The Studio shell's {type: word} map, the pickers' source too.
+          typeLabels: (function (host) {
+            try { return JSON.parse((host && host.dataset.typeLabels) || "{}"); } catch (e) { return {}; }
+          })(this.el.closest("[data-type-labels]")),
           onNodeClick: function (n) {
             if (n && n.id) self.pushEvent("node-clicked", { id: n.id });
           }
