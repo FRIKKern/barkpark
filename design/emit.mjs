@@ -1129,7 +1129,12 @@ function studioBlock(themes = loadThemes()) {
     ind + 'html[data-theme="dark"] {',
     baseVars("dark", ind + "  "),
     primaryVars("dark", ind + "  "),
+    // The status hues follow the explicit theme too (task-9dfa7ee60e6b0589):
+    // before, they flipped only on the OS media query, so the theme the user
+    // picked set the ground and the OS set the status colours.
+    statusVars("dark", ind + "  "),
     onStatusVars("dark", ind + "  "),
+    onTintVars("dark", ind + "  "),
     chromeVars("dark", ind + "  "),
     lifeVars("dark", ind + "  "),
     ind + "}",
@@ -1138,6 +1143,14 @@ function studioBlock(themes = loadThemes()) {
     statusVars("dark", ind + "    "),
     onTintVars("dark", ind + "    "),
     ind + "  }",
+    ind + "}",
+    // An explicit light theme re-asserts the light status hues, so a dark-mode
+    // OS cannot repaint them (paper-surface's four-block shape: bare light,
+    // prefers-dark, explicit light, explicit dark). html[data-theme] outranks
+    // the media query's :root by specificity.
+    ind + 'html[data-theme="light"] {',
+    statusVars("light", ind + "  "),
+    onTintVars("light", ind + "  "),
     ind + "}",
   ];
   const themed = themeBlocks(themes, studioThemeBlock);
