@@ -153,9 +153,11 @@ defmodule BarkparkWeb.Static.BpGraphEscapeLockTest do
              "scan did not reach the legend row sink (row.innerHTML = ...); sinks seen: " <>
                Enum.map_join(results, " | ", &short(&1.text))
 
-      assert "node.type" in tooltip.esc_args,
+      # task-96f9a40da119c8c6: the type row prints the host's type WORD for
+      # node.type; the escape still wraps the whole operand.
+      assert "typeWord(node.type)" in tooltip.esc_args,
              """
-             The tooltip sink no longer wraps node.type in esc().
+             The tooltip sink no longer wraps the node's type (typeWord(node.type)) in esc().
              esc() arguments observed at that sink: #{inspect(tooltip.esc_args)}
              This is the pre-#12324 stored-XSS line (bp-graph.js tooltip type row).
              """
