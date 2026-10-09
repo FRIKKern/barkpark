@@ -1125,31 +1125,14 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # scoped API, e.g. href: "/w/:workspace/p/:project/v1/data/doc/:dataset/...").
   # :workspace is replaced before :w-anything ambiguity can arise because
   # the replacements run longest-token-first.
+  # Delegates to `Barkpark.Content.PreviewLocations.interpolate/5` — the ONE
+  # placeholder-substitution implementation, shared with the batch backlinks
+  # -> locations resolver (task-c5d5e045e7efcc96). Same vocabulary, same
+  # longest-token-first order; `studio_preview_link_action_test.exs` pins
+  # that a StudioLive-rendered href and a direct `interpolate/5` call agree
+  # for the same inputs.
   defp do_interpolate_href(href, doc, dataset, ws_slug, proj_slug) do
-    id =
-      case doc do
-        %{doc_id: doc_id} -> Barkpark.Content.published_id(doc_id)
-        _ -> ""
-      end
-
-    # `:slug` (S9 criterion 4) — the consumer site addresses a page by slug,
-    # not by doc id, so a preview template interpolates the document's own
-    # slug. Replaced BEFORE `:id` for the same longest-token-first reason the
-    # scope pair is: neither is a prefix of the other today, but the ordering
-    # is the invariant this list is built on.
-    href
-    |> String.replace(":workspace", to_string(ws_slug || ""))
-    |> String.replace(":project", to_string(proj_slug || ""))
-    |> String.replace(":dataset", to_string(dataset || ""))
-    |> String.replace(":slug", doc_slug_for_href(doc))
-    |> String.replace(":id", id)
-  end
-
-  defp doc_slug_for_href(doc) do
-    case BarkparkWeb.Studio.StudioLive.DocActions.doc_slug(doc) do
-      slug when is_binary(slug) -> slug
-      _ -> ""
-    end
+    Barkpark.Content.PreviewLocations.interpolate(href, doc, dataset, ws_slug, proj_slug)
   end
 
   @doc """

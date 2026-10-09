@@ -992,6 +992,19 @@ defmodule Barkpark.Plugins.Capabilities do
         default_output: "table",
         scoped_prefix: "/w/:workspace_slug/p/:project_slug"
       ),
+      core_cmd(
+        "doc.locations",
+        "doc",
+        "locations",
+        "\"Used on N pages\": backlinks resolved into consumer-site URLs via each referrer's own schema desk.preview template. A referrer with no template, or needing :slug with none set, is omitted.",
+        "GET",
+        "/v1/data/locations/:dataset/:id",
+        "read",
+        args: [arg("id", true, "string", "Document id to find referring page URLs for.")],
+        writes: false,
+        default_output: "table",
+        scoped_prefix: "/w/:workspace_slug/p/:project_slug"
+      ),
       # auth_tier "read", NEVER "none" (D71): a none-tier read drops the bearer
       # and silently 404s private-schema reads to authenticated callers — the
       # proven doc.query bug class. The endpoint 404s anon (existence-hiding),

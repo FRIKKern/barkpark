@@ -119,6 +119,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "feeds DocActions.resolved_doc_actions/1's action registry (schema.actions / " <>
         "desk.preview) — never Envelope field redaction; a miss is a 404 before any " <>
         "document renders",
+    "barkpark/content/preview_locations.ex:preview_template" =>
+      "reads only desk.preview's URL template string to interpolate a backlink's " <>
+        "preview href — never a document field, so it never reaches Envelope redaction",
     "mix/tasks/barkpark.workspace.provision_schemas.ex:survey_one" =>
       "mix task copying schema rows between scopes (source read + target existence/provenance probe)",
     "barkpark/content.ex:get_schema" => "the facade delegate — this IS the raw lookup",

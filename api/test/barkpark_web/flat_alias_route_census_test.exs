@@ -487,6 +487,14 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "threads ScopeHelpers.scope_opts/1 into every store call, so the rows are the " <>
          "pipeline-derived :current_workspace's — which DeriveWorkspaceFromToken now fills " <>
          "from the token before AssignDefaultScope can stamp Default."},
+    # QueryController.locations (task-c5d5e045e7efcc96) — same shape as backlinks
+    # above, one line down: backlinks/2's result feeds PreviewLocations.resolve/4
+    # under the identical scope_opts(conn) thread.
+    {"GET", "/v1/data/locations/:dataset/:id"} =>
+      {:workspace_derived,
+       "threads ScopeHelpers.scope_opts/1 into Content.Graph.backlinks/2 and " <>
+         "PreviewLocations.resolve/4 exactly like its backlinks sibling above, so the " <>
+         "rows are the pipeline-derived :current_workspace's."},
     # QueryController.counts
     {"GET", "/v1/data/counts/:dataset"} =>
       {:workspace_derived,
