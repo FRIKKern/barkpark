@@ -37,8 +37,24 @@ defmodule BarkparkWeb.PreviewLinkController do
 
   # ── PUBLIC resolver ──────────────────────────────────────────────────────
 
+  # HARDENING for a draft served by a bearer-in-URL token (team-lead review):
+  #   * referrer-policy: no-referrer — overrides ApiSecurityHeaders'
+  #     strict-origin-when-cross-origin baseline. A referrer header on any
+  #     outbound link FROM this response would carry the raw token (it rides
+  #     the URL path) to whatever site that link points at.
+  #   * cache-control: private, no-store — an intermediary or the browser's
+  #     own disk cache must never retain a draft body keyed on a secret that
+  #     can be revoked out from under it.
+  #   * x-robots-tag: noindex — same stance as ReaderNoindex for the paper
+  #     reader, applied here directly since this route runs the :api
+  #     pipeline, not a reader pipeline that already mounts that plug.
+  # Set on BOTH the success and not-found arms — a 404 can still be cached or
+  # leak a referrer same as a 200, and the token is in the URL on the refused
+  # request too.
   @doc "GET /sp/:token — resolve a preview link and serve the one document it names."
   def show(conn, %{"token" => token}) do
+    conn = put_hardening_headers(conn)
+
     with {:ok, link} <- PreviewLinks.resolve(token),
          {:ok, doc} <-
            Content.get_document(link.doc_id, link.ref_type, link.dataset, scope(link)) do
@@ -132,6 +148,13 @@ defmodule BarkparkWeb.PreviewLinkController do
   end
 
   # ── helpers ────────────────────────────────────────────────────────────
+
+  defp put_hardening_headers(conn) do
+    conn
+    |> put_resp_header("referrer-policy", "no-referrer")
+    |> put_resp_header("cache-control", "private, no-store")
+    |> put_resp_header("x-robots-tag", "noindex")
+  end
 
   defp scope(link), do: [workspace_id: link.workspace_id, project_id: link.project_id]
 

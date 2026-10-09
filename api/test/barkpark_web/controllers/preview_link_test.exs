@@ -11,7 +11,13 @@ defmodule BarkparkWeb.PreviewLinkTest do
   alias Barkpark.{Auth, Content, Repo}
   alias Barkpark.Sharing.PreviewLink
 
+  import Barkpark.RateLimiterSandbox
   import Barkpark.TenancyFixtures
+
+  # Whole-node ETS table (:barkpark_rate_limiter) — reset so an earlier test's
+  # spend never leaks into the rate-limit tests below (same reset
+  # RateLimitTest itself runs for the same reason).
+  setup :reset_rate_limiter!
 
   @dataset "production"
   @admin "preview-link-admin"
@@ -74,6 +80,18 @@ defmodule BarkparkWeb.PreviewLinkTest do
 
   defp mint(conn, body),
     do: conn |> admin() |> post("/v1/shares/preview-links", body) |> json_response(201)
+
+  defp with_read_limit(n) do
+    original = Application.get_env(:barkpark, :rate_limits)
+
+    Application.put_env(
+      :barkpark,
+      :rate_limits,
+      Keyword.merge([read_per_minute: n, write_per_minute: 60, datasets: %{}], [])
+    )
+
+    on_exit(fn -> Application.put_env(:barkpark, :rate_limits, original) end)
+  end
 
   test "a PUBLISHED doc link returns the document JSON at /sp/:token", %{
     conn: conn,
@@ -283,5 +301,61 @@ defmodule BarkparkWeb.PreviewLinkTest do
     assert listed["id"] == link["id"]
     refute Map.has_key?(listed, "token")
     refute Map.has_key?(listed, "token_hash")
+  end
+
+  # ── hardening headers + per-IP rate limit (team-lead review) ─────────────
+
+  test "the three hardening headers are on a SUCCESSFUL /sp response", %{
+    conn: conn,
+    scope_str: scope
+  } do
+    %{"token" => token} = mint(conn, %{scope: scope, ref_type: "post", doc_id: "post1"})
+
+    resp = get(scoped_conn(), "/sp/#{token}")
+    assert resp.status == 200
+    assert get_resp_header(resp, "referrer-policy") == ["no-referrer"]
+    assert get_resp_header(resp, "cache-control") == ["private, no-store"]
+    assert get_resp_header(resp, "x-robots-tag") == ["noindex"]
+  end
+
+  test "the three hardening headers are ALSO on a REFUSED /sp response", %{} do
+    resp = get(scoped_conn(), "/sp/not-a-real-token")
+    assert resp.status == 404
+    assert get_resp_header(resp, "referrer-policy") == ["no-referrer"]
+    assert get_resp_header(resp, "cache-control") == ["private, no-store"]
+    assert get_resp_header(resp, "x-robots-tag") == ["noindex"]
+  end
+
+  test "RATE-LIMITED PER IP: a burst of anonymous /sp requests from one IP 429s", %{
+    conn: conn,
+    scope_str: scope
+  } do
+    with_read_limit(2)
+
+    %{"token" => token} = mint(conn, %{scope: scope, ref_type: "post", doc_id: "post1"})
+
+    assert get(scoped_conn(), "/sp/#{token}").status == 200
+    assert get(scoped_conn(), "/sp/#{token}").status == 200
+    limited = get(scoped_conn(), "/sp/#{token}")
+
+    assert limited.status == 429
+    assert Jason.decode!(limited.resp_body)["error"]["code"] == "rate_limited"
+  end
+
+  test "RATE-LIMITED PER IP: a different IP keeps its own budget", %{
+    conn: conn,
+    scope_str: scope
+  } do
+    with_read_limit(1)
+
+    %{"token" => token} = mint(conn, %{scope: scope, ref_type: "post", doc_id: "post1"})
+
+    ip_a = scoped_conn() |> put_req_header("x-forwarded-for", "203.0.113.10")
+    ip_b = scoped_conn() |> put_req_header("x-forwarded-for", "203.0.113.20")
+
+    assert get(ip_a, "/sp/#{token}").status == 200
+    assert get(ip_a, "/sp/#{token}").status == 429
+    # B is untouched — its own, unspent bucket.
+    assert get(ip_b, "/sp/#{token}").status == 200
   end
 end
