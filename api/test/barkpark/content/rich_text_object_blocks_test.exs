@@ -59,6 +59,29 @@ defmodule Barkpark.Content.RichTextObjectBlocksTest do
       assert Enum.any?(msgs, &(&1 =~ "/body/1/tone" and &1 =~ "must be one of info, warning"))
       assert Enum.any?(msgs, &(&1 =~ "/body/1/text" and &1 =~ "Required"))
     end
+
+    # task-839f9bebf5628c03 — found LIVE: barkpark-studio's PATCH on a
+    # published post, through the real "editor":"blocks" write path,
+    # produced ZERO findings for this exact out-of-vocabulary block. Root
+    # cause: a richText field's value has TWO live shapes, and the walk only
+    # ever recognised one of them.
+    #
+    #   * a bare list -- what `@schema`'s own tests above construct by hand.
+    #   * `%{"blocks" => [...], "html" => ...}` -- what the Studio
+    #     block-editor ACTUALLY stores once a field has gone through
+    #     `Papers.BlockOps.apply_field_block_ops/6`
+    #     (`Projection.project_body/2`'s output shape), and what a `patch`
+    #     that `set`s the field to that same shape stores verbatim, since a
+    #     generic "set" patch does no field-specific unwrapping.
+    #
+    # Same body, same schema, same assertions as the bare-list test above --
+    # only the outer wrapper differs.
+    test "the same tone/text violations are reported when body is the %{blocks:} wrapper shape" do
+      body = %{"blocks" => [para("hi"), callout(%{"tone" => "loud"})]}
+      assert {:error, %{"body" => msgs}} = Validation.validate(%{"body" => body}, "t", @schema)
+      assert Enum.any?(msgs, &(&1 =~ "/body/1/tone" and &1 =~ "must be one of info, warning"))
+      assert Enum.any?(msgs, &(&1 =~ "/body/1/text" and &1 =~ "Required"))
+    end
   end
 
   # task-839f9bebf5628c03 — a block field's OWN `"level": "warning"` rule used
