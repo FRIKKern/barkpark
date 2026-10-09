@@ -43,6 +43,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root a `visibleWhen` with the default "document" scope reads;
+  # nil reads this object's own value, as before (task-9905a69475b1ff3b).
+  attr :root, :map, default: nil
 
   def composite_field(assigns) do
     path = Map.get(assigns, :path, "")
@@ -60,6 +63,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       |> Map.put_new(:dataset, "production")
       |> Map.put_new(:scope_prefix, "")
       |> Map.put_new(:api_token_raw, "")
+      |> Map.put_new(:root, nil)
       |> Map.put(:title, title_for(assigns.field))
       |> Map.put(:description, description_for(assigns.field))
       |> Map.put(:subfields, assigns.field.fields || [])
@@ -73,7 +77,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         <.composite_body
           field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
           tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
         />
       <% @depth >= 2 -> %>
         <details class="bp-field bp-field-composite" data-field-type="composite" data-field-name={@field.name} data-depth={@depth} open>
@@ -82,7 +86,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
           />
         </details>
       <% true -> %>
@@ -92,7 +96,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           <.composite_body
             field={@field} value={@value} errors={@errors} warnings={@warnings} subfields={@subfields} groups={@groups}
             tabs_id={@tabs_id} path={@path} readonly={@readonly} on_change={@on_change} plugin_name={@plugin_name}
-            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw}
+            dataset={@dataset} scope_prefix={@scope_prefix} api_token_raw={@api_token_raw} root={@root}
           />
         </fieldset>
     <% end %>
@@ -122,6 +126,9 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   attr :dataset, :string, default: "production"
   attr :scope_prefix, :string, default: ""
   attr :api_token_raw, :string, default: ""
+  # The document root a `visibleWhen` with the default "document" scope reads;
+  # nil reads this object's own value, as before (task-9905a69475b1ff3b).
+  attr :root, :map, default: nil
 
   defp composite_body(assigns) do
     ~H"""
@@ -142,7 +149,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
           tabindex={if g["name"] == default_group(@groups), do: "0", else: "-1"}
         ><%= g["title"] || g["name"] %></button>
       </div>
-      <%= for sub <- @subfields, Visibility.visible?(sub, @value) do %>
+      <%= for sub <- @subfields, Visibility.visible?(sub, @root || @value, @value) do %>
         <div class="bp-subfield" data-subfield-name={sub.name} data-group={subfield_group(sub)}>
           <label class="bp-field-label" for={input_id(@path, @field.name, sub.name)}>
             <%= title_for(sub) %>
@@ -210,7 +217,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       readonly: assigns.readonly,
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
-      api_token_raw: Map.get(assigns, :api_token_raw) || ""
+      api_token_raw: Map.get(assigns, :api_token_raw) || "",
+      root: Map.get(assigns, :root)
     }
 
     composite_field(sub_assigns)
@@ -228,7 +236,8 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       readonly: assigns.readonly,
       dataset: Map.get(assigns, :dataset) || "production",
       scope_prefix: Map.get(assigns, :scope_prefix) || "",
-      api_token_raw: Map.get(assigns, :api_token_raw) || ""
+      api_token_raw: Map.get(assigns, :api_token_raw) || "",
+      root: Map.get(assigns, :root)
     }
 
     ArrayField.array_field(sub_assigns)

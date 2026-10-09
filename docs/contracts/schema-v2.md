@@ -23,11 +23,11 @@ Members are typed by a single `of` **shape descriptor** (missing/non-object ⇒ 
 
 ### `localizedText` — multi-language string with fallback chain
 
-The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when undeclared; callers (e.g. the ONIX export and Studio renderer) supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order.
+The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; validated — an unknown/empty set is rejected). `format` is `"plain"` or `"rich"`. Resolver: `Barkpark.Content.LocalizedText.resolve/2`. `fallbackChain` defaults to `[]` when undeclared; callers supply their own chain, typically `["nob", "eng", "first-non-empty"]`. `"first-non-empty"` walks remaining language slots in iteration order.
 
 ## Decisions (locked)
 
-- **Decision 7 — no `Code.eval`:** `parse/2` is data-only. Rule values in the `validations:` slot are inert data the evaluator interprets at runtime. No dynamic compilation.
+- **Decision 7 — no `Code.eval`:** `parse/2` is data-only. Rule values in the `validations:` slot are inert data the evaluator interprets at runtime.
 - **Decision 20 — `codelistId` discriminator:** `<plugin>:<name>` convention; `plugin_name` column prevents cross-plugin collisions.
 - **Decision 21 — BYO codelist snapshot:** no bundled EDItEUR XML; publisher supplies via `BARKPARK_ONIX_CODELIST_PATH` or DB (`plugin_settings`); core seeds EDItEUR + Thema via `CodelistSeeders`.
 
@@ -44,7 +44,7 @@ The field declares its language slots via `languages` (e.g. `["nob", "eng"]`; va
 
 Phase 0 shipped the four v2 types, the recursive validator, the codelist registry, the LiveView field components and the rule evaluator (`Barkpark.Content.Validation.Rules`, `Evaluator`); the `validations:` slot stays inert until Phase 3 (pinned by `validates_validations_slot_is_inert_in_phase_0`).
 
-**Phase 1+ (deferred — `docs/decisions/deferred.md`):** Oban + cloak_ecto wiring, error envelope v2 (`Accept-Version: 2`), Thema tree picker, Simplified/Advanced toggle, drag reorder.
+**Phase 1+:** `docs/decisions/deferred.md`, plus error envelope v2 (`Accept-Version: 2`).
 
 ## Stored value shapes
 
@@ -66,9 +66,13 @@ Write `validation: {required: true}` (ruling #48). Schema apply refuses a bare f
 
 ## The sidebar test — per-field `surface` (pd-doctrine t7, rule 4)
 
-Each field MAY carry `surface: "body" | "sidebar"` — PortableDoc doctrine rule 4 ("does it read as part of the article?"). `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies, references, dates, trade metadata, settings. Parsed by `parse_field/2` onto `Field.surface`; recurses into `composite` subfields and `arrayOf` `of` descriptors. **Absent ⇒ `nil` (unclassified)**, so a schema without `surface` round-trips unchanged and `surface` never flips `flat?/1`. Any other value ⇒ `{:error, :field_surface_invalid}`. Metadata only; no consumer yet (D1 — sidebar-v2 reads it later).
+Each field MAY carry `surface: "body" | "sidebar"`. `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies, references, dates, trade metadata, settings. Parsed onto `Field.surface`, recursing into `composite` subfields and `of` descriptors. **Absent ⇒ `nil` (unclassified)**, so a schema without `surface` round-trips unchanged and `surface` never flips `flat?/1`. Any other value ⇒ `{:error, :field_surface_invalid}`. Metadata only; no consumer yet (D1 — sidebar-v2 reads it later).
 
-**Audit boundary:** only the 8 seed schemas (`seeds/demo.ex`) and `paper.json` are stamped; others keep `surface: nil`.
+Only the 8 seed schemas (`seeds/demo.ex`) and `paper.json` are stamped.
+
+## `visibleWhen` scope
+
+`visibleWhen.scope`: `"document"` (default, from the root) or `"parent"` (the enclosing object/array item); top-level `"parent"` or another value is refused at write. Used by Studio and `readOnly`. **Hidden is not skipped:** validation still checks hidden fields.
 
 ## TUI constraint (D12)
 
