@@ -3501,6 +3501,16 @@
       position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
       overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0;
     }
+    /* Skip link (task-50c06dba12b3e908): off-screen until focused, then a
+       visible pill over the top-left of the bar. Its target is a zero-size
+       anchor, so it takes no room in the shell's flex column. */
+    .bp-skip-link {
+      position: absolute; left: 8px; top: -100px; z-index: 1000;
+      padding: 8px 12px; border-radius: var(--radius-sm);
+      background: var(--bg-card); color: var(--fg); border: 1px solid var(--border);
+    }
+    .bp-skip-link:focus { top: 8px; }
+    .bp-skip-target { display: block; height: 0; overflow: hidden; outline: none; }
     .scope-menu {
       position: absolute; top: calc(100% + 6px); left: 0; z-index: 80;
       display: flex; align-items: stretch;

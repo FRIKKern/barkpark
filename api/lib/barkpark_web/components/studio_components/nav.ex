@@ -463,7 +463,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     assigns = assign(assigns, :tabs, tabs)
 
     ~H"""
-    <div class="studio-bar-tabs">
+    <div class="studio-bar-tabs" role="navigation" aria-label={gettext("Studio sections")}>
       <%= for tab <- @tabs do %>
         <% active = plugin_tab_active?(tab, @current_path) %>
         <%!-- Icons-only top bar (sup-w1): the glyph carries the meaning, the
