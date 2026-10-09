@@ -3602,6 +3602,9 @@ defmodule BarkparkWeb.Router do
     pipe_through([:scoped_api_presence_focus, :require_token])
 
     post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
+    # task-936472b77285df5b — explicit leave, same rate class and pipeline
+    # as focus (a quick, session-scoped write, not the generic write bucket).
+    delete("/v1/data/presence/:dataset/leave", PresenceController, :leave)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the
