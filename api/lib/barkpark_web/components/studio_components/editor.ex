@@ -676,7 +676,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
     ~H"""
     <%= if @editor_doc do %>
-      <div class="editor-panel" data-role="content">
+      <%!-- The open document is the page's main region (task-8e2fa7915ed7faa0);
+            the paper and beta shells carry their own <main> instead. --%>
+      <div class="editor-panel" data-role="content" role="main">
         <.document_header
           dataset={@dataset}
           title={@editor_doc.title || preview_title(@editor_doc, @editor_schema) || singleton_title(@editor_schema) || "Untitled"}

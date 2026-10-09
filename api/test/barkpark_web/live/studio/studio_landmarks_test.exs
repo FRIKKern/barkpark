@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.StudioLandmarksTest do
     assert LazyHTML.attribute(target, "tabindex") == ["-1"]
   end
 
-  test "the tab row is a labelled navigation and the desk is main", %{conn: conn} do
+  test "the tab row is a labelled navigation and the open document is the one main", %{conn: conn} do
     {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/landmark_note/lm-1"))
 
     nav = q(html, ~s(.studio-bar-tabs[role="navigation"]))
@@ -62,7 +62,30 @@ defmodule BarkparkWeb.Studio.StudioLandmarksTest do
     assert [label] = LazyHTML.attribute(nav, "aria-label")
     assert label != ""
 
-    assert LazyHTML.attribute(q(html, "#studio-panes"), "role") == ["main"]
+    # task-8e2fa7915ed7faa0: the open document's panel is the main region, not
+    # the whole desk (which also holds the navigation columns).
+    assert Enum.count(q(html, ~s(#studio-panes[role]))) == 0
+    assert Enum.count(q(html, ~s(main, [role="main"]))) == 1
+    assert Enum.count(q(html, ~s(.editor-panel[role="main"]))) == 1
+  end
+
+  # task-8e2fa7915ed7faa0: with the desk as main, a paper page nested its
+  # shell's own labelled <main> inside it. The paper shell is the one main.
+  test "a paper page exposes exactly one main, the paper shell", %{conn: conn} do
+    {:ok, _} =
+      Content.upsert_paper(
+        Barkpark.LabelFixtures.paper_attrs(%{
+          "slug" => "lm-paper",
+          "style" => "article",
+          "body_html" => "<p>Hei.</p>"
+        })
+      )
+
+    {:ok, _view, html} = live(conn, scoped_studio("/d/#{@dataset}/studio/paper/lm-paper"))
+
+    mains = q(html, ~s(main, [role="main"]))
+    assert Enum.count(mains) == 1
+    assert LazyHTML.attribute(mains, "data-test-id") == ["studio-paper-shell"]
   end
 
   test "the open document's title is the page's level-1 heading", %{conn: conn} do
