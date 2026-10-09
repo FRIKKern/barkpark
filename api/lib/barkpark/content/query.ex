@@ -593,6 +593,39 @@ defmodule Barkpark.Content.Query do
                   )
                 )
 
+              # A `file` field's stored shape is the SAME `{asset: {_ref}}`
+              # wrapper an `image` field uses, minus the image-only hotspot/
+              # crop subfields (`Validation.walk_field/4`'s own "same split as
+              # image... no image-only concept applies" comment) — so its
+              # backlinks arm is #22042's image arm, unchanged, matched on
+              # `"file"` instead (task-7150f77eb6fbc640: a post's `file` field
+              # asset ref was invisible to backlinks/media-delete-protection
+              # entirely, while the `image` arm already covered the same
+              # shape for an `image` field).
+              field["type"] == "file" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "?->?->'asset'->>'_ref' = ?",
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
+              field["type"] == "arrayOf" and get_in(field, ["of", "type"]) == "file" ->
+                dynamic(
+                  [d],
+                  fragment(
+                    "jsonb_typeof(?->?) = 'array' AND ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text)))",
+                    d.content,
+                    ^name,
+                    d.content,
+                    ^name,
+                    ^pub_id
+                  )
+                )
+
               true ->
                 dynamic(false)
             end
