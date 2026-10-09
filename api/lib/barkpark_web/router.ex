@@ -3088,11 +3088,31 @@ defmodule BarkparkWeb.Router do
 
     # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of /links
     # above, not a branch of it: Links.create/1 strips a `drafts.` prefix off
-    # ref_id unconditionally, so it can never name an unpublished row. Same
-    # admin mint/list/revoke shape; public reader is GET /sp/:token below.
+    # ref_id unconditionally, so it can never name an unpublished row.
+    # list/revoke stay admin-only; mint moved below
+    # (task-9cfe08fe1e91b6c9 widened it to any write-capable member, same
+    # posture as task-ea6c9abb868593f8/task-d50757dc446514e7). Public reader
+    # is GET /sp/:token below.
     get("/preview-links", PreviewLinkController, :list)
-    post("/preview-links", PreviewLinkController, :mint)
     delete("/preview-links/:id", PreviewLinkController, :revoke)
+  end
+
+  # task-9cfe08fe1e91b6c9 — PreviewLinkController.mint/2 widened from
+  # admin-only to any write-capable WORKSPACE MEMBER, the third and final
+  # sibling of this widening series (after task-ea6c9abb868593f8's preview
+  # tokens and task-d50757dc446514e7's share links). A SEPARATE scope so
+  # `:require_admin` is not on this route's pipeline at all — same combo as
+  # the flat `/v1/data/mutate` family (router.ex `:require_write` precedent)
+  # and task-d50757dc446514e7's own `/v1/shares/links` mint split. The
+  # workspace-specific authorization (admin OR a write-capable member of the
+  # SPECIFIC workspace named in the request's `scope` param) lives in the
+  # controller's own `ensure_can_mint/2` — the workspace here comes from the
+  # request BODY, not the URL, so no `:scoped_api`/`ResolveWorkspace`
+  # membership gate exists on this flat route to lean on.
+  scope "/v1/shares", BarkparkWeb do
+    pipe_through([:api, :require_token, :flat_within_quota, :require_write])
+
+    post("/preview-links", PreviewLinkController, :mint)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound

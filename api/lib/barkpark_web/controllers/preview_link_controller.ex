@@ -6,8 +6,13 @@ defmodule BarkparkWeb.PreviewLinkController do
       document (draft or published), scoped to the LINK's own
       workspace/project/dataset (never the request). JSON only — there is no
       paper/media kind to special-case the way `/s/:token` does.
-    * `POST/GET/DELETE /v1/shares/preview-links` — ADMIN. Mint (raw token
-      shown once), list a document's links, revoke one.
+    * `POST /v1/shares/preview-links` — any write-capable WORKSPACE MEMBER
+      (not just admin), widened per task-9cfe08fe1e91b6c9 — the third and
+      final sibling of this widening series, after task-ea6c9abb868593f8
+      (preview tokens, #22468) and task-d50757dc446514e7 (share links,
+      #22484). Mint (raw token shown once).
+    * `GET/DELETE /v1/shares/preview-links` — still ADMIN-only. List a
+      document's links, revoke one.
 
   Deliberately NOT mounted under `/v1/preview/*`: that prefix already belongs
   to the unrelated `PreviewToken` JWT mechanism (header-borne signed token,
@@ -19,11 +24,43 @@ defmodule BarkparkWeb.PreviewLinkController do
   it: `Barkpark.Sharing.Links.published_ref_id/1` would strip exactly the
   prefix this feature exists to keep.
 
-  Tenancy confinement mirrors `ShareLinkController` verbatim: `:require_admin`
-  proves the caller holds `admin` SOMEWHERE, so `mint`/`list`/`revoke`
-  additionally require the caller to administer the TARGET workspace
-  (`PreviewLinks.workspace_admin?/2`, which delegates to the same
-  `Tenancy.Auth.workspace_admin?/2` chokepoint `Links.workspace_admin?/2` does).
+  Tenancy confinement mirrors `ShareLinkController` verbatim (pre-widening):
+  `list`/`revoke` additionally require the caller to administer the TARGET
+  workspace (`PreviewLinks.workspace_admin?/2`, which delegates to the same
+  `Tenancy.Auth.workspace_admin?/2` chokepoint `Links.workspace_admin?/2`
+  does).
+
+  ## Member mint confinement (task-9cfe08fe1e91b6c9)
+
+  Two checks `ensure_workspace_admin/2` never needed, because only a
+  workspace's own admin could reach `mint` at all — the SAME two
+  task-d50757dc446514e7 added to `ShareLinkController.mint/2`, applied here
+  verbatim because this controller takes the identical composite `scope`
+  string shape:
+
+    * **dataset_bound (#22393).** `scope_triple/1` parses `"ws[/project[/dataset]]"`
+      from the request body — the exact shape that let a dataset_bound
+      token bypass `RequireToken`/`OptionalToken`'s `dataset_off_binding?/2`
+      on `ShareLinkController.mint/2` (confirmed live there with a
+      throwaway probe before task-d50757dc446514e7's fix: neither plug ever
+      parses a `dataset` out of a composite `scope` param). Applying
+      `ensure_dataset_bound/2` HERE pre-emptively, rather than waiting to
+      discover the same gap live a second time.
+    * **Per-item read authority.** `ensure_doc_exists/5` threads
+      `caller_context: CallerContext.from_conn(conn)` into
+      `Content.get_document/4`, the same `Content.Scope.scope_to_owner/2`
+      chokepoint every other read uses. **Stated plainly, as on its
+      sibling:** this is currently a no-op for every caller this
+      bearer-token-only route admits — `scope_to_owner/2` bypasses entirely
+      for any `:api_token` principal, admin or member alike, by established,
+      pre-existing design. It is wired to the real chokepoint and will start
+      enforcing itself the moment a `:user` principal can reach this route.
+
+  Unlike its two siblings, `preview_links` carries NO access-level or
+  single/multi-use field at all (no `access: "edit"` knob like ShareLink, no
+  `multi_use` knob like PreviewToken) — the whole draft-preview capability is
+  the one thing at stake, so once `mint` widens there is nothing separate
+  left to keep admin-gated.
   """
   use BarkparkWeb, :controller
 
@@ -33,6 +70,7 @@ defmodule BarkparkWeb.PreviewLinkController do
   alias Barkpark.Sharing
   alias Barkpark.Sharing.PreviewLinks
   alias Barkpark.Tenancy
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
 
   # ── PUBLIC resolver ──────────────────────────────────────────────────────
@@ -75,11 +113,15 @@ defmodule BarkparkWeb.PreviewLinkController do
   @doc "POST /v1/shares/preview-links — mint a preview link (raw token shown ONCE)."
   def mint(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
+         # Token-intrinsic, no workspace lookup needed -- runs FIRST so it
+         # never becomes a workspace/project existence oracle (same ordering
+         # task-d50757dc446514e7 established on ShareLinkController.mint/2).
+         :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
-         :ok <- ensure_workspace_admin(conn, workspace.id),
+         :ok <- ensure_can_mint(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, doc_id, ref_type} <- doc_ref(params),
-         :ok <- ensure_doc_exists(doc_id, ref_type, dataset, workspace, project) do
+         :ok <- ensure_doc_exists(doc_id, ref_type, dataset, workspace, project, conn) do
       attrs = %{
         workspace_id: workspace.id,
         project_id: project.id,
@@ -100,6 +142,9 @@ defmodule BarkparkWeb.PreviewLinkController do
           unprocessable(conn, "could not create preview link")
       end
     else
+      {:error, :forbidden_dataset} ->
+        ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       {:error, :forbidden} ->
         forbidden(conn)
 
@@ -175,12 +220,52 @@ defmodule BarkparkWeb.PreviewLinkController do
       else: {:error, :forbidden}
   end
 
+  # task-9cfe08fe1e91b6c9 — `mint` alone admits a write-capable MEMBER, not
+  # just an admin. `list`/`revoke` stay on `ensure_workspace_admin/2`
+  # unchanged, above. `TenancyAuth.authorize/3`'s api_token arm is
+  # member?(token, ws) AND permits?(token, :write) -- the same
+  # write-capable-member primitive task-ea6c9abb868593f8 and
+  # task-d50757dc446514e7 both used.
+  defp ensure_can_mint(conn, workspace_id) do
+    if PreviewLinks.workspace_admin?(conn.assigns[:api_token], workspace_id) or
+         write_member?(conn, workspace_id),
+       do: :ok,
+       else: {:error, :forbidden}
+  end
+
+  defp write_member?(conn, workspace_id) do
+    case conn.assigns[:api_token] do
+      nil -> false
+      token -> TenancyAuth.authorize(token, workspace_id, :write) == :ok
+    end
+  end
+
+  # task-9cfe08fe1e91b6c9 — closes the SAME pre-existing dataset_bound
+  # (#22393) gap task-d50757dc446514e7 found and fixed on
+  # ShareLinkController.mint/2: `dataset_off_binding?/2` only reads a
+  # literal top-level `dataset` param, never this route's composite `scope`
+  # string. Applied pre-emptively here rather than re-discovering it live.
+  defp ensure_dataset_bound(conn, dataset) do
+    case conn.assigns[:api_token] do
+      %{dataset_bound: true, dataset: bound} when bound != dataset -> {:error, :forbidden_dataset}
+      _ -> :ok
+    end
+  end
+
   # Existence check against the id AS GIVEN — a draft id resolves iff the
   # caller already has access to the draft, since `opts` here carries only
   # the target workspace/project (the same confinement `ensure_item_exists`
-  # applies for ShareLink's published-only check).
-  defp ensure_doc_exists(doc_id, ref_type, dataset, ws, proj) do
-    case Content.get_document(doc_id, ref_type, dataset, workspace_id: ws.id, project_id: proj.id) do
+  # applies for ShareLink's published-only check). `caller_context:` threads
+  # into the SAME `Content.Scope.scope_to_owner/2` chokepoint every other
+  # read uses for an OWNER-SCOPED type -- see the moduledoc's "Per-item read
+  # authority" section for why this is currently inert for every caller this
+  # bearer-only route admits.
+  defp ensure_doc_exists(doc_id, ref_type, dataset, ws, proj, conn) do
+    case Content.get_document(doc_id, ref_type, dataset,
+           workspace_id: ws.id,
+           project_id: proj.id,
+           caller_context: CallerContext.from_conn(conn)
+         ) do
       {:ok, _} -> :ok
       _ -> {:error, "no such document in this scope"}
     end
