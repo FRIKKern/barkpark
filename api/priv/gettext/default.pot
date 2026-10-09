@@ -327,6 +327,7 @@ msgstr ""
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2211
 #: lib/barkpark_web/live/studio/studio_live/components.ex:2285
 #: lib/barkpark_web/live/studio/studio_live/doc_actions.ex:74
+#: lib/barkpark_web/live/studio/studio_live/handlers/lifecycle.ex:69
 #: lib/barkpark_web/studio_locale.ex:742
 #, elixir-autogen, elixir-format
 msgid "Untitled"

@@ -5,6 +5,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
   Thin routing heads stay on StudioLive (Phoenix dispatch); the bodies — which
   thread `socket` through `Shared` — live here. Behaviour-preserving.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
@@ -32,6 +34,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       )
       |> Shared.maybe_open_shares(params)
       |> Shared.rebuild_panes()
+      |> assign_page_title()
       |> Shared.subscribe_to_doc()
       |> Shared.track_presence()
       # Navigating (re)loads the editor from the DB, so the buffer is clean:
@@ -53,6 +56,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Lifecycle do
       _ ->
         {:noreply, socket}
     end
+  end
+
+  # The browser tab names the open document (task-fee30130f015c416): every
+  # document tab read "Studio · Barkpark", and a screen reader's page
+  # announcement never said which document it was. The root layout's
+  # live_title adds the " · Barkpark" suffix.
+  defp assign_page_title(socket) do
+    title =
+      case socket.assigns[:editor_doc] do
+        %{title: t} when is_binary(t) and t != "" -> t
+        %{} -> gettext("Untitled")
+        _ -> "Studio"
+      end
+
+    assign(socket, page_title: title)
   end
 
   # A remote save of the open document arrived (another editor/session — the
