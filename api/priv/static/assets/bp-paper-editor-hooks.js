@@ -15,6 +15,49 @@
 (function () {
   const Hooks = {};
 
+  // The editor's words in the viewer's Studio language (task-e8a5c972b7720591).
+  // The server stamps `data-paper-strings`
+  // (BarkparkWeb.StudioLocale.component_strings(:paper_hooks)) on the editor
+  // root: a JSON map keyed by the ENGLISH text. `bpPaperT` returns the stamped
+  // word, else the English unchanged, and fills `%{name}` slots from `vars`. A
+  // page carries one Studio language, so a target outside an editor (the
+  // body-level block menu) reads the first map on the page.
+  const bpPaperStringsCache = new WeakMap();
+  function bpPaperStrings(el) {
+    const host =
+      (el && typeof el.closest === "function" && el.closest("[data-paper-strings]")) ||
+      (typeof document !== "undefined" && document.querySelector("[data-paper-strings]")) ||
+      null;
+    if (!host) return {};
+    const raw = host.getAttribute("data-paper-strings") || "";
+    const cached = bpPaperStringsCache.get(host);
+    if (cached && cached.raw === raw) return cached.map;
+    let map = {};
+    try {
+      const parsed = JSON.parse(raw || "{}");
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) map = parsed;
+    } catch (_e) {
+      map = {};
+    }
+    bpPaperStringsCache.set(host, { raw, map });
+    return map;
+  }
+  function bpPaperT(el, text, vars) {
+    const map = bpPaperStrings(el);
+    let out = typeof map[text] === "string" ? map[text] : text;
+    if (vars) {
+      out = out.replace(/%\{(\w+)\}/g, (slot, name) =>
+        Object.prototype.hasOwnProperty.call(vars, name) ? String(vars[name]) : slot);
+    }
+    return out;
+  }
+  // A translation is text, never markup.
+  function bpPaperEsc(text) {
+    return String(text)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  }
+
   // Native on-page text fields keep browser selection/undo and the ordinary
   // form save coordinator. Manage height and the citation's first-line prefix.
   Hooks.BarkparkPaperAutoSize = {
@@ -115,6 +158,16 @@
     "Save paused — review required.",
     "Save paused — retry required.",
   ]);
+  // A footer status the hook may overwrite: one of the transient English tokens,
+  // or its translation in this page's Studio language (the server renders the
+  // footer translated, so a Norwegian "✓ …" must still count as transient).
+  function bpPaperTransientSaveStatus(el, text) {
+    if (PAPER_TRANSIENT_SAVE_STATUSES.has(text)) return true;
+    for (const token of PAPER_TRANSIENT_SAVE_STATUSES) {
+      if (token !== "" && bpPaperT(el, token) === text) return true;
+    }
+    return false;
+  }
   const paperExitCoordinators = new WeakMap();
 
   function bpPaperLinkReferenceCopySource(value) {
@@ -544,9 +597,9 @@
             : finiteNumber(value);
         if (!valid) {
           field.setCustomValidity?.(editor === "paper-toc-editor"
-            ? "Enter a positive whole number."
-            : gaugeMaximum ? "Enter a number greater than zero, or leave blank for automatic."
-              : "Enter a number.");
+            ? bpPaperT(form, "Enter a positive whole number.")
+            : gaugeMaximum ? bpPaperT(form, "Enter a number greater than zero, or leave blank for automatic.")
+              : bpPaperT(form, "Enter a number."));
         }
       });
       return;
@@ -564,12 +617,12 @@
         const integer = (field) => /^[+-]?\d+$/.test(field.value.trim());
         const minValid = integer(min);
         const maxValid = integer(max);
-        if (!minValid) min.setCustomValidity?.("Enter a whole number.");
-        if (!maxValid) max.setCustomValidity?.("Enter a whole number.");
+        if (!minValid) min.setCustomValidity?.(bpPaperT(form, "Enter a whole number."));
+        if (!maxValid) max.setCustomValidity?.(bpPaperT(form, "Enter a whole number."));
         const boundsChanged = min.value !== min.defaultValue || max.value !== max.defaultValue;
         if (boundsChanged && minValid && maxValid &&
             BigInt(min.value.trim()) > BigInt(max.value.trim())) {
-          max.setCustomValidity?.("Maximum must be at least the minimum.");
+          max.setCustomValidity?.(bpPaperT(form, "Maximum must be at least the minimum."));
         }
       }
       return;
@@ -581,13 +634,13 @@
     Object.values(fields).forEach((field) => field?.setCustomValidity(""));
     const number = (name) => fields[name]?.value.trim() ? Number(fields[name].value) : null;
     const value = number("value"), min = number("min"), max = number("max"), step = number("step");
-    if (step != null && step <= 0) fields.step?.setCustomValidity("Step must be greater than zero.");
+    if (step != null && step <= 0) fields.step?.setCustomValidity(bpPaperT(form, "Step must be greater than zero."));
     if (min != null && max != null && min > max) {
-      fields.max?.setCustomValidity("Maximum must be at least the minimum.");
+      fields.max?.setCustomValidity(bpPaperT(form, "Maximum must be at least the minimum."));
     } else if (value != null && min != null && value < min) {
-      fields.value?.setCustomValidity(`Value must be at least ${min}.`);
+      fields.value?.setCustomValidity(bpPaperT(form, "Value must be at least %{min}.", { min }));
     } else if (value != null && max != null && value > max) {
-      fields.value?.setCustomValidity(`Value must be at most ${max}.`);
+      fields.value?.setCustomValidity(bpPaperT(form, "Value must be at most %{max}.", { max }));
     }
   }
   const PAPER_HISTORY_POSITION = "__bpPaperHistoryPosition";
@@ -963,21 +1016,21 @@
         const code = entry?.disabledReason;
         if (code === "history_expired" || code === "history_ref_expired" ||
             code === "idempotency_receipt_expired") {
-          return "This change is more than one hour old and can no longer be restored.";
+          return bpPaperT(main, "This change is more than one hour old and can no longer be restored.");
         }
         if (code === "history_ref_consumed") {
-          return "This history step was already used. Make a new edit to continue.";
+          return bpPaperT(main, "This history step was already used. Make a new edit to continue.");
         }
         if (code === "history_conflict") {
-          return "This change no longer matches the current document.";
+          return bpPaperT(main, "This change no longer matches the current document.");
         }
         if (code === "history_unavailable") {
-          return "This history step is no longer available for this document.";
+          return bpPaperT(main, "This history step is no longer available for this document.");
         }
         if (code === "invalid_history_request") {
-          return "This history step could not be validated.";
+          return bpPaperT(main, "This history step could not be validated.");
         }
-        return code ? "This history step is unavailable." : "";
+        return code ? bpPaperT(main, "This history step is unavailable.") : "";
       };
 
       const renderHistoryControls = () => {
@@ -1010,9 +1063,11 @@
           status.textContent = blocked
             ? historyReason(blocked)
             : pending && mutationPaused && !mutationActive
-              ? `${pending.historyDirection === "undo" ? "Undo" : "Redo"} was not confirmed. Try again.`
+              ? pending.historyDirection === "undo"
+                ? bpPaperT(main, "Undo was not confirmed. Try again.")
+                : bpPaperT(main, "Redo was not confirmed. Try again.")
               : activeDirection
-                ? `${activeDirection === "undo" ? "Undoing" : "Redoing"}…`
+                ? activeDirection === "undo" ? bpPaperT(main, "Undoing…") : bpPaperT(main, "Redoing…")
                 : "";
         }
       };
@@ -1042,8 +1097,8 @@
         const status = main.querySelector(
           '[data-test-id="bp-paper-footer-save"][role="status"]',
         );
-        if (status && (force || PAPER_TRANSIENT_SAVE_STATUSES.has(status.textContent.trim()))) {
-          status.textContent = text;
+        if (status && (force || bpPaperTransientSaveStatus(main, status.textContent.trim()))) {
+          status.textContent = bpPaperT(main, text);
         }
       };
 
@@ -1940,7 +1995,7 @@
         mutationPaused = true;
         const message = "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading.";
         const status = main.querySelector('[data-test-id="bp-paper-footer-save"][role="status"]');
-        if (status) status.textContent = message;
+        if (status) status.textContent = bpPaperT(main, message);
         if (entry.expiryReported) return;
         entry.expiryReported = true;
         entry.source?.dispatchEvent?.(new CustomEvent("bp-error", {
@@ -2092,7 +2147,18 @@
           banner.dataset.bpPaperConflict = "true";
           banner.dataset.bpPaperReferenceDraft = "true";
           banner.setAttribute("role", "alert");
-          banner.innerHTML = '<strong class="bp-conflict-title">Related Paper changed</strong><span class="bp-conflict-description"></span><div class="bp-conflict-actions"><button type="button" data-action="review" aria-expanded="false">Review retained draft</button><button type="button" data-action="keep" disabled aria-disabled="true">Keep mine</button><button type="button" data-reference-draft-download>Download old field draft</button><button type="button" data-reference-draft-discard>Discard old draft</button></div><div data-conflict-detail hidden><p data-conflict-message></p><label><span data-reference-draft-label></span><textarea data-reference-draft-text readonly></textarea></label><details><summary>Technical details</summary><pre data-conflict-draft aria-label="Unsaved draft payload" tabindex="0"></pre></details></div>';
+          const t = (text) => bpPaperEsc(bpPaperT(main, text));
+          banner.innerHTML =
+            `<strong class="bp-conflict-title">${t("Related Paper changed")}</strong>` +
+            '<span class="bp-conflict-description"></span><div class="bp-conflict-actions">' +
+            `<button type="button" data-action="review" aria-expanded="false">${t("Review retained draft")}</button>` +
+            `<button type="button" data-action="keep" disabled aria-disabled="true">${t("Keep mine")}</button>` +
+            `<button type="button" data-reference-draft-download>${t("Download old field draft")}</button>` +
+            `<button type="button" data-reference-draft-discard>${t("Discard old draft")}</button></div>` +
+            '<div data-conflict-detail hidden><p data-conflict-message></p><label><span data-reference-draft-label></span>' +
+            '<textarea data-reference-draft-text readonly></textarea></label>' +
+            `<details><summary>${t("Technical details")}</summary>` +
+            `<pre data-conflict-draft aria-label="${t("Unsaved draft payload")}" tabindex="0"></pre></details></div>`;
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
@@ -2111,15 +2177,15 @@
           });
         }
         const localOnly = coordinator._detachedReferenceDraftIsLocalOnly(draft);
-        const fieldLabel = draft.field === "title" ? "title" : "description";
+        const fieldLabel = draft.field === "title" ? bpPaperT(main, "title") : bpPaperT(main, "description");
         banner.querySelector(".bp-conflict-description").textContent = localOnly
-          ? `This related Paper was replaced before your ${fieldLabel} draft was sent. The draft was not applied to the replacement.`
-          : `This related Paper was replaced while your ${fieldLabel} save was unresolved. Download the retained draft while its result is confirmed.`;
+          ? bpPaperT(main, "This related Paper was replaced before your %{field} draft was sent. The draft was not applied to the replacement.", { field: fieldLabel })
+          : bpPaperT(main, "This related Paper was replaced while your %{field} save was unresolved. Download the retained draft while its result is confirmed.", { field: fieldLabel });
         banner.querySelector("[data-conflict-message]").textContent = localOnly
-          ? "Download or copy this exact draft before explicitly discarding it."
-          : "This save may already have reached the server. It cannot be discarded safely here.";
+          ? bpPaperT(main, "Download or copy this exact draft before explicitly discarding it.")
+          : bpPaperT(main, "This save may already have reached the server. It cannot be discarded safely here.");
         banner.querySelector("[data-reference-draft-label]").textContent =
-          `Retained ${fieldLabel} draft`;
+          bpPaperT(main, "Retained %{field} draft", { field: fieldLabel });
         banner.querySelector("[data-reference-draft-text]").value = draft.value;
         banner.querySelector("[data-conflict-draft]").textContent =
           JSON.stringify(draft.snapshot, null, 2);
@@ -2128,7 +2194,7 @@
         discard.setAttribute("aria-disabled", String(!localOnly));
         discard.title = localOnly
           ? ""
-          : "This save has an unresolved server outcome and cannot be discarded here.";
+          : bpPaperT(main, "This save has an unresolved server outcome and cannot be discarded here.");
       };
       coordinator._setConflict = (reply, source, sourceDocumentKey, conflictEntry = null) => {
         const dirtyFallbackSource = [...sources].find(([fallbackSource, record]) =>
@@ -2182,15 +2248,18 @@
             coordinator._detachedReferenceDraftIsLocalOnly(detached);
           detail.hidden = false;
           banner.querySelector('[data-action="review"]').setAttribute("aria-expanded", "true");
+          const revision = conflict.currentRev == null
+            ? bpPaperT(main, "unknown")
+            : String(conflict.currentRev);
           detail.querySelector("[data-conflict-message]").textContent = detached
             ? detachedLocalOnly
-              ? "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
-              : "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here."
+              ? bpPaperT(main, "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement.")
+              : bpPaperT(main, "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here.")
             : positional
-              ? `Server revision ${String(conflict.currentRev ?? "unknown")}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.`
+              ? bpPaperT(main, "Server revision %{revision}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.", { revision })
               : conflict.keepUnavailable
-                ? `Server revision ${String(conflict.currentRev ?? "unknown")}. No exact retry payload is available. Use latest explicitly discards this retained draft.`
-                : `Server revision ${String(conflict.currentRev ?? "unknown")}. Keep mine retries your edits on that revision; Use latest discards them.`;
+                ? bpPaperT(main, "Server revision %{revision}. No exact retry payload is available. Use latest explicitly discards this retained draft.", { revision })
+                : bpPaperT(main, "Server revision %{revision}. Keep mine retries your edits on that revision; Use latest discards them.", { revision });
           const retainedDraft = bpPaperConflictDraft(head, conflict.snapshot);
           const reviewDraft = conflict.latestSnapshot
             ? {
@@ -2210,7 +2279,17 @@
           banner = document.createElement("div");
           banner.dataset.bpPaperConflict = "true";
           banner.setAttribute("role", "alert");
-          banner.innerHTML = '<strong class="bp-conflict-title">Save paused</strong><span class="bp-conflict-description">This document changed elsewhere. Your edits are still here.</span><div class="bp-conflict-actions"><button type="button" data-action="review" aria-expanded="false">Review</button><button type="button" data-action="keep">Keep mine</button><button type="button" data-action="latest">Use latest</button></div><div data-conflict-detail hidden><p data-conflict-message></p><details><summary>Technical details</summary><pre data-conflict-draft aria-label="Unsaved draft payload" tabindex="0"></pre></details></div>';
+          const t = (text) => bpPaperEsc(bpPaperT(main, text));
+          banner.innerHTML =
+            `<strong class="bp-conflict-title">${t("Save paused")}</strong>` +
+            `<span class="bp-conflict-description">${t("This document changed elsewhere. Your edits are still here.")}</span>` +
+            '<div class="bp-conflict-actions">' +
+            `<button type="button" data-action="review" aria-expanded="false">${t("Review")}</button>` +
+            `<button type="button" data-action="keep">${t("Keep mine")}</button>` +
+            `<button type="button" data-action="latest">${t("Use latest")}</button></div>` +
+            '<div data-conflict-detail hidden><p data-conflict-message></p>' +
+            `<details><summary>${t("Technical details")}</summary>` +
+            `<pre data-conflict-draft aria-label="${t("Unsaved draft payload")}" tabindex="0"></pre></details></div>`;
           const root = main.querySelector(".bp-paper-editor") || main;
           root.prepend(banner);
           banner.addEventListener("click", (event) => {
@@ -2239,29 +2318,32 @@
         const keep = banner.querySelector('[data-action="keep"]');
         keep.disabled = keepUnavailable;
         keep.setAttribute("aria-disabled", String(keepUnavailable));
-        keep.title = keepUnavailable ? "This retained draft has no safe exact rebase path." : "";
+        keep.title = keepUnavailable
+          ? bpPaperT(main, "This retained draft has no safe exact rebase path.")
+          : "";
         const detached = coordinator._conflictDetachedReferenceDraft();
         if (detached) {
           keep.disabled = true;
           keep.setAttribute("aria-disabled", "true");
           const detachedLocalOnly = detached.source === conflict.source &&
             coordinator._detachedReferenceDraftIsLocalOnly(detached);
+          const detachedField = bpPaperT(main, detached.field);
           banner.querySelector(".bp-conflict-description").textContent = detachedLocalOnly
-            ? `This related Paper was replaced before your ${detached.field} draft was sent.`
-            : `This related Paper was replaced while your ${detached.field} save was unresolved.`;
+            ? bpPaperT(main, "This related Paper was replaced before your %{field} draft was sent.", { field: detachedField })
+            : bpPaperT(main, "This related Paper was replaced while your %{field} save was unresolved.", { field: detachedField });
           let download = banner.querySelector("[data-reference-draft-download]");
           if (!download) {
             download = document.createElement("button");
             download.type = "button";
             download.dataset.referenceDraftDownload = "true";
             download.dataset.detachedReferenceRecovery = "true";
-            download.textContent = "Download old field draft";
+            download.textContent = bpPaperT(main, "Download old field draft");
             banner.querySelector(".bp-conflict-actions")?.append(download);
           }
           const latest = banner.querySelector('[data-action="latest"]');
           latest.disabled = true;
           latest.setAttribute("aria-disabled", "true");
-          latest.title = "This save has an unresolved server outcome and cannot be discarded here.";
+          latest.title = bpPaperT(main, "This save has an unresolved server outcome and cannot be discarded here.");
           const detail = banner.querySelector("[data-conflict-detail]");
           let field = detail.querySelector("[data-reference-draft-text]");
           if (!field) {
@@ -2276,7 +2358,7 @@
             detail.querySelector("details")?.before(label);
           }
           detail.querySelector("[data-reference-draft-label]").textContent =
-            `Retained ${detached.field} draft`;
+            bpPaperT(main, "Retained %{field} draft", { field: detachedField });
           field.value = detached.value;
           const canDiscard = detached.source === conflict.source &&
             coordinator._detachedReferenceDraftIsLocalOnly(detached);
@@ -2286,7 +2368,7 @@
             discard.type = "button";
             discard.dataset.referenceDraftDiscard = "true";
             discard.dataset.detachedReferenceRecovery = "true";
-            discard.textContent = "Discard old draft";
+            discard.textContent = bpPaperT(main, "Discard old draft");
             banner.querySelector(".bp-conflict-actions")?.append(discard);
           } else if (!canDiscard) {
             discard?.remove();
@@ -2302,7 +2384,7 @@
             conflict.reply.error !== "";
           banner.querySelector(".bp-conflict-description").textContent = outdatedCanvas
             ? conflict.reply.error
-            : "This document changed elsewhere. Your edits are still here.";
+            : bpPaperT(main, "This document changed elsewhere. Your edits are still here.");
           const latest = banner.querySelector('[data-action="latest"]');
           latest.disabled = false;
           latest.setAttribute("aria-disabled", "false");
@@ -3790,7 +3872,7 @@
           const status = this.el.closest("main")?.querySelector(
             '[data-test-id="bp-paper-footer-save"][role="status"]',
           );
-          if (status) status.textContent = message;
+          if (status) status.textContent = bpPaperT(this.el, message);
           if (entry.errorReported) return;
           entry.errorReported = true;
           this.el.dispatchEvent(new CustomEvent("bp-error", {
@@ -4165,8 +4247,10 @@
             );
             if (status) {
               status.textContent = reply && reply.saved
-                ? `Saved as master: ${reply.master?.title || "master"}`
-                : "Could not save this block as a master.";
+                ? bpPaperT(this.el, "Saved as master: %{title}", {
+                    title: reply.master?.title || bpPaperT(this.el, "master"),
+                  })
+                : bpPaperT(this.el, "Could not save this block as a master.");
             }
           });
         };
@@ -4340,7 +4424,7 @@
             hole.innerHTML = html;
           } else {
             hole.innerHTML =
-              '<div class="bp-canvas-readonly-chip">Nothing to show yet.</div>';
+              `<div class="bp-canvas-readonly-chip">${bpPaperEsc(bpPaperT(hole, "Nothing to show yet."))}</div>`;
           }
         };
         this._onBlockHtml = (payload) => {
@@ -4866,7 +4950,7 @@
       menu.id = BP_PAPER_CTX_MENU_ID;
       menu.className = "bp-paper-context-menu";
       menu.setAttribute("role", "menu");
-      menu.setAttribute("aria-label", "Block actions");
+      menu.setAttribute("aria-label", bpPaperT(null, "Block actions"));
       menu.hidden = true;
       // pdd-t2: the calm template note shown (instead of usable move/delete
       // items) when the menu opens on a template-locked block. Hidden for
@@ -4874,7 +4958,7 @@
       const note = document.createElement("div");
       note.className = "bp-paper-context-menu__note";
       note.setAttribute("role", "presentation");
-      note.textContent = "Part of the document template";
+      note.textContent = bpPaperT(null, "Part of the document template");
       note.hidden = true;
       menu.appendChild(note);
       const items = [
@@ -4900,7 +4984,8 @@
         btn.dataset.action = it.action;
         // textContent (never innerHTML) — the labels are static, but this keeps
         // the surface XSS-proof by construction.
-        btn.textContent = it.label;
+        btn.dataset.label = it.label;
+        btn.textContent = bpPaperT(null, it.label);
         btn.addEventListener("click", () => bpPaperCtxMenuActivate(it.action));
         menu.appendChild(btn);
       }
@@ -4910,6 +4995,14 @@
 
     function bpPaperCtxMenuOpen(hook, x, y, block) {
       const menu = bpPaperCtxMenuEl();
+      // The menu is one body-level element; name it in this editor's language
+      // each time it opens.
+      menu.setAttribute("aria-label", bpPaperT(hook.el, "Block actions"));
+      const templateNote = menu.querySelector(".bp-paper-context-menu__note");
+      if (templateNote) templateNote.textContent = bpPaperT(hook.el, "Part of the document template");
+      menu.querySelectorAll("[data-label]").forEach((item) => {
+        item.textContent = bpPaperT(hook.el, item.dataset.label);
+      });
       const blocks = Array.from(
         (hook._body || document).querySelectorAll("[data-edit-block-id]")
       );
@@ -5518,7 +5611,7 @@
       const names = raw ? raw.split(",") : [];
       const hosts = [...this.el.querySelectorAll(this.el.dataset.paintedCopy || ":not(*)")];
       if (!names.some(Boolean) || hosts.length !== names.length) return;
-      const label = this.el.dataset.paintedCopyLabel || "Text";
+      const label = this.el.dataset.paintedCopyLabel || bpPaperT(this.el, "Text");
       const multiline = this.el.dataset.paintedCopyMultiline;
       hosts.forEach((host, index) => {
         if (!names[index]) return;

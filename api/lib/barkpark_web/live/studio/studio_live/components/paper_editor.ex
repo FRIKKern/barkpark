@@ -216,6 +216,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       data-paper-doc-key={"#{@dataset}:#{@doc_type}:#{@slug}"}
       data-paper-canvas-resume-halt="true"
       data-paper-canvas-resume-state={to_string(@canvas_resume_state)}
@@ -234,6 +235,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       data-paper-doc-key={@paper_doc_key}
       data-paper-rev={@doc_type == "paper" && @paper_rev}
       data-document-rev={@doc_type != "paper" && @document_rev}
@@ -308,6 +310,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       id={"paper-editor-#{@slug}"}
       class="bp-paper-editor"
       data-test-id="studio-paper-block-editor"
+      data-paper-strings={BarkparkWeb.StudioLocale.component_strings(:paper_hooks)}
       phx-hook="BarkparkPaperSortable"
       data-paper-doc-key={@paper_doc_key}
       data-paper-rev={@doc_type == "paper" && @paper_rev}
@@ -630,7 +633,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # sup-w5 — footer save label. The calm token keeps its premium ✓ affix; every
   # other server state ("Save failed", the empty pre-write open, …) is echoed
   # VERBATIM so the footer can never lie about a failed or vetoed write.
-  defp save_status_label("Auto-saved"), do: "✓ Auto-saved"
+  # The known server tokens read in the Studio language; any other server text
+  # is still echoed verbatim. The hooks recognise the translated calm token as
+  # transient through the same `:paper_hooks` map (task-e8a5c972b7720591).
+  defp save_status_label("Auto-saved"), do: gettext("✓ Auto-saved")
+  defp save_status_label("Save failed"), do: gettext("Save failed")
+  defp save_status_label("Saved"), do: gettext("Saved")
+  defp save_status_label("Save cancelled"), do: gettext("Save cancelled")
+  defp save_status_label("Read-only"), do: gettext("Read-only")
+  defp save_status_label("Updated by another user"), do: gettext("Updated by another user")
   defp save_status_label(status) when is_binary(status), do: status
   defp save_status_label(_), do: ""
 

@@ -257,6 +257,136 @@ defmodule BarkparkWeb.StudioLocale do
     })
   end
 
+  # The paper editor hooks' words (bp-paper-editor-hooks.js, task-e8a5c972b7720591):
+  # the save status, the save-conflict and related-Paper banners, history and
+  # field-validity messages and the block menu. Keyed by the English text the
+  # hooks fall back to; %{slots} are left for the hooks to fill.
+  def component_strings(:paper_hooks) do
+    Jason.encode!(%{
+      "Auto-saved" => gettext("Auto-saved"),
+      "Block actions" => gettext("Block actions"),
+      "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement." =>
+        gettext(
+          "Copy or download this exact old-reference draft, then use Discard old draft. It will not be applied to the replacement."
+        ),
+      "Could not save this block as a master." =>
+        gettext("Could not save this block as a master."),
+      "Delete block" => gettext("Delete block"),
+      "description" => gettext("description"),
+      "Discard old draft" => gettext("Discard old draft"),
+      "Download old field draft" => gettext("Download old field draft"),
+      "Download or copy this exact draft before explicitly discarding it." =>
+        gettext("Download or copy this exact draft before explicitly discarding it."),
+      "Enter a number greater than zero, or leave blank for automatic." =>
+        gettext("Enter a number greater than zero, or leave blank for automatic."),
+      "Enter a number." => gettext("Enter a number."),
+      "Enter a positive whole number." => gettext("Enter a positive whole number."),
+      "Enter a whole number." => gettext("Enter a whole number."),
+      "Keep mine" => gettext("Keep mine"),
+      "master" => gettext("master"),
+      "Maximum must be at least the minimum." => gettext("Maximum must be at least the minimum."),
+      "Move down" => gettext("Move down"),
+      "Move up" => gettext("Move up"),
+      "Nothing to show yet." => gettext("Nothing to show yet."),
+      "Part of the document template" => gettext("Part of the document template"),
+      "Redo was not confirmed. Try again." => gettext("Redo was not confirmed. Try again."),
+      "Redoing…" => gettext("Redoing…"),
+      "Related Paper changed" => gettext("Related Paper changed"),
+      "Retained %{field} draft" => gettext("Retained %{field} draft", field: "%{field}"),
+      "Review" => gettext("Review"),
+      "Review retained draft" => gettext("Review retained draft"),
+      "Save paused" => gettext("Save paused"),
+      "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading." =>
+        gettext(
+          "Save paused after one hour of retries. Unsaved work remains here; copy it before reloading."
+        ),
+      "Save paused — retry required." => gettext("Save paused — retry required."),
+      "Save paused — review required." => gettext("Save paused — review required."),
+      "Save paused: this browser cannot create a safe retry ID. Your edits are still here." =>
+        gettext(
+          "Save paused: this browser cannot create a safe retry ID. Your edits are still here."
+        ),
+      "Save paused: this nested editor lost its document position. Your edits are still here; copy them before reloading." =>
+        gettext(
+          "Save paused: this nested editor lost its document position. Your edits are still here; copy them before reloading."
+        ),
+      "Saved as master: %{title}" => gettext("Saved as master: %{title}", title: "%{title}"),
+      "Saving…" => gettext("Saving…"),
+      "Server revision %{revision}. Keep mine retries your edits on that revision; Use latest discards them." =>
+        gettext(
+          "Server revision %{revision}. Keep mine retries your edits on that revision; Use latest discards them.",
+          revision: "%{revision}"
+        ),
+      "Server revision %{revision}. No exact retry payload is available. Use latest explicitly discards this retained draft." =>
+        gettext(
+          "Server revision %{revision}. No exact retry payload is available. Use latest explicitly discards this retained draft.",
+          revision: "%{revision}"
+        ),
+      "Server revision %{revision}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft." =>
+        gettext(
+          "Server revision %{revision}. Row positions may have changed. Keep mine is unavailable for positional collections; Use latest explicitly discards this draft.",
+          revision: "%{revision}"
+        ),
+      "Step must be greater than zero." => gettext("Step must be greater than zero."),
+      "Technical details" => gettext("Technical details"),
+      "Text" => gettext("Text"),
+      "This change is more than one hour old and can no longer be restored." =>
+        gettext("This change is more than one hour old and can no longer be restored."),
+      "This change no longer matches the current document." =>
+        gettext("This change no longer matches the current document."),
+      "This document changed elsewhere. Your edits are still here." =>
+        gettext("This document changed elsewhere. Your edits are still here."),
+      "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here." =>
+        gettext(
+          "This draft has a pending or attempted save for the old reference. Copy or download it; retry and discard are unavailable here."
+        ),
+      "This history step could not be validated." =>
+        gettext("This history step could not be validated."),
+      "This history step is no longer available for this document." =>
+        gettext("This history step is no longer available for this document."),
+      "This history step is unavailable." => gettext("This history step is unavailable."),
+      "This history step was already used. Make a new edit to continue." =>
+        gettext("This history step was already used. Make a new edit to continue."),
+      "This related Paper was replaced before your %{field} draft was sent." =>
+        gettext("This related Paper was replaced before your %{field} draft was sent.",
+          field: "%{field}"
+        ),
+      "This related Paper was replaced before your %{field} draft was sent. The draft was not applied to the replacement." =>
+        gettext(
+          "This related Paper was replaced before your %{field} draft was sent. The draft was not applied to the replacement.",
+          field: "%{field}"
+        ),
+      "This related Paper was replaced while your %{field} save was unresolved." =>
+        gettext("This related Paper was replaced while your %{field} save was unresolved.",
+          field: "%{field}"
+        ),
+      "This related Paper was replaced while your %{field} save was unresolved. Download the retained draft while its result is confirmed." =>
+        gettext(
+          "This related Paper was replaced while your %{field} save was unresolved. Download the retained draft while its result is confirmed.",
+          field: "%{field}"
+        ),
+      "This retained draft has no safe exact rebase path." =>
+        gettext("This retained draft has no safe exact rebase path."),
+      "This save has an unresolved server outcome and cannot be discarded here." =>
+        gettext("This save has an unresolved server outcome and cannot be discarded here."),
+      "This save may already have reached the server. It cannot be discarded safely here." =>
+        gettext(
+          "This save may already have reached the server. It cannot be discarded safely here."
+        ),
+      "title" => gettext("title"),
+      "Undo was not confirmed. Try again." => gettext("Undo was not confirmed. Try again."),
+      "Undoing…" => gettext("Undoing…"),
+      "unknown" => gettext("unknown"),
+      "Unsaved changes — fix invalid fields." => gettext("Unsaved changes — fix invalid fields."),
+      "Unsaved draft payload" => gettext("Unsaved draft payload"),
+      "Use latest" => gettext("Use latest"),
+      "Value must be at least %{min}." =>
+        gettext("Value must be at least %{min}.", min: "%{min}"),
+      "Value must be at most %{max}." => gettext("Value must be at most %{max}.", max: "%{max}"),
+      "✓ Auto-saved" => gettext("✓ Auto-saved")
+    })
+  end
+
   # The paper canvas (api/assets/paper-editor) reads this map, keyed by the
   # ENGLISH text, through its one `t()` helper (src/i18n.js), stamped on each
   # canvas run's host (task-addade22d350314a). `%{name}` slots are filled

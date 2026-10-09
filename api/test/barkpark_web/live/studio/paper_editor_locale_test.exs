@@ -97,6 +97,64 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
     refute html =~ "<legend>Step 1</legend>"
   end
 
+  # task-e8a5c972b7720591: the hooks read their words (save status, conflict
+  # banners, block menu) off the editor root, and the footer's calm save token
+  # renders in the Studio language.
+  test "the nb-NO editor root carries the hooks' Norwegian words", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/paper/pe-loc-paper")
+
+    strings = paper_strings(html)
+    assert strings["Save paused"] == "Lagring satt på pause"
+    assert strings["✓ Auto-saved"] == "✓ Lagret automatisk"
+    assert strings["Block actions"] == "Blokkhandlinger"
+
+    assert strings["Retained %{field} draft"] == "Beholdt utkast for %{field}"
+
+    render_hook(view, "paper-block-autosave", autosave_params(html))
+    footer = view |> element(~s([data-test-id="bp-paper-footer-save"])) |> render()
+    assert footer =~ "✓ Lagret automatisk"
+    refute footer =~ "Auto-saved"
+  end
+
+  test "an English editor root carries the English words", %{conn: conn, ws: ws, proj: proj} do
+    {:ok, ws} = Tenancy.set_workspace_locale(ws, "en")
+
+    {:ok, view, html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/paper/pe-loc-paper")
+
+    assert paper_strings(html)["Save paused"] == "Save paused"
+    render_hook(view, "paper-block-autosave", autosave_params(html))
+
+    assert view |> element(~s([data-test-id="bp-paper-footer-save"])) |> render() =~
+             "✓ Auto-saved"
+  end
+
+  defp autosave_params(html) do
+    [_, rev] = Regex.run(~r/data-paper-rev="(\d+)"/, html)
+
+    %{
+      "block_id" => "eq1",
+      "tex" => "E = mc^3",
+      "if_rev" => rev,
+      "request_id" => Ecto.UUID.generate()
+    }
+  end
+
+  defp paper_strings(html) do
+    [json | _] =
+      html
+      |> LazyHTML.from_document()
+      |> LazyHTML.query(".bp-paper-editor[data-paper-strings]")
+      |> LazyHTML.attribute("data-paper-strings")
+
+    Jason.decode!(json)
+  end
+
   # task-8f6507ea3a5c79c6: the pickers the canvas mounts in JS read their words off
   # the run wrapper, so it must carry the workspace's picker strings.
   test "the nb-NO canvas run carries Norwegian picker strings", %{conn: conn, ws: ws, proj: proj} do

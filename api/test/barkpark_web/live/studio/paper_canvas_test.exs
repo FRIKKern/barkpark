@@ -984,6 +984,17 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       )
     end
 
+    # The footer's own text. The editor root also carries the hooks' strings map
+    # (`data-paper-strings`, task-e8a5c972b7720591), a dictionary keyed by these
+    # same tokens, so a whole-component match would read the dictionary, not the
+    # status.
+    defp footer_text(html) do
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-test-id="bp-paper-footer-save"]))
+      |> LazyHTML.text()
+    end
+
     # THE non-vacuous guard: reverting the footer to the literal "✓ Auto-saved"
     # makes THIS fail — a "Save failed" write can only surface verbatim if the
     # footer actually reads @save_status.
@@ -991,22 +1002,22 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvasTest do
       html = save_footer("Save failed")
 
       assert html =~ ~s(data-test-id="bp-paper-footer-save")
-      assert html =~ "Save failed"
+      assert footer_text(html) =~ "Save failed"
       # the old hardcoded calm token must NOT appear when the write failed
-      refute html =~ "✓ Auto-saved"
+      refute footer_text(html) =~ "✓ Auto-saved"
     end
 
     test "the calm 'Auto-saved' token keeps its premium ✓ affix" do
       html = save_footer("Auto-saved")
-      assert html =~ "✓ Auto-saved"
+      assert footer_text(html) =~ "✓ Auto-saved"
     end
 
     test "a fresh pre-write open (unassigned save_status ⇒ \"\") shows an empty, non-lying save region" do
       html = save_footer("")
       # the region is present and accessible, but carries no false 'Auto-saved'
       assert html =~ ~s(data-test-id="bp-paper-footer-save")
-      refute html =~ "Auto-saved"
-      refute html =~ "Save failed"
+      refute footer_text(html) =~ "Auto-saved"
+      refute footer_text(html) =~ "Save failed"
     end
 
     test "the save region is an accessible live status (role=status, aria-live=polite)" do
