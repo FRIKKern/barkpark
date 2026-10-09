@@ -115,6 +115,10 @@ defmodule BarkparkWeb.StudioLocale do
   # processing states and visibility.
   def component_strings(:asset_explorer) do
     Jason.encode!(%{
+      # The status facet's values (task-9b39b33f9b4e63c2); the processing and
+      # visibility values below were already here, keyed by the raw value.
+      "draft" => gettext("draft"),
+      "published" => gettext("published"),
       "%{count} assets" => gettext("%{count} assets", count: "%{count}"),
       "%{count} assets match" => gettext("%{count} assets match", count: "%{count}"),
       "%{count} searches" => gettext("%{count} searches", count: "%{count}"),

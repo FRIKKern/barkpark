@@ -114,6 +114,14 @@
   ];
 
   const FACET_FIELDS = ["tags", "mimeType", "processing", "visibility", "status"];
+  // Facets whose values are a closed set the Studio names (task-9b39b33f9b4e63c2):
+  // the raw value is the strings-map key, so English reads unchanged. Tags and
+  // MIME types are data and stay as stored.
+  const FACET_VALUE_WORDS = {
+    processing: ["ready", "processing", "failed"],
+    visibility: ["public", "private"],
+    status: ["draft", "published"],
+  };
   const FACET_LABELS = {
     tags: "Tags",
     mimeType: "Format",
@@ -977,7 +985,7 @@
             '" data-value="' +
             esc(value) +
             '">' +
-            esc(value) +
+            ((FACET_VALUE_WORDS[field] || []).includes(value) ? this._e(value) : esc(value)) +
             ' <span class="bp-ae-facet-count">' +
             esc(String(count)) +
             "</span></button>";
