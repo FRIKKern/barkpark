@@ -72,11 +72,53 @@ defmodule Barkpark.Content.Writer do
   write door.
   """
   def validate_document(type, title, content, dataset, opts \\ []) do
+    case validate_document_findings(type, title, content, dataset, opts) do
+      {:ok, content} -> {:ok, content}
+      {:error, errors, _findings} -> {:error, errors}
+    end
+  end
+
+  @doc """
+  Same contract as `validate_document/5`, PLUS the `finding()` list
+  (`%{path:, message:, code:, params:}`, task-1dac662bed153203) behind the
+  same errors map — so a caller that wants to put `code`/`params` on the
+  wire (the HTTP `validation_failed` envelope) can, without `validate_document/5`
+  itself changing shape for its two other callers (`content/forms.ex`,
+  the Studio doc handler), who keep reading the plain `{:error, errors}` they
+  always have.
+
+  Walks the schema TWICE (once for the legacy string-keyed `errors`, once for
+  `check_findings/3`'s structured list) rather than deriving one from the
+  other, so `validate_document/5`'s wire-facing `errors` map stays the exact
+  bytes `Validation.validate/3` has always produced — no new grouping logic
+  to get subtly wrong.
+  """
+  @spec validate_document_findings(
+          String.t(),
+          String.t() | nil,
+          map() | nil,
+          String.t(),
+          keyword()
+        ) ::
+          {:ok, map() | nil} | {:error, map(), [Barkpark.Content.Validation.finding()]}
+  def validate_document_findings(type, title, content, dataset, opts \\ []) do
     scope = Keyword.take(opts, [:workspace_id, :project_id])
 
     case Content.get_schema(type, dataset, scope) do
-      {:ok, schema} -> Barkpark.Content.Validation.validate(content, title, schema)
-      _ -> {:ok, content}
+      {:ok, schema} ->
+        case Barkpark.Content.Validation.validate(content, title, schema) do
+          {:ok, content} ->
+            {:ok, content}
+
+          {:error, errors} ->
+            %{errors: findings} =
+              Barkpark.Content.Validation.check_findings(content, title, schema)
+
+            {:error, errors, findings}
+        end
+
+      _ ->
+        {:ok, content}
     end
   end
 
@@ -105,9 +147,11 @@ defmodule Barkpark.Content.Writer do
       returned. The write lands with the SAME status and the SAME bytes it
       landed with before this function existed.
     * `Validation.enforce?(dataset)` true (per-dataset opt-in) — returns
-      `{:error, {:schema_validation_failed, errors}}`, which
+      `{:error, {:schema_validation_failed, errors, findings}}`, which
       `Content.Errors.build/1` renders as 422 `validation_failed` with the
-      per-field errors in `details`. Nothing is written: this runs BEFORE the
+      per-field errors in `details` (byte-identical to before
+      task-1dac662bed153203) plus a parallel `findings` list carrying
+      `code`/`params` per finding. Nothing is written: this runs BEFORE the
       changeset on every branch that calls it.
 
   A type with no schema, a schema with no validation rules, and content that
@@ -115,7 +159,8 @@ defmodule Barkpark.Content.Writer do
   and the refusal fire only on content that breaks a DECLARED rule.
   """
   @spec check_document_schema(String.t(), map(), String.t()) ::
-          :ok | {:error, {:schema_validation_failed, map()}}
+          :ok
+          | {:error, {:schema_validation_failed, map(), [Barkpark.Content.Validation.finding()]}}
   def check_document_schema(type, attrs, dataset) when is_binary(type) and is_binary(dataset) do
     enforce? = Barkpark.Content.Validation.enforce?(dataset)
 
@@ -151,13 +196,13 @@ defmodule Barkpark.Content.Writer do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     title = Map.get(attrs, "title") || Map.get(attrs, :title)
 
-    case validate_document(type, title, content, dataset, stamped_scope(attrs)) do
+    case validate_document_findings(type, title, content, dataset, stamped_scope(attrs)) do
       {:ok, _content} ->
         :ok
 
-      {:error, errors} when is_map(errors) and map_size(errors) > 0 ->
+      {:error, errors, findings} when is_map(errors) and map_size(errors) > 0 ->
         if enforce? do
-          {:error, {:schema_validation_failed, errors}}
+          {:error, {:schema_validation_failed, errors, findings}}
         else
           emit_schema_advisories(type, attrs, errors)
           :ok

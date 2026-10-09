@@ -232,6 +232,15 @@ defmodule Barkpark.Content.ErrorsEnvelopeTableTest do
       {"schema_validation_failed",
        {:error, {:schema_validation_failed, %{"title" => ["Required"]}}}, "validation_failed",
        422, [:details]},
+      # Same arm, PLUS the structured `finding()` list (task-1dac662bed153203):
+      # `findings` rides as a purely additive sibling key — `details`/`code`/
+      # `status` are byte-identical to the 2-tuple row above, which is exactly
+      # why this needs its OWN row rather than reusing that one's assertion.
+      {"schema_validation_failed/findings",
+       {:error,
+        {:schema_validation_failed, %{"title" => ["Required"]},
+         [%{path: "/title", message: "Required", code: :required, params: %{}}]}},
+       "validation_failed", 422, [:details, :findings]},
       {"invalid_schema_fields", {:error, {:invalid_schema_fields, :missing_name}},
        "validation_failed", 422, [:details]},
       {"schema_has_documents", {:error, {:schema_has_documents, 3}}, "schema_has_documents", 409,

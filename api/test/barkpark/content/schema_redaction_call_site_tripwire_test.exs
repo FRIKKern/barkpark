@@ -98,7 +98,9 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
       "unscoped arm only (no stamped scope), WRITE-path cipher",
     "barkpark/content/papers.ex:doc_scoped_schema" =>
       "unscoped arm only (document carries no scope), block synthesis",
-    "barkpark/content/writer.ex:validate_document" => "unscoped 2-arity, write validation",
+    "barkpark/content/writer.ex:validate_document_findings" =>
+      "unscoped 2-arity, write validation (task-1dac662bed153203 moved the get_schema call " <>
+        "here from validate_document/5, which now delegates to this function)",
     "barkpark/content/writer.ex:schema_for_create" =>
       "unscoped arm only (no stamped scope), write scaffold",
 

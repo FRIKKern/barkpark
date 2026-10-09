@@ -213,6 +213,33 @@
                 "additionalProperties": true,
                 "type": "object"
               },
+              "findings": {
+                "description": "Structured form of `details`, on content-schema `validation_failed` responses: one entry per finding, `message` byte-identical to the string under `details`, plus a stable `code` and a `params` map (task-1dac662bed153203). Additive — a client reading only `details` is unaffected.",
+                "items": {
+                  "properties": {
+                    "code": {
+                      "type": "string"
+                    },
+                    "message": {
+                      "type": "string"
+                    },
+                    "params": {
+                      "additionalProperties": true,
+                      "type": "object"
+                    },
+                    "path": {
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "path",
+                    "message",
+                    "code"
+                  ],
+                  "type": "object"
+                },
+                "type": "array"
+              },
               "hint": {
                 "description": "An imperative one-line fix suggestion, when available.",
                 "type": "string"
