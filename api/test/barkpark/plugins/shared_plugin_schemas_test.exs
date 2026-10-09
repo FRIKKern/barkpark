@@ -113,8 +113,12 @@ defmodule Barkpark.Plugins.SharedPluginSchemasTest do
     assert {:error, %{"headline" => _}} =
              Writer.validate_document(type, "t", %{}, @dataset, ctx.opts)
 
-    assert {:error, {:schema_validation_failed, %{"headline" => _}}} =
+    assert {:error, {:schema_validation_failed, %{"headline" => _}, findings}} =
              Content.create_document(type, %{"title" => "no headline"}, @dataset, ctx.opts)
+
+    assert Enum.any?(findings, &(&1.path == "/headline" and &1.code == :required)),
+           "task-1dac662bed153203: the ENFORCE arm now carries a structured finding " <>
+             "alongside the legacy errors map, got #{inspect(findings)}"
 
     assert {:ok, doc} =
              Content.create_document(

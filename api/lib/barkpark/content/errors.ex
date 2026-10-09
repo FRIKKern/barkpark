@@ -1198,6 +1198,22 @@ defmodule Barkpark.Content.Errors do
     }
   end
 
+  # Same ENFORCE arm, PLUS the structured findings list (task-1dac662bed153203):
+  # `details` is byte-identical to the 2-tuple clause above (same `errors` map,
+  # same key, same strings) — `findings` is a purely additive sibling a caller
+  # opts into reading for a per-code sentence (barkpark-studio), never a
+  # replacement for `details`.
+  defp build({:error, {:schema_validation_failed, errors, findings}})
+       when is_map(errors) and is_list(findings) do
+    %{
+      code: "validation_failed",
+      message: "document content failed schema validation",
+      status: 422,
+      details: errors,
+      findings: Enum.map(findings, &finding_wire/1)
+    }
+  end
+
   # Owner ruling #47: publish refuses a scalar or reference list holding an
   # empty row. `details` names each field with one message per empty row.
   defp build({:error, {:empty_list_members, errors}}) when is_map(errors) do
@@ -1406,6 +1422,14 @@ defmodule Barkpark.Content.Errors do
     )
 
     %{code: "internal_error", message: "unknown error (#{descriptor})", status: 500}
+  end
+
+  # `Validation.finding()` (`%{path:, message:, code:, params:}`) onto the
+  # wire: `code` is an atom internally (pinned to `Validation.known_codes/0`)
+  # and becomes its string name here, same convention as every other `code`
+  # this module emits.
+  defp finding_wire(%{path: path, message: message, code: code, params: params}) do
+    %{path: path, message: message, code: Atom.to_string(code), params: params}
   end
 
   # Longest descriptor the envelope will carry. A pathological term (a deeply

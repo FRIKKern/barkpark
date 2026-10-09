@@ -5,7 +5,7 @@
 
 Frozen `/v1`: breaking changes need `/v2`; additive stay in v1.
 
-**JS/TS:** use `@barkpark/core` (queries, mutations, media, listen) and `@barkpark/nextjs` (App Router). [SDK guide](cards/js-sdk.md). Docs site: `pnpm -C js install && pnpm -C js --filter @barkpark/docs dev`.
+**JS/TS:** use `@barkpark/core` (queries, mutations, media, listen) and `@barkpark/nextjs` (App Router). [SDK guide](cards/js-sdk.md).
 
 ## 1a. Workspace → Project → Dataset hierarchy
 
@@ -148,7 +148,7 @@ Contract: [contracts/media-http-envelope.md](contracts/media-http-envelope.md).
 
 ## 9. Error Codes
 
-All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`.
+All errors: `{"error":{"code","message","request_id"}}`; `request_id` mirrors `x-request-id`; `details` on `validation_failed`; optional `hint`. §6 schema `validation_failed` adds `findings:[{path,message,code,params}]`.
 
 Core: `not_found` 404 · `unauthorized` 401 · `forbidden` 403 · `precondition_failed` 412 (`details.expected`/`.actual`) · `invalid_filter` 400 · `conflict` 409 · `malformed` 400 · `validation_failed` 422 · `bad_request` 400/422 · `internal_error` 500 · `rate_limited` 429 (`Retry-After`).
 

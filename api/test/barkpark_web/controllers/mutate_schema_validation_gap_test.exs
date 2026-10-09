@@ -205,6 +205,64 @@ defmodule BarkparkWeb.MutateSchemaValidationGapTest do
              "the refused document must not exist — a 422 that still persisted is the worst arm"
     end
 
+    test "a create violating TWO distinct rules carries both finding codes on the wire (task-1dac662bed153203)",
+         ctx do
+      type = "msvenf_codes_#{System.unique_integer([:positive])}"
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{
+            "name" => type,
+            "title" => "Findings Codes Type",
+            "visibility" => "public",
+            "fields" => [
+              %{"name" => "title", "type" => "string"},
+              %{"name" => "slug", "type" => "string", "validation" => %{"required" => true}},
+              %{
+                "name" => "handle",
+                "type" => "string",
+                "validation" => %{"pattern" => "^[a-z-]+$"}
+              }
+            ]
+          },
+          ctx.enforce_dataset
+        )
+
+      doc_id = "msvenf-codes-#{System.unique_integer([:positive])}"
+
+      resp =
+        create(ctx, type, ctx.enforce_dataset, doc_id, %{
+          "content" => %{"title" => "Two breaks", "handle" => "NOT A SLUG 42"}
+        })
+
+      assert resp.status == 422
+      body = json_response(resp, 422)
+
+      # THE ADDITIVE ASSERTION: `details` carries exactly what it always has —
+      # drop `findings` entirely and this half of the test still passes.
+      assert get_in(body, ["error", "details", "slug"]), "details must still name `slug`"
+      assert get_in(body, ["error", "details", "handle"]), "details must still name `handle`"
+
+      findings = get_in(body, ["error", "findings"]) || []
+      codes = Enum.map(findings, & &1["code"])
+
+      assert "required" in codes,
+             "expected a `required` finding for the missing slug, got #{inspect(codes)}"
+
+      assert "pattern_mismatch" in codes,
+             "expected a `pattern_mismatch` finding for the bad handle, got #{inspect(codes)}"
+
+      # Each finding's `message` is byte-identical to its entry under
+      # `details` — the structured list is a parallel view, not a rewrite.
+      for finding <- findings do
+        path = String.trim_leading(finding["path"], "/")
+
+        assert (get_in(body, ["error", "details", path]) || [])
+               |> Enum.member?(finding["message"]),
+               "finding #{inspect(finding)} message must appear under details[#{inspect(path)}]"
+      end
+    end
+
     test "a create SATISFYING the schema still lands 200 under enforcement", ctx do
       doc_id = "msvenf-good-#{System.unique_integer([:positive])}"
 
