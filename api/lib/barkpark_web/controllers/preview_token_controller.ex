@@ -28,22 +28,33 @@ defmodule BarkparkWeb.PreviewTokenController do
   leaked multi_use token's blast radius — tighter than single-use, which
   self-destructs on first read regardless of TTL.
 
-  ## No HTTP revoke route, deliberately
-
-  `preview_token_jti` carries no workspace/tenant column at all (migration
-  20260417230200) — unlike `PreviewLinkController.revoke/2`'s sibling route,
-  which reads its row's STORED workspace_id before deciding. A
-  `DELETE .../:jti` front door here would be a bare-id selector reaching an
-  admin-mutable row with no tenant re-derivation possible:
-  `RequireAdminRouteCensusTest` classifies exactly that shape `:exploitable`.
-  `Barkpark.PreviewToken.revoke/1` still exists and is still the backstop
-  the multi_use ruling asked for — callable in-process (iex, a future mix
-  task) — it is just not exposed to an admin-anywhere Bearer over HTTP
-  until the table carries a real tenant column to fence it with.
-
   A single-use token minted here gets no such cap: it behaves exactly like
   one minted by calling `PreviewToken.sign/2` directly, which nothing ever
   prevented.
+
+  ## Tenant-scoped HTTP revoke (task-49a6a686bb88d9e5)
+
+  The FLAT mint (`mint/2` below) never grew a flat revoke: `preview_token_jti`
+  carried no workspace/tenant column at all (migration 20260417230200), so a
+  bare `DELETE .../:jti` front door would have been a selector with no tenant
+  re-derivation possible — `RequireAdminRouteCensusTest` classifies exactly
+  that shape `:exploitable`. `revoke/2` below is the SCOPED twin instead,
+  mounted only on `/w/:workspace_slug/p/:project_slug/...` — migration
+  20261009050000 added `owner_workspace_id`/`owner_project_id` to the table
+  (named with an `owner_` prefix, not `workspace_id`/`project_id` — that
+  exact name would mechanically pull the table into
+  `WorkspaceBundle.Catalog`'s E1 tenant-bundle export/teardown, which these
+  short-lived rows have nothing to do with; see the migration's own
+  moduledoc), populated at `record_jti/1` time, and
+  `PreviewToken.revoke_scoped/3` reads the row's STORED scope before
+  deciding, the same pattern
+  `PreviewLinkController.revoke/2` already uses. An admin of workspace A
+  calling `/w/B/.../v1/preview-tokens/:jti` never even reaches this action —
+  `RequireWorkspaceRole` (the SAME `:scoped_admin` gate the scoped mint
+  uses) 403s at the pipeline. `Barkpark.PreviewToken.revoke/1` (bare, no
+  scope) still exists for an in-process caller that already holds the
+  workspace boundary some other way (iex, a future mix task); this action
+  never calls it.
 
   ## Tenant confinement (`RequireAdminRouteCensusTest`, :tenant_bound)
 
@@ -117,6 +128,27 @@ defmodule BarkparkWeb.PreviewTokenController do
     end
   end
 
+  @doc "DELETE /w/:workspace_slug/p/:project_slug/v1/preview-tokens/:jti — revoke one token."
+  def revoke(conn, %{"jti" => jti}) do
+    opts = scope_opts(conn)
+
+    case Keyword.get(opts, :workspace_id) do
+      ws_id when is_binary(ws_id) ->
+        case PreviewToken.revoke_scoped(jti, ws_id, Keyword.get(opts, :project_id)) do
+          :ok -> json(conn, %{revoked: true, jti: jti})
+          {:error, :not_found} -> not_found(conn)
+        end
+
+      _ ->
+        # :scoped_api always resolves :current_workspace before this action
+        # runs (ResolveWorkspace halts the pipeline otherwise), so this arm
+        # is unreachable in practice — kept as a fail-closed 404 rather than
+        # a bare-jti, unscoped revoke/1 call, which is exactly the
+        # :exploitable shape this whole route exists to avoid.
+        not_found(conn)
+    end
+  end
+
   # ── helpers ──────────────────────────────────────────────────────────────
 
   # Reads the admin's OWN resolved tenant off `scope_opts/1` — never caller
@@ -169,4 +201,7 @@ defmodule BarkparkWeb.PreviewTokenController do
 
   defp unprocessable(conn, msg),
     do: ErrorResponse.emit_custom(conn, 422, "validation_failed", msg)
+
+  defp not_found(conn),
+    do: ErrorResponse.emit(conn, {:error, :not_found}, "preview token not found")
 end

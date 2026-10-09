@@ -16,6 +16,15 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     * `.../v1/preview/{query,doc,listen}` accepting that token when its
       signed scope matches the URL — refusing it, in BOTH directions, when
       it does not.
+
+  Also covers the tenant-scoped revoke (task-49a6a686bb88d9e5):
+  `DELETE .../v1/preview-tokens/:jti`, same `[:scoped_api, :scoped_admin]`
+  gate as the mint. Deliberately only ONE revoke route exists — a flat
+  mint (#22299) is recorded under whatever workspace `:flat_admin_api`
+  resolved for the minting admin (the seeded Default workspace absent a
+  `DeriveWorkspaceFromToken` hit), so it is still revocable through this
+  SAME scoped route at `/w/default/p/default/...` — proven below,
+  rather than a second, flat revoke door.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -74,12 +83,27 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
 
     {:ok, _} = TenancyAuth.create_membership(ws_a.id, member_a.id)
 
+    # ADMIN of BOTH A and B — isolates `revoke_scoped/3`'s own workspace_id
+    # comparison from `RequireWorkspaceRole` (the route gate). A stranger to B
+    # (admin_a_raw) gets refused at the ROUTE before `revoke_scoped/3` is ever
+    # called; this fixture IS admitted onto B's URL (legitimate admin there
+    # too), so only the data-layer check can still refuse the cross-tenant
+    # revoke.
+    admin_both_raw = "spt-admin-both-#{suffix}"
+
+    {:ok, admin_both} =
+      Auth.create_token(admin_both_raw, "admin-both", @dataset, ["read", "write", "admin"])
+
+    {:ok, _} = TenancyAuth.create_membership(ws_a.id, admin_both.id, "admin")
+    {:ok, _} = TenancyAuth.create_membership(ws_b.id, admin_both.id, "admin")
+
     %{
       ws_a: ws_a,
       ws_b: ws_b,
       admin_a_raw: admin_a_raw,
       admin_b_raw: admin_b_raw,
-      member_a_raw: member_a_raw
+      member_a_raw: member_a_raw,
+      admin_both_raw: admin_both_raw
     }
   end
 
@@ -289,5 +313,146 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     resp = conn |> get("/w/#{ws_a.slug}/p/default/v1/preview/doc/#{@dataset}/post/anything")
 
     assert resp.status == 403
+  end
+
+  # ── tenant-scoped revoke (task-49a6a686bb88d9e5) ────────────────────────
+
+  defp revoke(conn, ws_slug, raw, jti) do
+    conn
+    |> bearer(raw)
+    |> delete("/w/#{ws_slug}/p/default/v1/preview-tokens/#{jti}")
+  end
+
+  test "an admin of A revokes A's own token, and it is refused on the next request", %{
+    ws_a: ws_a,
+    admin_a_raw: raw,
+    conn: conn
+  } do
+    body = mint!(conn, ws_a.slug, raw, %{"dataset" => @dataset, "multi_use" => true})
+    token = body["token"]
+    jti = body["jti"]
+
+    first =
+      conn
+      |> preview(token)
+      |> get("/w/#{ws_a.slug}/p/default/v1/preview/doc/#{@dataset}/post/#{ws_a.slug}-doc")
+
+    assert first.status == 200
+
+    revoke_resp = revoke(conn, ws_a.slug, raw, jti)
+    assert revoke_resp.status == 200
+    assert Jason.decode!(revoke_resp.resp_body)["revoked"] == true
+
+    second =
+      conn
+      |> preview(token)
+      |> get("/w/#{ws_a.slug}/p/default/v1/preview/doc/#{@dataset}/post/#{ws_a.slug}-doc")
+
+    assert second.status == 401
+  end
+
+  test "an admin of A cannot revoke B's token", %{
+    ws_b: ws_b,
+    admin_a_raw: admin_a_raw,
+    admin_b_raw: admin_b_raw,
+    conn: conn
+  } do
+    body = mint!(conn, ws_b.slug, admin_b_raw, %{"dataset" => @dataset, "multi_use" => true})
+    jti = body["jti"]
+    token = body["token"]
+
+    # Attempt the revoke AT B's own URL but with A's credential -- refused by
+    # the route gate (RequireWorkspaceRole), never reaching revoke_scoped/3.
+    resp = revoke(conn, ws_b.slug, admin_a_raw, jti)
+    assert resp.status == 403
+
+    # The token is still live: the attempted revoke did nothing.
+    still_live =
+      conn
+      |> preview(token)
+      |> get("/w/#{ws_b.slug}/p/default/v1/preview/doc/#{@dataset}/post/#{ws_b.slug}-doc")
+
+    assert still_live.status == 200
+  end
+
+  test "an admin of BOTH A and B still cannot revoke A's token via B's URL", %{
+    ws_a: ws_a,
+    ws_b: ws_b,
+    admin_a_raw: admin_a_raw,
+    admin_both_raw: admin_both_raw,
+    conn: conn
+  } do
+    body = mint!(conn, ws_a.slug, admin_a_raw, %{"dataset" => @dataset, "multi_use" => true})
+    jti = body["jti"]
+    token = body["token"]
+
+    # admin_both_raw IS a legitimate admin of B, so RequireWorkspaceRole
+    # admits this request onto B's URL -- only `revoke_scoped/3`'s own
+    # workspace_id comparison stands between this call and A's token.
+    resp = revoke(conn, ws_b.slug, admin_both_raw, jti)
+    assert resp.status == 404
+
+    still_live =
+      conn
+      |> preview(token)
+      |> get("/w/#{ws_a.slug}/p/default/v1/preview/doc/#{@dataset}/post/#{ws_a.slug}-doc")
+
+    assert still_live.status == 200
+
+    # Confirm it's a routing/scope thing, not a broken fixture: the SAME
+    # admin, at A's own URL, revokes it just fine.
+    own_url_resp = revoke(conn, ws_a.slug, admin_both_raw, jti)
+    assert own_url_resp.status == 200
+  end
+
+  test "a flat-minted token (#22299, no /w/.../p/... prefix) is recorded under the Default workspace, and revocable via the scoped route at /w/default/p/default/...",
+       %{conn: conn} do
+    {default_ws, _default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    flat_admin_raw = "spt-flat-admin-#{System.unique_integer([:positive])}"
+
+    {:ok, flat_admin} =
+      Auth.create_token(flat_admin_raw, "flat-admin", @dataset, ["read", "write", "admin"])
+
+    # RequireAdmin (the flat mint's gate) checks the token's GLOBAL `admin`
+    # permission alone; RequireWorkspaceRole (the scoped revoke's gate)
+    # checks an actual membership ROLE in the resolved workspace -- this
+    # token needs both, to mint flat AND revoke scoped.
+    {:ok, _} = TenancyAuth.create_membership(default_ws.id, flat_admin.id, "admin")
+
+    mint_resp =
+      conn
+      |> bearer(flat_admin_raw)
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/preview-tokens", %{"dataset" => @dataset, "multi_use" => true})
+
+    assert mint_resp.status == 201
+    jti = Jason.decode!(mint_resp.resp_body)["jti"]
+    refute Barkpark.PreviewToken.revoked?(jti)
+
+    revoke_resp = revoke(conn, default_ws.slug, flat_admin_raw, jti)
+    assert revoke_resp.status == 200
+    assert Jason.decode!(revoke_resp.resp_body)["revoked"] == true
+    assert Barkpark.PreviewToken.revoked?(jti)
+  end
+
+  test "revoking an unknown jti is a 404", %{ws_a: ws_a, admin_a_raw: raw, conn: conn} do
+    resp = revoke(conn, ws_a.slug, raw, "not-a-real-jti")
+    assert resp.status == 404
+  end
+
+  test "revoking the same jti twice is idempotent, not a second-time 404", %{
+    ws_a: ws_a,
+    admin_a_raw: raw,
+    conn: conn
+  } do
+    body = mint!(conn, ws_a.slug, raw, %{"dataset" => @dataset, "multi_use" => true})
+    jti = body["jti"]
+
+    assert revoke(conn, ws_a.slug, raw, jti).status == 200
+    # A row with revoked_at already set still matches the scope query and the
+    # update_all still returns n >= 0 -- re-setting revoked_at to "now" again
+    # is a harmless idempotent re-revoke, not a 404, since the row IS found.
+    assert revoke(conn, ws_a.slug, raw, jti).status == 200
   end
 end
