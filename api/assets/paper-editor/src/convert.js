@@ -59,9 +59,12 @@ function flatMarkToTiptap(mark) {
 // An unknown flat mark rides as a bpOpaqueMark (./opaque-mark.js) holding the stored
 // mark and its leaf's whole `marks` array verbatim, so a save writes both back.
 const OPAQUE_MARK = "bpOpaqueMark";
+// A mark object may name itself `_type` (Portable Text's spelling) instead of `type`;
+// it is carried the same way (task-87c8c9503e4f6028).
 function opaqueMarkToTiptap(mark, leafMarks) {
+  const nameOf = (m) => (typeof m.type === "string" && m.type !== "" ? m.type : m._type);
   const named = typeof mark === "string" ? mark !== "" :
-    mark && typeof mark === "object" && !Array.isArray(mark) && typeof mark.type === "string" && mark.type !== "";
+    mark && typeof mark === "object" && !Array.isArray(mark) && typeof nameOf(mark) === "string" && nameOf(mark) !== "";
   if (!named) return null;
   return { type: OPAQUE_MARK, attrs: { mark: deepCloneJson(mark), leaf: deepCloneJson(leafMarks) } };
 }
@@ -87,10 +90,14 @@ function inlineToTiptapNodes(node, marks, out) {
       return;
     }
     case "code": {
-      // inline code is a leaf in portable-doc; in TipTap it is a `code` mark.
+      // inline code is a leaf in portable-doc; in TipTap it is a `code` mark. The
+      // leaf's own flat `marks` ride like a text leaf's, so typing inside the code
+      // writes them back (task-87c8c9503e4f6028).
       const text = node.value || "";
       if (text.length === 0) return;
-      out.push({ type: "text", text, marks: [...marks, { type: "code" }] });
+      const own = Array.isArray(node.marks)
+        ? node.marks.map((m) => flatMarkToTiptap(m) || opaqueMarkToTiptap(m, node.marks)).filter(Boolean) : [];
+      out.push({ type: "text", text, marks: [...marks, { type: "code" }, ...own].map((m) => ({ ...m })) });
       return;
     }
     case "strong": {
