@@ -709,14 +709,20 @@ defmodule Barkpark.Content.Writer do
 
   Returns `{:ok, new_doc}` on success or `{:error, changeset}` on
   insert failure. Used by the Studio's "Duplicate" header action.
+
+  `:title_suffix` (task-141c0bba8070ef02) replaces the English `" (copy)"`
+  with the caller's own (the Studio passes it in the workspace language). A
+  caller that passes it also gets an untitled source copied as untitled,
+  instead of the English `"Untitled (copy)"`. Without it the title is
+  exactly as before.
   """
   @spec clone_document(map(), String.t(), String.t(), keyword()) ::
           {:ok, Document.t()} | {:error, term()}
   def clone_document(doc, type, dataset, opts \\ [])
       when is_map(doc) and is_binary(type) and is_binary(dataset) do
+    {suffix, opts} = Keyword.pop(opts, :title_suffix)
     new_id = generate_id(type)
-    src_title = Map.get(doc, :title) || "Untitled"
-    new_title = "#{src_title} (copy)"
+    {src_title, new_title} = copy_title(Map.get(doc, :title), suffix)
     src_content = doc |> clone_content(type, dataset) |> retitle_copy(src_title, new_title)
 
     create_document(
@@ -732,6 +738,18 @@ defmodule Barkpark.Content.Writer do
     )
   end
 
+  defp copy_title(title, nil) do
+    src = title || "Untitled"
+    {src, "#{src} (copy)"}
+  end
+
+  defp copy_title(title, suffix) when is_binary(suffix) do
+    case title && String.trim(title) do
+      blank when blank in [nil, "", "Untitled"] -> {title, nil}
+      _ -> {title, title <> suffix}
+    end
+  end
+
   # The copy's own title source must carry the copy's title. The row's title is
   # re-derived from `content["title"]` on the next write, and a block write
   # projects `content["title"]` from the stored block list (a field block bound
@@ -739,6 +757,10 @@ defmodule Barkpark.Content.Writer do
   # title reverted to it on its first edit, and the desk showed two documents
   # with the same name (task-970a40d1a252e649). Only a value that still equals the
   # source title is changed.
+  # An untitled copy (a :title_suffix caller) keeps the source's own empty
+  # title source untouched: there is no copy title to write into it.
+  defp retitle_copy(content, _src_title, nil), do: content
+
   defp retitle_copy(%{} = content, src_title, new_title) do
     content
     |> then(fn c ->

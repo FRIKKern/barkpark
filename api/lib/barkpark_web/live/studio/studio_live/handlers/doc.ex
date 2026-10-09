@@ -366,16 +366,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
   # The copy's title, which is what the author recognises in the desk; the raw
   # id only for a copy with no title (task-a69f860810cbcfc3).
   defp duplicated_message(%{title: title}, _pub_id) when is_binary(title) and title != "",
-    do: "Duplicated as “#{title}”"
+    do: gettext("Duplicated as “%{title}”", title: title)
 
-  defp duplicated_message(_doc, pub_id), do: "Duplicated as #{pub_id}"
+  defp duplicated_message(_doc, pub_id), do: gettext("Duplicated as %{id}", id: pub_id)
 
   def duplicate_doc(socket) do
     doc = socket.assigns[:editor_doc]
     type = socket.assigns[:editor_type]
 
     if doc && type do
-      case Content.clone_document(doc, type, socket.assigns.dataset, Shared.hook_opts(socket)) do
+      # The copy's suffix in the Studio language (task-141c0bba8070ef02): it is
+      # stored in the title, so the English " (copy)" read English everywhere.
+      opts = Shared.hook_opts(socket) ++ [title_suffix: gettext(" (copy)")]
+
+      case Content.clone_document(doc, type, socket.assigns.dataset, opts) do
         {:ok, new_doc} ->
           pub_id = Content.published_id(new_doc.doc_id)
           base = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
