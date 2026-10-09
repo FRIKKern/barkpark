@@ -40,9 +40,14 @@ defmodule BarkparkWeb.PreviewTokenController do
   re-derivation possible — `RequireAdminRouteCensusTest` classifies exactly
   that shape `:exploitable`. `revoke/2` below is the SCOPED twin instead,
   mounted only on `/w/:workspace_slug/p/:project_slug/...` — migration
-  20261009050000 added `workspace_id`/`project_id` to the table, populated at
-  `record_jti/1` time, and `PreviewToken.revoke_scoped/3` reads the row's
-  STORED scope before deciding, the same pattern
+  20261009050000 added `owner_workspace_id`/`owner_project_id` to the table
+  (named with an `owner_` prefix, not `workspace_id`/`project_id` — that
+  exact name would mechanically pull the table into
+  `WorkspaceBundle.Catalog`'s E1 tenant-bundle export/teardown, which these
+  short-lived rows have nothing to do with; see the migration's own
+  moduledoc), populated at `record_jti/1` time, and
+  `PreviewToken.revoke_scoped/3` reads the row's STORED scope before
+  deciding, the same pattern
   `PreviewLinkController.revoke/2` already uses. An admin of workspace A
   calling `/w/B/.../v1/preview-tokens/:jti` never even reaches this action —
   `RequireWorkspaceRole` (the SAME `:scoped_admin` gate the scoped mint

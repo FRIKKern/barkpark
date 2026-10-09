@@ -85,14 +85,19 @@ defmodule Barkpark.PreviewToken do
         # task-49a6a686bb88d9e5 — nil for a flat, unscoped mint (unchanged),
         # populated whenever the claims carry a workspace/project (the scoped
         # mint always does). This is what `revoke_scoped/3` matches against.
+        # `owner_workspace_id`/`owner_project_id`, NOT `workspace_id`/
+        # `project_id` — the migration's own moduledoc explains why: a column
+        # literally named `workspace_id` would mechanically pull this table
+        # into `WorkspaceBundle.Catalog`'s E1 (tenant bundle export/teardown),
+        # a behaviour change to a different system this task never asked for.
         # `dump_uuid/1`, not the bare claim string: `insert_all/3` here takes
         # a TABLE NAME, not a schema, so Ecto has no column-type information
         # to encode a UUID string against a `:binary_id` column with — the
         # 16-byte binary Postgrex's default types expect has to be produced
         # by hand (`Ecto.UUID.dump/1`), the same gap `token_id` above has
         # always carried silently because nothing has ever populated it.
-        workspace_id: dump_uuid(Map.get(claims, "workspace_id")),
-        project_id: dump_uuid(Map.get(claims, "project_id")),
+        owner_workspace_id: dump_uuid(Map.get(claims, "workspace_id")),
+        owner_project_id: dump_uuid(Map.get(claims, "project_id")),
         issued_at: from_unix(Map.get(claims, "iat"), now),
         expires_at: from_unix(Map.get(claims, "exp"), now)
       }
@@ -140,8 +145,8 @@ defmodule Barkpark.PreviewToken do
   `project_id` (task-49a6a686bb88d9e5) — never trusted from anywhere else,
   the same posture `PreviewTokenController.mint/2` already holds for
   signing a scope into a token in the first place. A row whose STORED
-  `workspace_id` does not equal the one given (including a row with no
-  `workspace_id` at all — a flat, unscoped mint predates this column or
+  `owner_workspace_id` does not equal the one given (including a row with no
+  `owner_workspace_id` at all — a flat, unscoped mint predates this column or
   named no workspace) is `{:error, :not_found}`, identical to an unknown
   jti: this never distinguishes "exists under a different tenant" from
   "does not exist" to the caller, the same existence-hiding rule every
@@ -156,18 +161,19 @@ defmodule Barkpark.PreviewToken do
       when is_binary(jti) and is_binary(workspace_id) do
     # Same reason as `record_jti/1`'s `dump_uuid/1`: this `from/2` names a
     # bare TABLE, not a schema, so Ecto has no `:binary_id` type info for
-    # `workspace_id`/`project_id` to encode a dashed UUID string against —
-    # the 16-byte binary has to be produced by hand.
+    # `owner_workspace_id`/`owner_project_id` to encode a dashed UUID string
+    # against — the 16-byte binary has to be produced by hand.
     with ws_bin when is_binary(ws_bin) <- dump_uuid(workspace_id),
          proj_bin <- if(is_nil(project_id), do: nil, else: dump_uuid(project_id)),
          true <- is_nil(project_id) or is_binary(proj_bin) do
       query =
         from(j in "preview_token_jti",
           where: j.jti == ^jti,
-          where: j.workspace_id == ^ws_bin
+          where: j.owner_workspace_id == ^ws_bin
         )
 
-      query = if is_nil(proj_bin), do: query, else: where(query, [j], j.project_id == ^proj_bin)
+      query =
+        if is_nil(proj_bin), do: query, else: where(query, [j], j.owner_project_id == ^proj_bin)
 
       {n, _} = Repo.update_all(query, set: [revoked_at: DateTime.utc_now()])
       if n == 0, do: {:error, :not_found}, else: :ok

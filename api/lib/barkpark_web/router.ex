@@ -2878,8 +2878,12 @@ defmodule BarkparkWeb.Router do
   # resolves the admin's OWN scope, not a URL-named one, so there's no
   # per-request workspace to test a revoke's confinement against. The
   # tenant-scoped revoke (task-49a6a686bb88d9e5) lives on the SCOPED twin
-  # below instead, now that `preview_token_jti` carries workspace_id/
-  # project_id. A token minted HERE (flat) is still revocable there: its
+  # below instead, now that `preview_token_jti` carries owner_workspace_id/
+  # owner_project_id (named with the `owner_` prefix, NOT `workspace_id`,
+  # deliberately — see the migration's moduledoc: that literal column name
+  # would pull this table into the tenant-bundle export/teardown system,
+  # which these short-lived, TTL-swept rows have nothing to do with). A
+  # token minted HERE (flat) is still revocable there: its
   # row is recorded under whatever workspace this pipeline's
   # `scope_opts(conn)` resolved at mint time — the seeded Default workspace
   # absent a `DeriveWorkspaceFromToken` hit — so `DELETE
@@ -3662,8 +3666,8 @@ defmodule BarkparkWeb.Router do
     # grew no revoke twin (preview_token_jti carried no tenant column; see
     # PreviewTokenController's own moduledoc). SAME gate as the mint above,
     # so an admin of A reaches 403 on `/w/B/.../:jti`, never the controller;
-    # `revoke/2` additionally checks the ROW's own stored workspace_id before
-    # touching it.
+    # `revoke/2` additionally checks the ROW's own stored owner_workspace_id
+    # before touching it.
     delete("/v1/preview-tokens/:jti", PreviewTokenController, :revoke)
   end
 
