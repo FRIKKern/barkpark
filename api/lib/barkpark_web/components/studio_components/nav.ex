@@ -24,13 +24,20 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   attr :flash, :map, required: true
 
   def studio_flash(assigns) do
+    # Always rendered (task-51cc4c46e1076bd6): a flash that inserted its own
+    # node into .studio-shell landed before the id-keyed #studio-panes, the
+    # patch moved the panes to make room, and whatever was focused inside them
+    # (the Publiser button that raised the flash) lost focus to <body>. A
+    # stable container is filled instead, so the panes never move.
     ~H"""
-    <%= if Phoenix.Flash.get(@flash, :info) do %>
-      <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
-    <% end %>
-    <%= if Phoenix.Flash.get(@flash, :error) do %>
-      <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
-    <% end %>
+    <div id="studio-flash" class="studio-flash">
+      <%= if Phoenix.Flash.get(@flash, :info) do %>
+        <div class="flash flash-info" role="status" aria-live="polite" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :info) %></div>
+      <% end %>
+      <%= if Phoenix.Flash.get(@flash, :error) do %>
+        <div class="flash flash-error" role="alert" aria-live="assertive" style="margin: 8px 16px 0;"><%= Phoenix.Flash.get(@flash, :error) %></div>
+      <% end %>
+    </div>
     """
   end
 
