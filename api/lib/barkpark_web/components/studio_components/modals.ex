@@ -365,6 +365,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
   """
   attr :show, :boolean, default: false
   attr :type, :string, default: nil
+  attr :type_word, :string, default: nil
   attr :caps, :list, default: []
   attr :link, :string, default: nil
   attr :error, :string, default: nil
@@ -386,7 +387,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
       >
         <div class="image-picker-header">
           <span id="airdrop-sheet-title" style="font-weight: 600; font-size: 14px;">
-            <%= gettext("Share access") %><%= if @type, do: " · #{BarkparkWeb.Studio.PaneBuilder.type_word(@type)}", else: "" %>
+            <%= gettext("Share access") %><%= if @type, do: " · " <> (@type_word || BarkparkWeb.Studio.PaneBuilder.type_word(@type)), else: "" %>
           </span>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="airdrop-close" aria-label={gettext("Close")}>×</button>
         </div>

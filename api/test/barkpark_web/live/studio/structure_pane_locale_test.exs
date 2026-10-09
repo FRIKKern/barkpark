@@ -118,4 +118,21 @@ defmodule BarkparkWeb.Studio.StructurePaneLocaleTest do
              "…Rest"
            ]
   end
+
+  # task-7b0c9b8ae4ac6f79: the list pane names the type by what its author
+  # called it, and a plugin-owned type by a Norwegian word of its own.
+  test "a Norwegian list pane names its type by title or by its own word", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, view, _html} =
+      live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/forfatter")
+
+    assert has_element?(view, ~s(button[aria-label="Opprett Forfatter"]))
+    refute has_element?(view, ~s(button[aria-label="Opprett forfatter"]))
+
+    {:ok, view, _html} = live(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio/sheet")
+    assert has_element?(view, ~s(button[aria-label="Opprett regneark"]))
+  end
 end

@@ -201,6 +201,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
       airdrop_can_share?: (socket.assigns[:current_user] || socket.assigns[:api_token]) != nil,
       airdrop_open: false,
       airdrop_type: nil,
+      airdrop_type_word: nil,
       airdrop_caps: [],
       airdrop_link: nil,
       airdrop_error: nil,

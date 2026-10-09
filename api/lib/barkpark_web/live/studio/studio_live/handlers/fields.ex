@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
   Document lifecycle (new/save/autosave) + editor toggles + ArrayField ops.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -68,7 +70,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          socket
          |> put_flash(
            :info,
-           "That “+” already created an untitled #{BarkparkWeb.Studio.PaneBuilder.type_word(type)} — opening it instead of making a second draft. Type in it, or wait a moment, to start another."
+           gettext(
+             "That “+” already created an untitled %{type} — opening it instead of making a second draft. Type in it, or wait a moment, to start another.",
+             type:
+               BarkparkWeb.Studio.PaneBuilder.type_word_for(
+                 type,
+                 socket.assigns.dataset,
+                 BarkparkWeb.ScopeHelpers.scope_opts(socket)
+               )
+           )
          )
          |> push_patch(to: Shared.studio_path(socket, path, socket.assigns.dataset))
          |> focus_new_doc(List.last(path))}

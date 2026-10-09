@@ -460,6 +460,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          type_title: schema && schema.title,
           role: :list,
           priority: :active,
           desk_groups: [],
@@ -538,6 +539,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           title: node.title || (schema && schema.title) || type_name,
           icon: node.icon || (schema && schema.icon),
           type_name: type_name,
+          type_title: schema && schema.title,
           role: :list,
           priority: :active,
           desk_groups: desk_groups,
@@ -999,9 +1001,9 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   # and only a document with neither falls back to the unnamed-row spelling.
   defp row_title(doc, schema) do
     case doc.title && String.trim(doc.title) do
-      nil -> preview_title(doc, schema) || unnamed_row_title(doc)
-      "" -> preview_title(doc, schema) || unnamed_row_title(doc)
-      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc)
+      nil -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
+      "" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
+      "Untitled" -> preview_title(doc, schema) || unnamed_row_title(doc, schema)
       title -> title
     end
   end
@@ -1017,19 +1019,82 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   """
   def display_title(doc, schema \\ nil), do: row_title(doc, schema)
 
-  defp unnamed_row_title(doc) do
-    gettext("Untitled %{type} · %{tail}", type: row_type_word(doc), tail: doc_id_tail(doc))
+  defp unnamed_row_title(doc, schema) do
+    gettext("Untitled %{type} · %{tail}",
+      type: row_type_word(doc, schema),
+      tail: doc_id_tail(doc)
+    )
   end
 
-  defp row_type_word(%{type: type}) when is_binary(type) and type != "", do: type_word(type)
-  defp row_type_word(_), do: gettext("document")
+  defp row_type_word(%{type: type}, schema) when is_binary(type) and type != "",
+    do: type_word(type, schema_title(schema))
+
+  defp row_type_word(_, _), do: gettext("document")
+
+  defp schema_title(%{title: title}), do: title
+  defp schema_title(%{"title" => title}), do: title
+  defp schema_title(_), do: nil
 
   @doc """
-  A schema name as words for Studio copy: `form_submission` → `form
-  submission` (task-6dfc55e961ffa137). Schema titles cannot stand in: they are
-  singular for some types and plural for others ("Ticket", "Form submissions").
+  The word Studio copy uses for one document of `type` ("New %{type}",
+  "Untitled %{type}"), in the viewer's language (task-7b0c9b8ae4ac6f79):
+
+    * a plugin-owned type has a singular word of its own (`task` → "oppgave");
+      its schema title cannot stand in, being plural for some types
+      ("Form submissions") and singular for others (task-6dfc55e961ffa137);
+    * a workspace's own type uses its schema `title` — what its author named
+      it ("Forfatter");
+    * only a type with neither falls back to its name as words
+      (`form_submission` → "form submission").
   """
-  def type_word(type) when is_binary(type), do: String.replace(type, ~r/[_-]+/, " ")
+  def type_word(type, title \\ nil)
+
+  def type_word(type, title) when is_binary(type) do
+    case Map.fetch(plugin_type_words(), type) do
+      {:ok, word} ->
+        word
+
+      :error ->
+        if is_binary(title) and String.trim(title) != "",
+          do: title,
+          else: String.replace(type, ~r/[_-]+/, " ")
+    end
+  end
+
+  @doc "`type_word/2` for a caller holding no schema: resolves the type's title in scope."
+  def type_word_for(type, dataset, scope_opts) when is_binary(type) do
+    title =
+      case Content.resolve_schema(type, dataset, scope_opts) do
+        {:ok, schema} -> schema.title
+        _ -> nil
+      end
+
+    type_word(type, title)
+  end
+
+  @doc "The plugin-owned types that carry a word of their own (the drift test reads it)."
+  def plugin_type_word_types, do: Map.keys(plugin_type_words())
+
+  defp plugin_type_words do
+    %{
+      "paper" => pgettext("type word", "paper"),
+      "paper_master" => pgettext("type word", "master"),
+      "form_response" => pgettext("type word", "form response"),
+      "form_submission" => pgettext("type word", "form submission"),
+      "form_endpoint" => pgettext("type word", "form endpoint"),
+      "session" => pgettext("type word", "session"),
+      "fact" => pgettext("type word", "fact"),
+      "mediaAsset" => pgettext("type word", "media asset"),
+      "mediaCollection" => pgettext("type word", "media collection"),
+      "quiz" => pgettext("type word", "quiz"),
+      "command" => pgettext("type word", "command"),
+      "sheet" => pgettext("type word", "sheet"),
+      "task" => pgettext("type word", "task"),
+      "listener" => pgettext("type word", "listener"),
+      "ticket" => pgettext("type word", "ticket"),
+      "book" => pgettext("type word", "book")
+    }
+  end
 
   # The entropy half of `<type>-<64 bits>` (`Content.generate_id/1`). Split from
   # the RIGHT so a type containing a hyphen cannot eat the tail, and fall back
