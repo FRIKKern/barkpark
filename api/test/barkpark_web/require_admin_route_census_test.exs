@@ -399,8 +399,15 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "ensure_workspace_admin",
        "PreviewLinkController.list/2 resolves the workspace THEN " <>
          "ensure_workspace_admin/2 -> PreviewLinks.workspace_admin?/2."},
-    {:post, "/v1/shares/preview-links"} =>
-      {:tenant_bound, "ensure_workspace_admin", "PreviewLinkController.mint/2, same shape."},
+    # {:post, "/v1/shares/preview-links"} REMOVED (task-9cfe08fe1e91b6c9):
+    # mint/2 moved off `[:api, :require_admin]` onto its own
+    # `[:api, :require_token, :flat_within_quota, :require_write]` scope, so
+    # it no longer falls in THIS census's population at all (this file only
+    # tracks routes gated by `RequireAdmin`, per the moduledoc). Its
+    # workspace-specific confinement is now `ensure_can_mint/2` (admin OR a
+    # write-capable member) -- a stronger requirement than `RequireAdmin`
+    # ever was; see preview_link_member_mint_test.exs for its own
+    # refusal-case coverage.
     {:delete, "/v1/shares/preview-links/:id"} =>
       {:tenant_bound, "ensure_workspace_admin",
        "PreviewLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
