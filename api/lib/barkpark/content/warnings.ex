@@ -20,8 +20,17 @@ defmodule Barkpark.Content.Warnings do
 
   @key :barkpark_authoring_warnings
 
-  @typedoc "One advisory entry — code + severity are stable machine keys."
-  @type entry :: %{code: String.t(), severity: String.t(), message: String.t()}
+  @typedoc """
+  One advisory entry — `code` + `severity` are stable machine keys. May carry
+  additional emitter-chosen keys (`put/4`'s `extra`); every CURRENT emitter
+  bar `schema_validation` passes none, so this type names only the floor.
+  """
+  @type entry :: %{
+          required(:code) => String.t(),
+          required(:severity) => String.t(),
+          required(:message) => String.t(),
+          optional(atom()) => term()
+        }
 
   @doc "Reset the accumulator for a fresh request/batch."
   @spec reset() :: :ok
@@ -41,16 +50,25 @@ defmodule Barkpark.Content.Warnings do
   Severity defaults to `"advisory"` (the tag-count norm); an emitter with a
   sharper signal passes its own — the E4 dedup wall's advise band stamps
   `"warning"`. Never an error: promotion is charter-forbidden (D5).
+
+  `extra` (task-3f46241a2a9c3656) merges ADDITIVE keys onto the entry —
+  `schema_validation`'s emitter attaches a `findings:` list (the same
+  path/message/code/params shape task-1dac662bed153203 standardized for the
+  422 envelope, additive there too). Defaults to `%{}`, so every existing
+  3-arg call site keeps producing the EXACT `%{code:, severity:, message:}`
+  triple it always has — `response_warnings_test.exs` pins that shape with
+  exact map equality on an unrelated advisory, and a 4th key present on every
+  entry unconditionally would have broken it.
   """
-  @spec put(String.t(), String.t(), String.t()) :: :ok
-  def put(code, message, severity \\ "advisory")
-      when is_binary(code) and is_binary(message) and is_binary(severity) do
+  @spec put(String.t(), String.t(), String.t(), map()) :: :ok
+  def put(code, message, severity \\ "advisory", extra \\ %{})
+      when is_binary(code) and is_binary(message) and is_binary(severity) and is_map(extra) do
     case Process.get(@key) do
       nil ->
         :ok
 
       entries when is_list(entries) ->
-        entry = %{code: code, severity: severity, message: message}
+        entry = Map.merge(%{code: code, severity: severity, message: message}, extra)
         Process.put(@key, [entry | entries])
         :ok
     end
