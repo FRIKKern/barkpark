@@ -2188,6 +2188,17 @@
        opting it out costs nothing and removes the only real casualty.
        Re-visit if Sheets ever grows a container-queried child. */
     .editor-panel.sheet-editor { container-type: normal; }
+    /* …which is why the narrow two-row header below never reached the sheet:
+       its six text actions spilled LEFT out of a flex-end row, off-screen and
+       over the title (task-5d4f085dff4dd8ea). Keyed on the width bucket instead
+       of the panel container the sheet opts out of; the wide desk is unchanged. */
+    html:not([data-width-bucket="wide"]) .editor-panel.sheet-editor > .editor-header {
+      display: grid; grid-template-columns: minmax(0, 1fr);
+      height: auto; flex-shrink: 0; gap: 8px; padding-block: 8px;
+    }
+    html:not([data-width-bucket="wide"]) .editor-panel.sheet-editor > .editor-header > div:last-child {
+      flex-wrap: wrap;
+    }
     .editor-header { justify-content: space-between; background: var(--bg); }
     /* Paper actions are direct links/buttons, not the classic overflow menu.
        Give them their own row when the pane is narrow: flex-end overflow would

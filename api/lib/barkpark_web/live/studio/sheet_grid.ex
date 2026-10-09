@@ -2969,7 +2969,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       >
         <:status_pill>
           <span class={"badge badge-#{if @is_draft, do: "draft", else: "published"}"}>
-            <%= if @is_draft, do: "draft", else: "published" %>
+            <%= BarkparkWeb.StudioComponents.Panes.status_word(if @is_draft, do: "draft", else: "published") %>
           </span>
         </:status_pill>
         <:presence>

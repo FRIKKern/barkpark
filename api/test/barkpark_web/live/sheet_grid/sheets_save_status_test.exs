@@ -162,6 +162,18 @@ defmodule BarkparkWeb.SheetsSaveStatusTest do
     refute render(editor) =~ "All changes saved"
   end
 
+  # task-5d4f085dff4dd8ea: the sheet header's status pill read "draft" in nb-NO.
+  test "a Norwegian workspace names the sheet's state in its header pill", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    {editor, _grid} = open_editor(conn, "pill-nb")
+    html = render(editor)
+
+    assert html =~ ~r{<span class="badge badge-draft">\s*utkast\s*</span>}
+    refute html =~ ~r{<span class="badge badge-draft">\s*draft\s*</span>}
+  end
+
   test "a STALE persist frame (a rev the client has already passed) leaves it on Saving…",
        %{conn: conn} do
     put_cfg(debounce_ms: 60_000)
