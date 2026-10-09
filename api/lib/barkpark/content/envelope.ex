@@ -297,21 +297,23 @@ defmodule Barkpark.Content.Envelope do
       [] ->
         nil
 
-      paths ->
-        mappings =
-          paths
-          |> Enum.with_index()
-          |> Map.new(fn {key, idx} ->
-            {result_path(key),
-             %{"source" => %{"document" => 0, "path" => idx}, "type" => "value"}}
+      keys ->
+        {mappings, table} =
+          Enum.reduce(keys, {%{}, path_table_new()}, fn key, {m_acc, table} ->
+            {idx, table} = path_table_index(table, result_path(key))
+
+            {Map.put(m_acc, result_path(key), %{
+               "source" => %{"document" => 0, "path" => idx},
+               "type" => "value"
+             }), table}
           end)
 
-        {expand_mappings, expand_docs, _next_idx} =
-          expand_source_map(rendered, expanded, 1, &result_path/1)
+        {expand_mappings, expand_docs, _next_doc_idx, table} =
+          expand_source_map(rendered, expanded, 1, &result_path/1, table)
 
         %{
           "documents" => [%{"_id" => doc_id, "_type" => type} | expand_docs],
-          "paths" => Enum.map(paths, &result_path/1) ++ Map.keys(expand_mappings),
+          "paths" => path_table_to_list(table),
           "mappings" => Map.merge(mappings, expand_mappings)
         }
     end
@@ -360,16 +362,19 @@ defmodule Barkpark.Content.Envelope do
       when is_list(docs) and is_list(rendered_list) do
     expanded_list = expanded_list || List.duplicate(nil, length(rendered_list))
 
-    {documents, mappings, expand_documents, _next_idx, any_mapped?} =
+    {documents, mappings, expand_documents, _next_doc_idx, table, any_mapped?} =
       [docs, rendered_list, expanded_list]
       |> Enum.zip()
       |> Enum.with_index()
-      |> Enum.reduce({[], %{}, [], length(docs), false}, &reduce_row_source_map/2)
+      |> Enum.reduce(
+        {[], %{}, [], length(docs), path_table_new(), false},
+        &reduce_row_source_map/2
+      )
 
     if any_mapped? do
       %{
         "documents" => Enum.reverse(documents) ++ expand_documents,
-        "paths" => mappings |> Map.keys() |> Enum.sort(),
+        "paths" => path_table_to_list(table),
         "mappings" => mappings
       }
     end
@@ -379,36 +384,39 @@ defmodule Barkpark.Content.Envelope do
 
   defp reduce_row_source_map(
          {{%{doc_id: doc_id, type: type}, rendered, expanded}, row_idx},
-         {docs_acc, mappings_acc, expand_docs_acc, next_idx, any_mapped?}
+         {docs_acc, mappings_acc, expand_docs_acc, next_doc_idx, table, any_mapped?}
        )
        when is_map(rendered) do
     doc_entry = %{"_id" => doc_id, "_type" => type}
 
-    {row_mappings, row_mapped?} =
+    {row_mappings, table, row_mapped?} =
       case rendered |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort() do
         [] ->
-          {%{}, false}
+          {%{}, table, false}
 
         keys ->
-          m =
-            keys
-            |> Enum.with_index()
-            |> Map.new(fn {key, field_idx} ->
-              {row_result_path(row_idx, key),
-               %{"source" => %{"document" => row_idx, "path" => field_idx}, "type" => "value"}}
+          {m, table} =
+            Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+              {idx, table} = path_table_index(table, result_path(key))
+
+              {Map.put(m_acc, row_result_path(row_idx, key), %{
+                 "source" => %{"document" => row_idx, "path" => idx},
+                 "type" => "value"
+               }), table}
             end)
 
-          {m, true}
+          {m, table, true}
       end
 
-    {expand_mappings, row_expand_docs, next_idx} =
-      expand_source_map(rendered, expanded, next_idx, &row_result_path(row_idx, &1))
+    {expand_mappings, row_expand_docs, next_doc_idx, table} =
+      expand_source_map(rendered, expanded, next_doc_idx, &row_result_path(row_idx, &1), table)
 
     {
       [doc_entry | docs_acc],
       mappings_acc |> Map.merge(row_mappings) |> Map.merge(expand_mappings),
       expand_docs_acc ++ row_expand_docs,
-      next_idx,
+      next_doc_idx,
+      table,
       any_mapped? or row_mapped? or expand_mappings != %{}
     }
   end
@@ -435,45 +443,50 @@ defmodule Barkpark.Content.Envelope do
   # (always carrying `_id` + `_type`) or leaves it byte-identical (unresolved,
   # non-reference, or redacted away before expansion ran) — so "changed, and
   # now shaped like a rendered document" can only ever BE one.
-  defp expand_source_map(_base_rendered, nil, next_idx, _field_prefix_fun),
-    do: {%{}, [], next_idx}
+  defp expand_source_map(_base_rendered, nil, next_doc_idx, _field_prefix_fun, table),
+    do: {%{}, [], next_doc_idx, table}
 
-  defp expand_source_map(base_rendered, expanded, next_idx, field_prefix_fun)
+  defp expand_source_map(base_rendered, expanded, next_doc_idx, field_prefix_fun, table)
        when is_map(expanded) do
-    {mappings, docs_rev, final_idx} =
+    {mappings, docs_rev, final_doc_idx, table} =
       expanded
       |> Map.keys()
       |> Enum.reject(&(&1 in @reserved))
       |> Enum.sort()
-      |> Enum.reduce({%{}, [], next_idx}, fn key, {mappings_acc, docs_acc, idx} ->
+      |> Enum.reduce({%{}, [], next_doc_idx, table}, fn key,
+                                                        {mappings_acc, docs_acc, doc_idx, table} ->
         base_val = Map.get(base_rendered, key)
         exp_val = Map.get(expanded, key)
 
         case diff_expanded_field(base_val, exp_val) do
           :unchanged ->
-            {mappings_acc, docs_acc, idx}
+            {mappings_acc, docs_acc, doc_idx, table}
 
           {:single, sub_doc} ->
-            {sub_mappings, sub_entry} =
-              sub_document_source_map(sub_doc, field_prefix_fun.(key), idx)
+            {sub_mappings, sub_entry, table} =
+              sub_document_source_map(sub_doc, field_prefix_fun.(key), doc_idx, table)
 
-            {Map.merge(mappings_acc, sub_mappings), [sub_entry | docs_acc], idx + 1}
+            {Map.merge(mappings_acc, sub_mappings), [sub_entry | docs_acc], doc_idx + 1, table}
 
           {:array, elements} ->
-            Enum.reduce(elements, {mappings_acc, docs_acc, idx}, fn {el_idx, sub_doc},
-                                                                    {m_acc, d_acc, cur_idx} ->
+            Enum.reduce(elements, {mappings_acc, docs_acc, doc_idx, table}, fn {el_idx, sub_doc},
+                                                                               {m_acc, d_acc,
+                                                                                cur_idx, table} ->
               prefix = field_prefix_fun.(key) <> "[#{el_idx}]"
-              {sub_mappings, sub_entry} = sub_document_source_map(sub_doc, prefix, cur_idx)
-              {Map.merge(m_acc, sub_mappings), [sub_entry | d_acc], cur_idx + 1}
+
+              {sub_mappings, sub_entry, table} =
+                sub_document_source_map(sub_doc, prefix, cur_idx, table)
+
+              {Map.merge(m_acc, sub_mappings), [sub_entry | d_acc], cur_idx + 1, table}
             end)
         end
       end)
 
-    {mappings, Enum.reverse(docs_rev), final_idx}
+    {mappings, Enum.reverse(docs_rev), final_doc_idx, table}
   end
 
-  defp expand_source_map(_base_rendered, _expanded, next_idx, _field_prefix_fun),
-    do: {%{}, [], next_idx}
+  defp expand_source_map(_base_rendered, _expanded, next_doc_idx, _field_prefix_fun, table),
+    do: {%{}, [], next_doc_idx, table}
 
   # A value Expand left byte-identical — not a reference field, an
   # unresolvable reference, or a field redacted away before expansion ran.
@@ -512,19 +525,22 @@ defmodule Barkpark.Content.Envelope do
   defp sub_document_source_map(
          %{"_id" => sub_id, "_type" => sub_type} = sub_doc,
          prefix,
-         doc_index
+         doc_index,
+         table
        ) do
     keys = sub_doc |> Map.keys() |> Enum.reject(&(&1 in @reserved)) |> Enum.sort()
 
-    mappings =
-      keys
-      |> Enum.with_index()
-      |> Map.new(fn {key, field_idx} ->
-        {append_path(prefix, key),
-         %{"source" => %{"document" => doc_index, "path" => field_idx}, "type" => "value"}}
+    {mappings, table} =
+      Enum.reduce(keys, {%{}, table}, fn key, {m_acc, table} ->
+        {idx, table} = path_table_index(table, result_path(key))
+
+        {Map.put(m_acc, append_path(prefix, key), %{
+           "source" => %{"document" => doc_index, "path" => idx},
+           "type" => "value"
+         }), table}
       end)
 
-    {mappings, %{"_id" => sub_id, "_type" => sub_type}}
+    {mappings, %{"_id" => sub_id, "_type" => sub_type}, table}
   end
 
   defp result_path(key), do: "$[#{inspect(key)}]"
@@ -537,6 +553,37 @@ defmodule Barkpark.Content.Envelope do
   defp append_path(prefix, key), do: prefix <> "[#{inspect(key)}]"
 
   defp row_result_path(row_idx, key), do: "$[#{row_idx}][#{inspect(key)}]"
+
+  # THE PATH TABLE (task-d0c2bd670e2d8a87) — a single, shared, deduplicated
+  # list of BARE in-document path strings (`result_path/1`'s own output,
+  # e.g. `$["title"]`, never row- or ref-prefixed), built once across every
+  # row and every expanded sub-document a `source_map/3` or
+  # `source_map_many/3` call walks. Every mapping's `"source" => %{"path" =>
+  # idx}` indexes THIS table, never a per-row or per-sub-document-local
+  # count: two different rows (or a row and its own expanded sub-document)
+  # that both carry a "title" field correctly reuse the SAME slot, and two
+  # different field names always get two different slots, regardless of
+  # alphabetical sort order or which row/document introduced the name
+  # first. Before this, `path_idx` for a sub-document's or a row's fields
+  # was an index into THAT ONE document's own locally-sorted key list, while
+  # the emitted `"paths"` array was built from a totally different
+  # enumeration (`Map.keys(expand_mappings)`, or a global alphabetical sort
+  # of every row's RESULT-side mapping keys) — the two numberings had no
+  # relationship, so `paths[path_idx]` could — and in a live query with
+  # `?expand=`, did — name the wrong field entirely.
+  defp path_table_new, do: {[], %{}, 0}
+
+  defp path_table_index({list_rev, index_of, next_idx} = table, bare_path) do
+    case Map.fetch(index_of, bare_path) do
+      {:ok, idx} ->
+        {idx, table}
+
+      :error ->
+        {next_idx, {[bare_path | list_rev], Map.put(index_of, bare_path, next_idx), next_idx + 1}}
+    end
+  end
+
+  defp path_table_to_list({list_rev, _index_of, _next_idx}), do: Enum.reverse(list_rev)
 
   @doc """
   Redact an ALREADY-rendered envelope map under a subscriber's caller context —
