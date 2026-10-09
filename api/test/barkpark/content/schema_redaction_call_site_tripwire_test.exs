@@ -147,6 +147,11 @@ defmodule Barkpark.Content.SchemaRedactionCallSiteTripwireTest do
                               "barkpark_web/live/sheets_reader_live.ex:seal",
                               "barkpark/media/delivery/asset_response.ex:asset_schema",
                               "barkpark_web/controllers/share_link_controller.ex:serve",
+                              # task-6812c3100d7aedbc — same "doc" redaction
+                              # shape as share_link_controller.ex:serve above,
+                              # one line up: public anonymous read, schema
+                              # resolved then Envelope.render'd.
+                              "barkpark_web/controllers/preview_link_controller.ex:show",
                               "barkpark_web/controllers/search_controller.ex:schema_resolver",
                               "barkpark_web/controllers/federated_search_controller.ex:schema_resolver",
                               "barkpark_web/channels/search_channel.ex:schema_resolver",

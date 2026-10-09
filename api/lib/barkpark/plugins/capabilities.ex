@@ -3278,6 +3278,60 @@ defmodule Barkpark.Plugins.Capabilities do
         writes: true,
         default_output: "minimal"
       ),
+      # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of
+      # share.link-* above, not a branch of it: a preview link's doc_id keeps
+      # its `drafts.` prefix on purpose (Links.create/1 strips that prefix
+      # unconditionally, so share.link-* can never mint one). Same tier,
+      # same confinement shape, different id vocabulary (doc_id/ref_type, no
+      # kind/access — always one document).
+      core_cmd(
+        "share.preview-link-ls",
+        "share",
+        "preview-link-ls",
+        "List the draft-capable preview links (task-6812c3100d7aedbc) for one document.",
+        "GET",
+        "/v1/shares/preview-links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the document lives in."),
+          arg("doc_id", true, "string", "The document's id (a drafts. prefix is kept)."),
+          arg("ref_type", true, "string", "Document type.")
+        ],
+        writes: false,
+        default_output: "table"
+      ),
+      core_cmd(
+        "share.preview-link-mint",
+        "share",
+        "preview-link-mint",
+        "Mint a draft-capable preview link (raw token shown once, TTL required).",
+        "POST",
+        "/v1/shares/preview-links",
+        "admin",
+        args: [
+          arg("scope", true, "string", "ws[/project[/dataset]] the document lives in."),
+          arg("doc_id", true, "string", "The document's id (a drafts. prefix is kept)."),
+          arg("ref_type", true, "string", "Document type.")
+        ],
+        flags: [
+          flag("label", "string", "Human label for the minted link."),
+          flag("ttl", "int", "Link TTL in seconds (default 24h, capped at 7d).")
+        ],
+        writes: true,
+        default_output: "json"
+      ),
+      core_cmd(
+        "share.preview-link-revoke",
+        "share",
+        "preview-link-revoke",
+        "Revoke one preview link by id.",
+        "DELETE",
+        "/v1/shares/preview-links/:id",
+        "admin",
+        args: [arg("id", true, "string", "Preview link id (from share preview-link-ls).")],
+        writes: true,
+        default_output: "minimal"
+      ),
       # ── Content graph (Goal ges/graph-edge-seam) ─────────────────────────
       # Mounted from CORE so the verbs survive the `:plugins, []` kill switch
       # (the graph roots on ANY content doc). All `auth_tier: "read"`: the

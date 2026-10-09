@@ -958,6 +958,26 @@ defmodule BarkparkWeb.FlatAliasRouteCensusTest do
        "row-derived: every action resolves the link (or the named workspace) first and gates " <>
          "on Links.workspace_admin?/2 against THAT row's workspace_id — never " <>
          ":current_workspace."},
+    # PreviewLinkController.list (task-6812c3100d7aedbc) — same confinement
+    # shape as ShareLinkController.list/mint/revoke above, one id vocabulary
+    # down: doc_id/ref_type instead of kind/ref_id/access.
+    {"GET", "/v1/shares/preview-links"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
+    # PreviewLinkController.mint
+    {"POST", "/v1/shares/preview-links"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
+    # PreviewLinkController.revoke
+    {"DELETE", "/v1/shares/preview-links/:id"} =>
+      {:workspace_derived,
+       "row-derived: every action resolves the link (or the named workspace) first and gates " <>
+         "on PreviewLinks.workspace_admin?/2 against THAT row's workspace_id — never " <>
+         ":current_workspace."},
     # ShareController.list_tokens
     {"GET", "/v1/shares/tokens"} =>
       {:workspace_derived,

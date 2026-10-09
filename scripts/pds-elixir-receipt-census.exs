@@ -1008,6 +1008,7 @@ defmodule PDS.Census do
     {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete, :status_only_receipt},
     {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete, :status_only_receipt},
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke, :status_only_receipt},
+    {:delete, "/v1/shares/preview-links/:id", "BarkparkWeb.PreviewLinkController", :revoke, :status_only_receipt},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token, :status_only_receipt},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete, :status_only_receipt},
@@ -1206,6 +1207,7 @@ defmodule PDS.Census do
     {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
     {:post, "/v1/shares", "BarkparkWeb.ShareController", :create, :status_only_receipt},
     {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint, :status_only_receipt},
+    {:post, "/v1/shares/preview-links", "BarkparkWeb.PreviewLinkController", :mint, :status_only_receipt},
     # `post /v1/shares/media` — the one-verb media-publish affordance behind `bp media
     # publish` and the Studio media-library action. SAME SHAPE AND SAME CLASS AS ITS
     # SIBLING `post /v1/shares` -> :create one row above: do_publish_media/2 renders the
@@ -1371,6 +1373,7 @@ defmodule PDS.Census do
     {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete} => {"BarkparkWeb.SchemaController.delete/2", 1, "108524343"},
     {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete} => {"BarkparkWeb.ShareController.delete/2", 1, "18318765"},
     {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke} => {"BarkparkWeb.ShareLinkController.revoke/2", 1, "57504485"},
+    {:delete, "/v1/shares/preview-links/:id", "BarkparkWeb.PreviewLinkController", :revoke} => {"BarkparkWeb.PreviewLinkController.revoke/2", 1, "33520504"},
     {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token} => {"BarkparkWeb.ShareController.revoke_token/2", 1, "13923101"},
     {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete} => {"BarkparkWeb.WebhookController.delete/2", 1, "121306446"},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete} => {"BarkparkWeb.V1.MediaController.delete/2", 1, "98736159"},
