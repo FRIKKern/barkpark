@@ -360,6 +360,12 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     {"GET", "/v1/plugins/settings/:*"} => @census_task,
     {"DELETE", "/v1/plugins/settings/:*"} => @census_task,
 
+    # BarkparkWeb.PreviewTokenController (1) — task-8f7cba7f65cb343c. A site's
+    # server (or the Studio, handing a token to its preview frame) is the
+    # intended caller, not a terminal operator, but an operator plausibly
+    # wants to mint one for testing too — a real gap, not a "never" surface.
+    {"POST", "/v1/preview-tokens"} => @census_task,
+
     # BarkparkWeb.PulseController (3)
     {"POST", "/v1/plugins/pulse/:*/events"} => @census_task,
     {"GET", "/v1/plugins/pulse/:*/recent"} => @census_task,
