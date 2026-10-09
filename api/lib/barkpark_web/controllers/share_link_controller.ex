@@ -9,6 +9,20 @@ defmodule BarkparkWeb.ShareLinkController do
     * `POST/GET/DELETE /v1/shares/links` — ADMIN. Mint (raw token shown once),
       list an item's links, revoke one.
 
+  ## dataset_bound confinement on mint (task-03be4306d4226582)
+
+  `dataset_bound` (task-4418b517649a58ce, #22393) refuses a token minted with
+  an explicit `dataset` on any OTHER dataset — but `RequireToken` /
+  `OptionalToken`'s `dataset_off_binding?/2` reads the requested dataset from
+  a literal top-level `dataset` param or path segment, and this route's
+  dataset rides INSIDE the composite `scope` string (`"ws[/project[/dataset]]"`,
+  parsed by `scope_triple/1`), which neither plug ever sees. Confirmed live
+  before writing the fix: a token bound to `"staging"` minted a link scoped to
+  `"production"` with a 201 — a complete bypass, admin tokens included.
+  `ensure_dataset_bound/2` closes it for `mint` specifically: inert for the
+  overwhelming majority of tokens (not dataset_bound), a real 403 for the ones
+  that are.
+
   A link's `ref_id` is a PUBLISHED id, and that is now IMPLEMENTED rather than
   merely asserted: `Sharing.Links.published_ref_id/1` strips a `drafts.` prefix
   at the context boundary, so `create/1` cannot persist a draft ref whichever
@@ -392,6 +406,11 @@ defmodule BarkparkWeb.ShareLinkController do
   @doc "POST /v1/shares/links — mint an item link (raw token shown ONCE)."
   def mint(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
+         # Token-intrinsic, no workspace lookup needed -- runs FIRST so it
+         # never becomes a workspace/project existence oracle (it reveals
+         # only "your own token's dataset binding", which the caller already
+         # knows -- never whether ws/proj/item exist).
+         :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
          :ok <- ensure_workspace_admin(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
@@ -422,6 +441,9 @@ defmodule BarkparkWeb.ShareLinkController do
     else
       # MUST precede the is_binary arm and the catch-all: a denial that falls
       # into either becomes a 422 and the whole confinement silently voids.
+      {:error, :forbidden_dataset} ->
+        ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       {:error, :forbidden} ->
         forbidden(conn)
 
@@ -522,6 +544,22 @@ defmodule BarkparkWeb.ShareLinkController do
   # would answer 422 and the confinement would look like a validation quibble.
   defp ensure_workspace_admin(conn, workspace_id) do
     if workspace_admin?(conn, workspace_id), do: :ok, else: {:error, :forbidden}
+  end
+
+  # task-03be4306d4226582 — closes a real, pre-existing gap: `dataset_bound`
+  # (task-4418b517649a58ce, #22393) is enforced at credential resolution
+  # (`RequireToken`/`OptionalToken`'s `dataset_off_binding?/2`) ONLY for a
+  # literal top-level `dataset` param. This route's dataset rides inside the
+  # composite `scope` string, which neither plug parses, so no caller — admin
+  # included — hits any existing confinement. Confirmed live, pre-fix: a token
+  # bound to "staging" minted a link scoped to "production", 201. Runs on
+  # every caller: inert for the ordinary, non-bound case, a real refusal for
+  # the bound one.
+  defp ensure_dataset_bound(conn, dataset) do
+    case conn.assigns[:api_token] do
+      %{dataset_bound: true, dataset: bound} when bound != dataset -> {:error, :forbidden_dataset}
+      _ -> :ok
+    end
   end
 
   # Authorize-and-revoke is `Links.revoke_scoped/2` now; the denial shape (every
