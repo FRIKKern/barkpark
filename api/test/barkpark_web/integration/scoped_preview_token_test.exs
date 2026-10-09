@@ -16,6 +16,15 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     * `.../v1/preview/{query,doc,listen}` accepting that token when its
       signed scope matches the URL — refusing it, in BOTH directions, when
       it does not.
+
+  Also covers the tenant-scoped revoke (task-49a6a686bb88d9e5):
+  `DELETE .../v1/preview-tokens/:jti`, same `[:scoped_api, :scoped_admin]`
+  gate as the mint. Deliberately only ONE revoke route exists — a flat
+  mint (#22299) is recorded under whatever workspace `:flat_admin_api`
+  resolved for the minting admin (the seeded Default workspace absent a
+  `DeriveWorkspaceFromToken` hit), so it is still revocable through this
+  SAME scoped route at `/w/default/p/default/...` — proven below,
+  rather than a second, flat revoke door.
   """
   use BarkparkWeb.ConnCase, async: true
 
@@ -394,6 +403,37 @@ defmodule BarkparkWeb.Integration.ScopedPreviewTokenTest do
     # admin, at A's own URL, revokes it just fine.
     own_url_resp = revoke(conn, ws_a.slug, admin_both_raw, jti)
     assert own_url_resp.status == 200
+  end
+
+  test "a flat-minted token (#22299, no /w/.../p/... prefix) is recorded under the Default workspace, and revocable via the scoped route at /w/default/p/default/...",
+       %{conn: conn} do
+    {default_ws, _default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
+
+    flat_admin_raw = "spt-flat-admin-#{System.unique_integer([:positive])}"
+
+    {:ok, flat_admin} =
+      Auth.create_token(flat_admin_raw, "flat-admin", @dataset, ["read", "write", "admin"])
+
+    # RequireAdmin (the flat mint's gate) checks the token's GLOBAL `admin`
+    # permission alone; RequireWorkspaceRole (the scoped revoke's gate)
+    # checks an actual membership ROLE in the resolved workspace -- this
+    # token needs both, to mint flat AND revoke scoped.
+    {:ok, _} = TenancyAuth.create_membership(default_ws.id, flat_admin.id, "admin")
+
+    mint_resp =
+      conn
+      |> bearer(flat_admin_raw)
+      |> put_req_header("content-type", "application/json")
+      |> post("/v1/preview-tokens", %{"dataset" => @dataset, "multi_use" => true})
+
+    assert mint_resp.status == 201
+    jti = Jason.decode!(mint_resp.resp_body)["jti"]
+    refute Barkpark.PreviewToken.revoked?(jti)
+
+    revoke_resp = revoke(conn, default_ws.slug, flat_admin_raw, jti)
+    assert revoke_resp.status == 200
+    assert Jason.decode!(revoke_resp.resp_body)["revoked"] == true
+    assert Barkpark.PreviewToken.revoked?(jti)
   end
 
   test "revoking an unknown jti is a 404", %{ws_a: ws_a, admin_a_raw: raw, conn: conn} do

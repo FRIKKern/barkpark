@@ -2874,16 +2874,17 @@ defmodule BarkparkWeb.Router do
   # PreviewLinkController's own moduledoc already warns against colliding a
   # second auth scheme into that path.
   #
-  # NO revoke route here, deliberately: `preview_token_jti` carries no
-  # workspace/tenant column at all (migration 20260417230200), so a
-  # `DELETE .../:jti` HTTP front door would be a bare-id selector with no
-  # tenant re-derivation possible — `:exploitable` under
-  # `RequireAdminRouteCensusTest`'s own vocabulary, unlike
-  # `PreviewLinkController.revoke/2`'s sibling route, which reads its row's
-  # STORED workspace_id first. `Barkpark.PreviewToken.revoke/1` still exists
-  # and is still the backstop the multi_use ruling asked for; it is simply
-  # not wired to an HTTP route by this slice. Exposing it needs its own
-  # workspace-scoping column + fence, not a bare revoke-by-jti door.
+  # NO revoke route here, deliberately: this is `:flat_admin_api`, which
+  # resolves the admin's OWN scope, not a URL-named one, so there's no
+  # per-request workspace to test a revoke's confinement against. The
+  # tenant-scoped revoke (task-49a6a686bb88d9e5) lives on the SCOPED twin
+  # below instead, now that `preview_token_jti` carries workspace_id/
+  # project_id. A token minted HERE (flat) is still revocable there: its
+  # row is recorded under whatever workspace this pipeline's
+  # `scope_opts(conn)` resolved at mint time — the seeded Default workspace
+  # absent a `DeriveWorkspaceFromToken` hit — so `DELETE
+  # /w/default/p/default/v1/preview-tokens/:jti` (an admin of Default)
+  # reaches it. No second revoke route needed.
   scope "/v1/preview-tokens", BarkparkWeb do
     pipe_through(:flat_admin_api)
 
