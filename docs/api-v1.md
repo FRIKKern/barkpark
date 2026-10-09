@@ -15,7 +15,7 @@ A **Workspace** is the token-bound tenant of **Projects**, **Datasets**, **Docum
 
 ## 2. Base URL & Authentication
 
-`http://<host>:4000`. Private endpoints need `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + defaults + Cloud origins.
+Base URL: `http://<host>:4000`. Private: `Authorization: Bearer <token>`. Dev: `barkpark-dev-token` (all perms, `Default`). CORS: schema `cors_origins` + defaults + Cloud origins.
 
 **Tenancy.** Path workspace/project are authoritative and must match the token: unknown → `404`, non-member → `403`. Binding/write gates: `docs/auth.md`.
 
