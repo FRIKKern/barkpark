@@ -794,6 +794,36 @@ function stepTripletL(triplet, step) {
   return `${h} ${sat} ${num(Math.max(0, parseFloat(lit) + step))}%`;
 }
 
+// Text-on-tint voice for the brand (color.onTint.primary-text, ruling on
+// task-f6a066642fcac678): primary as TEXT on its own --primary-soft tint (active
+// filters, badges, history "create"). The fill hue reads 4.06:1 there in
+// evergreen light and 4.39:1 in charple dark, so the text walks its HSL
+// lightness away from the ground until it clears AA on the composited tint;
+// a primary that already clears ships unchanged. Fills, buttons and links stay
+// --primary. SOFT_ALPHA mirrors color._convention.softAlpha; validate.mjs
+// measures the shipped value on the tint built from the tokens themselves.
+const SOFT_ALPHA = { light: 0.15, dark: 0.2 };
+function primaryTextII(c, mode, misses) {
+  const p = hslParse(c.resolve(`primary.${mode}`));
+  const fill = parseColor(c.resolve(`primary.${mode}`));
+  const ground = parseColor(c.resolve(`bg.${mode}`));
+  const a = SOFT_ALPHA[mode];
+  // Measured as the browser paints it: both colours rounded to 8-bit sRGB.
+  const q = (rgb) => rgb.map((ch) => Math.round(ch * 255) / 255);
+  const tint = q(fill.map((ch, i) => ch * a + ground[i] * (1 - a)));
+  const seen = (triplet) => contrast(q(parseColor(triplet)), tint);
+  const step = relLum(ground) > 0.5 ? -0.5 : 0.5;
+  let l = p.l;
+  let out = hslFormat(p);
+  for (let i = 0; i < 200 && seen(out) < 4.5 && l > 0 && l < 100; i++) {
+    l = Math.min(100, Math.max(0, l + step));
+    out = hslFormat({ h: p.h, s: p.s, l });
+  }
+  const got = seen(out);
+  if (got < 4.5) misses.push({ slot: `onTint.primary-text.${mode}`, got, want: 4.5 });
+  return out;
+}
+
 // Paper callout tones — TINTED from the status ramp: a pale tinted panel (bg) and
 // an AA-clearing ink (fg) at the role's locked hue; neutral rides the accent hue
 // at near-zero chroma (a gray callout). Output hex (tokens shape).
@@ -952,6 +982,7 @@ function buildFormulas() {
   // — onTint: a status hue as text on its own tint (light one step darker) —
   F["onTint.warn-text.light"] = (c) => stepTripletL(c.resolve("status.warn.light"), WARN_TEXT_L_STEP);
   F["onTint.warn-text.dark"] = (c) => c.resolve("status.warn.dark");
+  M((m) => [`onTint.primary-text.${m}`, (c) => primaryTextII(c, m, c.misses)]);
 
   // — CLI chrome: skin-tinted gray ramp + 5 structural var() aliases —
   for (const role of Object.keys(CHROME_II))
@@ -1067,6 +1098,7 @@ export const SLOTS = (() => {
   for (const r of ["ok", "warn", "danger", "info"]) for (const m of ["light", "dark"]) s.push(`status.${r}.${m}`);
   for (const r of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) for (const m of ["light", "dark"]) s.push(`onStatus.${r}.${m}`);
   for (const m of ["light", "dark"]) s.push(`onTint.warn-text.${m}`);
+  for (const m of ["light", "dark"]) s.push(`onTint.primary-text.${m}`);
   for (const r of ["bg-accent", "border-muted", "fg-dim", "fg-accent", "surface-raised", "border-subtle"]) for (const m of ["light", "dark"]) s.push(`studioChrome.${r}.${m}`);
   const cliHex = ["chrome-accent", "chrome-dim", "chrome-ink", "chrome-text-secondary", "chrome-selection-bg", "chrome-selection-fg", "chrome-field-border", "chrome-toolbar-bg", "chrome-cursor-bg"];
   for (const r of cliHex) for (const m of ["light", "dark"]) s.push(`cliChrome.${r}.${m}`);

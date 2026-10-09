@@ -69,7 +69,7 @@ for (const role of ["ok-fg", "warn-fg", "danger-fg", "info-fg"]) {
 
 // --- text-on-tint voices: warn-text (Studio-only, task-98bc0a831eecc140) -------
 const onTint = color.onTint || {};
-for (const role of ["warn-text"]) {
+for (const role of ["warn-text", "primary-text"]) {
   ok(onTint[role] != null, `color.onTint.${role} is required (status text on its own -soft tint, Studio-only)`);
   hslPair(onTint[role], `color.onTint.${role}`);
 }
@@ -85,6 +85,22 @@ for (const role of ["warn-text"]) {
     const ratio = contrast(onTint["warn-text"][m], tint);
     ok(ratio >= 4.5,
       `color.onTint.warn-text.${m} must clear AA 4.5 on its warn tint (softAlpha ${a} over bg.${m}); got ${ratio.toFixed(2)}`);
+  }
+}
+
+// primary-text is the brand primary as TEXT on --primary-soft (ruling on
+// task-f6a066642fcac678): AA on the composited tint (primary at softAlpha over
+// bg), both modes. The fill read 4.06 there in light.
+{
+  const soft = (color._convention && color._convention.softAlpha) || {};
+  for (const m of ["light", "dark"]) {
+    const ground = parseColor(color.bg && color.bg[m]);
+    const fill = parseColor(color.primary[m]);
+    const a = Number(soft[m]);
+    const tint = fill.map((c, i) => c * a + ground[i] * (1 - a));
+    const ratio = contrast(onTint["primary-text"][m], tint);
+    ok(ratio >= 4.5,
+      `color.onTint.primary-text.${m} must clear AA 4.5 on the primary tint (softAlpha ${a} over bg.${m}); got ${ratio.toFixed(2)}`);
   }
 }
 

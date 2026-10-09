@@ -689,6 +689,46 @@ test("media picker broken-image notice clears AA 4.5 at its painted opacity, eve
   }
 });
 
+test("primary-text clears AA 4.5 on the primary-soft tint, every theme × mode (ruling on task-f6a066642fcac678)", () => {
+  const soft = JSON.parse(readFileSync(new URL("./tokens.json", import.meta.url), "utf8")).color._convention.softAlpha;
+  const q = (rgb) => rgb.map((c) => Math.round(c * 255) / 255);
+  for (const { name, theme } of ALL_THEMES) {
+    const { values, misses } = derive(theme);
+    assert.deepEqual(misses.filter((m) => /primary-text/.test(m.slot)), [], `${name}: primary-text walk reported a miss`);
+    for (const mode of ["light", "dark"]) {
+      const fill = parseColor(values[`primary.${mode}`]);
+      const ground = parseColor(values[`bg.${mode}`]);
+      const tint = q(fill.map((c, i) => c * soft[mode] + ground[i] * (1 - soft[mode])));
+      const ratio = contrast(q(parseColor(values[`onTint.primary-text.${mode}`])), tint);
+      assert.ok(ratio >= 4.5, `${name} ${mode}: --primary-text on --primary-soft = ${ratio.toFixed(3)} < 4.5`);
+    }
+  }
+});
+
+test("no Studio rule paints var(--primary) text on a primary tint (it takes --primary-text)", () => {
+  // Swept by shape across the Studio layout AND the hand-authored stylesheets
+  // under api/priv/static (task-f6a066642fcac678). A rule whose background is
+  // --primary-soft or an hsl(var(--primary-hsl) / a) tint and whose text is
+  // var(--primary) reads below AA in light.
+  const files = [
+    new URL("../api/lib/barkpark_web/layouts/root.html.heex", import.meta.url),
+    ...readdirSync(new URL("../api/priv/static/assets/", import.meta.url))
+      .filter((f) => f.endsWith(".css") && !/\.min\.|bundle/.test(f))
+      .map((f) => new URL(`../api/priv/static/assets/${f}`, import.meta.url)),
+  ];
+  const offenders = [];
+  for (const url of files) {
+    const css = readFileSync(url, "utf8");
+    for (const m of css.matchAll(/([^{}]*)\{([^{}]*)\}/g)) {
+      const body = m[2];
+      const tinted = /background(?:-color)?\s*:\s*(?:var\(--primary-soft|hsl\(var\(--primary-hsl\)\s*\/)/.test(body);
+      const primaryText = /(?<![-\w])color\s*:\s*var\(--primary\)/.test(body);
+      if (tinted && primaryText) offenders.push(`${url.pathname.split("/").pop()}: ${m[1].trim().slice(-60)}`);
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
 test("sup-w1: --surface-raised is visibly elevated above --bg in dark for the shipped evergreen theme", () => {
   // The elevation requirement: a raised card must separate from the page in dark.
   // Measured as OKLCH lightness delta (perceptual), evergreen is the shipped skin.
