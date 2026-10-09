@@ -115,6 +115,16 @@ defmodule BarkparkWeb.StudioLocale do
   # processing states and visibility.
   def component_strings(:asset_explorer) do
     Jason.encode!(%{
+      # Facet VALUES with a closed set (task-9b39b33f9b4e63c2), keyed by the raw
+      # value; the context keeps the state "processing" apart from the field
+      # label "Processing".
+      "ready" => pgettext("media facet value", "ready"),
+      "processing" => pgettext("media facet value", "processing"),
+      "failed" => pgettext("media facet value", "failed"),
+      "public" => pgettext("media facet value", "public"),
+      "private" => pgettext("media facet value", "private"),
+      "draft" => pgettext("media facet value", "draft"),
+      "published" => pgettext("media facet value", "published"),
       "%{count} assets" => gettext("%{count} assets", count: "%{count}"),
       "%{count} assets match" => gettext("%{count} assets match", count: "%{count}"),
       "%{count} searches" => gettext("%{count} searches", count: "%{count}"),

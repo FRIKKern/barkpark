@@ -111,6 +111,26 @@ try {
     assert.equal(empty.querySelectorAll("b").length, 0);
   });
 
+  // task-9b39b33f9b4e63c2: closed-set facet values (processing, visibility,
+  // status) read in the viewer's language; tags and MIME types are data.
+  check("closed-set facet values read the stamped words; data facets stay as stored", () => {
+    const facets = {
+      processing: { ready: 2 },
+      visibility: { public: 2 },
+      status: { draft: 2 },
+      mimeType: { "image/png": 1 },
+    };
+    const words = (el) => {
+      el._facets = facets;
+      el._renderFacets();
+      return Array.from(el.querySelectorAll(".bp-ae-facet")).map((b) => b.firstChild.textContent.trim());
+    };
+    nb._strings = null;
+    nb.setAttribute("data-strings", JSON.stringify({ ...NB, ready: "klar", public: "offentlig", draft: "utkast" }));
+    assert.deepEqual(words(nb).sort(), ["image/png", "klar", "offentlig", "utkast"]);
+    assert.deepEqual(words(en).sort(), ["draft", "image/png", "public", "ready"]);
+  });
+
   check("with no data-strings every word is the English", () => {
     assert.equal(text(en, ".bp-ae-sidebar-title"), "Library");
     assert.equal(text(en, ".bp-ae-upload"), "Upload");
@@ -164,9 +184,9 @@ try {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.message}`);
 } finally {
-  if (ran !== 9) {
+  if (ran !== 10) {
     failures += 1;
-    console.log(`FAIL  ran ${ran} of 9 checks`);
+    console.log(`FAIL  ran ${ran} of 10 checks`);
   }
   dom.window.close();
   if (failures > 0) {

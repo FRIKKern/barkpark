@@ -50,4 +50,28 @@ defmodule BarkparkWeb.StudioLocaleComponentKeysTest do
     assert strings["recent"] == "Nylige"
     assert strings["n_docs"] == "%{count} dokumenter"
   end
+
+  # task-9b39b33f9b4e63c2: the media rail's closed-set facet values, keyed by
+  # the raw value; the context keeps the state apart from the field label.
+  test "the media library's facet values are Norwegian under nb_NO and English otherwise" do
+    nb =
+      Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+        :asset_explorer |> StudioLocale.component_strings() |> Jason.decode!()
+      end)
+
+    assert Map.take(nb, ~w(ready processing failed public private draft published)) == %{
+             "ready" => "klar",
+             "processing" => "behandles",
+             "failed" => "feilet",
+             "public" => "offentlig",
+             "private" => "privat",
+             "draft" => "utkast",
+             "published" => "publisert"
+           }
+
+    assert nb["Processing"] == "Behandling", "the field label keeps its own word"
+
+    en = :asset_explorer |> StudioLocale.component_strings() |> Jason.decode!()
+    assert en["ready"] == "ready"
+  end
 end
