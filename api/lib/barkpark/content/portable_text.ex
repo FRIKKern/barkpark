@@ -21,9 +21,16 @@ defmodule Barkpark.Content.PortableText do
   `s`/`strike`/`del`, `code`, and links (`a href`, stored as a `link` mark
   definition). Other tags are dropped and their text is kept.
 
+  A decorator or mark definition outside that set (a `highlight`, an
+  `internalLink` annotation) has no editor UI, so it rides through the HTML as
+  an inert `<span data-pt-mark>` / `<span data-pt-def>` and comes back as the
+  stored mark; `from_html/2` reads a def back from the stored blocks by key.
+
   Keys are derived from position (`"b0"`, `"b0s1"`, `"b0m0"`), so converting
   the same HTML twice gives the same blocks. That is what lets an untouched
-  field keep its stored value byte for byte.
+  field keep its stored value byte for byte. An edited field keeps it per
+  block: `from_html/2` returns each stored block whose HTML the edit did not
+  change as it was stored, keys and all.
   """
 
   @decorators %{
@@ -59,10 +66,23 @@ defmodule Barkpark.Content.PortableText do
 
   @token ~r/<(\/?)([a-zA-Z][a-zA-Z0-9]*)([^>]*)>|([^<]+)|(<)/
 
-  @doc "Convert the editor's HTML to Portable Text blocks."
-  @spec from_html(String.t()) :: [map()]
-  def from_html(html) when is_binary(html) do
-    state = %{blocks: [], cur: nil, marks: [], lists: [], links: []}
+  @doc """
+  Convert the editor's HTML to Portable Text blocks. `stored` is the field's
+  current value: its mark definitions are what a `data-pt-def` span names, and
+  a rebuilt block that renders to the same HTML as a stored one is that stored
+  block.
+  """
+  @spec from_html(String.t(), [map()]) :: [map()]
+  def from_html(html, stored \\ []) when is_binary(html) do
+    state = %{blocks: [], cur: nil, marks: [], lists: [], links: [], spans: []}
+    stored = if blocks?(stored), do: stored, else: []
+
+    stored_defs =
+      for %{"markDefs" => defs} <- stored,
+          is_list(defs),
+          %{"_key" => k} = d <- defs,
+          into: %{},
+          do: {k, d}
 
     @token
     |> Regex.scan(html)
@@ -71,7 +91,27 @@ defmodule Barkpark.Content.PortableText do
     |> Map.fetch!(:blocks)
     |> Enum.reverse()
     |> Enum.with_index()
-    |> Enum.map(fn {block, i} -> finalize(block, i) end)
+    |> Enum.map(fn {block, i} -> finalize(block, i, stored_defs) end)
+    |> keep_stored(stored)
+  end
+
+  # A rebuilt block whose HTML matches an unused stored block's is that block,
+  # verbatim: the edit did not touch it.
+  defp keep_stored(blocks, []), do: blocks
+
+  defp keep_stored(blocks, stored) do
+    stored = Enum.map(stored, &{to_html([&1]), &1})
+
+    blocks
+    |> Enum.map_reduce(stored, fn block, left ->
+      html = to_html([block])
+
+      case Enum.find_index(left, &(elem(&1, 0) == html)) do
+        nil -> {block, left}
+        i -> {left |> Enum.at(i) |> elem(1), List.delete_at(left, i)}
+      end
+    end)
+    |> elem(0)
   end
 
   defp step([_, close, tag | rest], state) when tag != "" do
@@ -112,6 +152,12 @@ defmodule Barkpark.Content.PortableText do
       {"/", "a"} ->
         %{state | marks: drop_last(state.marks, {:link, nil})}
 
+      {"", "span"} ->
+        open_span(state, attrs)
+
+      {"/", "span"} ->
+        close_span(state)
+
       _ ->
         state
     end
@@ -139,6 +185,35 @@ defmodule Barkpark.Content.PortableText do
       end
 
     %{state | marks: state.marks ++ [{:link, decode(href || "")}]}
+  end
+
+  # A `data-pt-mark` span is a stored decorator, a `data-pt-def` span a stored
+  # mark definition; any other span is styling and carries no mark.
+  defp open_span(state, attrs) do
+    mark =
+      cond do
+        name = attr(attrs, "data-pt-mark") -> name
+        key = attr(attrs, "data-pt-def") -> {:def, key}
+        true -> nil
+      end
+
+    marks = if mark, do: state.marks ++ [mark], else: state.marks
+    %{state | marks: marks, spans: [mark | state.spans]}
+  end
+
+  defp close_span(%{spans: [nil | rest]} = state), do: %{state | spans: rest}
+
+  defp close_span(%{spans: [mark | rest]} = state),
+    do: %{state | marks: drop_last(state.marks, mark), spans: rest}
+
+  defp close_span(state), do: state
+
+  defp attr(attrs, name) do
+    case Regex.run(~r/#{name}\s*=\s*("([^"]*)"|'([^']*)')/i, attrs) do
+      [_, _, dq] when dq != "" -> decode(dq)
+      [_, _, "", sq] when sq != "" -> decode(sq)
+      _ -> nil
+    end
   end
 
   defp drop_last(marks, {:link, _}) do
@@ -183,7 +258,7 @@ defmodule Barkpark.Content.PortableText do
       else: %{state | cur: nil, blocks: [cur | state.blocks]}
   end
 
-  defp finalize(cur, i) do
+  defp finalize(cur, i, stored_defs) do
     key = "b#{i}"
     spans = cur.spans |> Enum.reverse() |> trim_edges()
 
@@ -194,18 +269,27 @@ defmodule Barkpark.Content.PortableText do
         {marks, defs} =
           Enum.map_reduce(span.marks, defs, fn
             {:link, href}, defs ->
-              case Enum.find(defs, &(&1["href"] == href)) do
+              case Enum.find(defs, &(&1["_type"] == "link" and &1["href"] == href)) do
                 %{"_key" => k} ->
                   {k, defs}
 
                 nil ->
-                  k = "#{key}m#{length(defs)}"
+                  k = free_key(key, defs)
                   {k, defs ++ [%{"_type" => "link", "_key" => k, "href" => href}]}
+              end
+
+            {:def, k}, defs ->
+              cond do
+                Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
+                def = stored_defs[k] -> {k, defs ++ [def]}
+                true -> {nil, defs}
               end
 
             mark, defs ->
               {mark, defs}
           end)
+
+        marks = Enum.reject(marks, &is_nil/1)
 
         {%{"_type" => "span", "_key" => "#{key}s#{j}", "text" => span.text, "marks" => marks},
          defs}
@@ -223,6 +307,11 @@ defmodule Barkpark.Content.PortableText do
       nil -> base
       item -> Map.merge(base, %{"listItem" => item, "level" => max(cur.level, 1)})
     end
+  end
+
+  defp free_key(key, defs, n \\ 0) do
+    k = "#{key}m#{n}"
+    if Enum.any?(defs, &(&1["_key"] == k)), do: free_key(key, defs, n + 1), else: k
   end
 
   # Leading/trailing whitespace of a block is markup, not text.
@@ -307,15 +396,20 @@ defmodule Barkpark.Content.PortableText do
   defp wrap("strike-through", acc, _), do: "<s>#{acc}</s>"
   defp wrap("code", acc, _), do: "<code>#{acc}</code>"
 
-  defp wrap(key, acc, defs) do
+  defp wrap(key, acc, defs) when is_binary(key) do
     case defs[key] do
       %{"_type" => "link", "href" => href} when is_binary(href) ->
         ~s(<a href="#{escape(href)}">#{acc}</a>)
 
-      _ ->
-        acc
+      %{} ->
+        ~s(<span data-pt-def="#{escape(key)}">#{acc}</span>)
+
+      nil ->
+        ~s(<span data-pt-mark="#{escape(key)}">#{acc}</span>)
     end
   end
+
+  defp wrap(_mark, acc, _defs), do: acc
 
   defp escape(text) do
     text

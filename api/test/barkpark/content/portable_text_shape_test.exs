@@ -104,6 +104,73 @@ defmodule Barkpark.Content.PortableTextShapeTest do
     end
   end
 
+  # task-949d59ae90b95cef: the editor has no UI for a decorator or markDef
+  # outside its own set (a `highlight`, an `internalLink` annotation), so the
+  # HTML it edits used to carry none of them, and an edit anywhere in the field
+  # rebuilt every block without them and renumbered every `_key`.
+  describe "marks the editor has no UI for" do
+    @marked %{
+      "_type" => "block",
+      "_key" => "k7Qa",
+      "style" => "normal",
+      "markDefs" => [
+        %{"_type" => "internalLink", "_key" => "ref1", "reference" => %{"_ref" => "doc-ibsen"}},
+        %{"_type" => "link", "_key" => "lnk1", "href" => "/peer"}
+      ],
+      "children" => [
+        %{"_type" => "span", "_key" => "s1", "text" => "Read ", "marks" => []},
+        %{"_type" => "span", "_key" => "s2", "text" => "Ibsen", "marks" => ["highlight", "ref1"]},
+        %{"_type" => "span", "_key" => "s3", "text" => " and ", "marks" => ["strong"]},
+        %{"_type" => "span", "_key" => "s4", "text" => "Peer", "marks" => ["lnk1", "smallcaps"]}
+      ]
+    }
+    @plain %{
+      "_type" => "block",
+      "_key" => "k9Zb",
+      "style" => "normal",
+      "markDefs" => [],
+      "children" => [%{"_type" => "span", "_key" => "s5", "text" => "Second", "marks" => []}]
+    }
+
+    test "an untouched block keeps its unknown marks, markDefs and keys when another block is saved" do
+      doc = doc!("pt-unknown-other", %{"excerpt" => [@marked, @plain]})
+      html = Forms.doc_to_form(doc, @schema)["excerpt"]
+      edited = String.replace(html, "Second", "Second, edited")
+
+      saved = save!(doc, %{"title" => "T", "excerpt" => edited})
+
+      assert [@marked, second] = saved.content["excerpt"]
+      assert [%{"text" => "Second, edited"}] = second["children"]
+    end
+
+    test "an edit in the same block keeps its unknown decorators and markDefs" do
+      doc = doc!("pt-unknown-same", %{"excerpt" => [@marked, @plain]})
+      html = Forms.doc_to_form(doc, @schema)["excerpt"]
+      edited = String.replace(html, "Read ", "Now read ")
+
+      saved = save!(doc, %{"title" => "T", "excerpt" => edited})
+
+      assert [block, @plain] = saved.content["excerpt"]
+
+      assert [
+               {"Now read ", []},
+               {"Ibsen", ["highlight", "ref1"]},
+               {" and ", ["strong"]},
+               {"Peer", [link_key, "smallcaps"]}
+             ] = Enum.map(block["children"], &{&1["text"], &1["marks"]})
+
+      assert hd(@marked["markDefs"]) in block["markDefs"]
+
+      assert %{"_type" => "link", "href" => "/peer"} =
+               Enum.find(block["markDefs"], &(&1["_key"] == link_key))
+    end
+
+    test "from_html/2 rebuilds the stored blocks from their own HTML" do
+      blocks = [@marked, @plain]
+      assert blocks |> PortableText.to_html() |> PortableText.from_html(blocks) == blocks
+    end
+  end
+
   test "a Studio rich-text edit is saved as Portable Text blocks" do
     saved =
       save!(doc!("pt-new", %{}), %{"title" => "T", "excerpt" => "<p>Hello <em>you</em></p>"})
