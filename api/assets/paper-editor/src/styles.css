@@ -1289,6 +1289,10 @@ div.bp-canvas-callout > .bp-callout__body { display: inline; }
 /* find matches (canvas/find-replace.js): the host's bar drives them. */
 .bp-find-match { background: hsl(var(--warn-hsl) / 0.28); border-radius: 2px; box-decoration-break: clone; }
 .bp-find-match--active { background: hsl(var(--warn-hsl) / 0.55); outline: 1px solid var(--paper-accent); }
+/* shared carets (canvas/remote-selections.js): another session's caret, name and range, in its color. */
+.bp-remote-caret { position: relative; display: inline-block; width: 0; height: 1.2em; vertical-align: text-bottom; border-left: 2px solid var(--bp-remote-color); margin-left: -1px; margin-right: -1px; pointer-events: none; user-select: none; }
+.bp-remote-caret__label { position: absolute; bottom: 100%; left: -2px; padding: 0 4px; border-radius: 3px 3px 3px 0; background: var(--bp-remote-color); color: var(--paper-bg); font-family: var(--paper-font-sans, inherit); font-size: smaller; font-weight: 600; line-height: normal; white-space: nowrap; }
+.bp-remote-selection { background: color-mix(in srgb, var(--bp-remote-color) 22%, transparent); box-decoration-break: clone; }
 /* island atoms (equation / footnotes / contents / video): a preview in the reader's classes over a fields
    row that hides at rest once the block has data. */
 .bp-canvas-island { position: relative; margin: 1rem 0 0; }
