@@ -47,6 +47,7 @@ var listReadCommands = map[string]bool{
 	"dataset.stats":      true, // analytics_controller.ex -> types
 	"doc.actions":        true, // document_actions_controller.ex -> actions
 	"doc.backlinks":      true, // query_controller.ex   -> result.backlinks
+	"doc.locations":      true, // query_controller.ex   -> locations (PreviewLocations.resolve/4)
 	// doc.history was here until it became `paginated: true`
 	// (task-c59788170e244f51): declaring ?offset= alongside ?limit= moved it
 	// out of this map's population — non-paginated core reads — and under the
