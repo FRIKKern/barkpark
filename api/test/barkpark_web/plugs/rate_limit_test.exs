@@ -616,4 +616,86 @@ defmodule BarkparkWeb.Plugs.RateLimitTest do
       assert body["error"]["code"] == "rate_limited"
     end
   end
+
+  # task-2c31de0cf6597d32 follow-up — measured live on guerrilla by the
+  # barkpark-studio lead: Studio's editors authenticate to Barkpark with a
+  # per-editor BEARER (the editor's own app token, or a shared studio token),
+  # never a session cookie, so the session-only fix above left them on the
+  # flat 60/min default. A Bearer whose `owner_user_id` names ONE human now
+  # gets the SAME wider session_write_per_minute default. App tokens from
+  # POST /v1/auth/app-tokens qualify by construction: `AppTokenController.mint/2`
+  # sets `owner_user_id: user.id` on every mint, one per editor email — so
+  # they need no separate class check, just the owner check.
+  describe "a Bearer token whose owner_user_id names one human (task-2c31de0cf6597d32 follow-up)" do
+    defp mint_owned(label, email) do
+      user = Barkpark.AccountsFixtures.register_user(email)
+      raw = label <> "-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+
+      {:ok, _token} =
+        Barkpark.Auth.create_token(raw, label, "production", ["read", "write"], nil,
+          owner_user_id: user.id
+        )
+
+      raw
+    end
+
+    defp mutate_with_bearer(raw) do
+      build(:post, "/v1/data/mutate/production", %{"dataset" => "production"}, [
+        {"authorization", "Bearer " <> raw}
+      ])
+    end
+
+    test "an owner-token sustains 65+ writes/min with no 429" do
+      with_limits([])
+
+      raw = mint_owned("owner-editor", "owner-editor@example.com")
+
+      results = for _ <- 1..65, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      refute Enum.any?(results, & &1.halted),
+             "an owned Bearer token hit a write 429 before 65 writes — " <>
+               "it is not getting the wider session_write_per_minute default"
+    end
+
+    test "an ownerless (shared/service) token still 429s at 61" do
+      with_limits([])
+
+      # No owner_user_id option -- the exact shape a shared studio token (or
+      # any service credential) has always minted as.
+      raw = mint("shared-service-token")
+
+      results = for _ <- 1..61, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      assert List.last(results).halted,
+             "an ownerless token sustained 61 writes/min -- it leaked onto the " <>
+               "wider owner budget it must not get"
+
+      refute Enum.take(results, 60) |> Enum.any?(& &1.halted),
+             "an ownerless token 429'd before its own 60/min default was spent"
+    end
+
+    test "a class: :app token with owner_user_id set also widens (the budget keys on " <>
+           "owner_user_id alone, not on class)" do
+      with_limits([])
+
+      user = Barkpark.AccountsFixtures.register_user("app-editor@example.com")
+      raw = "app-editor-" <> Base.encode16(:crypto.strong_rand_bytes(8))
+
+      {:ok, _token} =
+        Barkpark.Auth.create_token(
+          raw,
+          "app:app-editor@example.com",
+          "production",
+          ["read", "write"],
+          nil,
+          class: :app,
+          owner_user_id: user.id
+        )
+
+      results = for _ <- 1..65, do: RateLimit.call(mutate_with_bearer(raw), RateLimit.init([]))
+
+      refute Enum.any?(results, & &1.halted),
+             "a class: :app token with owner_user_id set did not get the owner budget"
+    end
+  end
 end

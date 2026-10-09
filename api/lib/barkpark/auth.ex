@@ -116,6 +116,30 @@ defmodule Barkpark.Auth do
 
   def verify_token_id(_), do: nil
 
+  @doc """
+  Resolve a raw bearer to `{id, owner_user_id}`, or nil.
+
+  Sibling of `verify_token_id/1` above — same WHERE clause, same fail-closed
+  `kind == "api"` boundary, same `verify_token/1` call, just one more field off
+  the struct `Repo.one()` already loaded. No second query.
+
+  For `BarkparkWeb.Plugs.RateLimit` (task-2c31de0cf6597d32): a token that
+  `owner_user_id` names as ONE human's — a personal PAT, or an app token
+  minted via `POST /v1/auth/app-tokens` (`AppTokenController.mint/2` sets
+  `owner_user_id: user.id` on every mint, one per editor email) — gets its own
+  write budget instead of sharing the flat per-token default with every other
+  caller of a shared/service credential.
+  """
+  @spec verify_token_principal(binary()) :: {binary(), binary() | nil} | nil
+  def verify_token_principal(raw_token) when is_binary(raw_token) do
+    case verify_token(raw_token) do
+      {:ok, %ApiToken{id: id, owner_user_id: owner_user_id}} -> {id, owner_user_id}
+      _ -> nil
+    end
+  end
+
+  def verify_token_principal(_), do: nil
+
   # ── dwb-7: single-use login handoff tickets ─────────────────────────────
 
   @doc """
