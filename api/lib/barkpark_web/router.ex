@@ -2825,6 +2825,22 @@ defmodule BarkparkWeb.Router do
     get("/:dataset", StructureController, :show)
   end
 
+  # ── Preview JWT mint/revoke — admin-only (task-8f7cba7f65cb343c) ─────────
+  # `:flat_admin_api`, not `[:api, :require_admin]`: no existing admin route
+  # minted a preview token before this one, so there is no naive pipeline to
+  # regress — picked to match every other flat admin-management surface on
+  # this list (schemas, structure, plugin roster) rather than invent a
+  # second convention. Not under `/v1/preview/*`: that prefix is the UNRELATED
+  # :api_preview read-tunnel pipeline a minted token is presented TO, and
+  # PreviewLinkController's own moduledoc already warns against colliding a
+  # second auth scheme into that path.
+  scope "/v1/preview-tokens", BarkparkWeb do
+    pipe_through(:flat_admin_api)
+
+    post("/", PreviewTokenController, :mint)
+    delete("/:jti", PreviewTokenController, :revoke)
+  end
+
   # ── Schema management — requires admin token ────────────────────────────
   # `:flat_admin_api`, not `[:api, :require_admin]`: `upsert`/`delete` stamp and
   # filter on `scope_opts(conn)`, so on the naive pipeline a non-Default

@@ -24,6 +24,19 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
   Every refusal happens before the JTI is recorded, so a token aimed at the
   wrong document is not burned. Refusals are 403 `forbidden` with reason
   `preview_scope`.
+
+  ## Single-use, unless `multi_use` (task-8f7cba7f65cb343c)
+
+  `record_jti/1` is single-use by construction (`INSERT … ON CONFLICT DO
+  NOTHING` on `jti`): the first request to verify a given token wins, every
+  later one gets `{:error, :already_used}`. A token signed with `multi_use:
+  true` — a claim that can ONLY originate from `PreviewTokenController.mint/2`,
+  since it rides inside the signed payload — skips that call here instead:
+  its jti was already registered once, at mint time, so `revoke/1` /
+  `revoked?/1` (checked on every `verify/2` call regardless of `multi_use`)
+  and `sweep`/`sweep_batch` GC still have a row to act on, but no request
+  ever burns it. TTL (clamped to a hard max by the mint route) and revocation
+  are what bound a `multi_use` token instead of single-use's one-shot burn.
   """
 
   import Plug.Conn
@@ -46,7 +59,7 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
          true <- is_binary(Map.get(claims, "dataset")),
          {:ok, doc_ids} <- check_doc_scope(conn, claims),
          {:ok, conn} <- assign_claimed_scope(conn, claims),
-         {:ok, _} <- PreviewToken.record_jti(claims) do
+         {:ok, _} <- maybe_record_jti(claims) do
       conn
       |> assign(:preview_claims, claims)
       |> assign(:forced_perspective, "drafts")
@@ -60,6 +73,17 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
   end
 
   # The token's document list, as published ids. `[]` = dataset-wide.
+  # task-8f7cba7f65cb343c — a `multi_use` token was already registered once,
+  # at mint time (`PreviewTokenController.mint/2`), so calling `record_jti`
+  # here on every read would ALWAYS hit the existing row and refuse every
+  # request past the first with `:already_used` — exactly the single-use
+  # behaviour this claim exists to opt out of. `revoked?/1` is still checked
+  # on every call, inside `PreviewToken.verify/2` above, regardless of
+  # `multi_use` — a revoked multi_use token is refused immediately, same as
+  # any other revoked token.
+  defp maybe_record_jti(%{"multi_use" => true} = claims), do: {:ok, claims}
+  defp maybe_record_jti(claims), do: PreviewToken.record_jti(claims)
+
   defp claimed_doc_ids(claims) do
     case Map.get(claims, "doc_ids") do
       ids when is_list(ids) ->
