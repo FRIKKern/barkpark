@@ -377,8 +377,10 @@ defmodule BarkparkWeb.QueryController do
             ] ++ scope_opts(conn)
           )
 
+        base_rendered = Envelope.render_many(docs, schema, caller_context)
+
         rendered =
-          Envelope.render_many(docs, schema, caller_context)
+          base_rendered
           |> Expand.expand(
             expand_spec,
             dataset,
@@ -387,6 +389,8 @@ defmodule BarkparkWeb.QueryController do
           )
           |> project_fields(parse_fields(params["fields"]))
           |> maybe_resolve_tasks(conn, params)
+
+        source_map = maybe_source_map_many(conn, params, docs, base_rendered)
 
         inner =
           %{
@@ -410,7 +414,8 @@ defmodule BarkparkWeb.QueryController do
           list_sync_tags(dataset, type, rendered),
           etag,
           cache_validator(etag, schema_hash, page_shape(inner)),
-          t0
+          t0,
+          source_map
         )
     end
   end
@@ -980,11 +985,24 @@ defmodule BarkparkWeb.QueryController do
   # resolve/2` silently clamps `?perspective=drafts` for an anonymous caller
   # rather than 400ing it.
   defp maybe_source_map(conn, params, doc, base_rendered) do
-    truthy = params["sourceMap"] in ["true", "1", true]
-
-    if truthy and AnonPerspective.resolve(conn, params) != :published do
+    if source_map_requested?(conn, params) do
       Envelope.source_map(doc, base_rendered)
     end
+  end
+
+  # List-result sibling (task-b54d854d43769266) — SAME opt-in flag, SAME
+  # drafts/raw-only rule as the doc-get candidate above; only the Envelope
+  # function differs (source_map_many/2, one row per result instead of one
+  # whole document).
+  defp maybe_source_map_many(conn, params, docs, base_rendered_list) do
+    if source_map_requested?(conn, params) do
+      Envelope.source_map_many(docs, base_rendered_list)
+    end
+  end
+
+  defp source_map_requested?(conn, params) do
+    truthy = params["sourceMap"] in ["true", "1", true]
+    truthy and AnonPerspective.resolve(conn, params) != :published
   end
 
   # doc-get USED TO READ `?perspective` AND THROW IT AWAY. show_doc/5 did a bare
@@ -1239,7 +1257,7 @@ defmodule BarkparkWeb.QueryController do
     put_resp_header(conn, "vary", Enum.join(merged, ", "))
   end
 
-  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0, source_map \\ nil) do
+  defp respond(conn, inner, schema_hash, sync_tags, etag, validator, t0, source_map) do
     elapsed_ms = div(System.monotonic_time(:microsecond) - t0, 1000)
 
     conn =
