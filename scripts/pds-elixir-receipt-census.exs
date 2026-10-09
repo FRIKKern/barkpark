@@ -1275,6 +1275,12 @@ defmodule PDS.Census do
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/fields/:field/ops", "BarkparkWeb.DocumentOpsController", :apply_field_ops, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/focus", "BarkparkWeb.PresenceController", :focus, :status_only_receipt},
+    # task-936472b77285df5b — leave's own answer (`%{left: true, sessionId: sid}`)
+    # is built from the REQUEST's own sessionId echoed back plus a bare literal,
+    # never a stored re-read — same class, same reasoning as its `focus` sibling
+    # directly above (which answers the room entry read back after applying it,
+    # also never an `ok: true` literal this lens keys on).
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/data/presence/:dataset/leave", "BarkparkWeb.PresenceController", :leave, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
     {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},

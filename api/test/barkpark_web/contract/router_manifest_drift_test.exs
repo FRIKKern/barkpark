@@ -108,6 +108,8 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
       "editor presence stream — an editing UI's live room, a terminal has no focused field",
     {"POST", "/v1/data/presence/:*/focus"} =>
       "editor field focus — moves an open presence stream's cursor; no CLI holds one",
+    {"DELETE", "/v1/data/presence/:*/leave"} =>
+      "editor presence leave (task-936472b77285df5b) — untracks the caller's own open stream; a terminal holds no stream to leave",
     # ── Cloud member removal (owner ruling #26, 2026-10-03) ─────────────────
     # The control plane calls this with the stored instance admin token when a
     # person leaves the owning team: sessions revoked, seats dropped, owned

@@ -73,6 +73,8 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
     |> post(base <> "/focus", Jason.encode!(body))
   end
 
+  defp leave(conn, base, params), do: delete(conn, base <> "/leave", params)
+
   test "two clients see each other's document and field focus within 300 ms", ctx do
     a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-1", "name" => "Ann", "documentId" => "p1"})
     b = open(ctx.conn, ctx.base, %{"sessionId" => "bob-1", "name" => "Bob", "documentId" => "p1"})
@@ -160,6 +162,60 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
 
     assert focus(ctx.conn, ctx.base, %{"sessionId" => "ann-3", "field" => "x"}).status == 200
     close(a)
+  end
+
+  # task-936472b77285df5b — an explicit leave untracks the caller's own
+  # session at once, instead of waiting on the keepalive to notice a dead
+  # stream. Same auth/ownership shape as `focus`.
+  describe "leave" do
+    test "removes the entry and the room's other subscribers get the diff", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-1", "name" => "Ann"})
+      b = open(ctx.conn, ctx.base, %{"sessionId" => "bob-leave-1", "name" => "Bob"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-leave-1", "api:bob-leave-1"] end)
+
+      Phoenix.PubSub.subscribe(Barkpark.PubSub, ctx.topic)
+
+      resp = leave(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-1"})
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body) == %{"left" => true, "sessionId" => "ann-leave-1"}
+
+      wait_for(fn -> keys(ctx.topic) == ["api:bob-leave-1"] end)
+
+      assert_receive %Phoenix.Socket.Broadcast{event: "presence_diff", payload: %{leaves: leaves}}
+                     when is_map_key(leaves, "api:ann-leave-1"),
+                     1_000
+
+      # the stream itself ends on its own — leave does not wait for
+      # :sse_overloaded to notice the session is gone.
+      assert Task.await(a, 1_000).status == 200
+      close(b)
+    end
+
+    test "another session can't remove yours", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-2"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-leave-2"] end)
+
+      assert leave(ctx.other_conn, ctx.base, %{"sessionId" => "ann-leave-2"}).status == 404
+      assert keys(ctx.topic) == ["api:ann-leave-2"]
+
+      assert leave(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-2"}).status == 200
+      wait_for(fn -> keys(ctx.topic) == [] end)
+      assert Task.await(a, 1_000).status == 200
+    end
+
+    test "a second leave on an already-left session is a no-op", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-3"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-leave-3"] end)
+
+      assert leave(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-3"}).status == 200
+      wait_for(fn -> keys(ctx.topic) == [] end)
+      assert Task.await(a, 1_000).status == 200
+
+      # idempotent: no live session to remove is answered the same way as
+      # "never existed" — the no-existence-oracle shape `focus` already uses,
+      # not a crash and not a distinguishable error.
+      assert leave(ctx.conn, ctx.base, %{"sessionId" => "ann-leave-3"}).status == 404
+    end
   end
 
   test "a read token can stream (and is seen) but moving focus needs write", ctx do
@@ -336,6 +392,51 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
                "/v1/data/presence/production/focus",
                "localhost"
              ) == :error
+    end
+  end
+
+  # task-936472b77285df5b — the keepalive used to be a plain `receive ...
+  # after`, whose clock restarts on every message `receive` handles. A
+  # `?documentId=`-filtered stream in a room with OFF-FILTER churn kept
+  # receiving `presence_diff` broadcasts that recomputed its view, found no
+  # visible change, wrote nothing — and still reset the clock. Fixed with
+  # `Process.send_after/3`, which keeps its own schedule regardless.
+  describe "keepalive" do
+    setup do
+      previous = Application.get_env(:barkpark, :presence_keepalive_ms)
+      Application.put_env(:barkpark, :presence_keepalive_ms, 150)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :presence_keepalive_ms, previous),
+          else: Application.delete_env(:barkpark, :presence_keepalive_ms)
+      end)
+
+      :ok
+    end
+
+    test "off-filter diffs arriving faster than the interval don't delay it", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-ka", "documentId" => "p1"})
+      b = open(ctx.conn, ctx.base, %{"sessionId" => "bob-ka", "documentId" => "p2"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-ka", "api:bob-ka"] end)
+
+      # Each of these is a `presence_diff` on A's topic, but A is filtered to
+      # p1 and every one of these moves bob-ka's focus on p2 -- A's visible
+      # entries never change, so A's loop never calls `chunk/2` for any of
+      # them. 12 * 30ms = 360ms of churn, faster than the 150ms interval, for
+      # longer than it -- the old `after`-based timer would starve here.
+      for i <- 1..12 do
+        assert focus(ctx.conn, ctx.base, %{
+                 "sessionId" => "bob-ka",
+                 "documentId" => "p2",
+                 "field" => "f#{i}"
+               }).status == 200
+
+        Process.sleep(30)
+      end
+
+      assert close(a).resp_body =~ ": keepalive\n\n"
+      close(b)
     end
   end
 end

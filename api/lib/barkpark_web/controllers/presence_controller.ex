@@ -1,14 +1,24 @@
 defmodule BarkparkWeb.PresenceController do
   @selection_max_bytes 512
+  # task-936472b77285df5b — shortened from 15_000: the probabilistic half of
+  # expiry (see moduledoc) now bounds its OWN worst case tighter, independent
+  # of whether `leave` below was called. A tiny `": keepalive\n\n"` comment
+  # every 5s is negligible bandwidth for an open editing session. The
+  # DEFAULT only — `keepalive_ms/0` reads `:barkpark, :presence_keepalive_ms`
+  # first, so a test can shrink the interval without waiting out this one.
+  # Defined here (before @moduledoc) so the doc string below can interpolate
+  # it.
+  @keepalive_ms 5_000
 
   @moduledoc """
   Editor presence over HTTP for clients that are not the LiveView Studio
   (task-32b73e85f89d4be7, Studio parity journey J07).
 
-      GET  /w/:ws/p/:proj/v1/data/presence/:dataset?sessionId=&name=&documentId=
-      POST /w/:ws/p/:proj/v1/data/presence/:dataset/focus
-           {"sessionId": "…", "documentId": "…", "field": "seo.metaTitle",
-            "selection": {"anchor": Point, "head": Point} | null}
+      GET    /w/:ws/p/:proj/v1/data/presence/:dataset?sessionId=&name=&documentId=
+      POST   /w/:ws/p/:proj/v1/data/presence/:dataset/focus
+             {"sessionId": "…", "documentId": "…", "field": "seo.metaTitle",
+              "selection": {"anchor": Point, "head": Point} | null}
+      DELETE /w/:ws/p/:proj/v1/data/presence/:dataset/leave?sessionId=
 
   The GET is a Server-Sent Events stream. While it is open, the connection
   process is TRACKED in the same Phoenix.Presence room the LiveView Studio
@@ -30,10 +40,53 @@ defmodule BarkparkWeb.PresenceController do
   AND was opened by the same API token, so one caller cannot steer another's
   cursor.
 
-  Expiry: Phoenix.Presence drops an entry when its tracking process exits.
-  The stream process exits when the client disconnects, and at the latest on
-  the next keepalive write (every #{div(15_000, 1000)} s) that finds the
-  socket closed — no stale entry outlives its connection.
+  ## Leaving (task-936472b77285df5b)
+
+  `DELETE .../leave?sessionId=` untracks the caller's OWN session from the
+  room at once — same ownership check as `focus` (404 unless the session is
+  live and was opened by the same API token), so a session can only remove
+  itself, never another's. Idempotent: the session is gone after the first
+  call, so a SECOND leave finds no live session and answers the SAME 404 as
+  the first call would have before the session ever existed — "nothing to
+  do" is not an error. The stream behind the removed session exits right
+  after untracking (its own `receive` loop, not this request's), so the SSE
+  connection itself closes too, not just the room entry.
+
+  WHY THIS EXISTS, GIVEN THE EXPIRY BELOW ALREADY CLAIMS TO COVER IT. Found
+  live on guerrilla.barkpark.cloud (task-936472b77285df5b): a closed stream's
+  entry lingered 20-40s instead of leaving "at the latest on the next
+  keepalive write" as the paragraph below promises. Two candidate causes were
+  checked, not assumed. Candidate 1, moot: a handled `presence_diff` already
+  calls `chunk/2` whenever the VISIBLE entries change (`send_snapshot/4`), so
+  a write failure there finds a dead socket just as fast as a keepalive would
+  — a busy room with visible churn was never the slow case. Candidate 2,
+  confirmed and FIXED here: the keepalive used to be a plain `receive ...
+  after` timeout, and an `after` clause's clock restarts on every message
+  that `receive` handles — including a `presence_diff` for a document this
+  stream's `?documentId=` filter does NOT show, which recomputes `entries/2`,
+  finds no visible change, writes nothing, and still resets the clock. A busy
+  room whose other activity stayed off-filter could starve the keepalive
+  indefinitely. Fixed by scheduling it with `Process.send_after/3` instead
+  (see `schedule_keepalive/0`): a timer fired by `self()` keeps its own
+  schedule no matter what else lands in the mailbox. The reverse proxy's
+  handling of a closed downstream connection remains unverified from here —
+  an explicit leave sidesteps it either way, by having the client state its
+  own departure instead of waiting to be inferred. `pagehide` cannot use
+  `navigator.sendBeacon` for this: a beacon can only POST, and cannot carry
+  the bearer `Authorization` header this route requires. Use
+  `fetch(url, {method: "DELETE", keepalive: true, headers: {Authorization: …}})`
+  instead — `keepalive: true` is what lets it outlive the unloading page.
+
+  Expiry (the fallback for a client that cannot or does not call leave — a
+  crash, a network cut, an older client): Phoenix.Presence drops an entry
+  when its tracking process exits. The stream process exits when the client
+  disconnects, and at the latest on the next keepalive write (every
+  #{div(@keepalive_ms, 1000)} s — shortened from the original 15s, and now on
+  its own timer rather than a resettable `after`, both for exactly this
+  reason, task-936472b77285df5b) that finds the socket closed. This remains
+  probabilistic wherever the proxy's own half-close detection is slower than
+  that; `leave` is the deterministic path and clients SHOULD call it whenever
+  they can.
 
   Identity is the client's to state: the Studio parity app proxies every
   browser user through one server token, so `?name=` carries the person and
@@ -49,7 +102,6 @@ defmodule BarkparkWeb.PresenceController do
   alias BarkparkWeb.{ErrorResponse, Presence}
   alias BarkparkWeb.Studio.PresenceState
 
-  @keepalive_ms 15_000
   @session_re ~r/\A[A-Za-z0-9_-]{1,64}\z/
 
   def stream(conn, %{"dataset" => dataset} = params) do
@@ -85,6 +137,7 @@ defmodule BarkparkWeb.PresenceController do
 
       with {:ok, conn} <- chunk(conn, frame("session", %{sessionId: sid})),
            {:ok, conn, last} <- send_snapshot(conn, topic, doc_filter, nil) do
+        schedule_keepalive()
         loop(conn, %{topic: topic, key: key, doc_filter: doc_filter, last: last})
       else
         _ -> conn
@@ -128,6 +181,40 @@ defmodule BarkparkWeb.PresenceController do
     end
   end
 
+  @doc """
+  DELETE /w/:ws/p/:proj/v1/data/presence/:dataset/leave?sessionId= — untrack
+  the caller's OWN session at once. 404 unless the session is live and was
+  opened by the SAME API token as `focus`/`stream` require — a session can
+  remove only itself. Idempotent: once untracked, a second call finds no
+  live session and answers the same 404, which IS the no-op (nothing to
+  remove, not an error).
+  """
+  def leave(conn, %{"dataset" => dataset} = params) do
+    with {:ok, topic, token} <- room(conn, dataset),
+         {:ok, sid} <- required_session(params["sessionId"]),
+         :ok <- owns_live_session(topic, sid, token) do
+      ref = make_ref()
+
+      Phoenix.PubSub.broadcast(
+        Barkpark.PubSub,
+        session_topic(topic, sid),
+        {:presence_leave, {self(), ref}}
+      )
+
+      case await_left(ref) do
+        :ok ->
+          json(conn, %{left: true, sessionId: sid})
+
+        :timeout ->
+          {:error, status, code, message} = not_live()
+          ErrorResponse.emit_custom(conn, status, code, message, %{})
+      end
+    else
+      {:error, status, code, message} ->
+        ErrorResponse.emit_custom(conn, status, code, message, %{})
+    end
+  end
+
   # ── The stream loop ──────────────────────────────────────────────────────
 
   defp loop(conn, state) do
@@ -141,22 +228,51 @@ defmodule BarkparkWeb.PresenceController do
         send(from, {:presence_focus_applied, ref})
         loop(conn, state)
 
+      # task-936472b77285df5b — an explicit leave. untrack/3 MUST run from
+      # THIS process (the one `track/4` named in `stream/2`): the leave
+      # HTTP request is a different, short-lived process that cannot
+      # untrack on this stream's behalf directly, which is why it is a
+      # broadcast + ack here, the same shape `:presence_focus` already uses.
+      # Does NOT recurse: the session is gone, so the stream ends with it —
+      # exactly what the client wanted (one less thing to clean up later),
+      # not a room entry surviving its own removal request.
+      {:presence_leave, {from, ref}} ->
+        Presence.untrack(self(), state.topic, state.key)
+        send(from, {:presence_left, ref})
+        conn
+
       %Phoenix.Socket.Broadcast{event: "presence_diff"} ->
         case send_snapshot(conn, state.topic, state.doc_filter, state.last) do
           {:ok, conn, last} -> loop(conn, %{state | last: last})
           _ -> conn
         end
 
+      # task-936472b77285df5b — scheduled with `Process.send_after/3`, NOT a
+      # `receive ... after` timeout: an `after` clause's clock restarts on
+      # EVERY message this `receive` handles, so a `?documentId=`-filtered
+      # stream in a busy room (other sessions' diffs on OTHER documents keep
+      # arriving, matching `presence_diff` above and re-entering `receive`,
+      # but never writing — see `send_snapshot/4`) could starve it
+      # indefinitely. A timer fired by `self()` is independent of whatever
+      # else lands in this mailbox, so it keeps its own schedule regardless.
+      :keepalive ->
+        case chunk(conn, ": keepalive\n\n") do
+          {:ok, conn} ->
+            schedule_keepalive()
+            loop(conn, state)
+
+          _ ->
+            conn
+        end
+
       _other ->
         loop(conn, state)
-    after
-      @keepalive_ms ->
-        case chunk(conn, ": keepalive\n\n") do
-          {:ok, conn} -> loop(conn, state)
-          _ -> conn
-        end
     end
   end
+
+  defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
+
+  defp keepalive_ms, do: Application.get_env(:barkpark, :presence_keepalive_ms, @keepalive_ms)
 
   # One frame per CHANGE of the visible list: a diff for another document, or
   # one that only moved `joined_at`, sends nothing.
@@ -213,6 +329,14 @@ defmodule BarkparkWeb.PresenceController do
   defp await_applied(ref) do
     receive do
       {:presence_focus_applied, ^ref} -> :ok
+    after
+      @focus_apply_ms -> :timeout
+    end
+  end
+
+  defp await_left(ref) do
+    receive do
+      {:presence_left, ^ref} -> :ok
     after
       @focus_apply_ms -> :timeout
     end
