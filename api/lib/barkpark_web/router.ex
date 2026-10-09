@@ -269,6 +269,32 @@ defmodule BarkparkWeb.Router do
     plug(BarkparkWeb.Plugs.TenantLogMetadata)
   end
 
+  # task-db8de40bbc928c54 — byte-identical to :scoped_api, ONE line swapped:
+  # RateLimit runs with `class: :presence_focus` instead of the bare
+  # method-verb classification every other :scoped_api route gets. Without
+  # this, `POST .../presence/:dataset/focus` (a POST, so `method_class/1`
+  # bills it :write) shared the SAME write bucket #22206 raised for a
+  # session principal (180/min) with every real content mutation that
+  # principal makes — an editor's ordinary cursor/selection churn can
+  # exceed that in normal use and starve a real save's budget. `class:
+  # :presence_focus` is a REAL enforced class (unlike :browser's shadow-only
+  # one): RateLimit.limited/4's catch-all clause already refuses any
+  # non-:browser class with the standard JSON 429, so no new refusal code
+  # is needed — only its own budget (rate_limit.ex's limit_per_minute/3,
+  # default_per_minute/3) and its own bucket key, so a focus burst can never
+  # debit (or be debited by) the write bucket.
+  pipeline :scoped_api_presence_focus do
+    plug(BarkparkWeb.Plugs.AcceptBarkparkVendor)
+    plug(:accepts, ["json"])
+    plug(BarkparkWeb.Plugs.ApiSecurityHeaders)
+    plug(BarkparkWeb.Plugs.ErrorEnvelopeNegotiation)
+    plug(BarkparkWeb.Plugs.RateLimit, class: :presence_focus)
+    plug(:scoped_api_optional_credential)
+    plug(BarkparkWeb.Plugs.ResolveWorkspace)
+    plug(BarkparkWeb.Plugs.ResolveProject)
+    plug(BarkparkWeb.Plugs.TenantLogMetadata)
+  end
+
   # Soft credential resolution for :scoped_api — bearer ALWAYS, browser session
   # only where it cannot drive a forged state change (gyldendal field report
   # #15).
@@ -3406,10 +3432,11 @@ defmodule BarkparkWeb.Router do
 
     get("/v1/data/listen/:dataset", ListenController, :listen)
     # Editor presence for non-LiveView clients (task-32b73e85f89d4be7). The
-    # POST moves a live stream's own focus; it writes no document, so it rides
-    # this read pipeline. Scoped only: the room is workspace + project.
+    # GET rides this read pipeline; the POST moves to its own scope right
+    # below (task-db8de40bbc928c54) so it gets the presence_focus rate
+    # class rather than the generic write bucket. Scoped only: the room is
+    # workspace + project.
     get("/v1/data/presence/:dataset", PresenceController, :stream)
-    post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
     get("/v1/data/export/:dataset", ExportController, :export)
     get("/v1/data/analytics/:dataset", AnalyticsController, :index)
     get("/v1/data/history/:dataset/:type/:doc_id", HistoryController, :index)
@@ -3422,6 +3449,16 @@ defmodule BarkparkWeb.Router do
     # server-side (task-4feb8efa46a0ed33) — read-only, so it rides this
     # token-required scoped-read pipeline like the masters list above.
     get("/v1/papers/:slug/fleet-blocks", PaperFleetBlocksController, :show)
+  end
+
+  # task-db8de40bbc928c54 — the presence-focus POST, split out of the scoped
+  # reads above into its own rate class. Still :require_token (same auth as
+  # its GET sibling); `:scoped_api_presence_focus` differs from `:scoped_api`
+  # in ONE line, the RateLimit class — see that pipeline's comment.
+  scope "/w/:workspace_slug/p/:project_slug", BarkparkWeb do
+    pipe_through([:scoped_api_presence_focus, :require_token])
+
+    post("/v1/data/presence/:dataset/focus", PresenceController, :focus)
   end
 
   # Scoped revision restore — a WRITE, so it carries :require_write on top of the

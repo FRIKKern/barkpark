@@ -103,6 +103,7 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   defp plan(conn, opts) do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
+      :presence_focus -> presence_focus_plan(conn)
       _ -> method_plan(conn)
     end
   end
@@ -117,6 +118,19 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     {principal_class, key} = bucket_key(conn, class, dataset)
     per_minute = limit_per_minute(class, dataset, principal_class)
     {class, per_minute, key}
+  end
+
+  # task-db8de40bbc928c54 — a REAL enforced class, unlike :browser's
+  # shadow-only one: `limited/4`'s catch-all clause already refuses any
+  # non-:browser class with the standard JSON 429, so no new refusal path is
+  # needed. Its OWN key (bucket_key/3 embeds `class` into the key string for
+  # every principal kind already) means a focus burst can never debit, or be
+  # debited by, the write bucket the same principal's content saves use.
+  defp presence_focus_plan(conn) do
+    dataset = conn.path_params["dataset"]
+    {_principal_class, key} = bucket_key(conn, :presence_focus, dataset)
+    per_minute = limit_per_minute(:presence_focus, dataset, nil)
+    {:presence_focus, per_minute, key}
   end
 
   defp browser_plan(conn) do
@@ -285,6 +299,14 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   defp default_per_minute(cfg, :write, _principal_class),
     do: Keyword.get(cfg, :write_per_minute, 60)
+
+  # task-db8de40bbc928c54 — generous and fixed (no :session widening the way
+  # :write does): presence/focus churn is UI chrome, not a content write, so
+  # it never needed `session_write_per_minute`'s per-editor reasoning. 600/min
+  # = 10/sec, well above normal cursor/selection event cadence, bounded so a
+  # genuinely runaway client still cannot flood the presence room forever.
+  defp default_per_minute(cfg, :presence_focus, _principal_class),
+    do: Keyword.get(cfg, :presence_focus_per_minute, 600)
 
   defp dataset_override(_cfg, nil, _class), do: nil
 
