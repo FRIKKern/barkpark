@@ -1215,11 +1215,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             phx-value-type={ref.type}
             data-test-id="backlink-row"
           >
-            <span class="bp-doc-backlink__title">{ref.title || gettext("Untitled")}</span>
+            <span class="bp-doc-backlink__title">{BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled")}</span>
             <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
           </button>
           <div :if={!ref[:from_doc_id]} class="bp-doc-backlink" data-test-id="backlink-row">
-            <span class="bp-doc-backlink__title">{ref.title || gettext("Untitled")}</span>
+            <span class="bp-doc-backlink__title">{BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled")}</span>
             <span class="bp-doc-backlink__meta">{ref.type} / {ref.via_field}</span>
           </div>
         </li>
@@ -1347,7 +1347,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         :if={@has_editor and not @inspector_leaf}
         class="bp-desk-crumb bp-desk-crumb--current"
         aria-current="page"
-      ><%= @editor_doc.title || gettext("Untitled") %></span>
+      ><%= BarkparkWeb.Studio.DocTitle.shown(@editor_doc.title) || gettext("Untitled") %></span>
       <button
         :if={@inspector_leaf}
         type="button"

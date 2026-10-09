@@ -2579,9 +2579,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
   def assign_page_title(socket) do
     title =
       case socket.assigns[:editor_doc] do
-        %{title: t} when is_binary(t) and t != "" -> t
-        %{} = doc -> derived_title(doc, socket.assigns[:editor_schema])
-        _ -> "Studio"
+        %{} = doc ->
+          BarkparkWeb.Studio.DocTitle.shown(Map.get(doc, :title)) ||
+            derived_title(doc, socket.assigns[:editor_schema])
+
+        _ ->
+          "Studio"
       end
 
     assign(socket, page_title: title)

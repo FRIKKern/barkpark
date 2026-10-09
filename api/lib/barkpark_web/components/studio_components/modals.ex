@@ -794,7 +794,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <div class="history-item-info">
                 <div class="history-item-action">
                   <span class={"history-action-badge history-action-#{rev.action}"}><%= history_action_label(rev.action) %></span>
-                  <span class="history-item-title"><%= rev.title || gettext("Untitled") %></span>
+                  <span class="history-item-title"><%= BarkparkWeb.Studio.DocTitle.shown(rev.title) || gettext("Untitled") %></span>
                 </div>
                 <%!-- UTC on the server; Hooks.LocalTime rewrites it in the
                       viewer's own zone (task-7a12da688a06f880). --%>
@@ -929,7 +929,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
               <div class="delete-ref-list">
                 <%= for ref <- @delete_refs do %>
                   <div class="delete-ref-item">
-                    <span class="delete-ref-title"><%= ref.title || gettext("Untitled") %></span>
+                    <span class="delete-ref-title"><%= BarkparkWeb.Studio.DocTitle.shown(ref.title) || gettext("Untitled") %></span>
                     <span class="delete-ref-meta"><%= ref.type %> / <%= ref.field %></span>
                   </div>
                 <% end %>
