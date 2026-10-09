@@ -41,14 +41,14 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
     |> assign_from_bearer()
     |> case do
       {:ok, conn} ->
-        conn
+        refuse_off_binding(conn)
 
       {:error, conn} ->
         conn
         |> assign_from_session()
         |> case do
           {:ok, conn} ->
-            require_csrf_header(conn)
+            conn |> require_csrf_header() |> refuse_off_binding()
 
           {:error, conn} ->
             case account_session?(conn) do
@@ -146,6 +146,18 @@ defmodule BarkparkWeb.Plugs.RequireBearerOrSessionToken do
       {:ok, token} -> {:ok, assign(conn, :api_token, token)}
       _ -> {:error, conn}
     end
+  end
+
+  # A token minted with an explicit `dataset` is refused on any other dataset
+  # (task-9d76210585fa665b). This plug is the only credential door on the flat
+  # `:media_mutate` pipeline, which runs no `ResolveWorkspace`, so the shared
+  # predicate is applied here too.
+  defp refuse_off_binding(%Plug.Conn{halted: true} = conn), do: conn
+
+  defp refuse_off_binding(conn) do
+    if BarkparkWeb.Plugs.RequireToken.dataset_off_binding?(conn, conn.assigns[:api_token]),
+      do: halt_with(conn, {:error, :forbidden_dataset}),
+      else: conn
   end
 
   defp unauthorized(conn) do
