@@ -1206,7 +1206,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
            data-test-id="doc-conflict-banner">
         <div class="bp-violations-summary">
           <span class="bp-violations-warning">
-            Updated by another user — your unsaved edits are kept.
+            <%= gettext("Updated by another user — your unsaved edits are kept.") %>
           </span>
         </div>
         <button
@@ -1214,7 +1214,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
           class="btn btn-sm"
           phx-click="reload-remote-doc"
           data-test-id="doc-conflict-reload"
-        >Reload</button>
+        ><%= gettext("Reload") %></button>
       </div>
     <% end %>
     """

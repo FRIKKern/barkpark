@@ -179,14 +179,14 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
       <form id={"#{@id}-form"} phx-change="inner-change" phx-target={@myself} phx-hook="BarkparkFieldBridge" data-paper-field-flush>
         <ul class="bp-paper-chips">
           <li :for={{chip, i} <- Enum.with_index(@value)} class="bp-paper-chip">
-            <input type="text" name={"[#{i}]"} value={chip} aria-label="Edit value" />
+            <input type="text" name={"[#{i}]"} value={chip} aria-label={gettext("Edit value")} />
             <button
               type="button"
               phx-click="inner-array-op"
               phx-target={@myself}
               phx-value-action="remove_row"
               phx-value-index={i}
-              aria-label="Remove"
+              aria-label={gettext("Remove")}
             >×</button>
           </li>
         </ul>

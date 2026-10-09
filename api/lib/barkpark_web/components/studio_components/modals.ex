@@ -199,7 +199,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 </div>
                 <div :if={row.url} class="share-row-url"><%= row.url %></div>
                 <p :if={row.source == "env"} class="shares-note share-row-env-note">
-                  Declared in <%= env_baseline_immutable() %>
+                  <%= gettext("Declared in %{file}", file: env_baseline_immutable()) %>
                 </p>
               </div>
               <button

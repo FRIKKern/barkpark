@@ -2545,14 +2545,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input type="hidden" name="block_id" value={@id} />
           <select name="tone" class="bp-paper-edit-tone">
             <option :for={t <- ~w(info success warning danger neutral)} value={t} selected={Map.get(@block, "tone") == t}>
-              <%= t %>
+              <%= tone_word(t) %>
             </option>
           </select>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="collapsible" checked={Map.get(@block, "collapsible") == true} /> Foldable
+            <input type="checkbox" name="collapsible" checked={Map.get(@block, "collapsible") == true} /> <%= gettext("Foldable") %>
           </label>
           <label class="bp-paper-edit-check">
-            <input type="checkbox" name="collapsed" checked={Map.get(@block, "collapsed") == true} /> Start collapsed
+            <input type="checkbox" name="collapsed" checked={Map.get(@block, "collapsed") == true} /> <%= gettext("Start collapsed") %>
           </label>
           <input
             type="text"
@@ -4825,10 +4825,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <input id={"field-number-unit-" <> @id} type="text" name="unit"
                  class="bp-paper-edit-text" value={Blocks.form_value(Map.get(@block, "unit"))} />
           <small id={"field-number-hint-" <> @id} class="bp-paper-edit-kind">
-            Enter a valid number<%= case Blocks.form_value(Map.get(@block, "unit")) do
-              "" -> ""
-              unit -> " in #{unit}"
-            end %>.
+            <%= case Blocks.form_value(Map.get(@block, "unit")) do
+              "" -> gettext("Enter a valid number.")
+              unit -> gettext("Enter a valid number in %{unit}.", unit: unit)
+            end %>
           </small>
           <button type="submit" class="btn btn-primary btn-sm"><%= gettext("Save number field") %></button>
         </form>
@@ -5454,4 +5454,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
     do: Map.put(block, :__picker, flags)
 
   defp with_picker_flags(block, _descriptor), do: block
+
+  # A callout tone's name in the Studio language; the stored value stays the
+  # English word, and English reads it unchanged.
+  defp tone_word("info"), do: pgettext("callout tone", "info")
+  defp tone_word("success"), do: pgettext("callout tone", "success")
+  defp tone_word("warning"), do: pgettext("callout tone", "warning")
+  defp tone_word("danger"), do: pgettext("callout tone", "danger")
+  defp tone_word("neutral"), do: pgettext("callout tone", "neutral")
+  defp tone_word(other), do: other
 end

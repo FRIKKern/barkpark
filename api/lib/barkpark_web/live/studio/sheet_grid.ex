@@ -3629,11 +3629,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             data-test-id="sheet-pager-next"
           ><%= gettext("Next") %></button>
           <span data-test-id="sheet-pager-text">
-            Showing rows <%= @visible_first %>–<%= @visible_last %> of <%= @rows %><%= if @filter_active do %> · <%= @filter_hidden_count %> rows hidden by filter<% end %><%= if @col_truncated do %> · first <%= @cols %> of <%= @used_cols %> columns<% end %>
+            <%= gettext("Showing rows %{first}–%{last} of %{rows}", first: @visible_first, last: @visible_last, rows: @rows) %><%= if @filter_active do %> · <%= ngettext("%{count} rows hidden by filter", "%{count} rows hidden by filter", @filter_hidden_count) %><% end %><%= if @col_truncated do %> · <%= gettext("first %{cols} of %{used} columns", cols: @cols, used: @used_cols) %><% end %>
           </span>
         <% else %>
           <span data-test-id="sheet-pager-text">
-            Showing the first <%= @cols %> of <%= @used_cols %> columns
+            <%= gettext("Showing the first %{cols} of %{used} columns", cols: @cols, used: @used_cols) %>
           </span>
         <% end %>
       </div>

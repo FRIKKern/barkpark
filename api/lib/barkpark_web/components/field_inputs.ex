@@ -171,7 +171,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <% end %>
     </div>
     <select :if={not @radio} id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} name={"doc[#{@n}]"} class="form-input" phx-debounce="300">
-      <option :if={@show_placeholder} value="" selected disabled={@required}>Select…</option>
+      <option :if={@show_placeholder} value="" selected disabled={@required}><%= gettext("Select…") %></option>
       <%= for o <- @opts do %><option value={o.value} selected={o.value == @v}><%= o.label %></option><% end %>
     </select>
     """
@@ -324,7 +324,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     hidden_v = if has_value, do: stored, else: ""
     # Native picker needs a #rrggbb value; use a neutral fallback when unset.
     picker_v = if has_value, do: stored, else: "#000000"
-    label = if has_value, do: stored, else: "No color"
+    label = if has_value, do: stored, else: gettext("No color")
 
     picker_style =
       "width:36px;height:36px;border:1px solid var(--input);border-radius:6px;cursor:pointer;background:transparent;" <>
@@ -345,7 +345,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       <input type="hidden" data-color-value name={"doc[#{@n}]"} value={@hidden_v} phx-debounce="300" />
       <input id={if @id_prefix == "", do: nil, else: @id_prefix <> @n} type="color" value={@picker_v} data-color-unset={to_string(not @has_value)} style={@picker_style} />
       <span style="font-family:var(--font-mono);font-size:13px;"><%= @label %></span>
-      <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;">Clear</button>
+      <button :if={@has_value} type="button" data-color-clear class="btn btn-sm" style="font-size:12px;"><%= gettext("Clear") %></button>
     </div>
     """
   end
