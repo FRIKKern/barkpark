@@ -4146,15 +4146,23 @@ function classifyNode(node) {
 // (bpId:null) is CLIENT-MINTED a unique id here (so blocksToMarkdown has a stable
 // key and the exit realign can donate it back). The `taken` set guards uniqueness
 // within the call. PURE, DOM-free — like runToOps it touches no editor.
-export function docToBlocks(doc) {
+//
+// `options.reuse(index)` (the canvas emit's fast path, task-fb938eb8be3bce48) may
+// answer the block a top-level node projected to at an earlier call, when the
+// caller KNOWS the node is unchanged since then; that node is not re-projected.
+// The default answers nothing, so every node is projected as before.
+export function docToBlocks(doc, options = {}) {
   const nodes = (doc && doc.content) || [];
+  const reuse = typeof options.reuse === "function" ? options.reuse : null;
   const taken = new Set();
   // Seed `taken` with every id ALREADY on a node so a mint can never collide with a
   // surviving id. RECURSIVE (descend bpSection bodies at any depth) — the make-or-break
   // duplicate_id-abort guard: a nested child id is invisible to a top-level-only seed,
   // so a mint could collide with it and abort the whole atomic batch.
   walkNodeIds(nodes, taken);
-  return nodes.map((node) => {
+  return nodes.map((node, index) => {
+    const reused = reuse && reuse(index);
+    if (reused) return reused;
     const cls = classifyNode(node);
     const bpId = node.attrs && node.attrs.bpId;
     const id = bpId != null ? bpId : mintId(taken);
@@ -4342,7 +4350,12 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // an already-correct subsequence (e.g. a pure interior edit) emits zero moves.
   // We apply each move to `running` as we go, so subsequent checks see the
   // post-move order and we never emit a redundant move.
-  for (let i = 0; i < nextSeq.length; i++) {
+  // Already in order (every interior edit, every keystroke): each entry sits one
+  // slot after its predecessor, so the walk below would emit nothing. Checking
+  // that is linear; the walk's indexOf per entry is quadratic in the run's length
+  // (task-fb938eb8be3bce48).
+  const inOrder = running.length === nextSeq.length && nextSeq.every((e, i) => running[i] === e.id);
+  for (let i = 0; !inOrder && i < nextSeq.length; i++) {
     const id = nextSeq[i].id;
     // A LOCKED block holds its position (pdd-t2): never emit a move for it. The
     // filterTransaction veto keeps a locked node at its fixed index, so `running`
@@ -4382,8 +4395,13 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // field — a sheet's `ref`, an embed's `target` — which the canvas now retargets
   // through the reference picker, so an atom whose reference CHANGED emits exactly one
   // patch-block and one whose reference did not emits nothing.
+  // `options.unchangedIds` (the canvas emit's fast path, task-fb938eb8be3bce48)
+  // names surviving ids whose node the caller KNOWS still equals its prev block:
+  // their compare below could only find nothing to patch, so it is skipped.
+  const unchangedIds = options.unchangedIds instanceof Set ? options.unchangedIds : null;
   for (const entry of nextSeq) {
     if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
+    if (unchangedIds && unchangedIds.has(entry.id)) continue;
     // A read-only atom with no retargetable reference keeps the original
     // zero-ops-by-construction guarantee.
     if (entry.isReadOnlyAtom && !(entry.bpType in READ_ONLY_ATOM_RETARGET_KEY)) continue;
