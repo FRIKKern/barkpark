@@ -30,7 +30,10 @@ defmodule BarkparkWeb.Studio.ChatLocaleTest do
     {"</svg> chatter", "</svg> chats"},
     {"</svg> Ny", "</svg> New"},
     # The context band: the field name and the absence marker are words.
-    {"vert (lokalt på serveren)", "host (server-local)"}
+    {"vert (lokalt på serveren)", "host (server-local)"},
+    # task-e9866733f6217e28: the context ring's tooltip before the first result.
+    {~s(title="Kontekstvinduet er ukjent til det første resultatet"),
+     ~s(title="Context window unknown until the first result")}
   ]
 
   setup %{conn: conn} do
@@ -73,12 +76,15 @@ defmodule BarkparkWeb.Studio.ChatLocaleTest do
 
     assert conn |> get(path) |> html_response(200) =~ ~s(<html lang="nb-NO")
 
-    {:ok, _view, html} = live(conn, path)
+    {:ok, view, html} = live(conn, path)
 
     for {nb, en} <- @pairs do
       assert html =~ nb
       refute html =~ en
     end
+
+    # The tab title is capitalised like every other Studio tab.
+    assert page_title(view) == "Chat · Barkpark"
   end
 
   test "the default workspace's chat page stays English", %{conn: conn} do

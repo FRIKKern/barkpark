@@ -171,7 +171,9 @@ defmodule BarkparkWeb.Studio.ChatLive do
       {:ok,
        socket
        |> assign(
-         page_title: gettext("chat"),
+         # A capitalised title like every other Studio tab; the top-menu tab
+         # keeps its lowercase "chat" label (nav.ex tab_label/1).
+         page_title: gettext("Chat"),
          # The task reader (task-ed873c9ae56685b7): every ledger read this view
          # makes goes through `ChatTaskSeam`, resolved ONCE for the viewer's
          # workspace. nil = the tasks plugin is off for this workspace (or not
@@ -3656,7 +3658,7 @@ defmodule BarkparkWeb.Studio.ChatLive do
               phx-value-id={t.id}
               title={gettext("Claim-first: Claude claims it, reads the brief, stamps evidence, closes")}
             >
-              Hand to Claude
+              {gettext("Hand to Claude")}
             </button>
           </div>
         </div>
@@ -8424,10 +8426,10 @@ defmodule BarkparkWeb.Studio.ChatLive do
 
   defp ring_title(%{context_tokens: used, context_window: window})
        when is_integer(used) and is_integer(window) and window > 0 do
-    "Context: #{used} / #{window} tokens"
+    gettext("Context: %{used} / %{window} tokens", used: used, window: window)
   end
 
-  defp ring_title(_), do: "Context window unknown until the first result"
+  defp ring_title(_), do: gettext("Context window unknown until the first result")
 
   defp format_cost(cost) when is_number(cost) and cost > 0 do
     "$" <> :erlang.float_to_binary(cost / 1, decimals: 4)
