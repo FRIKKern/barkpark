@@ -20,7 +20,7 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
       valid    | valid          | the BEARER's token
       valid    | absent         | the BEARER's token
       INVALID  | valid          | the SESSION's token (bearer does NOT win)
-      INVALID  | absent         | anonymous — no `:api_token` assign
+      INVALID  | absent         | anonymous — no `:api_token` assign (or 401, strict — see below)
       absent   | valid          | the SESSION's token
       absent   | absent         | anonymous — no `:api_token` assign
 
@@ -29,10 +29,32 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
   absent one here and falls through identically. Pinned case-by-case in
   `test/barkpark_web/plugs/optional_session_token_precedence_test.exs`.
 
-  Never halts — like
+  Default (`strict_on_presented: false`): never halts — like
   `BarkparkWeb.Plugs.OptionalToken`, it passes an anonymous conn through
   untouched and lets the downstream membership gate
   (`BarkparkWeb.Plugs.ResolveWorkspace`) reject closed.
+
+  ## `strict_on_presented: true` (task-2366a212d58a1700)
+
+  Mirrors `OptionalToken`'s own opt of the same name: a request that
+  PRESENTS `Authorization: Bearer <x>` where `<x>` does not verify (revoked,
+  expired, or never existed) halts with the same indistinguishable 401
+  `RequireToken` emits — UNLESS the row above's own session fallback would
+  have recovered it anyway (a valid session token, OR a valid
+  `:current_user` account session). Only the ONE row that previously fell
+  through to pure anonymous (`INVALID` bearer, nothing else resolves it
+  either) changes shape; every other row in the table is untouched,
+  including "INVALID bearer, valid session → the SESSION's token", which
+  still wins exactly as before. Why: this plug serves routes a browser
+  Studio session legitimately reaches with a stale cached bearer header
+  alongside a live session cookie, and that caller must keep working.
+
+  Exists because `ResolveWorkspace`'s membership gate cannot tell "no
+  credential was presented" from "a credential was presented and it was
+  garbage" once a bad bearer has already been silently dropped here — both
+  read as anonymous and get the SAME 403 `not_a_member`, which misleads a
+  caller holding a genuinely revoked token into thinking they lack
+  permission rather than realizing their credential is dead.
 
   This is the cookie-aware sibling of `OptionalToken`. It exists for the
   `:scoped_browser` pipeline: a logged-in browser user carries only the
@@ -61,6 +83,7 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
 
   import Plug.Conn
   alias Barkpark.Auth
+  alias BarkparkWeb.Plugs.RequireToken
 
   # Ruling #16 rework half (task-57f23825b18ab55d): "`session["api_token"]`"
   # above is the LEGACY shape — a cookie minted before a revocable session row
@@ -69,9 +92,12 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
 
   def init(opts), do: opts
 
-  def call(conn, _opts) do
+  def call(conn, opts) do
+    strict? = strict_on_presented?(opts)
+    bearer_token = token_from_bearer(conn)
+
     conn =
-      case token_from_bearer(conn) || token_from_session(conn) || token_from_dev_config() do
+      case bearer_token || token_from_session(conn) || token_from_dev_config() do
         {:ok, token} -> assign(conn, :api_token, token)
         _ -> conn
       end
@@ -81,9 +107,25 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
     # User principal the downstream gates (ResolveWorkspace, LiveScope) accept
     # via Tenancy.Auth.authorize/3. Soft like the token arm: invalid/absent
     # passes through anonymous. A token, when present, keeps precedence.
-    case user_from_session(conn) do
-      %Barkpark.Accounts.User{} = user -> assign(conn, :current_user, user)
-      _ -> conn
+    conn =
+      case user_from_session(conn) do
+        %Barkpark.Accounts.User{} = user -> assign(conn, :current_user, user)
+        _ -> conn
+      end
+
+    # task-2366a212d58a1700 — the ONE row of the precedence table this
+    # changes: a bearer was PRESENTED (`bearer_presented?/1`), it did NOT
+    # verify (`bearer_token` is nil, so it is not a plain absent header), and
+    # NOTHING else recovered it either (no session token, no session user).
+    # Every other row -- a valid session recovering an invalid bearer chief
+    # among them -- is untouched: this check runs LAST, after both
+    # assigns above already ran, so it only ever fires when they both failed.
+    if strict? and is_nil(bearer_token) and bearer_presented?(conn) and
+         not Map.has_key?(conn.assigns, :api_token) and
+         not Map.has_key?(conn.assigns, :current_user) do
+      RequireToken.deny(conn, {:error, :unauthorized})
+    else
+      conn
     end
   end
 
@@ -106,6 +148,20 @@ defmodule BarkparkWeb.Plugs.OptionalSessionToken do
       _ -> nil
     end
   end
+
+  # Same predicate `OptionalToken` strict-mode uses: did the REQUEST carry a
+  # Bearer scheme at all, regardless of whether it verified. `token_from_bearer/1`
+  # alone cannot answer this -- it returns nil for both "absent" and
+  # "presented but invalid", which is exactly the ambiguity strict mode exists
+  # to resolve.
+  defp bearer_presented?(conn),
+    do: match?(["Bearer " <> _], get_req_header(conn, "authorization"))
+
+  defp strict_on_presented?(opts) when is_list(opts),
+    do: Keyword.get(opts, :strict_on_presented, false)
+
+  defp strict_on_presented?(%{} = opts), do: Map.get(opts, :strict_on_presented, false)
+  defp strict_on_presented?(_), do: false
 
   defp token_from_session(conn) do
     case Auth.resolve_session_credential(
