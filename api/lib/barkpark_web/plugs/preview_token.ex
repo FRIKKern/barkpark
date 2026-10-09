@@ -12,6 +12,11 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
     the backlinks / related / tags reads and `?expand=` are refused, because
     each returns documents the token does not name. An empty or absent list
     keeps the dataset-wide behaviour existing integrations rely on.
+    `GET /v1/preview/listen/:dataset` (task-78dc25a4f117fa07) is ALSO allowed
+    with a non-empty list — the SSE/listen route carries neither `:doc_id` nor
+    `:type` in its path, so it needs its own `listen_route?/1` match below; the
+    per-event fence for what a doc-scoped token's stream actually forwards
+    lives in `BarkparkWeb.ListenFilter`'s `only_doc_ids`.
   * `workspace_id` (optional) — reads run in that workspace instead of the
     Default workspace; `project_id` (optional) narrows to one of its projects.
     A workspace or project the box does not have is refused.
@@ -90,11 +95,25 @@ defmodule BarkparkWeb.Plugs.PreviewToken do
           is_binary(params["type"]) ->
             {:ok, ids}
 
+          # task-78dc25a4f117fa07: GET /v1/preview/listen/:dataset carries
+          # neither `:doc_id` nor `:type` in its path — a dataset-only shape
+          # none of the arms above recognise. Matched by EXACT path_info,
+          # not by "no doc_id and no type", so a future preview route that
+          # also lacks those params does not silently fall into this arm —
+          # it stays {:error, :preview_scope} until it is named here too.
+          # The per-event doc_id fence for what this token actually streams
+          # lives downstream, in ListenFilter's only_doc_ids (listen_filter.ex).
+          listen_route?(conn) ->
+            {:ok, ids}
+
           true ->
             {:error, :preview_scope}
         end
     end
   end
+
+  defp listen_route?(%{path_info: ["v1", "preview", "listen", _dataset]}), do: true
+  defp listen_route?(_), do: false
 
   defp maybe_assign_doc_ids(conn, []), do: conn
   defp maybe_assign_doc_ids(conn, ids), do: assign(conn, :preview_doc_ids, ids)

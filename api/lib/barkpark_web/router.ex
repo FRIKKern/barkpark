@@ -2431,6 +2431,14 @@ defmodule BarkparkWeb.Router do
     get("/related/:dataset/:id", QueryController, :related)
     get("/tags/:dataset", QueryController, :tag_browse)
     get("/tags/:dataset/:tag", QueryController, :tag_docs)
+
+    # task-78dc25a4f117fa07 — SAME action /v1/data/listen/:dataset uses
+    # (ListenController.listen/2), mounted a second time under the preview
+    # JWT's auth pipeline instead of a bearer token's. Zero new controller
+    # logic for the route itself: listen_filter.ex's only_doc_ids fences a
+    # doc-scoped token's stream to its own documents (see that module and
+    # Plugs.PreviewToken's moduledoc for the auth/scope contract).
+    get("/listen/:dataset", ListenController, :listen)
   end
 
   # ── Private API — full CRUD, requires token ─────────────────────────────

@@ -61,6 +61,15 @@ defmodule BarkparkWeb.ListenController do
     # workspace-wide, as the ruling chose.
     lf = ListenFilter.narrow_to_project(lf, project_path_project_id(conn, scope))
 
+    # task-78dc25a4f117fa07: a doc-scoped Barkpark.PreviewToken (owner ruling
+    # #17) threads `:only_doc_ids` into `scope` the same way it already does
+    # for every other read (`ScopeHelpers.scope_opts/1`'s `maybe_only_doc_ids/2`)
+    # — this is the ONE line that makes a /v1/preview/listen connection fence
+    # to the token's own documents instead of the whole dataset topic. A
+    # bearer-token caller's scope never carries this key, so this is a no-op
+    # for every pre-existing /v1/data/listen connection.
+    lf = ListenFilter.narrow_to_only_doc_ids(lf, Keyword.get(scope, :only_doc_ids))
+
     # Tenancy scope for BOTH stream legs, read from the SAME `scope_opts/1` the
     # field-visibility scope above comes from — not from a private re-read of
     # `conn.assigns[:current_workspace]`.

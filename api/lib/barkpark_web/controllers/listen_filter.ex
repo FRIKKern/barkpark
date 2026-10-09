@@ -47,14 +47,27 @@ defmodule BarkparkWeb.ListenFilter do
   # `project_id` is not a query param: the controller sets it from the URL
   # (`narrow_to_project/2`) when the stream was opened on a
   # `/w/:ws/p/:proj/...` path (owner ruling #50, task-d60479a7749b0ca5).
-  defstruct types: nil, ids: nil, perspective: nil, filter: %{}, project_id: nil
+  #
+  # `only_doc_ids` is ALSO not a query param: the controller sets it from
+  # `scope[:only_doc_ids]` (`narrow_to_only_doc_ids/2`, task-78dc25a4f117fa07)
+  # when the connection carries a doc-scoped `Barkpark.PreviewToken` — a
+  # SERVER-ENFORCED floor the caller cannot widen, unlike `ids` (a caller's
+  # own `?ids=` narrowing). The two compose as an AND in `id_ok?/2` below:
+  # a token scoped to {A, B} that also asks `?ids=A,C` sees only A.
+  defstruct types: nil,
+            ids: nil,
+            perspective: nil,
+            filter: %{},
+            project_id: nil,
+            only_doc_ids: nil
 
   @type t :: %__MODULE__{
           types: MapSet.t(String.t()) | nil,
           ids: MapSet.t(String.t()) | nil,
           perspective: String.t() | nil,
           filter: %{optional(String.t()) => [String.t()]},
-          project_id: String.t() | nil
+          project_id: String.t() | nil,
+          only_doc_ids: MapSet.t(String.t()) | nil
         }
 
   @doc "The `?perspective` values the listen route honours."
@@ -135,6 +148,7 @@ defmodule BarkparkWeb.ListenFilter do
   @spec pass_meta?(t(), %{type: term(), doc_id: term()}) :: boolean()
   def pass_meta?(%__MODULE__{} = f, %{type: type, doc_id: doc_id} = event) do
     type_ok?(f.types, type) and id_ok?(f.ids, doc_id) and
+      id_ok?(f.only_doc_ids, doc_id) and
       perspective_ok?(f.perspective, doc_id) and project_ok?(f.project_id, event)
   end
 
@@ -150,6 +164,24 @@ defmodule BarkparkWeb.ListenFilter do
     do: %{f | project_id: project_id}
 
   def narrow_to_project(%__MODULE__{} = f, _), do: f
+
+  @doc """
+  Narrow the stream to a `Barkpark.PreviewToken`'s own `doc_ids` claim
+  (task-78dc25a4f117fa07, owner ruling #17's listen twin). This is a
+  SERVER-ENFORCED floor, not a caller-chosen narrowing like `ids` above — a
+  doc-scoped preview token's connection never forwards another document's
+  event, on either the live leg or the Last-Event-ID replay leg (both run
+  `pass_meta?/2`). `ids` already published-normalises via `DraftId` at parse
+  time; `only_doc_ids` is handed the SAME normalised set `ScopeHelpers`
+  already built (`scope[:only_doc_ids]`), so no second normalisation runs
+  here — `nil`/`[]` (no token scope, or an empty-doc_ids dataset-wide token)
+  leaves the stream unnarrowed, exactly like `narrow_to_project/2`'s `nil` arm.
+  """
+  @spec narrow_to_only_doc_ids(t(), [String.t()] | nil) :: t()
+  def narrow_to_only_doc_ids(%__MODULE__{} = f, [_ | _] = ids),
+    do: %{f | only_doc_ids: MapSet.new(ids)}
+
+  def narrow_to_only_doc_ids(%__MODULE__{} = f, _), do: f
 
   # An event with no project (a shared-layer or pre-tenancy row) is not this
   # project's business either.
