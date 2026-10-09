@@ -499,7 +499,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n}>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — managed via API</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — managed via API") %></span>
     </div>
     """
   end
