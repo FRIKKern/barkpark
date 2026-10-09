@@ -3420,7 +3420,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                 <button type="button" class="btn btn-ghost btn-sm" phx-click="cf-delete" phx-value-id={rule["id"]} phx-target={@myself} aria-label={gettext("Delete rule %{rule}", rule: cf_rule_summary(rule))} data-test-id={"sheet-cf-delete-" <> to_string(rule["id"])}><%= gettext("Delete") %></button>
               </li>
             </ul>
-            <p :if={@cf_rules == []} class="sheet-cf-empty" data-test-id="sheet-cf-empty">No rules yet — add one below.</p>
+            <p :if={@cf_rules == []} class="sheet-cf-empty" data-test-id="sheet-cf-empty"><%= gettext("No rules yet — add one below.") %></p>
 
             <%!-- Create / edit form. phx-change tracks the op so value2 appears
                   only for "between" and typed values survive the re-render. --%>
@@ -3980,7 +3980,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
       </div>
 
       <div :if={@sel_stats} class="sheet-statsbar" data-test-id="sheet-statsbar">
-        Sum: {Sheets.number_to_display(@sel_stats.sum)} · Avg: {Sheets.number_to_display(@sel_stats.avg)} · Count: {@sel_stats.count}
+        {gettext("Sum:")} {Sheets.number_to_display(@sel_stats.sum)} · {gettext("Avg:")} {Sheets.number_to_display(@sel_stats.avg)} · {gettext("Count:")} {@sel_stats.count}
       </div>
     </div>
     """
@@ -4052,8 +4052,8 @@ defmodule BarkparkWeb.Studio.SheetGrid do
                       Sort is an EDIT mutation, so these menu items live INSIDE the
                       @editable block and NEVER render in a read-only view (SF-AM2d,
                       SF-AM4). --%>
-                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="asc" phx-target={@myself} data-test-id={"sheet-sort-col-asc-#{c}"}>Sort A→Z</button>
-                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="desc" phx-target={@myself} data-test-id={"sheet-sort-col-desc-#{c}"}>Sort Z→A</button>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="asc" phx-target={@myself} data-test-id={"sheet-sort-col-asc-#{c}"}>{gettext("Sort A→Z")}</button>
+                <button type="button" role="menuitem" phx-click="sort-column" phx-value-col={c} phx-value-dir="desc" phx-target={@myself} data-test-id={"sheet-sort-col-desc-#{c}"}>{gettext("Sort Z→A")}</button>
               </div>
             <% end %>
             <%!-- Per-column FILTER funnel (SF-D9 + SF-AM4). Pure LiveView,

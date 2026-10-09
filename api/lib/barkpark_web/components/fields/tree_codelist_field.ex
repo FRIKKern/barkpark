@@ -360,7 +360,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           disabled
           data-codelist-empty="true"
         >
-          <option value="">(no codelist registered: <%= @plugin_name %>:<%= @list_id %>)</option>
+          <option value=""><%= gettext("(no codelist registered: %{list})", list: "#{@plugin_name}:#{@list_id}") %></option>
         </select>
       <% else %>
         <input

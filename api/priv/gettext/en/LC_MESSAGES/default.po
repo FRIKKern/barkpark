@@ -2373,6 +2373,7 @@ msgid "Tag strength, 1 to 100"
 msgstr ""
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:406
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:395
 #, elixir-autogen, elixir-format
 msgid "This %{type} ("
 msgstr ""
@@ -3035,6 +3036,8 @@ msgstr ""
 msgid "Loading assets…"
 msgstr ""
 
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:542
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1178
 #: lib/barkpark_web/studio_locale.ex:184
 #, elixir-autogen, elixir-format
 msgid "Locked"
@@ -10495,4 +10498,96 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgctxt "callout tone"
 msgid "warning"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5063
+#, elixir-autogen, elixir-format
+msgid "%{type} blocks are not editable yet (view/delete/reorder only)."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/paper_field_block.ex:296
+#, elixir-autogen, elixir-format
+msgid "%{type} blocks are not editable yet."
+msgstr ""
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:363
+#, elixir-autogen, elixir-format
+msgid "(no codelist registered: %{list})"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:395
+#, elixir-autogen, elixir-format, fuzzy
+msgid ") has no body blocks yet. Add one below."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/paper_field_block.ex:198
+#, elixir-autogen, elixir-format, fuzzy
+msgid "+ Add"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format
+msgid "Avg:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format, fuzzy
+msgid "Count:"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3423
+#, elixir-autogen, elixir-format
+msgid "No rules yet — add one below."
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4055
+#, elixir-autogen, elixir-format
+msgid "Sort A→Z"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4056
+#, elixir-autogen, elixir-format
+msgid "Sort Z→A"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format
+msgid "Sum:"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_text_field.ex:106
+#, elixir-autogen, elixir-format
+msgid "no translation available"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/localized_text_field.ex:101
+#, elixir-autogen, elixir-format
+msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:681
+#, elixir-autogen, elixir-format
+msgid "read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:136
+#: lib/barkpark_web/components/fields/composite_field.ex:194
+#, elixir-autogen, elixir-format
+msgid "read-only — stored as structured data this field's editor cannot show; saved unchanged"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:480
+#, elixir-autogen, elixir-format
+msgid "read-only — the .scaffy source of truth; edit in the repo"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/codelist_field.ex:181
+#: lib/barkpark_web/components/fields/composite_field.ex:550
+#, elixir-autogen, elixir-format, fuzzy
+msgid "— Select —"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4725
+#, elixir-autogen, elixir-format, fuzzy
+msgid "— divider —"
 msgstr ""

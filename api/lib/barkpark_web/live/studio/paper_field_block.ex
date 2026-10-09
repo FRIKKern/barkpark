@@ -195,7 +195,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
           phx-click="inner-array-op"
           phx-target={@myself}
           phx-value-action="add_row"
-        >+ Add</button>
+        ><%= gettext("+ Add") %></button>
       </form>
     </div>
     """
@@ -293,7 +293,7 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
     ~H"""
     <div class="bp-paper-composite-block bp-paper-composite-unknown" data-block-id={@block_id}>
       <p class="bp-paper-edit-readonly">
-        <%= @field_type %> blocks are not editable yet.
+        <%= gettext("%{type} blocks are not editable yet.", type: @field_type) %>
       </p>
     </div>
     """

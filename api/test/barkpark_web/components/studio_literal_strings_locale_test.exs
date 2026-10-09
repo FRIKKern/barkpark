@@ -37,6 +37,23 @@ defmodule BarkparkWeb.Components.StudioLiteralStringsLocaleTest do
     in_locale(locale, fn -> render_component(&Editor.doc_conflict_banner/1, conflict: true) end)
   end
 
+  # A string field handed a structured stored value renders read-only with a note.
+  defp structured(locale) do
+    in_locale(locale, fn ->
+      render_component(&FieldInputs.input/1,
+        field: %{"type" => "string", "name" => "slug"},
+        editor_form: %{"slug" => %{"current" => "x"}}
+      )
+    end)
+  end
+
+  test "the read-only structured-value note reads in the Studio language" do
+    assert structured("nb_NO") =~ "skrivebeskyttet — lagret som strukturerte data"
+
+    assert structured("en") =~
+             "read-only — stored as structured data this field&#39;s editor cannot show; saved unchanged"
+  end
+
   test "the select placeholder, colour field and conflict banner read Norwegian under nb_NO" do
     assert select("nb_NO") =~ "Velg…"
     refute select("nb_NO") =~ "Select…"

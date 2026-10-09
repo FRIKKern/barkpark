@@ -31,6 +31,7 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias Barkpark.Content.LocalizedText
 
@@ -97,12 +98,12 @@ defmodule BarkparkWeb.Components.Fields.LocalizedTextField do
               data-severity="warning"
               data-missing-primary={@warning.primary}
               data-using-fallback={@warning.using}>
-          primary translation `<%= @warning.primary %>` missing — using fallback `<%= @warning.using %>`
+          <%= gettext("primary translation `%{primary}` missing — using fallback `%{using}`", primary: @warning.primary, using: @warning.using) %>
         </span>
       <% end %>
 
       <%= if @resolution == {:error, :no_value} and @value_map != %{} do %>
-        <span class="error bp-localized-empty" data-severity="error">no translation available</span>
+        <span class="error bp-localized-empty" data-severity="error"><%= gettext("no translation available") %></span>
       <% end %>
 
       <%= for lang <- @languages do %>
