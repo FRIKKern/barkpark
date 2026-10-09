@@ -45,6 +45,19 @@ defmodule Barkpark.Sharing.PreviewLinks do
     do: Links.workspace_admin?(principal, workspace_id)
 
   @doc """
+  The stable principal-ref `created_by` stamps and `list_for/5`/`revoke_scoped/2`
+  compare against: `"api_token:<id>"` or `"user:<id>"` — the same shape
+  `Tenancy.Members.invited_by` already uses (task-0548f06277c4712e). `nil` for
+  anything else (no principal, or a shape neither clause names), so a caller
+  that minted with no identifiable principal never collides with a later
+  "mine" filter by coincidence.
+  """
+  @spec actor_ref(term()) :: String.t() | nil
+  def actor_ref(%Barkpark.Auth.ApiToken{id: id}), do: "api_token:" <> id
+  def actor_ref(%Barkpark.Accounts.User{id: id}), do: "user:" <> id
+  def actor_ref(_), do: nil
+
+  @doc """
   Create a preview link. `attrs` must carry `:workspace_id`, `:project_id`,
   `:dataset`, `:doc_id` (raw — a `drafts.` prefix is kept verbatim), `:ref_type`;
   optional `:label`, `:ttl` (seconds — defaulted and clamped, see moduledoc).
@@ -137,21 +150,29 @@ defmodule Barkpark.Sharing.PreviewLinks do
   end
 
   @doc """
-  Revoke a link only when `principal` administers the link ROW's OWN
-  workspace AND (task-4ad625842939ae8f) is not `dataset_bound` to some OTHER
-  dataset than the row's own — same denial shape as `Links.revoke_scoped/2`:
-  a non-castable id, a missing row, a foreign row, a row with a nil
-  `workspace_id`, and now a dataset_bound token's wrong-dataset row all
-  collapse to `{:error, :not_found}`. The id is the only thing the request
-  names, so a dataset mismatch here folds into the existing collapse rather
-  than a distinguishable refusal — see `Links.revoke_scoped/2`'s docstring
-  for why that would be an existence leak.
+  Revoke a link when `principal` administers the link ROW's OWN workspace, OR
+  (task-0548f06277c4712e) when `principal` is the link's own creator —
+  `created_by == actor_ref(principal)`, never true for a NULL `created_by`
+  (a link minted before this field existed stays admin-only-revocable, which
+  is the existing behaviour, not a regression) — AND (task-4ad625842939ae8f)
+  is not `dataset_bound` to some OTHER dataset than the row's own. BOTH must
+  hold: dataset_bound is an absolute confinement on the token itself, so it
+  applies whether the caller is revoking as admin or as the link's own
+  creator. Same denial shape as `Links.revoke_scoped/2`, widened to cover
+  both new cases: a non-castable id, a missing row, a foreign row (neither
+  admin nor creator), a row with a nil `workspace_id`, and now a
+  dataset_bound token's wrong-dataset row all collapse to
+  `{:error, :not_found}`. The id is the only thing the request names, so
+  neither a creator mismatch nor a dataset mismatch gets a distinguishable
+  refusal — see `Links.revoke_scoped/2`'s docstring for why that would be an
+  existence leak.
   """
   @spec revoke_scoped(term(), term()) :: {:ok, PreviewLink.t()} | {:error, :not_found}
   def revoke_scoped(principal, id) do
     with row_id when is_binary(row_id) <- Repo.uuid_or_nil(id),
-         %PreviewLink{workspace_id: ws_id, dataset: row_dataset} <- Repo.get(PreviewLink, row_id),
-         true <- workspace_admin?(principal, ws_id),
+         %PreviewLink{workspace_id: ws_id, dataset: row_dataset, created_by: owner} <-
+           Repo.get(PreviewLink, row_id),
+         true <- authorized_for_row?(principal, ws_id, owner),
          true <- dataset_in_bounds?(principal, row_dataset) do
       revoke(row_id)
     else
@@ -159,23 +180,50 @@ defmodule Barkpark.Sharing.PreviewLinks do
     end
   end
 
+  defp authorized_for_row?(principal, workspace_id, owner) do
+    workspace_admin?(principal, workspace_id) or
+      (not is_nil(owner) and actor_ref(principal) == owner)
+  end
+
   defp dataset_in_bounds?(%{dataset_bound: true, dataset: bound}, row_dataset),
     do: bound == row_dataset
 
   defp dataset_in_bounds?(_principal, _row_dataset), do: true
 
-  @doc "List the preview links for one document (newest first), scoped to a project+dataset."
-  @spec list_for(binary(), binary(), binary(), binary()) :: [PreviewLink.t()]
-  def list_for(workspace_id, project_id, dataset, doc_id) do
+  @doc """
+  List the preview links for one document (newest first), scoped to a
+  project+dataset. `scope:` (task-0548f06277c4712e) is the admin/member split:
+
+    * `:all` (the default) — every link, unfiltered. The admin "list-all" view.
+    * `{:mine, ref}` — only links whose `created_by == ref`. The non-admin
+      member's "list my own" view. `ref: nil` (no identifiable principal)
+      deliberately matches NOTHING rather than falling through to `:all` — a
+      caller with no resolvable ref must never see every member's links by
+      having that nil compared against other nils, so it short-circuits to an
+      empty list before a query is even built.
+  """
+  @spec list_for(binary(), binary(), binary(), binary(), :all | {:mine, String.t() | nil}) ::
+          [PreviewLink.t()]
+  def list_for(workspace_id, project_id, dataset, doc_id, scope \\ :all)
+
+  def list_for(_workspace_id, _project_id, _dataset, _doc_id, {:mine, nil}), do: []
+
+  def list_for(workspace_id, project_id, dataset, doc_id, scope) do
     PreviewLink
     |> where(
       [l],
       l.workspace_id == ^workspace_id and l.project_id == ^project_id and
         l.dataset == ^dataset and l.doc_id == ^doc_id
     )
+    |> scope_query(scope)
     |> order_by([l], desc: l.inserted_at)
     |> Repo.all()
   end
+
+  defp scope_query(query, :all), do: query
+
+  defp scope_query(query, {:mine, ref}) when is_binary(ref),
+    do: where(query, [l], l.created_by == ^ref)
 
   # 24 bytes -> 32 url-safe chars. Opaque; the link is the only authorization.
   # Mirrors Links.generate_token/0's shape; not called through it because that

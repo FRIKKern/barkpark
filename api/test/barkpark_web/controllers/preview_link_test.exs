@@ -262,7 +262,14 @@ defmodule BarkparkWeb.PreviewLinkTest do
     assert get(scoped_conn(), "/sp/not-a-real-token").status == 404
   end
 
-  test "minting / listing / revoking are admin-only", %{conn: conn, scope_str: scope} do
+  test "minting / listing / revoking refuse a caller with no membership in this workspace",
+       %{conn: conn, scope_str: scope} do
+    # @junior carries flat "write" permission (so it clears the router's
+    # :require_write pipeline gate the same as an admin would) but is NEVER
+    # made a MEMBER of this test's workspace -- task-0548f06277c4712e and
+    # task-9cfe08fe1e91b6c9 both confine on workspace membership + write,
+    # not on global "admin", so a stranger to this specific workspace is
+    # still refused on mint/list exactly as before the widening.
     body = %{scope: scope, ref_type: "post", doc_id: "post1"}
     assert conn |> post("/v1/shares/preview-links", body) |> Map.get(:status) == 401
     assert conn |> junior() |> post("/v1/shares/preview-links", body) |> Map.get(:status) == 403
@@ -272,7 +279,13 @@ defmodule BarkparkWeb.PreviewLinkTest do
            |> get("/v1/shares/preview-links?scope=#{scope}&ref_type=post&doc_id=post1")
            |> Map.get(:status) == 403
 
-    assert conn |> junior() |> delete("/v1/shares/preview-links/x") |> Map.get(:status) == 403
+    # revoke is DIFFERENT (task-0548f06277c4712e): it is no longer gated by
+    # `:require_admin` at the router, so a write-capable caller (junior
+    # qualifies) reaches PreviewLinks.revoke_scoped/2, which answers
+    # {:error, :not_found} for ANY id it cannot cast/resolve/authorize --
+    # a malformed id ("x") is 404 for every caller now, not a workspace-level
+    # 403, matching the "no existence oracle" law this door already holds.
+    assert conn |> junior() |> delete("/v1/shares/preview-links/x") |> Map.get(:status) == 404
   end
 
   test "minting a link for a non-existent document is 422", %{conn: conn, scope_str: scope} do

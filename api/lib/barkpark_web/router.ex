@@ -3111,12 +3111,11 @@ defmodule BarkparkWeb.Router do
     # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of /links
     # above, not a branch of it: Links.create/1 strips a `drafts.` prefix off
     # ref_id unconditionally, so it can never name an unpublished row.
-    # list/revoke stay admin-only; mint moved below
-    # (task-9cfe08fe1e91b6c9 widened it to any write-capable member, same
-    # posture as task-ea6c9abb868593f8/task-d50757dc446514e7). Public reader
+    # list/revoke/mint all moved below (task-0548f06277c4712e widened
+    # list/revoke to a write-capable member's own links, after
+    # task-9cfe08fe1e91b6c9 widened mint the same way) — none of the three
+    # preview-link actions carries `:require_admin` any more; public reader
     # is GET /sp/:token below.
-    get("/preview-links", PreviewLinkController, :list)
-    delete("/preview-links/:id", PreviewLinkController, :revoke)
   end
 
   # task-9cfe08fe1e91b6c9 — PreviewLinkController.mint/2 widened from
@@ -3135,6 +3134,17 @@ defmodule BarkparkWeb.Router do
     pipe_through([:api, :require_token, :flat_within_quota, :require_write])
 
     post("/preview-links", PreviewLinkController, :mint)
+
+    # task-0548f06277c4712e — list/revoke widened the SAME way mint already
+    # was: a write-capable member sees/revokes only the links THEY minted
+    # (`ensure_can_list/2`, `PreviewLinks.revoke_scoped/2`'s creator check);
+    # an admin keeps list-all/revoke-all. Moved out of the `:require_admin`
+    # scope above for exactly that reason — a plain member with no global
+    # "admin" permission must still reach these two actions to manage their
+    # own links; the fine-grained admin-vs-own-creator split lives in the
+    # controller, not the pipeline.
+    get("/preview-links", PreviewLinkController, :list)
+    delete("/preview-links/:id", PreviewLinkController, :revoke)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound
