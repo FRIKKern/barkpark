@@ -129,6 +129,37 @@ defmodule BarkparkWeb.MediaController do
     end
   end
 
+  # ── Dataset-bound token confinement (task-9d76210585fa665b) ─────────────────
+  #
+  # The by-id reads (`show/2`, `serve/2`, `serve_rendition/2`) name no dataset,
+  # so the request-level fence (`RequireToken.dataset_off_binding?/2`, which
+  # reads the `:dataset` segment or param) has nothing to compare. A token
+  # minted with an explicit `dataset` (`dataset_bound: true`) is therefore held
+  # to it HERE, against the row's own dataset. `:not_found`, like the share
+  # fence above: a miss and an out-of-binding row answer the same. Unbound
+  # tokens and token-less callers pass untouched.
+  defp confine_bound_dataset(conn, %MediaFile{} = file) do
+    case bound_dataset(conn) do
+      nil -> {:ok, file}
+      dataset when dataset == file.dataset -> {:ok, file}
+      _ -> {:error, :not_found}
+    end
+  end
+
+  defp bound_dataset(conn) do
+    case conn.assigns[:api_token] do
+      %Barkpark.Auth.ApiToken{dataset_bound: true, dataset: dataset} -> dataset
+      _ -> nil
+    end
+  end
+
+  # The dataset a list/upload acts on when the request names none: a bound
+  # token's own dataset, else the historical `"production"` default. A request
+  # that names ANOTHER dataset never gets here for a bound token — the bearer
+  # doors refuse it first.
+  defp request_dataset(conn),
+    do: Map.get(conn.params, "dataset") || bound_dataset(conn) || "production"
+
   # ── Transform-param denylist guard (wb-api-media-transform-params-400) ──────
   #
   # `serve/2` and `serve_rendition/2` parsed NO transform vocabulary at all — a
@@ -150,7 +181,7 @@ defmodule BarkparkWeb.MediaController do
 
   @doc "Upload a file via multipart form data."
   def upload(conn, %{"file" => upload}) do
-    dataset = Map.get(conn.params, "dataset", "production")
+    dataset = request_dataset(conn)
 
     case Media.upload(upload, dataset, scope_opts(conn)) do
       {:ok, file} ->
@@ -192,7 +223,7 @@ defmodule BarkparkWeb.MediaController do
   actually returned.
   """
   def index(conn, params) do
-    dataset = Map.get(params, "dataset", "production")
+    dataset = request_dataset(conn)
     mime_filter = Map.get(params, "type")
     opts = scope_opts(conn)
 
@@ -224,6 +255,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
+         {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :view) do
       json(conn, render_file(file, conn))
@@ -251,6 +283,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file_by_path(relative_path, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
+         {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :original) do
       # Serve the path off the RESOLVED record, not the raw URL segment. The
@@ -362,6 +395,7 @@ defmodule BarkparkWeb.MediaController do
     with {:ok, file} <- Media.get_file(id, opts),
          {:ok, file} <- confine_one(opts, file),
          {:ok, file} <- confine_share_dataset(conn, file),
+         {:ok, file} <- confine_bound_dataset(conn, file),
          doc <- Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)),
          true <- Access.allowed?(conn, file, doc, :preview),
          watermark = Access.watermark_profile(doc),
