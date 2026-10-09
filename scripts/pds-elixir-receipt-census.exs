@@ -1557,7 +1557,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
-      basis_spans: [{629, 629}],
+      basis_spans: [{706, 706}],
       basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1575,7 +1575,7 @@ defmodule PDS.Census do
           "the org allowed-auth-methods guard — +10, the comment still sits on the def's first " <>
           "body line. RE-ANCHORED again off :522 on the re-auth failure budget (owner ruling #34): " <>
           "erase/2, above this def, grew by 8 lines when it took the rate-limited branch — +8, " <>
-          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19.",
+          "the comment still sits on the def's first body line. RE-ANCHORED again on owner ruling #13 (task-f4cfc3e2ab4bd6b8): create_token/2, above this def, took the recent-auth check — +37; then login/2 took the org-MFA factor demand (owner ruling #14) — +6; then create_token/2 and resolve_caller_workspace/2 grew when the PAT mint started naming its workspace (owner ruling #7, task-a08da65bc33083d0) — +37. RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — comment slid :610 -> :629, the def's first body line, by +19. RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): create_token/2 took a new \"Optional expiry\" @doc section, and mint_pat/4 split into mint_pat/4 (the fetch_pat_expiry/1 dispatch) + a new do_mint_pat/5 (the mint itself, plus two new TokenExpiry error clauses) so the pre-existing changeset clause ChangesetDetailControllersTest source-anchors stayed at its old indentation depth — net +77 lines above this def — comment slid :629 -> :706, the def's first body line, by +77.",
       why:
         "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
           "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
@@ -1584,7 +1584,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{644, 649}],
+      basis_spans: [{721, 726}],
       basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
@@ -1603,7 +1603,7 @@ defmodule PDS.Census do
           "login/2 taking the org allowed-auth-methods guard (the token `anti-enumeration` now " <>
           "on :540). RE-ANCHORED again off :537-542 on the re-auth failure budget (owner ruling " <>
           "#34): +8 lines inserted above by erase/2 taking the rate-limited branch (the token " <>
-          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647).",
+          "`anti-enumeration` now on :548). RE-ANCHORED again 2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new def above this one, was inserted whole (+17), and me/2 above it grew by one field (+1) — doc slid :625-630 -> :644-649, the token `anti-enumeration` now on :647). RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): the same +77-line insertion above (create_token/2's new @doc section and the mint_pat/4 -> mint_pat/4+do_mint_pat/5 split) slid the doc :644-649 -> :721-726, the token `anti-enumeration` now on :724).",
       why:
         "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
           ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
@@ -1714,7 +1714,7 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
             "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
-      basis_spans: [{655, 677}],
+      basis_spans: [{732, 754}],
       basis_token: "why it must merge",
       class: "PURE-ECHO",
       confirmation: "declared",
@@ -1724,7 +1724,10 @@ defmodule PDS.Census do
           "2026-10-08 (task-cfb6ca3f5ffaf099): AuthController.update_display_name/2, a new " <>
           "def above this one, was inserted whole (+17), and me/2 above it grew by one " <>
           "field (+1) — span slid :636-658 -> :655-677, the token `WHY IT MUST MERGE` " <>
-          "now on :672.",
+          "now on :672. RE-ANCHORED again 2026-10-09 (task-9d2cdfae246cc486): the same " <>
+          "+77-line insertion above (create_token/2's new @doc section and the " <>
+          "mint_pat/4 -> mint_pat/4+do_mint_pat/5 split) slid the span :655-677 -> " <>
+          ":732-754, the token `WHY IT MUST MERGE` now on :749.",
       why:
         "A SECOND ROW ON A KEY THAT ALREADY HAS ONE, DELIBERATELY. The site carries TWO " <>
           "independent declarations now: the @doc's anti-enumeration contract (the NO-OP-ACK " <>

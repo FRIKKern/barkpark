@@ -433,64 +433,10 @@ defmodule BarkparkWeb.AuthController do
   end
 
   defp mint_pat(conn, params, workspace_id, role) do
-    user = conn.assigns.current_user
-    name = token_name(params)
-    permissions = Auth.max_pat_permissions_for_role(role)
+    case fetch_pat_expiry(params) do
+      {:ok, expiry} ->
+        do_mint_pat(conn, params, workspace_id, role, expiry)
 
-    with {:ok, expiry} <- fetch_pat_expiry(params) do
-      # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
-      # `user_id` is never read — this is the mint's no-escalation guarantee.
-      #
-      # `:expires_at` is OMITTED (not passed as `nil`) when the caller asked
-      # for nothing: `Auth.create_personal_access_token/3`'s `Keyword.fetch/2`
-      # on that key distinguishes "absent" from "present and nil" — passing
-      # `nil` explicitly would route through `TokenExpiry.resolve/3`'s own
-      # unconfigured-default branch (no expiry) instead of falling through to
-      # the existing 30-day `:ttl` default, silently un-expiring every PAT
-      # mint that asks for nothing.
-      mint_opts =
-        [role: role, created_by: user.email, owner_user_id: user.id, workspace_id: workspace_id]
-        |> then(fn opts -> if expiry, do: Keyword.put(opts, :expires_at, expiry), else: opts end)
-
-      case Auth.create_personal_access_token(name, permissions, mint_opts) do
-        {:ok, {raw, token}} ->
-          # Minting a standing credential is an audit-worthy lifecycle event.
-          Audit.emit(%{
-            category: "token",
-            action: "personal_access_token_minted",
-            subject: token.id,
-            actor_type: "user",
-            actor_id: user.id,
-            metadata: %{"name" => token.name, "permissions" => token.permissions}
-          })
-
-          conn
-          |> put_status(:created)
-          |> json(%{
-            token: raw,
-            personal_access_token: %{
-              id: token.id,
-              name: token.name,
-              owner_user_id: token.owner_user_id,
-              permissions: token.permissions,
-              expires_at: token.expires_at,
-              inserted_at: token.inserted_at
-            }
-          })
-
-        {:error, :forbidden} ->
-          error(conn, 403, "forbidden", "you may not mint a token with those permissions")
-
-        {:error, {:expiry_exceeds_max, _, _} = reason} ->
-          error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
-
-        {:error, :expiry_not_in_future = reason} ->
-          error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
-
-        {:error, %Ecto.Changeset{} = cs} ->
-          error(conn, 422, "unprocessable", changeset_errors(cs))
-      end
-    else
       {:error, :invalid_expiry} ->
         error(
           conn,
@@ -499,6 +445,74 @@ defmodule BarkparkWeb.AuthController do
           "send at most one of ttl_seconds (a positive integer) or expires_at " <>
             "(an ISO-8601 datetime)"
         )
+    end
+  end
+
+  # Split out of `mint_pat/4` so this function's own `case` on
+  # `Auth.create_personal_access_token/3`'s result stays at the SAME
+  # indentation depth it had before the ttl_seconds/expires_at option
+  # existed — `ChangesetDetailControllersTest` pins the changeset arm's
+  # source text byte-for-byte (including whitespace), so nesting this `case`
+  # one level deeper inside a `with` would have broken that source-anchored
+  # assertion for a reason that has nothing to do with what it is actually
+  # guarding (the changeset error detail stays routed through
+  # `changeset_errors/1`, never a flat literal).
+  defp do_mint_pat(conn, params, workspace_id, role, expiry) do
+    user = conn.assigns.current_user
+    name = token_name(params)
+    permissions = Auth.max_pat_permissions_for_role(role)
+
+    # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
+    # `user_id` is never read — this is the mint's no-escalation guarantee.
+    #
+    # `:expires_at` is OMITTED (not passed as `nil`) when the caller asked
+    # for nothing: `Auth.create_personal_access_token/3`'s `Keyword.fetch/2`
+    # on that key distinguishes "absent" from "present and nil" — passing
+    # `nil` explicitly would route through `TokenExpiry.resolve/3`'s own
+    # unconfigured-default branch (no expiry) instead of falling through to
+    # the existing 30-day `:ttl` default, silently un-expiring every PAT
+    # mint that asks for nothing.
+    mint_opts =
+      [role: role, created_by: user.email, owner_user_id: user.id, workspace_id: workspace_id]
+      |> then(fn opts -> if expiry, do: Keyword.put(opts, :expires_at, expiry), else: opts end)
+
+    case Auth.create_personal_access_token(name, permissions, mint_opts) do
+      {:ok, {raw, token}} ->
+        # Minting a standing credential is an audit-worthy lifecycle event.
+        Audit.emit(%{
+          category: "token",
+          action: "personal_access_token_minted",
+          subject: token.id,
+          actor_type: "user",
+          actor_id: user.id,
+          metadata: %{"name" => token.name, "permissions" => token.permissions}
+        })
+
+        conn
+        |> put_status(:created)
+        |> json(%{
+          token: raw,
+          personal_access_token: %{
+            id: token.id,
+            name: token.name,
+            owner_user_id: token.owner_user_id,
+            permissions: token.permissions,
+            expires_at: token.expires_at,
+            inserted_at: token.inserted_at
+          }
+        })
+
+      {:error, :forbidden} ->
+        error(conn, 403, "forbidden", "you may not mint a token with those permissions")
+
+      {:error, {:expiry_exceeds_max, _, _} = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
+      {:error, :expiry_not_in_future = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
+      {:error, %Ecto.Changeset{} = cs} ->
+        error(conn, 422, "unprocessable", changeset_errors(cs))
     end
   end
 
