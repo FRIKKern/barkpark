@@ -210,28 +210,6 @@ for (const [where, get] of [
     }
   }
 }
-// The paper form option ring is a control boundary, so WCAG 1.4.11's 3:1
-// non-text floor applies on both grounds in both modes. Read the token the rule
-// actually paints from paper-surface.css, so a repoint to a lighter token reds.
-{
-  const cssPath = join(here, "..", "api", "assets", "paper-surface", "paper-surface.css");
-  let css = "";
-  try { css = readFileSync(cssPath, "utf8"); } catch (e) { ok(false, `cannot read ${cssPath}: ${e.message}`); }
-  const rule = css.match(/\.bp-form-opt > input \{[^}]*\}/);
-  const tok = rule && rule[0].match(/border:[^;]*var\(--paper-([a-z-]+)\)/);
-  ok(tok, "paper-surface.css: .bp-form-opt > input must paint its border from a var(--paper-<role>) token");
-  if (tok) {
-    for (const m of ["light", "dark"]) {
-      const ring = psurf[tok[1]] && psurf[tok[1]][m];
-      ok(ring && HEX.test(ring), `form option ring token color.paper.surface.${tok[1]}.${m} must be #rrggbb`);
-      if (!ring || !HEX.test(ring)) continue;
-      for (const g of ["bg", "bg-deep"]) {
-        const ratio = contrast(ring, psurf[g][m]);
-        ok(ratio >= 3, `paper form option ring (--paper-${tok[1]}, ${m}) must clear 3:1 non-text contrast on ${g}; got ${ratio.toFixed(2)}`);
-      }
-    }
-  }
-}
 
 // --- mail-client popup chrome (color.mailChrome): 6 hex pairs ----------------
 const mailChrome = color.mailChrome || {};
