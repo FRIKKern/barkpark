@@ -134,12 +134,12 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:457
+#: lib/barkpark_web/components/field_inputs.ex:460
 #, elixir-autogen, elixir-format
 msgid "Generate"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:457
+#: lib/barkpark_web/components/field_inputs.ex:460
 #, elixir-autogen, elixir-format
 msgid "Generate from %{source}"
 msgstr ""
@@ -908,7 +908,7 @@ msgstr ""
 msgid "Checkbox"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:348
+#: lib/barkpark_web/components/field_inputs.ex:351
 #: lib/barkpark_web/components/fields/tree_codelist_field.ex:390
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:79
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3810
@@ -8944,7 +8944,7 @@ msgstr ""
 msgid "%{met}/%{total} met"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:502
+#: lib/barkpark_web/components/field_inputs.ex:505
 #, elixir-autogen, elixir-format
 msgid "read-only — managed via API"
 msgstr ""
@@ -10437,7 +10437,7 @@ msgstr ""
 msgid "Foldable"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:327
+#: lib/barkpark_web/components/field_inputs.ex:330
 #, elixir-autogen, elixir-format
 msgid "No color"
 msgstr ""
@@ -10577,7 +10577,7 @@ msgstr ""
 msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:681
+#: lib/barkpark_web/components/field_inputs.ex:684
 #, elixir-autogen, elixir-format
 msgid "read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged"
 msgstr ""
@@ -10588,13 +10588,13 @@ msgstr ""
 msgid "read-only — stored as structured data this field's editor cannot show; saved unchanged"
 msgstr ""
 
-#: lib/barkpark_web/components/field_inputs.ex:480
+#: lib/barkpark_web/components/field_inputs.ex:483
 #, elixir-autogen, elixir-format
 msgid "read-only — the .scaffy source of truth; edit in the repo"
 msgstr ""
 
 #: lib/barkpark_web/components/fields/codelist_field.ex:181
-#: lib/barkpark_web/components/fields/composite_field.ex:551
+#: lib/barkpark_web/components/fields/composite_field.ex:554
 #, elixir-autogen, elixir-format
 msgid "— Select —"
 msgstr ""
@@ -10709,4 +10709,24 @@ msgstr ""
 #: lib/barkpark_web/components/studio_components/modals.ex:854
 #, elixir-autogen, elixir-format
 msgid "%{time} UTC"
+msgstr ""
+
+#: lib/barkpark_web/components/fields/array_field.ex:384
+#: lib/barkpark_web/components/fields/array_field.ex:665
+#, elixir-autogen, elixir-format
+msgid "Item"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:289
+#: lib/barkpark_web/components/fields/composite_field.ex:433
+#: lib/barkpark_web/components/studio_components/controls.ex:252
+#, elixir-autogen, elixir-format
+msgid "Off"
+msgstr ""
+
+#: lib/barkpark_web/components/field_inputs.ex:289
+#: lib/barkpark_web/components/fields/composite_field.ex:433
+#: lib/barkpark_web/components/studio_components/controls.ex:252
+#, elixir-autogen, elixir-format
+msgid "On"
 msgstr ""
