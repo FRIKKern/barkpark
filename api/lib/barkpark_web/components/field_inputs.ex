@@ -133,7 +133,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n} data-structured-value>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as structured data this field's editor cannot show; saved unchanged") %></span>
     </div>
     """
   end
@@ -477,7 +477,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n} data-source-field>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;line-height:1.5;white-space:pre;overflow:auto;max-height:60vh;opacity:0.85;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — the .scaffy source of truth; edit in the repo</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — the .scaffy source of truth; edit in the repo") %></span>
     </div>
     """
   end
@@ -678,7 +678,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
     ~H"""
     <div data-readonly-field={@n}>
       <pre style="margin:0;padding:8px 10px;border:1px dashed var(--input);border-radius:6px;font-family:var(--font-mono);font-size:12px;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @v %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged") %></span>
     </div>
     """
   end

@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.{ArrayField, CodelistField, LocalizedTextField, Visibility}
 
@@ -190,7 +191,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
     ~H"""
     <div data-readonly-field={@name} data-structured-value>
       <pre class="bp-input" style="margin:0;white-space:pre-wrap;word-break:break-word;opacity:0.75;"><%= @json %></pre>
-      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;">read-only — stored as structured data this field's editor cannot show; saved unchanged</span>
+      <span style="display:block;margin-top:4px;font-size:11px;opacity:0.55;"><%= gettext("read-only — stored as structured data this field's editor cannot show; saved unchanged") %></span>
     </div>
     """
   end
@@ -546,7 +547,7 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
       phx-change={@on_change}
       disabled={@readonly}
     >
-      <option value="" selected={is_nil(@value) or @value == ""}>— Select —</option>
+      <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
       <%= for opt <- @options do %>
         <option value={opt.value} selected={to_string(@value) == opt.value}>
           <%= opt.label %>

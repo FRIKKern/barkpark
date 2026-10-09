@@ -392,7 +392,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             faint grey the owner read as inert chrome (contrast raised in
             root.html.heex). --%>
       <p :if={@free_blocks == []} class="bp-paper-editor-empty">
-        This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Add one below.
+        {gettext("This %{type} (", type: @doc_type)}<code>{@slug}</code>{gettext(") has no body blocks yet. Add one below.")}
       </p>
 
       <%= if @canvas_on? do %>
@@ -539,7 +539,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
                 class="bp-paper-lock-note"
                 title={gettext("Part of the document template")}
                 data-test-id="paper-locked-note"
-              >🔒 Locked</span>
+              >🔒 {gettext("Locked")}</span>
             </span>
           </div>
           <.paper_block_fields
@@ -1175,7 +1175,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             class="bp-paper-lock-note"
             title={gettext("Part of the document template")}
             data-test-id="paper-locked-note"
-          >🔒 Locked</span>
+          >🔒 {gettext("Locked")}</span>
         </span>
       </div>
       <.task_block_preview
@@ -4722,7 +4722,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           </details>
         </div>
       <% "divider" -> %>
-        <p class="bp-paper-edit-readonly">— divider —</p>
+        <p class="bp-paper-edit-readonly">{gettext("— divider —")}</p>
 
       <%!-- field-* LEAF blocks (P2.1). Each renders a labelled native control
             inside a stable phx-update="ignore" wrapper mounted with the
@@ -4909,7 +4909,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             name="src"
             class="bp-paper-edit-text"
             value={Blocks.form_value(Map.get(@block, "src"))}
-            placeholder="/media/video.mp4 or https://…"
+            placeholder={gettext("/media/video.mp4 or https://…")}
             data-test-id="paper-field-video-src"
           />
           <label class="bp-paper-edit-fieldlabel" for={"video-poster-" <> @id}><%= gettext("Poster image") %></label>
@@ -5060,7 +5060,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= raw(Render.render_block(@block, %{style: :article})) %>
         </div>
         <p class="bp-paper-edit-readonly">
-          <%= @type %> blocks are not editable yet (view/delete/reorder only).
+          <%= gettext("%{type} blocks are not editable yet (view/delete/reorder only).", type: @type) %>
         </p>
     <% end %>
     """

@@ -360,7 +360,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           disabled
           data-codelist-empty="true"
         >
-          <option value="">(no codelist registered: <%= @plugin_name %>:<%= @list_id %>)</option>
+          <option value=""><%= gettext("(no codelist registered: %{list})", list: "#{@plugin_name}:#{@list_id}") %></option>
         </select>
       <% else %>
         <input
@@ -374,7 +374,7 @@ defmodule BarkparkWeb.Components.Fields.TreeCodelistField do
           <input
             type="text"
             class="bp-input bp-tree-search"
-            placeholder="Search codes or labels…"
+            placeholder={gettext("Search codes or labels…")}
             value={@search_query}
             phx-keyup="tree_search_input"
             phx-debounce="200"

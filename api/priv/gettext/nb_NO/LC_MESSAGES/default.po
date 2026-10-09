@@ -2373,6 +2373,7 @@ msgid "Tag strength, 1 to 100"
 msgstr "Etikettstyrke, 1 til 100"
 
 #: lib/barkpark_web/live/studio/studio_live/components.ex:406
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:395
 #, elixir-autogen, elixir-format
 msgid "This %{type} ("
 msgstr "Denne %{type} ("
@@ -3035,6 +3036,8 @@ msgstr "Last inn flere · %{count} igjen"
 msgid "Loading assets…"
 msgstr "Laster inn filer …"
 
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:542
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:1178
 #: lib/barkpark_web/studio_locale.ex:184
 #, elixir-autogen, elixir-format
 msgid "Locked"
@@ -10496,3 +10499,105 @@ msgstr "suksess"
 msgctxt "callout tone"
 msgid "warning"
 msgstr "advarsel"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:5063
+#, elixir-autogen, elixir-format
+msgid "%{type} blocks are not editable yet (view/delete/reorder only)."
+msgstr "%{type}-blokker kan ikke redigeres ennå (bare vise/slette/flytte)."
+
+#: lib/barkpark_web/live/studio/paper_field_block.ex:296
+#, elixir-autogen, elixir-format
+msgid "%{type} blocks are not editable yet."
+msgstr "%{type}-blokker kan ikke redigeres ennå."
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:363
+#, elixir-autogen, elixir-format
+msgid "(no codelist registered: %{list})"
+msgstr "(ingen kodeliste registrert: %{list})"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:395
+#, elixir-autogen, elixir-format
+msgid ") has no body blocks yet. Add one below."
+msgstr ") har ingen innholdsblokker ennå. Legg til en nedenfor."
+
+#: lib/barkpark_web/live/studio/paper_field_block.ex:198
+#, elixir-autogen, elixir-format
+msgid "+ Add"
+msgstr "+ Legg til"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format
+msgid "Avg:"
+msgstr "Snitt:"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format
+msgid "Count:"
+msgstr "Antall:"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3423
+#, elixir-autogen, elixir-format
+msgid "No rules yet — add one below."
+msgstr "Ingen regler ennå — legg til en nedenfor."
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4055
+#, elixir-autogen, elixir-format
+msgid "Sort A→Z"
+msgstr "Sorter A→Å"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:4056
+#, elixir-autogen, elixir-format
+msgid "Sort Z→A"
+msgstr "Sorter Å→A"
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex:3983
+#, elixir-autogen, elixir-format
+msgid "Sum:"
+msgstr "Sum:"
+
+#: lib/barkpark_web/components/fields/localized_text_field.ex:106
+#, elixir-autogen, elixir-format
+msgid "no translation available"
+msgstr "ingen oversettelse tilgjengelig"
+
+#: lib/barkpark_web/components/fields/localized_text_field.ex:101
+#, elixir-autogen, elixir-format
+msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
+msgstr "primæroversettelsen `%{primary}` mangler — bruker reserven `%{using}`"
+
+#: lib/barkpark_web/components/field_inputs.ex:681
+#, elixir-autogen, elixir-format
+msgid "read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged"
+msgstr "skrivebeskyttet — lagret som blokkinnhold, som riktekstredigereren (HTML) ikke kan redigere; lagres uendret"
+
+#: lib/barkpark_web/components/field_inputs.ex:136
+#: lib/barkpark_web/components/fields/composite_field.ex:194
+#, elixir-autogen, elixir-format
+msgid "read-only — stored as structured data this field's editor cannot show; saved unchanged"
+msgstr "skrivebeskyttet — lagret som strukturerte data feltets redigerer ikke kan vise; lagres uendret"
+
+#: lib/barkpark_web/components/field_inputs.ex:480
+#, elixir-autogen, elixir-format
+msgid "read-only — the .scaffy source of truth; edit in the repo"
+msgstr "skrivebeskyttet — .scaffy-kilden er fasiten; rediger i repoet"
+
+#: lib/barkpark_web/components/fields/codelist_field.ex:181
+#: lib/barkpark_web/components/fields/composite_field.ex:550
+#, elixir-autogen, elixir-format
+msgid "— Select —"
+msgstr "— Velg —"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4725
+#, elixir-autogen, elixir-format
+msgid "— divider —"
+msgstr "— skillelinje —"
+
+#: lib/barkpark_web/live/studio/studio_live/components/paper_editor.ex:4912
+#, elixir-autogen, elixir-format
+msgid "/media/video.mp4 or https://…"
+msgstr "/media/video.mp4 eller https://…"
+
+#: lib/barkpark_web/components/fields/tree_codelist_field.ex:377
+#, elixir-autogen, elixir-format
+msgid "Search codes or labels…"
+msgstr "Søk i koder eller etiketter…"

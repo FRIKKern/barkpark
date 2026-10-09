@@ -58,6 +58,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
   """
 
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   alias BarkparkWeb.Components.Fields.TreeCodelistField
 
@@ -177,7 +178,7 @@ defmodule BarkparkWeb.Components.Fields.CodelistField do
             data-codelist-id={"#{@plugin_name}:#{@list_id}"}
             data-codelist-version={@field.version && to_string(@field.version)}
           >
-            <option value="" selected={is_nil(@value) or @value == ""}>— Select —</option>
+            <option value="" selected={is_nil(@value) or @value == ""}><%= gettext("— Select —") %></option>
             <%= for opt <- @options do %>
               <option value={opt.value} selected={@value == opt.value}>
                 <%= opt.value %> — <%= opt.label %>
