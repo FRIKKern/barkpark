@@ -55,10 +55,13 @@ defmodule Barkpark.Plugins.Github.Link do
       the append-only `mutation_events` log (`max(id)` head probe), and
       `Oban.Job` queue-depth counts. `Content.*` does not read any of the three
       and must not learn to.
-    * `outbox.ex` (1) — the outbound drain reads `mutation_events`, the same
+    * `outbox.ex` (2) — the outbound drain reads `mutation_events`, the same
       append-only log. An event is not a document; there is no `Content.*`
       reader for it, and inventing one for a single caller would put plugin
-      concerns inside `Content`.
+      concerns inside `Content`. The second site is the ruling-#12 multi-
+      workspace warning's `DISTINCT workspace_id ... LIMIT 2` probe over the
+      same log — same append-only-event shape, same reasoning, gated to run
+      at most once per boot (`persistent_term`).
     * `restrip.ex` (1) — `Oban.Job` rows: the restrip tasks whose job is still
       waiting, so a second `--apply` skips them (owner ruling #11). A job is not
       a document, the same shape as `health.ex`'s queue-depth counts.
