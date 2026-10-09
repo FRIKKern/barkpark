@@ -770,7 +770,7 @@ defmodule Barkpark.Content.Validation do
         walk_leaf(f, value, path, level)
 
       objects ->
-        blocks = if is_list(value), do: value, else: []
+        blocks = richtext_blocks(value)
 
         walk_leaf(f, value, path, level) ++
           (blocks
@@ -787,6 +787,34 @@ defmodule Barkpark.Content.Validation do
 
   # primitive leaf — apply v1-style rules from raw["validation"]
   defp walk_field(%Field{} = f, value, path, level), do: walk_leaf(f, value, path, level)
+
+  # A richText field's block array, found whichever of its two LIVE shapes
+  # `value` is holding (task-839f9bebf5628c03 — found live: barkpark-studio's
+  # PATCH on a published post, through the real "editor":"blocks" write
+  # path, produced zero findings for an out-of-vocabulary block because this
+  # was `if is_list(value), do: value, else: []` — a bare list ONLY). Kept
+  # OUT of the `walk_field/4` clause group above, same reason
+  # `walk_typed_array_item/4` below is kept out of it: so those clauses stay
+  # contiguous.
+  #
+  #   * a bare list — what every pre-existing test here constructs by hand,
+  #     and what a direct API write (set the field to an array) stores.
+  #   * `%{"blocks" => [...], "html" => ...}` — what the Studio block-editor
+  #     ACTUALLY stores once a field has gone through
+  #     `Papers.BlockOps.apply_field_block_ops/6`
+  #     (`Projection.project_body/2`'s output shape), and what a `patch` that
+  #     `set`s the field to that same shape stores verbatim since a generic
+  #     "set" patch has no field-specific unwrapping.
+  #
+  # Deliberately NOT `Papers.BlockOps.field_blocks/1`: that function ALSO
+  # turns a plain string into one synthesized paragraph block, a v1-legacy
+  # convenience that belongs to the write path, not to validation reading
+  # back whatever is already stored — a string value here falls through to
+  # `[]`, unchanged from before this fix (validation never fabricates a
+  # block to check).
+  defp richtext_blocks(list) when is_list(list), do: list
+  defp richtext_blocks(%{"blocks" => list}) when is_list(list), do: list
+  defp richtext_blocks(_), do: []
 
   # One item of a several-named-member-types `arrayOf` (task-b3ebbd3ab1575e2a) —
   # the typed branch of the "arrayOf" `walk_field/4` clause above, kept out of
