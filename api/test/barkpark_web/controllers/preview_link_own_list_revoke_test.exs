@@ -15,6 +15,7 @@ defmodule BarkparkWeb.PreviewLinkOwnListRevokeTest do
   use BarkparkWeb.ConnCase, async: true
 
   alias Barkpark.{Auth, Content}
+  alias Barkpark.Sharing.PreviewLinks
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
@@ -227,6 +228,140 @@ defmodule BarkparkWeb.PreviewLinkOwnListRevokeTest do
         |> json_response(200)
 
       assert resp["revoked"] == true
+    end
+  end
+
+  # task-4ad625842939ae8f + task-0548f06277c4712e TOGETHER: a dataset_bound
+  # token is still an ordinary member for own-vs-foreign purposes, and the
+  # dataset confinement is a SEPARATE, ANDed condition on top of it -- not a
+  # substitute for workspace-admin authority. Revoke's confinement folds into
+  # the same {:error, :not_found} collapse as a foreign-creator link, since
+  # both are id-only requests.
+  describe "a dataset_bound member" do
+    setup %{conn: conn} do
+      suffix = System.unique_integer([:positive])
+      ws = Barkpark.TenancyFixtures.create_workspace!("plolr-db-ws-#{suffix}")
+      proj = Barkpark.TenancyFixtures.create_project!(ws, "default")
+      scope = [workspace_id: ws.id, project_id: proj.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          "staging",
+          scope
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "plolr-db-post", "title" => "T"},
+          "staging",
+          scope
+        )
+
+      bound_raw = "plolr-db-bound-#{suffix}"
+
+      {:ok, bound_tok} =
+        Auth.create_token(bound_raw, "plolr-db-bound", @dataset, ["read", "write"], nil,
+          dataset_bound: true
+        )
+
+      {:ok, _} = TenancyAuth.create_membership(ws.id, bound_tok.id, "member")
+
+      %{
+        conn: conn,
+        ws: ws,
+        proj: proj,
+        bound_raw: bound_raw,
+        bound_tok: bound_tok,
+        production_scope: "#{ws.slug}/#{proj.slug}/#{@dataset}",
+        staging_scope: "#{ws.slug}/#{proj.slug}/staging"
+      }
+    end
+
+    test "revokes their OWN link in their bound dataset", %{
+      conn: conn,
+      ws: ws,
+      proj: proj,
+      bound_raw: raw,
+      production_scope: scope
+    } do
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          @dataset,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      {:ok, _} =
+        Content.create_document(
+          "post",
+          %{"doc_id" => "plolr-db-prod-post", "title" => "T"},
+          @dataset,
+          workspace_id: ws.id,
+          project_id: proj.id
+        )
+
+      link_id = mint_link!(conn, raw, scope, "drafts.plolr-db-prod-post")
+
+      resp =
+        conn
+        |> bearer(raw)
+        |> delete("/v1/shares/preview-links/#{link_id}")
+        |> json_response(200)
+
+      assert resp["revoked"] == true
+    end
+
+    test "cannot revoke their OWN link outside their bound dataset -- same 404 as an unknown id",
+         %{conn: conn, ws: ws, proj: proj, bound_raw: raw, bound_tok: bound_tok} do
+      # The bound token can't reach `mint` for staging either (same
+      # ensure_dataset_bound check), so a row that is genuinely theirs by
+      # `created_by`, in the dataset they're NOT bound to, is built directly
+      # -- isolating the dataset check in `revoke_scoped/2` from the (already
+      # separately covered) mint-time confinement.
+      {:ok, {_raw, link}} =
+        PreviewLinks.create(%{
+          workspace_id: ws.id,
+          project_id: proj.id,
+          dataset: "staging",
+          doc_id: "drafts.plolr-db-post",
+          ref_type: "post",
+          created_by: PreviewLinks.actor_ref(bound_tok)
+        })
+
+      resp_own_wrong_dataset =
+        conn |> bearer(raw) |> delete("/v1/shares/preview-links/#{link.id}")
+
+      resp_unknown =
+        conn |> bearer(raw) |> delete("/v1/shares/preview-links/#{Ecto.UUID.generate()}")
+
+      assert resp_own_wrong_dataset.status == resp_unknown.status
+      assert resp_own_wrong_dataset.status == 404
+
+      strip_request_id = fn body ->
+        body |> Jason.decode!() |> put_in(["error", "request_id"], nil)
+      end
+
+      assert strip_request_id.(resp_own_wrong_dataset.resp_body) ==
+               strip_request_id.(resp_unknown.resp_body)
+    end
+
+    test "cannot list their own dataset's links when the dataset isn't theirs to bind", %{
+      conn: conn,
+      bound_raw: raw,
+      staging_scope: scope
+    } do
+      resp =
+        conn
+        |> bearer(raw)
+        |> get(
+          "/v1/shares/preview-links?scope=#{URI.encode_www_form(scope)}&ref_type=post&doc_id=drafts.plolr-db-post"
+        )
+
+      assert resp.status == 403
+      assert Jason.decode!(resp.resp_body)["error"]["reason"] == "dataset_not_bound"
     end
   end
 end
