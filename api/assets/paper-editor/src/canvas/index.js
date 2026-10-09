@@ -665,6 +665,7 @@ class BpPaperCanvas extends HTMLElement {
     // describe only the local transaction, not manufacture an inverse patch that
     // reverts newly queued authority.
     this._debounceBaselineBlocks = null;
+    this._emitCache = null;
     // The RUN this canvas mounted — an array of prose blocks. This is the
     // "prev" runToOps diffs the live doc against. As of S4a this baseline is
     // ECHO-ADVANCED: after the server applies a batch it echoes the confirmed
@@ -1696,7 +1697,11 @@ class BpPaperCanvas extends HTMLElement {
   _scheduleEmit() {
     if (!this._editable) return; // read mode emits no ops
     if (!this._debounceTimer) {
-      this._debounceBaselineBlocks = deepCloneBlocks(this._blocks);
+      // The reference, not a deep clone: `_blocks` is only ever REPLACED (never
+      // edited in place), so a later broadcast cannot change what this holds. The
+      // clone cost a full copy of the run at the first key of every window
+      // (task-fb938eb8be3bce48).
+      this._debounceBaselineBlocks = this._blocks;
     }
     if (this._debounceTimer) clearTimeout(this._debounceTimer);
     this._debounceTimer = setTimeout(() => {
@@ -1744,8 +1749,31 @@ class BpPaperCanvas extends HTMLElement {
     if (this._editor.view && this._editor.view.composing) { this._armComposeEndEmit(); return false; }
     const diffBaseline = this._debounceBaselineBlocks || this._blocks;
     const nextDoc = normalizeCanvasDoc(this._editor.getJSON());
-    const nextBlocks = docToBlocks(nextDoc);
-    const stableDoc = runToTiptap(nextBlocks);
+    // The fast path (task-fb938eb8be3bce48): a top-level node that is the SAME
+    // ProseMirror node object it was at the last acknowledged emit is unchanged
+    // since then, and when the baseline is exactly that emit's after-state its
+    // block, its projection and its (empty) patch are already known. Only the
+    // nodes a transaction touched are projected and diffed.
+    const liveTop = [];
+    this._editor.state.doc.forEach((node) => liveTop.push(node));
+    const reuse = this._emitReuse(diffBaseline);
+    const reusedAt = new Map();
+    const unchangedIds = new Set();
+    if (reuse) {
+      liveTop.forEach((node, i) => {
+        const hit = reuse.get(node);
+        const json = (nextDoc.content || [])[i];
+        // A duplicated bpId was nulled by normalizeCanvasDoc: that node is new.
+        if (hit && json && json.attrs && json.attrs.bpId === hit.block.id) {
+          reusedAt.set(i, hit);
+          unchangedIds.add(hit.block.id);
+        }
+      });
+    }
+    const nextBlocks = docToBlocks(nextDoc, reusedAt.size ? { reuse: (i) => reusedAt.get(i)?.block } : {});
+    const stableDoc = reusedAt.size
+      ? { type: "doc", content: nextBlocks.map((block, i) => reusedAt.has(i) ? reusedAt.get(i).node : runToTiptap([block]).content[0]) }
+      : runToTiptap(nextBlocks);
 
     // runToOps mints ids for null-id nodes. Materialize those ids in the live
     // document before another edit can diff, otherwise each cumulative diff
@@ -1769,7 +1797,7 @@ class BpPaperCanvas extends HTMLElement {
     // round-trip kept one top-level node per live node (otherwise nothing is held).
     const aligned = (nextDoc.content || []).length === (stableDoc.content || []).length;
     const opsDoc = held.size && aligned ? { ...stableDoc, content: (stableDoc.content || []).filter((_, i) => !held.has(i)) } : stableDoc;
-    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true });
+    const ops = runToOps(diffBaseline, opsDoc, { preserveNewIds: true, unchangedIds });
     if (!ops || !ops.length) {
       // Nothing to save: the edits since the last batch cancelled out (typed,
       // then undone inside one debounce). Say so. The page's exit guard marked
@@ -1779,7 +1807,42 @@ class BpPaperCanvas extends HTMLElement {
       this.dispatchEvent(new CustomEvent("bp-noop", { bubbles: true, composed: true }));
       return false;
     }
-    return this._dispatchOps(ops, nextBlocks, diffBaseline);
+    const dispatched = this._dispatchOps(ops, nextBlocks, diffBaseline);
+    if (dispatched) this._rememberEmit(liveTop, nextDoc, nextBlocks, stableDoc);
+    return dispatched;
+  }
+
+  // The fast path's memory of one emit (task-fb938eb8be3bce48): each top-level
+  // node with a stable id that the id stamp left untouched, keyed by the node
+  // object, with the block and projection this emit gave it. It becomes usable
+  // only when the bridge acknowledges this exact batch (acknowledgeOps sets
+  // `blocks`): from then on a baseline that IS that acknowledged run equals this
+  // emit's blocks, so an untouched node has nothing to patch.
+  _rememberEmit(liveTop, nextDoc, nextBlocks, stableDoc) {
+    this._emitCache = null;
+    if (!this._inflightOps) return;
+    const afterStamp = [];
+    this._editor.state.doc.forEach((node) => afterStamp.push(node));
+    if (afterStamp.length !== liveTop.length) return;
+    const nodes = new Map();
+    liveTop.forEach((node, i) => {
+      const json = (nextDoc.content || [])[i];
+      const block = nextBlocks[i];
+      if (afterStamp[i] !== node || !block || !json || !json.attrs) return;
+      if (json.attrs.bpId == null || json.attrs.bpId !== block.id) return;
+      nodes.set(node, { block, node: stableDoc.content[i] });
+    });
+    this._emitCache = { nodes, afterBlocks: this._inflightOps.afterBlocks, blocks: null };
+  }
+
+  // The remembered nodes, when `diffBaseline` is exactly the run the remembered
+  // emit's acknowledgement installed; otherwise null and every node is projected.
+  // Any other writer of `_blocks` (an echo, a remote update, setContent) replaces
+  // the array, so the identity check sends it down the full path.
+  _emitReuse(diffBaseline) {
+    const cache = this._emitCache;
+    if (!cache || !cache.blocks || diffBaseline !== cache.blocks) return null;
+    return cache.nodes;
   }
 
   // Dispatch one op array for the LiveView hook to fold and retain its after-state
@@ -1794,7 +1857,10 @@ class BpPaperCanvas extends HTMLElement {
       this._inflightOps = {
         seq,
         ops,
-        afterBlocks: deepCloneBlocks(nextBlocks || this._blocks),
+        // A fresh array over this emit's own blocks: nextBlocks was built for this
+        // call (its reused entries are shared, never edited in place), so a deep
+        // copy of the whole run per keystroke bought nothing (task-fb938eb8be3bce48).
+        afterBlocks: nextBlocks ? nextBlocks.slice() : deepCloneBlocks(this._blocks),
         pendingServerBlocks: this._pendingServerBlocks,
         echoSeen: false,
         requestId: null,
@@ -1842,6 +1908,9 @@ class BpPaperCanvas extends HTMLElement {
     // can contain remote sibling changes queued for later display; advancing
     // to those unseen values would turn the next local edit into a reversion.
     this._blocks = deepCloneBlocks(current.afterBlocks);
+    if (this._emitCache && this._emitCache.afterBlocks === current.afterBlocks) {
+      this._emitCache.blocks = this._blocks;
+    }
     // A successful reviewed write supersedes the overlapping fields in the
     // deferred snapshot it was authored against. Keep remote sibling data, but
     // do not compare continued typing against those now-obsolete field values
@@ -1860,7 +1929,9 @@ class BpPaperCanvas extends HTMLElement {
     // batch is acknowledged. Advance that draft's captured baseline with the
     // confirmed local snapshot so its next diff stays incremental.
     if (this._debounceBaselineBlocks) {
-      this._debounceBaselineBlocks = deepCloneBlocks(current.afterBlocks);
+      // The run just installed holds the same content; share it (it is never
+      // edited in place), so the fast path recognises this baseline too.
+      this._debounceBaselineBlocks = this._blocks;
     }
     if (!current.echoSeen) {
       this._awaitingOwnEchoes.push({
@@ -3786,6 +3857,25 @@ class BpPaperCanvas extends HTMLElement {
   // nodes participate in the walk so positions cannot drift between siblings.
   _stampMaterializedIds(stableDoc) {
     if (!this._editor || !stableDoc) return;
+    // Nothing to stamp unless some live node has no id, or repeats a top-level id
+    // (the two cases the walk below acts on). Typing into stamped blocks has
+    // neither, and flattening the whole projection per keystroke was the emit's
+    // largest remaining cost (task-fb938eb8be3bce48).
+    let candidate = false;
+    const seenTop = new Set();
+    const liveDoc = this._editor.state.doc;
+    liveDoc.descendants((node, _pos, parent) => {
+      if (candidate) return false;
+      if (node.isText) return false;
+      const id = node.attrs?.bpId;
+      if (id == null) candidate = true;
+      else if (parent === liveDoc) {
+        if (seenTop.has(id)) candidate = true;
+        seenTop.add(id);
+      }
+      return !candidate;
+    });
+    if (!candidate) return;
     const stableNodes = [];
     const collect = (nodes) => {
       for (const node of nodes || []) {
