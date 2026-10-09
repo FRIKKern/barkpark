@@ -3290,7 +3290,7 @@
     /* History */
     .history-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 520px; max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(520px, calc(100vw - 24px)); max-height: 70vh; background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; display: flex; flex-direction: column; overflow: hidden;
     }
     .history-list { overflow-y: auto; flex: 1; }
@@ -3315,7 +3315,7 @@
     /* Delete modal */
     .delete-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 480px; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(480px, calc(100vw - 24px)); background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .delete-modal-header {
@@ -3407,7 +3407,7 @@
     /* Profile modal */
     .profile-modal {
       position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-      width: 360px; background: var(--bg-card); border: 1px solid var(--border);
+      width: min(360px, calc(100vw - 24px)); background: var(--bg-card); border: 1px solid var(--border);
       border-radius: var(--radius-lg); z-index: 51; overflow: hidden;
     }
     .profile-colors { display: flex; gap: 8px; flex-wrap: wrap; }
