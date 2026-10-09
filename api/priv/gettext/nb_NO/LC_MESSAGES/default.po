@@ -310,7 +310,8 @@ msgstr "Denne desken har ingen seksjon som heter"
 msgid "Unpublish"
 msgstr "Avpubliser"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:376
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:139
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:382
 #: lib/barkpark_web/components/studio_components/modals.ex:792
 #: lib/barkpark_web/components/studio_components/modals.ex:906
 #: lib/barkpark_web/live/studio/sheet_grid.ex:2968
@@ -413,6 +414,7 @@ msgstr "Bla i mediebiblioteket"
 msgid "Change"
 msgstr "Endre"
 
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:267
 #: lib/barkpark_web/components/studio_components/modals.ex:70
 #: lib/barkpark_web/components/studio_components/modals.ex:146
 #: lib/barkpark_web/components/studio_components/modals.ex:265
@@ -581,6 +583,8 @@ msgstr "Tøm søket"
 msgid "No documents match “%{query}”"
 msgstr "Ingen dokumenter treffer «%{query}»"
 
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:273
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:274
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1568
 #: lib/barkpark_web/live/studio/studio_live/components.ex:1569
 #, elixir-autogen, elixir-format
@@ -618,12 +622,12 @@ msgstr "%{names} redigerer"
 msgid "%{name} is editing"
 msgstr "%{name} redigerer"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:373
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:379
 #, elixir-autogen, elixir-format
 msgid "%{name} — open your profile"
 msgstr "%{name} — åpne profilen din"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:373
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:379
 #, elixir-autogen, elixir-format
 msgid "%{name} — profile"
 msgstr "%{name} — profil"
@@ -764,7 +768,8 @@ msgstr "Denne fanen som CSV (.csv)"
 msgid "Toggle dark / light theme"
 msgstr "Bytt mellom mørkt og lyst tema"
 
-#: lib/barkpark_web/components/studio_components/editor_fields.ex:376
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:370
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:382
 #, elixir-autogen, elixir-format
 msgid "browsing"
 msgstr "blar"
@@ -886,6 +891,7 @@ msgstr "Cellestil"
 msgid "Checkbox"
 msgstr "Avkrysningsboks"
 
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:79
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3805
 #: lib/barkpark_web/live/studio/sheet_grid.ex:4150
 #, elixir-autogen, elixir-format
@@ -2728,6 +2734,7 @@ msgstr "Vis i nettleser"
 msgid "chapter"
 msgstr "kapittel"
 
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:359
 #: lib/barkpark_web/live/bulldocs_live.ex:1767
 #, elixir-autogen, elixir-format
 msgid "editing"
@@ -8879,3 +8886,60 @@ msgstr "%{met}/%{total} oppfylt"
 #, elixir-autogen, elixir-format
 msgid "read-only — managed via API"
 msgstr "skrivebeskyttet — styres via API-et"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:57
+#, elixir-autogen, elixir-format
+msgid "%{count} selected"
+msgstr "%{count} valgt"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:55
+#, elixir-autogen, elixir-format
+msgid "Bulk actions"
+msgstr "Massehandlinger"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:360
+#, elixir-autogen, elixir-format
+msgid "Click to jump there"
+msgstr "Klikk for å gå dit"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:146
+#, elixir-autogen, elixir-format
+msgid "Close secondary pane"
+msgstr "Lukk sideruten"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:349
+#, elixir-autogen, elixir-format
+msgid "Jump to %{name} — editing %{title}"
+msgstr "Gå til %{name} — redigerer %{title}"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:293
+#, elixir-autogen, elixir-format
+msgid "No matches."
+msgstr "Ingen treff."
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:266
+#, elixir-autogen, elixir-format
+msgid "Open in new pane"
+msgstr "Åpne i ny rute"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:66
+#, elixir-autogen, elixir-format
+msgid "Publish selected"
+msgstr "Publiser valgte"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:157
+#, elixir-autogen, elixir-format
+msgid "Read-only — edit via primary pane."
+msgstr "Skrivebeskyttet — rediger i hovedruten."
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:73
+#, elixir-autogen, elixir-format
+msgid "Unpublish selected"
+msgstr "Avpubliser valgte"
+
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:350
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:358
+#: lib/barkpark_web/components/studio_components/editor_fields.ex:369
+#, elixir-autogen, elixir-format
+msgid "User"
+msgstr "Bruker"
