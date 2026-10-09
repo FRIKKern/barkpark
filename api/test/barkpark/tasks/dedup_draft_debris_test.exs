@@ -156,7 +156,12 @@ defmodule Barkpark.Tasks.DedupDraftDebrisTest do
 
     assert resolved.doc_id == "drafts." <> debris
 
-    refute payload.message =~ "404",
+    # The ids are random (uid/1), so one can contain the digits "404"
+    # (e.g. "unpub-404386"); strip the ids the note quotes before looking
+    # for a 404 claim, or the test reds on a lucky number.
+    prose = payload.message |> String.replace(debris, "") |> String.replace(retry, "")
+
+    refute prose =~ "404",
            "the task read door resolves the draft, so the note must not say it 404s: " <>
              payload.message
 
