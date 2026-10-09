@@ -10638,3 +10638,9 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Studio sections"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/geometry.ex:153
+#: lib/barkpark_web/live/studio/studio_live/mount.ex:414
+#, elixir-autogen, elixir-format
+msgid "User %{id}"
+msgstr ""
