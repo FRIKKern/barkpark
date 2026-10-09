@@ -785,7 +785,7 @@ defmodule BarkparkWeb.StudioComponents.Modals do
           <span id="history-modal-title" style="font-weight: 600; font-size: 14px;"><%= gettext("Document history") %></span>
           <button type="button" class="btn btn-ghost btn-sm" phx-click="close-history" aria-label={gettext("Close")}>×</button>
         </div>
-        <div class="history-list">
+        <div class="history-list" id="history-list" phx-hook="LocalTime">
           <%= if @revisions == [] do %>
             <div class="text-sm text-muted" style="padding: 24px; text-align: center;"><%= gettext("No history yet") %></div>
           <% end %>
@@ -796,7 +796,13 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                   <span class={"history-action-badge history-action-#{rev.action}"}><%= history_action_label(rev.action) %></span>
                   <span class="history-item-title"><%= rev.title || gettext("Untitled") %></span>
                 </div>
-                <div class="history-item-time"><%= format_history_time(rev.inserted_at) %></div>
+                <%!-- UTC on the server; Hooks.LocalTime rewrites it in the
+                      viewer's own zone (task-7a12da688a06f880). --%>
+                <time
+                  class="history-item-time"
+                  datetime={history_iso(rev.inserted_at)}
+                  data-local-time
+                ><%= utc_history_time(rev.inserted_at) %></time>
               </div>
               <%!-- Every row's button said only "Restore", so a screen reader's
                     button list was thirty identical names
@@ -807,7 +813,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
                 phx-value-id={rev.id}
                 aria-label={
                   gettext("Restore the version from %{time} (%{action})",
-                    time: format_history_time(rev.inserted_at),
+                    time: utc_history_time(rev.inserted_at),
+                    action: history_action_label(rev.action)
+                  )
+                }
+                data-datetime={history_iso(rev.inserted_at)}
+                data-local-label={
+                  gettext("Restore the version from %{time} (%{action})",
+                    time: "{time}",
                     action: history_action_label(rev.action)
                   )
                 }
@@ -836,6 +849,14 @@ defmodule BarkparkWeb.StudioComponents.Modals do
 
   # The pattern and the month names are the locale's: an nb-NO Studio reads
   # "06. okt. 2026 kl. 07:25:45".
+  # The server's own render says which clock it is in: the stored time is UTC,
+  # and the app has no time-zone database to convert it (task-7a12da688a06f880).
+  defp utc_history_time(dt), do: gettext("%{time} UTC", time: format_history_time(dt))
+
+  # Whole seconds: the shown time has none finer, and ECMAScript only promises
+  # to parse three fractional digits.
+  defp history_iso(dt), do: dt |> DateTime.truncate(:second) |> DateTime.to_iso8601()
+
   defp format_history_time(dt) do
     Calendar.strftime(dt, gettext("%b %d, %Y at %H:%M:%S"),
       abbreviated_month_names: fn month -> Enum.at(month_abbreviations(), month - 1) end
