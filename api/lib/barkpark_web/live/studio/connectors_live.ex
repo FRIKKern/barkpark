@@ -791,6 +791,10 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
         id="connectors-disconnect-modal"
         role="dialog"
         aria-modal="true"
+        aria-labelledby="connectors-disconnect-title"
+        phx-hook="ModalFocus"
+        phx-window-keydown="cancel_disconnect"
+        phx-key="escape"
         data-test-id="connectors-disconnect-modal"
         style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
       >
@@ -798,7 +802,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
           class="card"
           style="background: var(--bg-card); color: var(--fg); padding: 24px; min-width: 420px; max-width: 560px; border-radius: 10px; display: flex; flex-direction: column; gap: 12px;"
         >
-          <h2 class="h3" style="margin: 0;">
+          <h2 id="connectors-disconnect-title" class="h3" style="margin: 0;">
             {gettext("Disconnect %{provider}?", provider: provider_name(@disconnecting.provider))}
           </h2>
           <p class="text-sm" style="color: var(--fg-muted); margin: 0;">
@@ -808,7 +812,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
             )}
           </p>
           <div style="display: flex; gap: 8px; justify-content: flex-end;">
-            <button type="button" class="btn" phx-click="cancel_disconnect">
+            <button type="button" class="btn" phx-click="cancel_disconnect" data-modal-focus>
               {gettext("Cancel")}
             </button>
             <button
@@ -1038,6 +1042,9 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
       role="dialog"
       aria-modal="true"
       aria-labelledby="connectors-connect-title"
+      phx-hook="ModalFocus"
+      phx-window-keydown="close_dialog"
+      phx-key="escape"
       data-test-id="connectors-connect-modal"
       style="position: fixed; inset: 0; background: rgba(0,0,0,0.4); display: flex; align-items: center; justify-content: center; z-index: 1000;"
     >
@@ -1072,6 +1079,7 @@ defmodule BarkparkWeb.Studio.ConnectorsLive do
               spellcheck="false"
               phx-debounce="blur"
               data-test-id="connectors-credential-input"
+              data-modal-focus
               style="padding: 8px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--fg); font-family: var(--font-mono, monospace);"
             />
             <p :if={@card.credential_hint} class="text-sm" style="margin: 0; color: var(--fg-muted);">
