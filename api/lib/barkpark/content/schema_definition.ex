@@ -965,6 +965,27 @@ defmodule Barkpark.Content.SchemaDefinition do
     end
   end
 
+  # file (task-681df8da723386b8) — a leaf, unless it declares `fields`, exactly
+  # the same shape as `image` above: Sanity's `file` type is an asset
+  # reference that may carry its own siblings (a caption, an alt-text-like
+  # label) beside `asset`. No `image`-only concept (hotspot/crop) applies, so
+  # this clause is the SAME subfields branch without the options.hotspot leg.
+  defp parse_field_type("file", f, plugin) do
+    case Map.get(f, "fields") do
+      nil ->
+        {:ok, %Field{}}
+
+      kids when is_list(kids) ->
+        case parse_fields(kids, plugin) do
+          {:ok, parsed} -> {:ok, %Field{fields: parsed}}
+          err -> err
+        end
+
+      _ ->
+        {:error, {:file_fields_must_be_list, Map.get(f, "name")}}
+    end
+  end
+
   # any other binary type-tag (string, slug, text, richText, image, select,
   # boolean, datetime, color, reference, array, …) is treated as a v1
   # leaf — parsed permissively, preserved verbatim in `raw`.
@@ -1039,6 +1060,9 @@ defmodule Barkpark.Content.SchemaDefinition do
   # An image with declared subfields (or Sanity's `options.hotspot`) has a
   # structure the v2 walker checks; a bare image stays a v1 leaf.
   defp v2_shape?(%Field{type: "image", fields: [_ | _]}), do: true
+  # file (task-681df8da723386b8) — same rule as image above, minus the
+  # options.hotspot leg (no such concept for a non-image asset).
+  defp v2_shape?(%Field{type: "file", fields: [_ | _]}), do: true
   # A richText vocabulary declaring custom object blocks (`blocks.of` entries
   # shaped `{name, fields}`) has block fields the v2 walker checks.
   defp v2_shape?(%Field{type: "richText", raw: %{"blocks" => %{"of" => of}}}) when is_list(of),

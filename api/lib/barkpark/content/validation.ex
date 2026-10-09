@@ -611,6 +611,16 @@ defmodule Barkpark.Content.Validation do
       else: walk_leaf(f, value, path, level)
   end
 
+  # file (task-681df8da723386b8) — same split as image above: a leaf unless
+  # it declares subfields. No image-only concept (hotspot/crop) applies, so
+  # walk_file/4 is the same cond minus the rect validation, with wording that
+  # says "file" instead of "image".
+  defp walk_field(%Field{type: "file"} = f, value, path, level) do
+    if structured_file?(f),
+      do: walk_file(f, value, path, level),
+      else: walk_leaf(f, value, path, level)
+  end
+
   # richText whose block vocabulary declares custom object blocks
   # (task-152cacba913a4724): every block of such a type has its declared
   # fields checked. Other blocks, and the field's own rules, are unchanged.
@@ -775,6 +785,34 @@ defmodule Barkpark.Content.Validation do
 
   defp image_rect_findings(_rect, sides, path),
     do: [{path, "expected an object with #{Enum.join(sides, ", ")}"}]
+
+  # file (task-681df8da723386b8) — a bare leaf has no shape to check beyond
+  # the generic v1 rules (walk_leaf); a `file` with declared subfields walks
+  # them exactly like image's own composite subfields, no rect validation
+  # (no hotspot/crop concept for a non-image asset).
+  defp structured_file?(%Field{fields: [_ | _]}), do: true
+  defp structured_file?(_), do: false
+
+  defp walk_file(%Field{} = f, value, path, level) do
+    rules = field_rules(f, level)
+
+    cond do
+      blank?(value) and required?(rules) ->
+        Enum.map(apply_message(["Required"], rules), &{path, &1})
+
+      is_nil(value) ->
+        []
+
+      is_binary(value) ->
+        walk_image_fields(f, %{}, path, level)
+
+      not is_map(value) ->
+        shape(level, [{path, "expected a file URL or a file object"}])
+
+      true ->
+        walk_image_fields(f, value, path, level)
+    end
+  end
 
   # The array's own length rule (v2 walker only; flat mode is frozen).
   defp check_list_bounds(list, rules) when is_list(list) do
