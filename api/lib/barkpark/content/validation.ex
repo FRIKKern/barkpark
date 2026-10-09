@@ -751,6 +751,19 @@ defmodule Barkpark.Content.Validation do
   # richText whose block vocabulary declares custom object blocks
   # (task-152cacba913a4724): every block of such a type has its declared
   # fields checked. Other blocks, and the field's own rules, are unchanged.
+  #
+  # task-839f9bebf5628c03 — `level` rides all the way into each block's own
+  # field walk now, instead of a blanket `shape(level, &1)` around the whole
+  # block. The blanket gate used to pass `:error` to the CHILD walk no matter
+  # what `level` this call was made with, then discard the (ALWAYS
+  # error-shaped) result entirely whenever `level` wasn't `:error` — so a
+  # block field's OWN `"level": "warning"` rule could never surface on
+  # EITHER pass: not on the error run (its rule isn't error-level, so nothing
+  # was found under `:error`), and not on the warning run (the gate discarded
+  # the block's findings outright). Threading `level` through makes a block
+  # field obey its own declared level exactly like an ordinary composite
+  # subfield already does (see the "composite" clause above, which passes
+  # `level` the same way with no gate at all).
   defp walk_field(%Field{type: "richText", raw: raw} = f, value, path, level) do
     case object_block_types(raw) do
       objects when map_size(objects) == 0 ->
@@ -764,12 +777,11 @@ defmodule Barkpark.Content.Validation do
            |> Enum.with_index()
            |> Enum.flat_map(fn
              {%{"type" => t} = block, idx} when is_map_key(objects, t) ->
-               object_block_findings(Map.fetch!(objects, t), block, "#{path}/#{idx}")
+               object_block_findings(Map.fetch!(objects, t), block, "#{path}/#{idx}", level)
 
              _ ->
                []
-           end)
-           |> then(&shape(level, &1)))
+           end))
     end
   end
 
@@ -828,29 +840,39 @@ defmodule Barkpark.Content.Validation do
   @doc """
   Findings for ONE custom object block against its declared `fields`, as
   `[{path, message, code, params}]`. Each field is walked like a composite's
-  subfield (so `validation` rules and nested shapes apply), and a string
-  value must be in the field's `options.list` when one is declared (Sanity's
-  list shape: strings or `{title, value}`).
+  subfield (so `validation` rules and nested shapes apply, AT THE GIVEN
+  `level` — task-839f9bebf5628c03), and a string value must be in the
+  field's `options.list` when one is declared (Sanity's list shape: strings
+  or `{title, value}`). The not-in-list check carries no `"level"` of its
+  own (it is driven by `options.list`, not a `validation` rule), so it stays
+  an ERROR-level-only finding regardless of `level` — unchanged from before
+  this function took a level at all, and exactly how `Content.Validation`'s
+  moduledoc already describes `options.list` elsewhere.
+
+  `level` defaults to `:error` for `FieldVocabulary.validate/2` (the
+  block-op write path), which only ever wants the hard refusal shape and
+  never called this with a level before.
   """
-  @spec object_block_findings([map()], map(), String.t()) :: [
+  @spec object_block_findings([map()], map(), String.t(), atom()) :: [
           {String.t(), String.t(), atom(), map()}
         ]
-  def object_block_findings(fields, block, path) when is_list(fields) and is_map(block) do
+  def object_block_findings(fields, block, path, level \\ :error)
+      when is_list(fields) and is_map(block) do
     case SchemaDefinition.parse(%{"name" => "block", "fields" => fields}) do
       {:ok, parsed} ->
         Enum.flat_map(parsed.fields, fn %Field{} = child ->
           value = fetch_field(block, child.name)
           child_path = path <> "/" <> (child.name || "")
 
-          walk_field(child, value, child_path, :error) ++
-            list_option_findings(child, value, child_path)
+          walk_field(child, value, child_path, level) ++
+            shape(level, list_option_findings(child, value, child_path))
         end)
 
       {:error, reason} ->
-        [
+        shape(level, [
           {path, "the block's declared fields do not parse: #{inspect(reason)}",
            :block_fields_invalid, %{reason: inspect(reason)}}
-        ]
+        ])
     end
   end
 
