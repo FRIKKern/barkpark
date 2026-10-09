@@ -12,6 +12,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   via this module so the gate stays single-sourced.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign_new: 3]
   import Phoenix.LiveView, only: [get_connect_params: 1, stream: 3, allow_upload: 3]
 
@@ -40,7 +41,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
         _ ->
           if stored_name && stored_name != "",
             do: stored_name,
-            else: "User #{String.slice(user_id, 0..3)}"
+            else: fallback_name(socket, user_id)
       end
 
     # SELF-ONLY account label. The signed-in account's email, shown ONLY in the
@@ -402,4 +403,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Mount do
   Re-evaluated in every shares-* handler, not just at mount.
   """
   def shares_admin?(socket), do: Caps.admin?(socket)
+
+  # A session with no display name and no stored name is "User <4 hex>" in
+  # the workspace's language (task-af8133b738966b6c). Mount runs before
+  # handle_params puts the Studio locale, so the name is built inside it.
+  defp fallback_name(socket, user_id) do
+    locale = BarkparkWeb.StudioLocale.resolve(socket.assigns[:current_workspace])
+
+    Gettext.with_locale(BarkparkWeb.Gettext, locale, fn ->
+      gettext("User %{id}", id: String.slice(user_id, 0..3))
+    end)
+  end
 end
