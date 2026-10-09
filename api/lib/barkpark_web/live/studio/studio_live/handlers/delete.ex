@@ -3,6 +3,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
   Delete-with-reference-check. Behaviour-preserving extraction of the
   StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -54,9 +56,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
     title = PaneBuilder.display_title(doc)
 
     cond do
-      disconnected? and refs == 1 -> "Deleted “#{title}” and removed 1 reference to it."
-      disconnected? and refs > 1 -> "Deleted “#{title}” and removed #{refs} references to it."
-      true -> "Deleted “#{title}”."
+      disconnected? and refs >= 1 ->
+        ngettext(
+          "Deleted “%{title}” and removed 1 reference to it.",
+          "Deleted “%{title}” and removed %{count} references to it.",
+          refs,
+          title: title
+        )
+
+      true ->
+        gettext("Deleted “%{title}”.", title: title)
     end
   end
 
@@ -93,7 +102,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> put_flash(:error, "Delete cancelled: #{reason}")}
+           |> put_flash(:error, gettext("Delete cancelled: %{reason}", reason: reason))}
 
         {:ok, _} ->
           new_path = Enum.take(socket.assigns.nav_path, length(socket.assigns.nav_path) - 1)
@@ -112,7 +121,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Delete do
           {:noreply,
            socket
            |> assign(show_delete: false, delete_refs: [])
-           |> put_flash(:error, "Failed to delete")}
+           |> put_flash(:error, gettext("Failed to delete"))}
       end
     else
       {:noreply, socket}

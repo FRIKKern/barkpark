@@ -91,7 +91,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     else
       # Same rule as the refusal arms above: an ERROR arm of this case already
       # flashes, so a press that never ran must not answer with silence.
-      {:noreply, put_flash(socket, :error, "Nothing to publish — open a document first")}
+      {:noreply, put_flash(socket, :error, gettext("Nothing to publish — open a document first"))}
     end
   end
 
@@ -186,14 +186,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
     slug = doc && Content.published_id(doc.doc_id)
 
     if slug && public_sheet_reader?(doc, dataset) do
-      "Published. Published sheets are public, so anyone can now read this one at /sheets/#{slug}."
+      gettext(
+        "Published. Published sheets are public, so anyone can now read this one at /sheets/%{slug}.",
+        slug: slug
+      )
     else
-      "Published. It is readable through the API under this workspace's sharing rules; " <>
-        "this workspace has no public page for sheets yet."
+      gettext(
+        "Published. It is readable through the API under this workspace's sharing rules; this workspace has no public page for sheets yet."
+      )
     end
   end
 
-  def publish_success_message(_type, _doc, _dataset), do: "Published"
+  def publish_success_message(_type, _doc, _dataset), do: gettext("Published")
 
   defp public_sheet_reader?(%{workspace_id: ws_id}, dataset) when is_binary(ws_id) do
     dataset == Barkpark.Content.Papers.paper_default_dataset() and
@@ -237,8 +241,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
          put_flash(
            socket,
            :error,
-           "Name the tag before publishing. Documents use the tag by a name made from its title " <>
-             "(lowercase letters, digits and hyphens), so the title needs at least one letter or digit."
+           gettext(
+             "Name the tag before publishing. Documents use the tag by a name made from its title (lowercase letters, digits and hyphens), so the title needs at least one letter or digit."
+           )
          )}
 
       tag_name_taken?(name, dataset, opts) ->
@@ -246,7 +251,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
          put_flash(
            socket,
            :error,
-           "A tag named “#{name}” already exists. Open that tag to change it, or give this one a different title."
+           gettext(
+             "A tag named “%{name}” already exists. Open that tag to change it, or give this one a different title.",
+             name: name
+           )
          )}
 
       true ->
@@ -261,7 +269,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
            socket
            |> put_flash(
              :info,
-             "Published tag “#{name}”. Documents and tasks use it by that name."
+             gettext("Published tag “%{name}”. Documents and tasks use it by that name.",
+               name: name
+             )
            )
            |> push_patch(to: Shared.studio_path(socket, path, dataset))}
         else
@@ -272,7 +282,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
              put_flash(
                socket,
                :error,
-               "Publish failed: the tag “#{name}” could not be saved (#{inspect(error)}). Your draft is unchanged."
+               gettext(
+                 "Publish failed: the tag “%{name}” could not be saved (%{inspect}). Your draft is unchanged.",
+                 name: name,
+                 inspect: inspect(error)
+               )
              )}
         end
     end
@@ -309,7 +323,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
         {:noreply, assign(socket, show_unpublish_guard: true, unpublish_refs: refs)}
       end
     else
-      {:noreply, put_flash(socket, :error, "Nothing to unpublish — open a document first")}
+      {:noreply,
+       put_flash(socket, :error, gettext("Nothing to unpublish — open a document first"))}
     end
   end
 
@@ -372,13 +387,15 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Doc do
            |> push_patch(to: Shared.studio_path(socket, new_path, socket.assigns.dataset))}
 
         {:error, {:halted, reason}} ->
-          {:noreply, put_flash(socket, :error, "Duplicate cancelled: #{reason}")}
+          {:noreply,
+           put_flash(socket, :error, gettext("Duplicate cancelled: %{reason}", reason: reason))}
 
         {:error, _} ->
-          {:noreply, put_flash(socket, :error, "Failed to duplicate")}
+          {:noreply, put_flash(socket, :error, gettext("Failed to duplicate"))}
       end
     else
-      {:noreply, put_flash(socket, :error, "Nothing to duplicate — open a document first")}
+      {:noreply,
+       put_flash(socket, :error, gettext("Nothing to duplicate — open a document first"))}
     end
   end
 end

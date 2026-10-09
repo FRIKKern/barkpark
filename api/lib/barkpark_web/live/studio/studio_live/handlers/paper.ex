@@ -5,6 +5,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
   action to exactly ONE DocPatchOp through `Shared.paper_op/2`.
   Behaviour-preserving extraction of the StudioLive handler bodies.
   """
+  use Gettext, backend: BarkparkWeb.Gettext
+
   import Phoenix.Component, only: [assign: 2]
   import Phoenix.LiveView
 
@@ -590,26 +592,36 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:info, "Baseline accepted — pinned literal updated to the current value")}
+           |> put_flash(
+             :info,
+             gettext("Baseline accepted — pinned literal updated to the current value")
+           )}
 
         {:error, :precondition_failed} ->
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:error, "Paper changed since this view — re-rendered, retry the accept")}
+           |> put_flash(
+             :error,
+             gettext("Paper changed since this view — re-rendered, retry the accept")
+           )}
 
         {:error, :not_drifted} ->
           {:noreply,
            socket
            |> Shared.refetch_paper()
-           |> put_flash(:info, "Baseline already matches the current value")}
+           |> put_flash(:info, gettext("Baseline already matches the current value"))}
 
         {:error, :dangling} ->
           {:noreply,
-           put_flash(socket, :error, "Value is unresolvable (dangling) — no baseline to accept")}
+           put_flash(
+             socket,
+             :error,
+             gettext("Value is unresolvable (dangling) — no baseline to accept")
+           )}
 
         {:error, _reason} ->
-          {:noreply, put_flash(socket, :error, "Accept baseline failed")}
+          {:noreply, put_flash(socket, :error, gettext("Accept baseline failed"))}
       end
     end
   end
@@ -743,7 +755,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
       when is_binary(fname) and fname != "" do
     if Shared.expected_field_blocked?(socket, fname) do
       socket
-      |> put_flash(:error, "That field is already at its limit.")
+      |> put_flash(:error, gettext("That field is already at its limit."))
       |> failed_reply(params)
     else
       new =
@@ -819,7 +831,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
     cond do
       Shared.expected_field_blocked?(socket, fname) ->
         socket
-        |> put_flash(:error, "That field is already at its limit.")
+        |> put_flash(:error, gettext("That field is already at its limit."))
         |> failed_reply(params)
 
       true ->
@@ -839,7 +851,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
 
           _ ->
             socket
-            |> put_flash(:error, "Unknown property.")
+            |> put_flash(:error, gettext("Unknown property."))
             |> failed_reply(params)
         end
     end
@@ -1091,7 +1103,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Paper do
              |> refresh_paper_values()
              |> put_flash(
                :info,
-               "Canonical value written to #{target} — changes #{impact.count} doc(s)"
+               ngettext(
+                 "Canonical value written to %{target} — changes %{count} doc(s)",
+                 "Canonical value written to %{target} — changes %{count} doc(s)",
+                 impact.count,
+                 target: target
+               )
              )}
 
           {:error, {:rev_mismatch, _}} ->

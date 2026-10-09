@@ -15,6 +15,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   `Paper.clear_paper_view/1` from `rebuild_panes/1`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
   import Phoenix.Component, only: [assign: 2, assign: 3]
   import Phoenix.LiveView
 
@@ -379,7 +380,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
           {:error, _reason} ->
             socket
-            |> put_flash(:error, "Edit failed")
+            |> put_flash(:error, gettext("Edit failed"))
             |> assign(save_status: "Save failed")
             |> assign(last_paper_save_ok?: false)
             |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
@@ -537,7 +538,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           {:error, _reason} ->
             {:error,
              socket
-             |> put_flash(:error, "Edit failed")
+             |> put_flash(:error, gettext("Edit failed"))
              |> assign(save_status: "Save failed", last_paper_save_ok?: false)}
         end
     end
@@ -635,7 +636,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           socket =
             socket
             |> assign(paper_masters: paper_masters(socket, paper))
-            |> put_flash(:info, "Saved as master: #{master.title}")
+            |> put_flash(:info, gettext("Saved as master: %{title}", title: master.title))
 
           {:ok, socket, %{id: impl.master_id(master), title: master.title}}
 
@@ -932,7 +933,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     rejected = history_step_rejection(reason)
 
     socket
-    |> put_flash(:error, "History step failed")
+    |> put_flash(:error, gettext("History step failed"))
     |> assign(save_status: "Save failed", last_paper_save_ok?: false)
     |> assign(
       last_paper_save_result: %{
@@ -1132,16 +1133,22 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       cond do
         tag == "" ->
-          put_flash(socket, :error, "A label needs a tag name.")
+          put_flash(socket, :error, gettext("A label needs a tag name."))
 
         not (is_integer(strength) and strength in 1..100) ->
-          put_flash(socket, :error, "A label's strength must be a whole number from 1 to 100.")
+          put_flash(
+            socket,
+            :error,
+            gettext("A label's strength must be a whole number from 1 to 100.")
+          )
 
         String.length(rationale) < 20 ->
           put_flash(
             socket,
             :error,
-            "A label needs a rationale of at least 20 characters — say why this tag fits."
+            gettext(
+              "A label needs a rationale of at least 20 characters — say why this tag fits."
+            )
           )
 
         true ->
@@ -1175,11 +1182,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       not BarkparkWeb.Studio.Caps.admin_affordance?(socket.assigns[:caps]) ->
         {:error,
-         "“#{tag}” is not a label in this workspace yet. Pick one from the suggestions, or ask an admin to add it."}
+         gettext(
+           "“%{tag}” is not a label in this workspace yet. Pick one from the suggestions, or ask an admin to add it.",
+           tag: tag
+         )}
 
       not Regex.match?(@label_name, tag) ->
         {:error,
-         "A new label name uses lowercase letters, numbers and hyphens, like “product-news”."}
+         gettext(
+           "A new label name uses lowercase letters, numbers and hyphens, like “product-news”."
+         )}
 
       true ->
         register_label(socket, tag, dataset, opts)
@@ -1193,9 +1205,13 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       {:ok,
        socket
        |> assign_label_suggestions()
-       |> put_flash(:info, "Registered “#{tag}” as a label in this workspace.")}
+       |> put_flash(:info, gettext("Registered “%{tag}” as a label in this workspace.", tag: tag))}
     else
-      _ -> {:error, "Could not register “#{tag}” as a label. Try again, or ask another admin."}
+      _ ->
+        {:error,
+         gettext("Could not register “%{tag}” as a label. Try again, or ask another admin.",
+           tag: tag
+         )}
     end
   end
 
@@ -1222,36 +1238,54 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
           socket
           |> put_flash(
             :info,
-            Shared.with_advisories("Published", Barkpark.Content.Warnings.drain())
+            Shared.with_advisories(gettext("Published"), Barkpark.Content.Warnings.drain())
           )
           |> push_patch(
             to: Shared.studio_path(socket, ["open", type, pid], socket.assigns.dataset)
           )
 
         {:error, {:halted, reason}} ->
-          put_flash(socket, :error, "Publish blocked: #{reason}")
+          put_flash(socket, :error, gettext("Publish blocked: %{reason}", reason: reason))
 
         {:error, {:label_spine, details}} ->
-          put_flash(socket, :error, "Publish blocked: #{paper_wall_copy(details)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: paper_wall_copy(details))
+          )
 
         {:error, {:unknown_tag, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{unknown_label_copy(payload, socket)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: unknown_label_copy(payload, socket))
+          )
 
         {:error, {:duplicate_of, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: Shared.format_wall_details(payload))
+          )
 
         {:error, {:dedup_unavailable, _}} ->
           put_flash(
             socket,
             :error,
-            "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+            gettext(
+              "Publish blocked: the duplicate check is unavailable right now — try again in a moment."
+            )
           )
 
         {:error, {:invalid_epic_paper_quality, payload}} ->
-          put_flash(socket, :error, "Publish blocked: #{Shared.format_wall_details(payload)}")
+          put_flash(
+            socket,
+            :error,
+            gettext("Publish blocked: %{detail}", detail: Shared.format_wall_details(payload))
+          )
 
         {:error, _} ->
-          put_flash(socket, :error, "Publish failed")
+          put_flash(socket, :error, gettext("Publish failed"))
       end
     end)
   end
@@ -1341,14 +1375,16 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         |> sync_paper_edit_doc()
         |> put_flash(
           :error,
-          "The paper changed while you were editing — that metadata change was not saved; try again."
+          gettext(
+            "The paper changed while you were editing — that metadata change was not saved; try again."
+          )
         )
 
       {:error, {:halted, reason}} ->
-        put_flash(socket, :error, "Save cancelled: #{reason}")
+        put_flash(socket, :error, gettext("Save cancelled: %{reason}", reason: reason))
 
       {:error, _} ->
-        put_flash(socket, :error, "Save failed")
+        put_flash(socket, :error, gettext("Save failed"))
     end
   end
 
@@ -2274,7 +2310,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
           {:error, _reason} ->
             socket
-            |> put_flash(:error, "Edit failed")
+            |> put_flash(:error, gettext("Edit failed"))
             |> assign(last_paper_save_ok?: false)
             |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
         end
@@ -2341,7 +2377,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
       {:error, _reason} ->
         socket
-        |> put_flash(:error, "Edit failed")
+        |> put_flash(:error, gettext("Edit failed"))
         |> assign(last_paper_save_ok?: false)
         |> assign(last_paper_save_result: %{saved: false, request_id: op["request_id"]})
     end

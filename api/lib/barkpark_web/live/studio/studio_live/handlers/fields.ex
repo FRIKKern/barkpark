@@ -138,10 +138,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
          |> focus_new_doc(pub_id)}
 
       {:error, {:halted, reason}} ->
-        {:noreply, put_flash(socket, :error, "Create cancelled: #{reason}")}
+        {:noreply,
+         put_flash(socket, :error, gettext("Create cancelled: %{reason}", reason: reason))}
 
       {:error, _} ->
-        {:noreply, put_flash(socket, :error, "Failed to create")}
+        {:noreply, put_flash(socket, :error, gettext("Failed to create"))}
     end
   end
 
@@ -209,7 +210,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Handlers.Fields do
         # stale concurrent-edit banner.
         socket =
           socket
-          |> put_flash(:info, "Saved")
+          |> put_flash(:info, gettext("Saved"))
           |> Shared.rebuild_panes()
           |> assign(editor_dirty: false, doc_conflict: false)
           |> clear_touched()
