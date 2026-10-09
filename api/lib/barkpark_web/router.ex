@@ -3101,11 +3101,12 @@ defmodule BarkparkWeb.Router do
   # same posture task-ea6c9abb868593f8 shipped for preview tokens). A
   # SEPARATE scope so `:require_admin` is not on this route's pipeline at
   # all: `[:api, :require_token, :flat_within_quota, :require_write]` is the
-  # SAME established combo the flat `/v1/data/mutate` family already uses
-  # (router.ex:2730) — it proves only a write-capable TOKEN, nothing
-  # workspace-specific. The real, workspace-specific authorization (is this
-  # caller an admin OR a write-capable member of the SPECIFIC workspace named
-  # in the request's `scope` param) lives in the controller's own
+  # SAME established combo the flat `/v1/data/mutate` family's
+  # `HistoryController.restore/2` route already uses — it proves only a
+  # write-capable TOKEN, nothing workspace-specific. The real,
+  # workspace-specific authorization (is this caller an admin OR a
+  # write-capable member of the SPECIFIC workspace named in the request's
+  # `scope` param) lives in the controller's own
   # `ensure_can_mint/2`, because the workspace here comes from the request
   # BODY, not the URL — no `:scoped_api`/`ResolveWorkspace` membership gate
   # exists on this flat route to lean on.
