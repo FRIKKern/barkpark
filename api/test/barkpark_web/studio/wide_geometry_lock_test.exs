@@ -386,7 +386,7 @@ defmodule BarkparkWeb.Studio.WideGeometryLockTest do
      the nearest ancestor container, landing on `panel` by luck rather than by
      contract.
      """},
-    {"bp-ae", "max-width: 640px", ".bp-ae-root { flex-direction: column;",
+    {"bp-ae", "width <= 640px", ".bp-ae-root { flex-direction: column;",
      """
      The media library's one-column stack (task-c196ca78349ea153) asks how
      wide the EXPLORER is given to be: its 200px library rail and 300px

@@ -3022,7 +3022,7 @@
     /* Phone width: one column — library lists on top (wrapping), then the
        toolbar and grid at full width, then the inspector — and the explorer
        scrolls as a whole instead of crushing the grid between two rails. */
-    @container bp-ae (max-width: 640px) {
+    @container bp-ae (width <= 640px) {
       .bp-ae-root { flex-direction: column; overflow-y: auto; }
       .bp-ae-sidebar {
         width: auto; border-right: 0; border-bottom: 1px solid var(--border-muted);

@@ -54,7 +54,7 @@ defmodule BarkparkWeb.Studio.MediaLibraryNarrowLayoutTest do
     assert css =~ ~r/\.bp-ae-filter,\s*\.bp-ae-collection \{/
     assert css =~ ~r/\.bp-ae-filter\.is-active,\s*\.bp-ae-collection\.is-active \{/
 
-    [_, query] = Regex.run(~r/@container bp-ae \(max-width: 640px\) \{(.*?)\n    \}/s, css)
+    [_, query] = Regex.run(~r/@container bp-ae \(width <= 640px\) \{(.*?)\n    \}/s, css)
     assert query =~ ".bp-ae-root { flex-direction: column;"
     assert query =~ ~r/\.bp-ae-sidebar \{[^}]*width: auto/
     assert query =~ ~r/\.bp-ae-inspector \{[^}]*width: auto/
