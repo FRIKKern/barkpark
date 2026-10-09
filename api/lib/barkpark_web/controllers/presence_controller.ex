@@ -1,11 +1,14 @@
 defmodule BarkparkWeb.PresenceController do
+  @selection_max_bytes 512
+
   @moduledoc """
   Editor presence over HTTP for clients that are not the LiveView Studio
   (task-32b73e85f89d4be7, Studio parity journey J07).
 
       GET  /w/:ws/p/:proj/v1/data/presence/:dataset?sessionId=&name=&documentId=
       POST /w/:ws/p/:proj/v1/data/presence/:dataset/focus
-           {"sessionId": "…", "documentId": "…", "field": "seo.metaTitle"}
+           {"sessionId": "…", "documentId": "…", "field": "seo.metaTitle",
+            "selection": {"anchor": Point, "head": Point} | null}
 
   The GET is a Server-Sent Events stream. While it is open, the connection
   process is TRACKED in the same Phoenix.Presence room the LiveView Studio
@@ -15,12 +18,17 @@ defmodule BarkparkWeb.PresenceController do
     * `event: session` once, `{"sessionId": …}` — the id to send focus with;
     * `event: presence` with the full room list (`{"presences": [...]}`, narrowed
       to one document by `?documentId=`), first on connect and then on every
-      change, each entry `{sessionId, name, color, documentId, field, client}`;
+      change, each entry `{sessionId, name, color, documentId, field, client}`
+      plus `selection` while that session has one;
     * `: keepalive` comments.
 
-  The POST moves that session's focus (document + field path). It answers 404
-  unless the session is live AND was opened by the same API token, so one
-  caller cannot steer another's cursor.
+  The POST moves that session's focus (document + field path) and, optionally,
+  its text selection (task-d47c05259837093f, shared carets): the canvas
+  `bp-canvas-selection` detail, `Point = {blockId, path?, offset}`. A focus
+  without `selection` clears it. Over #{@selection_max_bytes} bytes of JSON is
+  a 413; any other shape is a 422. It answers 404 unless the session is live
+  AND was opened by the same API token, so one caller cannot steer another's
+  cursor.
 
   Expiry: Phoenix.Presence drops an entry when its tracking process exits.
   The stream process exits when the client disconnects, and at the latest on
@@ -90,6 +98,7 @@ defmodule BarkparkWeb.PresenceController do
   def focus(conn, %{"dataset" => dataset} = params) do
     with {:ok, topic, token} <- room(conn, dataset),
          {:ok, sid} <- required_session(params["sessionId"]),
+         {:ok, selection} <- selection(params["selection"]),
          :ok <- owns_live_session(topic, sid, token) do
       doc_id = blank_to_nil(params["documentId"])
       field = blank_to_nil(params["field"])
@@ -100,13 +109,13 @@ defmodule BarkparkWeb.PresenceController do
       Phoenix.PubSub.broadcast(
         Barkpark.PubSub,
         session_topic(topic, sid),
-        {:presence_focus, want, field, {self(), ref}}
+        {:presence_focus, %{doc_id: want, field: field, selection: selection}, {self(), ref}}
       )
 
       # The answer is the room entry READ BACK after the stream applied it,
       # never the request echoed: a 200 means the room now says this.
       with :ok <- await_applied(ref),
-           %{} = entry <- read_entry(topic, sid, want, field) do
+           %{} = entry <- read_entry(topic, sid, want, field, selection) do
         json(conn, %{result: entry})
       else
         _ ->
@@ -126,13 +135,8 @@ defmodule BarkparkWeb.PresenceController do
       :sse_overloaded ->
         conn
 
-      {:presence_focus, doc_id, field, {from, ref}} ->
-        Presence.update(
-          self(),
-          state.topic,
-          state.key,
-          &Map.merge(&1, %{doc_id: doc_id, field: field})
-        )
+      {:presence_focus, focus, {from, ref}} ->
+        Presence.update(self(), state.topic, state.key, &Map.merge(&1, focus))
 
         send(from, {:presence_focus_applied, ref})
         loop(conn, state)
@@ -184,8 +188,10 @@ defmodule BarkparkWeb.PresenceController do
 
   # Studio LiveView metas carry no session id or field; their presence key is
   # the Studio user id, which plays the same role.
+  # `selection` is present only while set, so an entry without one keeps the
+  # six keys it always had.
   defp entry(key, meta) do
-    %{
+    entry = %{
       sessionId: Map.get(meta, :session_id) || key,
       name: Map.get(meta, :name),
       color: Map.get(meta, :color),
@@ -193,6 +199,11 @@ defmodule BarkparkWeb.PresenceController do
       field: Map.get(meta, :field),
       client: Map.get(meta, :client, "studio")
     }
+
+    case Map.get(meta, :selection) do
+      nil -> entry
+      selection -> Map.put(entry, :selection, selection)
+    end
   end
 
   defp frame(event, data), do: "event: #{event}\ndata: #{Jason.encode!(data)}\n\n"
@@ -209,12 +220,15 @@ defmodule BarkparkWeb.PresenceController do
 
   # The session's entry as the Presence store holds it now, picked by the
   # values just applied (a session open twice carries one meta per stream).
-  defp read_entry(topic, sid, doc_id, field) do
+  defp read_entry(topic, sid, doc_id, field, selection) do
     case Presence.get_by_key(topic, presence_key(sid)) do
       %{metas: metas} ->
         metas
         |> Enum.map(&entry(presence_key(sid), &1))
-        |> Enum.find(&(&1.documentId == doc_id and &1.field == field))
+        |> Enum.find(
+          &(&1.documentId == doc_id and &1.field == field and
+              Map.get(&1, :selection) == selection)
+        )
 
       _ ->
         nil
@@ -257,6 +271,44 @@ defmodule BarkparkWeb.PresenceController do
     do:
       {:error, 422, "validation_failed",
        "sessionId is required (the id the stream's session event sent)"}
+
+  # ── Selection (shared carets) ────────────────────────────────────────────
+
+  # `nil` (absent or JSON null) is the blurred state. Size is checked on the
+  # re-encoded value, before the shape, so an oversized body is a 413 whatever
+  # it holds.
+  defp selection(nil), do: {:ok, nil}
+
+  defp selection(sel) do
+    cond do
+      byte_size(Jason.encode!(sel)) > @selection_max_bytes ->
+        {:error, 413, "payload_too_large",
+         "selection must be at most #{@selection_max_bytes} bytes of JSON"}
+
+      selection_shape?(sel) ->
+        {:ok, sel}
+
+      true ->
+        {:error, 422, "validation_failed",
+         "selection must be null or {anchor, head}, each {blockId, path?, offset}"}
+    end
+  end
+
+  defp selection_shape?(%{"anchor" => a, "head" => h} = sel) when map_size(sel) == 2,
+    do: point?(a) and point?(h)
+
+  defp selection_shape?(_), do: false
+
+  defp point?(%{"blockId" => id, "offset" => off} = p)
+       when is_binary(id) and id != "" and is_integer(off) and off >= 0 do
+    case Map.drop(p, ["blockId", "offset"]) do
+      empty when empty == %{} -> true
+      %{"path" => path} when is_binary(path) and path != "" -> true
+      _ -> false
+    end
+  end
+
+  defp point?(_), do: false
 
   defp owns_live_session(topic, sid, token) do
     case Presence.get_by_key(topic, presence_key(sid)) do
