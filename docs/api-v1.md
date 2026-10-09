@@ -72,7 +72,7 @@ One document; 404 if missing or schema `"private"`. Takes `?fields=`/`?expand=` 
 
 ## 6. `POST /w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset` [token]
 
-Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true` (or `?dryRun=true`): full run, then rollback — `results` + `dryRun:true`, nothing persists; non-boolean → `400`.
+Atomic: one failure rolls back all. Body: `{"mutations":[…]}`. `"dryRun":true` (or `?dryRun=true`): runs, rolls back, answers `results` + `dryRun:true`; non-boolean → `400`. Unknown keys → `mutate.unknown_key` warning.
 
 **Write gate.** Needs `write` permission (read-only → `403`, own workspace too); tenancy first (§2). **Unscoped** (flat + workspace-less token): infers its ONE workspace into `resolvedScope`, else `422 workspace_scope_required`, no write.
 
@@ -99,7 +99,7 @@ The next four take one shape — `{ "<kind>": { "id": "my-post", "type": "post" 
 - **`discardDraft`** — deletes `drafts.<id>` only.
 - **`delete`** — deletes `<id>` and `drafts.<id>` if they exist; honors `ifRevisionID`.
 
-**Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. A publish (or paper-ingest 200) may add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
+**Success:** `{ "transactionId": "<hex>", "results": [ { "id": "drafts.my-post", "operation": "create", "document": {…envelope} } ] }`. May add non-blocking `warnings:[{code,severity,message}]` (`label_norm`, `schema_validation`).
 
 Failures: §9. Searchable text (title + every `content` string) over Postgres' **1 048 575-byte** tsvector cap → `422 searchable_text_too_large` (`details.limit_bytes`/`.field`/`.field_bytes`), nothing written. A document's JSON (title + content) over `BARKPARK_MAX_DOCUMENT_BYTES` (default 10 MB) → `413 document_too_large` (`details.limit_bytes`/`.size_bytes`); `/v1/data` bodies cap at 3x that. `content.dedup_bypass: true` skips the duplicate scan.
 
