@@ -253,8 +253,19 @@ defmodule BarkparkWeb.Plugs.RateLimitBrowserShadowTest do
       # The row says 13; main carries 14. The count is pinned as a LOWER bound
       # plus an exact-today note so a new mount is noticed without this test
       # fighting every unrelated pipeline addition.
-      assert Enum.all?(mounts, &(&1 == "")),
-             "a RateLimit mount now passes options: #{inspect(Enum.reject(mounts, &(&1 == "")))} — " <>
+      #
+      # ONE DELIBERATE EXCEPTION (task-db8de40bbc928c54): `class:
+      # :presence_focus`, the focus-POST-only pipeline. Named here, not just
+      # allowed by a loosened regex, because the whole POINT of this test is
+      # that a new option string must be looked at by a human before it ships
+      # — `:presence_focus` is NOT `:browser`, so it is a REAL enforced class
+      # (RateLimit.limited/4's non-:browser catch-all refuses it exactly like
+      # :read/:write), never shadow-only. Any OTHER new option string still
+      # fails this assertion and must be reasoned about the same way.
+      non_empty = Enum.reject(mounts, &(&1 == ""))
+
+      assert Enum.all?(non_empty, &(&1 == ", class: :presence_focus")),
+             "a RateLimit mount now passes options: #{inspect(non_empty)} — " <>
                "if that is `class: :browser`, the shadow law applies to it and this test should " <>
                "be updated deliberately, not silently"
     end
