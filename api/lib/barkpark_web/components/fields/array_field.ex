@@ -381,7 +381,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
       pick(row, spec["title"]) ||
         first_text(row, subs) ||
         title_for(item) ||
-        "Item"
+        gettext("Item")
 
     %{
       title: title,
@@ -662,7 +662,7 @@ defmodule BarkparkWeb.Components.Fields.ArrayField do
   # Shown as-is it read "Choices[item]" on an empty row; an untitled item is
   # just an "Item" to an editor (task-3630409f12d4a43b).
   defp title_for(%{name: n}) when is_binary(n) do
-    if String.ends_with?(n, "[item]"), do: "Item", else: humanize(n)
+    if String.ends_with?(n, "[item]"), do: gettext("Item"), else: humanize(n)
   end
 
   defp title_for(_), do: ""

@@ -332,7 +332,9 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
       # (hidden-false + checkbox-true ordering is the form contract below).
       assert html =~ ~s(class="form-switch")
       assert html =~ ~s(class="form-switch-track")
-      assert html =~ ">Off<"
+      # Both words ship; CSS :checked shows the true one (task-70fd7cef5d0266aa).
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
 
       hidden_idx =
         :binary.match(html, ~s(<input type="hidden" name="doc[featured]" value="false"))
@@ -354,7 +356,9 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         })
 
       assert html =~ ~s(value="true" checked phx-debounce="100")
-      assert html =~ ">On<"
+
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
     end
 
     test "id_prefix lands on the checkbox only" do

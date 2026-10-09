@@ -239,7 +239,9 @@ defmodule BarkparkWeb.Components.FormParityE15Test do
       assert html =~ ~s(class="form-switch bp-input-checkbox")
       assert html =~ ~s(class="form-switch-track")
       refute html =~ ~r{<input\s+type="checkbox"\s+class="bp-input"}
-      assert html =~ ">On<"
+
+      assert html =~
+               ~s(<span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">Off</span><span class="form-switch-state-on">On</span></span>)
     end
 
     test "select subfield with layout: radio renders radios with the option titles" do

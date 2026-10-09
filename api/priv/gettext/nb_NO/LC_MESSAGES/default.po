@@ -134,12 +134,12 @@ msgstr "Dupliser"
 msgid "Edit"
 msgstr "Rediger"
 
-#: lib/barkpark_web/components/field_inputs.ex:457
+#: lib/barkpark_web/components/field_inputs.ex:460
 #, elixir-autogen, elixir-format
 msgid "Generate"
 msgstr "Generer"
 
-#: lib/barkpark_web/components/field_inputs.ex:457
+#: lib/barkpark_web/components/field_inputs.ex:460
 #, elixir-autogen, elixir-format
 msgid "Generate from %{source}"
 msgstr "Generer fra %{source}"
@@ -908,7 +908,7 @@ msgstr "Cellestil"
 msgid "Checkbox"
 msgstr "Avkrysningsboks"
 
-#: lib/barkpark_web/components/field_inputs.ex:348
+#: lib/barkpark_web/components/field_inputs.ex:351
 #: lib/barkpark_web/components/fields/tree_codelist_field.ex:390
 #: lib/barkpark_web/components/studio_components/editor_fields.ex:79
 #: lib/barkpark_web/live/studio/sheet_grid.ex:3810
@@ -8944,7 +8944,7 @@ msgstr "%{field} %{n}"
 msgid "%{met}/%{total} met"
 msgstr "%{met}/%{total} oppfylt"
 
-#: lib/barkpark_web/components/field_inputs.ex:502
+#: lib/barkpark_web/components/field_inputs.ex:505
 #, elixir-autogen, elixir-format
 msgid "read-only — managed via API"
 msgstr "skrivebeskyttet — styres via API-et"
@@ -10437,7 +10437,7 @@ msgstr "Skriv inn et gyldig tall."
 msgid "Foldable"
 msgstr "Sammenleggbar"
 
-#: lib/barkpark_web/components/field_inputs.ex:327
+#: lib/barkpark_web/components/field_inputs.ex:330
 #, elixir-autogen, elixir-format
 msgid "No color"
 msgstr "Ingen farge"
@@ -10577,7 +10577,7 @@ msgstr "ingen oversettelse tilgjengelig"
 msgid "primary translation `%{primary}` missing — using fallback `%{using}`"
 msgstr "primæroversettelsen `%{primary}` mangler — bruker reserven `%{using}`"
 
-#: lib/barkpark_web/components/field_inputs.ex:681
+#: lib/barkpark_web/components/field_inputs.ex:684
 #, elixir-autogen, elixir-format
 msgid "read-only — stored as block content, which the rich-text editor (HTML) cannot edit; saved unchanged"
 msgstr "skrivebeskyttet — lagret som blokkinnhold, som riktekstredigereren (HTML) ikke kan redigere; lagres uendret"
@@ -10588,13 +10588,13 @@ msgstr "skrivebeskyttet — lagret som blokkinnhold, som riktekstredigereren (HT
 msgid "read-only — stored as structured data this field's editor cannot show; saved unchanged"
 msgstr "skrivebeskyttet — lagret som strukturerte data feltets redigerer ikke kan vise; lagres uendret"
 
-#: lib/barkpark_web/components/field_inputs.ex:480
+#: lib/barkpark_web/components/field_inputs.ex:483
 #, elixir-autogen, elixir-format
 msgid "read-only — the .scaffy source of truth; edit in the repo"
 msgstr "skrivebeskyttet — .scaffy-kilden er fasiten; rediger i repoet"
 
 #: lib/barkpark_web/components/fields/codelist_field.ex:181
-#: lib/barkpark_web/components/fields/composite_field.ex:551
+#: lib/barkpark_web/components/fields/composite_field.ex:554
 #, elixir-autogen, elixir-format
 msgid "— Select —"
 msgstr "— Velg —"
@@ -10710,3 +10710,23 @@ msgstr "Navn på arbeidsområdet"
 #, elixir-autogen, elixir-format
 msgid "%{time} UTC"
 msgstr "%{time} UTC"
+
+#: lib/barkpark_web/components/fields/array_field.ex:384
+#: lib/barkpark_web/components/fields/array_field.ex:665
+#, elixir-autogen, elixir-format
+msgid "Item"
+msgstr "Element"
+
+#: lib/barkpark_web/components/field_inputs.ex:289
+#: lib/barkpark_web/components/fields/composite_field.ex:433
+#: lib/barkpark_web/components/studio_components/controls.ex:252
+#, elixir-autogen, elixir-format
+msgid "Off"
+msgstr "Av"
+
+#: lib/barkpark_web/components/field_inputs.ex:289
+#: lib/barkpark_web/components/fields/composite_field.ex:433
+#: lib/barkpark_web/components/studio_components/controls.ex:252
+#, elixir-autogen, elixir-format
+msgid "On"
+msgstr "På"

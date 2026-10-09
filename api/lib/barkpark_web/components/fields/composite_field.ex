@@ -427,7 +427,10 @@ defmodule BarkparkWeb.Components.Fields.CompositeField do
         disabled={@readonly}
       />
       <span class="form-switch-track" aria-hidden="true"></span>
-      <span class="form-switch-state"><%= if @checked, do: "On", else: "Off" %></span>
+      <%!-- Both words ship and CSS `:checked` shows the true one, so the word
+            follows a click before any re-render, in the Studio language
+            (task-70fd7cef5d0266aa). aria-hidden: the checkbox announces its state. --%>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off"><%= gettext("Off") %></span><span class="form-switch-state-on"><%= gettext("On") %></span></span>
     </label>
     """
   end

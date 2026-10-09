@@ -33,6 +33,7 @@ defmodule BarkparkWeb.StudioComponents.Controls do
     * `bp_radio/1` — a `.form-radio` labeled radio for one-of-N choices.
   """
   use Phoenix.Component
+  use Gettext, backend: BarkparkWeb.Gettext
 
   @doc """
   A `.card` section: tokenized surface + border + radius, with a padded body.
@@ -222,8 +223,10 @@ defmodule BarkparkWeb.StudioComponents.Controls do
   """
   attr :name, :string, default: nil
   attr :checked, :boolean, default: false
-  attr :on_label, :string, default: "On"
-  attr :off_label, :string, default: "Off"
+  # nil reads "On"/"Off" in the Studio language (task-70fd7cef5d0266aa); an
+  # attr default is fixed at compile time, so the word is picked at render.
+  attr :on_label, :string, default: nil
+  attr :off_label, :string, default: nil
   attr :id, :string, default: nil
   attr :value, :string, default: nil
   attr :disabled, :boolean, default: false
@@ -246,7 +249,7 @@ defmodule BarkparkWeb.StudioComponents.Controls do
             so the word stays truthful when the switch toggles inside a
             submit-only form (no LiveView re-render — e.g. plugin settings).
             aria-hidden: the real checkbox announces state to AT. --%>
-      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">{@off_label}</span><span class="form-switch-state-on">{@on_label}</span></span>
+      <span class="form-switch-state" aria-hidden="true"><span class="form-switch-state-off">{@off_label || gettext("Off")}</span><span class="form-switch-state-on">{@on_label || gettext("On")}</span></span>
     </label>
     """
   end
