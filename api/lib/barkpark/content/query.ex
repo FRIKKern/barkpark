@@ -522,7 +522,8 @@ defmodule Barkpark.Content.Query do
   """
   def list_reference_holders(target_id, dataset, opts) do
     pub_id = Barkpark.Content.published_id(target_id)
-    ids = [pub_id, Barkpark.Content.draft_id(pub_id)]
+    draft_id = Barkpark.Content.draft_id(pub_id)
+    ids = [pub_id, draft_id]
     ctx = Keyword.get(opts, :caller_context) || Barkpark.Content.CallerContext.anonymous()
 
     opts
@@ -577,14 +578,18 @@ defmodule Barkpark.Content.Query do
               # its own path rather than falling through to the `true` arm
               # below (task-94891b81179a0855: an image field's asset ref was
               # invisible to backlinks and media relations entirely).
+              # The `_ref` matches the asset's bare OR draft id: the upload
+              # receipt's `assetDocId` is `drafts.asset-…`, and a client that
+              # stores it verbatim holds the same asset (task-fe13ea62be4a69e6).
               field["type"] == "image" ->
                 dynamic(
                   [d],
                   fragment(
-                    "?->?->'asset'->>'_ref' = ?",
+                    "?->?->'asset'->>'_ref' IN (?, ?)",
                     d.content,
                     ^name,
-                    ^pub_id
+                    ^pub_id,
+                    ^draft_id
                   )
                 )
 
@@ -592,12 +597,15 @@ defmodule Barkpark.Content.Query do
                 dynamic(
                   [d],
                   fragment(
-                    "jsonb_typeof(?->?) = 'array' AND ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text)))",
+                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))) OR ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))))",
                     d.content,
                     ^name,
                     d.content,
                     ^name,
-                    ^pub_id
+                    ^pub_id,
+                    d.content,
+                    ^name,
+                    ^draft_id
                   )
                 )
 
@@ -614,10 +622,11 @@ defmodule Barkpark.Content.Query do
                 dynamic(
                   [d],
                   fragment(
-                    "?->?->'asset'->>'_ref' = ?",
+                    "?->?->'asset'->>'_ref' IN (?, ?)",
                     d.content,
                     ^name,
-                    ^pub_id
+                    ^pub_id,
+                    ^draft_id
                   )
                 )
 
@@ -625,12 +634,15 @@ defmodule Barkpark.Content.Query do
                 dynamic(
                   [d],
                   fragment(
-                    "jsonb_typeof(?->?) = 'array' AND ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text)))",
+                    "jsonb_typeof(?->?) = 'array' AND (?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))) OR ?->? @> jsonb_build_array(jsonb_build_object('asset', jsonb_build_object('_ref', ?::text))))",
                     d.content,
                     ^name,
                     d.content,
                     ^name,
-                    ^pub_id
+                    ^pub_id,
+                    d.content,
+                    ^name,
+                    ^draft_id
                   )
                 )
 

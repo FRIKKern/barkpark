@@ -182,12 +182,24 @@ defmodule Barkpark.Media.WhereUsed do
   # 2026-10-09). The structural lookup has no equivalent reason to narrow
   # itself the same way: it is a single indexed read, not a corpus-wide text
   # scan, so there is no churn/cost tradeoff pushing it toward published-only.
+  #
+  # The blob's OWN tenancy scope rides into the backlinks read
+  # (task-fe13ea62be4a69e6). Without it `resolve_read_dataset_id/2` falls back
+  # to the Default project, and when that project holds a dataset of the same
+  # name (guerrilla's `e2e-freeform`) the schema catalog and the documents are
+  # both pinned to ITS dataset id: no `post` schema, no referrers, and a scoped
+  # delete answered 200 over live `_ref`s.
   defp structural_referrers(%MediaFile{} = file) do
-    case Barkpark.Media.asset_doc_for_file(file, file.dataset, MediaFile.scope_opts(file)) do
+    scope = MediaFile.scope_opts(file)
+
+    case Barkpark.Media.asset_doc_for_file(file, file.dataset, scope) do
       nil ->
         %{count: 0, sample: []}
 
       asset_doc ->
+        # The upload mints the companion as a DRAFT (`drafts.asset-…`) while a
+        # field holds the bare `asset-…`; `list_reference_holders/3` matches the
+        # published id, so normalise here.
         asset_doc_id = Barkpark.Content.published_id(asset_doc.doc_id)
 
         ctx = %Barkpark.Content.CallerContext{
@@ -197,8 +209,10 @@ defmodule Barkpark.Media.WhereUsed do
         }
 
         rows =
-          Barkpark.Content.Query.list_reference_holders(asset_doc_id, file.dataset,
-            caller_context: ctx
+          Barkpark.Content.Query.list_reference_holders(
+            asset_doc_id,
+            file.dataset,
+            [caller_context: ctx] ++ scope
           )
 
         sample =
