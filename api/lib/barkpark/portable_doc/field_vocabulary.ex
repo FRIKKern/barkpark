@@ -30,6 +30,17 @@ defmodule Barkpark.PortableDoc.FieldVocabulary do
                       (task-152cacba913a4724; checked by
                       `Content.Validation.object_block_findings/3`)
 
+  A custom object block's `name` colliding with one of the four built-ins
+  above (or any other name already in `of`) is NOT refused at schema save —
+  **the declared shape wins** for every block carrying that name, in BOTH
+  enforcement paths (this module's `validate/2`, and the v2 schema walk's
+  `Content.Validation.walk_field/4`): `object_block_types/1` only reads the
+  OBJECT entries of `of`, so a same-named bare string is simply shadowed, not
+  conflicting. A schema author who names a custom block `"image"` gets an
+  `image` whose shape is THEIRS, not portable-doc's bare built-in, read
+  consistently by every door — never a refused schema, never two doors
+  disagreeing about what the name means (task-839f9bebf5628c03).
+
   The client enforces the same vocabulary calmly (slash menu + a
   `filterTransaction` veto); THIS module is the truth the write path checks,
   so a hand-rolled op cannot smuggle an out-of-vocabulary block into a field.
