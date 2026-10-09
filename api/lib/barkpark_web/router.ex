@@ -3080,10 +3080,11 @@ defmodule BarkparkWeb.Router do
     delete("/tokens/:token_id", ShareController, :revoke_token)
 
     # P7 ITEM (per-document) share links — Google-Docs-style direct links to ONE
-    # paper/doc/media. Admin-only mint (raw token shown once) / list-per-item /
-    # revoke; the public reader is GET /s/:token below.
+    # paper/doc/media. List-per-item / revoke stay admin-only (revoke is
+    # ANCHORED code, scripts/pds-elixir-receipt-census.exs exclusion); mint
+    # moved below (task-d50757dc446514e7 widened it to any write-capable
+    # member). The public reader is GET /s/:token below.
     get("/links", ShareLinkController, :list)
-    post("/links", ShareLinkController, :mint)
     delete("/links/:id", ShareLinkController, :revoke)
 
     # task-6812c3100d7aedbc — DRAFT-capable preview links, a SIBLING of /links
@@ -3093,6 +3094,25 @@ defmodule BarkparkWeb.Router do
     get("/preview-links", PreviewLinkController, :list)
     post("/preview-links", PreviewLinkController, :mint)
     delete("/preview-links/:id", PreviewLinkController, :revoke)
+  end
+
+  # task-d50757dc446514e7 — ShareLinkController.mint/2 widened from
+  # admin-only to any write-capable WORKSPACE MEMBER (barkpark-studio's gap,
+  # same posture task-ea6c9abb868593f8 shipped for preview tokens). A
+  # SEPARATE scope so `:require_admin` is not on this route's pipeline at
+  # all: `[:api, :require_token, :flat_within_quota, :require_write]` is the
+  # SAME established combo the flat `/v1/data/mutate` family already uses
+  # (router.ex:2730) — it proves only a write-capable TOKEN, nothing
+  # workspace-specific. The real, workspace-specific authorization (is this
+  # caller an admin OR a write-capable member of the SPECIFIC workspace named
+  # in the request's `scope` param) lives in the controller's own
+  # `ensure_can_mint/2`, because the workspace here comes from the request
+  # BODY, not the URL — no `:scoped_api`/`ResolveWorkspace` membership gate
+  # exists on this flat route to lean on.
+  scope "/v1/shares", BarkparkWeb do
+    pipe_through([:api, :require_token, :flat_within_quota, :require_write])
+
+    post("/links", ShareLinkController, :mint)
   end
 
   # P7 ITEM share-link PUBLIC reader — resolves the opaque token to its bound

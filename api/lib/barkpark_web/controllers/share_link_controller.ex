@@ -6,8 +6,56 @@ defmodule BarkparkWeb.ShareLinkController do
       item, scoped to the LINK's own workspace/project/dataset (NOT the request
       path), so it is independent of any section share. A paper renders its
       reader page; another doc returns its published data; media serves the file.
-    * `POST/GET/DELETE /v1/shares/links` — ADMIN. Mint (raw token shown once),
-      list an item's links, revoke one.
+    * `POST /v1/shares/links` — any write-capable WORKSPACE MEMBER (not just
+      admin), widened per task-d50757dc446514e7 (barkpark-studio's gap: Sanity
+      lets an editor mint a share link, not just an admin — the same posture
+      task-ea6c9abb868593f8 shipped for preview tokens). Mint (raw token shown
+      once) for the default `access: "read"`; `"access": "edit"` stays
+      admin-gated (`authorize_access/3` below) — it hands the link's holder
+      EDIT authority on the item, a bigger grant than a read-only public
+      link.
+    * `GET/DELETE /v1/shares/links` — still ADMIN-only. List an item's links,
+      revoke one. Deliberately NOT widened: `list` serialises an item's whole
+      link inventory (metadata, not secrets — see the tenancy-confinement
+      section below), and `revoke` is ANCHORED code
+      (`scripts/pds-elixir-receipt-census.exs` exclusion register) — both out
+      of this slice's fence.
+
+  ## Member mint confinement (task-d50757dc446514e7)
+
+  Two checks `ensure_workspace_admin/2` never needed, because only a
+  workspace's own admin could reach `mint` at all:
+
+    * **dataset_bound (#22393).** A member's own token can be bound to ONE
+      dataset (`ApiToken.dataset_bound`), refused on every other dataset by
+      `RequireToken.dataset_off_binding?/2` (flat routes) / `OptionalToken`'s
+      identical check — but BOTH read the request's dataset from a literal
+      `dataset` param (path segment or top-level body key); this route's
+      dataset rides INSIDE the composite `scope` string
+      (`"ws[/project[/dataset]]"`), which neither plug ever parses. Confirmed
+      live (a throwaway probe, before writing the fix): a token bound to
+      `"staging"` minted a link scoped to `"production"` with a 201 — a
+      complete bypass, pre-existing for any dataset_bound ADMIN too, just low
+      blast radius while only admins could mint. `ensure_dataset_bound/2`
+      closes it for mint specifically, for every caller (admin included —
+      inert for the overwhelming majority that are not dataset_bound, a real
+      fix for the ones that are).
+    * **Per-item read authority.** `ensure_item_exists/6` now threads
+      `caller_context: CallerContext.from_conn(conn)` into the same
+      `Content.get_paper/get_document` calls every other read uses, so an
+      OWNER-SCOPED item is confined by the SAME `Content.Scope.scope_to_owner/2`
+      chokepoint everything else goes through — no bespoke check invented
+      here. **Stated plainly, not papered over:** `scope_to_owner/2` bypasses
+      entirely for ANY `:api_token` principal (admin or member alike — see its
+      clauses), by established, pre-existing design; this route is, and stays,
+      BEARER-TOKEN-ONLY (no `:current_user`/session arm, matching this file's
+      history). So today this wiring is a no-op in practice — it is wired to
+      the real chokepoint and will start enforcing itself the moment a
+      `:user` principal can reach this route, but it closes nothing for a
+      bearer-token member right now. Closing THAT gap for real needs either
+      session-auth support here or a product call on the api_token bypass
+      itself — both bigger than this slice; flagged to team-lead rather than
+      claimed as done.
 
   A link's `ref_id` is a PUBLISHED id, and that is now IMPLEMENTED rather than
   merely asserted: `Sharing.Links.published_ref_id/1` strips a `drafts.` prefix
@@ -189,6 +237,7 @@ defmodule BarkparkWeb.ShareLinkController do
   alias Barkpark.Media.Storage.MediaFile
   alias Barkpark.Sharing
   alias Barkpark.Sharing.{Links, ShareLink}
+  alias Barkpark.Tenancy.Auth, as: TenancyAuth
   alias BarkparkWeb.ErrorResponse
 
   # ── PUBLIC resolver ──────────────────────────────────────────────────────
@@ -392,12 +441,18 @@ defmodule BarkparkWeb.ShareLinkController do
   @doc "POST /v1/shares/links — mint an item link (raw token shown ONCE)."
   def mint(conn, params) do
     with {:ok, {ws, proj, dataset}} <- scope_triple(params["scope"]),
+         # Token-intrinsic, no workspace lookup needed -- runs FIRST so it
+         # never becomes a workspace/project existence oracle (it reveals
+         # only "your own token's dataset binding", which the caller already
+         # knows -- never whether ws/proj/item exist).
+         :ok <- ensure_dataset_bound(conn, dataset),
          %Tenancy.Workspace{} = workspace <- Tenancy.get_workspace_by_slug(ws),
-         :ok <- ensure_workspace_admin(conn, workspace.id),
+         :ok <- ensure_can_mint(conn, workspace.id),
          %Tenancy.Project{} = project <- Tenancy.get_project(ws, proj),
          {:ok, kind, ref_type, ref_id} <- item_ref(params),
-         access <- access_of(params),
-         :ok <- ensure_item_exists(kind, ref_type, ref_id, dataset, workspace, project) do
+         {:ok, access} <- authorize_access(params, conn, workspace.id),
+         :ok <-
+           ensure_item_exists(kind, ref_type, ref_id, dataset, workspace, project, conn) do
       attrs = %{
         workspace_id: workspace.id,
         project_id: project.id,
@@ -422,6 +477,9 @@ defmodule BarkparkWeb.ShareLinkController do
     else
       # MUST precede the is_binary arm and the catch-all: a denial that falls
       # into either becomes a 422 and the whole confinement silently voids.
+      {:error, :forbidden_dataset} ->
+        ErrorResponse.emit(conn, {:error, :forbidden_dataset})
+
       {:error, :forbidden} ->
         forbidden(conn)
 
@@ -524,6 +582,41 @@ defmodule BarkparkWeb.ShareLinkController do
     if workspace_admin?(conn, workspace_id), do: :ok, else: {:error, :forbidden}
   end
 
+  # task-d50757dc446514e7 — `mint` alone admits a write-capable MEMBER, not
+  # just an admin. `list`/`revoke` stay on `ensure_workspace_admin/2`
+  # unchanged, above. `TenancyAuth.authorize/3`'s api_token arm is
+  # member?(token, ws) AND permits?(token, :write) — the same "write-capable
+  # member" primitive task-ea6c9abb868593f8 used for the preview-token mint
+  # widening, not a bespoke check invented here.
+  defp ensure_can_mint(conn, workspace_id) do
+    if workspace_admin?(conn, workspace_id) or write_member?(conn, workspace_id),
+      do: :ok,
+      else: {:error, :forbidden}
+  end
+
+  defp write_member?(conn, workspace_id) do
+    case conn.assigns[:api_token] do
+      nil -> false
+      token -> TenancyAuth.authorize(token, workspace_id, :write) == :ok
+    end
+  end
+
+  # task-d50757dc446514e7 — closes a real, pre-existing gap: `dataset_bound`
+  # (#22393) is enforced at credential resolution (`RequireToken`/
+  # `OptionalToken`'s `dataset_off_binding?/2`) ONLY for a literal top-level
+  # `dataset` param. This route's dataset rides inside the composite `scope`
+  # string, which neither plug parses, so NEITHER an admin NOR (once widened)
+  # a member hits any existing confinement -- confirmed live, pre-fix: a
+  # token bound to "staging" minted a link scoped to "production", 201. Runs
+  # on every caller (admin included): inert for the ordinary, non-bound case,
+  # a real refusal for the bound one.
+  defp ensure_dataset_bound(conn, dataset) do
+    case conn.assigns[:api_token] do
+      %{dataset_bound: true, dataset: bound} when bound != dataset -> {:error, :forbidden_dataset}
+      _ -> :ok
+    end
+  end
+
   # Authorize-and-revoke is `Links.revoke_scoped/2` now; the denial shape (every
   # failure collapsing to one `{:error, :not_found}`, so a foreign row is
   # byte-identical to a missing one) is stated and tested there.
@@ -559,21 +652,59 @@ defmodule BarkparkWeb.ShareLinkController do
   defp access_of(%{"access" => "edit"}), do: "edit"
   defp access_of(_), do: "read"
 
-  defp ensure_item_exists("doc", "paper", ref_id, dataset, ws, proj) do
-    case Content.get_paper(ref_id, dataset, workspace_id: ws.id, project_id: proj.id) do
+  # task-d50757dc446514e7 — mint's base action (the default "read" access)
+  # admits any write-capable member; "access": "edit" hands the link's
+  # holder EDIT authority on the item (moduledoc: "an edit link is what the
+  # scoped editor accepts") -- a bigger grant than a read-only public link,
+  # so it stays admin-gated, the SAME admin-only-knob shape
+  # task-ea6c9abb868593f8 used for the preview-token mint's `multi_use`.
+  # Caught by share_link_test.exs's own pre-existing "LEAK CLOSED -- mint: a
+  # foreign admin cannot manufacture an edit credential in B" test: that
+  # actor is a genuine plain-"member" of B (not an attacker any more, once
+  # mint widened) requesting `access: "edit"`, which must still refuse.
+  defp authorize_access(params, conn, workspace_id) do
+    access = access_of(params)
+
+    # `{:error, :forbidden}` (not a string): this is a CONFINEMENT refusal
+    # per the moduledoc's own denial-shape law ("a value that EXISTS but the
+    # caller cannot administer -> 403"), not a malformed request -- routes
+    # through the SAME `forbidden/1` branch `ensure_can_mint/2` already uses.
+    if access == "edit" and not workspace_admin?(conn, workspace_id) do
+      {:error, :forbidden}
+    else
+      {:ok, access}
+    end
+  end
+
+  # `caller_context:` threads into the SAME `Content.Scope.scope_to_owner/2`
+  # chokepoint every other read uses for an OWNER-SCOPED type -- see the
+  # moduledoc's "Per-item read authority" section for why this is currently
+  # inert for every caller this bearer-only route admits (api_token
+  # principals bypass owner-scoping entirely, admin and member alike) and
+  # what closing that for real would need.
+  defp ensure_item_exists("doc", "paper", ref_id, dataset, ws, proj, conn) do
+    case Content.get_paper(ref_id, dataset,
+           workspace_id: ws.id,
+           project_id: proj.id,
+           caller_context: CallerContext.from_conn(conn)
+         ) do
       %Content.Document{} -> :ok
       _ -> {:error, "no such paper in this scope"}
     end
   end
 
-  defp ensure_item_exists("doc", ref_type, ref_id, dataset, ws, proj) do
-    case Content.get_document(ref_id, ref_type, dataset, workspace_id: ws.id, project_id: proj.id) do
+  defp ensure_item_exists("doc", ref_type, ref_id, dataset, ws, proj, conn) do
+    case Content.get_document(ref_id, ref_type, dataset,
+           workspace_id: ws.id,
+           project_id: proj.id,
+           caller_context: CallerContext.from_conn(conn)
+         ) do
       {:ok, _} -> :ok
       _ -> {:error, "no such document in this scope"}
     end
   end
 
-  defp ensure_item_exists("media", _rt, ref_id, _dataset, ws, proj) do
+  defp ensure_item_exists("media", _rt, ref_id, _dataset, ws, proj, _conn) do
     case Media.get_file(ref_id, workspace_id: ws.id, project_id: proj.id) do
       {:ok, _} -> :ok
       _ -> {:error, "no such media file in this scope"}

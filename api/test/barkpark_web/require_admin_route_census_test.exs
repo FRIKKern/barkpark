@@ -388,8 +388,16 @@ defmodule BarkparkWeb.RequireAdminRouteCensusTest do
       {:tenant_bound, "ensure_workspace_admin",
        "ShareLinkController.list/2 resolves the workspace THEN " <>
          "ensure_workspace_admin/2 -> Sharing.Links.workspace_admin?/2."},
-    {:post, "/v1/shares/links"} =>
-      {:tenant_bound, "ensure_workspace_admin", "ShareLinkController.mint/2, same shape."},
+    # {:post, "/v1/shares/links"} REMOVED (task-d50757dc446514e7): mint/2
+    # moved off `[:api, :require_admin]` onto its own
+    # `[:api, :require_token, :flat_within_quota, :require_write]` scope, so
+    # it no longer falls in THIS census's population at all (this file only
+    # tracks routes gated by `RequireAdmin`, per the moduledoc). Its
+    # workspace-specific confinement is now `ensure_can_mint/2` (admin OR a
+    # write-capable member, via `TenancyAuth.authorize/3`) — a stronger
+    # requirement than `RequireAdmin` ever was, not a weaker one; see
+    # share_link_member_mint_test.exs for its own refusal-case coverage
+    # (this census only ever covered the `RequireAdmin`-gated shape).
     {:delete, "/v1/shares/links/:id"} =>
       {:tenant_bound, "ensure_workspace_admin",
        "ShareLinkController.revoke/2 reads the row's workspace THEN the same predicate."},
