@@ -295,6 +295,21 @@ defmodule BarkparkWeb.AuthController do
   Session-gated self-mint of a Personal Access Token that carries the caller's
   USER identity (`owner_user_id`).
 
+  ## Optional expiry (task-9d2cdfae246cc486)
+
+  Body may carry AT MOST ONE of:
+
+    * `ttl_seconds` (positive integer) — expire this many seconds from mint.
+    * `expires_at` (ISO-8601 string) — expire at that instant; must be in the
+      future.
+
+  Both resolve through `TokenExpiry.resolve/3` (the same policy every other
+  mint route uses): a requested expiry over the `:api` class's 365-day max is
+  422, naming the max, and no token is minted — never silently clamped.
+  Omitting both keeps the existing 30-day default unchanged. An expired token
+  answers the identical 401 a revoked one does (`Auth.verify_token/1`'s single
+  WHERE clause checks both; no separate "expired" oracle).
+
   ## No-escalation invariant (SECURITY)
 
   `owner_user_id` is ALWAYS `current_user.id`, taken from the authenticated
@@ -418,18 +433,50 @@ defmodule BarkparkWeb.AuthController do
   end
 
   defp mint_pat(conn, params, workspace_id, role) do
+    case fetch_pat_expiry(params) do
+      {:ok, expiry} ->
+        do_mint_pat(conn, params, workspace_id, role, expiry)
+
+      {:error, :invalid_expiry} ->
+        error(
+          conn,
+          422,
+          "unprocessable",
+          "send at most one of ttl_seconds (a positive integer) or expires_at " <>
+            "(an ISO-8601 datetime)"
+        )
+    end
+  end
+
+  # Split out of `mint_pat/4` so this function's own `case` on
+  # `Auth.create_personal_access_token/3`'s result stays at the SAME
+  # indentation depth it had before the ttl_seconds/expires_at option
+  # existed — `ChangesetDetailControllersTest` pins the changeset arm's
+  # source text byte-for-byte (including whitespace), so nesting this `case`
+  # one level deeper inside a `with` would have broken that source-anchored
+  # assertion for a reason that has nothing to do with what it is actually
+  # guarding (the changeset error detail stays routed through
+  # `changeset_errors/1`, never a flat literal).
+  defp do_mint_pat(conn, params, workspace_id, role, expiry) do
     user = conn.assigns.current_user
     name = token_name(params)
     permissions = Auth.max_pat_permissions_for_role(role)
 
     # owner_user_id is HARD-BOUND to the session user. A body `owner_user_id` /
     # `user_id` is never read — this is the mint's no-escalation guarantee.
-    case Auth.create_personal_access_token(name, permissions,
-           role: role,
-           created_by: user.email,
-           owner_user_id: user.id,
-           workspace_id: workspace_id
-         ) do
+    #
+    # `:expires_at` is OMITTED (not passed as `nil`) when the caller asked
+    # for nothing: `Auth.create_personal_access_token/3`'s `Keyword.fetch/2`
+    # on that key distinguishes "absent" from "present and nil" — passing
+    # `nil` explicitly would route through `TokenExpiry.resolve/3`'s own
+    # unconfigured-default branch (no expiry) instead of falling through to
+    # the existing 30-day `:ttl` default, silently un-expiring every PAT
+    # mint that asks for nothing.
+    mint_opts =
+      [role: role, created_by: user.email, owner_user_id: user.id, workspace_id: workspace_id]
+      |> then(fn opts -> if expiry, do: Keyword.put(opts, :expires_at, expiry), else: opts end)
+
+    case Auth.create_personal_access_token(name, permissions, mint_opts) do
       {:ok, {raw, token}} ->
         # Minting a standing credential is an audit-worthy lifecycle event.
         Audit.emit(%{
@@ -458,8 +505,38 @@ defmodule BarkparkWeb.AuthController do
       {:error, :forbidden} ->
         error(conn, 403, "forbidden", "you may not mint a token with those permissions")
 
+      {:error, {:expiry_exceeds_max, _, _} = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
+      {:error, :expiry_not_in_future = reason} ->
+        error(conn, 422, "unprocessable", Auth.TokenExpiry.message(reason))
+
       {:error, %Ecto.Changeset{} = cs} ->
         error(conn, 422, "unprocessable", changeset_errors(cs))
+    end
+  end
+
+  # AT MOST ONE of `ttl_seconds` (positive integer, seconds from now) or
+  # `expires_at` (ISO-8601, must parse). Neither → nil, resolved as `opts[:ttl]`
+  # defaulting to the existing 30-day horizon inside
+  # `Auth.create_personal_access_token/3` — byte-identical to every mint before
+  # this option existed. Mirrors `TokenController.fetch_expiry/1`'s XOR shape.
+  defp fetch_pat_expiry(params) do
+    case {Map.get(params, "ttl_seconds"), Map.get(params, "expires_at")} do
+      {nil, nil} ->
+        {:ok, nil}
+
+      {ttl, nil} when is_integer(ttl) and ttl > 0 ->
+        {:ok, DateTime.add(DateTime.utc_now(), ttl, :second)}
+
+      {nil, at} when is_binary(at) ->
+        case DateTime.from_iso8601(at) do
+          {:ok, dt, _offset} -> {:ok, dt}
+          _ -> {:error, :invalid_expiry}
+        end
+
+      _ ->
+        {:error, :invalid_expiry}
     end
   end
 

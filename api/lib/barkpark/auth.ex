@@ -1832,6 +1832,15 @@ defmodule Barkpark.Auth do
   USER identity — set ONLY by the session-gated self-mint, hard-bound to the
   authenticated caller; never a client-supplied value).
 
+  `:expires_at` (task-9d2cdfae246cc486) — a caller-REQUESTED expiry
+  (`TokenExpiry.request()`: `nil` | a `DateTime.t()`), taking precedence over
+  `:ttl` when given. Resolved through the SAME `TokenExpiry.resolve/3` every
+  other mint route uses, so a requested expiry over the `:api` class's 365-day
+  max is refused (`{:error, {:expiry_exceeds_max, :api, 365}}`), never
+  clamped, and a non-future expiry is `{:error, :expiry_not_in_future}`.
+  Omitted (the default for every caller before this option existed) keeps the
+  exact `:ttl`-based 30-day horizon unchanged.
+
   ## `:workspace_id` — NO implicit Default-Workspace fallback (SECURITY)
 
   When `:workspace_id` is omitted (or `nil`), the token is minted
@@ -1853,7 +1862,7 @@ defmodule Barkpark.Auth do
     role = Keyword.get(opts, :role, "member")
 
     with :ok <- authorize_pat_permissions(role, permissions),
-         {:ok, expires_at} <- pat_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl)) do
+         {:ok, expires_at} <- pat_expires_at(opts) do
       raw = @pat_token_prefix <> Base.url_encode64(:crypto.strong_rand_bytes(32), padding: false)
       ws_id = Keyword.get(opts, :workspace_id)
 
@@ -1959,13 +1968,26 @@ defmodule Barkpark.Auth do
     end
   end
 
+  # `:expires_at` (task-9d2cdfae246cc486) takes precedence when the caller
+  # supplied one — resolved through the SAME TokenExpiry policy every other
+  # mint route uses, so it is capped (REFUSED over the :api max, never
+  # clamped) exactly like them. Absent, falls through to the pre-existing
+  # :ttl-based 30-day default, byte-identical to every caller before this
+  # option existed (none of them pass :expires_at).
+  defp pat_expires_at(opts) do
+    case Keyword.fetch(opts, :expires_at) do
+      {:ok, request} -> TokenExpiry.resolve(:api, request)
+      :error -> pat_ttl_expires_at(Keyword.get(opts, :ttl, @pat_default_ttl))
+    end
+  end
+
   # `:ttl nil` stays "never" (an in-process, trusted-caller choice — no HTTP
   # route reaches it). A positive ttl over the api max age is REFUSED naming
   # the max (task-a0f8cfd7f4800236) — it used to be silently clamped to 1 year.
   # A non-positive/non-integer ttl still falls back to the 30-day default.
-  defp pat_expires_at(nil), do: {:ok, nil}
+  defp pat_ttl_expires_at(nil), do: {:ok, nil}
 
-  defp pat_expires_at(ttl) do
+  defp pat_ttl_expires_at(ttl) do
     ttl = if is_integer(ttl) and ttl > 0, do: ttl, else: @pat_default_ttl
     TokenExpiry.resolve(:api, DateTime.add(DateTime.utc_now(), ttl, :second))
   end
