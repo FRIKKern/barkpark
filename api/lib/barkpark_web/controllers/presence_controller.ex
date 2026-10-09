@@ -3,8 +3,11 @@ defmodule BarkparkWeb.PresenceController do
   # task-936472b77285df5b — shortened from 15_000: the probabilistic half of
   # expiry (see moduledoc) now bounds its OWN worst case tighter, independent
   # of whether `leave` below was called. A tiny `": keepalive\n\n"` comment
-  # every 5s is negligible bandwidth for an open editing session. Defined
-  # here (before @moduledoc) so the doc string below can interpolate it.
+  # every 5s is negligible bandwidth for an open editing session. The
+  # DEFAULT only — `keepalive_ms/0` reads `:barkpark, :presence_keepalive_ms`
+  # first, so a test can shrink the interval without waiting out this one.
+  # Defined here (before @moduledoc) so the doc string below can interpolate
+  # it.
   @keepalive_ms 5_000
 
   @moduledoc """
@@ -52,27 +55,38 @@ defmodule BarkparkWeb.PresenceController do
   WHY THIS EXISTS, GIVEN THE EXPIRY BELOW ALREADY CLAIMS TO COVER IT. Found
   live on guerrilla.barkpark.cloud (task-936472b77285df5b): a closed stream's
   entry lingered 20-40s instead of leaving "at the latest on the next
-  keepalive write" as the paragraph below promises. Two contributing factors,
-  neither fully ruled out without further live measurement: the reverse proxy
-  in front of Phoenix may not propagate a closed downstream connection to the
-  upstream promptly (untestable here); and, for a `?documentId=`-filtered
-  stream specifically, `send_snapshot/4` only calls `chunk/2` -- the ONLY
-  place a dead socket is ever discovered -- when the VISIBLE entries for that
-  filter actually change, so a busy room whose other activity is on OTHER
-  documents can go a keepalive cycle or more with the `receive` block
-  constantly reset by messages that never provoke a write. An explicit leave
-  sidesteps both: the client states its own departure instead of waiting to
-  be inferred, and `pagehide` (`navigator.sendBeacon`) fires it reliably
-  before a tab's connection even begins to close.
+  keepalive write" as the paragraph below promises. Two candidate causes were
+  checked, not assumed. Candidate 1, moot: a handled `presence_diff` already
+  calls `chunk/2` whenever the VISIBLE entries change (`send_snapshot/4`), so
+  a write failure there finds a dead socket just as fast as a keepalive would
+  — a busy room with visible churn was never the slow case. Candidate 2,
+  confirmed and FIXED here: the keepalive used to be a plain `receive ...
+  after` timeout, and an `after` clause's clock restarts on every message
+  that `receive` handles — including a `presence_diff` for a document this
+  stream's `?documentId=` filter does NOT show, which recomputes `entries/2`,
+  finds no visible change, writes nothing, and still resets the clock. A busy
+  room whose other activity stayed off-filter could starve the keepalive
+  indefinitely. Fixed by scheduling it with `Process.send_after/3` instead
+  (see `schedule_keepalive/0`): a timer fired by `self()` keeps its own
+  schedule no matter what else lands in the mailbox. The reverse proxy's
+  handling of a closed downstream connection remains unverified from here —
+  an explicit leave sidesteps it either way, by having the client state its
+  own departure instead of waiting to be inferred. `pagehide` cannot use
+  `navigator.sendBeacon` for this: a beacon can only POST, and cannot carry
+  the bearer `Authorization` header this route requires. Use
+  `fetch(url, {method: "DELETE", keepalive: true, headers: {Authorization: …}})`
+  instead — `keepalive: true` is what lets it outlive the unloading page.
 
   Expiry (the fallback for a client that cannot or does not call leave — a
   crash, a network cut, an older client): Phoenix.Presence drops an entry
   when its tracking process exits. The stream process exits when the client
   disconnects, and at the latest on the next keepalive write (every
-  #{div(@keepalive_ms, 1000)} s — shortened from the original 15s for exactly
-  this reason, task-936472b77285df5b) that finds the socket closed. This
-  remains probabilistic in the ways described above; `leave` is the
-  deterministic path and clients SHOULD call it whenever they can.
+  #{div(@keepalive_ms, 1000)} s — shortened from the original 15s, and now on
+  its own timer rather than a resettable `after`, both for exactly this
+  reason, task-936472b77285df5b) that finds the socket closed. This remains
+  probabilistic wherever the proxy's own half-close detection is slower than
+  that; `leave` is the deterministic path and clients SHOULD call it whenever
+  they can.
 
   Identity is the client's to state: the Studio parity app proxies every
   browser user through one server token, so `?name=` carries the person and
@@ -123,6 +137,7 @@ defmodule BarkparkWeb.PresenceController do
 
       with {:ok, conn} <- chunk(conn, frame("session", %{sessionId: sid})),
            {:ok, conn, last} <- send_snapshot(conn, topic, doc_filter, nil) do
+        schedule_keepalive()
         loop(conn, %{topic: topic, key: key, doc_filter: doc_filter, last: last})
       else
         _ -> conn
@@ -232,16 +247,32 @@ defmodule BarkparkWeb.PresenceController do
           _ -> conn
         end
 
+      # task-936472b77285df5b — scheduled with `Process.send_after/3`, NOT a
+      # `receive ... after` timeout: an `after` clause's clock restarts on
+      # EVERY message this `receive` handles, so a `?documentId=`-filtered
+      # stream in a busy room (other sessions' diffs on OTHER documents keep
+      # arriving, matching `presence_diff` above and re-entering `receive`,
+      # but never writing — see `send_snapshot/4`) could starve it
+      # indefinitely. A timer fired by `self()` is independent of whatever
+      # else lands in this mailbox, so it keeps its own schedule regardless.
+      :keepalive ->
+        case chunk(conn, ": keepalive\n\n") do
+          {:ok, conn} ->
+            schedule_keepalive()
+            loop(conn, state)
+
+          _ ->
+            conn
+        end
+
       _other ->
         loop(conn, state)
-    after
-      @keepalive_ms ->
-        case chunk(conn, ": keepalive\n\n") do
-          {:ok, conn} -> loop(conn, state)
-          _ -> conn
-        end
     end
   end
+
+  defp schedule_keepalive, do: Process.send_after(self(), :keepalive, keepalive_ms())
+
+  defp keepalive_ms, do: Application.get_env(:barkpark, :presence_keepalive_ms, @keepalive_ms)
 
   # One frame per CHANGE of the visible list: a diff for another document, or
   # one that only moved `joined_at`, sends nothing.

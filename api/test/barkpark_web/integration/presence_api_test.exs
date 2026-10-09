@@ -394,4 +394,49 @@ defmodule BarkparkWeb.Integration.PresenceApiTest do
              ) == :error
     end
   end
+
+  # task-936472b77285df5b — the keepalive used to be a plain `receive ...
+  # after`, whose clock restarts on every message `receive` handles. A
+  # `?documentId=`-filtered stream in a room with OFF-FILTER churn kept
+  # receiving `presence_diff` broadcasts that recomputed its view, found no
+  # visible change, wrote nothing — and still reset the clock. Fixed with
+  # `Process.send_after/3`, which keeps its own schedule regardless.
+  describe "keepalive" do
+    setup do
+      previous = Application.get_env(:barkpark, :presence_keepalive_ms)
+      Application.put_env(:barkpark, :presence_keepalive_ms, 150)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:barkpark, :presence_keepalive_ms, previous),
+          else: Application.delete_env(:barkpark, :presence_keepalive_ms)
+      end)
+
+      :ok
+    end
+
+    test "off-filter diffs arriving faster than the interval don't delay it", ctx do
+      a = open(ctx.conn, ctx.base, %{"sessionId" => "ann-ka", "documentId" => "p1"})
+      b = open(ctx.conn, ctx.base, %{"sessionId" => "bob-ka", "documentId" => "p2"})
+      wait_for(fn -> keys(ctx.topic) == ["api:ann-ka", "api:bob-ka"] end)
+
+      # Each of these is a `presence_diff` on A's topic, but A is filtered to
+      # p1 and every one of these moves bob-ka's focus on p2 -- A's visible
+      # entries never change, so A's loop never calls `chunk/2` for any of
+      # them. 12 * 30ms = 360ms of churn, faster than the 150ms interval, for
+      # longer than it -- the old `after`-based timer would starve here.
+      for i <- 1..12 do
+        assert focus(ctx.conn, ctx.base, %{
+                 "sessionId" => "bob-ka",
+                 "documentId" => "p2",
+                 "field" => "f#{i}"
+               }).status == 200
+
+        Process.sleep(30)
+      end
+
+      assert close(a).resp_body =~ ": keepalive\n\n"
+      close(b)
+    end
+  end
 end
