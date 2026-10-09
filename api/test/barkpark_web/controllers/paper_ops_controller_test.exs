@@ -13,7 +13,8 @@ defmodule BarkparkWeb.PaperOpsControllerTest do
 
   import Barkpark.TenancyFixtures
 
-  alias Barkpark.{Auth, Content}
+  alias Barkpark.{Accounts, Auth, Content, Repo}
+  alias Barkpark.Accounts.Privacy
   alias Barkpark.Tenancy.Auth, as: TenancyAuth
 
   @dataset "production"
@@ -59,6 +60,7 @@ defmodule BarkparkWeb.PaperOpsControllerTest do
     %{
       ws: ws,
       project: project,
+      member: member,
       member_raw: member_raw,
       reader_raw: reader_raw,
       outsider_raw: outsider_raw,
@@ -266,6 +268,77 @@ defmodule BarkparkWeb.PaperOpsControllerTest do
         })
 
       assert %{"error" => %{"code" => "malformed_request"}} = json_response(conn, 422)
+    end
+  end
+
+  # ── author attribution (task-1ecebe46ef50e427) ───────────────────────────
+
+  describe "POST /v1/papers/:slug/ops — writes an attributed history row" do
+    test "a plain member token's edit shows that member in history", %{
+      ws: ws,
+      project: project,
+      member_raw: raw,
+      member: member,
+      slug: slug,
+      rev: rev
+    } do
+      post(req(raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("att1", "attributed")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      [latest | _] =
+        Content.list_revisions(slug, "paper", @dataset,
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      assert latest.action == "api-ops"
+      assert latest.actor_kind == "api_token"
+      assert latest.actor_id == member.id
+      # This token has no owner, so it stays an unlabelled api_token --
+      # Privacy.redact_actor_labels/1's generic resolution has nothing to
+      # resolve it TO, honestly.
+      assert [%{actor_label: nil}] = Privacy.redact_actor_labels([Map.from_struct(latest)])
+    end
+
+    test "an owned app token's edit shows the OWNER's display name in history", %{
+      ws: ws,
+      project: project,
+      slug: slug,
+      rev: rev
+    } do
+      email = "paper-editor-#{System.unique_integer([:positive])}@example.com"
+      {:ok, user} = Accounts.register_user(%{email: email, password: "a-long-enough-password-1"})
+
+      owned_raw = "po-owned-#{System.unique_integer([:positive])}"
+      {:ok, owned} = Auth.create_token(owned_raw, "owned app token", @dataset, ["read", "write"])
+      {:ok, owned} = owned |> Ecto.Changeset.change(owner_user_id: user.id) |> Repo.update()
+      # A user-owned token's seat decision requires TWO rows (Tenancy.Auth's
+      # own `holder_seat_decision/3`): the token's OWN membership (its seat)
+      # AND its owner's own user membership (the token "never outlives its
+      # holder's demotion or removal" rule) -- both at `role: "member"`.
+      {:ok, _} = TenancyAuth.create_membership(ws.id, owned.id, "member", "api_token")
+      {:ok, _} = TenancyAuth.create_membership(ws.id, user.id, "member", "user")
+
+      post(req(owned_raw), ops_path(ws, project, slug), %{
+        "ops" => [append_op("att2", "owned")],
+        "ifRev" => rev
+      })
+      |> json_response(200)
+
+      [latest | _] =
+        Content.list_revisions(slug, "paper", @dataset,
+          workspace_id: ws.id,
+          project_id: project.id
+        )
+
+      assert latest.actor_kind == "api_token"
+      assert latest.actor_id == owned.id
+      # The SAME generic read-time resolution a document op's history already
+      # gets -- this door stamps no special-cased label of its own.
+      assert [%{actor_label: ^email}] = Privacy.redact_actor_labels([Map.from_struct(latest)])
     end
   end
 end

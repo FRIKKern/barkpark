@@ -61,6 +61,15 @@ defmodule BarkparkWeb.PaperOpsController do
 
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
+  # task-1ecebe46ef50e427 — OPT IN to a version-history row, same gate
+  # `Papers.BlockOps.maybe_save_batch_revision/3` already has for the paper
+  # reader's `"edit-on-link"` action (block ops are keystroke-grade, so the
+  # op path writes history only for a caller that asks for one). A distinct
+  # action string from the reader's, naming THIS door rather than collapsing
+  # two different callers into one label a history reader could not tell
+  # apart.
+  @revision_action "api-ops"
+
   @doc """
   Apply an `ifRev`-fenced batch of block ops to paper `slug`. Body:
   `{"ops": [...], "ifRev": "<the paper's current rev>", "requestId":
@@ -99,7 +108,7 @@ defmodule BarkparkWeb.PaperOpsController do
                  dataset,
                  request_id,
                  principal,
-                 scope ++ [if_rev: if_rev]
+                 scope ++ attribution_opts(scope, if_rev)
                ) do
             {:ok, receipt, _replay} ->
               json(conn, receipt_json(receipt))
@@ -120,6 +129,33 @@ defmodule BarkparkWeb.PaperOpsController do
     do: ErrorResponse.emit_custom(conn, 422, "malformed_request", "\"slug\" is required")
 
   # ── helpers ─────────────────────────────────────────────────────────────────
+
+  # task-1ecebe46ef50e427 — same two keys `BulldocsLive.Edit.write_opts/1`
+  # (the reader LiveView's own doc) adds on top of the tenant scope:
+  # `:revision_action` opts into the history write at all, and
+  # `:actor_user_id` is `revisions.actor_user_id`'s legacy single column kept
+  # in step with the `actor_kind`/`actor_id`/`actor_label` triple
+  # `CallerContext.actor_stamp_from_opts/1` already derives FROM `scope`'s own
+  # `:caller_context` — nothing new to resolve. `scope_opts(conn)`'s
+  # `:caller_context` already comes from `CallerContext.from_conn/1`, which
+  # for a bearer token resolves `from_token/2` — an OWNED token (a PAT or an
+  # app token minted by `POST /v1/auth/app-tokens`, both of which stamp
+  # `owner_user_id`) carries that owner's `user_id` already, so this needs no
+  # LiveView-only concept (`PaperActor`/`:viewer`) to reach the SAME "owned
+  # token -> its owner" resolution document ops get: once a revision row
+  # exists with `actor_kind: "api_token"`, `Barkpark.Accounts.Privacy.
+  # redact_actor_labels/1` (already the history reader's own chokepoint)
+  # resolves the OWNING user's email as the display label, generically, for
+  # any writer that stamped the row — this door included.
+  defp attribution_opts(scope, if_rev) do
+    user_id =
+      case Keyword.get(scope, :caller_context) do
+        %Barkpark.Content.CallerContext{user_id: id} -> id
+        _ -> nil
+      end
+
+    [if_rev: if_rev, revision_action: @revision_action, actor_user_id: user_id]
+  end
 
   defp requested_dataset(params) do
     case Map.get(params, "dataset") do
