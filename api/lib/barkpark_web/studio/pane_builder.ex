@@ -16,6 +16,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   alias Barkpark.{Content, Structure}
   alias Barkpark.Content.Graph
   alias Barkpark.Content.PreviewText
+  alias BarkparkWeb.Studio.StructureCopy
   alias BarkparkWeb.Studio.StudioLive.Paths
 
   @doc """
@@ -68,7 +69,7 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
     # The DISPLAYED desk is the default-gated tree (charter Decisions 1/3): a
     # disabled plugin's tree and top-menu Media are absent, so panes[0] tells
     # the enablement truth. `gated` renders the root pane in EVERY case.
-    gated = Structure.build(dataset, scope(opts))
+    gated = dataset |> Structure.build(scope(opts)) |> StructureCopy.localize()
 
     # Resolution walks gated-first. A raw nav_path whose head no longer sits at
     # the gated root (a stale pre-tiering deep link — e.g. the router's legacy
@@ -280,7 +281,10 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
           # the form. This restores the #1851 never-unreachable guarantee for
           # the one type that only lives off the top menu.
           nil ->
-            ungated = Structure.build(dataset, [gating: :none] ++ scope(opts))
+            ungated =
+              dataset
+              |> Structure.build([gating: :none] ++ scope(opts))
+              |> StructureCopy.localize()
 
             cond do
               root_has_segment?(ungated, head) ->
