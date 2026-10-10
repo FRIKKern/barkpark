@@ -59,6 +59,11 @@ try {
   const before = editor.state.doc.childCount;
 
   canvas._chooseSlash({ group: "Blocks", type: "factBox", label: "Faktaboks", object: true });
+  // A declared object block with fields asks for them first (task-aebfe6c1b3c3f881).
+  const dialog = document.querySelector(".bp-inline-object-dialog");
+  assert.ok(dialog, "the field dialog opened");
+  dialog.querySelector('[data-field="body"]').value = "Fakta.";
+  dialog.querySelector("form").dispatchEvent(new window.Event("submit", { cancelable: true }));
 
   let carried = null;
   editor.state.doc.forEach((node) => {
@@ -72,6 +77,7 @@ try {
   const ops = batches.flat();
   const insert = ops.find((op) => op.block && op.block.type === "factBox");
   assert.ok(insert, `the insert reaches the server as a factBox block: ${JSON.stringify(ops)}`);
+  assert.equal(insert.block.body, "Fakta.", "the dialog's value rides the insert");
   assert.equal(typeof insert.block.id, "string");
 
   console.log("PASS object_block_slash_insert: a declared object block inserts as a block of its type");
