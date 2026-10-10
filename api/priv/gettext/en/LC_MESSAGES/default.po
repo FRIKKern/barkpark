@@ -11841,3 +11841,69 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Goal path graph"
 msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "draft"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "revise"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "publish"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "published"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "correction"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "search"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-request"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-accept"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-reject"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-opened"
+msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-snapshot"
+msgstr ""

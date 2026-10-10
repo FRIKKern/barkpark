@@ -11841,3 +11841,69 @@ msgstr "Rad/kolonne"
 #, elixir-autogen, elixir-format
 msgid "Goal path graph"
 msgstr "Målstigraf"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "draft"
+msgstr "utkast"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "revise"
+msgstr "revisjon"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "publish"
+msgstr "publisering"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "published"
+msgstr "publisert"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "correction"
+msgstr "korrigering"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "search"
+msgstr "søk"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-request"
+msgstr "forenkling ønsket"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-accept"
+msgstr "forenkling godtatt"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "simplify-reject"
+msgstr "forenkling avvist"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-opened"
+msgstr "mål åpnet"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgctxt "paper event"
+msgid "goal-snapshot"
+msgstr "målstatus"
