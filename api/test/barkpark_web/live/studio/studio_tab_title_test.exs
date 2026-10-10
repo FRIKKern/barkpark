@@ -50,6 +50,14 @@ defmodule BarkparkWeb.Studio.StudioTabTitleTest do
   # task-fee30130f015c416: with a document open every tab still read
   # "Studio · Barkpark". The open document's title names the tab, and moving
   # to another document renames it.
+  # task-6e0b0f0ae9a665e1: the API tester set no page_title and rendered no h1.
+  test "the API tester names its tab and its page", %{conn: conn} do
+    {:ok, view, html} = live(conn, scoped_studio("/d/production/studio/api-tester"))
+    assert page_title(view) == "API · Barkpark"
+    assert [_] = html |> LazyHTML.from_fragment() |> LazyHTML.query("h1") |> Enum.to_list()
+    assert html =~ ~s(<h1 class="sr-only">API</h1>)
+  end
+
   test "an open document names the tab, and navigating renames it", %{conn: conn} do
     {:ok, _} =
       Barkpark.Content.upsert_schema(
