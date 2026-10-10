@@ -99,6 +99,8 @@ try {
 
   const input = picker.querySelector(".bp-ref-search-input");
   assert.ok(input, "the picker offers its real typeahead input");
+  // A user types into a focused search (the list closes when focus leaves).
+  input.focus();
   input.value = "target";
   input.dispatchEvent(new window.Event("input", { bubbles: true }));
 

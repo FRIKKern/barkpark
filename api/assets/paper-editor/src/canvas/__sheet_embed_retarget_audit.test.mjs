@@ -572,6 +572,8 @@ try {
     if (change) change.click();
     const input = picker.querySelector(".bp-ref-search-input");
     assert.ok(input, "the picker offers its real typeahead input");
+    // A user types into a focused search (the list closes when focus leaves).
+    input.focus();
     input.value = term;
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     await new Promise((resolve) => setTimeout(resolve, 400));
@@ -823,6 +825,8 @@ try {
     if (change) change.click();
     const input = picker.querySelector(".bp-ref-search-input");
     assert.ok(input, "the picker offers its real typeahead input for free text");
+    // A user types into a focused search (the list closes when focus leaves).
+    input.focus();
     input.value = typed;
     input.dispatchEvent(new window.Event("input", { bubbles: true }));
     input.dispatchEvent(
