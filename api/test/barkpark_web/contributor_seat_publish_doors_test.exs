@@ -214,6 +214,49 @@ defmodule BarkparkWeb.ContributorSeatPublishDoorsTest do
       refute published?(id)
     end
 
+    test "the LiveView gate refuses publish and unpublish before any handler runs",
+         %{conn: conn, ws_id: ws_id} do
+      {raw, _} = seated_token(ws_id, "contributor")
+      id = new_id()
+      create_published!(id)
+
+      conn = init_test_session(conn, %{"api_token" => raw})
+      {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
+
+      assert BarkparkWeb.Studio.Caps.classify("confirm-unpublish") == :publish
+      html = render_click(view, "confirm-unpublish")
+      assert html =~ "cannot publish"
+      assert published?(id)
+    end
+
+    test "the gate's own question: Caps.publish_refused?/1 on the socket assigns",
+         %{ws_id: ws_id} do
+      {_, contributor} = seated_token(ws_id, "contributor")
+      {_, member} = seated_token(ws_id, "member")
+      ws = %{id: ws_id}
+
+      assert BarkparkWeb.Studio.Caps.publish_refused?(%{
+               current_workspace: ws,
+               api_token: contributor
+             })
+
+      refute BarkparkWeb.Studio.Caps.publish_refused?(%{current_workspace: ws, api_token: member})
+    end
+
+    test "a contributor still edits the draft in Studio", %{conn: conn, ws_id: ws_id} do
+      {raw, _} = seated_token(ws_id, "contributor")
+      id = new_id()
+      create_draft!(id)
+
+      conn = init_test_session(conn, %{"api_token" => raw})
+      {:ok, view, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/#{@type_name}/#{id}"))
+
+      render_change(view, "autosave", %{"doc" => %{"title" => "Edited"}})
+
+      assert {:ok, draft} = Content.get_document("drafts." <> id, @type_name, @dataset)
+      assert draft.title == "Edited"
+    end
+
     test "the Publish button works for a member (control)", %{conn: conn, ws_id: ws_id} do
       {raw, _} = seated_token(ws_id, "member")
       id = new_id()

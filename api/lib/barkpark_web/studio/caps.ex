@@ -187,6 +187,11 @@ defmodule BarkparkWeb.Studio.Caps do
   # dispatches the action with `:dryrun` and `confirm-modal-real` with `:real`,
   # so classifying the opener :admin and the steps :write would gate the
   # mutation one tier too low at the step that performs it.
+  # Publish-side writes (task-348a4fbe24feede6): they change what readers see,
+  # so on top of `:write` the seat must not be draft-only (`contributor`).
+  # Same gate, one more question; see `gate/3`.
+  @publish_events ~w(publish unpublish confirm-unpublish paper-publish)
+
   @admin_events ~w(
     shares-open shares-add shares-remove
     item-share-open item-share-create item-share-revoke
@@ -201,7 +206,7 @@ defmodule BarkparkWeb.Studio.Caps do
     create-workspace create-project new-document save slug-generate autosave
     array_op select-media clear-image upload-image select-ref clear-ref
     restore-revision save-profile delete-doc confirm-delete
-    discard-draft confirm-discard publish unpublish confirm-unpublish
+    discard-draft confirm-discard
     duplicate-doc toggle-doc-checkbox
     paper-edit-block paper-block-autosave sidebar-slug-change
     paper-op paper-ops paper-history-step field-block-ops valueref-accept-baseline paper-add-block
@@ -209,7 +214,7 @@ defmodule BarkparkWeb.Studio.Caps do
     paper-unbind-property paper-delete-block paper-move-block
     paper-move-block-to paper-callout-fold valueref-writeback-confirm
     access-revoke
-    paper-publish sidebar-description-change sidebar-label-add
+    sidebar-description-change sidebar-label-add
     paper-save-master paper-insert-master paper-detach-master paper-pin-master
   )
 
@@ -219,11 +224,12 @@ defmodule BarkparkWeb.Studio.Caps do
   comprehensiveness test asserts every live `handle_event` head classifies to a
   known tier (never `:deny`), so a new ungated privileged event trips CI.
   """
-  @spec classify(String.t()) :: :none | :read | :write | :admin | :deny
+  @spec classify(String.t()) :: :none | :read | :write | :publish | :admin | :deny
   def classify(event) when is_binary(event) do
     cond do
       event in @safe_events -> :none
       event in @read_events -> :read
+      event in @publish_events -> :publish
       event in @admin_events -> :admin
       event in @write_events -> :write
       true -> :deny
@@ -681,6 +687,14 @@ defmodule BarkparkWeb.Studio.Caps do
           {:halt, deny(socket)}
         end
 
+      # :publish — everything :write needs, and a seat that may publish.
+      :publish ->
+        cond do
+          not write_capable?(socket.assigns, derive(socket)) -> {:halt, deny(socket)}
+          publish_refused?(socket.assigns) -> {:halt, deny_publish(socket)}
+          true -> {:cont, socket}
+        end
+
       # :admin and :deny (default) both require admin, enforced on ALL sockets.
       _admin_or_deny ->
         if derive(socket).admin do
@@ -693,6 +707,38 @@ defmodule BarkparkWeb.Studio.Caps do
 
   defp deny(socket),
     do: put_flash(socket, :error, "You don't have access to do that.")
+
+  defp deny_publish(socket),
+    do:
+      put_flash(
+        socket,
+        :error,
+        Gettext.gettext(
+          BarkparkWeb.Gettext,
+          "Your role can edit drafts but cannot publish, unpublish or delete published documents. Ask a workspace admin."
+        )
+      )
+
+  @doc """
+  True when the socket acts through a draft-only seat (`contributor`) in its
+  mounted workspace: the publish-side events are refused for it. The same
+  predicate `Content.Lifecycle` asks on the server
+  (`Tenancy.Auth.publish_refused?/2`), over the socket's caller context.
+  """
+  @spec publish_refused?(map()) :: boolean
+  def publish_refused?(assigns) when is_map(assigns) do
+    ws_id =
+      case Map.get(assigns, :current_workspace) do
+        %{id: id} when is_binary(id) -> id
+        _ -> nil
+      end
+
+    is_binary(ws_id) and
+      Tenancy.Auth.publish_refused?(
+        Barkpark.Content.CallerContext.from_conn(%{assigns: assigns}),
+        ws_id
+      )
+  end
 
   @doc """
   THE `:admin` AFFORDANCE PREDICATE — the ONE function a render site asks
