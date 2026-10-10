@@ -423,9 +423,13 @@ export class SlashMenu {
     this._el.appendChild(list);
 
     // Empty state — a non-selectable row when the query matches nothing.
+    // It is a DISABLED option, so the listbox is never empty (axe
+    // aria-required-children, task-347897df84f96882) and a screen reader hears it.
     if (this._items.length === 0) {
       const empty = document.createElement("div");
       empty.className = "bp-slash-empty";
+      empty.setAttribute("role", "option");
+      empty.setAttribute("aria-disabled", "true");
       empty.textContent = t(this._emptyText || "No blocks match");
       list.appendChild(empty);
     }
