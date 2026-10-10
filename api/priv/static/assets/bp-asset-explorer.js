@@ -28,20 +28,53 @@
     return (fi && fi.mimeType) || "";
   }
 
+  // Numbers and dates read in the page's language (the Studio sets <html lang>),
+  // not the browser's: 33,1 KB in an nb-NO Studio. The date takes the shape
+  // Hooks.LocalTime gives the history list (task-114329329fc3bd37).
+  function pageLang() {
+    const lang = typeof document !== "undefined" && document.documentElement && document.documentElement.lang;
+    return lang || undefined;
+  }
+
+  function fmtDecimal(n) {
+    try {
+      return new Intl.NumberFormat(pageLang(), {
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1,
+        useGrouping: false
+      }).format(n);
+    } catch (_e) {
+      return n.toFixed(1);
+    }
+  }
+
+  function fmtCount(n) {
+    try {
+      return n.toLocaleString(pageLang());
+    } catch (_e) {
+      return String(n);
+    }
+  }
+
   function formatSize(raw) {
     const n = parseInt(raw, 10);
     if (!n || isNaN(n)) return "";
     if (n < 1024) return n + " B";
-    if (n < 1048576) return (n / 1024).toFixed(1) + " KB";
-    return (n / 1048576).toFixed(1) + " MB";
+    if (n < 1048576) return fmtDecimal(n / 1024) + " KB";
+    return fmtDecimal(n / 1048576) + " MB";
   }
 
   function fmtDate(iso) {
     if (!iso) return "";
+    const d = new Date(iso);
+    if (isNaN(d.getTime())) return iso;
     try {
-      return new Date(iso).toLocaleString();
+      return new Intl.DateTimeFormat(pageLang(), {
+        day: "2-digit", month: "short", year: "numeric",
+        hour: "2-digit", minute: "2-digit", second: "2-digit"
+      }).format(d);
     } catch (_e) {
-      return iso;
+      return d.toLocaleString();
     }
   }
 
@@ -763,7 +796,7 @@
       }
       this._loadMoreEl.hidden = false;
       this._loadMoreEl.textContent = this._t("Load more · %{count} remaining", {
-        count: remaining.toLocaleString()
+        count: fmtCount(remaining)
       });
     }
 
@@ -914,7 +947,7 @@
         total > 0
           ? total === 1
             ? this._t("1 asset matches")
-            : this._t("%{count} assets match", { count: total.toLocaleString() })
+            : this._t("%{count} assets match", { count: fmtCount(total) })
           : this._t("No assets match");
       this._findBarEl.hidden = false;
       this._findBarEl.innerHTML =
