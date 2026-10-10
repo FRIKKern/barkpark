@@ -224,6 +224,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       data-canvas-vocabulary={@vocab_json}
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
+      data-save-strings={field_canvas_save_strings()}
       data-test-id="field-canvas"
     >
       <bp-paper-canvas></bp-paper-canvas>
@@ -754,4 +755,19 @@ defmodule BarkparkWeb.Components.FieldInputs do
   def image_form_value(%{} = map), do: Jason.encode!(map)
   def image_form_value(v) when is_binary(v), do: v
   def image_form_value(_), do: ""
+
+  # The words the field canvas hook shows when a save does not land
+  # (task-fcbf22671c0c82df), in the Studio's language, keyed by the English.
+  defp field_canvas_save_strings do
+    Jason.encode!(%{
+      "Save paused" => gettext("Save paused"),
+      "This document changed elsewhere. Your edits are still here." =>
+        gettext("This document changed elsewhere. Your edits are still here."),
+      "Keep mine" => gettext("Keep mine"),
+      "Use latest" => gettext("Use latest"),
+      "Not saved" => gettext("Not saved"),
+      "This edit was not saved. Your text is still here." =>
+        gettext("This edit was not saved. Your text is still here.")
+    })
+  end
 end
