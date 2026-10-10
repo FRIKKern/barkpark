@@ -209,13 +209,16 @@ defmodule BarkparkWeb.SharingCompositionP4Test do
       assert render_click(view, "select-group", %{"group" => "brief"})
     end
 
-    test "without the share, anonymous still 403s on the scoped Studio", %{
+    # Without the share a signed-out browser is not admitted; it is sent to
+    # sign in (task-c1ccdbfaa26876cb).
+    test "without the share, anonymous is still not admitted to the scoped Studio", %{
       conn: conn,
       ws: ws,
       proj: proj
     } do
-      conn = get(conn, "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio")
-      assert conn.status == 403
+      path = "/w/#{ws.slug}/p/#{proj.slug}/d/#{@dataset}/studio"
+      conn = get(conn, path)
+      assert redirected_to(conn) == "/login?return_to=" <> URI.encode_www_form(path)
     end
   end
 

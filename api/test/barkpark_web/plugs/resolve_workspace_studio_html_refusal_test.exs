@@ -132,16 +132,19 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspaceStudioHtmlRefusalTest do
     refute conn.status == 403
   end
 
-  test "an ANONYMOUS request to a non-Default workspace is UNCHANGED (JSON envelope)", %{
+  # task-c1ccdbfaa26876cb changed the Studio arm on purpose: a signed-out
+  # BROWSER is sent to sign in (studio_signed_out_redirect_test.exs pins it).
+  # The workspace's JSON API keeps the envelope for an anonymous caller.
+  test "an ANONYMOUS API request to a non-Default workspace keeps the JSON envelope", %{
     conn: conn
   } do
     n = System.unique_integer([:positive])
     {:ok, ws} = Tenancy.create_workspace(%{slug: "rw-anon-#{n}", name: "WS #{n}"})
     {:ok, _} = Tenancy.create_project(ws, %{slug: "default", name: "Default"})
 
-    conn = get(conn, studio_path(ws.slug))
+    conn = get(conn, "/w/#{ws.slug}/p/default/v1/data/query/#{@dataset}/post")
 
-    assert conn.status == 403
+    refute conn.status in [301, 302]
     assert conn.resp_body =~ "\"error\""
   end
 

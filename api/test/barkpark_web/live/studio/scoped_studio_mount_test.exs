@@ -94,13 +94,18 @@ defmodule BarkparkWeb.Studio.ScopedStudioMountTest do
       assert conn.status == 403
     end
 
-    test "anonymous 403s on any NON-Default workspace (the allowance is Default-only)", %{
-      conn: conn,
-      ws_a: ws_a,
-      proj_a: proj_a
-    } do
+    # The allowance is Default-only: a signed-out browser on any other
+    # workspace is sent to sign in, never admitted (task-c1ccdbfaa26876cb).
+    test "anonymous is sent to sign in on any NON-Default workspace (the allowance is Default-only)",
+         %{
+           conn: conn,
+           ws_a: ws_a,
+           proj_a: proj_a
+         } do
       conn = get(conn, scoped_url(ws_a, proj_a))
-      assert conn.status == 403
+
+      assert redirected_to(conn) ==
+               "/login?return_to=" <> URI.encode_www_form(scoped_url(ws_a, proj_a))
     end
 
     test "unknown workspace slug 404s (no existence leak past resolve)", %{
