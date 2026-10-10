@@ -26,6 +26,13 @@ defmodule Barkpark.Content.PortableText do
   an inert `<span data-pt-mark>` / `<span data-pt-def>` and comes back as the
   stored mark; `from_html/2` reads a def back from the stored blocks by key.
 
+  An inline object (a block child whose `_type` is not `span`, such as the
+  Sanity chip `bp import` stores) rides as an inert
+  `<span data-pt-object="…" contenteditable="false">` carrying the whole
+  object as JSON, and comes back verbatim. Before, it printed as bare text and
+  the next edit of its block stored that text as part of a plain span
+  (task-600eae4cd8a05206).
+
   Keys are derived from position (`"b0"`, `"b0s1"`, `"b0m0"`), so converting
   the same HTML twice gives the same blocks. That is what lets an untouched
   field keep its stored value byte for byte. An edited field keeps it per
@@ -74,7 +81,7 @@ defmodule Barkpark.Content.PortableText do
   """
   @spec from_html(String.t(), [map()]) :: [map()]
   def from_html(html, stored \\ []) when is_binary(html) do
-    state = %{blocks: [], cur: nil, marks: [], lists: [], links: [], spans: []}
+    state = %{blocks: [], cur: nil, marks: [], lists: [], links: [], spans: [], skip: 0}
     stored = if blocks?(stored), do: stored, else: []
 
     stored_defs =
@@ -163,8 +170,10 @@ defmodule Barkpark.Content.PortableText do
     end
   end
 
-  defp step([_, _, _, _, text | _], state) when text != "", do: add_text(state, decode(text))
-  defp step([_, "", "", "", "", "<"], state), do: add_text(state, "<")
+  defp step([_, _, _, _, text | _], %{skip: 0} = state) when text != "",
+    do: add_text(state, decode(text))
+
+  defp step([_, "", "", "", "", "<"], %{skip: 0} = state), do: add_text(state, "<")
   defp step(_, state), do: state
 
   defp list_item(["ol" | _]), do: "number"
@@ -189,7 +198,30 @@ defmodule Barkpark.Content.PortableText do
 
   # A `data-pt-mark` span is a stored decorator, a `data-pt-def` span a stored
   # mark definition; any other span is styling and carries no mark.
-  defp open_span(state, attrs) do
+  # An inline object span: the stored object becomes a child of the current
+  # block, and its label text is skipped up to the span's close.
+  defp open_span(%{skip: 0} = state, attrs) do
+    case attr(attrs, "data-pt-object") do
+      nil ->
+        open_mark_span(state, attrs)
+
+      json ->
+        case Jason.decode(json) do
+          {:ok, %{"_type" => t} = object} when is_binary(t) ->
+            state = if state.cur, do: state, else: start_block(state, "normal", nil, 0)
+            cur = %{state.cur | spans: [%{object: object} | state.cur.spans]}
+            %{state | cur: cur, skip: 1, spans: [:object | state.spans]}
+
+          _ ->
+            open_mark_span(state, attrs)
+        end
+    end
+  end
+
+  defp open_span(state, _attrs),
+    do: %{state | skip: state.skip + 1, spans: [:object | state.spans]}
+
+  defp open_mark_span(state, attrs) do
     mark =
       cond do
         name = attr(attrs, "data-pt-mark") -> name
@@ -200,6 +232,9 @@ defmodule Barkpark.Content.PortableText do
     marks = if mark, do: state.marks ++ [mark], else: state.marks
     %{state | marks: marks, spans: [mark | state.spans]}
   end
+
+  defp close_span(%{spans: [:object | rest]} = state),
+    do: %{state | spans: rest, skip: max(state.skip - 1, 0)}
 
   defp close_span(%{spans: [nil | rest]} = state), do: %{state | spans: rest}
 
@@ -251,9 +286,10 @@ defmodule Barkpark.Content.PortableText do
   defp flush(%{cur: nil} = state), do: state
 
   defp flush(%{cur: cur} = state) do
-    text = cur.spans |> Enum.map_join(& &1.text) |> String.trim()
+    text = cur.spans |> Enum.map_join(&Map.get(&1, :text, "")) |> String.trim()
+    has_object = Enum.any?(cur.spans, &Map.has_key?(&1, :object))
 
-    if text == "",
+    if text == "" and not has_object,
       do: %{state | cur: nil},
       else: %{state | cur: nil, blocks: [cur | state.blocks]}
   end
@@ -265,34 +301,38 @@ defmodule Barkpark.Content.PortableText do
     {children, defs} =
       spans
       |> Enum.with_index()
-      |> Enum.map_reduce([], fn {span, j}, defs ->
-        {marks, defs} =
-          Enum.map_reduce(span.marks, defs, fn
-            {:link, href}, defs ->
-              case Enum.find(defs, &(&1["_type"] == "link" and &1["href"] == href)) do
-                %{"_key" => k} ->
-                  {k, defs}
+      |> Enum.map_reduce([], fn
+        {%{object: object}, _j}, defs ->
+          {object, defs}
 
-                nil ->
-                  k = free_key(key, defs)
-                  {k, defs ++ [%{"_type" => "link", "_key" => k, "href" => href}]}
-              end
+        {span, j}, defs ->
+          {marks, defs} =
+            Enum.map_reduce(span.marks, defs, fn
+              {:link, href}, defs ->
+                case Enum.find(defs, &(&1["_type"] == "link" and &1["href"] == href)) do
+                  %{"_key" => k} ->
+                    {k, defs}
 
-            {:def, k}, defs ->
-              cond do
-                Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
-                def = stored_defs[k] -> {k, defs ++ [def]}
-                true -> {nil, defs}
-              end
+                  nil ->
+                    k = free_key(key, defs)
+                    {k, defs ++ [%{"_type" => "link", "_key" => k, "href" => href}]}
+                end
 
-            mark, defs ->
-              {mark, defs}
-          end)
+              {:def, k}, defs ->
+                cond do
+                  Enum.any?(defs, &(&1["_key"] == k)) -> {k, defs}
+                  def = stored_defs[k] -> {k, defs ++ [def]}
+                  true -> {nil, defs}
+                end
 
-        marks = Enum.reject(marks, &is_nil/1)
+              mark, defs ->
+                {mark, defs}
+            end)
 
-        {%{"_type" => "span", "_key" => "#{key}s#{j}", "text" => span.text, "marks" => marks},
-         defs}
+          marks = Enum.reject(marks, &is_nil/1)
+
+          {%{"_type" => "span", "_key" => "#{key}s#{j}", "text" => span.text, "marks" => marks},
+           defs}
       end)
 
     base = %{
@@ -319,10 +359,14 @@ defmodule Barkpark.Content.PortableText do
 
   defp trim_edges(spans) do
     spans
-    |> List.update_at(0, &%{&1 | text: String.trim_leading(&1.text)})
-    |> List.update_at(-1, &%{&1 | text: String.trim_trailing(&1.text)})
-    |> Enum.reject(&(&1.text == ""))
+    |> List.update_at(0, &trim_span(&1, :leading))
+    |> List.update_at(-1, &trim_span(&1, :trailing))
+    |> Enum.reject(&(Map.get(&1, :text) == ""))
   end
+
+  defp trim_span(%{text: text} = span, :leading), do: %{span | text: String.trim_leading(text)}
+  defp trim_span(%{text: text} = span, :trailing), do: %{span | text: String.trim_trailing(text)}
+  defp trim_span(object, _side), do: object
 
   defp decode(text) do
     text
@@ -376,6 +420,10 @@ defmodule Barkpark.Content.PortableText do
     defs = Map.new(b["markDefs"] || [], &{&1["_key"], &1})
 
     Enum.map_join(children, fn
+      %{"_type" => type} = object when is_binary(type) and type != "span" ->
+        ~s(<span data-pt-object="#{escape(Jason.encode!(object))}" contenteditable="false">) <>
+          escape(object_label(object)) <> "</span>"
+
       %{"text" => text} = span when is_binary(text) ->
         inner = text |> escape() |> String.replace("\n", "<br>")
 
@@ -389,6 +437,17 @@ defmodule Barkpark.Content.PortableText do
   end
 
   defp spans_html(_), do: ""
+
+  # The label an inline object shows: the readers' rule (inline.ex
+  # inline_object_text/1), else its type.
+  defp object_label(object) do
+    Enum.find_value(~w(text title label name value), "[#{object["_type"]}]", fn key ->
+      case object[key] do
+        v when is_binary(v) and v != "" -> v
+        _ -> nil
+      end
+    end)
+  end
 
   defp wrap("strong", acc, _), do: "<strong>#{acc}</strong>"
   defp wrap("em", acc, _), do: "<em>#{acc}</em>"

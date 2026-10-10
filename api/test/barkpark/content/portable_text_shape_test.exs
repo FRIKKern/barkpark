@@ -171,6 +171,55 @@ defmodule Barkpark.Content.PortableTextShapeTest do
     end
   end
 
+  # task-600eae4cd8a05206: a Sanity inline object (as `bp import` stores it)
+  # inside a block's children. It printed as bare text, and the next edit of
+  # its block stored that text inside a plain span: _type, _key and tone lost.
+  describe "inline objects" do
+    @chip %{"_type" => "chip", "_key" => "k1", "text" => "Reviewed", "tone" => "positive"}
+    @post11 %{
+      "_type" => "block",
+      "_key" => "b0",
+      "style" => "normal",
+      "markDefs" => [],
+      "children" => [
+        %{"_type" => "span", "_key" => "b0s0", "text" => "Status ", "marks" => []},
+        @chip,
+        %{"_type" => "span", "_key" => "b0s2", "text" => ", written with Ada.", "marks" => []}
+      ]
+    }
+
+    test "the editor HTML carries the object as an inert labelled span" do
+      html = PortableText.to_html([@post11])
+      assert html =~ ~s(contenteditable="false">Reviewed</span>)
+      assert html =~ "data-pt-object="
+      refute html =~ ~s("tone")
+    end
+
+    test "editing other text in the block keeps the object byte-identical" do
+      html = String.replace(PortableText.to_html([@post11]), "Status", "Status now")
+      assert [%{"children" => children}] = PortableText.from_html(html, [@post11])
+
+      assert [%{"text" => "Status now "}, @chip, %{"text" => ", written with Ada."}] =
+               children
+    end
+
+    test "markup in the object's fields is escaped and comes back verbatim" do
+      chip = %{"_type" => "chip", "_key" => "k2", "text" => ~s(<b>"x"</b> & y)}
+      block = %{@post11 | "children" => [chip]}
+      html = PortableText.to_html([block])
+      refute html =~ "<b>"
+      edited = String.replace(html, "<p>", "<p>Lead ")
+
+      assert [%{"children" => [%{"text" => "Lead "}, ^chip]}] =
+               PortableText.from_html(edited, [block])
+    end
+
+    test "a block holding only an object is kept" do
+      block = %{@post11 | "children" => [@chip]}
+      assert [%{"children" => [@chip]}] = PortableText.from_html(PortableText.to_html([block]))
+    end
+  end
+
   test "a Studio rich-text edit is saved as Portable Text blocks" do
     saved =
       save!(doc!("pt-new", %{}), %{"title" => "T", "excerpt" => "<p>Hello <em>you</em></p>"})
