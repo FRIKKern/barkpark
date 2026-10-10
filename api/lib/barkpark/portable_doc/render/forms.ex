@@ -15,6 +15,7 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   NO logic change). Output is byte-identical to the pre-split engine.
   """
 
+  alias Barkpark.PortableDoc.Render.Chrome
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, escape_attr: 1]
 
   def form_html(b, style) do
@@ -39,7 +40,9 @@ defmodule Barkpark.PortableDoc.Render.Forms do
     legend = ~s(<legend>#{escape_html(prompt)}</legend>)
 
     rationale_line = form_muted_line(Map.get(q, "rationale"), "", style)
-    recommendation_line = form_muted_line(Map.get(q, "recommendation"), "Recommendation: ", style)
+
+    recommendation_line =
+      form_muted_line(Map.get(q, "recommendation"), Chrome.t("Recommendation: "), style)
 
     control =
       ~s(<div class="bp-form-opts">) <> form_control_html(type, id, q, style) <> "</div>"
@@ -75,7 +78,9 @@ defmodule Barkpark.PortableDoc.Render.Forms do
   # Per-type control markup. All names share the question id so grouped
   # radios/checkboxes round-trip to one answer field at the interactive phase.
   defp form_control_html("yesno", id, _q, style) do
-    form_radio_group(id, ["Yes", "No"], style)
+    # The submitted value stays the stored answer ("Yes"/"No"); only the
+    # label the reader sees is in the render's locale (task-8e96278fc4ee7097).
+    form_radio_group(id, [{"Yes", Chrome.t("Yes")}, {"No", Chrome.t("No")}], style)
   end
 
   defp form_control_html("single", id, q, style) do
@@ -116,9 +121,10 @@ defmodule Barkpark.PortableDoc.Render.Forms do
     # Article mode: classed option rows, zero inline layout — paper-surface.css
     # owns the geometry (and the custom control faces).
     labels
-    |> Enum.map(fn label ->
+    |> Enum.map(&choice_pair/1)
+    |> Enum.map(fn {value, label} ->
       ~s(<label class="bp-form-opt">) <>
-        ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(label)}"> ) <>
+        ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(value)}"> ) <>
         ~s(<span>#{escape_html(label)}</span></label>)
     end)
     |> Enum.join("")
@@ -126,13 +132,19 @@ defmodule Barkpark.PortableDoc.Render.Forms do
 
   defp form_choice_group(id, labels, input_type, _style) do
     labels
-    |> Enum.map(fn label ->
+    |> Enum.map(&choice_pair/1)
+    |> Enum.map(fn {value, label} ->
       ~s(<label style="display:block;margin:0.2rem 0">) <>
-        ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(label)}"> ) <>
+        ~s(<input type="#{input_type}" name="#{escape_attr(id)}" value="#{escape_attr(value)}"> ) <>
         ~s(<span>#{escape_html(label)}</span></label>)
     end)
     |> Enum.join("")
   end
+
+  # An option is its own value, or a {value, label} pair when the shown label
+  # is translated chrome and the submitted value must not move.
+  defp choice_pair({value, label}), do: {value, label}
+  defp choice_pair(label), do: {label, label}
 
   # Coerce a scale bound to an integer, falling back to `default`.
   defp scale_bound(v, _default) when is_integer(v), do: v

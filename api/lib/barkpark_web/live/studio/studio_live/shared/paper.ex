@@ -1721,7 +1721,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     html =
       case Map.get(block, "child") do
         child when is_map(child) ->
-          case Render.render_block(child, %{style: :article}) do
+          case Render.render_block(child, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
             html when is_binary(html) -> html
             _ -> ""
           end
@@ -1766,7 +1766,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
         _ -> block
       end
 
-    case Render.render_block(resolved, %{style: :article}) do
+    case Render.render_block(resolved, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
       html when is_binary(html) -> html
       _ -> ""
     end
@@ -3257,6 +3257,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
       # leak into shared caches or anonymous HTML.
       valueref_accept: true
     }
+
+    # The renderer's own words in the workspace locale (task-8e96278fc4ee7097).
+    opts = BarkparkWeb.StudioLocale.pd_opts(opts)
 
     blocks
     |> Enum.with_index()

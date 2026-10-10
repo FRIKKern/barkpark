@@ -138,7 +138,11 @@ defmodule BarkparkWeb.Studio.PaperFieldBlock do
 
     if resolved?,
       do: nil,
-      else: Barkpark.PortableDoc.Render.render_block(block, %{style: :article})
+      else:
+        Barkpark.PortableDoc.Render.render_block(
+          block,
+          BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
+        )
   end
 
   defp unresolved_codelist_paint(_block, _type), do: nil

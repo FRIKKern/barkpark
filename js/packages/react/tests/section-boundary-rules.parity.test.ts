@@ -28,6 +28,7 @@
 import { describe, expect, it } from 'vitest'
 import { readFileSync } from 'node:fs'
 import { renderBlocks } from '../src/blocks/registry'
+import { EN } from '../src/blocks/chrome'
 
 const FIXTURE_URL = new URL(
   '../../../../api/test/support/fixtures/section-boundary-rules.json',
@@ -56,7 +57,7 @@ describe('section boundary rules (shared fixture)', () => {
 
   for (const c of fixture.cases) {
     it(`renderBlocks: ${c.name}`, () => {
-      expect(ruleCount(renderBlocks([c.block]))).toBe(c.rules)
+      expect(ruleCount(renderBlocks([c.block], EN))).toBe(c.rules)
     })
   }
 
@@ -76,7 +77,7 @@ describe('section boundary rules (shared fixture)', () => {
         { type: 'paragraph', content: [{ type: 'text', value: 'body' }] },
       ],
     })
-    const html = renderBlocks([section('First'), section('Second')])
+    const html = renderBlocks([section('First'), section('Second')], EN)
     // Zero hairlines between the two: each boundary is the head's own
     // border-top, drawn by paper-surface.css.
     expect(ruleCount(html)).toBe(0)

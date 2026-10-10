@@ -23,6 +23,7 @@
 
 import type { Block } from './inline'
 import { renderBlocks } from './blocks/registry'
+import { type ChromeStrings, makeCtx } from './blocks/chrome'
 
 export type { Block, Inline } from './inline'
 
@@ -31,6 +32,12 @@ export interface PortableDocProps {
   value: Block[] | null | undefined
   /** Extra class(es) appended to the `bp-paper-surface` root. */
   className?: string
+  /**
+   * The renderer's chrome words in your language, keyed by the English text
+   * (e.g. `{ "Recommendation: ": "Anbefaling: " }`) — the same map Barkpark's
+   * renderer uses for a workspace locale. Omitted, chrome renders in English.
+   */
+  strings?: ChromeStrings
 }
 
 /**
@@ -40,10 +47,11 @@ export interface PortableDocProps {
  * produces. Ship `@barkpark/react/paper-surface.css` (or your own copy of
  * `api/assets/paper-surface/paper-surface.css`) to skin it.
  */
-export function PortableDoc({ value, className }: PortableDocProps) {
+export function PortableDoc({ value, className, strings }: PortableDocProps) {
   const blocks = Array.isArray(value) ? value : []
   const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'
-  return <div className={cls} dangerouslySetInnerHTML={{ __html: renderBlocks(blocks) }} />
+  const html = renderBlocks(blocks, makeCtx(strings))
+  return <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
 /**
@@ -52,6 +60,9 @@ export function PortableDoc({ value, className }: PortableDocProps) {
  * an Astro `set:html` / a non-React SSR surface can consume it directly, and the
  * cross-surface parity harness can compare it against the Elixir/Go golden.
  */
-export function renderPortableDocument(value: Block[] | null | undefined): string {
-  return renderBlocks(Array.isArray(value) ? value : [])
+export function renderPortableDocument(
+  value: Block[] | null | undefined,
+  options: { strings?: ChromeStrings } = {},
+): string {
+  return renderBlocks(Array.isArray(value) ? value : [], makeCtx(options.strings))
 }

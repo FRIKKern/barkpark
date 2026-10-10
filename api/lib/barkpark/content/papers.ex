@@ -415,10 +415,34 @@ defmodule Barkpark.Content.Papers do
         # foreign" there, so it lands on the rewrite arm; only `is_nil(sv)` rows
         # with drifted bytes are report-only, and those are exactly the ones the
         # reader now heals itself.
-        if Map.get(content, "body_html_sv") == Render.body_html_render_version(),
-          do: :divergent,
-          else: {:stale, rendered}
+        cond do
+          Map.get(content, "body_html_sv") != Render.body_html_render_version() ->
+            {:stale, rendered}
+
+          # LOCALE DRIFT (task-8e96278fc4ee7097): the renderer's own words follow
+          # the workspace locale, which is a render INPUT the stamp does not carry.
+          # A workspace that switches language leaves its stored body in the old
+          # words under a current stamp; that is these blocks rendered by this
+          # renderer in another locale — stale, not divergent. Without this arm
+          # every such paper would answer 422 to every reader.
+          rendered_in_another_locale?(html, blocks, dataset, style, scope) ->
+            {:stale, rendered}
+
+          true ->
+            :divergent
+        end
     end
+  end
+
+  # Does `html` equal these blocks rendered in some OTHER known locale? Runs only
+  # on the rare byte-mismatch-under-a-current-stamp path, so the extra renders
+  # never touch a coherent read.
+  defp rendered_in_another_locale?(html, blocks, dataset, style, scope) do
+    opts = Labels.paper_render_opts(dataset, style, scope)
+
+    Barkpark.Tenancy.known_locales()
+    |> Enum.reject(&(&1 == opts[:locale]))
+    |> Enum.any?(fn locale -> Render.render_blocks(blocks, %{opts | locale: locale}) == html end)
   end
 
   # Does any block in the list resolve an EXTERNAL referent at render time?

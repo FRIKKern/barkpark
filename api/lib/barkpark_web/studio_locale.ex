@@ -41,11 +41,31 @@ defmodule BarkparkWeb.StudioLocale do
     BarkparkWeb.Gettext |> Gettext.get_locale() |> String.replace("_", "-")
   end
 
+  @doc """
+  PortableDoc render opts in the locale this process renders in, so the
+  renderer's own words (form Yes/No, task status, empty states) match the
+  Studio or reader around them (task-8e96278fc4ee7097). A process that put no
+  locale renders `en`, byte-identical to a render without `:locale`.
+  """
+  @spec pd_opts(map()) :: map()
+  def pd_opts(opts \\ %{}) when is_map(opts),
+    do: Map.put(opts, :locale, Gettext.get_locale(BarkparkWeb.Gettext))
+
   @doc "Put the workspace's locale on the current process for the render that follows."
   @spec put(Tenancy.Workspace.t() | nil) :: String.t()
   def put(workspace) do
     locale = resolve(workspace)
     Gettext.put_locale(BarkparkWeb.Gettext, locale)
+
+    # The renderer's words follow this workspace too; hand it the locale we
+    # already loaded so its render opts cost no second workspace query.
+    with %Tenancy.Workspace{id: id} <- workspace,
+         do:
+           Barkpark.Content.Labels.remember_workspace_locale(
+             id,
+             Tenancy.workspace_locale(workspace)
+           )
+
     locale
   end
 

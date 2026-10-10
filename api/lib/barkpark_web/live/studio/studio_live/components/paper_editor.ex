@@ -1289,7 +1289,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # task_detail_html renders "" for an empty/matchless task — surface that as
   # an explicit empty note instead of a silent blank strip.
   defp rendered_or_empty(block) do
-    case Render.render_block(block, %{style: :article}) do
+    case Render.render_block(block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article})) do
       html when html in ["", nil] -> :empty
       html -> if String.trim(html) == "", do: :empty, else: {:ok, html}
     end
@@ -2515,7 +2515,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               <bp-paper-editor data-editor-mode="table" data-block={Jason.encode!(projection)}></bp-paper-editor>
             <% :readonly -> %>
               <div data-test-id="paper-table-readonly">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
                 <p class="bp-paper-edit-readonly">
                   <%= gettext("This Table's authored structure is not yet supported for lossless editing; original content is preserved.") %>
                 </p>
@@ -2585,7 +2585,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "code" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-code-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-code-preview">
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <form
             id={"code-form-" <> @id}
@@ -2700,7 +2700,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
           <%= case Blocks.action_form_state(@block) do %>
             <% {:ok, state} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <details
                 id={"action-controls-" <> @id}
@@ -2738,7 +2738,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </details>
             <% {:error, :malformed_action} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-action-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <p class="bp-paper-edit-readonly">
                 <%= gettext("This Action's authored fields are malformed and cannot be edited here; original content is preserved.") %>
@@ -2748,7 +2748,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "notes" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-notes-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-notes-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= case Blocks.notes_form_state(@block) do %>
             <% {:ok, state} -> %>
@@ -2785,7 +2785,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "note" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-note-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-note-preview">
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= case Blocks.note_form_state(@block) do %>
             <% {:ok, state} -> %>
@@ -2865,7 +2865,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </form>
             <% {:error, _} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-stage-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <p class="bp-paper-edit-readonly"><%= gettext("This Stage's authored fields need an unambiguous shape before editing; original content is preserved.") %></p>
           <% end %>
@@ -3016,7 +3016,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </details>
             <% {:error, _reason} -> %>
               <div data-test-id="paper-terminal-readonly">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
                 <p class="bp-paper-edit-readonly">
                   <%= gettext("This Terminal's authored body needs a canonical shape and stable identities before editing; original content is preserved.") %>
                 </p>
@@ -3173,7 +3173,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
               </details>
             <% {:error, :malformed_card} -> %>
               <div class="bp-paper-contextual-preview" data-test-id="paper-card-preview">
-                <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+                <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
               </div>
               <p class="bp-paper-edit-readonly">
                 <%= gettext("This Card's known slots are malformed and cannot be edited here; original content is preserved.") %>
@@ -3322,7 +3322,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </figure>
           <% else %>
             <div class="bp-paper-contextual-preview" data-test-id="paper-figure-preview">
-              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
             </div>
             <p class="bp-paper-edit-readonly">
               <%= gettext("This Figure's singular child needs a stable identity before it can be edited; original content is preserved.") %>
@@ -3333,7 +3333,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-route-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-route-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"route-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -3377,7 +3377,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-api-endpoint-preview"
             {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
           >
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"api-endpoint-controls-" <> @id} class="bp-paper-contextual-controls bp-paper-contextual-controls--api-endpoint"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -3465,7 +3465,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "toc" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-toc-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-toc-preview">
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"toc-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -3545,7 +3545,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             data-test-id="paper-criteria-progress-preview"
             {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}
           >
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"criteria-progress-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -4033,7 +4033,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-form-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-form-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
           </div>
           <%= if @tree_identity_safe and editable_form_questions?(@block) do %>
             <details
@@ -4366,7 +4366,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
             </details>
           <% else %>
             <div class="bp-paper-contextual-preview" data-test-id="paper-tabs-preview">
-              <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+              <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
             </div>
             <p class="bp-paper-edit-readonly">
               <%= gettext("Panel identities or body data need repair before editing; original content is preserved.") %>
@@ -4376,7 +4376,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% "steps" -> %>
         <div class="bp-paper-contextual-editor" data-test-id="paper-steps-editor">
           <%= if not editable_steps?(@block) do %>
-            <%= raw(Render.render_block(@block, %{style: :article, paper_links: @paper_links})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article, paper_links: @paper_links}))) %>
             <p class="bp-paper-edit-readonly"><%= gettext("Step identities need repair before editing; original content is preserved.") %></p>
           <% else %>
           <ol class="bp-steps">
@@ -4598,7 +4598,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-gauge-list-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-gauge-list-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"gauge-list-controls-" <> @id}
                    class="bp-paper-contextual-controls bp-paper-contextual-controls--gauge-list"
@@ -4672,7 +4672,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <div class="bp-paper-contextual-editor" data-test-id="paper-bar-chart-contextual-editor">
           <div class="bp-paper-contextual-preview" data-test-id="paper-bar-chart-preview"
                {TechnicalBlockEditor.painted_copy_attrs(@block, @id)}>
-            <%= raw(Render.render_block(@block, %{style: :article})) %>
+            <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
           </div>
           <details id={"paper-chart-controls-" <> @id} class="bp-paper-contextual-controls"
                    phx-mounted={JS.ignore_attributes("open")}>
@@ -5057,7 +5057,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
              recorded transcripts): leaving the words out made Edit drop authored text
              the reader shows (r2b click-to-edit census). --%>
         <div class="bp-paper-contextual-preview" data-test-id="paper-readonly-preview">
-          <%= raw(Render.render_block(@block, %{style: :article})) %>
+          <%= raw(Render.render_block(@block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))) %>
         </div>
         <p class="bp-paper-edit-readonly">
           <%= gettext("%{type} blocks are not editable yet (view/delete/reorder only).", type: @type) %>

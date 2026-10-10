@@ -62,6 +62,12 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
               "id" => "st1",
               "type" => "steps",
               "steps" => [%{"id" => "st1-a", "title" => "Gå", "blocks" => []}]
+            },
+            %{
+              "id" => "f1",
+              "type" => "form",
+              "kind" => "grill",
+              "questions" => [%{"id" => "q1", "type" => "yesno", "prompt" => "Skal vi?"}]
             }
           ],
           "workspace_id" => ws.id,
@@ -192,5 +198,21 @@ defmodule BarkparkWeb.Studio.PaperEditorLocaleTest do
     assert html =~ ~s(title="Drag to reorder")
     refute html =~ "Angre innholdsendringen"
     assert html =~ "<legend>Step 1</legend>"
+    assert html =~ "<span>Yes</span>"
+    refute html =~ "<span>Ja</span>"
+  end
+
+  # task-8e96278fc4ee7097: the block previews are the reader's own renderer, and
+  # its words (a form's Yes/No) stayed English inside a Norwegian editor.
+  test "the nb-NO block previews speak the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    html = editor_html(conn, ws, proj)
+
+    assert html =~ "<span>Ja</span>"
+    assert html =~ "<span>Nei</span>"
+    refute html =~ "<span>Yes</span>"
   end
 end

@@ -20,7 +20,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.TechnicalBlockEditor do
   def technical_block_editor(assigns) do
     assigns =
       assigns
-      |> assign(:preview, Render.render_block(assigns.block, %{style: :article}))
+      |> assign(
+        :preview,
+        Render.render_block(assigns.block, BarkparkWeb.StudioLocale.pd_opts(%{style: :article}))
+      )
       |> assign(:label, technical_label(Map.get(assigns.block, "type")))
 
     ~H"""

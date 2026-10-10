@@ -348,3 +348,84 @@ describe(`PortableDoc × Elixir golden parity (${fixtureFiles.length} non-plugin
     expect(fixtureFiles.length).toBe(minted.length)
   })
 })
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Part 3 — the locale golden (task-8e96278fc4ee7097). The Elixir renderer renders
+// the inputs in a locale; the JS renderer is handed the SAME words as its
+// `strings` map and must emit the same shape. `*.locale-golden.json`, so the
+// per-type census above (and toPlainText's pinned 65) never sees it.
+// ─────────────────────────────────────────────────────────────────────────────
+interface LocaleGolden {
+  locale: string
+  strings: Record<string, string>
+  inputs: unknown[]
+  expectedHtml: string
+  shape: GoldenShapeNode[]
+}
+
+const localeFiles = existsSync(FIXTURE_DIR)
+  ? readdirSync(FIXTURE_DIR)
+      .filter((f) => f.endsWith('.locale-golden.json'))
+      .sort()
+  : []
+
+describe('PortableDoc × Elixir locale golden', () => {
+  it('the nb-NO locale golden is present', () => {
+    expect(localeFiles).toContain('nb-NO.locale-golden.json')
+  })
+
+  for (const file of localeFiles) {
+    const golden = JSON.parse(readFileSync(join(FIXTURE_DIR, file), 'utf8')) as LocaleGolden
+    const Renderer = PortableDoc as (props: { value: unknown; strings?: Record<string, string> }) => ReactNode
+
+    it(`${golden.locale} — DOM shape equals the Elixir golden when handed its strings`, () => {
+      const actualHtml = renderToStaticMarkup(
+        createElement(Renderer, { value: golden.inputs, strings: golden.strings }),
+      )
+      assertShapeEqual(actualHtml, golden.expectedHtml, { unwrapClass: SURFACE })
+    })
+
+    it(`${golden.locale} — renderPortableDocument takes the same strings`, async () => {
+      const { renderPortableDocument } = (await import('../src/index')) as unknown as {
+        renderPortableDocument: (v: unknown, o?: { strings?: Record<string, string> }) => string
+      }
+      assertShapeEqual(renderPortableDocument(golden.inputs, { strings: golden.strings }), golden.expectedHtml, {
+        unwrapClass: SURFACE,
+      })
+    })
+
+    // Control: without the map the JS renderer answers English, so the match
+    // above is the strings doing the work, not a golden that happens to be English.
+    it(`${golden.locale} — without strings the shape does NOT match (the words are the difference)`, () => {
+      const englishHtml = renderToStaticMarkup(createElement(Renderer, { value: golden.inputs }))
+      expect(() => assertShapeEqual(englishHtml, golden.expectedHtml, { unwrapClass: SURFACE })).toThrow()
+    })
+
+    it(`${golden.locale} — JS parser reproduces the Elixir-computed golden shape`, () => {
+      expect(parseGoldenShape(golden.expectedHtml)).toEqual(golden.shape)
+    })
+
+    // The words ride an explicit per-render context, never module state: renders
+    // interleaved the way concurrent server requests interleave each keep their own
+    // language, and a render after a localized one is plain English again.
+    it(`${golden.locale} — interleaved renders never see each other's words`, async () => {
+      const { renderPortableDocument } = (await import('../src/index')) as unknown as {
+        renderPortableDocument: (v: unknown, o?: { strings?: Record<string, string> }) => string
+      }
+      const english = renderPortableDocument(golden.inputs)
+      const localized = renderPortableDocument(golden.inputs, { strings: golden.strings })
+      const tick = () => new Promise((r) => setTimeout(r, 0))
+      const results = await Promise.all(
+        Array.from({ length: 8 }, async (_, i) => {
+          await tick()
+          return i % 2 === 0
+            ? renderPortableDocument(golden.inputs, { strings: golden.strings })
+            : renderPortableDocument(golden.inputs)
+        }),
+      )
+      results.forEach((html, i) => expect(html).toBe(i % 2 === 0 ? localized : english))
+      expect(localized).not.toBe(english)
+      expect(renderPortableDocument(golden.inputs)).toBe(english)
+    })
+  }
+})

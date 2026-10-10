@@ -10,6 +10,7 @@ import { describe, it, expect } from 'vitest'
 import { REGISTERED_TYPES, renderBlock } from '../src/blocks/registry'
 import type { Block } from '../src/inline'
 import { toPlainText } from '../src/toPlainText'
+import { EN } from '../src/blocks/chrome'
 
 // The field vocabulary the emitters read, swept from src/blocks/*.ts. Each key
 // is set to a hostile value ALL AT ONCE per variant — an emitter only reads its
@@ -49,11 +50,11 @@ describe('every registered block type degrades on hostile field shapes — never
   for (const type of REGISTERED_TYPES) {
     it(`${type} survives all hostile shapes`, () => {
       // Bare block: nothing but the type.
-      expect(typeof renderBlock({ type } as Block)).toBe('string')
+      expect(typeof renderBlock({ type } as Block, EN)).toBe('string')
       for (const [labelOfV, v] of HOSTILE_VALUES) {
         let out: string
         try {
-          out = renderBlock(blockWithAllKeys(type, v))
+          out = renderBlock(blockWithAllKeys(type, v), EN)
         } catch (err) {
           throw new Error(
             `renderBlock threw for type=${type} with every common field = ${labelOfV}: ${String(err)}`,
@@ -78,7 +79,7 @@ describe('every registered block type degrades on hostile field shapes — never
         }) as unknown as Block,
     )
     for (const b of nasty) {
-      expect(typeof renderBlock(b)).toBe('string')
+      expect(typeof renderBlock(b, EN)).toBe('string')
     }
   })
 

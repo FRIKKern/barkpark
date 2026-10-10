@@ -71,7 +71,7 @@ defmodule Barkpark.PortableDoc.Render do
                         ] ++
                           Enum.map(
                             ~w(
-                              cards_email.ex components.ex compose.ex data_viz.ex figures.ex
+                              cards_email.ex chrome.ex components.ex compose.ex data_viz.ex figures.ex
                               fleet_email.ex forms.ex inline.ex math.ex palettes.ex
                               panels_email.ex section_layout.ex status_vocab.ex stylesheet.ex tokens_gen.ex
                               util.ex walk.ex
@@ -259,10 +259,32 @@ defmodule Barkpark.PortableDoc.Render do
     style = Map.get(opts, :style, :email)
     theme = Map.get(opts, :theme, :evergreen)
 
-    block
-    |> prepare_block(opts)
-    |> compose_block(style, theme)
-    |> render_html(Map.put(opts, :doctype, false))
+    in_locale(opts, fn ->
+      block
+      |> prepare_block(opts)
+      |> compose_block(style, theme)
+      |> render_html(Map.put(opts, :doctype, false))
+    end)
+  end
+
+  @doc """
+  The language the renderer's own chrome words are written in (task-8e96278fc4ee7097).
+  `opts[:locale]` is a workspace locale ("nb-NO") or a gettext one ("nb_NO");
+  absent, it is English — ALWAYS, never the calling process's locale, so a
+  render (and the body cache built from it) does not depend on who asked.
+  Every emitter calls `gettext` directly; the locale rides the process for the
+  duration of this render. English msgids are the English output byte for byte.
+  """
+  def in_locale(opts, fun) when is_function(fun, 0) do
+    locale =
+      case Map.get(opts, :locale) do
+        l when is_binary(l) and l != "" -> String.replace(l, "-", "_")
+        _ -> "en"
+      end
+
+    Gettext.with_locale(BarkparkWeb.Gettext, locale, fn ->
+      Barkpark.PortableDoc.Render.Chrome.with_strings(fun)
+    end)
   end
 
   # Container block types whose clauses recurse into child BLOCKS (not inline

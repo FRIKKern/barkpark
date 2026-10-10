@@ -1202,8 +1202,10 @@ defmodule BarkparkWeb.BulldocsLive do
   # two clauses are kept SEPARATE (not collapsed) because the article /
   # non-article split is a distinction the reader may re-acquire — today both
   # map to `:article`, the same way `Labels.paper_render_opts/3` does.
-  defp render_opts(true), do: %{style: :article}
-  defp render_opts(false), do: %{style: :article}
+  # Both also carry the owning workspace's locale, which `mount` put on the
+  # process, so the renderer's own words read in the paper's language.
+  defp render_opts(true), do: BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
+  defp render_opts(false), do: BarkparkWeb.StudioLocale.pd_opts(%{style: :article})
 
   # A paper with a non-nil block list streams its blocks; HTML-only papers
   # (and the empty state) keep the raw-HTML container.
