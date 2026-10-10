@@ -284,7 +284,17 @@ class BpReferencePicker extends HTMLElement {
       "position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap;";
     wrap.appendChild(status);
 
+    // The list belongs to the field: once focus leaves the input and its
+    // options (Tab, Shift+Tab, a click elsewhere) it closes instead of
+    // floating over the fields below (task-99bc7de193ae9efe).
+    wrap.addEventListener("focusout", (e) => {
+      if (wrap.contains(e.relatedTarget) || this._inHostEditor(e.relatedTarget)) return;
+      if (this._debounceTimer) clearTimeout(this._debounceTimer);
+      this._hideDropdown();
+    });
+
     this.appendChild(wrap);
+    this._searchWrap = wrap;
     this._searchInput = input;
     this._dropdown = dropdown;
     this._status = status;
@@ -386,16 +396,30 @@ class BpReferencePicker extends HTMLElement {
 
     if (!t) {
       await this._fetchSuggestions("");
-      this._renderSuggestDropdown();
+      if (this._focusInField()) this._renderSuggestDropdown();
       return;
     }
 
     try {
       const matches = await this._fetchSearchResults(t);
-      this._renderResultDropdown(matches);
+      // An answer that lands after focus left the field must not reopen it.
+      if (this._focusInField()) this._renderResultDropdown(matches);
     } catch (_e) {
       this._hideDropdown();
     }
+  }
+
+  // Inside the paper canvas the picker sits in a node view, and the editor
+  // can take focus back while a search is in flight; that editor is the
+  // field's own context, so its answer still lands there.
+  _focusInField() {
+    const active = document.activeElement;
+    return !!(this._searchWrap && this._searchWrap.contains(active)) || this._inHostEditor(active);
+  }
+
+  _inHostEditor(el) {
+    const editor = this.closest('[contenteditable="true"]');
+    return !!(editor && el && editor.contains(el));
   }
 
   _searchUrl(query) {
