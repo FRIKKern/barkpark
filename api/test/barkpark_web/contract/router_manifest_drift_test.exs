@@ -117,6 +117,15 @@ defmodule BarkparkWeb.Contract.RouterManifestDriftTest do
     # human removes a member with `bp cloud members`, never against the box.
     {"POST", "/v1/auth/cloud-users/deprovision"} =>
       "Cloud's member-removal door (ruling #26) — the control plane calls it, not a CLI verb",
+    # ── Deploy-flip SSE retire hook (task-2bcada0faa01ebb2) ─────────────────
+    # deploy/instance-deploy.sh POSTs here, on the RETIRING slot's own port
+    # (never through Caddy), right after a blue/green Caddy flip lands — so
+    # every open SSE stream on that slot ends at once instead of sitting
+    # alive-but-deaf through the drain. RequireLoopback-gated, same trust
+    # boundary as /v1/data/local/search above; no person or `bp` verb has any
+    # reason to retire a slot's streams from outside the box.
+    {"POST", "/v1/internal/retire-sse"} =>
+      "deploy-flip SSE retire signal — instance-deploy.sh calls it on the retiring slot, not a CLI verb",
     # ── The chat shell's open-session probe (wsc-steer-open-session-managed) ──
     # The TUI's agent detail asks this, for the task its agent↔task join already
     # resolved, before it offers "open session"; the answer is a session id the
