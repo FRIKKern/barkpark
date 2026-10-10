@@ -99,6 +99,9 @@ export const PROSE_GOLDEN: Record<string, string> = {
  * state, NOT reading-flow body prose, so `toPlainText` deliberately omits them.
  */
 export const TEXTLESS_SKIP: Record<string, string> = {
+  // rpu-backlog-field-embed-coverage: a transclusion carries only a target; its
+  // prose belongs to the embedded paper, read from that paper, not from here.
+  embed: 'note transclusion — a target reference whose prose lives in the embedded paper, not in this block',
   // ── schema field blocks (task-7375ba22758155fa) — a labelled datum row of a
   // document's structured field, not reading-flow prose ─────────────────────
   'field-string':

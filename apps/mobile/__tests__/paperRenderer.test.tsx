@@ -343,16 +343,17 @@ describe('table', () => {
 describe('unknown blocks', () => {
   // THE SPECIMENS ARE DELIBERATE (mob-zb-s5). This test used `gauge-list` and
   // `chart` until those became real renderers, which disarmed it silently — the
-  // fallback assertions simply stopped describing a fallback. `embed` and
-  // `dashboard` cannot repeat that: they are D48's RECORDED exclusions —
-  // server/Go-registry types with no @barkpark/react emitter — and mobile's
-  // registry is react ∖ EXCLUSIONS, so no renderer slice can ever claim them.
+  // fallback assertions simply stopped describing a fallback. `embed` repeated
+  // it when @barkpark/react gained an opt-in embed emitter
+  // (rpu-backlog-field-embed-coverage), so this now uses `master-ref` and
+  // `dashboard`: server-resolved / Go-registry types with no @barkpark/react
+  // emitter, which mobile's registry (react ∖ EXCLUSIONS) cannot claim.
   it('renders the honest labeled fallback and logs once per type', () => {
     const warn = jest.spyOn(console, 'warn').mockImplementation(() => {})
-    const first = render({ type: 'embed', items: [] })
-    expect(first.text).toContain('Unsupported block: embed')
-    render({ type: 'embed' })
-    render({ type: 'embed' })
+    const first = render({ type: 'master-ref', items: [] })
+    expect(first.text).toContain('Unsupported block: master-ref')
+    render({ type: 'master-ref' })
+    render({ type: 'master-ref' })
     expect(warn).toHaveBeenCalledTimes(1)
     render({ type: 'dashboard' })
     expect(warn).toHaveBeenCalledTimes(2)

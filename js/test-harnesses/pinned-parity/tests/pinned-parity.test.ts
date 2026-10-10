@@ -143,9 +143,17 @@ if (!existsSync(fieldBlocksEntry)) {
 }
 const fieldBlocks = ((await import(pathToFileURL(fieldBlocksEntry).href)) as { fieldBlocks: Record<string, unknown> })
   .fieldBlocks
+// The opt-in `embed` emitter, from the same artifact's exports["./embed"].
+const embedEntry = resolveExport(EXTRACT_DIR, './embed')
+if (!existsSync(embedEntry)) {
+  throw new Error(`the pinned artifact's exports["./embed"] points at ${embedEntry}, which is NOT in the tarball`)
+}
+const embedBlocks = ((await import(pathToFileURL(embedEntry).href)) as { embedBlocks: () => Record<string, unknown> })
+  .embedBlocks
+const optIn = { ...fieldBlocks, ...embedBlocks() }
 
 function render(renderer: Renderer, input: unknown): string {
-  return renderToStaticMarkup(createElement(renderer, { value: [input], blocks: fieldBlocks }))
+  return renderToStaticMarkup(createElement(renderer, { value: [input], blocks: optIn }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -180,7 +188,7 @@ describe('pinned artifact × current Elixir goldens — DOM-shape parity', () =>
     expect(goldens.length).toBe(goldenFiles.length)
     expect(goldens.length, 'the golden directory is empty — the parity loop would be vacuous').toBeGreaterThan(0)
     // Core registry plus the opt-in field blocks the artifact ships under ./field-blocks.
-    const registered = new Set([...REGISTERED_TYPES, ...Object.keys(fieldBlocks)])
+    const registered = new Set([...REGISTERED_TYPES, ...Object.keys(optIn)])
     const unregistered = goldens.map((g) => g.type).filter((t) => !registered.has(t))
     expect(unregistered, `goldens for types the renderer does not register: ${unregistered.join(', ')}`).toHaveLength(0)
     // Aliases mean REGISTERED_TYPES is a SUPERSET of the golden types, never smaller.

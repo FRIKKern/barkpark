@@ -31,6 +31,7 @@
 import { BLOCK_RENDERERS, DEGRADE_ONLY } from '../src/papers/portabledoc/blocks'
 import { REGISTERED_TYPES } from '../../../js/packages/react/src/blocks/registry'
 import { fieldEmitters } from '../../../js/packages/react/src/blocks/fields'
+import { embedBlocks } from '../../../js/packages/react/src/embed'
 
 // react's registry module pulls in the whole emitter tree. Nothing in it
 // touches react-native, but mobile's `blocks` barrel does, and the WebView
@@ -69,8 +70,8 @@ const MOBILE_AHEAD: ReadonlySet<string> = new Set([])
 // The canonical set is the core registry PLUS the opt-in schema field blocks
 // (@barkpark/react/field-blocks, task-7375ba22758155fa): react ships them
 // outside the core bundle, but they are canonical types and the reader renders
-// them on every surface.
-const canonical = [...REGISTERED_TYPES, ...Object.keys(fieldEmitters)].sort()
+// them on every surface. `embed` (@barkpark/react/embed) likewise.
+const canonical = [...REGISTERED_TYPES, ...Object.keys(fieldEmitters), ...Object.keys(embedBlocks())].sort()
 const mobile = Object.keys(BLOCK_RENDERERS).sort()
 
 describe('cross-surface registry parity (charter D48)', () => {

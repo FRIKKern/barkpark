@@ -34,8 +34,8 @@
 # directions — and they agree on all four of #18166's fixtures and on compose.ex
 # at e671915ea^, where `table_col_types/2` still used the literal-pattern form.
 # At that commit, 80 types minus the 15 then-EXCLUDED = 65. Today (task-7375ba22758155fa):
-# 81 types minus the 2 EXCLUDED = 79 = EXPECTED_COUNT, which the golden-fixture
-# directory independently corroborates at 79 files.
+# 81 types minus the 1 EXCLUDED = 80 = EXPECTED_COUNT, which the golden-fixture
+# directory independently corroborates at 80 files.
 #
 # `bash scripts/pd-parity-completeness.sh --selftest` runs the controls on the
 # instrument (a green on the real file proves nothing when the instrument IS the
@@ -73,7 +73,9 @@ FIXTURES="$ROOT/api/test/support/fixtures/pd-parity"
 # 2026-10-10 (task-7375ba22758155fa): 65 -> 79. The 14 schema field blocks
 # (field-*, composite, arrayOf, codelist, localizedText) left EXCLUDED when
 # @barkpark/react gained their emitters; embed and master-ref stay out.
-EXPECTED_COUNT=79
+# 2026-10-10 (rpu-backlog-field-embed-coverage): 79 -> 80. `embed` left
+# EXCLUDED with its opt-in @barkpark/react/embed emitter.
+EXPECTED_COUNT=80
 
 # ── THE EXTRACTOR ────────────────────────────────────────────────────────────
 # Reads ONLY `def compose_block/2,3` clause heads. The awk program tracks quote
@@ -204,11 +206,11 @@ legacy_dispatched_types() {
   } | sort -u
 }
 
-# The excluded types: `embed` and `master-ref` (task-59f078a2fd248698), which
-# resolve server side at read time. The 14 schema field blocks charter D7 cut
-# came back in with task-7375ba22758155fa. Space-padded so a `case` glob matches
+# The excluded type: `master-ref` (task-59f078a2fd248698), which resolves
+# server side at read time. The 14 schema field blocks charter D7 cut came back
+# in with task-7375ba22758155fa, and `embed` with rpu-backlog-field-embed-coverage. Space-padded so a `case` glob matches
 # whole words only.
-EXCLUDED=" embed master-ref "
+EXCLUDED=" master-ref "
 
 # ── --selftest: CONTROLS ON THE INSTRUMENT ───────────────────────────────────
 # This guard's whole failure mode is a census that answers confidently about a

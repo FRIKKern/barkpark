@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PortableDoc, renderPortableDocument, type Block } from '../src'
 import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
 import { REGISTERED_TYPES } from '../src/blocks/registry'
 
 // One authored block per IN-SCOPE type + the distinctive marker its :article
@@ -1357,5 +1358,57 @@ describe('field blocks (opt-in @barkpark/react/field-blocks)', () => {
       { blocks: fieldBlocks },
     )
     expect(html).toContain('<span>Inner</span>')
+  })
+})
+
+// The OPT-IN `embed` emitter (@barkpark/react/embed; rpu-backlog-field-embed-coverage):
+// the walk.ex embed/2 twin at :article.
+describe('embed (opt-in @barkpark/react/embed)', () => {
+  const block = { type: 'embed', target: 'Field notes' } as Block
+
+  it('without the opt-in it is the core placeholder, not a transclusion', () => {
+    expect(renderPortableDocument([block])).toContain('bp-unknown-block')
+    expect(REGISTERED_TYPES).not.toContain('embed')
+  })
+
+  it('opted in with no map it draws the unresolved placeholder, byte-equal to the Elixir walker', () => {
+    expect(renderPortableDocument([block], { blocks: embedBlocks() })).toBe(
+      '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes">↪ Field notes</section>',
+    )
+  })
+
+  it('a target in the map injects its pre-rendered HTML inside the frame', () => {
+    const html = renderPortableDocument([block], {
+      blocks: embedBlocks({ 'Field notes': '<p>Inner</p>' }),
+    })
+    expect(html).toBe(
+      '<section class="paper-embed bp-embed" data-embed="Field notes"><p>Inner</p></section>',
+    )
+  })
+
+  it("HTML carried by the document itself is never injected — only the caller's map is", () => {
+    const forged = {
+      type: 'embed',
+      target: 'Field notes',
+      html: '<b>forged</b>',
+      content: '<script>alert(1)</script>',
+      embeds: { 'Field notes': '<b>forged</b>' },
+    } as Block
+    for (const blocks of [embedBlocks(), embedBlocks({ Other: '<p>x</p>' })]) {
+      const html = renderPortableDocument([forged], { blocks })
+      expect(html).toBe(
+        '<section class="paper-embed paper-embed--unresolved bp-embed bp-embed--unresolved" data-embed="Field notes">↪ Field notes</section>',
+      )
+    }
+  })
+
+  it('escapes the target and never resolves an inherited key', () => {
+    const hostile = { type: 'embed', target: '"><script>x</script>' } as Block
+    const html = renderPortableDocument([hostile], { blocks: embedBlocks({}) })
+    expect(html).not.toContain('<script>')
+    const proto = renderPortableDocument([{ type: 'embed', target: 'toString' } as Block], {
+      blocks: embedBlocks({}),
+    })
+    expect(proto).toContain('bp-embed--unresolved')
   })
 })

@@ -45,5 +45,11 @@
   "path": "dist/field-blocks.mjs",
   "limit": "1.7 KB",
   "gzip": true
+ },
+ {
+  "name": "Embed subpath — 2026-10-10 (rpu-backlog-field-embed-coverage): the OPT-IN `embed` emitter (@barkpark/react/embed, embedBlocks(embeds)), passed via <PortableDoc blocks={…}>; 708 B, 92 B headroom; the core entries above do not carry it and their limits are unchanged",
+  "path": "dist/embed.mjs",
+  "limit": "0.8 KB",
+  "gzip": true
  }
 ]

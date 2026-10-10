@@ -11,13 +11,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   Modeled on `Mix.Tasks.Barkpark.PaperComponents.GenGoldenParity` as a SIBLING
   (pure `build/1` → byte-equal N-mirror write → freshness lock), NOT an extension:
   that task freezes a HAND-DERIVED structural projection for 13 component types;
-  this one freezes the REAL `:article` HTML emission for the 79 in-scope types
+  this one freezes the REAL `:article` HTML emission for the 80 in-scope types
   plus a parser-derived DOM-shape the JS Layer-2 comparator reads.
 
-  ## The 79 in-scope types (charter D7, widened)
+  ## The 80 in-scope types (charter D7, widened)
 
-  Every type `compose.ex` dispatches except `embed` and `master-ref`, which
-  resolve server side at read time. Charter D7 first cut the 14 schema field
+  Every type `compose.ex` dispatches except `master-ref`, which resolves server
+  side at read time (`embed` is in, as its unresolved placeholder). Charter D7 first cut the 14 schema field
   blocks (`field-{string,slug,text,boolean,select,datetime,color,reference,image,number}`,
   `composite`, `arrayOf`, `codelist`, `localizedText`) as schema-editor renderers;
   task-7375ba22758155fa brought them back when @barkpark/react gained their
@@ -72,7 +72,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
 
   alias Barkpark.PortableDoc.Render
 
-  # ── the 79 in-scope authored inputs ───────────────────────────────────────────
+  # ── the 80 in-scope authored inputs ───────────────────────────────────────────
   #
   # ONE realistic block per in-scope type. Every string is whitespace-clean so the
   # emitter's trims are no-ops and the frozen bytes are stable. Alias members share
@@ -830,6 +830,10 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     },
     "arrayOf" => %{"type" => "arrayOf", "label" => "Tags", "value" => ["alpha", "beta"]},
     "codelist" => %{"type" => "codelist", "label" => "Language", "value" => "nob"},
+    # Note transclusion (rpu-backlog-field-embed-coverage): rendered without an
+    # :embeds map, so the golden is the unresolved placeholder every surface
+    # draws for a target it was not handed.
+    "embed" => %{"type" => "embed", "target" => "Field notes"},
     "localizedText" => %{
       "type" => "localizedText",
       "label" => "Tagline",
@@ -838,12 +842,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     }
   }
 
-  # The types that resolve server side at read time and have no JS emitter:
-  # `embed` (transclusion) and `master-ref` (task-59f078a2fd248698, a linked
-  # master instance). The 14 schema field blocks charter D7 cut were pulled back
-  # in by task-7375ba22758155fa. Kept here as the executable counterpart of the
-  # bash guard's `excluded` list (asserted equal in the test).
-  @excluded ~w(embed master-ref)
+  # The type that resolves server side at read time and has no JS emitter:
+  # `master-ref` (task-59f078a2fd248698, a linked master instance). The 14
+  # schema field blocks charter D7 cut were pulled back in by
+  # task-7375ba22758155fa, and `embed` by rpu-backlog-field-embed-coverage (its
+  # golden is the unresolved placeholder). Kept here as the executable
+  # counterpart of the bash guard's `excluded` list (asserted equal in the test).
+  @excluded ~w(master-ref)
 
   # The 3 alias pairs — BOTH members are in-scope so alias dispatch is exercised.
   @alias_pairs [{"questionnaire", "form"}, {"stat-grid", "stats"}, {"task-list", "tasks"}]
@@ -853,7 +858,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   # in-scope types whose output changes with `:locale` (one member per alias
   # pair) plus a title-less collapsible callout (the tone-name fallback). It is
   # named `*.locale-golden.json`, not `*.golden.json`, so the per-type census
-  # (79 types, one fixture each) is untouched.
+  # (80 types, one fixture each) is untouched.
   @locale_goldens %{
     "nb-NO" => [
       "form",
@@ -886,13 +891,13 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
   @doc "The two mirror DIRECTORIES the fixtures are written into (also read by the freshness test)."
   def mirror_dirs, do: [@api_dir, @js_dir]
 
-  @doc "The excluded (out-of-scope) type set: the resolver-context types `embed` and `master-ref`."
+  @doc "The excluded (out-of-scope) type set: the resolver-context type `master-ref`."
   def excluded, do: @excluded
 
   @doc "The 3 alias pairs whose BOTH members are in-scope."
   def alias_pairs, do: @alias_pairs
 
-  @doc "The 79 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
+  @doc "The 80 in-scope block type slugs, sorted (each emits `<slug>.golden.json`)."
   def types, do: @inputs |> Map.keys() |> Enum.sort()
 
   @doc "The authored input block for a type slug."

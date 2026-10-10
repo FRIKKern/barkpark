@@ -50,7 +50,8 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
     # jdf-bl-historiene-renderer-reconciliation: +duel +lineage
     # docgates-s27: +pre-gate-badge (#17199's compose.ex clause, goldenless until now)
     # task-7375ba22758155fa: +14 schema field blocks (65 -> 79)
-    assert length(GenPdParity.types()) == 79
+    # rpu-backlog-field-embed-coverage: +embed (79 -> 80)
+    assert length(GenPdParity.types()) == 80
   end
 
   test "both members of all 3 alias pairs are present" do

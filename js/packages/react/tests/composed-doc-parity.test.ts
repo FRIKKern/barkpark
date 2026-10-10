@@ -44,12 +44,14 @@ import { fileURLToPath } from 'node:url'
 import { renderPortableDocument, type Block } from '../src'
 import { parseShape, type ShapeNode } from './support/dom-shape'
 import { fieldBlocks } from '../src/field-blocks'
+import { embedBlocks } from '../src/embed'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
 
 // Every golden renders with the opt-in field blocks registered
 // (@barkpark/react/field-blocks, task-7375ba22758155fa), as the per-type parity does.
-const render = (value: Block[]) => renderPortableDocument(value, { blocks: fieldBlocks })
+const render = (value: Block[]) =>
+  renderPortableDocument(value, { blocks: { ...fieldBlocks, ...embedBlocks() } })
 const FIXTURE_DIR = join(HERE, 'fixtures', 'pd-golden')
 
 interface GoldenFixture {

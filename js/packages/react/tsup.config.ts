@@ -76,6 +76,8 @@ export default defineConfig({
     // The opt-in schema field block emitters (task-7375ba22758155fa): their own
     // entry so the core renderer chunks never carry them.
     'field-blocks': 'src/field-blocks.ts',
+    // The opt-in `embed` emitter (note transclusion; rpu-backlog-field-embed-coverage).
+    embed: 'src/embed.ts',
   },
   format: ['cjs', 'esm'],
   dts: true,

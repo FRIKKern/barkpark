@@ -503,7 +503,8 @@ const CENSUS: Record<string, Record<string, number>> = {
     // label and value, the colour row's mono hex, and the sub-row block's label
     // and each sub-row.
     'scale.base': 2,
-    'scale.sm': 9,
+    // + 1 for embed's muted "↪ target" line (rpu-backlog-field-embed-coverage).
+    'scale.sm': 10,
   },
   'papers/portabledoc/blocks/math.tsx': {
     // The equation's THREE steps, declared once each in the STEPS table: lg is
