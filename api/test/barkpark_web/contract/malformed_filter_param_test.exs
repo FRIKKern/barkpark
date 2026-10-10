@@ -47,7 +47,7 @@ defmodule BarkparkWeb.Contract.MalformedFilterParamTest do
   end
 
   defp request({path, token}, query) do
-    conn = build_conn()
+    conn = scoped_conn()
     conn = if token, do: put_req_header(conn, "authorization", "Bearer " <> token), else: conn
     get(conn, path <> "?" <> query)
   end
