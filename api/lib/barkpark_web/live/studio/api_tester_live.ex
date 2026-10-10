@@ -38,6 +38,9 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
     # category name into the set hides its items in the nav.
     {:ok,
      assign(socket,
+       # The tab and the screen reader's page announcement name this section,
+       # like every other Studio section (task-6e0b0f0ae9a665e1).
+       page_title: gettext("API"),
        dataset: dataset,
        endpoints: endpoints,
        categories: endpoints |> Enum.map(& &1.category) |> Enum.uniq(),
@@ -563,6 +566,7 @@ defmodule BarkparkWeb.Studio.ApiTesterLive do
       |> assign(:last_result, last_result)
 
     ~H"""
+    <h1 class="sr-only">{gettext("API")}</h1>
     <.pane_layout id="api-tester-panes">
       <.pane_column title="API">
         <div class="pane-body">
