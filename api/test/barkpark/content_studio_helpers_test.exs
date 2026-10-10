@@ -205,6 +205,30 @@ defmodule Barkpark.ContentStudioHelpersTest do
       assert copy.status == "draft"
     end
 
+    # task-141c0bba8070ef02: the suffix is the caller's; without one the
+    # title is exactly as before, including an untitled source.
+    test "a :title_suffix replaces the English suffix; an untitled source then stays untitled" do
+      src = seed_post("c-sfx", title: "Fjellet", body: "b")
+
+      assert {:ok, copy} =
+               Content.clone_document(src, @doc_type, @dataset, title_suffix: " (kopi)")
+
+      assert copy.title == "Fjellet (kopi)"
+
+      untitled = seed_post("c-sfx-u", title: nil, body: "b")
+
+      assert {:ok, ucopy} =
+               Content.clone_document(untitled, @doc_type, @dataset, title_suffix: " (kopi)")
+
+      assert ucopy.title in [nil, ""]
+    end
+
+    test "a caller with no :title_suffix keeps the English suffix and the Untitled fallback" do
+      untitled = seed_post("c-dflt-u", title: nil, body: "b")
+      assert {:ok, copy} = Content.clone_document(untitled, @doc_type, @dataset)
+      assert copy.title == "Untitled (copy)"
+    end
+
     test "copy is independent of source — editing source does not affect copy" do
       src = seed_post("c2", title: "Source", body: "S")
       {:ok, copy} = Content.clone_document(src, @doc_type, @dataset)

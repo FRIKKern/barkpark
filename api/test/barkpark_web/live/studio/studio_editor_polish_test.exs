@@ -124,4 +124,59 @@ defmodule BarkparkWeb.Studio.StudioEditorPolishTest do
     view |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
     assert render(view) =~ "Duplicated as “Fjellet (copy)”"
   end
+
+  # task-141c0bba8070ef02: the copy suffix is STORED in the title, so an
+  # English " (copy)" read English in every surface of a Norwegian Studio.
+  test "a Norwegian Studio stores the copy with its own suffix; an untitled source stays untitled",
+       %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    {:ok, _} =
+      Content.upsert_schema(
+        %{
+          "name" => "polishdupnb",
+          "title" => "Dup",
+          "visibility" => "public",
+          "fields" => [%{"name" => "title", "type" => "string"}]
+        },
+        @dataset
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "polishdupnb",
+        %{
+          "doc_id" => "polishdupnb-1",
+          "title" => "Fjellet",
+          "content" => %{"title" => "Fjellet"}
+        },
+        @dataset
+      )
+
+    {:ok, _} =
+      Content.create_document(
+        "polishdupnb",
+        %{"doc_id" => "polishdupnb-2", "content" => %{}},
+        @dataset
+      )
+
+    {:ok, view, _} = open(conn, "polishdupnb/polishdupnb-1")
+    view |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
+    assert render(view) =~ "Duplisert som «Fjellet (kopi)»"
+
+    titles = fn ->
+      Content.list_documents("polishdupnb", @dataset, perspective: :drafts)
+      |> Enum.map(& &1.title)
+    end
+
+    assert "Fjellet (kopi)" in titles.()
+    refute Enum.any?(titles.(), &(&1 && &1 =~ "(copy)"))
+
+    before = length(titles.())
+    {:ok, view2, _} = open(conn, "polishdupnb/polishdupnb-2")
+    view2 |> element(~s(button[phx-click="duplicate-doc"])) |> render_click()
+    assert length(titles.()) == before + 1, "the untitled source was duplicated"
+    refute Enum.any?(titles.(), &(&1 && &1 =~ "Untitled"))
+  end
 end
