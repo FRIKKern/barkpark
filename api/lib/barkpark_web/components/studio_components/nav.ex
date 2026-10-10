@@ -848,6 +848,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
   exactly one `.studio-bar` with 10 `.studio-tab` anchors in it.
 
   The `id` is required because LiveView refuses a `phx-hook` without one.
+
+  ## Why it is the banner
+
+  The bar is the page's site header, so it is `role="banner"`: the workspace
+  switcher, the tool tabs and the presence avatars then sit in a landmark, and a
+  screen reader jumps to them like any other region (task-6e6de3764438c5cf).
+  Studio renders no other banner.
   """
   slot :brand
   slot :tabs
@@ -855,7 +862,13 @@ defmodule BarkparkWeb.StudioComponents.Nav do
 
   def studio_topbar(assigns) do
     ~H"""
-    <div class="studio-bar" id="studio-bar" phx-hook="PressAnswer" data-press-strings={press_answer_strings()}>
+    <div
+      class="studio-bar"
+      id="studio-bar"
+      role="banner"
+      phx-hook="PressAnswer"
+      data-press-strings={press_answer_strings()}
+    >
       <%= render_slot(@brand) %>
       <%= render_slot(@tabs) %>
       <%= for a <- @actions do %><%= render_slot(a) %><% end %>

@@ -100,7 +100,7 @@ defmodule BarkparkWeb.Studio.PhoneDeskResidueTest do
         )
 
       assert src =~
-               ~S|<div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected">|,
+               ~S|<div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected" role="main">|,
              "the nothing-selected placeholder lost `data-reason` — the phone rule now matches nothing"
     end
   end
