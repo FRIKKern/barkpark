@@ -398,6 +398,10 @@ config :barkpark, Oban,
        # window in mutation_events.document / webhook_deliveries.payload_snapshot.
        # A no-op tick unless `:deleted_payload_retention, enabled:` (below) is on.
        {"30 4 * * *", Barkpark.Content.Workers.DeletedPayloadSweeper},
+       # task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation, Mondays
+       # 03:00 UTC (the slot of the never-installed systemd timer it replaces).
+       # A no-op tick unless `:public_read_rotation, enabled:` (below) is on.
+       {"0 3 * * 1", Barkpark.Auth.PublicReadRotationWorker},
        # Recover webhook deliveries stranded in `pending` by a dispatcher
        # crash / BEAM restart mid-delivery — re-dispatches any row still
        # `pending` past `:webhook_stuck_delivery_after_seconds` (default 300s)
@@ -526,6 +530,13 @@ config :barkpark, :paper_access_log_ttl_days, 90
 # `mix barkpark.deleted_payload_retention` census. Policy:
 # Barkpark.Content.DeletedPayloadRetention.
 config :barkpark, :deleted_payload_retention, enabled: false, days: 90
+
+# task-eaaf13ab768f34f6 c6 — the weekly public-read token rotation
+# (Barkpark.Auth.PublicReadRotationWorker). SHIPS DISABLED: switched on it mints
+# a new token every Monday and purges the previous one after 8 days, so every
+# consumer must be reached by the token file or VERCEL_DEPLOY_HOOK first. An
+# operator turns it on with BARKPARK_PUBLIC_READ_ROTATION=on (runtime.exs).
+config :barkpark, :public_read_rotation, enabled: false
 
 # tlv-s6 — engagement honesty lease (TLV charter D4). The THOUGHT states
 # (considering/researching) carry a content.engagement companion whose `ts`

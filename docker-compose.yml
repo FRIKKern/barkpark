@@ -93,6 +93,8 @@ services:
       # Deleted-payload retention, off unless set (owner ruling #33; read in api/config/runtime.exs)
       - BARKPARK_DELETED_PAYLOAD_RETENTION
       - BARKPARK_DELETED_PAYLOAD_RETENTION_DAYS
+      # Weekly public-read token rotation, off unless set (task-eaaf13ab768f34f6; read in api/config/runtime.exs)
+      - BARKPARK_PUBLIC_READ_ROTATION
       # Per-dataset schema ENFORCEMENT opt-in (comma-separated slugs or `all`; #16147,
       # read in api/config/runtime.exs). Unset = advise-only, the default.
       - BARKPARK_SCHEMA_ENFORCE_DATASETS
