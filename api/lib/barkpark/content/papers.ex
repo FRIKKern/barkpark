@@ -1482,19 +1482,24 @@ defmodule Barkpark.Content.Papers do
         Barkpark.PortableDoc.TaskResolver.mark_unavailable(blocks)
 
       resolver ->
-        Barkpark.PortableDoc.TaskResolver.resolve(
-          blocks,
-          fn query ->
-            query
-            |> task_query_dataset(dataset)
-            |> resolver.rows_for_query(scope, dataset: dataset)
-          end,
-          fn query ->
-            query
-            |> task_query_dataset(dataset)
-            |> resolver.agg_for_query(scope, dataset: dataset)
-          end
-        )
+        # One RenderCache per render: every block's fetch shares it, so the
+        # resolver reads what all blocks need (the task schema) once
+        # (ctx-b6-memoized-visibility-gate).
+        Barkpark.Content.RenderCache.with_cache(fn cache ->
+          Barkpark.PortableDoc.TaskResolver.resolve(
+            blocks,
+            fn query ->
+              query
+              |> task_query_dataset(dataset)
+              |> resolver.rows_for_query(scope, dataset: dataset, render_cache: cache)
+            end,
+            fn query ->
+              query
+              |> task_query_dataset(dataset)
+              |> resolver.agg_for_query(scope, dataset: dataset, render_cache: cache)
+            end
+          )
+        end)
     end
   end
 
