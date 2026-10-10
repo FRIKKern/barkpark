@@ -1268,6 +1268,8 @@ defmodule Barkpark.Content.Validation do
   # flat_mode caller's "path" is just the field name, added by it directly;
   # the v2 caller pairs these with a real path via `pair/2`).
   defp validate_field(value, rules, field) do
+    value = unwrap_slug(value, field)
+
     []
     |> check_required(value, rules)
     |> check_min(value, rules, field)
@@ -1276,6 +1278,36 @@ defmodule Barkpark.Content.Validation do
     |> Enum.reverse()
     |> apply_message(rules)
   end
+
+  # task-bb7c45fe5e501d76 — Sanity's slug object shape, `{_type: "slug",
+  # current: "my-slug"}` (the shape Studio's own slug input stores), vs. the
+  # bare-string shape `"my-slug"` a direct API write can send for the same
+  # field. `check_required/3`, `check_min/4`, `check_max/4` and
+  # `check_pattern/2` above are ALL `is_binary(value)`-guarded leaf checks —
+  # against the wrapping map they silently no-op, so a slug field's
+  # `pattern`/`min`/`max` rule never ran on this shape at all (found live,
+  # studio-parity/e2e-freeform advisory dataset: `slug: {_type:"slug",
+  # current:"Bad Slug"}` produced NO finding where `slug: "Bad Slug"` did).
+  # Unwrapped here, once, for every rule check at once — gated on the FIELD's
+  # own declared type (not the value's self-reported `_type`, which a
+  # caller could spoof on an unrelated field to dodge that field's own
+  # rules), so nothing changes for a field that isn't actually `"slug"`.
+  # `current` missing or non-string unwraps to `nil`, which `blank?/1`
+  # below correctly treats as empty for `required` (the "required-non-
+  # empty" half of the gap) and which every binary-guarded check already
+  # no-ops on safely.
+  defp unwrap_slug(value, field) when is_map(value) do
+    if get_in_field(field, "type") == "slug" do
+      case Map.get(value, "current") do
+        current when is_binary(current) -> current
+        _ -> nil
+      end
+    else
+      value
+    end
+  end
+
+  defp unwrap_slug(value, _field), do: value
 
   defp check_required(errors, value, %{"required" => true}) do
     if blank?(value) do
