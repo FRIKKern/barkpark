@@ -126,11 +126,29 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		return usageErrf(out, func() { usageImport(out, false) }, "import needs the NDJSON file a `bp export` wrote")
 	}
 
-	if code := importCheckSidecar(out, path); code != exitOK {
+	dataset := ctx.Dataset
+	if dataset == "" {
+		dataset = "production"
+	}
+	scope := exportScope(manifest.Context{Workspace: ctx.Workspace, Project: ctx.Project, Dataset: dataset})
+
+	// A `sanity dataset export` tarball is read through its rewritten
+	// data.ndjson; its assets upload after the refusal and confirmation
+	// checks below, so a refused import uploads nothing.
+	src := path
+	var sanity *sanityImport
+	if importIsSanityTarball(path) {
+		s, err := sanityPrepare(path, scope)
+		if err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %s: %v. Nothing was written.", path, err), exitValidation)
+		}
+		defer s.cleanup()
+		sanity, src = s, s.ndjson
+	} else if code := importCheckSidecar(out, path); code != exitOK {
 		return code
 	}
 
-	rows, err := importReadRows(path)
+	rows, err := importReadRows(src)
 	if err != nil {
 		return useError(out, "validation_failed", fmt.Sprintf("import: %s: %v. Nothing was written.", path, err), exitValidation)
 	}
@@ -154,12 +172,6 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			r.Action = "skip"
 		}
 	}
-
-	dataset := ctx.Dataset
-	if dataset == "" {
-		dataset = "production"
-	}
-	scope := exportScope(manifest.Context{Workspace: ctx.Workspace, Project: ctx.Project, Dataset: dataset})
 
 	existing, err := importTargetIDs(ctx, dataset)
 	if err != nil {
@@ -193,7 +205,7 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		if refused {
 			refusedIDs = collisions
 		}
-		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs)
+		importRenderPlan(out, path, scope, ordered, len(batches), refusedIDs, sanity)
 		if refused {
 			return exitConflict
 		}
@@ -219,6 +231,18 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		}
 	}
 
+	if sanity != nil {
+		if err := sanity.upload(out, ctx, dataset, scope); err != nil {
+			return useError(out, "request_failed",
+				fmt.Sprintf("import: %v. No document was written; the assets already uploaded are recorded in %s%s and a re-run reuses them.",
+					err, path, sanityAssetsSuffix), exitGeneric)
+		}
+		sanity.resolve(ordered)
+		if batches, err = importBatches(ordered, batchBytes); err != nil {
+			return useError(out, "validation_failed", fmt.Sprintf("import: %v. Nothing was written.", err), exitValidation)
+		}
+	}
+
 	u := ctxScopedURL(ctx, "/v1/data/mutate/"+url.PathEscape(dataset))
 	applied := 0
 	for n, b := range batches {
@@ -240,11 +264,18 @@ func runImport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		"ok": true, "file": path, "scope": scope, "dry_run": false,
 		"applied": applied, "batches": len(batches), "counts": counts,
 	}
+	if sanity != nil {
+		payload["sanity"] = sanity.summary()
+	}
 	if out.emitStructured(payload) {
 		return exitOK
 	}
 	out.outf("imported %d documents into %s from %s (%d created, %d overwritten, %d skipped) in %d batch(es)",
 		applied, scope, path, counts["create"], counts["overwrite"], counts["skip"], len(batches))
+	if sanity != nil {
+		out.outf("%d asset(s) referenced by %d value(s) point at Barkpark media; %d Sanity asset document(s) were not imported",
+			len(sanity.assets), sanity.refs, sanity.skipped)
+	}
 	return exitOK
 }
 
@@ -546,7 +577,7 @@ func importActionCounts(rows []*importRow) map[string]int {
 
 // importRenderPlan prints the dry-run report: one row per document in apply
 // order, with what a real run would do to it.
-func importRenderPlan(out *writer, path, scope string, rows []*importRow, batches int, refusedIDs []string) {
+func importRenderPlan(out *writer, path, scope string, rows []*importRow, batches int, refusedIDs []string, sanity *sanityImport) {
 	counts := importActionCounts(rows)
 	docs := make([]map[string]any, 0, len(rows))
 	for _, r := range rows {
@@ -559,8 +590,15 @@ func importRenderPlan(out *writer, path, scope string, rows []*importRow, batche
 	if len(refusedIDs) > 0 {
 		payload["refused_ids"] = refusedIDs
 	}
+	if sanity != nil {
+		payload["sanity"] = sanity.summary()
+	}
 	if out.emitStructured(payload) {
 		return
+	}
+	if sanity != nil {
+		out.outf("dry run: %d asset(s) referenced by %d value(s): %d to upload, %d already uploaded. %d Sanity asset document(s) would not be imported.",
+			len(sanity.assets), sanity.refs, sanity.pending(), len(sanity.assets)-sanity.pending(), sanity.skipped)
 	}
 	out.outf("dry run: importing %s into %s. Nothing was written.", path, scope)
 	for _, r := range rows {
@@ -585,7 +623,7 @@ func usageImport(out *writer, toStdout bool) {
 	if toStdout {
 		p = out.outf
 	}
-	p("usage: bp import <file.ndjson> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--yes]")
+	p("usage: bp import <file.ndjson | sanity-export.tar.gz> [--dry-run] [--overwrite] [--from-line N] [--batch-bytes N] [--yes]")
 	p("")
 	p("Restore a `bp export` NDJSON backup into the active dataset (set it with -d).")
 	p("")
@@ -609,6 +647,15 @@ func usageImport(out *writer, toStdout bool) {
 	p("A batch holds at most 1000 mutations and is applied by the server as one")
 	p("transaction, so a refused batch applies nothing from that batch.")
 	p("")
+	p("A `sanity dataset export` tarball (.tar.gz or .tgz) imports its data.ndjson. Each")
+	p("asset file uploads once as Barkpark media and every image/file value pointing at")
+	p("it is rewritten to {asset: {_type: reference, _ref: <Barkpark asset id>}}. Sanity's")
+	p("own sanity.imageAsset / sanity.fileAsset documents are not imported. Uploads start")
+	p("only after the checks above pass; <tarball>.assets.json records each uploaded asset")
+	p("per target, so a re-run or a --from-line resume uploads nothing twice. A value whose")
+	p("file is missing from the tarball refuses the import before anything is written.")
+	p("")
 	p("  bp import backup.ndjson --dry-run")
 	p("  bp import backup.ndjson")
+	p("  bp import production.tar.gz --dry-run")
 }
