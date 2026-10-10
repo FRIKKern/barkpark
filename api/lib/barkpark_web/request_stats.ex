@@ -31,8 +31,10 @@ defmodule BarkparkWeb.RequestStats do
     * `sampled_at` — UTC wall-clock at read time, stamping WHEN the window was
       observed (the window itself runs on monotonic time).
     * `classes` — per-route-class breakdown, `%{class => %{count, req_per_s,
-      authed, anon, auth_unknown}}`; `%{}` on an empty window (no fabricated
-      zero-rows for classes nobody observed).
+      p95_ms, authed, anon, auth_unknown}}`; `%{}` on an empty window (no fabricated
+      zero-rows for classes nobody observed). The per-class `p95_ms` says WHICH
+      class carries a tail (am-bl-idle-p95-anomaly); a class row exists only
+      with samples, so it is never `nil`.
 
   ## Route classes — enum CLOSED at five (charter D9)
 
@@ -404,6 +406,7 @@ defmodule BarkparkWeb.RequestStats do
          %{
            count: n,
            req_per_s: Float.round(n * 1000 / elapsed_ms, 2),
+           p95_ms: rows |> Enum.map(&elem(&1, 0)) |> Enum.sort() |> percentile(95) |> round(),
            authed: Map.get(by_auth, :authed, 0),
            anon: Map.get(by_auth, :anon, 0),
            auth_unknown: Map.get(by_auth, :auth_unknown, 0)

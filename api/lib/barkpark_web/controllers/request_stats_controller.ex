@@ -15,7 +15,7 @@ defmodule BarkparkWeb.RequestStatsController do
   four): `200 {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s":
   float|null, "window_s": int, "count": int, "elapsed_s": float, "sampled_at":
   iso8601-utc string, "classes": {class: {"count": int, "req_per_s": float,
-  "authed": int, "anon": int, "auth_unknown": int}}}`. `classes` is keyed by
+  "p95_ms": int, "authed": int, "anon": int, "auth_unknown": int}}}`. `classes` is keyed by
   the five-class route enum (`lv_dead|browser|api|unrouted|pre_router`, charter
   D9) and is `{}` on an empty window. The shape is owned by
   `BarkparkWeb.RequestStats` (this controller only serialises what `stats/1`

@@ -83,12 +83,12 @@ defmodule BarkparkWeb.RequestStatsControllerTest do
     assert is_map(body["classes"])
 
     # Every class row (this authed GET itself lands one) carries the closed
-    # five-key per-class shape.
+    # six-key per-class shape.
     for {class, row} <- body["classes"] do
       assert class in ~w(lv_dead browser api unrouted pre_router)
 
       assert Map.keys(row) |> Enum.sort() ==
-               ["anon", "auth_unknown", "authed", "count", "req_per_s"]
+               ["anon", "auth_unknown", "authed", "count", "p95_ms", "req_per_s"]
 
       assert row["count"] == row["authed"] + row["anon"] + row["auth_unknown"]
     end
