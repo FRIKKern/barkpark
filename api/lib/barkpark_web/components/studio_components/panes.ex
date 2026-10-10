@@ -236,9 +236,15 @@ defmodule BarkparkWeb.StudioComponents.Panes do
         <span class="pane-column-collapsed-label"><%= @title %></span>
       </button>
     <% else %>
+      <%!-- A named region, so screen-reader landmark navigation reaches each
+           desk column and its header is inside a landmark (task-462c98e4f1abdf92).
+           No pane column holds a landmark of its own (the editor's main and the
+           paper shell's main render outside the panes), so nothing nests. --%>
       <div
         class={@col_class}
         id={@id}
+        role="region"
+        aria-label={@title}
         data-role={@role_attr}
         data-priority={@priority_attr}
         tabindex={@focus_on_mount && "-1"}

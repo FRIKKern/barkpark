@@ -153,6 +153,29 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
     refute html =~ "open your profile"
   end
 
+  # task-462c98e4f1abdf92: each desk pane column is a landmark named in the
+  # Studio's language, and no landmark nests inside a pane.
+  test "the desk's pane columns are regions named in the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj
+  } do
+    {:ok, _view, html} = live(conn, desk(ws, proj))
+    doc = LazyHTML.from_document(html)
+    panes = LazyHTML.query(doc, ~s(div.pane-column[role="region"]))
+
+    assert Enum.count(panes) >= 1
+    assert "Struktur" in LazyHTML.attribute(LazyHTML.query(doc, "#pane-structure"), "aria-label")
+
+    nested =
+      LazyHTML.query(
+        doc,
+        ".pane-column main, .pane-column [role=main], .pane-column [role=region], .pane-column nav, .pane-column aside"
+      )
+
+    assert Enum.count(nested) == 0, "a landmark nests inside a pane column"
+  end
+
   test "the default workspace keeps the English top bar", %{conn: conn} do
     {default_ws, default_proj} = Barkpark.TenancyFixtures.ensure_default_scope!()
     {:ok, _view, html} = live(conn, desk(default_ws, default_proj))
