@@ -71,7 +71,8 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type CodeTabs MARK:typekeyed-corpus-code-tabs
     // scaffy:add-block-type Tabs MARK:typekeyed-corpus-tabs
     // docgates-s27: 64 -> 65 (pre-gate-badge golden seeded).
-    expect(cases.length).toBe(65)
+    // task-7375ba22758155fa: 65 -> 79 (the 14 schema field blocks).
+    expect(cases.length).toBe(79)
   })
 
   it('every golden type is partitioned into EXACTLY ONE of PROSE / TEXTLESS', () => {
@@ -96,7 +97,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 27 prose + 38 textless = 65', () => {
+  it('the partition is 27 prose + 52 textless = 79', () => {
     // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
     // grown (pbw-stier-tabs): each tab's label + nested blocks' prose, the `steps` precedent
     // grown (jarl-dogfood): expandable's summary + nested blocks are reading prose
@@ -111,15 +112,17 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-textless-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
     // docgates-s27: +pre-gate-badge (reader chrome, never authored prose).
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(38)
+    // task-7375ba22758155fa: +14 schema field blocks (datum rows, not prose).
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(52)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 
   it('every TEXTLESS_SKIP rationale is a non-empty committed justification', () => {
     for (const [t, why] of Object.entries(TEXTLESS_SKIP)) {
-      expect(typeof why === 'string' && why.trim().length > 0, `skip "${t}" needs a rationale`).toBe(
-        true,
-      )
+      expect(
+        typeof why === 'string' && why.trim().length > 0,
+        `skip "${t}" needs a rationale`,
+      ).toBe(true)
     }
   })
 
@@ -186,7 +189,10 @@ describe('toPlainText — prose reads BOTH the content[] and the flat shape', ()
     },
     {
       type: 'notes',
-      flat: { type: 'notes', items: [{ label: 'Upgrade', lead: 'Instant', text: 'The board updates live.' }] },
+      flat: {
+        type: 'notes',
+        items: [{ label: 'Upgrade', lead: 'Instant', text: 'The board updates live.' }],
+      },
       content: {
         type: 'notes',
         items: [

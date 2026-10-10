@@ -36,13 +36,13 @@ baseline() {
   echo 'def compose_block(%{"type" => t}, _style) when t in ["stats", "stat-grid"], do: nil' >> "$COMPOSE"
 }
 baseline
-run 'literal heads and literal-list alias pair' 0 'in-scope count: 65'
+run 'literal heads and literal-list alias pair' 0 'in-scope count: 79'
 cat >> "$COMPOSE" <<'EX'
 @aliases ~w(bulletList h1 h2 h3)
 def compose_block(%{"type" => t}, style) when t in @aliases, do: nil
 def compose_block(%{"type" => t}, style) when t == "quote", do: nil
 EX
-run 'attribute and equality aliases retain their target golden' 0 'in-scope count: 65'
+run 'attribute and equality aliases retain their target golden' 0 'in-scope count: 79'
 cat >> "$COMPOSE" <<'EX'
 defp table_col_types(b) do
   case b do
@@ -60,7 +60,7 @@ def compose_block(_other, _style), do: %{"type" => "inline-body"}
 # def compose_block(%{"type" => "comment-head"}, s), do: nil
 # when t in ["comment-guard"]
 EX
-run 'helper, body and comment literals are not dispatch' 0 'in-scope count: 65'
+run 'helper, body and comment literals are not dispatch' 0 'in-scope count: 79'
 baseline
 cat >> "$COMPOSE" <<'EX'
 @doc """
@@ -72,7 +72,7 @@ def compose_block(%{"type" => "string-head"}, s), do: nil
 """
 defp layout(layout) when layout in ["chapters", "timeline"], do: nil
 EX
-run 'documentation, multiline strings and layout guards are not dispatch' 0 'in-scope count: 65'
+run 'documentation, multiline strings and layout guards are not dispatch' 0 'in-scope count: 79'
 baseline
 # Replace the single-line alias dispatch with a multiline literal guard.
 sed '$d' "$COMPOSE" > "$TMP/multiline.ex"
@@ -88,7 +88,7 @@ def compose_block(
   ],
   do: %{"type" => "inline-body"}
 EX
-run 'multiline literal guard and inline body boundary' 0 'in-scope count: 65'
+run 'multiline literal guard and inline body boundary' 0 'in-scope count: 79'
 cat >> "$COMPOSE" <<'EX'
 def compose_block(
   %{
@@ -107,9 +107,9 @@ run 'missing existing golden remains fatal' 1 'no golden fixture for in-scope ty
 mv -f "$TMP/heading.golden.json" "$TMP/api/test/support/fixtures/pd-parity/heading.golden.json"
 sed '/"heading"/d' "$COMPOSE" > "$TMP/shrunk.ex"
 cp -f "$TMP/shrunk.ex" "$COMPOSE"
-run 'census shrink remains fatal with all dispatched goldens present' 1 'expected 65 in-scope types, computed 64'
+run 'census shrink remains fatal with all dispatched goldens present' 1 'expected 79 in-scope types, computed 78'
 cp -f "$ROOT/api/lib/barkpark/portable_doc/render/compose.ex" "$COMPOSE"
-run 'actual compose source has exactly 65 covered types' 0 'in-scope count: 65'
+run 'actual compose source has exactly 79 covered types' 0 'in-scope count: 79'
 cat >> "$COMPOSE" <<'EX'
 def compose_block(%{"type" => t}, _style)
     when t in [

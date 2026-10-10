@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row: `dots: {on, of}` → role=img dot row + chrome label): 26346 B -> 26529 B (+183) after trimming (one shared dot template; string coercion kept for Elixir/Go parity, costs 22 B); limit raised by the irremovable +183, 31 B headroom",
+  "name": "PortableDoc client — 2026-10-10 (task-7375ba22758155fa, the 13 schema field block emitters: field-string…field-image, composite, arrayOf, codelist, localizedText): 26529 B -> 27234 B (+705) after trimming (field-number folded into the shared field row, one sub-row template for composite and localizedText); without them those 13 types render as the Unsupported-block placeholder, so the bytes are the feature; limit raised by the irremovable +705, 16 B headroom",
   "path": "dist/index.mjs",
-  "limit": "26.56 KB",
+  "limit": "27.25 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the server entry): 25364 B -> 25520 B (+156) after trimming; limit raised by the irremovable +156, 10 B headroom",
+  "name": "RSC server — 2026-10-10 (task-7375ba22758155fa, the 13 schema field block emitters through the server entry): 25520 B -> 26241 B (+721) after trimming; limit raised by the irremovable +721, 9 B headroom",
   "path": "dist/server.mjs",
-  "limit": "25.53 KB",
+  "limit": "26.25 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the PortableDoc subpath): 22370 B -> 22539 B (+169) after trimming; limit raised by the irremovable +169, 41 B headroom",
+  "name": "PortableDoc subpath — 2026-10-10 (task-7375ba22758155fa, the 13 schema field block emitters through the PortableDoc subpath): 22539 B -> 23290 B (+751) after trimming; limit raised by the irremovable +751, 10 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "22.58 KB",
+  "limit": "23.3 KB",
   "gzip": true
  }
 ]

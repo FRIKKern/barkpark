@@ -18,6 +18,7 @@ import { tableEmitters } from './table'
 import { sheetEmitters } from './sheet'
 import { taskboardEmitters } from './taskboard'
 import { mathEmitters } from './math'
+import { fieldEmitters } from './fields'
 
 type Emit = (block: Block, ctx: RenderCtx) => string
 
@@ -30,6 +31,7 @@ const DISPATCH: Record<string, Emit> = {
   ...sheetEmitters,
   ...taskboardEmitters,
   ...mathEmitters,
+  ...fieldEmitters,
 }
 
 /** The full set of registered block types this renderer handles — every key in
