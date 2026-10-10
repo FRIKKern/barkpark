@@ -5737,6 +5737,11 @@
         const a = document.activeElement;
         this._returnTo = a && a !== document.body ? a : null;
         this._returnId = this._returnTo && this._returnTo.id;
+        // A trigger with no id is re-found by what it does and says: its
+        // phx-click and its aria-label (a restore re-renders the editor header,
+        // so the Historikk button is a NEW node by the time the dialog closes).
+        this._returnClick = this._returnTo && this._returnTo.getAttribute("phx-click");
+        this._returnLabel = this._returnTo && this._returnTo.getAttribute("aria-label");
         this._focusIn();
         this._onKey = (e) => {
           if (e.key !== "Tab") return;
@@ -5767,6 +5772,13 @@
         document.removeEventListener("keydown", this._onKey, true);
         let back = this._returnTo;
         if (back && !back.isConnected && this._returnId) back = document.getElementById(this._returnId);
+        if (back && !back.isConnected && this._returnClick) {
+          const click = this._returnClick;
+          const label = this._returnLabel;
+          back = Array.from(document.querySelectorAll("[phx-click]")).find(
+            (el) => el.getAttribute("phx-click") === click && el.getAttribute("aria-label") === label
+          ) || back;
+        }
         if (back && back.isConnected) back.focus();
       },
       _focusIn() {
