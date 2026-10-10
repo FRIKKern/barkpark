@@ -10,6 +10,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderBlock } from '../src/blocks/registry'
 import { ROADMAP_UNPLACED_COPY, ROADMAP_LANE_UNPLACED_COPY } from '../src/blocks/core'
+import { EN } from '../src/blocks/chrome'
 
 const FULL_BAR = 'style="left:0%;width:100%"'
 
@@ -21,7 +22,7 @@ describe('roadmap — cannot-place state', () => {
         { title: 'Wire the harness', status: 'ready', priority: '1' },
         { title: 'Render the board', status: 'in_progress', priority: '0' },
       ],
-    })
+    }, EN)
     expect(html.startsWith(`<div class="bp-tasks bp-tasks--empty">${ROADMAP_UNPLACED_COPY}</div>`)).toBe(true)
     expect(html).not.toContain('bp-rm__bar')
     expect(html).not.toContain(FULL_BAR)
@@ -38,7 +39,7 @@ describe('roadmap — cannot-place state', () => {
         { title: 'Placed', status: 'ready', left: 10, width: 30 },
         { title: 'Unplaced', status: 'ready' },
       ],
-    })
+    }, EN)
     expect(html).not.toContain(ROADMAP_UNPLACED_COPY)
     expect(html).toContain('style="left:10%;width:30%"')
     expect(html).toContain(
@@ -56,7 +57,7 @@ describe('roadmap — cannot-place state', () => {
         { title: 'Ship the board', status: 'in_progress', left: 40, width: 35 },
       ],
       scale: ['Q1', 'Q2'],
-    })
+    }, EN)
     expect(html).not.toContain('unplaced')
     expect(html).not.toContain(ROADMAP_UNPLACED_COPY)
     expect(html).toContain('<div class="bp-rm__lane bp-rm__lane--phase"><span class="bp-rm__lbl">Foundation</span>')
@@ -64,7 +65,7 @@ describe('roadmap — cannot-place state', () => {
   })
 
   it('a numeric-looking STRING is not author geometry (the Elixir is_number/1 rule)', () => {
-    const html = renderBlock({ type: 'roadmap', snapshot: [{ title: 'S', status: 'ready', left: '40' }] })
+    const html = renderBlock({ type: 'roadmap', snapshot: [{ title: 'S', status: 'ready', left: '40' }] }, EN)
     expect(html).toContain(ROADMAP_UNPLACED_COPY)
   })
 })

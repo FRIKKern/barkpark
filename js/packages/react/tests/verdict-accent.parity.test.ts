@@ -22,6 +22,7 @@
 import { describe, expect, it } from 'vitest'
 import { datavizEmitters } from '../src/blocks/dataviz'
 import { coreEmitters } from '../src/blocks/core'
+import { EN } from '../src/blocks/chrome'
 
 const stat = datavizEmitters.stat
 const stats = datavizEmitters.stats
@@ -37,7 +38,7 @@ const emitStats = (block: unknown) => {
 }
 const emitCallout = (block: unknown) => {
   if (!callout) throw new Error('missing callout emitter')
-  return callout(block as never)
+  return callout(block as never, EN)
 }
 
 describe('stat verdict — the number carries the judgement', () => {

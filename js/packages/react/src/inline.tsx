@@ -192,6 +192,7 @@ import {
   MANIFEST_STATUS_ROLES,
   MANIFEST_STATUS_TO_ROLE,
 } from './status-vocab.gen'
+import type { RenderCtx } from './blocks/chrome'
 
 /** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
  * a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
@@ -259,10 +260,10 @@ export function spinnerRole(name: string): boolean {
 /** The status glyph span (Components.glyph_html/1): a spinner role is an empty
  * span whose ::before CSS-animates the Braille frames; every other role is its
  * static glyph, both keyed `bp-g bp-g--<role>`. */
-export function glyphHtml(name: string): string {
+export function glyphHtml(name: string, ctx: RenderCtx): string {
   if (spinnerRole(name)) {
     // role="img": an aria-label on a role-less span is prohibited (task-21231dd5be0ca72c).
-    return `<span class="bp-g bp-g--${name}" role="img" aria-label="${escapeHtml(labelForRole(name))}"></span>`
+    return `<span class="bp-g bp-g--${name}" role="img" aria-label="${escapeHtml(ctx.t(labelForRole(name)))}"></span>`
   }
   return `<span class="bp-g bp-g--${name}">${glyphChar(name)}</span>`
 }
@@ -270,8 +271,8 @@ export function glyphHtml(name: string): string {
 /** The DRAFT chip on a task-snapshot row (PDS-D749's draft label contract): a
  * row carrying `draft === true` — and nothing else — gets the chip; a published
  * row gets '' and stays byte-identical. Twin of components.ex draft_html/1. */
-export function draftHtml(r: Record<string, unknown>): string {
-  return r.draft === true ? '<span class="bp-draft">DRAFT</span> ' : ''
+export function draftHtml(r: Record<string, unknown>, ctx: RenderCtx): string {
+  return r.draft === true ? `<span class="bp-draft">${ctx.t('DRAFT')}</span> ` : ''
 }
 
 /* ── inline rendering (D4) ─────────────────────────────────────────────────────

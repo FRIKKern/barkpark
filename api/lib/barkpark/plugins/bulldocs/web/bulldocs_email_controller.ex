@@ -36,7 +36,7 @@ defmodule BarkparkWeb.BulldocsEmailController do
         send_resp(conn, 404, "not found")
 
       paper ->
-        opts = %{style: :email, theme: email_theme(paper)}
+        opts = %{style: :email, theme: email_theme(paper), locale: email_locale(paper)}
         title = email_title(paper, slug)
         trusted_paper_uri = trusted_paper_uri(conn)
 
@@ -162,6 +162,15 @@ defmodule BarkparkWeb.BulldocsEmailController do
   # The paper's workspace theme identity, defaulting through the seeded Default
   # workspace (mirrors email_task_scope's fail-closed fallback). Absent/unknown
   # → the default theme, keeping the byte stream unchanged.
+  # The renderer's own words (form Yes/No, task status, "Watch the video") in
+  # the language of the workspace that owns the paper (task-8e96278fc4ee7097).
+  defp email_locale(paper) do
+    paper
+    |> Map.get(:workspace_id)
+    |> Barkpark.Tenancy.get_workspace_by_id()
+    |> Barkpark.Tenancy.workspace_locale()
+  end
+
   defp email_theme(paper) do
     ws_id =
       (paper && paper.workspace_id) ||

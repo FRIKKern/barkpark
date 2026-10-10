@@ -36,6 +36,7 @@ export type {
 // output, or calls `renderPortableDocument(blocks)` for the raw HTML string.
 export { PortableDoc, renderPortableDocument } from './PortableDoc'
 export type { PortableDocProps, Block, Inline } from './PortableDoc'
+export type { ChromeStrings } from './blocks/chrome'
 
 // Plain-text extraction — pure and RSC-safe (the common `generateMetadata`
 // use case runs server-side). Mirrors index.ts.

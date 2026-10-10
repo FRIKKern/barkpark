@@ -207,10 +207,25 @@ defmodule Barkpark.Content.Labels do
 
   @doc false
   def paper_render_opts(dataset, style, scope) when style in ["article", "article-wide"],
-    do: Map.put(render_opts(dataset, scope), :style, :article)
+    do: render_opts(dataset, scope) |> Map.put(:style, :article) |> put_locale(scope)
 
   def paper_render_opts(dataset, _style, scope),
-    do: Map.put(render_opts(dataset, scope), :style, :article)
+    do: render_opts(dataset, scope) |> Map.put(:style, :article) |> put_locale(scope)
+
+  # The renderer's chrome words (task-8e96278fc4ee7097) follow the paper's
+  # workspace locale, so the persisted body_html a reader is served speaks the
+  # workspace's language. A row with no workspace scope is the Default
+  # workspace's. The locale is a render INPUT, not a resolver: it rides the same
+  # opts every persisted render (write path, rehydrate sweep, backfills) shares.
+  defp put_locale(opts, scope) do
+    workspace =
+      case Keyword.get(scope, :workspace_id) do
+        ws when is_binary(ws) and ws != "" -> Barkpark.Tenancy.get_workspace_by_id(ws)
+        _ -> Barkpark.Tenancy.get_default_workspace()
+      end
+
+    Map.put(opts, :locale, Barkpark.Tenancy.workspace_locale(workspace))
+  end
 
   @doc false
   # Resolve the per-doc style marker for an upsert: an explicit `style` in attrs

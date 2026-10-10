@@ -28,8 +28,9 @@ import {
   blockedHtml,
   countRole,
 } from './core'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 /* ── task-board (kanban) — Components.task_board_html/1 ─────────────────────── */
 
@@ -56,11 +57,11 @@ const BOARD_ROLES: string[] = [
   CANCEL_ROLE,
 ]
 
-function boardLabel(role: string): string {
-  return capitalize(labelForRole(role))
+function boardLabel(role: string, ctx: RenderCtx): string {
+  return capitalize(ctx.t(labelForRole(role)))
 }
 
-function boardCol(role: string, label: string, rows: Block[]): string {
+function boardCol(role: string, label: string, rows: Block[], ctx: RenderCtx): string {
   if (rows.length === 0) return ''
   const cards = rows
     .map((r) => {
@@ -73,15 +74,15 @@ function boardCol(role: string, label: string, rows: Block[]): string {
       const title = escapeHtml(str(m.title))
       const meta = priorityHtml(m.priority) + criteriaHtml(m.criteria)
       const metaHtml = meta === '' ? '' : `<div class="bp-bcard__m">${meta}</div>`
-      return `<div class="bp-bcard">${glyphHtml(rowRole)}<span class="bp-bcard__t">${draftHtml(m)}${title}</span>${metaHtml}</div>`
+      return `<div class="bp-bcard">${glyphHtml(rowRole, ctx)}<span class="bp-bcard__t">${draftHtml(m, ctx)}${title}</span>${metaHtml}</div>`
     })
     .join('')
   return `<div class="bp-board__col bp-board__col--${role}"><div class="bp-board__head"><span class="bp-board__label">${label}</span><span class="bp-board__count">${rows.length}</span></div><div class="bp-board__cards">${cards}</div></div>`
 }
 
-const taskBoard: Emit = (b) => {
+const taskBoard: Emit = (b, ctx) => {
   const rows = asList<Block>(b.snapshot)
-  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">No tasks yet.</div>`
+  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">${ctx.t('No tasks yet.')}</div>`
   const byRole: Record<string, Block[]> = {}
   for (const r of rows) {
     const role = roleOf(isMap(r) ? r.status : undefined)
@@ -93,7 +94,7 @@ const taskBoard: Emit = (b) => {
     const col = BOARD_ROLES.includes(role) ? role : 'open'
     ;(byRole[col] ??= []).push(r)
   }
-  const cols = BOARD_ROLES.map((role) => boardCol(role, boardLabel(role), byRole[role] ?? []))
+  const cols = BOARD_ROLES.map((role) => boardCol(role, boardLabel(role, ctx), byRole[role] ?? [], ctx))
     .filter((c) => c !== '')
     .join('')
   return `<div class="bp-board">${cols}</div>`
@@ -101,7 +102,7 @@ const taskBoard: Emit = (b) => {
 
 /* ── task list — Components.tasks_html/1 (momentum + phases + rows) ─────────── */
 
-function momentumHtml(rows: Block[]): string {
+function momentumHtml(rows: Block[], ctx: RenderCtx): string {
   const total = rows.length
   if (total === 0) return ''
   const prog = countRole(rows, 'progress')
@@ -110,16 +111,16 @@ function momentumHtml(rows: Block[]): string {
   const pct = Math.round((done / total) * 100)
   return (
     `<div class="bp-momentum"><div class="bp-momentum__row">` +
-    `<span class="bp-momentum__i">${glyphHtml('progress')}<b>${prog}</b> in flight</span>` +
-    `<span class="bp-momentum__i bp-g--ready">${glyphHtml('ready')}<b>${ready}</b> ready</span>` +
-    `<span class="bp-momentum__i bp-g--done">${glyphHtml('done')}<b>${done}</b> done</span>` +
+    `<span class="bp-momentum__i">${glyphHtml('progress', ctx)}<b>${prog}</b> ${ctx.t('in flight')}</span>` +
+    `<span class="bp-momentum__i bp-g--ready">${glyphHtml('ready', ctx)}<b>${ready}</b> ${ctx.t('ready')}</span>` +
+    `<span class="bp-momentum__i bp-g--done">${glyphHtml('done', ctx)}<b>${done}</b> ${ctx.t('done')}</span>` +
     `<span class="bp-momentum__grow"></span>` +
     `<span class="bp-momentum__pct">${pct}%</span></div>` +
     `<div class="bp-momentum__track"><span class="bp-momentum__fill" style="width:${pct}%"></span></div></div>`
   )
 }
 
-function rowHtml(r: Block): string {
+function rowHtml(r: Block, ctx: RenderCtx): string {
   const role = roleOf(r.status)
   const title = escapeHtml(str(r.title))
   const depthRaw = r.depth
@@ -132,8 +133,8 @@ function rowHtml(r: Block): string {
   return (
     `<div class="bp-trow bp-trow--${role}" style="padding-left:${pad}px">` +
     arrow +
-    glyphHtml(role) +
-    `<span class="bp-trow__t">${draftHtml(r)}${title}</span>` +
+    glyphHtml(role, ctx) +
+    `<span class="bp-trow__t">${draftHtml(r, ctx)}${title}</span>` +
     metaHtml +
     `</div>`
   )
@@ -155,8 +156,8 @@ function groupRows(rows: Block[]): Array<[string | null, Block[]]> {
   return order.map((k) => [k, acc.get(k)!])
 }
 
-function phaseHtml(name: string | null, rows: Block[]): string {
-  const body = rows.map(rowHtml).join('')
+function phaseHtml(name: string | null, rows: Block[], ctx: RenderCtx): string {
+  const body = rows.map((r) => rowHtml(r, ctx)).join('')
   if (name === null) return body
   const done = countRole(rows, 'done')
   const total = rows.length
@@ -167,15 +168,15 @@ function phaseHtml(name: string | null, rows: Block[]): string {
   return hdr + body
 }
 
-const tasks: Emit = (b) => {
+const tasks: Emit = (b, ctx) => {
   const rows = asList<Block>(b.snapshot)
-  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">No tasks yet.</div>`
+  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">${ctx.t('No tasks yet.')}</div>`
   const title = str(b.title).trim()
   const titleHtml = title === '' ? '' : `<div class="bp-tasks__title">${escapeHtml(title)}</div>`
   const body = groupRows(rows)
-    .map(([phase, rs]) => phaseHtml(phase, rs))
+    .map(([phase, rs]) => phaseHtml(phase, rs, ctx))
     .join('')
-  return `<div class="bp-tasks">${titleHtml}${momentumHtml(rows)}<div class="bp-tasks__list">${body}</div></div>`
+  return `<div class="bp-tasks">${titleHtml}${momentumHtml(rows, ctx)}<div class="bp-tasks__list">${body}</div></div>`
 }
 
 export const taskboardEmitters: Record<string, Emit> = {

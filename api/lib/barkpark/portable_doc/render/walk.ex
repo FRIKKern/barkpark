@@ -53,6 +53,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     only: [escape_html: 1, escape_attr: 1, safe_url: 1, tone_palette: 1]
 
   alias Barkpark.PortableDoc.Render.StatusVocab
+  alias Barkpark.PortableDoc.Render.Chrome
 
   # Mono font is theme-INVARIANT (charter D28) — stays a compile-time constant.
   @font_mono Barkpark.PortableDoc.Render.Palettes.font_mono()
@@ -884,7 +885,7 @@ defmodule Barkpark.PortableDoc.Render.Walk do
         # read, so the chip SAYS so rather than omitting the segment (which
         # would read as "this task has no criteria").
         :unavailable ->
-          "criteria unavailable"
+          Chrome.t("criteria unavailable")
 
         _ ->
           nil

@@ -8,6 +8,7 @@
 // the Elixir renderer emits (never throwing). Container blocks (section, columns,
 // terminal, card, figure) recurse back through here.
 
+import type { RenderCtx } from './chrome'
 import { type Block, escapeHtml, str, isMap } from '../inline'
 import { coreEmitters } from './core'
 import { datavizEmitters } from './dataviz'
@@ -18,7 +19,7 @@ import { sheetEmitters } from './sheet'
 import { taskboardEmitters } from './taskboard'
 import { mathEmitters } from './math'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 const DISPATCH: Record<string, Emit> = {
   ...coreEmitters,
@@ -40,17 +41,17 @@ const DISPATCH: Record<string, Emit> = {
 export const REGISTERED_TYPES: string[] = Object.keys(DISPATCH)
 
 /** Render one type-keyed block to an HTML string (article surface). */
-export function renderBlock(block: Block): string {
+export function renderBlock(block: Block, ctx: RenderCtx): string {
   if (!isMap(block)) return `<div class="bp-unknown-block">invalid block</div>`
   const type = str(block.type)
   const emit = DISPATCH[type]
-  if (emit) return emit(block)
+  if (emit) return emit(block, ctx)
   // Unknown/unregistered type → degrade, never throw (compose.ex unknown_block_node/1).
   return `<div class="bp-unknown-block">Unsupported block: ${escapeHtml(type)}</div>`
 }
 
 /** Render a block array to a joined HTML string. */
-export function renderBlocks(blocks: unknown): string {
+export function renderBlocks(blocks: unknown, ctx: RenderCtx): string {
   if (!Array.isArray(blocks)) return ''
-  return blocks.map((b) => renderBlock(b as Block)).join('')
+  return blocks.map((b) => renderBlock(b as Block, ctx)).join('')
 }

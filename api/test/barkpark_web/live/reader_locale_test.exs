@@ -18,7 +18,15 @@ defmodule BarkparkWeb.ReaderLocaleTest do
 
   @dataset "production"
 
-  defp scoped_paper!(locale) do
+  @body_blocks [
+    %{
+      "id" => "b1",
+      "type" => "paragraph",
+      "content" => [%{"type" => "text", "value" => "Norsk brødtekst"}]
+    }
+  ]
+
+  defp scoped_paper!(locale, blocks \\ @body_blocks) do
     ws = create_workspace!()
     proj = create_project!(ws)
     {:ok, ws} = Tenancy.set_workspace_locale(ws, locale)
@@ -29,13 +37,7 @@ defmodule BarkparkWeb.ReaderLocaleTest do
         Barkpark.LabelFixtures.paper_attrs(%{
           "slug" => slug,
           "title" => "Etiketter",
-          "blocks" => [
-            %{
-              "id" => "b1",
-              "type" => "paragraph",
-              "content" => [%{"type" => "text", "value" => "Norsk brødtekst"}]
-            }
-          ],
+          "blocks" => blocks,
           "workspace_id" => ws.id,
           "project_id" => proj.id
         })
@@ -117,6 +119,46 @@ defmodule BarkparkWeb.ReaderLocaleTest do
     {:ok, view, _html} = live(conn, path)
     {:dictionary, dict} = Process.info(view.pid, :dictionary)
     assert Enum.any?(dict, fn {_k, v} -> v == "nb_NO" end)
+  end
+
+  # task-8e96278fc4ee7097: the renderer's own words (a form's Yes/No, a task's
+  # status) followed the server's English while the page around them spoke the
+  # workspace's language.
+  @form_block %{
+    "id" => "f1",
+    "type" => "form",
+    "kind" => "grill",
+    "questions" => [%{"id" => "q1", "type" => "yesno", "prompt" => "Ship it?"}]
+  }
+
+  test "the renderer's own words in an nb-NO paper read Norwegian, live and dead", %{conn: conn} do
+    path = scoped_paper!("nb-NO", [@form_block])
+
+    html = conn |> get(path) |> html_response(200)
+    assert html =~ ">Ja<"
+    assert html =~ ">Nei<"
+    refute html =~ ">Yes<"
+
+    {:ok, _view, live_html} = live(conn, path)
+    assert live_html =~ ">Ja<"
+    refute live_html =~ ">No<"
+  end
+
+  test "the email rendering of an nb-NO paper takes the workspace's language", %{conn: conn} do
+    path = scoped_paper!("nb-NO", [@form_block])
+    email_path = String.replace(path, "?share=", "/email?share=")
+
+    html = conn |> get(email_path) |> html_response(200)
+    assert html =~ ">Ja<"
+    refute html =~ ">Yes<"
+  end
+
+  test "the same form in an English workspace keeps Yes/No", %{conn: conn} do
+    path = scoped_paper!("en", [@form_block])
+
+    html = conn |> get(path) |> html_response(200)
+    assert html =~ ">Yes<"
+    refute html =~ ">Ja<"
   end
 
   test "a Default-workspace paper on the flat reader stays English", %{conn: conn} do

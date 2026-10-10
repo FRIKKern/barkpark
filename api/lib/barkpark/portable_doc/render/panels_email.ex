@@ -38,7 +38,7 @@ defmodule Barkpark.PortableDoc.Render.PanelsEmail do
 
   import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
 
-  alias Barkpark.PortableDoc.Render.{Palettes, StatusVocab}
+  alias Barkpark.PortableDoc.Render.{Chrome, Palettes, StatusVocab}
 
   # ── terminal ─────────────────────────────────────────────────────────────────
 
@@ -161,8 +161,8 @@ defmodule Barkpark.PortableDoc.Render.PanelsEmail do
     rows =
       StatusVocab.roles()
       |> Enum.map_join("", fn role ->
-        name = role |> StatusVocab.label_for_role() |> escape_html()
-        meaning = role |> StatusVocab.meaning_for_role() |> escape_html()
+        name = role |> StatusVocab.label_for_role() |> Chrome.t() |> escape_html()
+        meaning = role |> StatusVocab.meaning_for_role() |> Chrome.t() |> escape_html()
 
         ~s|<tr>| <>
           ~s|<td style="font-family:#{mono};font-weight:700;font-size:14px;color:#{role_glyph_hex(role, sk)};padding:6px 10px;text-align:center;width:1.4em">#{legend_glyph(role)}</td>| <>

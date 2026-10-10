@@ -28,8 +28,9 @@ import {
 import { renderBlock, renderBlocks } from './registry'
 import { listChildren } from '../list-children'
 import { CHAT_DIFF_BUDGET, diffRowsHtml, splitLines, type DiffLine } from './chat'
+import type { RenderCtx } from './chrome'
 
-type Emit = (block: Block) => string
+type Emit = (block: Block, ctx: RenderCtx) => string
 
 /* ── prose core (walk.ex) ─────────────────────────────────────────────────── */
 
@@ -61,8 +62,8 @@ const heading: Emit = (b) => {
 // authoritative — zero live blocks contradict their own type spelling.
 const headingAtLevel =
   (level: 1 | 2 | 3): Emit =>
-  (b) =>
-    heading({ ...b, level } as Block)
+  (b, ctx) =>
+    heading({ ...b, level } as Block, ctx)
 
 // Swept sibling of the heading/list content[] defect: eyebrow read `text` alone,
 // so the 3 live eyebrows persisted as `{content:[…]}` rendered an empty
@@ -89,7 +90,7 @@ function tabEntries(b: Block): TabEntry[] {
     .map((t) => ({ label: str(t.label), blocks: asList<Block>(t.blocks) }))
 }
 
-const tabs: Emit = (b) => {
+const tabs: Emit = (b, ctx) => {
   const entries = tabEntries(b)
   if (entries.length === 0) return ''
 
@@ -104,7 +105,7 @@ const tabs: Emit = (b) => {
     .join('')
 
   const panels = entries
-    .map((t, i) => `<div class="bp-tabs__panel" data-tab-index="${i}">${renderBlocks(t.blocks)}</div>`)
+    .map((t, i) => `<div class="bp-tabs__panel" data-tab-index="${i}">${renderBlocks(t.blocks, ctx)}</div>`)
     .join('')
 
   return (
@@ -223,12 +224,12 @@ const apiEndpoint: Emit = (b) => {
 // (I0: zero-JS). `open` reflects the block's own state (this emitter only
 // ever renders the :article View surface). Empty (no summary, no children)
 // renders nothing.
-const expandable: Emit = (b) => {
+const expandable: Emit = (b, ctx) => {
   const summary = str(b.summary)
   const blocks = asList(b.blocks ?? b.children)
   if (summary === '' && blocks.length === 0) return ''
 
-  const inner = renderBlocks(blocks)
+  const inner = renderBlocks(blocks, ctx)
   const openAttr = b.open === true ? ' open' : ''
   return `<details${openAttr} class="bp-expandable"><summary>${escapeHtml(summary)}</summary><div class="bp-expandable__body">${inner}</div></details>`
 }
@@ -261,19 +262,19 @@ const footnote: Emit = (b) => {
 // {title, blocks}, each recursed through the shared `renderBlocks` dispatcher
 // (the columns/terminal precedent). A semantic `<ol>` carries the numbering
 // natively; a step with neither a title nor any blocks contributes nothing.
-function stepRowHtml(step: unknown): string {
+function stepRowHtml(step: unknown, ctx: RenderCtx): string {
   if (!isMap(step)) return ''
   const title = str(step.title)
   const blocks = asList(step.blocks ?? step.children)
   if (title === '' && blocks.length === 0) return ''
 
-  const body = renderBlocks(blocks)
+  const body = renderBlocks(blocks, ctx)
   const titleHtml = title === '' ? '' : `<div class="bp-steps__title">${escapeHtml(title)}</div>`
   return `<li class="bp-steps__step">${titleHtml}<div class="bp-steps__body">${body}</div></li>`
 }
 
-const steps: Emit = (b) => {
-  const rows = asList(b.steps).map(stepRowHtml).join('')
+const steps: Emit = (b, ctx) => {
+  const rows = asList(b.steps).map((step) => stepRowHtml(step, ctx)).join('')
   return rows === '' ? '' : `<ol class="bp-steps">${rows}</ol>`
 }
 
@@ -547,13 +548,13 @@ export function listStart(b: Block): number | null {
   return typeof start === 'number' && Number.isInteger(start) && start !== 1 ? start : null
 }
 
-const list: Emit = (b) => {
+const list: Emit = (b, ctx) => {
   const tag = b.ordered === true ? 'ol' : 'ul'
   const start = b.ordered === true && (b as { task?: unknown }).task !== true ? listStart(b) : null
   return `<${tag}${start === null ? '' : ` start="${start}"`}>${asList(b.items)
     .map(
       (item) =>
-        `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item))}</li>`,
+        `<li><span>${renderInlines(itemInlines(item))}</span>${renderBlocks(listChildren(item), ctx)}</li>`,
     )
     .join('')}</${tag}>`
 }
@@ -596,7 +597,7 @@ function normalizeListItem(item: unknown): unknown {
 
 // `numbered_list` authoring-drift alias → an ORDERED list (mirrors compose.ex,
 // which maps numbered_list → list with ordered:true).
-const numberedList: Emit = (b) => list({ ...b, ordered: true } as Block)
+const numberedList: Emit = (b, ctx) => list({ ...b, ordered: true } as Block, ctx)
 
 /* callout (walk.ex callout/3, article) */
 
@@ -783,10 +784,10 @@ function encodeMermaid(source: string): string {
   return source.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
 }
 
-const figure: Emit = (b) => {
+const figure: Emit = (b, ctx) => {
   const child = b.child
   const caption = str(b.caption)
-  const childHtml = isMap(child) ? renderBlock(child as Block) : ''
+  const childHtml = isMap(child) ? renderBlock(child as Block, ctx) : ''
   return `<figure style="margin:var(--bp-air-figure, 1.6rem) 0 0;margin-inline:var(--bp-evidence-pull, 0px);width:var(--bp-evidence-width, 100%);box-sizing:border-box;overflow-x:auto">${childHtml}${articleFigcaption(caption)}</figure>`
 }
 
@@ -1033,7 +1034,7 @@ const HR_STACK = '<hr class="bp-hr" style="border-top-width:1px">'
 const sectionStackRules = (b: Block, blocks: Block[], isGrid: boolean): boolean =>
   b.title != null || isGrid || !(isMap(blocks[0]) && blocks[0].type === 'heading')
 
-const section: Emit = (b) => {
+const section: Emit = (b, ctx) => {
   const layout = b.layout
   const isGrid = isMap(layout) && layout.mode === 'grid'
   const blocks = asList<Block>(b.blocks)
@@ -1048,7 +1049,7 @@ const section: Emit = (b) => {
     const cells = blocks
       .map(
         (child) =>
-          `<div class="bp-section__cell"${cellLayoutAttr(child)}>${renderBlocks([child])}</div>`,
+          `<div class="bp-section__cell"${cellLayoutAttr(child)}>${renderBlocks([child], ctx)}</div>`,
       )
       .join('')
     return (
@@ -1069,7 +1070,7 @@ const section: Emit = (b) => {
   const rule = sectionStackRules(b, blocks, isGrid) ? HR_STACK : ''
   const titleSpan =
     b.title != null ? `<span style="font-weight:bold">${escapeHtml(str(b.title))}</span>` : ''
-  const inner = blocks.map((child) => renderBlock(child)).join('')
+  const inner = blocks.map((child) => renderBlock(child, ctx)).join('')
   return (
     `<div style="display:flex;flex-direction:column">` + rule + titleSpan + inner + rule + `</div>`
   )
@@ -1077,22 +1078,22 @@ const section: Emit = (b) => {
 
 /* columns (compose.ex :article) */
 
-const columns: Emit = (b) => {
+const columns: Emit = (b, ctx) => {
   const cols = asList(b.columns)
   const n = Math.max(cols.length, 1)
   const inner = cols
-    .map((col) => `<div class="bp-cols__c">${renderBlocks(asList<Block>(col))}</div>`)
+    .map((col) => `<div class="bp-cols__c">${renderBlocks(asList<Block>(col), ctx)}</div>`)
     .join('')
   return `<div class="bp-cols" style="--bp-cols:${n}">${inner}</div>`
 }
 
 /* terminal (compose.ex :article) */
 
-const terminal: Emit = (b) => {
+const terminal: Emit = (b, ctx) => {
   const title = escapeHtml(str(b.title))
   const footer = str(b.footer)
   const kids = asList<Block>(b.children ?? b.blocks)
-  const body = renderBlocks(kids)
+  const body = renderBlocks(kids, ctx)
   const live =
     b.live === true || b.live === 'true' || b.live === 'live'
       ? `<span class="bp-term__live">live</span>`
@@ -1143,14 +1144,14 @@ function countRole(rows: Block[], r: string): number {
   return rows.filter((row) => roleOf(row.status) === r).length
 }
 
-const statusLegend: Emit = () => {
+const statusLegend: Emit = (_b, ctx) => {
   // LEGEND_ROLES (not STATUS_ROLES) — the manifest-scoped vocabulary key, frozen
   // to the Elixir golden. The fail-open `unknown` sentinel and the not-yet-in-
   // manifest thought states are excluded (see inline.tsx LEGEND_ROLES).
   const rows = LEGEND_ROLES.map((r) => {
-    const name = escapeHtml(labelForRole(r.role))
-    const meaning = meaningForRole(r.role)
-    return `<div class="bp-legend__r">${glyphHtml(r.role)}<span class="bp-legend__n">${name}</span><span class="bp-legend__d">${meaning}</span></div>`
+    const name = escapeHtml(ctx.t(labelForRole(r.role)))
+    const meaning = ctx.t(meaningForRole(r.role))
+    return `<div class="bp-legend__r">${glyphHtml(r.role, ctx)}<span class="bp-legend__n">${name}</span><span class="bp-legend__d">${meaning}</span></div>`
   }).join('')
   return `<div class="bp-legend">${rows}</div>`
 }
@@ -1205,15 +1206,15 @@ function normalizeMedia(el: unknown): Block {
   return el as Block
 }
 
-const card: Emit = (b) => {
+const card: Emit = (b, ctx) => {
   const tone = str(b.tone)
   const toneCls = ['info', 'ok', 'warn', 'danger'].includes(tone) ? ` bp-card--${tone}` : ''
-  const media = renderBlocks(slotElements(b, 'media').map(normalizeMedia))
+  const media = renderBlocks(slotElements(b, 'media').map(normalizeMedia), ctx)
   const inner =
     media +
-    renderBlocks(slotElements(b, 'title')) +
-    renderBlocks(slotElements(b, 'body')) +
-    renderBlocks(slotElements(b, 'action'))
+    renderBlocks(slotElements(b, 'title'), ctx) +
+    renderBlocks(slotElements(b, 'body'), ctx) +
+    renderBlocks(slotElements(b, 'action'), ctx)
   return `<div class="bp-card${toneCls}">${inner}</div>`
 }
 
@@ -1278,13 +1279,13 @@ function priorityLabel(p: unknown): string | null {
   return digits === '' ? null : 'P' + digits
 }
 
-function taskDetail(b: Block): string {
+function taskDetail(b: Block, ctx: RenderCtx): string {
   const t = isMap(b.task) ? b.task : b
   const title = str(t.title).trim()
   // Mirrors Render.Components.task_detail_html/1: an unresolved task-detail is
   // still a block, so it keeps its place with the same placeholder the sibling
   // live-query widgets use instead of collapsing to nothing.
-  if (title === '') return `<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>`
+  if (title === '') return `<div class="bp-tdetail bp-tdetail--empty">${ctx.t('No matching tasks.')}</div>`
   const role = roleOf(t.status)
 
   const sections: string[] = []
@@ -1300,15 +1301,15 @@ function taskDetail(b: Block): string {
       .filter((x): x is string => x != null && x !== '')
       .map(escapeHtml)
       .join(' · ')
-    sections.push(`<div class="bp-tdetail__meta">${glyphHtml(role)}<span>${parts}</span></div>`)
+    sections.push(`<div class="bp-tdetail__meta">${glyphHtml(role, ctx)}<span>${parts}</span></div>`)
   }
   // stamp
   {
     const c = str(t.created).trim()
     const u = str(t.updated).trim()
     const line = [
-      c !== '' ? `created ${escapeHtml(c)}` : '',
-      u !== '' ? `updated ${escapeHtml(u)}` : '',
+      c !== '' ? ctx.t('created %{when}', { when: escapeHtml(c) }) : '',
+      u !== '' ? ctx.t('updated %{when}', { when: escapeHtml(u) }) : '',
     ]
       .filter(Boolean)
       .join(' · ')
@@ -1323,7 +1324,7 @@ function taskDetail(b: Block): string {
           const m = isMap(s) ? s : {}
           const r = roleOf(m.status)
           const lbl = escapeHtml(str(m.label))
-          return `<span class="bp-tl__seg">${glyphHtml(r)}<span>${lbl}</span></span>`
+          return `<span class="bp-tl__seg">${glyphHtml(r, ctx)}<span>${lbl}</span></span>`
         })
         .join(`<span class="bp-tl__arr">→</span>`)
       sections.push(`<div class="bp-tdetail__timeline">${cells}</div>`)
@@ -1344,7 +1345,7 @@ function taskDetail(b: Block): string {
         .map((c) => {
           const m = isMap(c) ? c : {}
           const done = truthy(m.met)
-          const g = done ? glyphHtml('done') : glyphHtml('ready')
+          const g = done ? glyphHtml('done', ctx) : glyphHtml('ready', ctx)
           const txtRaw = str(m.text) !== '' ? str(m.text) : str(m.criterion)
           const txt = escapeHtml(txtRaw)
           const ev = str(m.evidence).trim()
@@ -1354,7 +1355,7 @@ function taskDetail(b: Block): string {
         })
         .join('')
       sections.push(
-        `<div class="bp-tdetail__lbl">Criteria · ${met}/${total}</div><div class="bp-tdetail__crit">${rows}</div>`,
+        `<div class="bp-tdetail__lbl">${ctx.t('Criteria · %{met}/%{total}', { met, total })}</div><div class="bp-tdetail__crit">${rows}</div>`,
       )
     }
   }
@@ -1363,18 +1364,22 @@ function taskDetail(b: Block): string {
     const blocks = typeof t.blocks === 'number' ? t.blocks : 0
     const blocked = typeof t.blocked_by === 'number' ? t.blocked_by : 0
     const words = [
-      blocks > 0 ? `blocks ${blocks} ${blocks === 1 ? 'task' : 'tasks'}` : '',
-      blocked > 0 ? `blocked by ${blocked}` : '',
+      blocks > 0
+        ? blocks === 1
+          ? ctx.t('blocks %{n} task', { n: blocks })
+          : ctx.t('blocks %{n} tasks', { n: blocks })
+        : '',
+      blocked > 0 ? ctx.t('blocked by %{n}', { n: blocked }) : '',
     ]
       .filter(Boolean)
       .join(' · ')
     if (words !== '')
       sections.push(
-        `<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">${words}</div>`,
+        `<div class="bp-tdetail__lbl">${ctx.t('Dependencies')}</div><div class="bp-tdetail__deps">${words}</div>`,
       )
   }
   // children rail
-  sections.push(detailRail(t, 'children', 'Children'))
+  sections.push(detailRail(t, 'children', ctx.t('Children'), ctx))
   // papers rail
   {
     const rows = asList(t.papers)
@@ -1384,9 +1389,9 @@ function taskDetail(b: Block): string {
       const body = shown
         .map((p) => `<div class="bp-rail__r bp-rail__paper">▸ ${escapeHtml(str(p))}</div>`)
         .join('')
-      const more = extra <= 0 ? '' : `<div class="bp-rail__more">… and ${extra} more</div>`
+      const more = extra <= 0 ? '' : `<div class="bp-rail__more">${ctx.t('… and %{n} more', { n: extra })}</div>`
       sections.push(
-        `<div class="bp-tdetail__lbl">Papers</div><div class="bp-tdetail__rail">${body}${more}</div>`,
+        `<div class="bp-tdetail__lbl">${ctx.t('Papers')}</div><div class="bp-tdetail__rail">${body}${more}</div>`,
       )
     }
   }
@@ -1403,7 +1408,7 @@ function taskDetail(b: Block): string {
   return `<div class="bp-tdetail"><div class="bp-tdetail__title">${escapeHtml(title)}</div>${joined}</div>`
 }
 
-function detailRail(t: Record<string, unknown>, key: string, label: string): string {
+function detailRail(t: Record<string, unknown>, key: string, label: string, ctx: RenderCtx): string {
   const rows = asList(t[key])
   if (rows.length === 0) return ''
   const shown = rows.slice(0, 20)
@@ -1414,14 +1419,14 @@ function detailRail(t: Record<string, unknown>, key: string, label: string): str
       const m = isMap(r) ? r : {}
       const role = roleOf(m.status)
       const title = escapeHtml(str(m.title))
-      return `<div class="bp-rail__r">${glyphHtml(role)}<span>${title}</span></div>`
+      return `<div class="bp-rail__r">${glyphHtml(role, ctx)}<span>${title}</span></div>`
     })
     .join('')
-  const more = extra <= 0 ? '' : `<div class="bp-rail__more">… and ${extra} more</div>`
-  return `<div class="bp-tdetail__lbl">${label} · ${done}/${rows.length} done</div><div class="bp-tdetail__rail">${body}${more}</div>`
+  const more = extra <= 0 ? '' : `<div class="bp-rail__more">${ctx.t('… and %{n} more', { n: extra })}</div>`
+  return `<div class="bp-tdetail__lbl">${ctx.t('%{label} · %{done}/%{total} done', { label, done, total: rows.length })}</div><div class="bp-tdetail__rail">${body}${more}</div>`
 }
 
-const taskDetailEmit: Emit = (b) => taskDetail(b)
+const taskDetailEmit: Emit = (b, ctx) => taskDetail(b, ctx)
 
 /* roadmap (components.ex roadmap_html) */
 
@@ -1445,14 +1450,14 @@ export const ROADMAP_LANE_UNPLACED_COPY = 'not scheduled'
 const placeable = (m: Record<string, unknown>) =>
   typeof m.left === 'number' || typeof m.width === 'number'
 
-const roadmap: Emit = (b) => {
+const roadmap: Emit = (b, ctx) => {
   const rows = asList(b.snapshot)
-  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">No roadmap items.</div>`
+  if (rows.length === 0) return `<div class="bp-tasks bp-tasks--empty">${ctx.t('No roadmap items.')}</div>`
   // NOT ONE row has geometry: say so, then list the items (never drop them).
   if (!rows.some((r) => isMap(r) && placeable(r)))
     return (
-      `<div class="bp-tasks bp-tasks--empty">${ROADMAP_UNPLACED_COPY}</div>` +
-      renderBlock({ type: 'tasks', snapshot: rows })
+      `<div class="bp-tasks bp-tasks--empty">${ctx.t(ROADMAP_UNPLACED_COPY)}</div>` +
+      renderBlock({ type: 'tasks', snapshot: rows }, ctx)
     )
   const todayVal = b.today
   const today =
@@ -1478,8 +1483,8 @@ const roadmap: Emit = (b) => {
         (placed ? '' : ' bp-rm__lane--unplaced')
       const body = placed
         ? `<span class="bp-rm__bar bp-rm__bar--${role}" style="left:${left}%;width:${width}%"></span>`
-        : `<span class="bp-rm__unplaced">${ROADMAP_LANE_UNPLACED_COPY}</span>`
-      return `<div class="${cls}"><span class="bp-rm__lbl">${draftHtml(m)}${title}</span><div class="bp-rm__track">${body}${today}</div></div>`
+        : `<span class="bp-rm__unplaced">${ctx.t(ROADMAP_LANE_UNPLACED_COPY)}</span>`
+      return `<div class="${cls}"><span class="bp-rm__lbl">${draftHtml(m, ctx)}${title}</span><div class="bp-rm__track">${body}${today}</div></div>`
     })
     .join('')
   return `<div class="bp-roadmap">${scale}<div class="bp-rm__lanes">${lanes}</div></div>`

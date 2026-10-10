@@ -22,10 +22,11 @@ defmodule Barkpark.PortableDoc.Render.Components do
   data, so no `safe_color` is needed here — status drives the CSS class only.
   """
 
-  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1]
+  import Barkpark.PortableDoc.Render.Util, only: [escape_html: 1, escape_attr: 1]
   alias Barkpark.Chat.ToolRows
   alias Barkpark.PortableDoc.TextDiff
   alias Barkpark.PortableDoc.Render.StatusVocab
+  alias Barkpark.PortableDoc.Render.Chrome
   alias Barkpark.PortableDoc.Slots
 
   @doc """
@@ -38,7 +39,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     case rows do
       [] ->
-        ~s|<div class="bp-tasks bp-tasks--empty">No tasks yet.</div>|
+        ~s|<div class="bp-tasks bp-tasks--empty">#{Chrome.t("No tasks yet.")}</div>|
 
       _ ->
         title = block |> get("title") |> stringish() |> String.trim()
@@ -75,7 +76,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
   def task_unavailable_html(block) do
     ~s|<div class="bp-dataviz--empty bp-task-unavailable" data-unavailable="tasks" role="note">| <>
       escape_html(task_unavailable_kind(block)) <>
-      " — " <> @task_unavailable_note <> "</div>"
+      " — " <> Chrome.t(@task_unavailable_note) <> "</div>"
   end
 
   @doc "The placeholder note text (shared with the email variant)."
@@ -110,7 +111,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
         # paints an explicit note. Same shape as the sibling live-query widgets
         # (`bp-tasks bp-tasks--empty`), and the same copy the canvas preview uses
         # so edit and reader read identically for the empty case.
-        ~s|<div class="bp-tdetail bp-tdetail--empty">No matching tasks.</div>|
+        ~s|<div class="bp-tdetail bp-tdetail--empty">#{Chrome.t("No matching tasks.")}</div>|
 
       _ ->
         role = t |> get("status") |> stringish() |> role_of()
@@ -123,7 +124,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             detail_desc(t),
             detail_criteria(t),
             detail_deps(t),
-            detail_rail(t, "children", "Children"),
+            detail_rail(t, "children", Chrome.t("Children")),
             detail_papers(t),
             detail_labels(t)
           ]
@@ -160,7 +161,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
     u = t |> get("updated") |> stringish() |> String.trim()
 
     line =
-      [c != "" && "created #{escape_html(c)}", u != "" && "updated #{escape_html(u)}"]
+      [
+        c != "" && Chrome.t("created %{when}", when: escape_html(c)),
+        u != "" && Chrome.t("updated %{when}", when: escape_html(u))
+      ]
       |> Enum.filter(& &1)
       |> Enum.join(" · ")
 
@@ -229,7 +233,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
           end)
           |> Enum.join("")
 
-        ~s|<div class="bp-tdetail__lbl">Criteria · #{met}/#{total}</div><div class="bp-tdetail__crit">#{rows}</div>|
+        ~s|<div class="bp-tdetail__lbl">#{Chrome.t("Criteria · %{met}/%{total}", met: met, total: total)}</div><div class="bp-tdetail__crit">#{rows}</div>|
     end
   end
 
@@ -239,8 +243,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     words =
       [
-        blocks > 0 && "blocks #{blocks} #{plural(blocks, "task")}",
-        blocked > 0 && "blocked by #{blocked}"
+        blocks > 0 && blocks_words(blocks),
+        blocked > 0 && Chrome.t("blocked by %{n}", n: blocked)
       ]
       |> Enum.filter(& &1)
       |> Enum.join(" · ")
@@ -248,7 +252,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
     if words == "",
       do: "",
       else:
-        ~s|<div class="bp-tdetail__lbl">Dependencies</div><div class="bp-tdetail__deps">#{words}</div>|
+        ~s|<div class="bp-tdetail__lbl">#{Chrome.t("Dependencies")}</div><div class="bp-tdetail__deps">#{words}</div>|
   end
 
   defp detail_rail(t, key, label) do
@@ -276,9 +280,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
         more =
           if extra == [],
             do: "",
-            else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+            else:
+              ~s|<div class="bp-rail__more">#{Chrome.t("… and %{n} more", n: length(extra))}</div>|
 
-        ~s|<div class="bp-tdetail__lbl">#{label} · #{done}/#{length(rows)} done</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
+        ~s|<div class="bp-tdetail__lbl">#{Chrome.t("%{label} · %{done}/%{total} done", label: label, done: done, total: length(rows))}</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
     end
   end
 
@@ -302,9 +307,10 @@ defmodule Barkpark.PortableDoc.Render.Components do
         more =
           if extra == [],
             do: "",
-            else: ~s|<div class="bp-rail__more">… and #{length(extra)} more</div>|
+            else:
+              ~s|<div class="bp-rail__more">#{Chrome.t("… and %{n} more", n: length(extra))}</div>|
 
-        ~s|<div class="bp-tdetail__lbl">Papers</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
+        ~s|<div class="bp-tdetail__lbl">#{Chrome.t("Papers")}</div><div class="bp-tdetail__rail">#{body}#{more}</div>|
     end
   end
 
@@ -603,8 +609,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
     rows =
       StatusVocab.roles()
       |> Enum.map(fn role ->
-        name = role |> StatusVocab.label_for_role() |> escape_html()
-        meaning = StatusVocab.meaning_for_role(role)
+        name = role |> StatusVocab.label_for_role() |> Chrome.t() |> escape_html()
+        meaning = role |> StatusVocab.meaning_for_role() |> Chrome.t()
 
         ~s|<div class="bp-legend__r">#{glyph_html(role)}<span class="bp-legend__n">#{name}</span><span class="bp-legend__d">#{meaning}</span></div>|
       end)
@@ -637,7 +643,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     case rows do
       [] ->
-        ~s|<div class="bp-tasks bp-tasks--empty">No tasks yet.</div>|
+        ~s|<div class="bp-tasks bp-tasks--empty">#{Chrome.t("No tasks yet.")}</div>|
 
       _ ->
         by_role = Enum.group_by(rows, fn r -> r |> get("status") |> stringish() |> role_of() end)
@@ -669,7 +675,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
   # A board column header: the canonical lowercase label sentence-cased at render
   # (the fold — "in progress" → "In progress"), NOT a hand-typed board label.
-  defp board_label(role), do: role |> StatusVocab.label_for_role() |> String.capitalize()
+  defp board_label(role),
+    do: role |> StatusVocab.label_for_role() |> Chrome.t() |> String.capitalize()
 
   defp board_col(_role, _label, []), do: ""
 
@@ -744,7 +751,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
 
     case rows do
       [] ->
-        ~s|<div class="bp-tasks bp-tasks--empty">No roadmap items.</div>|
+        ~s|<div class="bp-tasks bp-tasks--empty">#{Chrome.t("No roadmap items.")}</div>|
 
       _ ->
         span = roadmap_span(block)
@@ -757,7 +764,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
           # the ITEMS through the task-list emitter, because "cannot place them"
           # is not a licence to drop them. The author asked for these rows; only
           # the timeline is unavailable.
-          ~s|<div class="bp-tasks bp-tasks--empty">#{@roadmap_unplaced_copy}</div>| <>
+          ~s|<div class="bp-tasks bp-tasks--empty">#{Chrome.t(@roadmap_unplaced_copy)}</div>| <>
             tasks_html(%{"snapshot" => rows})
         end
     end
@@ -809,7 +816,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
             # no geometry of its own. It draws NO bar: a bar here would be the
             # clamp default (left:0;width:100) sitting under every other lane and
             # reading as "runs the whole span", a claim the row never made.
-            ~s|<span class="bp-rm__unplaced">#{@roadmap_lane_unplaced_copy}</span>|
+            ~s|<span class="bp-rm__unplaced">#{Chrome.t(@roadmap_lane_unplaced_copy)}</span>|
           end
 
         ~s|<div class="#{cls}"><span class="bp-rm__lbl">#{draft_html(r)}#{title}</span><div class="bp-rm__track">#{body}#{today}</div></div>|
@@ -1763,9 +1770,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
       pct = round(done / total * 100)
 
       ~s|<div class="bp-momentum"><div class="bp-momentum__row">| <>
-        ~s|<span class="bp-momentum__i">#{glyph_html("progress")}<b>#{prog}</b> in flight</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--ready">#{glyph_html("ready")}<b>#{ready}</b> ready</span>| <>
-        ~s|<span class="bp-momentum__i bp-g--done">#{glyph_html("done")}<b>#{done}</b> done</span>| <>
+        ~s|<span class="bp-momentum__i">#{glyph_html("progress")}<b>#{prog}</b> #{Chrome.t("in flight")}</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--ready">#{glyph_html("ready")}<b>#{ready}</b> #{Chrome.t("ready")}</span>| <>
+        ~s|<span class="bp-momentum__i bp-g--done">#{glyph_html("done")}<b>#{done}</b> #{Chrome.t("done")}</span>| <>
         ~s|<span class="bp-momentum__grow"></span>| <>
         ~s|<span class="bp-momentum__pct">#{pct}%</span></div>| <>
         ~s|<div class="bp-momentum__track"><span class="bp-momentum__fill" style="width:#{pct}%"></span></div></div>|
@@ -1846,7 +1853,7 @@ defmodule Barkpark.PortableDoc.Render.Components do
       # a spinner role is an empty span whose ::before CSS-animates the Braille frames.
       # role="img" makes it a named image: an aria-label on a role-less span is
       # prohibited and never read (axe aria-prohibited-attr, task-21231dd5be0ca72c).
-      ~s|<span class="bp-g bp-g--#{role}" role="img" aria-label="#{StatusVocab.label_for_role(role)}"></span>|
+      ~s|<span class="bp-g bp-g--#{role}" role="img" aria-label="#{role |> StatusVocab.label_for_role() |> Chrome.t() |> escape_attr()}"></span>|
     else
       ~s|<span class="bp-g bp-g--#{role}">#{glyph_char(role)}</span>|
     end
@@ -1926,7 +1933,9 @@ defmodule Barkpark.PortableDoc.Render.Components do
   # (as the TUI's draftMark rides the title) so no layout slot moves. Twin:
   # `draftHtml` in js/packages/react/src/inline.ts — same bytes.
   defp draft_html(r) do
-    if get(r, "draft") == true, do: ~s|<span class="bp-draft">DRAFT</span> |, else: ""
+    if get(r, "draft") == true,
+      do: ~s|<span class="bp-draft">#{Chrome.t("DRAFT")}</span> |,
+      else: ""
   end
 
   # A pnode's `source` coercion (RATIFIED): boolean `true` → an ORIGIN accent (the
@@ -1953,6 +1962,8 @@ defmodule Barkpark.PortableDoc.Render.Components do
   defp int_or(n, _) when is_integer(n), do: n
   defp int_or(_, d), do: d
 
-  defp plural(1, word), do: word
-  defp plural(_, word), do: word <> "s"
+  # "blocks N task(s)": two whole msgids (no ngettext) so the React mirror keys
+  # the same two strings.
+  defp blocks_words(1), do: Chrome.t("blocks %{n} task", n: 1)
+  defp blocks_words(n), do: Chrome.t("blocks %{n} tasks", n: n)
 end
