@@ -21,11 +21,11 @@
 // it ships from BOTH the client entry (`index.ts`) and the RSC-safe entry
 // (`server.ts`) and drops into a Server Component untouched (charter D2/D3).
 
-import type { Block } from './inline'
+import { type Block, type InlineObjectRenderer, withInlineObjects } from './inline'
 import { renderBlocks } from './blocks/registry'
 import { type ChromeStrings, makeCtx } from './blocks/chrome'
 
-export type { Block, Inline } from './inline'
+export type { Block, Inline, InlineObjectRenderer } from './inline'
 
 export interface PortableDocProps {
   /** The type-keyed PortableDocument block array (Barkpark's block grammar). */
@@ -38,6 +38,12 @@ export interface PortableDocProps {
    * renderer uses for a workspace locale. Omitted, chrome renders in English.
    */
   strings?: ChromeStrings
+  /**
+   * HTML renderers for inline objects (a schema's `blocks.inline` types), keyed
+   * by type. Each gets the stored node and returns HTML it has escaped. A type
+   * without one shows its text in a `bp-inline-object` span.
+   */
+  inlineObjects?: Record<string, InlineObjectRenderer>
 }
 
 /**
@@ -47,10 +53,12 @@ export interface PortableDocProps {
  * produces. Ship `@barkpark/react/paper-surface.css` (or your own copy of
  * `api/assets/paper-surface/paper-surface.css`) to skin it.
  */
-export function PortableDoc({ value, className, strings }: PortableDocProps) {
-  const blocks = Array.isArray(value) ? value : []
+export function PortableDoc({ value, className, strings, inlineObjects }: PortableDocProps) {
   const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'
-  const html = renderBlocks(blocks, makeCtx(strings))
+  const html = renderPortableDocument(value, {
+    ...(strings && { strings }),
+    ...(inlineObjects && { inlineObjects }),
+  })
   return <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
@@ -62,7 +70,9 @@ export function PortableDoc({ value, className, strings }: PortableDocProps) {
  */
 export function renderPortableDocument(
   value: Block[] | null | undefined,
-  options: { strings?: ChromeStrings } = {},
+  options: { strings?: ChromeStrings; inlineObjects?: Record<string, InlineObjectRenderer> } = {},
 ): string {
-  return renderBlocks(Array.isArray(value) ? value : [], makeCtx(options.strings))
+  return withInlineObjects(options.inlineObjects, () =>
+    renderBlocks(Array.isArray(value) ? value : [], makeCtx(options.strings)),
+  )
 }

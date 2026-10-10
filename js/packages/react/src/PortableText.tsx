@@ -33,6 +33,8 @@ export interface PortableTextBlock {
   _type: 'block'
   _key?: string
   style?: string
+  /** Text spans. A child with any other `_type` is an inline object, rendered
+   * via {@link PortableTextComponents}.`types` with `isInline: true`. */
   children: PortableTextSpan[]
   markDefs?: PortableTextMarkDef[]
   listItem?: 'bullet' | 'number'
@@ -58,14 +60,14 @@ export interface PortableTextComponents {
   mark?: Partial<
     Record<string, ComponentType<{ children: ReactNode; value?: unknown; markType: string }>>
   >
-  types?: Partial<Record<string, ComponentType<{ value: CustomBlock }>>>
+  types?: Partial<Record<string, ComponentType<{ value: CustomBlock; isInline?: boolean }>>>
   list?: Partial<Record<'bullet' | 'number', ComponentType<{ children: ReactNode }>>>
   listItem?: Partial<
     Record<'bullet' | 'number', ComponentType<{ children: ReactNode; value: PortableTextBlock }>>
   >
   unknownMark?: ComponentType<{ children: ReactNode; markType: string }>
   unknownBlockStyle?: ComponentType<{ children: ReactNode; value: PortableTextBlock }>
-  unknownType?: ComponentType<{ value: CustomBlock }>
+  unknownType?: ComponentType<{ value: CustomBlock; isInline?: boolean }>
   /**
    * Renders a soft line break — a `\n` inside a span's text. Defaults to a
    * `<br/>` (the Portable Text convention). Pass `false` to keep newlines as
@@ -182,7 +184,12 @@ function renderChildren(
   // omit it (or supply a non-array) — guard so a malformed block renders empty
   // rather than throwing `undefined.map` and taking down the whole render.
   const kids = Array.isArray(block.children) ? block.children : []
-  return kids.map((s, i) => renderSpan(s, block, components, miss, i))
+  return kids.map((s, i) => {
+    const t: unknown = s._type
+    return t && t !== 'span'
+      ? renderType(s as unknown as CustomBlock, components, miss, i, true)
+      : renderSpan(s, block, components, miss, i)
+  })
 }
 
 function renderBlock(
@@ -262,12 +269,14 @@ function renderType(
   components: PortableTextComponents,
   miss: Miss | undefined,
   idx: number,
+  isInline = false,
 ): ReactElement | null {
   const key = node._key ?? String(idx)
   const userC = components.types && components.types[node._type]
-  if (userC) return createElement(userC, { value: node, key })
+  if (userC) return createElement(userC, { value: node, key, isInline })
   if (miss) miss({ _type: node._type })
-  if (components.unknownType) return createElement(components.unknownType, { value: node, key })
+  if (components.unknownType)
+    return createElement(components.unknownType, { value: node, key, isInline })
   return null
 }
 

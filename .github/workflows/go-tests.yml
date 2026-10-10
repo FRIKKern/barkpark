@@ -101,6 +101,9 @@ on:
       # introduced here: internal/pdrender/inline_code_source_parity_test.go
       # reads this fixture, so an edit to it must dispatch the Go suite.
       - "api/test/support/fixtures/inline-code-source.json"
+      # internal/pdrender/inline_object_parity_test.go reads this fixture (one
+      # fixture, three engines — task-85fee859cf3bfef6); an edit must dispatch the Go leg.
+      - "api/test/support/fixtures/inline-object-text.json"
       # internal/pdrender/code_source_alias_parity_test.go reads this fixture
       # (one fixture, three engines — #17684); an edit must dispatch the Go leg.
       - "api/test/support/fixtures/code-source-aliases.json"

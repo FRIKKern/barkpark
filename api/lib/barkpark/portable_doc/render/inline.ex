@@ -306,12 +306,28 @@ defmodule Barkpark.PortableDoc.Render.Inline do
   # reaching the renderer was 500ing the save, the body_html refresh, the
   # delta frames, and the Studio view (block_ops → inline.ex, no rescue
   # anywhere). Children, when present, still render — a D6-style node
-  # dual-writes its visible fallback as a text child; a childless unknown
-  # composes to the empty string, matching Go pdrender's degrade.
-  def compose_inline(%{"type" => _type} = n, inside_link) do
+  # dual-writes its visible fallback as a text child.
+  #
+  # A CHILDLESS node with a string type is an inline object
+  # (task-85fee859cf3bfef6): a schema's `blocks.inline` type, stored flat as
+  # `{type, ...fields}`. It composes to a `PdInlineObject` carrying the node,
+  # so the walker can hand it to a renderer the caller registered under
+  # `:inline_objects`, and otherwise shows `inline_object_text/1` in a span
+  # (an empty one when the node has no text-carrying key).
+  def compose_inline(%{"type" => type} = n, inside_link) do
     case Map.get(n, "children") do
       children when is_list(children) and children != [] ->
         %{"kind" => "PdText", "children" => Enum.map(children, &compose_inline(&1, inside_link))}
+
+      # A block-shaped node (`content` key, e.g. an empty paragraph wrapper)
+      # is not an inline object and keeps composing to "".
+      _ when is_binary(type) and type != "" and not is_map_key(n, "content") ->
+        %{
+          "kind" => "PdInlineObject",
+          "type" => type,
+          "text" => inline_object_text(n),
+          "node" => n
+        }
 
       _ ->
         ""
@@ -358,6 +374,26 @@ defmodule Barkpark.PortableDoc.Render.Inline do
       other -> %{"kind" => "PdText", "children" => [other]}
     end
   end
+
+  @doc """
+  The display text of an inline object without a registered renderer: the
+  first non-empty string among `text`, `title`, `label`, `name` and `value`,
+  else `""`.
+
+  Twins: `inlineObjectText` in `js/packages/react/src/inline.tsx` and
+  `inlineObjectText` in `internal/pdrender/inline.go`. All three are locked to
+  `api/test/support/fixtures/inline-object-text.json`.
+  """
+  def inline_object_text(%{} = n) do
+    Enum.find_value(~w(text title label name value), "", fn key ->
+      case Map.get(n, key) do
+        v when is_binary(v) and v != "" -> v
+        _ -> nil
+      end
+    end)
+  end
+
+  def inline_object_text(_), do: ""
 
   @doc """
   The body of an inline `code` leaf: `value` when it is a non-empty string,

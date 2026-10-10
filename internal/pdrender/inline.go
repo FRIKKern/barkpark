@@ -211,13 +211,40 @@ func (ir InlineRenderer) typed(n map[string]any, ctx RenderCtx, insideLink bool)
 		return ir.theme.Body.Render(ir.valuerefText(n, ctx))
 
 	default:
-		// Unknown inline type → render its children if any, else nothing.
-		// (compose_inline raises here; we degrade gracefully like the block path.)
+		// Unknown inline type → render its children if any. A childless one is
+		// an inline object (a schema's `blocks.inline` type, task-85fee859cf3bfef6):
+		// show its text, else its type name. Twins: inline.ex PdInlineObject and
+		// inline.tsx's default branch.
 		if _, ok := n["children"]; ok {
 			return ir.children(n, ctx, insideLink)
 		}
+		// A block-shaped node ("content" key) is not an inline object.
+		if _, block := n["content"]; block {
+			return ""
+		}
+		if text := inlineObjectText(n); text != "" {
+			return ir.theme.Body.Render(sanitizeText(text))
+		}
+		// No text: show the type name dimmed, so the node is never dropped
+		// silently (the HTML engines emit an empty marked span).
+		if t := attrStr(n, "type"); t != "" {
+			return ir.theme.Dim.Render("[" + sanitizeText(t) + "]")
+		}
 		return ""
 	}
+}
+
+// inlineObjectText is an inline object's display text: the first non-empty
+// string among text, title, label, name, value. Twins: inline_object_text/1
+// in render/inline.ex and inlineObjectText in js/packages/react; all three are
+// locked to api/test/support/fixtures/inline-object-text.json.
+func inlineObjectText(n map[string]any) string {
+	for _, k := range []string{"text", "title", "label", "name", "value"} {
+		if v, ok := n[k].(string); ok && v != "" {
+			return v
+		}
+	}
+	return ""
 }
 
 // children renders an inline node's "children" array in order.

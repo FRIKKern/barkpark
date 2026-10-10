@@ -935,6 +935,12 @@ html[data-theme="dark"] .bp-paper-body {
   color: var(--paper-accent); background: var(--paper-bg-deep); padding: 1px 6px;
   border-radius: 3px; font-size: 0.9em; text-decoration: none; border-bottom: none;
 }
+/* Inline object without a registered renderer (walk.ex inline_object/2): a
+   schema's `blocks.inline` type shown as its text, set off from the prose so a
+   reader sees it is a value, not typed words. */
+.bp-paper-surface .bp-inline-object {
+  background: var(--paper-bg-deep); padding: 0 4px; border-radius: 3px;
+}
 /* Verdict chips (inline `chip` node, walk.ex chip_html/5): a coloured pill in
    one of the five paperCallout tones with a dot that survives grayscale, and an
    optional note as a block beneath. The chip is what a scorecard CELL carries

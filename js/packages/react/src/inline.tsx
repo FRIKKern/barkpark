@@ -137,9 +137,7 @@ export function codeSource(b: Record<string, unknown> | null | undefined): strin
  * Twins: compose.ex `code_source_text/1`, code.go `codeSourceText`. */
 function codeSourceText(v: unknown): string {
   if (Array.isArray(v)) {
-    return v
-      .map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : ''))
-      .join('')
+    return v.map((n) => (typeof n === 'string' ? n : isMap(n) ? textLeafValue(n) : '')).join('')
   }
   return str(v)
 }
@@ -193,6 +191,8 @@ import {
   MANIFEST_STATUS_TO_ROLE,
 } from './status-vocab.gen'
 import type { RenderCtx } from './blocks/chrome'
+import { inlineObjectText } from './inline-object'
+export { inlineObjectText } from './inline-object'
 
 /** The fail-open sentinel (D11): an UNRECOGNIZED non-empty status renders here —
  * a dim neutral glyph, never masquerading as the bright `open` circle. Absent/
@@ -581,10 +581,50 @@ export function renderInline(node: Inline): string {
         resolved: typeof node.resolved === 'string' ? node.resolved : undefined,
       })
     default: {
-      // Unknown inline → degrade to its children when present, else nothing.
+      // Unknown inline → degrade to its children when present. A childless one
+      // is an inline object (a schema's `blocks.inline` type): a registered
+      // renderer draws it, else its text shows in a span. Twin of
+      // inline.ex PdInlineObject + walk.ex inline_object/2.
       const kids = asList(node.children)
-      return kids.length ? renderInlineChildren(kids) : ''
+      // A block-shaped node (`content` key) is not an inline object.
+      if (kids.length || 'content' in node) return renderInlineChildren(kids)
+      const type = str(node.type)
+      const own = inlineObjectRenderers?.[type]
+      if (own) {
+        // A renderer that throws or returns a non-string falls back to the
+        // span, as walk.ex does.
+        try {
+          const html: unknown = own(node)
+          if (typeof html === 'string') return html
+        } catch {
+          /* fall through */
+        }
+      }
+      // Empty span when the node has no text: never dropped silently.
+      return `<span class="bp-inline-object" data-inline-type="${escapeHtml(type)}">${escapeHtml(inlineObjectText(node))}</span>`
     }
+  }
+}
+
+/** Renders one inline object node (`{type, ...fields}`) to an HTML string. The
+ * function owns escaping; `escapeHtml` is exported for it. */
+export type InlineObjectRenderer = (node: Record<string, unknown>) => string
+
+// The renderers registered for the current synchronous render (see
+// withInlineObjects). Module state is safe here: a render never yields.
+let inlineObjectRenderers: Record<string, InlineObjectRenderer> | undefined
+
+/** Run `fn` with `renderers` registered for inline objects, then restore. */
+export function withInlineObjects<T>(
+  renderers: Record<string, InlineObjectRenderer> | undefined,
+  fn: () => T,
+): T {
+  const prev = inlineObjectRenderers
+  inlineObjectRenderers = renderers
+  try {
+    return fn()
+  } finally {
+    inlineObjectRenderers = prev
   }
 }
 
