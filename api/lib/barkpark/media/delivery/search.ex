@@ -152,6 +152,7 @@ defmodule Barkpark.Media.Delivery.Search do
     )
     |> scope_media_to_dataset(dataset, dataset_id)
     |> scope_to_workspace_or_global(workspace_id, project_id)
+    |> maybe_filter_sha1(Keyword.get(opts, :sha1))
     |> maybe_filter_mime(Keyword.get(opts, :mime_type))
     |> maybe_filter_mime(selections["mimeType"])
     |> maybe_filter_text(dataset, opts)
@@ -1177,6 +1178,12 @@ defmodule Barkpark.Media.Delivery.Search do
   end
 
   defp maybe_clamp_visibility(query, _), do: query
+
+  # task-b6e57c37f6928344 — exact content-hash match (`?sha1=`).
+  defp maybe_filter_sha1(query, sha1) when is_binary(sha1),
+    do: where(query, [m], m.sha1 == ^sha1)
+
+  defp maybe_filter_sha1(query, _), do: query
 
   defp maybe_filter_mime(query, nil), do: query
   defp maybe_filter_mime(query, ""), do: query

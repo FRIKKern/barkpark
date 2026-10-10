@@ -37,6 +37,9 @@ defmodule BarkparkWeb.MediaDeleteRefFieldGapTest do
   @ds "mediarefgap"
 
   # 1x1 transparent PNG, inline — mirrors media_delete_where_used_test.exs.
+  # Each upload appends a unique trailer after IEND (still a valid PNG):
+  # the v1 upload door answers repeated bytes with the existing asset
+  # (task-b6e57c37f6928344), and these tests need distinct assets.
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
@@ -239,7 +242,7 @@ defmodule BarkparkWeb.MediaDeleteRefFieldGapTest do
   # uploads into its conn's default dataset, which is NOT `@ds`.
   defp media_file! do
     tmp = Path.join(System.tmp_dir!(), "ref-field-gap-#{System.unique_integer([:positive])}.png")
-    File.write!(tmp, Base.decode64!(@png_b64))
+    File.write!(tmp, Base.decode64!(@png_b64) <> "#{System.unique_integer([:positive])}")
     upload = %Plug.Upload{path: tmp, filename: "cast.png", content_type: "image/png"}
 
     created =

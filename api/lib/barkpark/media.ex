@@ -63,6 +63,12 @@ defmodule Barkpark.Media do
   `Barkpark.Content` write scoping):
     * `:workspace_id` — stamp the owning workspace (nil = unscoped / pre-tenancy).
     * `:project_id`   — stamp the owning project (nil = workspace-wide).
+    * `:dedupe` — when `true`, bytes whose SHA-1 already belongs to a file in
+      the same dataset and workspace return `{:existing, file}` and store
+      nothing (task-b6e57c37f6928344). Off by default: a caller that owns its
+      file's lifecycle (a ticket attachment) must never share one.
+
+  Every new row stores the SHA-1 of its bytes in `sha1`.
   """
   def upload(plug_upload, dataset, opts \\ []),
     do: Door.admit(fn -> admitted_upload(plug_upload, dataset, opts) end)
@@ -123,6 +129,10 @@ defmodule Barkpark.Media do
     # a refused dataset slug no longer writes a blob it must then delete.
     with {:ok, %{size: size}} <- File.stat(temp_path),
          :ok <- validate_upload(mime_type, original_name, size),
+         # task-b6e57c37f6928344 — the SHA-1 of the bytes, in one streamed pass
+         # over the temp file Plug already wrote (64 KiB chunks, bounded
+         # memory), BEFORE any blob is written, so a duplicate stores nothing.
+         {:ok, sha1} <- sha1_file(temp_path),
          # Tenancy scope (workspace_id/project_id) is stamped from `opts` when the
          # caller supplied a resolved scope — mirrors `Barkpark.Content` write
          # scoping so a new blob is owned by the workspace it was uploaded into.
@@ -138,17 +148,24 @@ defmodule Barkpark.Media do
                original_name: original_name,
                mime_type: mime_type,
                size: size,
-               dataset: dataset
+               dataset: dataset,
+               sha1: sha1
              },
              opts
            ) do
-      persist_upload(
-        attrs,
-        blob_key(date_dir, filename, Map.get(attrs, :dataset_id)),
-        temp_path,
-        mime_type,
-        dataset
-      )
+      case Keyword.get(opts, :dedupe, false) && find_duplicate(attrs) do
+        %MediaFile{} = existing ->
+          {:existing, existing}
+
+        _ ->
+          persist_upload(
+            attrs,
+            blob_key(date_dir, filename, Map.get(attrs, :dataset_id)),
+            temp_path,
+            mime_type,
+            dataset
+          )
+      end
     else
       # PART 2 rejects, raised by validate_upload BEFORE any blob is written — the
       # allowlist / size-cap veto. Nothing is persisted, so surface the typed error
@@ -189,6 +206,97 @@ defmodule Barkpark.Media do
   # drift from — which is what makes the dataset prefix safe with no migration:
   # a store that accepts writes it cannot serve requires two variables, and there
   # is only one.
+  @doc """
+  Hash every `media_files` row whose `sha1` is NULL (rows born before the
+  column, task-b6e57c37f6928344). Walks by id in batches, reads each blob
+  through `Blobstore.ensure_local/1` (local disk, or the S3 cache), and writes
+  only `sha1`. A blob that cannot be read is counted and skipped, never fatal.
+  `dry_run: true` counts without reading. Returns
+  `%{hashed: n, missing: n, remaining: n}`.
+  """
+  @spec backfill_sha1(keyword()) :: %{
+          hashed: non_neg_integer(),
+          missing: non_neg_integer(),
+          remaining: non_neg_integer()
+        }
+  def backfill_sha1(opts \\ []) do
+    batch = Keyword.get(opts, :batch, 200)
+
+    if Keyword.get(opts, :dry_run, false) do
+      remaining = Repo.aggregate(from(m in MediaFile, where: is_nil(m.sha1)), :count)
+      %{hashed: 0, missing: 0, remaining: remaining}
+    else
+      backfill_sha1_from(nil, batch, %{hashed: 0, missing: 0, remaining: 0})
+    end
+  end
+
+  defp backfill_sha1_from(after_id, batch, acc) do
+    query = from(m in MediaFile, where: is_nil(m.sha1), order_by: [asc: m.id], limit: ^batch)
+    query = if after_id, do: where(query, [m], m.id > ^after_id), else: query
+
+    case Repo.all(query) do
+      [] ->
+        acc
+
+      files ->
+        acc =
+          Enum.reduce(files, acc, fn file, acc ->
+            with {:ok, local} <- Blobstore.ensure_local(file),
+                 {:ok, sha1} <- sha1_file(local) do
+              {1, _} = Repo.update_all(where(MediaFile, [m], m.id == ^file.id), set: [sha1: sha1])
+              %{acc | hashed: acc.hashed + 1}
+            else
+              _ -> %{acc | missing: acc.missing + 1, remaining: acc.remaining + 1}
+            end
+          end)
+
+        backfill_sha1_from(List.last(files).id, batch, acc)
+    end
+  end
+
+  # The hex SHA-1 of a file, streamed.
+  @doc false
+  @spec sha1_file(Path.t()) :: {:ok, String.t()} | {:error, term()}
+  def sha1_file(path) do
+    hash =
+      path
+      |> File.stream!(65_536)
+      |> Enum.reduce(:crypto.hash_init(:sha), &:crypto.hash_update(&2, &1))
+      |> :crypto.hash_final()
+
+    {:ok, Base.encode16(hash, case: :lower)}
+  rescue
+    e in File.Error -> {:error, e.reason}
+  end
+
+  # An earlier file with the same bytes in the SAME dataset and workspace
+  # (task-b6e57c37f6928344). Never across a workspace: a NULL workspace only
+  # matches a NULL workspace, and a resolved dataset_id is matched exactly (a
+  # pre-tenancy row with no dataset_id matches on the dataset slug instead).
+  # The oldest match wins, so repeats keep answering with one id. Two
+  # concurrent first uploads of the same bytes can both insert: there is no
+  # unique index, by design, because rows born before the column are NULL.
+  defp find_duplicate(%{sha1: sha1} = attrs) when is_binary(sha1) do
+    query =
+      from(m in MediaFile, where: m.sha1 == ^sha1, order_by: [asc: m.inserted_at], limit: 1)
+
+    query =
+      case Map.get(attrs, :dataset_id) do
+        nil -> where(query, [m], is_nil(m.dataset_id) and m.dataset == ^attrs.dataset)
+        dataset_id -> where(query, [m], m.dataset_id == ^dataset_id)
+      end
+
+    query =
+      case Map.get(attrs, :workspace_id) do
+        nil -> where(query, [m], is_nil(m.workspace_id))
+        workspace_id -> where(query, [m], m.workspace_id == ^workspace_id)
+      end
+
+    Repo.one(query)
+  end
+
+  defp find_duplicate(_attrs), do: nil
+
   defp persist_upload(attrs, relative_path, temp_path, mime_type, dataset) do
     # `{:ok, receipt}` — the backend's write ACK plus its post-condition read
     # (see Blobstore.receipt/3). The row's `size` stays the SOURCE size (what the
@@ -395,6 +503,7 @@ defmodule Barkpark.Media do
       |> Keyword.take([
         :limit,
         :offset,
+        :sha1,
         :mime_type,
         :kind,
         :q,

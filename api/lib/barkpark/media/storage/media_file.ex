@@ -20,6 +20,9 @@ defmodule Barkpark.Media.Storage.MediaFile do
 
     field :mime_type, :string
     field :size, :integer
+    # Hex SHA-1 of the stored bytes (task-b6e57c37f6928344). NULL on rows born
+    # before the column until `mix barkpark.media.backfill_sha1` hashes them.
+    field :sha1, :string
     field :dataset, :string, default: "production"
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
@@ -89,7 +92,8 @@ defmodule Barkpark.Media.Storage.MediaFile do
       :dataset,
       :workspace_id,
       :project_id,
-      :dataset_id
+      :dataset_id,
+      :sha1
     ])
     |> validate_required([:filename, :original_name, :path])
     |> neutralize_dangerous_mime()

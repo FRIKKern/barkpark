@@ -9,6 +9,12 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   alias Barkpark.Media
   alias Barkpark.Plugins.Media.Assets
 
+  # Each upload appends a unique trailer after IEND (still a valid PNG):
+
+  # the v1 upload door answers repeated bytes with the existing asset
+
+  # (task-b6e57c37f6928344), and these tests need distinct assets.
+
   @png_b64 "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNgAAIAAAUAAeImBZsAAAAASUVORK5CYII="
 
   setup do
@@ -47,7 +53,7 @@ defmodule BarkparkWeb.Integration.V1MediaCollectionsTest do
   defp authed(conn), do: put_req_header(conn, "authorization", "Bearer barkpark-dev-token")
 
   defp png_upload do
-    png_bin = Base.decode64!(@png_b64)
+    png_bin = Base.decode64!(@png_b64) <> "#{System.unique_integer([:positive])}"
     tmp_path = Path.join(System.tmp_dir!(), "col-#{:rand.uniform(1_000_000)}.png")
     File.write!(tmp_path, png_bin)
 
