@@ -205,6 +205,10 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
     # fixed and clamped to the viewport so a phone can reach it); `_closeMenu/0`
     # removes it. It is never shown inside the panel.
     ".bp-block-menu" => :body_portal,
+    # canvas/inline-object.js `InlineObjectDialog._build/1` builds the inline
+    # object field dialog and `document.body.append(el)`s it before it is shown
+    # (task-85fee859cf3bfef6); `close/1` removes it. Never inside the panel.
+    ".bp-inline-object-dialog" => :body_portal,
     # The canvas owns this notice and appends it to itself. Its viewport/caret
     # coordinates rely on the same panel containing-block ban as the toolbar;
     # it is not a body portal. Scroll/resize dismiss it before its anchor moves.
