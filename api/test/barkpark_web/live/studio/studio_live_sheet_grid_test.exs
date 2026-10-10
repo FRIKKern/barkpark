@@ -2493,6 +2493,31 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
              ~s(aria-pressed="false")
   end
 
+  # task-4feaeae19529df0e: the polite announcements were English literals in
+  # an otherwise Norwegian sheet editor.
+  test "find and remote-edit announcements read in the Studio language", %{conn: conn} do
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    create_sheet!("sg-status-nb", one_tab(%{"A1" => %{"v" => "hei"}, "A2" => %{"v" => "hei"}}))
+    {_view, target, _html} = open!(conn, "sg-status-nb")
+
+    assert render_submit(target, "find-next", %{"q" => "zzz"}) =~ "Ingen treff for «zzz»"
+    # The search starts after the active cell, so the first hit is any of the two.
+    assert render_submit(target, "find-next", %{"q" => "hei"}) =~ ~r/Treff [12] av 2 for «hei»/
+
+    # A remote edit to the viewer's active cell (A1, the mount default).
+    {_view_a, target_a, _} = open!(conn, "sg-status-nb")
+    {view_b, _target_b, _} = open!(Phoenix.ConnTest.build_conn(), "sg-status-nb")
+    render_hook(target_a, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target_a, "edit-commit", %{"value" => "7", "move" => "none"})
+    assert status_of(view_b) =~ "A1 endret til 7"
+    refute status_of(view_b) =~ "changed to"
+
+    render_hook(target_a, "edit-commit", %{"value" => "", "move" => "none"})
+    assert status_of(view_b) =~ "A1 tømt"
+  end
+
   test "a remote change to THIS viewer's active cell is announced politely; own echoes stay silent",
        %{conn: conn} do
     create_sheet!("sg-remote-announce", one_tab(%{}))
