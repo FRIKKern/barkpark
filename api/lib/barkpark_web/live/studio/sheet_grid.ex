@@ -2560,7 +2560,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           assign(socket,
             find_query: query,
             find_hits: hits,
-            status: ~s(No matches for "#{query}")
+            status: gettext(~s(No matches for "%{query}"), query: query)
           )
 
         pos ->
@@ -2569,7 +2569,14 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           socket
           |> assign(find_query: query, find_hits: hits)
           |> jump_to(pos)
-          |> assign(status: ~s(Match #{idx} of #{length(ordered)} for "#{query}"))
+          |> assign(
+            status:
+              gettext(~s(Match %{n} of %{count} for "%{query}"),
+                n: idx,
+                count: length(ordered),
+                query: query
+              )
+          )
       end
     end
   end
@@ -2630,8 +2637,13 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
     if tab == socket.assigns.tab and Map.has_key?(changed, ref) and not own? do
       case Map.get(changed, ref) do
-        nil -> assign(socket, status: "#{ref} cleared")
-        cell -> assign(socket, status: "#{ref} changed to #{Cells.display(cell)}")
+        nil ->
+          assign(socket, status: gettext("%{ref} cleared", ref: ref))
+
+        cell ->
+          assign(socket,
+            status: gettext("%{ref} changed to %{value}", ref: ref, value: Cells.display(cell))
+          )
       end
     else
       socket
