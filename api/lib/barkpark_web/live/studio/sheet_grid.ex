@@ -757,9 +757,18 @@ defmodule BarkparkWeb.Studio.SheetGrid do
     {:noreply, assign(socket, find_open: true)}
   end
 
+  # Closing find (Escape in the input, or ×) hands focus back to the grid once
+  # the patch lands; before, it fell to <body> (task-3e4466ab621e25fe).
   def handle_event("find-close", _params, socket) do
+    grid_id =
+      if socket.assigns.editable,
+        do: "#{socket.assigns.id}-grid",
+        else: "#{socket.assigns.id}-grid-view"
+
     {:noreply,
-     assign(socket, find_open: false, find_query: "", find_hits: MapSet.new(), status: "")}
+     socket
+     |> assign(find_open: false, find_query: "", find_hits: MapSet.new(), status: "")
+     |> push_event("bp:sheet-focus-grid", %{id: grid_id})}
   end
 
   def handle_event("find-next", %{"q" => q}, socket) when is_binary(q) do
@@ -3559,6 +3568,10 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             back; both are plain phx events, so find works without the JS hook.
             View mode's missing find bar is a pre-existing gap this slice does
             not widen: it keys on write capability, not on @editable. --%>
+      <%!-- Opened by find-open (Ctrl+F from the grid), the input takes focus as
+            it mounts; before, focus fell to <body> (task-3e4466ab621e25fe). The
+            always-shown bar of a viewer without write capability mounts with
+            @find_open false, so it never steals focus on page load. --%>
       <div
         :if={@find_open or not @write_capable}
         class="sheet-find"
@@ -3576,6 +3589,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             placeholder={gettext("Find in sheet")}
             aria-label={gettext("Find in sheet")}
             data-test-id="sheet-find-input"
+            phx-mounted={@find_open && Phoenix.LiveView.JS.focus()}
           />
           <button
             type="submit"
