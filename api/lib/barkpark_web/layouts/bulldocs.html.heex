@@ -2348,7 +2348,9 @@
   </div>
   <%!-- CSP layer-2: every control is bound via addEventListener in the nonced
         IIFEs below, never through an inline onclick. --%>
-  <div class="bp-view-controls" role="group" aria-label={gettext("Paper view controls")}>
+  <%!-- A named region, not a group: outside main/aside a group is in no
+        landmark at all (axe region; task-b46266af433288e3). --%>
+  <div class="bp-view-controls" role="region" aria-label={gettext("Paper view controls")}>
     <button
       type="button"
       class="bp-view-toggle"

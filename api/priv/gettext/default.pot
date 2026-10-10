@@ -11836,3 +11836,8 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Row / column"
 msgstr ""
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal path graph"
+msgstr ""

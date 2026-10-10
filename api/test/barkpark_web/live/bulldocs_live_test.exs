@@ -827,6 +827,16 @@ defmodule BarkparkWeb.BulldocsLiveTest do
       paper
     end
 
+    # task-b46266af433288e3: the graph's <pre> scrolls sideways when wide but
+    # could not take focus (axe scrollable-region-focusable).
+    test "the goal-path graph is keyboard-focusable and named", %{conn: conn} do
+      seed_rail_paper()
+      {:ok, _view, html} = live(conn, "/papers/#{@rail_slug}")
+
+      assert html =~
+               ~r/<pre class="mermaid" tabindex="0" role="group" aria-label="Goal path graph">/
+    end
+
     test "renders the rail with a linear gitGraph commit per event", %{conn: conn} do
       seed_rail_paper()
 
