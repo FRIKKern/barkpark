@@ -46,6 +46,7 @@ ssh root@<IP> "DOMAIN=myapp.example.com BARKPARK_SEED_PROFILE=clean bash /root/d
 
 - `DOMAIN` is the **public hostname, never an IP** — Phoenix whitelists exactly one host+scheme; an IP here makes the Studio websocket 403 (`docs/ops/studio-nav-bug-2026-04-19.md`).
 - `BARKPARK_SEED_PROFILE=clean` seeds papers + media (not the demo dataset) **and mints an admin token**, printed once at the end.
+- `BARKPARK_AUTHORING_WALL` (optional) — the publish wall: a paper or task must carry a description and 1–12 registered, weighted tags, and near-duplicate titles are refused. A server install keeps it **on** when this is unset; set `BARKPARK_AUTHORING_WALL=off` to publish with only a title. `/status.json` reports it as `authoring_wall`. `@barkpark/engine` runs with it off.
 
 `deploy.sh` installs Postgres, Erlang/Elixir, Go, builds Barkpark, generates all required secrets (`SECRET_KEY_BASE`, `BARKPARK_CLOAK_KEY`, `PREVIEW_JWT_SECRET`, `BARKPARK_KEK`), starts the systemd service, and — for an `https` hostname on a fresh box — installs **Caddy**, which auto-issues a Let's Encrypt cert the moment your DNS resolves. It never touches an existing Caddy install, so prod is safe.
 

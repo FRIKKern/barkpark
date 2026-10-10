@@ -153,6 +153,16 @@ if config_env() == :prod do
          System.get_env("BARKPARK_PUBLIC_DEMO_STUDIO") in ["1", "true"]
 end
 
+# The publish wall is ON for every prod node unless the installing door
+# declares it off with a falsy BARKPARK_AUTHORING_WALL (task-8edd8e147c648a36):
+# guerrilla, the control plane's boxes and compose installs keep it;
+# @barkpark/engine passes BARKPARK_AUTHORING_WALL=off.
+if config_env() == :prod do
+  config :barkpark,
+         :authoring_wall,
+         System.get_env("BARKPARK_AUTHORING_WALL") not in ["0", "false", "no", "off"]
+end
+
 # staging-barkpark identity tag: BARKPARK_ENV names WHICH instance this is
 # ("staging", "prod", …) so the Studio chrome renders an unmissable banner.
 # This is an IDENTITY label, NOT MIX_ENV — a prod-compiled release runs on the

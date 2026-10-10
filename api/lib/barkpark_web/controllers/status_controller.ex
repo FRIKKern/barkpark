@@ -55,6 +55,10 @@ defmodule BarkparkWeb.StatusController do
       # cloud | solo | app as the installing door declared it (BARKPARK_SHAPE,
       # `Barkpark.Shape`); null when no door declared one. Never guessed.
       shape: health.shape,
+      # Whether this install runs the publish wall (label spine, tag registry,
+      # dedup) — `Barkpark.Content.AuthoringWall.enabled?/0`, task-8edd8e147c648a36.
+      # On for guerrilla and every provisioned box; off on @barkpark/engine.
+      authoring_wall: health.authoring_wall,
       # Inventory of this node. DISCLOSURE (task-fe88bf2ed4df476d): anonymous
       # callers could NOT read which plugins are enabled before this field —
       # anonymous /v1/capabilities projects every plugin-sourced command and

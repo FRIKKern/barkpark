@@ -216,7 +216,7 @@ class Engine {
       // so media URLs came back as http://127.0.0.1/media/... and could not be fetched.
       PORT: String(this.port), PHX_PORT: String(this.port), PHX_HOST: '127.0.0.1', PHX_SCHEME: 'http',
       RELEASE_DISTRIBUTION: 'none', RELEASE_TMP: path.join(this.dataDir, 'tmp'), ERL_CRASH_DUMP: path.join(this.logDir, 'erl_crash.dump'),
-      BARKPARK_SHAPE: 'app', BARKPARK_HTTP_IP: '127.0.0.1', BARKPARK_TMUX_CONSOLE: '0', BARKPARK_CLAUDE_CHAT: '0',
+      BARKPARK_SHAPE: 'app', BARKPARK_AUTHORING_WALL: 'off', BARKPARK_HTTP_IP: '127.0.0.1', BARKPARK_TMUX_CONSOLE: '0', BARKPARK_CLAUDE_CHAT: '0',
       ...(this.options.plugins ? { BARKPARK_PLUGINS: this.options.plugins.join(',') } : {}),
       BARKPARK_MEDIA_DIR: path.join(this.dataDir, 'media'), BARKPARK_INDX_STATE_DIR: path.join(this.dataDir, 'indx'),
       BARKPARK_BUNDLE_SPILL_DIR: path.join(this.dataDir, 'bundles'),
