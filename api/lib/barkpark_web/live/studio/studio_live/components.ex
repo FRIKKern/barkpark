@@ -1585,21 +1585,6 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               aria-label={gettext("Clear search")}
               data-test-id="desk-search-clear"
             ><.icon name="x" size={14} /></button>
-            <%!-- The one live region for the search, present from mount: a
-                  region that arrives already holding its text is often not
-                  read, which is how "no match" went silent
-                  (task-b78dddf5135d8bbf). Every state's message lands here;
-                  the visible notices below are not live regions. The id keeps
-                  the DOM patch updating this node in place when the clear
-                  button appears before it; matched by position, it was
-                  replaced. --%>
-            <div
-              id="desk-search-status"
-              class="sr-only"
-              role="status"
-              data-test-id="desk-search-count"
-            ><%= desk_search_status(@desk_search, @desk_search_hits)
-            %></div>
           </div>
 
           <div
@@ -1607,6 +1592,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             class="pane-body"
             data-test-id="desk-search-results"
           >
+            <%!-- The search's one live region (task-0ad7fed4370a5978,
+                  task-b78dddf5135d8bbf). Every state's message lands here, so
+                  "no match" after hits is a text change in place, which is read;
+                  it used to be a new role=status node arriving already filled,
+                  which often is not. The visible notices below are not live
+                  regions. It lives in the results block, not the search box,
+                  so a settled desk ships no second empty announcer beside
+                  #bp-press-answer (press_answer_region_guard_test). The id keeps
+                  the DOM patch updating this node in place. --%>
+            <div
+              id="desk-search-status"
+              class="sr-only"
+              role="status"
+              data-test-id="desk-search-count"
+            ><%= desk_search_status(@desk_search, @desk_search_hits) %></div>
             <%= if String.length(String.trim(@desk_search)) < 2 do %>
               <div class="bp-pane-notice" data-test-id="desk-search-too-short">
                 <%= gettext("Type at least 2 characters") %>

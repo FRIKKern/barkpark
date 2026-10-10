@@ -212,24 +212,21 @@ defmodule BarkparkWeb.Studio.DeskSearchTest do
   end
 
   # task-0ad7fed4370a5978: the hits were silent to a screen reader.
-  # task-b78dddf5135d8bbf: so were "type more" and "no match" — each arrived as a
-  # NEW status element already holding its text, which a screen reader often
-  # skips. One region is on the desk from mount and every state's message lands
-  # in it; the visible notices are not live regions, so nothing is read twice.
-  test "one status region, present before any typing, announces every search state", %{
+  # task-b78dddf5135d8bbf: so was "no match" — after hits, it arrived as a NEW
+  # status element already holding its text, which a screen reader often skips.
+  # The one region now carries every state's message, so each change is a text
+  # change in place; the visible notices are not live regions, so nothing is
+  # read twice. A settled desk ships no search region at all: the page's one
+  # load-armed announcer is #bp-press-answer (press_answer_region_guard_test).
+  test "one status region carries every search state, and the settled desk has none", %{
     conn: conn,
     ws: ws,
     proj: proj
   } do
     {view, html} = desk(conn, ws, proj)
-    count = ~s([data-test-id="desk-search-count"][role="status"])
+    count = ~s(#desk-search-status[data-test-id="desk-search-count"][role="status"])
 
-    assert has_element?(view, count), "the region must exist before the first keystroke"
-    # Keyed by id, so the DOM patch updates it in place instead of swapping in a
-    # new, already-filled region when the clear button appears before it.
-    assert has_element?(view, ~s(#desk-search-status[role="status"]))
-    assert html |> status_regions() |> length() == 1
-    assert render(view |> element(count)) =~ ~r/>\s*<\/div>/
+    assert status_regions(html) == []
 
     html = type_in(view, "N")
     assert view |> element(count) |> render() =~ "Type at least 2 characters"
