@@ -92,12 +92,27 @@ defmodule Barkpark.Tasks.Validation do
   assumed: of 36,287 criteria entries across 8,736 live task rows (2026-09-07),
   362 omit `evidence` outright and 40 omit `met`. A predicate that refused
   those would be a far worse bug than the one it closes. Unknown extra keys are
-  left alone; this rule owns the three it names.
+  REFUSED against the declared set `criterion_keys/0` (see below).
 
   The message NAMES THE KEYS IT RECEIVED. The whole failure mode is a filer who
   typed `text` where the contract says `criterion` and got a clean 200 back;
   echoing the keys is what turns the refusal into a fix.
   """
+  # pds-bl-stray-keys-on-acceptance-criteria (lead ruling 2026-10-10): the
+  # declared key set of an acceptance_criteria entry. Derived from the code
+  # that reads and writes entries, not from a guess — `criterion`/`met`/
+  # `evidence` (this rule), `attempts`, `withdrawals`, `amendments`
+  # (`Tasks.Internal` stamp --miss / --withdraw / --amend), `discharge_marks`
+  # (`Tasks.Discharge`), `ack_gate` (stamp --ack_gate), `merge_gate`
+  # (`Tasks.Close` autostamp), `merge_discharges` (`Tasks.Landed.merge_discharges?/1`,
+  # the author's explicit merge veto), and `weight` (declared by ruling; 89 live
+  # entries carry it, no reader yet). Before this, nothing checked the key
+  # set: `text` shadowed `criterion`, `index` looked authoritative, and one
+  # `" met": false` (a leading space) sat beside `met: true` on a live row.
+  # Any other key is REFUSED, naming the key and this set, so a writer fixes
+  # its write in one try. A new declared key is added HERE, with its reader.
+  @criterion_keys ~w(criterion met evidence attempts merge_gate merge_discharges withdrawals amendments discharge_marks ack_gate weight)
+
   # @canonical capability:task-acceptance-criteria-shape aka:criterion,met,evidence,is_map,unstampable doc:docs/setup/TASK-SYSTEM.md
   @spec criteria_violation(list()) :: nil | String.t()
   def criteria_violation(list) when is_list(list) do
@@ -125,6 +140,12 @@ defmodule Barkpark.Tasks.Validation do
           "(#{inspect(Map.get(entry, "evidence", Map.get(entry, :evidence)))}). " <>
           "`evidence` is a string, null, or absent."
 
+      (unknown = unknown_keys(entry)) != [] ->
+        "criterion #{index} carries #{key_list(unknown)}, which no task reader declares. " <>
+          "Allowed keys on an acceptance_criteria entry: #{Enum.join(@criterion_keys, ", ")}. " <>
+          "Drop the key, or put the text where it belongs (a note goes in `attempts` via " <>
+          "`bp task stamp --miss --note`, an amendment via `bp task stamp --amend`)."
+
       true ->
         nil
     end
@@ -135,6 +156,21 @@ defmodule Barkpark.Tasks.Validation do
       "entries are objects with a `criterion` string (plus optional boolean `met` and " <>
       "string `evidence`)."
   end
+
+  @doc "The declared keys of an acceptance_criteria entry."
+  @spec criterion_keys() :: [String.t()]
+  def criterion_keys, do: @criterion_keys
+
+  defp unknown_keys(entry) do
+    entry
+    |> Map.keys()
+    |> Enum.map(&to_string/1)
+    |> Enum.reject(&(&1 in @criterion_keys))
+    |> Enum.sort()
+  end
+
+  defp key_list([one]), do: "the unknown key #{inspect(one)}"
+  defp key_list(many), do: "the unknown keys #{Enum.map_join(many, ", ", &inspect/1)}"
 
   # `Map.fetch` twice rather than `Map.get(e, "k") || Map.get(e, :k)`: a
   # legitimately-present `false` on `met` must NOT read as absent, which is the
