@@ -8,6 +8,8 @@
 //     beside it is a carry (End, Mod+ArrowRight; Home, Mod+ArrowLeft mirrored);
 //   * typing over a NodeSelected carry never removes it: the text goes into a new
 //     paragraph after the block;
+//   * a paste or an IME composition over a NodeSelected carry lands in a new
+//     paragraph after it the same way (Backspace/Delete stay a deliberate delete);
 //   * plain ArrowRight still reaches the carry (control).
 // Run: node src/canvas/__carry_caret_keys_mounted.test.mjs
 import assert from "node:assert/strict";
@@ -73,7 +75,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0, 6).join(" | ")}`);
   }
 }
-const EXPECTED = 8;
+const EXPECTED = 11;
 
 // ProseMirror's own arrow handling reads keyCode; Tiptap's "Mod" is Meta on a Mac.
 const MAC = /Mac|iP(hone|[oa]d)/.test(navigator.platform);
@@ -104,6 +106,12 @@ const caretAt = (pos) => editor.view.dispatch(editor.state.tr.setSelection(TextS
 const ids = () => { const out = []; editor.state.doc.forEach((n) => out.push(n.attrs.bpId || n.type.name)); return out; };
 const isCarrySelected = () => editor.state.selection instanceof NodeSelection && editor.state.selection.node.attrs.bpId === "co26";
 // The input path ProseMirror takes for a typed character.
+// Each data-loss check starts from the reported body, so one red cannot feed the next.
+async function reset() {
+  canvas.applyServerBlocksIfIdle(JSON.parse(JSON.stringify(BLOCKS)));
+  await tick(50);
+  assert.deepEqual(ids(), ["h26", "p26", "co26", "p27"], "reset to the reported body");
+}
 function type(text) {
   const { view } = editor;
   for (const char of text) {
@@ -151,6 +159,7 @@ try {
   });
 
   await check("typing over the selected callout keeps it: the batch has no remove-block, the text lands in a new paragraph after it", async () => {
+    await reset();
     editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, posOf("co26"))));
     ops.length = 0;
     type(" AAA");
@@ -165,6 +174,50 @@ try {
     assert.equal(next.type.name, "paragraph");
     assert.equal(next.textContent, " AAA");
     assert.deepEqual(order.filter((id) => ["h26", "p26", "co26", "p27"].includes(id)), ["h26", "p26", "co26", "p27"], "nothing moved");
+  });
+
+  const selectCarry = () => editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, posOf("co26"))));
+  const afterCarry = () => editor.state.doc.child(ids().indexOf("co26") + 1);
+  const removes = () => ops.filter((op) => op.op === "remove-block");
+
+  for (const [label, clip] of [
+    ["plain text", { text: "Pasted plain" }],
+    ["HTML", { html: "<p>Pasted <strong>rich</strong></p>", text: "Pasted rich" }],
+  ]) {
+    await check(`a ${label} paste over the selected callout keeps it and lands in a new paragraph after it`, async () => {
+      await reset();
+      selectCarry();
+      ops.length = 0;
+      const event = new Event("paste", { bubbles: true, cancelable: true });
+      Object.defineProperty(event, "clipboardData", { value: { types: clip.html ? ["text/html", "text/plain"] : ["text/plain"], getData: (t) => (t === "text/html" ? clip.html || "" : t === "text/plain" ? clip.text : ""), files: [] } });
+      editor.view.dom.dispatchEvent(event);
+      await tick(20);
+      canvas.flushPendingChanges();
+      await tick(20);
+      assert.ok(ops.length > 0, "the paste emitted ops");
+      assert.deepEqual(removes(), [], JSON.stringify(ops));
+      assert.ok(ids().includes("co26"), `the callout is gone: ${JSON.stringify(ids())}`);
+      assert.equal(afterCarry().textContent, clip.text);
+    });
+  }
+
+  await check("an IME composition over the selected callout starts in a new paragraph after it and keeps it", async () => {
+    await reset();
+    selectCarry();
+    ops.length = 0;
+    editor.view.dom.dispatchEvent(new window.CompositionEvent("compositionstart", { bubbles: true, data: "" }));
+    assert.ok(ids().includes("co26"), `the composition start removed the callout: ${JSON.stringify(ids())}`);
+    assert.ok(!(editor.state.selection instanceof NodeSelection), "the composition would replace the callout");
+    assert.equal(editor.state.selection.$head.parent.type.name, "paragraph");
+    assert.equal(afterCarry().textContent, "", "the composition starts in an empty paragraph after the callout");
+    // The committed composition, as ProseMirror reads it back.
+    editor.view.dispatch(editor.state.tr.insertText("\u3042"));
+    editor.view.dom.dispatchEvent(new window.CompositionEvent("compositionend", { bubbles: true, data: "\u3042" }));
+    canvas.flushPendingChanges();
+    await tick(20);
+    assert.deepEqual(removes(), [], JSON.stringify(ops));
+    assert.ok(ids().includes("co26"));
+    assert.equal(afterCarry().textContent, "\u3042");
   });
 } catch (e) {
   failures += 1;

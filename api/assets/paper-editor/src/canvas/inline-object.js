@@ -545,6 +545,27 @@ function safeCoords(view, pos) {
   }
 }
 
+// The carried block the selection holds as a NodeSelection, or null.
+export function selectedCarry(state) {
+  const sel = state.selection;
+  return sel instanceof NodeSelection && sel.node.type.name === BLOCK ? sel.node : null;
+}
+
+// A transaction that opens an empty paragraph after the NodeSelected carry and
+// puts the caret in it, so typing, a paste or a composition lands there instead of
+// replacing the block (task-0075081d540d1390). Null when no paragraph fits there.
+export function paragraphAfterSelectedCarry(state) {
+  const paragraph = state.schema.nodes.paragraph;
+  if (!selectedCarry(state) || !paragraph) return null;
+  const at = state.selection.to;
+  try {
+    const tr = state.tr.insert(at, paragraph.create());
+    return tr.setSelection(TextSelection.create(tr.doc, at + 1));
+  } catch (_e) {
+    return null;
+  }
+}
+
 // True (the key is consumed, the caret stays) when the caret is collapsed at the
 // `dir` edge of its textblock and the next block that way is a carried block.
 function keepCaretBesideCarry(editor, dir) {
@@ -622,16 +643,19 @@ export function inlineObjects(host) {
             // Typing over a selected carried block never replaces it: the text
             // goes into a new paragraph after the block (task-0075081d540d1390).
             handleTextInput(view, _from, _to, text) {
-              const sel = view.state.selection;
-              if (!(sel instanceof NodeSelection) || sel.node.type.name !== BLOCK) return false;
-              const paragraph = view.state.schema.nodes.paragraph;
-              if (!paragraph || !text) return false;
-              const at = sel.to;
-              try {
-                const tr = view.state.tr.insert(at, paragraph.create(null, view.state.schema.text(text)));
-                view.dispatch(tr.setSelection(TextSelection.create(tr.doc, at + 1 + text.length)).scrollIntoView());
-              } catch (_e) { /* no paragraph fits here: drop the keystroke, keep the block */ }
+              if (!selectedCarry(view.state) || !text) return false;
+              const tr = paragraphAfterSelectedCarry(view.state);
+              if (tr) view.dispatch(tr.insertText(text).scrollIntoView());
               return true;
+            },
+            // An IME composition starts in that new paragraph too; ProseMirror
+            // then composes into it as usual.
+            handleDOMEvents: {
+              compositionstart(view) {
+                const tr = selectedCarry(view.state) && paragraphAfterSelectedCarry(view.state);
+                if (tr) view.dispatch(tr.scrollIntoView());
+                return false;
+              },
             },
             handleDoubleClickOn(view, pos, node, nodePos) {
               if (node.type.name !== ATOM || !host._editable) return false;
