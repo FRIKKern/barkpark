@@ -142,6 +142,26 @@ defmodule BarkparkWeb.Plugs.RateLimit do
     {:presence_focus, per_minute, key}
   end
 
+  @doc false
+  # Gate B's seam (`BarkparkWeb.LiveMeter`, charter D4): the /live socket meter
+  # reads the SAME kill switch, per-minute budget and bucket shape as this
+  # plug's `:browser` class, so the two gates cannot drift apart. `:skip` when
+  # the class is switched off.
+  @spec browser_budget() :: :skip | {pos_integer(), keyword()}
+  def browser_budget do
+    cfg = Application.get_env(:barkpark, :rate_limits, [])
+
+    if browser_enabled?(cfg) do
+      per_minute = browser_per_minute(cfg)
+      {per_minute, bucket_opts(per_minute)}
+    else
+      :skip
+    end
+  end
+
+  @doc false
+  def shadow_event, do: @shadow_event
+
   defp browser_plan(conn) do
     cfg = Application.get_env(:barkpark, :rate_limits, [])
 

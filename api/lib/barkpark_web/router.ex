@@ -1920,7 +1920,11 @@ defmodule BarkparkWeb.Router do
   scope "/", BarkparkWeb do
     pipe_through([:browser, :paper_reader_csp])
 
-    live_session :finder, root_layout: {BarkparkWeb.Layouts, :bulldocs} do
+    # LiveMeter: the socket half of the :browser meter (charter D4 Gate B),
+    # shadow-only — hooked here so finder_live.ex itself is untouched.
+    live_session :finder,
+      root_layout: {BarkparkWeb.Layouts, :bulldocs},
+      on_mount: [{BarkparkWeb.LiveMeter, :public}] do
       live("/finder", FinderLive, :index)
     end
   end
