@@ -1713,13 +1713,13 @@ defmodule PDS.Census do
     %{
       key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
             "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
-      basis_spans: [{219, 244}],
+      basis_spans: [{227, 252}],
       basis_token: "no failure reaches this receipt",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis:
-        "the in-code ruling at :219-244, added by #18899 — the `media` surface twin of the " <>
-          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :236.",
+        "the in-code ruling at :227-252, added by #18899 — the `media` surface twin of the " <>
+          "search_controller row above, token `NO FAILURE REACHES THIS RECEIPT` on :245.",
       why:
         "the arm fires and this row withholds the finding, for the reason its twin states: " <>
           "same split, same @spec'd delete, same 404 beside the receipt. TWO ROWS, NOT ONE " <>
