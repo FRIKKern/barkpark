@@ -887,7 +887,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
                 <% end %>
               <% end %>
               <div class="editor-actions">
-                <span class="save-status" role="status" aria-live="polite"><%= @save_status %></span>
+                <span class="save-status" role="status" aria-live="polite"><%= BarkparkWeb.Studio.SaveStatus.label(@save_status) %></span>
                 <%!-- Gyldendal parity E1.6 — the publish bar's warning count:
                       Sanity's warning-level validation nags here and never
                       blocks; the fields carry the wording inline. --%>
