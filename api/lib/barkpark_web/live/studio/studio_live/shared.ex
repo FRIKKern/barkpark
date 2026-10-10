@@ -510,7 +510,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
     type = socket.assigns[:editor_type]
 
     cond do
-      Paper.write_denied?(socket) ->
+      # A read seat may still edit what its type's `readerWrites` opens to
+      # it (task-97702b326b8bfd6d): the same rule the event gate applied.
+      Paper.write_denied?(socket) and
+          not Caps.reader_write_allowed?("autosave", %{"doc" => params}, socket.assigns) ->
         Paper.refuse_write_denied(socket)
 
       Paper.grant_target_denied?(socket, type, doc_id) ->

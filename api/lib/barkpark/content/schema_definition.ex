@@ -67,6 +67,10 @@ defmodule Barkpark.Content.SchemaDefinition do
     #                 flat `initial_values`. See `default_prefill/1`.
     field :layout, {:array, :map}, default: []
     field :prefill, :map, default: %{}
+    # Which writes a READ seat may make on this type (task-97702b326b8bfd6d):
+    # `%{"create" => bool, "patchFields" => [field]}`; nil = none.
+    # Enforced by `Barkpark.Content.ReaderWrites`.
+    field :reader_writes, :map
 
     belongs_to :workspace, Barkpark.Tenancy.Workspace, type: :binary_id
     belongs_to :project, Barkpark.Tenancy.Project, type: :binary_id
@@ -84,7 +88,7 @@ defmodule Barkpark.Content.SchemaDefinition do
 
   def changeset(schema_def, attrs) do
     schema_def
-    |> cast(attrs, [
+    |> cast(alias_reader_writes(attrs), [
       :name,
       :title,
       :icon,
@@ -104,6 +108,7 @@ defmodule Barkpark.Content.SchemaDefinition do
       :cross_validations,
       :layout,
       :prefill,
+      :reader_writes,
       :workspace_id,
       :project_id,
       :dataset_id
@@ -118,6 +123,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_desk_block()
     |> validate_desk_views()
     |> validate_desk_editor()
+    |> validate_reader_writes()
     # W2 uniqueness flip: schema identity is now (name, dataset_id) — a project
     # can hold the same schema NAME in distinct datasets (e.g. "post" in
     # production + test), so the dataset_id leaf keeps them from colliding. The
@@ -1271,5 +1277,44 @@ defmodule Barkpark.Content.SchemaDefinition do
       {k, v} when is_atom(k) -> {Atom.to_string(k), v}
       {k, v} -> {k, v}
     end)
+  end
+
+  # `readerWrites` (the spelling the ruling and the GET echo use) is accepted
+  # as an alias of the stored `reader_writes`.
+  defp alias_reader_writes(%{"readerWrites" => rw} = attrs)
+       when not is_map_key(attrs, "reader_writes"),
+       do: Map.put(attrs, "reader_writes", rw)
+
+  defp alias_reader_writes(attrs), do: attrs
+
+  # `reader_writes` is an authorization grant, so its shape is strict: only the
+  # two known keys, a boolean `create`, and a list of field names.
+  defp validate_reader_writes(changeset) do
+    case get_change(changeset, :reader_writes) do
+      nil ->
+        changeset
+
+      rw when is_map(rw) ->
+        keys = rw |> Map.keys() |> Enum.map(&to_string/1)
+        create = Map.get(rw, "create", Map.get(rw, :create, false))
+        fields = Map.get(rw, "patchFields", Map.get(rw, :patchFields, []))
+
+        cond do
+          keys -- ["create", "patchFields"] != [] ->
+            add_error(changeset, :reader_writes, "only `create` and `patchFields` are allowed")
+
+          not is_boolean(create) ->
+            add_error(changeset, :reader_writes, "`create` must be true or false")
+
+          not (is_list(fields) and Enum.all?(fields, &(is_binary(&1) and &1 != ""))) ->
+            add_error(changeset, :reader_writes, "`patchFields` must be a list of field names")
+
+          true ->
+            put_change(changeset, :reader_writes, %{"create" => create, "patchFields" => fields})
+        end
+
+      _ ->
+        add_error(changeset, :reader_writes, "must be an object")
+    end
   end
 end
