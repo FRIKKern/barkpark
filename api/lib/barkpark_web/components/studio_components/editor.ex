@@ -275,7 +275,12 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def unresolved_document_notice(%{reason: :nothing_selected} = assigns) do
     ~H"""
-    <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected">
+    <%!-- With no document open this is the page's main region and carries its
+          one heading, as the open editor panel does (task-6e6de3764438c5cf).
+          It renders beside the pane columns, never inside one, so no landmark
+          nests. --%>
+    <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected" role="main">
+      <h1 class="sr-only"><%= gettext("Studio") %></h1>
       <div style="color: var(--fg-dim); text-align: center;">
         <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
         <div class="text-sm"><%= gettext("No document is open. Pick one from the list to start editing.") %></div>
