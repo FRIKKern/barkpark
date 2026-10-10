@@ -2567,6 +2567,41 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
   # The polite live region's current text. The delta rides PubSub → the host
   # LiveView's mailbox; `render/1` flushes it, but give the async hop a
   # bounded retry window rather than a sleep.
+  # task-49f187aeb423153b: an error cell said only its code. The commit is
+  # announced with what the code means, a remote viewer hears it too, and the
+  # cell carries it as its title, in the Studio language.
+  test "an error cell says what its code means, to the editor, a remote viewer and on hover",
+       %{conn: conn} do
+    create_sheet!("sg-error-explain", one_tab(%{}))
+    {view_a, target_a, _} = open!(conn, "sg-error-explain")
+    {view_b, _target_b, _} = open!(Phoenix.ConnTest.build_conn(), "sg-error-explain")
+
+    render_hook(target_a, "cell-click", %{"ref" => "A1", "shift" => false})
+    render_hook(target_a, "edit-commit", %{"value" => "=1/0", "move" => "none"})
+
+    assert status_of(view_a) =~ "A1: #DIV/0! — Division by zero"
+    assert status_of(view_b) =~ "A1 changed to #DIV/0! — Division by zero"
+
+    assert has_element?(view_a, ~s(td[data-ref="A1"][title="Division by zero"]))
+
+    {:ok, _} =
+      Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
+
+    {nb_view, nb_target, _} = open!(Phoenix.ConnTest.build_conn(), "sg-error-explain")
+    render_hook(nb_target, "cell-click", %{"ref" => "A2", "shift" => false})
+    render_hook(nb_target, "edit-commit", %{"value" => "=FOO(1)", "move" => "none"})
+    assert status_of(nb_view) =~ "A2: #NAME? — Ukjent funksjon eller navn"
+    assert render(nb_view) =~ "Deling på null"
+  end
+
+  # The corner header was an empty <th> (axe empty-table-header).
+  test "the corner header names the row-number column", %{conn: conn} do
+    create_sheet!("sg-corner", one_tab(%{}))
+    {view, _target, _} = open!(conn, "sg-corner")
+
+    assert has_element?(view, "th.sheet-corner .sr-only", "Row / column")
+  end
+
   defp status_of(view, tries \\ 50) do
     html = view |> element(~s([data-test-id="sheet-status"])) |> render()
 

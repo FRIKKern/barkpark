@@ -11786,3 +11786,53 @@ msgstr ""
 #, elixir-autogen, elixir-format
 msgid "Expires at"
 msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "not evaluated: %{name} is not supported"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The formula refers to itself (a circular reference)"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The formula refers to a cell that does not exist"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "A value has the wrong type for the formula"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "Division by zero"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "No value is available"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The result is not a valid number"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "The result has no room to spill into"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid/cells.ex
+#, elixir-autogen, elixir-format
+msgid "Unknown function or name"
+msgstr ""
+
+#: lib/barkpark_web/live/studio/sheet_grid.ex
+#, elixir-autogen, elixir-format
+msgid "Row / column"
+msgstr ""
