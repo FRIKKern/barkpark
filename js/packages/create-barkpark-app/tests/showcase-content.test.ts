@@ -3,9 +3,10 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { describe, expect, it } from 'vitest'
 import { renderPortableDocument } from '@barkpark/react'
+import { fieldBlocks } from '@barkpark/react/field-blocks'
 import { showcaseContent } from '../templates/blog-starter/seeds/showcase-content'
 
-// The blog-starter's flagship post body is the FULL 79-type PortableDocument
+// The blog-starter's flagship post body is the FULL 66-type PortableDocument
 // grammar, concatenated from `@barkpark/react`'s pd-golden parity fixtures (one
 // source of truth — see scripts/gen-showcase-content.mjs). This proves the
 // migrated blog renders every canonical block type through the canonical
@@ -35,11 +36,17 @@ interface Golden {
   shape: ShapeNode[]
 }
 
+// The opt-in schema field blocks (@barkpark/react/field-blocks,
+// task-7375ba22758155fa) are not part of the blog grammar the starter renders,
+// so the generator leaves them out; so does this census.
+const OPT_IN = new Set(Object.keys(fieldBlocks))
+
 function loadGoldens(): Golden[] {
   return readdirSync(GOLDEN_DIR)
     .filter((f) => f.endsWith('.golden.json'))
     .sort()
     .map((f) => JSON.parse(readFileSync(join(GOLDEN_DIR, f), 'utf8')) as Golden)
+    .filter((g) => !OPT_IN.has(g.type))
 }
 
 // Every class the golden's DOM-shape projection carries, root-to-leaf.
@@ -55,8 +62,8 @@ function classesOf(nodes: ShapeNode[]): string[] {
 
 const goldens = loadGoldens()
 
-describe('blog-starter showcase seed (79-type PortableDocument grammar)', () => {
-  it('seeds exactly the 79 canonical block types, in sync with the pd-golden fixtures', () => {
+describe('blog-starter showcase seed (66-type PortableDocument grammar)', () => {
+  it('seeds exactly the 66 canonical block types, in sync with the pd-golden fixtures', () => {
     // Guards against drift between the generated seed and the parity fixtures.
     // scaffy:add-block-type Toc MARK:showcase-goldens-toc
     // scaffy:add-block-type Steps MARK:showcase-goldens-steps
@@ -69,8 +76,9 @@ describe('blog-starter showcase seed (79-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-goldens-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-goldens-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-goldens-tabs
-    // task-7375ba22758155fa: +14 schema field blocks (65 -> 79)
-    expect(goldens).toHaveLength(79)
+    // task-7375ba22758155fa: +field-number, whose golden is now minted (core);
+    // the 13 opt-in field blocks stay out (OPT_IN above).
+    expect(goldens).toHaveLength(66)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
@@ -85,10 +93,10 @@ describe('blog-starter showcase seed (79-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-seedset-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-seedset-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-seedset-tabs
-    expect(new Set(seedTypes).size).toBe(79)
+    expect(new Set(seedTypes).size).toBe(66)
   })
 
-  it('renders all 79 distinct types through renderPortableDocument, each with its golden class-markers', () => {
+  it('renders all 66 distinct types through renderPortableDocument, each with its golden class-markers', () => {
     const byType = new Map(goldens.map((g) => [g.type, g]))
     const markersSeen = new Set<string>()
 
@@ -113,8 +121,8 @@ describe('blog-starter showcase seed (79-type PortableDocument grammar)', () => 
         expect(html, `${block.type} missing class ${cls}`).toContain(cls)
       }
 
-      // Fingerprint the type by (root tag + its bp-classes) so the run proves 79
-      // DISTINCT renderings, not one repeated 79×.
+      // Fingerprint the type by (root tag + its bp-classes) so the run proves 66
+      // DISTINCT renderings, not one repeated 66×.
       markersSeen.add(`${block.type}:${rootTag}:${bpClasses.sort().join(',')}`)
     }
 
@@ -129,7 +137,7 @@ describe('blog-starter showcase seed (79-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-markers-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-markers-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-markers-tabs
-    expect(markersSeen.size).toBe(79)
+    expect(markersSeen.size).toBe(66)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {

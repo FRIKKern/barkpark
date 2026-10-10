@@ -23,7 +23,7 @@
 
 import { type Block, type InlineObjectRenderer, withInlineObjects } from './inline'
 import { renderBlocks } from './blocks/registry'
-import { type ChromeStrings, makeCtx } from './blocks/chrome'
+import { type ChromeStrings, type RenderCtx, makeCtx } from './blocks/chrome'
 
 export type { Block, Inline, InlineObjectRenderer } from './inline'
 
@@ -44,6 +44,12 @@ export interface PortableDocProps {
    * without one shows its text in a `bp-inline-object` span.
    */
   inlineObjects?: Record<string, InlineObjectRenderer>
+  /**
+   * Opt-in block emitters for types the core renderer does not ship, keyed by
+   * block type — e.g. `fieldBlocks` from `@barkpark/react/field-blocks` for the
+   * schema field blocks. They never replace a core type.
+   */
+  blocks?: RenderCtx['blocks']
 }
 
 /**
@@ -53,12 +59,9 @@ export interface PortableDocProps {
  * produces. Ship `@barkpark/react/paper-surface.css` (or your own copy of
  * `api/assets/paper-surface/paper-surface.css`) to skin it.
  */
-export function PortableDoc({ value, className, strings, inlineObjects }: PortableDocProps) {
+export function PortableDoc({ value, className, ...options }: PortableDocProps) {
   const cls = className ? `bp-paper-surface ${className}` : 'bp-paper-surface'
-  const html = renderPortableDocument(value, {
-    ...(strings && { strings }),
-    ...(inlineObjects && { inlineObjects }),
-  })
+  const html = renderPortableDocument(value, options)
   return <div className={cls} dangerouslySetInnerHTML={{ __html: html }} />
 }
 
@@ -70,9 +73,11 @@ export function PortableDoc({ value, className, strings, inlineObjects }: Portab
  */
 export function renderPortableDocument(
   value: Block[] | null | undefined,
-  options: { strings?: ChromeStrings; inlineObjects?: Record<string, InlineObjectRenderer> } = {},
+  options: Omit<PortableDocProps, 'value' | 'className'> = {},
 ): string {
+  const ctx = makeCtx(options.strings)
+  ctx.blocks = options.blocks
   return withInlineObjects(options.inlineObjects, () =>
-    renderBlocks(Array.isArray(value) ? value : [], makeCtx(options.strings)),
+    renderBlocks(Array.isArray(value) ? value : [], ctx),
   )
 }

@@ -16,6 +16,9 @@ export type ChromeStrings = Record<string, string>
 export interface RenderCtx {
   /** The chrome word `english` in this render's language (English when absent). */
   t: (english: string, vars?: Record<string, string | number>) => string
+  /** Opt-in block emitters for types the core registry does not ship (e.g.
+   * `@barkpark/react/field-blocks`), consulted after the core dispatch. */
+  blocks?: Record<string, (block: never, ctx: RenderCtx) => string> | undefined
 }
 
 /** Build the render context for `strings` (English when omitted or malformed). */

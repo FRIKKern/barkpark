@@ -43,8 +43,13 @@ import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { renderPortableDocument, type Block } from '../src'
 import { parseShape, type ShapeNode } from './support/dom-shape'
+import { fieldBlocks } from '../src/field-blocks'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
+
+// Every golden renders with the opt-in field blocks registered
+// (@barkpark/react/field-blocks, task-7375ba22758155fa), as the per-type parity does.
+const render = (value: Block[]) => renderPortableDocument(value, { blocks: fieldBlocks })
 const FIXTURE_DIR = join(HERE, 'fixtures', 'pd-golden')
 
 interface GoldenFixture {
@@ -104,13 +109,13 @@ describe('composed multi-block document ≡ per-block goldens (no golden re-auth
   })
 
   it('every golden keeps its isolated DOM shape inside ONE composed document (sorted order)', () => {
-    const html = renderPortableDocument(goldens.map(({ fx }) => fx.input))
+    const html = render(goldens.map(({ fx }) => fx.input))
     assertComposedEqualsIsolated(html, goldens)
   })
 
   it('adjacency does not leak: the REVERSED composition still matches per golden', () => {
     const rev = [...goldens].reverse()
-    const html = renderPortableDocument(rev.map(({ fx }) => fx.input))
+    const html = render(rev.map(({ fx }) => fx.input))
     assertComposedEqualsIsolated(html, rev)
   })
 
@@ -121,10 +126,8 @@ describe('composed multi-block document ≡ per-block goldens (no golden re-auth
     for (const { fx } of goldens) {
       blocks.push(...noise, fx.input)
     }
-    const html = renderPortableDocument(blocks as Block[])
-    const probeShapes = parseShape(
-      renderPortableDocument(noise as Block[]),
-    )
+    const html = render(blocks as Block[])
+    const probeShapes = parseShape(render(noise as Block[]))
     expect(probeShapes).toHaveLength(2) // both probes render a visible placeholder
     for (const p of probeShapes) expect(p.classes).toContain('bp-unknown-block')
     assertComposedEqualsIsolated(html, goldens, probeShapes)
@@ -135,7 +138,7 @@ describe('composed multi-block document ≡ per-block goldens (no golden re-auth
     const section = goldens.find((g) => g.name === 'section')!
     const table = goldens.find((g) => g.name === 'table')!
     const order = [section, para, table]
-    const html = renderPortableDocument(order.map(({ fx }) => fx.input))
+    const html = render(order.map(({ fx }) => fx.input))
     assertComposedEqualsIsolated(html, order)
     // The mark really is in the fixture (guards against a defanged corpus):
     expect(para.fx.expectedHtml).toMatch(/<strong|<b\b|font-weight/)
@@ -148,7 +151,7 @@ describe('composed multi-block document ≡ per-block goldens (no golden re-auth
       type: 'columns',
       columns: [[para.fx.input], [callout.fx.input]],
     } as unknown as Block
-    const roots = parseShape(renderPortableDocument([nested]))
+    const roots = parseShape(render([nested]))
     expect(roots).toHaveLength(1)
     const cols = roots[0]!
     // Two column children, each carrying the nested golden's isolated shape.
@@ -169,11 +172,11 @@ describe('composed multi-block document ≡ per-block goldens (no golden re-auth
       { ...base, width: 320 },
       { ...base, width: 1200, height: 630 },
     ] as Block[]
-    const shapes = variants.map((v) => parseShape(renderPortableDocument([v])))
+    const shapes = variants.map((v) => parseShape(render([v])))
     expect(shapes[1]).toEqual(shapes[0])
     expect(shapes[2]).toEqual(shapes[0])
     // …and the width really reached the markup (the variant is not a no-op):
-    const html = renderPortableDocument([variants[1]!])
+    const html = render([variants[1]!])
     expect(html).toContain('width="320"')
   })
 })
@@ -183,13 +186,13 @@ describe('protective proof — the guard REDS on a shape-mutating composition wr
     // The mutant composer this guard exists to catch: a document assembler that
     // wraps every block in its own container.
     const wrapped = goldens
-      .map(({ fx }) => `<div class="bp-compose-wrap">${renderPortableDocument([fx.input])}</div>`)
+      .map(({ fx }) => `<div class="bp-compose-wrap">${render([fx.input])}</div>`)
       .join('')
     expect(() => assertComposedEqualsIsolated(wrapped, goldens)).toThrow()
   })
 
   it('a wrapper that only ADDS a class to the first block root also fails', () => {
-    const html = renderPortableDocument(goldens.map(({ fx }) => fx.input))
+    const html = render(goldens.map(({ fx }) => fx.input))
     const first = goldenShapes.get(goldens[0]!.name)![0]!
     // Forge the expectation: same tree, one extra class on the first root — the
     // comparator must distinguish it from the real composed output.

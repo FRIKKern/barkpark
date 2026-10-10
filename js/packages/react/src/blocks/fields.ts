@@ -1,15 +1,18 @@
 // SPDX-License-Identifier: Apache-2.0
 // Copyright 2026 Barkpark contributors
 //
-// Schema field blocks (field-string … field-number, composite, arrayOf,
+// Schema field blocks (field-string … field-image, composite, arrayOf,
 // codelist, localizedText) — the JS twin of compose.ex's `:article` field
-// clauses (task-7375ba22758155fa; field-number since B085). Each renders the
+// clauses (task-7375ba22758155fa). OPT-IN: they ship from the
+// `@barkpark/react/field-blocks` subpath and render only when a caller passes
+// them (`<PortableDoc blocks={fieldBlocks}>`), so a site that never renders a
+// schema field pays nothing for them. `field-number` stays in the core
+// (forms.ts), where it shipped first. Each renders the
 // read-only definition row the Phoenix reader paints: `bp-field` with a
 // `bp-field__l` label beside a `bp-field__v` value. Every author string is
 // escaped at the leaf; a colour reaches the inline style only as a strict hex
 // literal (safe_hex), and an image src goes through safeUrl. `embed` and
-// `master-ref` need resolver context and are not here. Kept compact: this file
-// rides the size-limit budget.
+// `master-ref` need resolver context and are not here.
 
 import { type Block, escapeAttr as ea, escapeHtml as eh, isMap, safeUrl } from '../inline'
 import type { RenderCtx } from './chrome'
@@ -96,15 +99,6 @@ export const fieldEmitters: Record<string, Emit> = {
   },
   'field-datetime': (b) =>
     text(b, typeof b.value === 'string' ? b.value.replace(/T/g, ' ') : val(b)),
-  // field_number_text/1: numbers pass through; a string must be a FULL decimal;
-  // anything else (and a non-finite value) is the "—" state with no unit.
-  'field-number': (b) => {
-    const v = b.value
-    const t = typeof v === 'string' ? v.trim() : ''
-    const n = typeof v === 'number' ? v : /^-?\d+(\.\d+)?([eE][+-]?\d+)?$/.test(t) ? Number(t) : NaN
-    const unit = s(b.unit).trim()
-    return text(b, Number.isFinite(n) ? String(n) + (unit && ' ' + unit) : '—')
-  },
   'field-color': (b) => {
     const hex = val(b)
     const safe = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.test(hex) ? hex : 'transparent'

@@ -1,6 +1,7 @@
 import { describe, it, expect } from 'vitest'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { PortableDoc, renderPortableDocument, type Block } from '../src'
+import { fieldBlocks } from '../src/field-blocks'
 import { REGISTERED_TYPES } from '../src/blocks/registry'
 
 // One authored block per IN-SCOPE type + the distinctive marker its :article
@@ -498,77 +499,6 @@ const CASES: Array<{ type: string; block: Block; marker: string }> = [
     block: { type: 'field-number', label: 'Price', value: 19.99, unit: 'NOK' },
     marker: 'bp-field',
   },
-  // Schema field blocks (task-7375ba22758155fa) — compose.ex's :article field rows.
-  {
-    type: 'field-string',
-    block: { type: 'field-string', label: 'Title', value: 'Notes' },
-    marker: '<span>Notes</span>',
-  },
-  {
-    type: 'field-slug',
-    block: { type: 'field-slug', label: 'Slug', value: 'notes' },
-    marker: '<span>notes</span>',
-  },
-  {
-    type: 'field-text',
-    block: { type: 'field-text', label: 'Lead', value: 'Short.' },
-    marker: '<span>Short.</span>',
-  },
-  {
-    type: 'field-boolean',
-    block: { type: 'field-boolean', label: 'Live', value: true },
-    marker: '<span>Yes</span>',
-  },
-  {
-    type: 'field-select',
-    block: {
-      type: 'field-select',
-      label: 'Status',
-      value: 'live',
-      options: [{ value: 'live', label: 'Live' }],
-    },
-    marker: '<span>Live</span>',
-  },
-  {
-    type: 'field-datetime',
-    block: { type: 'field-datetime', label: 'At', value: '2026-10-10T09:30' },
-    marker: '2026-10-10 09:30',
-  },
-  {
-    type: 'field-color',
-    block: { type: 'field-color', label: 'Accent', value: '#1e5347' },
-    marker: 'bp-field__swatch',
-  },
-  {
-    type: 'field-reference',
-    block: { type: 'field-reference', label: 'Author', value: 'author-ada' },
-    marker: 'author-ada',
-  },
-  {
-    type: 'field-image',
-    block: { type: 'field-image', label: 'Cover', value: 'https://example.com/c.jpg' },
-    marker: 'bp-field__img',
-  },
-  {
-    type: 'composite',
-    block: { type: 'composite', label: 'SEO', fields: [{ name: 'title' }], value: { title: 'T' } },
-    marker: 'bp-field__sub',
-  },
-  {
-    type: 'arrayOf',
-    block: { type: 'arrayOf', label: 'Tags', value: ['a'] },
-    marker: 'bp-field__list',
-  },
-  {
-    type: 'codelist',
-    block: { type: 'codelist', label: 'Lang', value: 'nob' },
-    marker: '<span>nob</span>',
-  },
-  {
-    type: 'localizedText',
-    block: { type: 'localizedText', label: 'Tagline', languages: ['nob'], value: { nob: 'Hei' } },
-    marker: '<b>nob</b><span>Hei</span>',
-  },
   {
     type: 'chat-thinking',
     block: { type: 'chat-thinking', tokens: 1500 },
@@ -758,8 +688,7 @@ describe('PortableDoc — the type-keyed renderer', () => {
     // scaffy:add-block-type Tabs MARK:js-count-tabs
     // + 1: field-number (B085) React emitter (pbw-fix-field-number-react).
     // + 1: pre-gate-badge (#17199's reader-synthesised badge; docgates-s27).
-    // + 13: the schema field blocks (task-7375ba22758155fa).
-    expect(registered).toHaveLength(89)
+    expect(registered).toHaveLength(76)
   })
 
   it('composes a whole kitchen-sink array in one render without throwing', () => {
@@ -1311,5 +1240,122 @@ describe('task-detail empty state (parity2-bug-taskdetail-empty-state)', () => {
     expect(html).toContain('<div class="bp-tdetail__title">real</div>')
     expect(html).not.toContain('bp-tdetail--empty')
     expect(html).not.toContain('No matching tasks.')
+  })
+})
+
+// The OPT-IN schema field blocks (task-7375ba22758155fa): they render only when
+// a caller passes `fieldBlocks` from @barkpark/react/field-blocks, so the core
+// registry (and its bundle) never carries them.
+const FIELD_CASES: Array<{ type: string; block: Block; marker: string }> = [
+  {
+    type: 'field-string',
+    block: { type: 'field-string', label: 'Title', value: 'Notes' },
+    marker: '<span>Notes</span>',
+  },
+  {
+    type: 'field-slug',
+    block: { type: 'field-slug', label: 'Slug', value: 'notes' },
+    marker: '<span>notes</span>',
+  },
+  {
+    type: 'field-text',
+    block: { type: 'field-text', label: 'Lead', value: 'Short.' },
+    marker: '<span>Short.</span>',
+  },
+  {
+    type: 'field-boolean',
+    block: { type: 'field-boolean', label: 'Live', value: true },
+    marker: '<span>Yes</span>',
+  },
+  {
+    type: 'field-select',
+    block: {
+      type: 'field-select',
+      label: 'Status',
+      value: 'live',
+      options: [{ value: 'live', label: 'Live' }],
+    },
+    marker: '<span>Live</span>',
+  },
+  {
+    type: 'field-datetime',
+    block: { type: 'field-datetime', label: 'At', value: '2026-10-10T09:30' },
+    marker: '2026-10-10 09:30',
+  },
+  {
+    type: 'field-color',
+    block: { type: 'field-color', label: 'Accent', value: '#1e5347' },
+    marker: 'bp-field__swatch',
+  },
+  {
+    type: 'field-reference',
+    block: { type: 'field-reference', label: 'Author', value: 'author-ada' },
+    marker: 'author-ada',
+  },
+  {
+    type: 'field-image',
+    block: { type: 'field-image', label: 'Cover', value: 'https://example.com/c.jpg' },
+    marker: 'bp-field__img',
+  },
+  {
+    type: 'composite',
+    block: { type: 'composite', label: 'SEO', fields: [{ name: 'title' }], value: { title: 'T' } },
+    marker: 'bp-field__sub',
+  },
+  {
+    type: 'arrayOf',
+    block: { type: 'arrayOf', label: 'Tags', value: ['a'] },
+    marker: 'bp-field__list',
+  },
+  {
+    type: 'codelist',
+    block: { type: 'codelist', label: 'Lang', value: 'nob' },
+    marker: '<span>nob</span>',
+  },
+  {
+    type: 'localizedText',
+    block: { type: 'localizedText', label: 'Tagline', languages: ['nob'], value: { nob: 'Hei' } },
+    marker: '<b>nob</b><span>Hei</span>',
+  },
+]
+
+describe('field blocks (opt-in @barkpark/react/field-blocks)', () => {
+  it('covers exactly the opt-in field types, none of them core', () => {
+    expect(FIELD_CASES.map((c) => c.type).sort()).toEqual(Object.keys(fieldBlocks).sort())
+    expect(Object.keys(fieldBlocks)).toHaveLength(13)
+    for (const t of Object.keys(fieldBlocks)) expect(REGISTERED_TYPES).not.toContain(t)
+  })
+
+  for (const c of FIELD_CASES) {
+    it(`${c.type} renders its row when opted in, and the placeholder when not`, () => {
+      const html = renderPortableDocument([c.block], { blocks: fieldBlocks })
+      expect(html).toContain('<div class="bp-field">')
+      expect(html).toContain(c.marker)
+      expect(renderPortableDocument([c.block])).toContain('bp-unknown-block')
+    })
+  }
+
+  it('an opt-in emitter never replaces a core type', () => {
+    const html = renderPortableDocument(
+      [{ type: 'paragraph', content: [{ type: 'text', value: 'x' }] }],
+      {
+        blocks: { paragraph: () => '<p>hijacked</p>' },
+      },
+    )
+    expect(html).not.toContain('hijacked')
+  })
+
+  it('reaches blocks nested in a container (the ctx rides the recursion)', () => {
+    const html = renderPortableDocument(
+      [
+        {
+          type: 'section',
+          title: 'S',
+          blocks: [{ type: 'field-string', label: 'T', value: 'Inner' }],
+        },
+      ],
+      { blocks: fieldBlocks },
+    )
+    expect(html).toContain('<span>Inner</span>')
   })
 })

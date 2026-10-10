@@ -18,7 +18,6 @@ import { tableEmitters } from './table'
 import { sheetEmitters } from './sheet'
 import { taskboardEmitters } from './taskboard'
 import { mathEmitters } from './math'
-import { fieldEmitters } from './fields'
 
 type Emit = (block: Block, ctx: RenderCtx) => string
 
@@ -31,7 +30,6 @@ const DISPATCH: Record<string, Emit> = {
   ...sheetEmitters,
   ...taskboardEmitters,
   ...mathEmitters,
-  ...fieldEmitters,
 }
 
 /** The full set of registered block types this renderer handles — every key in
@@ -46,7 +44,9 @@ export const REGISTERED_TYPES: string[] = Object.keys(DISPATCH)
 export function renderBlock(block: Block, ctx: RenderCtx): string {
   if (!isMap(block)) return `<div class="bp-unknown-block">invalid block</div>`
   const type = str(block.type)
-  const emit = DISPATCH[type]
+  // An opt-in emitter (ctx.blocks, e.g. @barkpark/react/field-blocks) adds a
+  // type the core does not ship; it never replaces a core one.
+  const emit = DISPATCH[type] || (ctx.blocks?.[type] as Emit | undefined)
   if (emit) return emit(block, ctx)
   // Unknown/unregistered type → degrade, never throw (compose.ex unknown_block_node/1).
   return `<div class="bp-unknown-block">Unsupported block: ${escapeHtml(type)}</div>`
