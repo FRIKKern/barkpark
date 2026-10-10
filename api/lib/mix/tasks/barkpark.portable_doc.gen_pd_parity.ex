@@ -453,6 +453,7 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "body" => "Hver blokk består sine egne mekaniske porter.",
       "max" => 118,
       "spark" => [3, 5, 8, 13, 21],
+      "dots" => %{"on" => 2, "of" => 10},
       "source" => "commit:591fdcd53"
     },
     "stats" => %{
@@ -460,7 +461,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "sourceDefault" => "paper:scaffy-benchmark",
       "items" => [
         %{"value" => "42", "label" => "In-scope types"},
-        %{"value" => "3", "label" => "Renderers", "source" => "task:jdf-bl-historiene"}
+        %{
+          "value" => "3",
+          "label" => "Renderers",
+          "dots" => %{"on" => 3, "of" => 5},
+          "source" => "task:jdf-bl-historiene"
+        }
       ]
     },
     "stat-grid" => %{

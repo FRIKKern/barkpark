@@ -2,6 +2,7 @@ package pdrender
 
 import (
 	"math"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -17,7 +18,7 @@ import (
 //
 // CONTRACT (ratified, pbp-tui-creative-slate §3):
 //
-//	stat:  {value, max?, denom?, unit?, label?, body?, verdict?, spark?:[n…], source?}
+//	stat:  {value, max?, denom?, unit?, label?, body?, verdict?, dots?:{on,of}, spark?:[n…], source?}
 //
 //	- value  the headline datum. Rendered as a DISPLAY string (the slate stamps
 //	         pre-formatted values like "1.24M", "$42.10", "73%"), so it is read
@@ -44,6 +45,12 @@ import (
 //	         stat_html/1 and js/.../dataviz.ts, which stamp
 //	         .bp-stat__v--loss/--peace on exactly the same element: three render
 //	         engines, one vocabulary.
+//	- dots   optional {on, of} trial count ("2 of 10"): a row under the value of
+//	         `of` glyphs, the first `on` filled (●) and the rest open (○), then a
+//	         dim "on/of". `of` must be a whole number 1..maxStatDots, `on` is
+//	         clamped into 0..of; anything else → no row. Too narrow for the
+//	         glyphs → the "on/of" text alone. MIRROR of data_viz.ex dots/1 (web
+//	         draws the dots, email the same glyph text).
 //	- spark  optional numeric array → an eighth-block sparkline row beneath the
 //	         stat, through the reusable primitive.
 //	- source valid datum provenance, rendered outside the cell as a kilde footer.
@@ -260,6 +267,10 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 		out = append(out, verdictInk(m, ctx, ctx.Theme.Body.Bold(true)).Render(value)+denomSuffix+unitSuffix)
 	}
 
+	if on, of, ok := statDots(m); ok {
+		out = append(out, statDotsLine(on, of, w, ctx))
+	}
+
 	// Caption under the number/bar. EVERY wrapped line is emitted — the label is
 	// authored content, and dropping its tail (the old firstLine() truncation ate
 	// " Aug" out of "…, 12 Aug" at wide widths) silently loses the author's words.
@@ -281,6 +292,52 @@ func statCell(m map[string]any, ctx RenderCtx) []string {
 	}
 
 	return out
+}
+
+// maxStatDots bounds the trial-dot array (data_viz.ex @max_dots).
+const maxStatDots = 50
+
+// statDots reads the `dots` field as (on, of). `of` must be a whole number in
+// 1..maxStatDots; `on` must be whole and is clamped into 0..of. Anything else
+// → ok=false, so a stat without a valid field renders as before.
+func statDots(m map[string]any) (on, of int, ok bool) {
+	d, isMap := m["dots"].(map[string]any)
+	if !isMap {
+		return 0, 0, false
+	}
+	of, okOf := wholeNum(d["of"])
+	on, okOn := wholeNum(d["on"])
+	if !okOf || !okOn || of < 1 || of > maxStatDots {
+		return 0, 0, false
+	}
+	return min(max(on, 0), of), of, true
+}
+
+// wholeNum reads a whole number: an integral JSON number or an integer string.
+func wholeNum(v any) (int, bool) {
+	switch x := v.(type) {
+	case float64:
+		if x == math.Trunc(x) && !math.IsInf(x, 0) {
+			return int(x), true
+		}
+	case int:
+		return x, true
+	case string:
+		if n, err := strconv.Atoi(strings.TrimSpace(x)); err == nil {
+			return n, true
+		}
+	}
+	return 0, false
+}
+
+// statDotsLine draws "●●○○○○○○○○ 2/10": the glyphs in the body tone, the count
+// dim. A cell too narrow for both keeps the count alone.
+func statDotsLine(on, of, w int, ctx RenderCtx) string {
+	count := ctx.Theme.Dim.Render(strconv.Itoa(on) + "/" + strconv.Itoa(of))
+	if of+1+runeWidth(strconv.Itoa(on)+"/"+strconv.Itoa(of)) > w {
+		return count
+	}
+	return ctx.Theme.Body.Render(strings.Repeat("●", on)+strings.Repeat("○", of-on)) + " " + count
 }
 
 // statBar is the KPI bullet-bar: `fill` cells of ▓ in the body tone, the

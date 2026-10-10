@@ -624,15 +624,29 @@ defmodule Barkpark.PortableDoc.Bpml.Printer do
   # error. It rides LAST in the row so the attribute order of every pre-existing
   # verdict-free stat stays byte-identical; the grammar digest moves once, on
   # purpose. `caption`/`note` keep their refusal.
+  #
+  # `dots` (pe-bl-stat-tile-dots) rides last as "on/of". A stored string prints
+  # verbatim; any other shape refuses rather than drop the key.
   defp stat_item(%{} = i) do
     if Map.get(i, "caption") in [nil, ""] and Map.get(i, "note") in [nil, ""] do
-      "<stat#{attr_str(i, ["label", "value", "denom", "verdict", "source"])}>#{esc(Map.get(i, "body", ""))}</stat>"
+      i = Map.put(i, "dots", stat_dots_attr(Map.get(i, "dots")))
+
+      "<stat#{attr_str(i, ["label", "value", "denom", "verdict", "source", "dots"])}>#{esc(Map.get(i, "body", ""))}</stat>"
     else
       raise(UnprintableError.new(:block, "stat"))
     end
   end
 
   defp stat_item(_other), do: raise(UnprintableError.new(:block, "stat-grid"))
+
+  defp stat_dots_attr(nil), do: nil
+  defp stat_dots_attr(s) when is_binary(s), do: s
+
+  defp stat_dots_attr(%{"on" => on, "of" => of} = d)
+       when map_size(d) == 2 and is_integer(on) and is_integer(of),
+       do: "#{on}/#{of}"
+
+  defp stat_dots_attr(_other), do: raise(UnprintableError.new(:block, "stat"))
 
   defp empty_content?(c), do: c in [nil, [], ""]
 

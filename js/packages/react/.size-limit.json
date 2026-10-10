@@ -7,15 +7,15 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc client — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 26062 B -> 26163 B (+101); the remaining ~45 chrome words as ctx.t() lookups, no string table shipped (the caller supplies it); limit unchanged, 207 B headroom",
+  "name": "PortableDoc client — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row: `dots: {on, of}` → role=img dot row + chrome label): 26346 B -> 26529 B (+183) after trimming (one shared dot template; string coercion kept for Elixir/Go parity, costs 22 B); limit raised by the irremovable +183, 31 B headroom",
   "path": "dist/index.mjs",
-  "limit": "26.37 KB",
+  "limit": "26.56 KB",
   "gzip": true
  },
  {
-  "name": "RSC server — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 25063 B -> 25177 B (+114); the same change through the server entry; limit unchanged, 193 B headroom",
+  "name": "RSC server — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the server entry): 25364 B -> 25520 B (+156) after trimming; limit raised by the irremovable +156, 10 B headroom",
   "path": "dist/server.mjs",
-  "limit": "25.37 KB",
+  "limit": "25.53 KB",
   "gzip": true
  },
  {
@@ -35,9 +35,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc subpath — 2026-10-10 rebase 2 (task-2de470c7200d07c7, renderer chrome words part 2: callouts, data viz, equations, sheets, terminal, paper links): 22103 B -> 22206 B (+103); the same change through the PortableDoc subpath; limit unchanged, 204 B headroom",
+  "name": "PortableDoc subpath — 2026-10-10 (pe-bl-stat-tile-dots, stat dots row through the PortableDoc subpath): 22370 B -> 22539 B (+169) after trimming; limit raised by the irremovable +169, 41 B headroom",
   "path": "dist/portable-doc.mjs",
-  "limit": "22.41 KB",
+  "limit": "22.58 KB",
   "gzip": true
  }
 ]

@@ -11367,6 +11367,11 @@ msgctxt "data source"
 msgid "Source"
 msgstr "Kilde"
 
+#: lib/barkpark/portable_doc/render/chrome.ex:100
+#, elixir-autogen, elixir-format
+msgid "%{on} of %{total}"
+msgstr "%{on} av %{total}"
+
 #: lib/barkpark/portable_doc/render/chrome.ex:98
 #, elixir-autogen, elixir-format
 msgctxt "data source"

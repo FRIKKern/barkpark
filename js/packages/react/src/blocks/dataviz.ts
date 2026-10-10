@@ -140,7 +140,35 @@ function statHtml(block: unknown, ctx: RenderCtx): string {
   const verdictMod = VERDICTS.includes(displayString(get(block, 'verdict')))
     ? ` bp-stat__v--${displayString(get(block, 'verdict'))}`
     : ''
-  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+  return `<div class="bp-stat">${bar}<div class="bp-stat__v${verdictMod}">${escapeHtml(value)}${denomHtml}${unitHtml}</div>${dotsHtml(block, ctx)}${labelHtml}${bodyHtml}${sparkSvg(spark)}${kilde}</div>`
+}
+
+/* ── trial dots (pe-bl-stat-tile-dots) ─────────────────────────────────────── */
+//
+// `dots: {on, of}` — "2 of 10 trials": `of` dots, the first `on` filled. `of`
+// must be a whole number 1..MAX_DOTS and `on` is clamped into 0..of; anything
+// else renders nothing. The array is ONE image to assistive tech. MIRROR of
+// data_viz.ex dots/1 + dots_html/1.
+const MAX_DOTS = 50
+
+function whole(v: unknown): number | null {
+  const t = typeof v === 'string' ? v.trim() : v
+  return Number.isInteger(t)
+    ? (t as number)
+    : typeof t === 'string' && /^[+-]?\d+$/.test(t)
+      ? +t
+      : null
+}
+
+function dotsHtml(block: unknown, ctx: RenderCtx): string {
+  const d = get(block, 'dots')
+  const of = whole(get(d, 'of'))
+  let on = whole(get(d, 'on'))
+  if (of === null || of < 1 || of > MAX_DOTS || on === null) return ''
+  on = Math.min(Math.max(on, 0), of)
+  const dot = (cls: string, n: number) =>
+    `<i class="bp-stat__dot${cls}" aria-hidden="true"></i>`.repeat(n)
+  return `<div class="bp-stat__dots" role="img" aria-label="${escapeAttr(ctx.t('%{on} of %{total}', { on, total: of }))}">${dot(' bp-stat__dot--on', on)}${dot('', of - on)}</div>`
 }
 
 const stats: Emit = (block, ctx) => {
@@ -292,7 +320,9 @@ const duel: Emit = (block, ctx) => {
 // base class, so every lineage authored before the clock strip is unchanged.
 function toneClass(base: string, tone: unknown): string {
   const t = displayString(tone)
-  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger' ? `${base} ${base}--${t}` : base
+  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger'
+    ? `${base} ${base}--${t}`
+    : base
 }
 
 function lineageNodeHtml(n: unknown): string {
@@ -717,7 +747,12 @@ function countGauges(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
   const entries = [...counts.entries()].sort((a, b) =>
     a[1] !== b[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
   )
-  return entries.map(([label, count]) => ({ label, prop: count / maxCount, digit: String(count), note: '' }))
+  return entries.map(([label, count]) => ({
+    label,
+    prop: count / maxCount,
+    digit: String(count),
+    note: '',
+  }))
 }
 
 function gaugeRows(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {

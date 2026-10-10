@@ -1807,8 +1807,9 @@ defmodule BarkparkWeb.Contract.CapabilitiesManifestTest do
       # regenerating types off the digest sees exactly this one new key.
       # `source` after it, added on purpose by the Run-4 round-trip matrix: a
       # stat's provenance ref (THE KILDE LAW) was dropped by an unedited
-      # pull → push. Same widening rule: only the new key moves.
-      assert blocks["stat"] == ["label", "value", "denom", "verdict", "source"]
+      # pull → push. Same widening rule: only the new key moves. `dots`
+      # (pe-bl-stat-tile-dots) rides last for the same reason.
+      assert blocks["stat"] == ["label", "value", "denom", "verdict", "source", "dots"]
       assert blocks["lineage-node"] == ["title", "overline", "source", "tone", "unit", "value"]
       assert blocks["expandable"] == ["id", "summary", "open"]
       assert blocks["paper"] == ["slug", "title"]
