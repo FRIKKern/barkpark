@@ -5,6 +5,7 @@ defmodule BarkparkWeb.ListenController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
   alias Barkpark.Content
   alias Barkpark.Content.{CallerContext, Envelope, EventLog}
+  alias Barkpark.Realtime.DrainSignal
   alias BarkparkWeb.{ErrorResponse, ListenFilter, ReadPerspective}
 
   def listen(conn, %{"dataset" => dataset} = params) do
@@ -167,6 +168,10 @@ defmodule BarkparkWeb.ListenController do
 
     try do
       schedule_keepalive()
+      # task-2bcada0faa01ebb2 — so a blue/green flip can end THIS stream at
+      # once instead of leaving it alive-but-deaf on the retiring slot. See
+      # `Barkpark.Realtime.DrainSignal`.
+      DrainSignal.subscribe()
       listen_loop(conn, dataset, workspace_id, caller_context, scope, lf)
     after
       send(forwarder, :stop)
@@ -344,6 +349,21 @@ defmodule BarkparkWeb.ListenController do
           listen_loop(c, dataset, workspace_id, caller_context, scope, lf)
         else
           {:revoked, conn} -> conn
+          _ -> conn
+        end
+
+      # task-2bcada0faa01ebb2 — the slot this stream is on is retiring
+      # (DeployController.retire_sse/2, called by instance-deploy.sh right
+      # after the Caddy flip). End it NOW with a distinguishable final frame
+      # instead of sitting alive-but-deaf until systemd's drain/SIGKILL: the
+      # client sees the stream close, reconnects through Caddy to the slot
+      # that's actually live, and replays via Last-Event-ID — nothing lost,
+      # just no 20-30s blackout. Does NOT recurse: returning conn here ends
+      # listen_recv/6 (and the controller action), which closes the chunked
+      # response.
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
           _ -> conn
         end
     end

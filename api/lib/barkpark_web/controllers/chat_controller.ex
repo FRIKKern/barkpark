@@ -77,6 +77,7 @@ defmodule BarkparkWeb.ChatController do
   alias Barkpark.ChatHosts
   alias Barkpark.PortableDoc.FromMarkdown
   alias Barkpark.PortableDoc.Render.Components
+  alias Barkpark.Realtime.DrainSignal
   alias Barkpark.StudioChat
 
   alias Barkpark.StudioChat.{
@@ -542,6 +543,8 @@ defmodule BarkparkWeb.ChatController do
 
         try do
           schedule_keepalive()
+          # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
+          DrainSignal.subscribe()
           stream_loop(conn)
         after
           # Ownership cleanup (D24): stop the helper. The forwarder is ALSO linked,
@@ -599,6 +602,8 @@ defmodule BarkparkWeb.ChatController do
 
     try do
       schedule_keepalive()
+      # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
+      DrainSignal.subscribe()
       fleet_stream_loop(conn, scope, epoch, boundary)
     after
       send(forwarder, :stop)
@@ -662,6 +667,19 @@ defmodule BarkparkWeb.ChatController do
       :keepalive ->
         schedule_keepalive()
         fleet_chunk_or_stop(conn, sse_keepalive(), scope, epoch, boundary)
+
+      # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
+      # retire_sse/2, called by instance-deploy.sh right after the Caddy
+      # flip). End now with a distinguishable final frame instead of
+      # sitting alive-but-deaf until systemd's drain/SIGKILL — see
+      # Barkpark.Realtime.DrainSignal. MUST STAY ABOVE `_other` below for
+      # the same reason `:keepalive` does. Does NOT recurse: returning conn
+      # ends fleet_stream_loop/4 (and the controller action).
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
+        end
 
       _other ->
         fleet_stream_loop(conn, scope, epoch, boundary)
@@ -839,6 +857,19 @@ defmodule BarkparkWeb.ChatController do
       :keepalive ->
         schedule_keepalive()
         chunk_or_stop(conn, sse_keepalive())
+
+      # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
+      # retire_sse/2, called by instance-deploy.sh right after the Caddy
+      # flip). End now with a distinguishable final frame instead of
+      # sitting alive-but-deaf until systemd's drain/SIGKILL — see
+      # Barkpark.Realtime.DrainSignal. MUST STAY ABOVE `_other` below for
+      # the same reason `:keepalive` does. Does NOT recurse: returning conn
+      # ends stream_loop/1 (and the controller action).
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
+        end
 
       _other ->
         stream_loop(conn)

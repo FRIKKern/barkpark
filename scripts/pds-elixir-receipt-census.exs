@@ -1334,7 +1334,16 @@ defmodule PDS.Census do
     # WebhookController rows above already carry.
     {:post,
      "/w/:workspace_slug/p/:project_slug/v1/data/doc/:dataset/:type/:doc_id/actions/:name",
-     "BarkparkWeb.DocumentActionsController", :dispatch, :status_only_receipt}
+     "BarkparkWeb.DocumentActionsController", :dispatch, :status_only_receipt},
+    # task-2bcada0faa01ebb2 (#22639): retire_sse/2 is `:ok =
+    # DrainSignal.broadcast_retire(); send_resp(conn, 204, "")` — a genuine
+    # bodiless 204, the same shape status_only_receipt's own prose already
+    # names ChatController.answer/2 as carrying (one of 149, not the class's
+    # norm). The caller is the deploying box's own instance-deploy.sh, never
+    # a document write: the receipt this action could render is a PubSub
+    # broadcast's fan-out count, which no HTTP response here claims either
+    # way. ARRIVED via `--routed-rows`, not hand-classified.
+    {:post, "/v1/internal/retire-sse", "BarkparkWeb.DeployController", :retire_sse, :status_only_receipt}
   ]
 
   # ---------------------------------------- the exclusion anchors (PDS-D585)

@@ -2518,6 +2518,18 @@ defmodule BarkparkWeb.Router do
     get("/local/search/:dataset", SearchController, :search_local)
   end
 
+  # ── Deploy-flip SSE retire hook (task-2bcada0faa01ebb2) ───────────────────
+  # `deploy/instance-deploy.sh` POSTs here, on the OLD slot's own port, right
+  # after the Caddy flip lands — before the 5s sleep + `systemctl disable
+  # --now` that used to leave open SSE streams alive-but-deaf on that slot
+  # for ~20-30s. Same RequireLoopback-only trust boundary as local search
+  # above: the caller IS the box.
+  scope "/v1/internal", BarkparkWeb do
+    pipe_through(:api_local)
+
+    post("/retire-sse", DeployController, :retire_sse)
+  end
+
   # ── Preview — same reads, forces perspective=drafts via preview JWT ─────
   scope "/v1/preview", BarkparkWeb do
     pipe_through(:api_preview)

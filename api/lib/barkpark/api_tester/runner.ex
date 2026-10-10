@@ -61,11 +61,14 @@ defmodule Barkpark.ApiTester.Runner do
   # THE LOOPBACK-ONLY LANE (owner ruling #30 Q14, 2026-10-03). This runner
   # fires from the node to its own loopback address, so every request it sends
   # passes `BarkparkWeb.Plugs.RequireLoopback`. The `:api_local` routes
-  # (/v1/data/local/*) skip auth because only the co-located site can reach
-  # them; a Studio user steering the runner there would bypass that. Any path
-  # that is, or resolves (dot segments) to, that lane is refused before a
-  # request is built. `runner_build_test.exs` pins every `:api_local` route.
-  @loopback_only_prefix "/v1/data/local/"
+  # (/v1/data/local/*, /v1/internal/*) skip auth because only the co-located
+  # site/deploy tooling can reach them; a Studio user steering the runner
+  # there would bypass that. Any path that is, or resolves (dot segments) to,
+  # one of these lanes is refused before a request is built.
+  # `runner_build_test.exs` pins every `:api_local` route — a NEW one added
+  # to the router under neither prefix reds that test, which is the point:
+  # add the new prefix here rather than widen the test's own expectation.
+  @loopback_only_prefixes ["/v1/data/local/", "/v1/internal/"]
 
   @doc "True when `path` (query ignored, dot segments resolved) is in the loopback-only lane."
   @spec loopback_only_path?(String.t()) :: boolean()
@@ -84,8 +87,11 @@ defmodule Barkpark.ApiTester.Runner do
       |> Enum.reverse()
       |> Enum.join("/")
 
-    String.starts_with?(resolved <> "/", @loopback_only_prefix) or
-      String.starts_with?("/" <> String.trim_leading(resolved, "/") <> "/", @loopback_only_prefix)
+    normalized = "/" <> String.trim_leading(resolved, "/") <> "/"
+
+    Enum.any?(@loopback_only_prefixes, fn prefix ->
+      String.starts_with?(resolved <> "/", prefix) or String.starts_with?(normalized, prefix)
+    end)
   end
 
   defp build_query_string(query_params, form_state) do

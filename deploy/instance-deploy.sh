@@ -205,6 +205,24 @@ SANDBOX_RUNNER_BIN="${BARKPARK_SANDBOX_RUNNER_BIN:-/usr/local/bin/cloud-sandbox-
 SANDBOX_RUNNER_MJS="${BARKPARK_SANDBOX_RUNNER_MJS:-/usr/local/bin/cloud-sandbox-runner.mjs}"
 log() { echo "[instance-deploy $(date -u +%H:%M:%S)] $*"; }
 
+# Fire-and-forget: ask the slot about to be retired to end its own open SSE
+# streams (listen/chat/presence) right now, instead of sitting alive-but-deaf for the
+# ~20-30s its drain + the `systemctl disable --now` below takes
+# (task-2bcada0faa01ebb2 — Caddy already points elsewhere by the time this
+# runs, so a stream opened before the flip keeps sending ': keepalive' but
+# never sees a write again until the old slot actually stops). Called on
+# BOTH flip paths (forward deploy and --rollback) right after Caddy reload
+# succeeds, hitting the retiring slot's OWN port directly — never through
+# Caddy. Gated app-side by RequireLoopback (BarkparkWeb.DeployController);
+# best-effort here: a timeout/refused/non-204 is a LOG line, never a deploy
+# failure — the stream just drains the slow way instead, same as before
+# this existed.
+signal_sse_retire() { # $1 = the retiring slot's own port
+  local port="$1" code
+  code="$(bp_curl_code -s -o /dev/null --max-time 3 -X POST "http://localhost:${port}/v1/internal/retire-sse" 2>/dev/null || echo 000)"
+  log "signaled SSE retire on :$port (POST /v1/internal/retire-sse = $code)"
+}
+
 # ---- ONE shared Caddyfile lock (site-spawner D27) --------------------------
 # $CADDYFILE has a SECOND writer: deploy/site-deploy.sh arms a `handle_path
 # /sites/<slug>/*` block into the same file. Both scripts do read -> backup ->
@@ -1042,6 +1060,10 @@ if [ "$MODE" != "deploy" ]; then
   exec 8>&-   # leaf lock: released the moment the file is written + reloaded
   code="$(bp_curl_code -sk -o /dev/null --max-time 10 --resolve "${HEALTH_HOST}:443:127.0.0.1" "https://${HEALTH_HOST}${HEALTH_PATH}" || echo 000)"
   log "Caddy now -> :$TARGET_PORT (https://${HEALTH_HOST}${HEALTH_PATH} = $code)"
+  # This path has no post-flip gate (the comment above the curl says so) —
+  # Caddy already points at $TARGET_PORT, so $FLIP_FROM (the slot rolled
+  # away from) is retiring right now.
+  signal_sse_retire "$FLIP_FROM"
 
   # Drain, retire the rolled-away slot, and rewrite STATE to the rolled-back
   # sha (W6 D21) — keeps coalesce, the agent's git_commit, and the next
@@ -2042,6 +2064,11 @@ if [ "$code" != "200" ]; then
   git reset --hard "$OLD"
   exit 14
 fi
+
+# The health gate just above can still revert the flip (old slot never
+# retired) — only past it is $FLIP_FROM (the slot Caddy flipped AWAY from)
+# actually retiring.
+signal_sse_retire "$FLIP_FROM"
 
 # ---- Drain, then retire the old slot AND the pre-blue/green legacy unit.
 # Exactly one slot stays enabled (survives reboot). Rollback is NOT a bare

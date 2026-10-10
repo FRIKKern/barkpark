@@ -99,6 +99,7 @@ defmodule BarkparkWeb.PresenceController do
   import BarkparkWeb.ScopeHelpers, only: [scope_opts: 1]
 
   alias Barkpark.Content.DraftId
+  alias Barkpark.Realtime.DrainSignal
   alias BarkparkWeb.{ErrorResponse, Presence}
   alias BarkparkWeb.Studio.PresenceState
 
@@ -138,6 +139,8 @@ defmodule BarkparkWeb.PresenceController do
       with {:ok, conn} <- chunk(conn, frame("session", %{sessionId: sid})),
            {:ok, conn, last} <- send_snapshot(conn, topic, doc_filter, nil) do
         schedule_keepalive()
+        # task-2bcada0faa01ebb2 — see Barkpark.Realtime.DrainSignal.
+        DrainSignal.subscribe()
         loop(conn, %{topic: topic, key: key, doc_filter: doc_filter, last: last})
       else
         _ -> conn
@@ -263,6 +266,20 @@ defmodule BarkparkWeb.PresenceController do
 
           _ ->
             conn
+        end
+
+      # task-2bcada0faa01ebb2 — this slot is retiring (DeployController.
+      # retire_sse/2, called by instance-deploy.sh right after the Caddy
+      # flip). End now with a distinguishable final frame instead of
+      # sitting alive-but-deaf until systemd's drain/SIGKILL — see
+      # Barkpark.Realtime.DrainSignal. MUST STAY ABOVE `_other` below: a
+      # bare wildcard clause matches EVERYTHING, including `:retire`
+      # itself. Does NOT recurse: returning conn ends loop/2 (and the
+      # controller action).
+      :retire ->
+        case chunk(conn, DrainSignal.retire_frame()) do
+          {:ok, c} -> c
+          _ -> conn
         end
 
       _other ->
