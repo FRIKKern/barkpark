@@ -8,6 +8,8 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   assigns. Frozen-band px sums come from `Geometry.left_px`/`top_px`.
   """
 
+  use Gettext, backend: BarkparkWeb.Gettext
+
   alias BarkparkWeb.Studio.SheetGrid.Geometry
 
   # Engine error markers — a cell whose computed `"v"` is one of these gets the
@@ -166,17 +168,46 @@ defmodule BarkparkWeb.Studio.SheetGrid.Cells do
   end
 
   # The `title` a `<td>` carries — hover/inspect text, `nil` for an ordinary
-  # cell so LiveView omits the attribute entirely. Today its ONE source is the
-  # unsupported-function marker the engine writes next to a kept import value
-  # (`"stale_fn" => "FOO"`): the value stays on screen, and this says why it is
-  # not live. Twin of the `sheet-err` arm in `cell_class/6` — the class is the
-  # loud style, this is the reason.
+  # cell so LiveView omits the attribute entirely. Two sources, both twins of
+  # the `sheet-err` arm in `cell_class/6` (the class is the loud style, this is
+  # the reason): the unsupported-function marker the engine writes next to a
+  # kept import value (`"stale_fn" => "FOO"`), which says why the value is not
+  # live; and a computed error value, titled with what its code means
+  # (task-49f187aeb423153b: "#NAME?" alone told nobody what went wrong).
   def cell_title(cell) do
     case unsupported_fn(cell) do
-      nil -> nil
-      fname -> "not evaluated: " <> fname <> " is not supported"
+      nil -> cell |> value_of() |> error_reason()
+      fname -> gettext("not evaluated: %{name} is not supported", name: fname)
     end
   end
+
+  @doc """
+  What an engine error code means, in the Studio language, or nil for any
+  other value. One entry per code in `@engine_errors`.
+  """
+  def error_reason("#CYCLE!"), do: gettext("The formula refers to itself (a circular reference)")
+  def error_reason("#REF!"), do: gettext("The formula refers to a cell that does not exist")
+  def error_reason("#VALUE!"), do: gettext("A value has the wrong type for the formula")
+  def error_reason("#DIV/0!"), do: gettext("Division by zero")
+  def error_reason("#N/A"), do: gettext("No value is available")
+  def error_reason("#NUM!"), do: gettext("The result is not a valid number")
+  def error_reason("#SPILL!"), do: gettext("The result has no room to spill into")
+  def error_reason("#NAME?"), do: gettext("Unknown function or name")
+  def error_reason(_value), do: nil
+
+  @doc """
+  A cell's display as a screen reader should hear it: an error code is
+  followed by what it means ("#NAME? — Unknown function or name").
+  """
+  def spoken(display) do
+    case error_reason(display) do
+      nil -> display
+      reason -> display <> " — " <> reason
+    end
+  end
+
+  defp value_of(%{"v" => v}), do: v
+  defp value_of(_cell), do: nil
 
   # The engine's `"stale_fn"` stamp — the first function name a formula used
   # that the engine does not implement — or nil for every other cell.

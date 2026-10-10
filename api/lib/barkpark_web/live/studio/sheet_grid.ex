@@ -2609,7 +2609,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   defp announce_commit(socket, pos) do
     if socket.assigns.notice == nil do
       ref = Sheets.format_ref(pos)
-      assign(socket, status: "#{ref}: #{committed_display(socket, ref)}")
+      assign(socket, status: "#{ref}: #{Cells.spoken(committed_display(socket, ref))}")
     else
       assign(socket, status: "")
     end
@@ -2651,7 +2651,11 @@ defmodule BarkparkWeb.Studio.SheetGrid do
 
         cell ->
           assign(socket,
-            status: gettext("%{ref} changed to %{value}", ref: ref, value: Cells.display(cell))
+            status:
+              gettext("%{ref} changed to %{value}",
+                ref: ref,
+                value: Cells.spoken(Cells.display(cell))
+              )
           )
       end
     else

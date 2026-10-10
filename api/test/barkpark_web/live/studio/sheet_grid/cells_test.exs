@@ -401,6 +401,26 @@ defmodule BarkparkWeb.Studio.SheetGrid.CellsTest do
       assert Cells.cell_title(cell) == "not evaluated: FOO is not supported"
     end
 
+    # task-49f187aeb423153b: every engine error code is explained, in the
+    # Studio language, and the unsupported-function title is translated.
+    test "an error value is titled with what its code means, for every engine code" do
+      for code <- Cells.error_vocab() do
+        reason = Cells.error_reason(code)
+        assert is_binary(reason) and reason != "", "no explanation for #{code}"
+        assert Cells.cell_title(%{"v" => code}) == reason
+        assert Cells.spoken(code) == code <> " — " <> reason
+      end
+
+      assert Cells.spoken("42") == "42"
+
+      Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+        assert Cells.cell_title(%{"v" => "#DIV/0!"}) == "Deling på null"
+
+        assert Cells.cell_title(%{"v" => 42, "stale" => true, "stale_fn" => "FOO"}) ==
+                 "ikke beregnet: FOO støttes ikke"
+      end)
+    end
+
     test "is nil for an ordinary cell, a bare stale cell, and a missing cell" do
       assert Cells.cell_title(%{"v" => 1}) == nil
       assert Cells.cell_title(%{"v" => "old", "stale" => true}) == nil
