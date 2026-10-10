@@ -225,6 +225,7 @@ defmodule BarkparkWeb.Components.FieldInputs do
       data-canvas-dataset={@dataset}
       data-canvas-token={@api_token_raw}
       data-save-strings={field_canvas_save_strings()}
+      data-strings={BarkparkWeb.StudioLocale.component_strings(:paper_canvas)}
       data-test-id="field-canvas"
     >
       <bp-paper-canvas></bp-paper-canvas>

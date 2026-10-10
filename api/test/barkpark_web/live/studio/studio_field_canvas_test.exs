@@ -107,6 +107,35 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
     refute html =~ "bp-rt-wrap-description"
   end
 
+  # task-76c5440175affe20: the field canvas spoke English in a Norwegian Studio
+  # (its slash menu, its placeholders, and the notice naming what a paste left
+  # out): the paper canvas's words were stamped on the paper editor only.
+  test "the field canvas carries the canvas words in the workspace's language", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    doc: doc
+  } do
+    strings = fn html ->
+      [json] =
+        html
+        |> LazyHTML.from_document()
+        |> LazyHTML.query(~s([data-test-id="field-canvas"]))
+        |> LazyHTML.attribute("data-strings")
+
+      Jason.decode!(json)
+    end
+
+    id = DraftId.published_id(doc.doc_id)
+    {:ok, _view, en} = live(conn, studio_url(ws, proj, id))
+    assert strings.(en)["an image"] == "an image"
+
+    {:ok, _} = Tenancy.set_workspace_locale(ws, "nb-NO")
+    {:ok, _view, nb} = live(conn, studio_url(ws, proj, id))
+    assert strings.(nb)["an image"] == "et bilde"
+    assert strings.(nb)["Insert block"] == "Sett inn blokk"
+  end
+
   test "field-block-ops writes content[field] only and echoes the new blocks to the canvas", %{
     conn: conn,
     ws: ws,
@@ -164,6 +193,46 @@ defmodule BarkparkWeb.Studio.StudioFieldCanvasTest do
 
     {:ok, saved} = Content.get_document(DraftId.draft_id(id), "publication", @dataset, scope)
     assert [%{"id" => "p1"}] = saved.content["description"]["blocks"]
+  end
+
+  # task-76c5440175affe20: the canvas fits a paste to the field before it saves
+  # (paste-vocabulary.js). These are the blocks it makes from a markdown `> quote`,
+  # a <table> and a <pre><code> in this vocabulary (blockquote STYLE, no code
+  # mark); the server takes them where it refuses the raw `code` block above.
+  test "the blocks a fitted paste produces are saved, not refused", %{
+    conn: conn,
+    ws: ws,
+    proj: proj,
+    doc: doc,
+    scope: scope
+  } do
+    id = DraftId.published_id(doc.doc_id)
+    {:ok, view, _html} = live(conn, studio_url(ws, proj, id))
+    text = fn value -> [%{"type" => "text", "value" => value}] end
+
+    fitted = [
+      %{"id" => "q", "type" => "pullquote", "content" => text.("MD quote")},
+      %{"id" => "t", "type" => "paragraph", "content" => text.("A")},
+      %{"id" => "t-1", "type" => "paragraph", "content" => text.("1")},
+      %{"id" => "c", "type" => "paragraph", "content" => text.("const x = 1")}
+    ]
+
+    html =
+      render_hook(view, "field-block-ops", %{
+        "field" => "description",
+        "request_id" => "field-canvas-fitted-paste",
+        "if_rev" => current_document_rev(view),
+        "ops" => Enum.map(fitted, &%{"op" => "append-block", "block" => &1})
+      })
+
+    refute html =~ "Not allowed in this field"
+    assert_push_event(view, "bp:field-canvas-update", %{field: "description", blocks: blocks})
+    assert Enum.map(blocks, & &1["id"]) == ["p1", "q", "t", "t-1", "c"]
+
+    {:ok, saved} = Content.get_document(DraftId.draft_id(id), "publication", @dataset, scope)
+
+    assert Enum.map(saved.content["description"]["blocks"], & &1["type"]) ==
+             ["paragraph", "pullquote", "paragraph", "paragraph", "paragraph"]
   end
 
   test "a stale field canvas receives the current opaque revision and does not overwrite", %{

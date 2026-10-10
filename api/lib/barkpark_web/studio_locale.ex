@@ -466,6 +466,17 @@ defmodule BarkparkWeb.StudioLocale do
       "call-to-action button" => gettext("call-to-action button"),
       "Callout" => gettext("Callout"),
       "Callout title" => gettext("Callout title"),
+      # What a paste had to leave out (task-76c5440175affe20).
+      "Pasted the text. Left out: %{what}. Add it separately: drag the image file in, or insert the block from the menu." =>
+        gettext(
+          "Pasted the text. Left out: %{what}. Add it separately: drag the image file in, or insert the block from the menu.",
+          what: "%{what}"
+        ),
+      "an image" => gettext("an image"),
+      "a video" => gettext("a video"),
+      "an embed" => gettext("an embed"),
+      "a %{type} block" => gettext("a %{type} block", type: "%{type}"),
+      "%{what} (×%{count})" => gettext("%{what} (×%{count})", what: "%{what}", count: "%{count}"),
       "caption" => gettext("caption"),
       "Caption" => gettext("Caption"),
       "captioned block" => gettext("captioned block"),

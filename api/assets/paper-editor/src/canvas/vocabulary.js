@@ -122,6 +122,13 @@ export function allowedInlineTypes(vocab) {
   return new Set(["text", ...vocab.marks, ...vocab.annotations]);
 }
 
+// May a TipTap mark of this name sit in the field? (A paste unwraps the ones that
+// may not, keeping their text — paste-vocabulary.js.)
+export function markAllowed(markName, vocab) {
+  if (!vocab) return true;
+  return allowedInlineTypes(vocab).has(MARK_TO_PD[markName] || markName);
+}
+
 // The portable-doc type a TipTap node JSON stands for, or null when unknown.
 function pdTypeOf(node) {
   if (!node) return null;
