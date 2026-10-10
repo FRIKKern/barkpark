@@ -93,6 +93,9 @@ defmodule Barkpark.PortableDoc.Render.Chrome do
       "Open the paper to see the live chart." => gettext("Open the paper to see the live chart."),
       "Open the paper to see the live progress." =>
         gettext("Open the paper to see the live progress."),
+      # the data-viz source stamp (task-c5c0f4fa42848256)
+      "Source" => pgettext("data source", "Source"),
+      "Sources" => pgettext("data source", "Sources"),
       "Sheet truncated — showing the first %{n} rows" =>
         gettext("Sheet truncated — showing the first %{n} rows", n: "%{n}"),
       # task status vocabulary (design/status-manifest.json labels)

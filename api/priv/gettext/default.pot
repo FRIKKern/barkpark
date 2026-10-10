@@ -10969,22 +10969,22 @@ msgstr ""
 msgid "Recommendation: "
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:114
+#: lib/barkpark/portable_doc/render/chrome.ex:117
 #, elixir-autogen, elixir-format
 msgid "a candidate being weighed"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:113
+#: lib/barkpark/portable_doc/render/chrome.ex:116
 #, elixir-autogen, elixir-format
 msgid "abandoned or superseded"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:108
+#: lib/barkpark/portable_doc/render/chrome.ex:111
 #, elixir-autogen, elixir-format
 msgid "backlog — not ready yet"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:110
+#: lib/barkpark/portable_doc/render/chrome.ex:113
 #, elixir-autogen, elixir-format
 msgid "being worked right now"
 msgstr ""
@@ -11004,7 +11004,7 @@ msgstr ""
 msgid "blocks %{n} tasks"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:112
+#: lib/barkpark/portable_doc/render/chrome.ex:115
 #, elixir-autogen, elixir-format
 msgid "complete"
 msgstr ""
@@ -11029,7 +11029,7 @@ msgstr ""
 msgid "not scheduled"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:111
+#: lib/barkpark/portable_doc/render/chrome.ex:114
 #, elixir-autogen, elixir-format
 msgid "something is required first"
 msgstr ""
@@ -11039,12 +11039,12 @@ msgstr ""
 msgid "tasks unavailable — the Tasks plugin is not loaded"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:109
+#: lib/barkpark/portable_doc/render/chrome.ex:112
 #, elixir-autogen, elixir-format
 msgid "unchecked — claim it now"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:115
+#: lib/barkpark/portable_doc/render/chrome.ex:118
 #, elixir-autogen, elixir-format
 msgid "under active investigation"
 msgstr ""
@@ -11071,49 +11071,49 @@ msgctxt "answer"
 msgid "Yes"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:102
+#: lib/barkpark/portable_doc/render/chrome.ex:105
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "blocked"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:104
+#: lib/barkpark/portable_doc/render/chrome.ex:107
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "cancelled"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:105
+#: lib/barkpark/portable_doc/render/chrome.ex:108
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "considering"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:103
+#: lib/barkpark/portable_doc/render/chrome.ex:106
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "done"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:101
+#: lib/barkpark/portable_doc/render/chrome.ex:104
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "in progress"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:99
+#: lib/barkpark/portable_doc/render/chrome.ex:102
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "open"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:100
+#: lib/barkpark/portable_doc/render/chrome.ex:103
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "ready"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:106
+#: lib/barkpark/portable_doc/render/chrome.ex:109
 #, elixir-autogen, elixir-format
 msgctxt "task status"
 msgid "researching"
@@ -11239,7 +11239,7 @@ msgstr ""
 msgid "Peace"
 msgstr ""
 
-#: lib/barkpark/portable_doc/render/chrome.ex:97
+#: lib/barkpark/portable_doc/render/chrome.ex:100
 #, elixir-autogen, elixir-format
 msgid "Sheet truncated — showing the first %{n} rows"
 msgstr ""
@@ -11302,4 +11302,16 @@ msgstr ""
 #: lib/barkpark/portable_doc/render/chrome.ex:88
 #, elixir-autogen, elixir-format
 msgid "series %{n}"
+msgstr ""
+
+#: lib/barkpark/portable_doc/render/chrome.ex:97
+#, elixir-autogen, elixir-format
+msgctxt "data source"
+msgid "Source"
+msgstr ""
+
+#: lib/barkpark/portable_doc/render/chrome.ex:98
+#, elixir-autogen, elixir-format
+msgctxt "data source"
+msgid "Sources"
 msgstr ""

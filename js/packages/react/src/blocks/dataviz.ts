@@ -129,7 +129,7 @@ function statHtml(block: unknown, ctx: RenderCtx): string {
   const labelHtml = label === '' ? '' : `<div class="bp-stat__l">${escapeHtml(label)}</div>`
   // THE KILDE LAW: a stat is a datum, and a datum carries its provenance.
   const ref = parseSourceRef(displayString(get(block, 'source')))
-  const kilde = kildeHtml(ref === null ? [] : [ref])
+  const kilde = kildeHtml(ref === null ? [] : [ref], ctx)
   // THE VERDICT: 'loss' or 'peace' paints the DIGITS in the verdict ink
   // (design/tokens.json color.verdict; paper-surface.css .bp-stat__v--loss /
   // --peace). Only the value moves — label, body and rule keep the page voice,
@@ -151,7 +151,7 @@ const stats: Emit = (block, ctx) => {
   const dflt = displayString(get(block, 'sourceDefault'))
   const refs = figureRefs(items, dflt, (it) => displayString(get(it, 'value')) !== '')
   const cells = items.map((it) => statHtml(omitSource(it), ctx)).join('')
-  return `<div class="bp-stats">${cells}${kildeHtml(refs)}</div>`
+  return `<div class="bp-stats">${cells}${kildeHtml(refs, ctx)}</div>`
 }
 
 /* ── kilde (source provenance) ─────────────────────────────────────────────── */
@@ -203,10 +203,11 @@ function figureRefs(
   return out
 }
 
-// The «kilde» stamp: "Kilde" (one ref) / "Kilder" (several), then each ref.
-function kildeHtml(refs: SourceRef[]): string {
+// The «kilde» stamp: "Source" (one ref) / "Sources" (several), then each ref, in
+// the render's language (nb: Kilde / Kilder — task-c5c0f4fa42848256).
+function kildeHtml(refs: SourceRef[], ctx: RenderCtx): string {
   if (refs.length === 0) return ''
-  const word = refs.length > 1 ? 'Kilder' : 'Kilde'
+  const word = refs.length > 1 ? ctx.t('Sources') : ctx.t('Source')
   const spans = refs
     .map((r) => {
       const inner =
@@ -274,7 +275,7 @@ const duel: Emit = (block, ctx) => {
     `<th class="bp-duel__th bp-duel__th--a" scope="col">${escapeHtml(legendA)}</th>` +
     `<th class="bp-duel__th" scope="col">${escapeHtml(legendB)}</th></tr></thead>`
   const body = rows.map(duelRowHtml).join('')
-  return `<div class="bp-duel"><table class="bp-duel__table">${head}<tbody>${body}</tbody></table>${kildeHtml(refs)}</div>`
+  return `<div class="bp-duel"><table class="bp-duel__table">${head}<tbody>${body}</tbody></table>${kildeHtml(refs, ctx)}</div>`
 }
 
 /* ── lineage (dated nodes on a line, jarl figure family) ───────────────────── */
@@ -319,7 +320,7 @@ const lineage: Emit = (block, ctx) => {
   const dflt = displayString(get(block, 'sourceDefault'))
   const refs = figureRefs(nodes, dflt, (n) => displayString(get(n, 'value')) !== '')
   const lis = nodes.map(lineageNodeHtml).join('')
-  return `<div class="bp-lineage"><ol class="bp-lineage__nodes">${lis}</ol>${kildeHtml(refs)}</div>`
+  return `<div class="bp-lineage"><ol class="bp-lineage__nodes">${lis}</ol>${kildeHtml(refs, ctx)}</div>`
 }
 
 /* ── heatmap ───────────────────────────────────────────────────────────────── */
