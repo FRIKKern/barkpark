@@ -631,6 +631,24 @@ defmodule BarkparkWeb.BulldocsLive do
 
   defp paper_scope_opts(_), do: []
 
+  # The rail's event list names a known event type in the reader's language
+  # (ruling 2026-10-10, option (a)): the stored `event_type` and the gitGraph's
+  # ASCII commit ids stay as written, and an unknown type reads raw. English
+  # reads the ids exactly as before (each id is its own msgid).
+  @doc false
+  def event_label("draft"), do: pgettext("paper event", "draft")
+  def event_label("revise"), do: pgettext("paper event", "revise")
+  def event_label("publish"), do: pgettext("paper event", "publish")
+  def event_label("published"), do: pgettext("paper event", "published")
+  def event_label("correction"), do: pgettext("paper event", "correction")
+  def event_label("search"), do: pgettext("paper event", "search")
+  def event_label("simplify-request"), do: pgettext("paper event", "simplify-request")
+  def event_label("simplify-accept"), do: pgettext("paper event", "simplify-accept")
+  def event_label("simplify-reject"), do: pgettext("paper event", "simplify-reject")
+  def event_label("goal-opened"), do: pgettext("paper event", "goal-opened")
+  def event_label("goal-snapshot"), do: pgettext("paper event", "goal-snapshot")
+  def event_label(type), do: type
+
   @doc false
   # Build a VALID linear Mermaid gitGraph from the rail's events. One `commit`
   # per event in inserted_at order (the context already sorts asc). Each commit
@@ -1946,7 +1964,7 @@ defmodule BarkparkWeb.BulldocsLive do
               phx-value-event-id={event.id}
             >
               <span class="bp-goal-rail-event-idx">{idx}</span>
-              <span class="bp-goal-rail-event-type">{event.event_type}</span>
+              <span class="bp-goal-rail-event-type">{event_label(event.event_type)}</span>
             </button>
           </li>
         </ol>
