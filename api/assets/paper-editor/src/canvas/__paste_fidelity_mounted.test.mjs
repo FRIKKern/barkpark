@@ -1,7 +1,7 @@
-// A paste is fitted to a field's vocabulary node by node and never dropped whole
-// (task-76c5440175affe20). The clipboards are sanity-builder's scout shapes
-// (barkpark-studio e2e/journeys/paste.spec.ts CLIPBOARDS), pasted as real events.
-// Run: node src/canvas/__paste_vocabulary_mounted.test.mjs
+// Paste fidelity, Sanity parity (task-68314b1d334213e8): content that was kept but
+// shaped wrong. The clipboards are sanity-builder's scout shapes (barkpark-studio
+// e2e/journeys/paste.spec.ts CLIPBOARDS) plus controls, pasted as real events.
+// Run: node src/canvas/__paste_fidelity_mounted.test.mjs
 import assert from "node:assert/strict";
 import { JSDOM } from "jsdom";
 
@@ -78,67 +78,83 @@ const plain = (inline) => (inline || []).map((n) => n.value ?? n.text ?? plain(n
 const texts = (blocks) => blocks.map((b) => b.text || plain(b.content) || (b.items || []).map(plain).join(" | ") || b.value || "");
 const inVocab = (ed) => docVocabularyViolation(ed.getJSON(), parseVocabulary(VOCAB));
 
+
 let passed = 0;
 async function test(name, run) { await run(); console.log("PASS " + name); passed++; }
+const pasted = (r) => r.blocks.slice(1);
 
 try {
-  await test("1. markdown with a `> quote` line pastes EVERY block; the quote is the field's quote block", async () => {
-    const r = await pasteInto(CLIPBOARDS.markdown);
-    const t = texts(r.blocks);
-    for (const want of ["MD heading", "MD bullet one | MD bullet two", "MD quote", "MD last line"]) assert.ok(t.includes(want), `kept ${want}: ${JSON.stringify(t)}`);
-    assert.equal(r.blocks.find((b) => plain(b.content) === "MD quote").type, "pullquote");
-    assert.equal(r.notice(), "", "nothing was left out, so no notice");
-    assert.equal(inVocab(r.ed), null);
+  await test("0. <blockquote><p>…</p></blockquote> is the field's quote style, and a quote block in a paper", async () => {
+    const clip = { html: "<p>Before</p><blockquote><p>Quoted text</p></blockquote><p>After</p>", text: "Before\nQuoted text\nAfter" };
+    let r = await pasteInto(clip);
+    assert.deepEqual(pasted(r).map((b) => b.type), ["paragraph", "pullquote", "paragraph"]);
+    assert.equal(plain(pasted(r)[1].content), "Quoted text");
+    r.canvas.remove();
+    r = await pasteInto(clip, null);
+    assert.equal(pasted(r)[1].type, "blockquote");
+    r.canvas.remove();
+    // Two paragraphs in one quote: one quote block each (Sanity's shape; a quote
+    // block may not hold a line break), in a field and in a paper.
+    r = await pasteInto({ html: "<blockquote><p>One</p><p>Two</p></blockquote>", text: "One\nTwo" });
+    assert.deepEqual(pasted(r).map((b) => [b.type, plain(b.content)]), [["pullquote", "One"], ["pullquote", "Two"]]);
+    r.canvas.remove();
+    r = await pasteInto({ html: "<blockquote><p>One</p><p>Two</p></blockquote>", text: "One\nTwo" }, null);
+    assert.deepEqual(pasted(r).map((b) => [b.type, plain(b.content)]), [["blockquote", "One"], ["blockquote", "Two"]]);
     r.canvas.remove();
   });
 
-  await test("2. HTML with a <table> keeps the surrounding blocks and the cell text as paragraphs", async () => {
-    const r = await pasteInto({ html: "<p>Before</p><table><thead><tr><th>A</th><th>B</th></tr></thead><tbody><tr><td>1</td><td>2</td></tr></tbody></table><p>After</p>", text: "Before\nA\tB\n1\t2\nAfter" });
-    const t = texts(r.blocks);
-    for (const want of ["Before", "A", "B", "1", "2", "After"]) assert.ok(t.includes(want), `kept ${want}: ${JSON.stringify(t)}`);
-    assert.ok(!r.blocks.some((b) => b.type === "table"), "no table in a field without one");
-    assert.equal(inVocab(r.ed), null);
+  await test("1. a markdown [text](url) is a link over its text, on one line too", async () => {
+    for (const text of ["See [the docs](https://example.com/md) now.", "See [the docs](https://example.com/md) now.\n\n- a bullet"]) {
+      const r = await pasteInto({ text });
+      const p = pasted(r)[0];
+      assert.deepEqual(p.content, [{ type: "text", value: "See " }, { type: "link", href: "https://example.com/md", children: [{ type: "text", value: "the docs" }] }, { type: "text", value: " now." }]);
+      assert.doesNotMatch(JSON.stringify(r.blocks), /\[the docs\]/);
+      r.canvas.remove();
+    }
+    const r = await pasteInto({ text: "See [the docs](https://example.com/md) now." });
+    assert.equal(r.blocks.length, 2, "one line flows into the caret's line, no extra block");
     r.canvas.remove();
   });
 
-  await test("3. <img>/<figure> pastes all its text and shows a lasting notice naming the image", async () => {
-    const r = await pasteInto(CLIPBOARDS["web-article"]);
-    const t = texts(r.blocks);
-    for (const want of ["Web heading", "A caption", "A", "2", "Quoted text", "const x = 1", "Web last line"]) assert.ok(t.includes(want), `kept ${want}: ${JSON.stringify(t)}`);
-    assert.match(r.notice(), /Pasted the text\. Left out: an image\./);
-    assert.doesNotMatch(r.notice(), /Nothing was pasted/);
-    await tick(600);
-    assert.match(r.notice(), /Left out: an image/, "the notice has no timeout, and outlives the save flush");
-    r.ed.commands.insertContent("x");
-    assert.equal(r.notice(), "", "the person's next edit clears it");
-    assert.equal(inVocab(r.ed), null);
-    r.canvas.remove();
-  });
-
-  await test("3b. a paper canvas (no vocabulary) also pastes the text of HTML with an image", async () => {
-    const r = await pasteInto(CLIPBOARDS["web-article"], null);
-    assert.ok(texts(r.blocks).includes("Web last line"));
-    assert.match(r.notice(), /Left out: an image\./);
-    r.canvas.remove();
-  });
-
-  await test("4. a pasted <pre><code> becomes a paragraph with a code mark, so the save is not refused", async () => {
-    const r = await pasteInto({ html: "<p>Before</p><pre><code>const x = 1</code></pre><p>After</p>", text: "Before\nconst x = 1\nAfter" });
-    const code = r.blocks.find((b) => plain(b.content) === "const x = 1");
-    assert.equal(code.type, "paragraph");
-    assert.deepEqual(code.content, [{ type: "code", value: "const x = 1" }]);
-    const opTypes = r.batches.flatMap((batch) => batch.ops || []).flatMap((op) => (op.block ? [op.block.type] : []));
-    assert.ok(opTypes.length && opTypes.every((type) => type === "paragraph"), `ops carry only admitted blocks: ${opTypes}`);
-    assert.equal(inVocab(r.ed), null);
-    r.canvas.remove();
-  });
-
-  await test("an in-vocabulary paste is untouched (Google Docs)", async () => {
+  await test("2. Google Docs: no underline inside the link, no newline paragraph from a <br> between blocks", async () => {
     const r = await pasteInto(CLIPBOARDS["google-docs"]);
-    // No paragraph from the <br> Google Docs puts between blocks (task-68314b1d334213e8).
-    assert.deepEqual(r.blocks.map((b) => b.type + (b.level || "")), ["paragraph", "heading2", "paragraph", "list", "paragraph"]);
-    assert.equal(r.notice(), "");
+    const link = JSON.stringify(pasted(r).find((b) => JSON.stringify(b).includes('"link"')));
+    assert.doesNotMatch(link, /underline/);
+    assert.ok(!r.blocks.some((b) => b.type === "paragraph" && /^\s*$/.test(plain(b.content)) && JSON.stringify(b).includes("\\n")), "no paragraph holding only a newline");
+    assert.deepEqual(pasted(r).map((b) => b.type), ["heading", "paragraph", "list", "paragraph"]);
     r.canvas.remove();
+  });
+
+  await test("2b. controls: an author's underline outside a link and a <br> inside a line are kept", async () => {
+    const r = await pasteInto({ html: '<p><span style="text-decoration:underline">kept</span> and line<br>break</p>', text: "kept and line\nbreak" });
+    const p = pasted(r)[0];
+    assert.match(JSON.stringify(p.content), /"underline"/);
+    assert.equal(plain(p.content), "kept and line\nbreak");
+    r.canvas.remove();
+  });
+
+  await test("3. plain text: a single newline is a soft break in one block; a blank line still splits", async () => {
+    const r = await pasteInto({ text: "Line one\nLine two\n\nNew paragraph after a blank line" });
+    assert.deepEqual(pasted(r).map((b) => plain(b.content)), ["Line one\nLine two", "New paragraph after a blank line"]);
+    assert.equal(inVocab(r.ed), null);
+    r.canvas.remove();
+  });
+  await test("3b. multi-line plain text pasted inside a quote keeps every line (a quote holds no soft break)", async () => {
+    const canvas = document.createElement("bp-paper-canvas");
+    canvas.setAttribute("data-vocabulary", VOCAB);
+    canvas.blocks = [{ id: "q", type: "pullquote", content: [{ type: "text", value: "Quoted" }] }];
+    canvas.acknowledgedSaves = true;
+    document.body.append(canvas);
+    await tick(50);
+    const ed = canvas._editor;
+    ed.chain().setTextSelection(ed.state.doc.child(0).nodeSize - 1).run();
+    const event = new Event("paste", { bubbles: true, cancelable: true });
+    Object.defineProperty(event, "clipboardData", { value: { types: ["text/plain"], getData: (t) => (t === "text/plain" ? "Line one\nLine two\n\nNew paragraph" : ""), files: [] } });
+    ed.view.dom.dispatchEvent(event);
+    await tick(20);
+    const t = canvas.recoverySnapshot().blocks.map((b) => plain(b.content)).join(" | ");
+    for (const want of ["Line one", "Line two", "New paragraph"]) assert.ok(t.includes(want), `kept ${want}: ${t}`);
+    canvas.remove();
   });
 } finally {
   console.log(`\n${passed} passed`);
