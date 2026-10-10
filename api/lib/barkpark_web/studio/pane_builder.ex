@@ -1684,6 +1684,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
   def list_items(node, scope_prefix) do
     Enum.flat_map(node.items, fn child ->
       case child.type do
+        # A desk.hidden type rides the resolution tree so its URL opens; a
+        # rendered list never names it (task-9df0043eb4ecf3cc follow-up).
+        _ when is_map_key(child, :desk_hidden) and child.desk_hidden == true ->
+          []
+
         :divider ->
           # Carry the optional label through so the renderer can show it as a
           # section break. Legacy host-side dividers omit it (label nil).

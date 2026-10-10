@@ -87,7 +87,11 @@ defmodule Barkpark.Structure do
       # hierarchy (Sanity's «Hierarkisk struktur»). The node itself stays a type
       # list (no new wire node type — old Go TUIs keep rendering it as the
       # parentless root list); PaneBuilder walks the children pane by pane.
-      tree: nil
+      tree: nil,
+      # true on a `desk.hidden` type's node in the RESOLUTION tree only: it is
+      # there so a direct URL resolves, and a rendered list pane leaves it out
+      # (task-9df0043eb4ecf3cc follow-up).
+      desk_hidden: false
     ]
   end
 
@@ -316,8 +320,27 @@ defmodule Barkpark.Structure do
         [%Node{id: "rest", title: "…Rest", icon: "🗂", type: :list, items: rest_children}]
       end
 
-    maybe_join(non_rest_groups ++ [rest_tier])
+    tiers = maybe_join(non_rest_groups ++ [rest_tier])
+
+    if Keyword.get(opts, :gating, :enabled) == :none,
+      do: mark_desk_hidden(tiers, hidden_type_set(schemas)),
+      else: tiers
   end
+
+  # Flag every node of a `desk.hidden` type in the resolution tree, at any depth.
+  defp mark_desk_hidden(nodes, hidden) when is_list(nodes) do
+    if MapSet.size(hidden) == 0, do: nodes, else: Enum.map(nodes, &mark_desk_hidden(&1, hidden))
+  end
+
+  defp mark_desk_hidden(%Node{} = node, hidden) do
+    %{
+      node
+      | desk_hidden: is_binary(node.type_name) and MapSet.member?(hidden, node.type_name),
+        items: if(is_list(node.items), do: mark_desk_hidden(node.items, hidden), else: node.items)
+    }
+  end
+
+  defp mark_desk_hidden(other, _hidden), do: other
 
   # Place a host group (books / media) by its owning plugin's effective
   # enablement + placement. Disabled → dropped (its doc types then surface in
