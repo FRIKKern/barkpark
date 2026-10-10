@@ -766,12 +766,19 @@ defmodule BarkparkWeb.Studio.StudioLive do
     if socket.assigns[:type_labels_key] == key do
       socket
     else
+      # Plugin words first: the listed catalog leaves out a plugin's SHARED
+      # schema row outside the Default workspace, so `paper` read "paper" in
+      # every picker there (task-f1b5f9e279951791).
+      plugin_words =
+        Map.new(PaneBuilder.plugin_type_word_types(), &{&1, PaneBuilder.type_word(&1)})
+
       labels =
         dataset
         |> Content.list_schemas(BarkparkWeb.ScopeHelpers.scope_opts(socket))
         |> Map.new(fn schema ->
           {schema.name, PaneBuilder.type_word(schema.name, schema.title)}
         end)
+        |> then(&Map.merge(plugin_words, &1))
 
       assign(socket, type_labels: Jason.encode!(labels), type_labels_key: key)
     end

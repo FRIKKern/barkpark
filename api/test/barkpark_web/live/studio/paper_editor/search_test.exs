@@ -85,6 +85,20 @@ defmodule BarkparkWeb.Studio.PaperEditor.SearchTest do
              end)
     end
 
+    # task-f1b5f9e279951791: the [[ menu badged every hit "paper" in a
+    # Norwegian Studio. The reply carries the viewer's word beside the id.
+    test "a match carries the type word in the viewer's language" do
+      socket = bare_socket(@dataset)
+
+      {:reply, %{results: [hit | _]}, _socket} =
+        Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+          Paper.paper_wikilink_search("Wikilink", socket)
+        end)
+
+      assert hit.type == "paper"
+      assert hit.type_label == "artikkel"
+    end
+
     test "non-matching query returns empty list" do
       socket = bare_socket(@dataset)
 
