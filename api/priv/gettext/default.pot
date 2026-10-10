@@ -10314,6 +10314,11 @@ msgstr ""
 msgid "That grant is no longer active."
 msgstr ""
 
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:887
+#, elixir-autogen, elixir-format
+msgid "Your role can edit drafts but cannot publish, unpublish or delete published documents. Ask a workspace admin."
+msgstr ""
+
 #: lib/barkpark_web/live/studio/studio_live/shared.ex:903
 #, elixir-autogen, elixir-format
 msgid "The document changed since you loaded it — reload and retry."

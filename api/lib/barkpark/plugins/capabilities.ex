@@ -2602,7 +2602,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "scoped_admin",
         args: [arg("email", true, "string", "E-mail of the person to seat.")],
         flags: [
-          flag("role", "string", "owner | admin | member (or a custom role).", default: "member")
+          flag(
+            "role",
+            "string",
+            "owner | admin | member | contributor (or a custom role). A contributor writes drafts but cannot publish.",
+            default: "member"
+          )
         ],
         writes: true,
         default_output: "minimal",
@@ -2646,7 +2651,12 @@ defmodule Barkpark.Plugins.Capabilities do
         "scoped_admin",
         args: [
           arg("principal_ref", true, "string", "E-mail, or a principal id."),
-          arg("role", true, "string", "owner | admin | member (or a custom role).")
+          arg(
+            "role",
+            true,
+            "string",
+            "owner | admin | member | contributor (or a custom role). A contributor writes drafts but cannot publish."
+          )
         ],
         flags: [
           flag("principal_type", "string", "Kind of a RAW id — user | api_token.",

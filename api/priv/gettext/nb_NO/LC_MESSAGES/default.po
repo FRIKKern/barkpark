@@ -10314,6 +10314,11 @@ msgstr "Feltet har allerede nådd grensen."
 msgid "That grant is no longer active."
 msgstr "Den tilgangen er ikke lenger aktiv."
 
+#: lib/barkpark_web/live/studio/studio_live/shared.ex:887
+#, elixir-autogen, elixir-format
+msgid "Your role can edit drafts but cannot publish, unpublish or delete published documents. Ask a workspace admin."
+msgstr "Rollen din kan redigere utkast, men ikke publisere, avpublisere eller slette publiserte dokumenter. Spør en administrator i arbeidsområdet."
+
 #: lib/barkpark_web/live/studio/studio_live/shared.ex:903
 #, elixir-autogen, elixir-format
 msgid "The document changed since you loaded it — reload and retry."

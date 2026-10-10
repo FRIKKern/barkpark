@@ -151,6 +151,16 @@ defmodule Barkpark.Tenancy.Auth do
       * `:read`  ← "member", "admin", "owner"
       * `:write` ← "member", "admin", "owner"
       * `:admin` ← "admin", "owner"
+
+  ## Publishing is write minus the draft-only seats
+
+  There is no separate `publish` permission string or action. A principal that
+  may `:write` may also publish, unpublish and delete published documents,
+  EXCEPT when it sits in a draft-only seat (`contributor`, owner decision
+  2026-10-10 on task-348a4fbe24feede6): that seat writes drafts and is refused
+  every change to the published row. `publish_refused?/2` is the one predicate
+  for it, `Barkpark.Content.Lifecycle` asks it at every publish-side door, and
+  `seat_capabilities/3` reports it as `publish`.
   """
   import Ecto.Query, warn: false
   require Logger
@@ -180,8 +190,13 @@ defmodule Barkpark.Tenancy.Auth do
   @builtin_role_actions %{
     "owner" => ~w(read write admin),
     "admin" => ~w(read write admin),
-    "member" => ~w(read write)
+    "member" => ~w(read write),
+    # Writes drafts, never publishes: see `publish_refused?/2`.
+    "contributor" => ~w(read write)
   }
+
+  # Seat roles that may write drafts but not change what is published.
+  @draft_only_roles ~w(contributor)
 
   # Default role for a NEW membership when no explicit role is passed. A token
   # ADDED to a workspace it did not create is a `member` — write content, but
@@ -670,7 +685,7 @@ defmodule Barkpark.Tenancy.Auth do
 
   def permits?(_token, _action), do: false
 
-  @no_seat %{read: false, write: false, admin: false}
+  @no_seat %{read: false, write: false, publish: false, admin: false}
 
   @doc """
   THE SEAT DECISION for one principal, read off an **already-loaded**
@@ -750,7 +765,7 @@ defmodule Barkpark.Tenancy.Auth do
   `test/barkpark_web/live/studio/pds_w43_caps_derive_cost_test.exs`.
   """
   @spec seat_capabilities(principal(), Membership.t() | nil, binary()) ::
-          %{read: boolean(), write: boolean(), admin: boolean()}
+          %{read: boolean(), write: boolean(), publish: boolean(), admin: boolean()}
   def seat_capabilities(
         %ApiToken{id: principal_id} = token,
         %Membership{
@@ -767,10 +782,14 @@ defmodule Barkpark.Tenancy.Auth do
     # `authorize/3`'s token arm makes. ONE role resolution for the three.
     actions = granted_actions(role, workspace_id)
     holder = holder_actions(token, workspace_id)
+    write = permits?(token, :write) and "write" in actions and "write" in holder
 
     %{
       read: permits?(token, :read) and "read" in actions and "read" in holder,
-      write: permits?(token, :write) and "write" in actions and "write" in holder,
+      write: write,
+      publish:
+        write and role not in @draft_only_roles and
+          holder_role(token, workspace_id) not in @draft_only_roles,
       admin: permits?(token, :admin) and "admin" in actions and "admin" in holder
     }
   end
@@ -794,6 +813,7 @@ defmodule Barkpark.Tenancy.Auth do
     %{
       read: "read" in actions,
       write: "write" in actions,
+      publish: "write" in actions and role not in @draft_only_roles,
       admin: "admin" in actions
     }
   end
@@ -820,6 +840,64 @@ defmodule Barkpark.Tenancy.Auth do
   end
 
   defp holder_actions(_token, _workspace_id), do: ~w(read write admin)
+
+  defp holder_role(%ApiToken{owner_user_id: uid}, workspace_id) when is_binary(uid),
+    do: membership_role(uid, workspace_id, :user)
+
+  defp holder_role(_token, _workspace_id), do: nil
+
+  @doc """
+  True when the caller sits in a DRAFT-ONLY seat (`contributor`) and so may
+  not publish, unpublish or delete a published document in `workspace_id`.
+
+  This only ever TAKES AWAY. A caller with no draft-only seat answers `false`
+  and keeps whatever its write gate already decided, so an internal job (no
+  caller context), a share-edit token or a grant-admitted caller is unchanged.
+  The seats checked are every principal the context names: the token's own
+  seat and the user it acts for (a session user, or a PAT's owner). Either
+  one in a draft-only seat refuses, so a contributor cannot publish through a
+  token minted by someone else's seat or through their own PAT.
+
+  `workspace_id` is the workspace the write acts on. When it is not a binary
+  (an unresolved `:shared_only` or `nil` scope), a draft-only seat in ANY
+  workspace refuses: the write's tenant is unknown, so the narrower answer
+  wins.
+  """
+  @spec publish_refused?(term(), term()) :: boolean()
+  def publish_refused?(%Barkpark.Content.CallerContext{} = ctx, workspace_id) do
+    seats =
+      [{ctx.token_id, "api_token"}, {ctx.user_id, "user"}]
+      |> Enum.flat_map(fn {id, type} ->
+        case Repo.uuid_or_nil(id) do
+          nil -> []
+          uuid -> [{uuid, type}]
+        end
+      end)
+
+    case seats do
+      [] ->
+        false
+
+      _ ->
+        principal_match =
+          Enum.reduce(seats, dynamic(false), fn {id, type}, acc ->
+            dynamic([m], ^acc or (m.principal_id == ^id and m.principal_type == ^type))
+          end)
+
+        from(m in Membership, where: m.role in @draft_only_roles, where: ^principal_match)
+        |> scope_seat_workspace(workspace_id)
+        |> Repo.exists?()
+    end
+  end
+
+  def publish_refused?(_caller, _workspace_id), do: false
+
+  defp scope_seat_workspace(query, workspace_id) do
+    case Repo.uuid_or_nil(workspace_id) do
+      nil -> query
+      ws -> from(m in query, where: m.workspace_id == ^ws)
+    end
+  end
 
   @doc """
   The caller's GLOBAL auth tier, as one of the closed strings the
