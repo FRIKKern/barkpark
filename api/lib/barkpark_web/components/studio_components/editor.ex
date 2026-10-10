@@ -291,62 +291,67 @@ defmodule BarkparkWeb.StudioComponents.Editor do
 
   def unresolved_document_notice(assigns) do
     ~H"""
-    <div
-      class="bp-paper-unrenderable"
-      role="alert"
-      aria-live="assertive"
-      tabindex="-1"
-      data-test-id="studio-unresolved-document-notice"
-      data-reason={@reason}
-      data-doc-id={@doc_id}
-      data-doc-type={@doc_type}
-      data-cause={@cause}
-    >
-      <p class="bp-paper-unrenderable-title">
-        <%= gettext("Studio could not open this document.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
-      </p>
-      <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
-        <%= gettext("Ask whoever shared access with you to widen the grant.") %>
-      </p>
-      <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
-        <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
-      </p>
-      <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
-        <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("Whatever is stored under that type is untouched.") %>
-      </p>
-      <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
-        <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
-        <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
-      </p>
-      <div class="bp-paper-unrenderable-actions">
-        <a
-          :if={@cause == :elsewhere and @elsewhere_href}
-          href={@elsewhere_href}
-          class="btn btn-primary btn-sm"
-          data-test-id="studio-unresolved-open-elsewhere"
-        >
-          <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
-        </a>
-        <a
-          href={@list_href || @desk_href}
-          class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
-          data-test-id="studio-unresolved-recovery"
-        >
-          <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
-        </a>
-        <a
-          :if={@list_href}
-          href={@desk_href}
-          class="btn btn-ghost btn-sm"
-          data-test-id="studio-unresolved-back-to-desk"
-        >
-          <%= gettext("Back to the desk") %>
-        </a>
+    <%!-- Like the nothing-selected state, this card stands in for the editor
+          panel, so it is the page's main region and carries its one heading.
+          A wrapper holds the landmark: the card itself is the alert. --%>
+    <div role="main" class="bp-unresolved-main" data-test-id="studio-unresolved-document-main">
+      <div
+        class="bp-paper-unrenderable"
+        role="alert"
+        aria-live="assertive"
+        tabindex="-1"
+        data-test-id="studio-unresolved-document-notice"
+        data-reason={@reason}
+        data-doc-id={@doc_id}
+        data-doc-type={@doc_type}
+        data-cause={@cause}
+      >
+        <h1 class="bp-paper-unrenderable-title">
+          <%= gettext("Studio could not open this document.") %>
+        </h1>
+        <p :if={@reason == :not_found and @cause == :elsewhere} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this workspace — but a document with that id lives in the workspace") %> <strong><%= @elsewhere_name %></strong>.
+        </p>
+        <p :if={@cause == :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= if @reason == :unknown_node do %><%= gettext("The type") %> <code><%= @doc_type %></code> <%= gettext("exists in this dataset") %><% else %><%= gettext("A %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset") %><% end %>, <%= gettext("but your access grant does not cover it") %><%= if @grant_scope && @grant_scope != "" do %> (<%= gettext("it covers %{scope}", scope: @grant_scope) %>)<% end %>.
+          <%= gettext("Ask whoever shared access with you to widen the grant.") %>
+        </p>
+        <p :if={@reason == :not_found and @cause not in [:elsewhere, :out_of_reach]} class="bp-paper-unrenderable-reason">
+          <%= gettext("No %{type} with the id", type: @doc_type) %> <code><%= @doc_id %></code> <%= gettext("exists in this dataset. It may have been deleted.") %>
+        </p>
+        <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
+          <%= gettext("No schema for") %> <code><%= @doc_type %></code> <%= gettext("is installed in this dataset, so Studio has no fields to show its documents with") %><%= if @doc_id && @doc_id != @doc_type do %> (<%= gettext("you asked for") %> <code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("Whatever is stored under that type is untouched.") %>
+        </p>
+        <p :if={@reason == :unknown_node and @cause != :out_of_reach} class="bp-paper-unrenderable-reason">
+          <%= gettext("This desk has no section named") %> <code><%= @doc_type %></code>, <%= gettext("so the path could not be walked to a document") %><%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
+          <%= gettext("The link may predate a structure change, or the plugin that owned it may be disabled.") %>
+        </p>
+        <div class="bp-paper-unrenderable-actions">
+          <a
+            :if={@cause == :elsewhere and @elsewhere_href}
+            href={@elsewhere_href}
+            class="btn btn-primary btn-sm"
+            data-test-id="studio-unresolved-open-elsewhere"
+          >
+            <%= gettext("Open it in %{workspace}", workspace: @elsewhere_name) %>
+          </a>
+          <a
+            href={@list_href || @desk_href}
+            class={["btn btn-sm", if(@cause == :elsewhere and @elsewhere_href, do: "btn-ghost", else: "btn-primary")]}
+            data-test-id="studio-unresolved-recovery"
+          >
+            <%= if @list_href, do: gettext("Back to the %{type} list", type: @doc_type), else: gettext("Back to the desk") %>
+          </a>
+          <a
+            :if={@list_href}
+            href={@desk_href}
+            class="btn btn-ghost btn-sm"
+            data-test-id="studio-unresolved-back-to-desk"
+          >
+            <%= gettext("Back to the desk") %>
+          </a>
+        </div>
       </div>
     </div>
     """
