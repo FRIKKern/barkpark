@@ -113,7 +113,7 @@ function resolveExport(pkgDir: string, subpath: string): string {
   return join(pkgDir, pick(entry))
 }
 
-type Renderer = (props: { value: unknown }) => ReactNode
+type Renderer = (props: { value: unknown; blocks?: unknown }) => ReactNode
 
 /** Import PortableDoc out of an extracted artifact directory, via its exports map. */
 async function loadPortableDoc(pkgDir: string): Promise<Renderer> {
@@ -134,8 +134,18 @@ async function loadPortableDoc(pkgDir: string): Promise<Renderer> {
 
 const pinned = await loadPortableDoc(EXTRACT_DIR)
 
+// The opt-in schema field blocks (task-7375ba22758155fa), loaded from the SAME
+// pinned artifact through its exports["./field-blocks"], so a tarball that
+// omits the subpath reds here like a missing core entry would.
+const fieldBlocksEntry = resolveExport(EXTRACT_DIR, './field-blocks')
+if (!existsSync(fieldBlocksEntry)) {
+  throw new Error(`the pinned artifact's exports["./field-blocks"] points at ${fieldBlocksEntry}, which is NOT in the tarball`)
+}
+const fieldBlocks = ((await import(pathToFileURL(fieldBlocksEntry).href)) as { fieldBlocks: Record<string, unknown> })
+  .fieldBlocks
+
 function render(renderer: Renderer, input: unknown): string {
-  return renderToStaticMarkup(createElement(renderer, { value: [input] }))
+  return renderToStaticMarkup(createElement(renderer, { value: [input], blocks: fieldBlocks }))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -169,11 +179,12 @@ describe('pinned artifact × current Elixir goldens — DOM-shape parity', () =>
     // readdir-derived, no floor literal: the census moves WITH the frozen set.
     expect(goldens.length).toBe(goldenFiles.length)
     expect(goldens.length, 'the golden directory is empty — the parity loop would be vacuous').toBeGreaterThan(0)
-    const registered = new Set(REGISTERED_TYPES)
+    // Core registry plus the opt-in field blocks the artifact ships under ./field-blocks.
+    const registered = new Set([...REGISTERED_TYPES, ...Object.keys(fieldBlocks)])
     const unregistered = goldens.map((g) => g.type).filter((t) => !registered.has(t))
     expect(unregistered, `goldens for types the renderer does not register: ${unregistered.join(', ')}`).toHaveLength(0)
     // Aliases mean REGISTERED_TYPES is a SUPERSET of the golden types, never smaller.
-    expect(REGISTERED_TYPES.length).toBeGreaterThanOrEqual(new Set(goldens.map((g) => g.type)).size)
+    expect(registered.size).toBeGreaterThanOrEqual(new Set(goldens.map((g) => g.type)).size)
   })
 
   for (const golden of goldens) {
