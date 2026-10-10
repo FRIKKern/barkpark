@@ -75,5 +75,27 @@ hook.el.remove();
 hook.destroyed();
 assert.equal(document.activeElement, fresh, "a replaced trigger is found by its id");
 
+// task-69ef8a4632161f8e: a restore re-renders the editor header, so the id-less
+// Historikk button is a new node when the history dialog closes. It is found by its
+// phx-click and aria-label, never by a look-alike that says something else.
+document.body.insertAdjacentHTML(
+  "beforeend",
+  '<header><button phx-click="show-history" aria-label="Annet">A</button>' +
+    '<button phx-click="show-history" aria-label="Historikk">H</button></header>',
+);
+document.querySelector('[aria-label="Historikk"]').focus();
+hook = open('<button id="restore">Gjenopprett</button>');
+assert.equal(document.activeElement.id, "restore");
+const header = document.querySelector("header");
+const rebuilt = header.cloneNode(true);
+header.replaceWith(rebuilt);
+hook.el.remove();
+hook.destroyed();
+assert.equal(
+  document.activeElement,
+  rebuilt.querySelector('[aria-label="Historikk"]'),
+  "a replaced id-less trigger is found by its phx-click and aria-label",
+);
+
 console.log("ok modal focus: focus in, preferred control, Tab wraps, restored on close");
 window.close();
