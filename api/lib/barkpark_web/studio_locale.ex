@@ -772,7 +772,10 @@ defmodule BarkparkWeb.StudioLocale do
     Jason.encode!(%{
       "Bold (mod+B)" => gettext("Bold (mod+B)"),
       "Italic (mod+I)" => gettext("Italic (mod+I)"),
+      "Bold" => gettext("Bold"),
+      "Italic" => gettext("Italic"),
       "Link" => gettext("Link"),
+      "Link address" => gettext("Link address"),
       "Set" => gettext("Set"),
       "Remove" => gettext("Remove")
     })

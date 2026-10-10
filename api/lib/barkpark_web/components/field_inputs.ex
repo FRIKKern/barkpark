@@ -628,11 +628,17 @@ defmodule BarkparkWeb.Components.FieldInputs do
 
   def slug_source_of(_), do: "title"
 
+  # The text box's accessible name: the field's title, else its name.
+  defp rich_text_label(%{"title" => title}, _name) when is_binary(title) and title != "",
+    do: title
+
+  defp rich_text_label(_field, name), do: name
+
   defp rich_text_editor(assigns) do
     ~H"""
     <div id={doc_wrap_id("bp-rt-wrap", @n, @doc_key, @form_gen)} phx-update="ignore" phx-hook="BarkparkFieldBridge">
       <input type="hidden" id={"bp-rt-hidden-#{@n}"} name={"doc[#{@n}]"} value={@v} phx-debounce="500" />
-      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)}></bp-rich-text-editor>
+      <bp-rich-text-editor value={@v} data-bridge-target={"bp-rt-hidden-#{@n}"} data-strings={BarkparkWeb.StudioLocale.component_strings(:rich_text)} data-label={rich_text_label(@field, @n)}></bp-rich-text-editor>
     </div>
     """
   end

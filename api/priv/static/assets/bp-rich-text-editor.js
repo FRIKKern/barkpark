@@ -35,6 +35,11 @@ class BpRichTextEditor extends HTMLElement {
     this._editor = document.createElement("div");
     this._editor.contentEditable = "true";
     this._editor.className = "bp-rte-body";
+    // A bare contenteditable div has no role and no name; the field's label
+    // rides on the host as data-label (task-e471f8bd50a1aefd).
+    this._editor.setAttribute("role", "textbox");
+    this._editor.setAttribute("aria-multiline", "true");
+    if (this.dataset.label) this._editor.setAttribute("aria-label", this.dataset.label);
     this._editor.innerHTML = initial;
     this.appendChild(this._editor);
 
@@ -54,6 +59,7 @@ class BpRichTextEditor extends HTMLElement {
   }
 
   disconnectedCallback() {
+    if (this._onSelection) document.removeEventListener("selectionchange", this._onSelection);
     if (this._editor) {
       if (this._onInput) this._editor.removeEventListener("input", this._onInput);
       if (this._onPaste) this._editor.removeEventListener("paste", this._onPaste);
@@ -84,12 +90,13 @@ class BpRichTextEditor extends HTMLElement {
       const out = typeof strings[text] === "string" ? strings[text] : text;
       return out.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]);
     };
+    // Each glyph button is named by its word: the glyph alone read "B, button".
     bar.innerHTML =
-      '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '"><b>B</b></button>' +
-      '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '"><i>I</i></button>' +
-      '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '">🔗</button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="bold" title="' + t("Bold (mod+B)") + '" aria-label="' + t("Bold") + '"><b aria-hidden="true">B</b></button>' +
+      '<button type="button" class="bp-rte-btn" data-cmd="italic" title="' + t("Italic (mod+I)") + '" aria-label="' + t("Italic") + '"><i aria-hidden="true">I</i></button>' +
+      '<button type="button" class="bp-rte-btn bp-rte-link" title="' + t("Link") + '" aria-label="' + t("Link") + '"><span aria-hidden="true">🔗</span></button>' +
       '<span class="bp-rte-linkrow" hidden>' +
-      '<input type="text" class="bp-rte-url" placeholder="https://…" />' +
+      '<input type="text" class="bp-rte-url" placeholder="https://…" aria-label="' + t("Link address") + '" />' +
       '<button type="button" class="bp-rte-btn bp-rte-set">' + t("Set") + "</button>" +
       '<button type="button" class="bp-rte-btn bp-rte-unset">' + t("Remove") + "</button>" +
       "</span>";
@@ -97,15 +104,56 @@ class BpRichTextEditor extends HTMLElement {
 
     const exec = (cmd, arg) => {
       this._editor.focus();
+      // Focusing the text from a toolbar reached by Tab drops the selection to
+      // a caret; put back the last one the author made in the text.
+      if (this._lastRange) {
+        const sel = window.getSelection();
+        sel.removeAllRanges();
+        sel.addRange(this._lastRange);
+      }
       document.execCommand(cmd, false, arg);
       this._emit();
     };
 
-    bar.querySelectorAll("[data-cmd]").forEach((b) => {
-      // mousedown + preventDefault keeps the text selection alive (a click
-      // would blur the contenteditable and collapse it).
-      b.addEventListener("mousedown", (e) => {
+    // A pointer acts on mousedown (+ preventDefault keeps the text selection
+    // alive; a click would blur the contenteditable and collapse it). Enter and
+    // Space fire only `click`, with detail 0, so a keyboard press acts there; a
+    // pointer's own click (detail >= 1) is skipped so it never acts twice.
+    const press = (el, act) => {
+      el.addEventListener("mousedown", (e) => {
         e.preventDefault();
+        act();
+      });
+      el.addEventListener("click", (e) => {
+        if (e.detail === 0) act();
+      });
+    };
+
+    // The last selection inside the text, kept so a toolbar reached by Tab
+    // (which moves focus off the text) still acts on what the author selected.
+    this._onSelection = () => {
+      const sel = window.getSelection();
+      // Only while the text has focus: leaving it collapses the selection,
+      // and that must not overwrite the one the author made.
+      if (
+        sel && sel.rangeCount > 0 && this._editor &&
+        document.activeElement === this._editor && this._editor.contains(sel.anchorNode)
+      ) {
+        this._lastRange = sel.getRangeAt(0).cloneRange();
+      }
+    };
+    document.addEventListener("selectionchange", this._onSelection);
+    const reselect = () => {
+      const sel = window.getSelection();
+      const inside = sel && sel.rangeCount > 0 && this._editor.contains(sel.anchorNode);
+      if (!inside && this._lastRange) {
+        sel.removeAllRanges();
+        sel.addRange(this._lastRange);
+      }
+    };
+    bar.querySelectorAll("[data-cmd]").forEach((b) => {
+      press(b, () => {
+        reselect();
         exec(b.dataset.cmd);
       });
     });
@@ -113,8 +161,8 @@ class BpRichTextEditor extends HTMLElement {
     const linkRow = bar.querySelector(".bp-rte-linkrow");
     const urlInput = bar.querySelector(".bp-rte-url");
 
-    bar.querySelector(".bp-rte-link").addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    press(bar.querySelector(".bp-rte-link"), () => {
+      reselect();
       // Save the selection — focusing the URL input destroys it.
       const sel = window.getSelection();
       this._savedRange =
@@ -142,10 +190,7 @@ class BpRichTextEditor extends HTMLElement {
       linkRow.hidden = true;
     };
 
-    bar.querySelector(".bp-rte-set").addEventListener("mousedown", (e) => {
-      e.preventDefault();
-      apply();
-    });
+    press(bar.querySelector(".bp-rte-set"), apply);
     urlInput.addEventListener("keydown", (e) => {
       if (e.key === "Enter") {
         e.preventDefault();
@@ -155,8 +200,7 @@ class BpRichTextEditor extends HTMLElement {
         restore();
       }
     });
-    bar.querySelector(".bp-rte-unset").addEventListener("mousedown", (e) => {
-      e.preventDefault();
+    press(bar.querySelector(".bp-rte-unset"), () => {
       restore();
       exec("unlink");
       linkRow.hidden = true;

@@ -290,7 +290,7 @@ defmodule BarkparkWeb.Components.FieldInputsTest do
         |> Phoenix.HTML.safe_to_string()
 
       assert String.trim(html) ==
-               ~s(<div id="bp-rt-wrap-body-doc" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body" data-strings="#{strings}"></bp-rich-text-editor>\n</div>),
+               ~s(<div id="bp-rt-wrap-body-doc" phx-update="ignore" phx-hook="BarkparkFieldBridge">\n  <input type="hidden" id="bp-rt-hidden-body" name="doc[body]" value="hello" phx-debounce="500">\n  <bp-rich-text-editor value="hello" data-bridge-target="bp-rt-hidden-body" data-strings="#{strings}" data-label="body"></bp-rich-text-editor>\n</div>),
              "the unconfigured richText clause changed — Option A must not become " <>
                "Option B (the blocks editor as the DEFAULT for every richText field)"
 
