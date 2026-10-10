@@ -20,7 +20,7 @@ defmodule Barkpark.Content.ScheduledPublishes do
 
   ## Lifecycle
 
-  `scheduled` -> `published` | `cancelled` | `refused` | `failed`. At most one
+  `scheduled` -> `published` | `cancelled` | `refused` | `failed` | `missed`. At most one
   `scheduled` row per document. Each change is announced on the document's
   listen stream as a `schedule` or `unschedule` event on the draft; the publish
   itself is the ordinary `publish` event.
@@ -114,6 +114,37 @@ defmodule Barkpark.Content.ScheduledPublishes do
       announce_for(row, "unschedule")
       {:ok, row}
     end
+  end
+
+  @doc """
+  Re-arm a workspace's pending schedules after a bundle import.
+
+  Rows travel in a workspace bundle; their Oban jobs do not. For every
+  `scheduled` row in `workspace_id`: a future `publish_at` gets its job again
+  (the worker is unique per schedule id, so an existing job is not doubled),
+  and a past-due one ends `missed`, because a publish that runs late without
+  anyone deciding it should is worse than none. Returns the counts.
+  """
+  @spec rearm(binary()) :: %{rearmed: non_neg_integer(), missed: non_neg_integer()}
+  def rearm(workspace_id) when is_binary(workspace_id) do
+    now = DateTime.utc_now()
+
+    ScheduledPublish
+    |> where([s], s.workspace_id == ^workspace_id and s.status == "scheduled")
+    |> Repo.all()
+    |> Enum.reduce(%{rearmed: 0, missed: 0}, fn row, acc ->
+      if DateTime.compare(row.publish_at, now) == :gt do
+        {:ok, _} =
+          Oban.insert(ScheduledPublishWorker.new(%{id: row.id}, scheduled_at: row.publish_at))
+
+        %{acc | rearmed: acc.rearmed + 1}
+      else
+        {:ok, _} =
+          finish(row, "missed", "its time passed while it was not armed (a workspace restore)")
+
+        %{acc | missed: acc.missed + 1}
+      end
+    end)
   end
 
   @doc """

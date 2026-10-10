@@ -1124,7 +1124,7 @@
             }
           },
           {
-            "description": "scheduled | published | cancelled | refused | failed | all.",
+            "description": "scheduled | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
             "required": false,
@@ -7321,7 +7321,7 @@
             }
           },
           {
-            "description": "scheduled | published | cancelled | refused | failed | all.",
+            "description": "scheduled | published | cancelled | refused | failed | missed | all.",
             "in": "query",
             "name": "status",
             "required": false,

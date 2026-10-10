@@ -623,6 +623,12 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         # enablement reads the imported row (task-c8a87043cb286a2f).
         with {:ok, _} <- result, ws_id when is_binary(ws_id) <- manifest["workspace_id"] do
           Barkpark.Plugins.Enablement.announce(ws_id)
+
+          # Scheduled publishes travel, their Oban jobs do not: re-arm the
+          # future ones and mark the past-due ones `missed`, so a restored
+          # workspace never shows a schedule that will not fire, and never
+          # publishes late without a human (task-8e88b5539acafdae).
+          Barkpark.Content.ScheduledPublishes.rearm(ws_id)
         end
 
         result

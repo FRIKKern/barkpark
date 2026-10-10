@@ -1179,7 +1179,10 @@ defmodule Barkpark.Plugins.Capabilities do
         flags: [
           flag("id", "string", "Only this document's schedules."),
           flag("type", "string", "Only this document type."),
-          flag("status", "string", "scheduled | published | cancelled | refused | failed | all.",
+          flag(
+            "status",
+            "string",
+            "scheduled | published | cancelled | refused | failed | missed | all.",
             default: "scheduled"
           )
         ],

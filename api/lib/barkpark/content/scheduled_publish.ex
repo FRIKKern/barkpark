@@ -9,7 +9,7 @@ defmodule Barkpark.Content.ScheduledPublish do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(scheduled published cancelled refused failed)
+  @statuses ~w(scheduled published cancelled refused failed missed)
   @principal_types ~w(user api_token)
 
   schema "scheduled_publishes" do

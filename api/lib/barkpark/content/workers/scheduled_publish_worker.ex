@@ -8,7 +8,16 @@ defmodule Barkpark.Content.Workers.ScheduledPublishWorker do
   FINISHED schedule (recorded on the row), not a job error, so it is never
   retried into a later publish nobody asked for.
   """
-  use Oban.Worker, queue: :default, max_attempts: 3
+  # One live job per schedule: `ScheduledPublishes.rearm/1` may enqueue for a
+  # row whose job already exists (a merge import onto a live instance).
+  use Oban.Worker,
+    queue: :default,
+    max_attempts: 3,
+    unique: [
+      keys: [:id],
+      period: :infinity,
+      states: [:available, :scheduled, :executing, :retryable]
+    ]
 
   alias Barkpark.Content.ScheduledPublishes
 
