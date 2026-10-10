@@ -2582,8 +2582,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert status_of(view_a) =~ "A1: #DIV/0! — Division by zero"
     assert status_of(view_b) =~ "A1 changed to #DIV/0! — Division by zero"
 
-    assert render(view_a) =~
-             ~r/data-ref="A1"[^>]*title="Division by zero"|title="Division by zero"[^>]*data-ref="A1"/
+    assert has_element?(view_a, ~s(td[data-ref="A1"][title="Division by zero"]))
 
     {:ok, _} =
       Barkpark.Tenancy.set_workspace_locale(Barkpark.Tenancy.get_default_workspace(), "nb-NO")
@@ -2600,8 +2599,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     create_sheet!("sg-corner", one_tab(%{}))
     {view, _target, _} = open!(conn, "sg-corner")
 
-    assert render(view) =~
-             ~r/class="sheet-corner"[^>]*>\s*<span class="sr-only">Row \/ column<\/span>/
+    assert has_element?(view, "th.sheet-corner .sr-only", "Row / column")
   end
 
   defp status_of(view, tries \\ 50) do
