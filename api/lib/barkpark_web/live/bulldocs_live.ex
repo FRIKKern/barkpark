@@ -1925,7 +1925,9 @@ defmodule BarkparkWeb.BulldocsLive do
       <aside :if={@rail_events != []} id="goal-path-rail" class="bp-goal-rail">
         <h2 class="bp-goal-rail-title">{gettext("Goal path")}</h2>
         <div id="goal-path-graph" phx-hook="PaperMermaid">
-          <pre class="mermaid">{@rail_gitgraph}</pre>
+          <%!-- The graph scrolls sideways when wide; a keyboard user scrolls
+                it once it can take focus (axe scrollable-region-focusable). --%>
+          <pre class="mermaid" tabindex="0" role="group" aria-label={gettext("Goal path graph")}>{@rail_gitgraph}</pre>
         </div>
         <%!-- Clickable event list — doubles as the no-Mermaid fallback. A
               PLAIN click selects (highlight only, via "rail-select"). A

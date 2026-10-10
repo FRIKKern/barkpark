@@ -8,11 +8,13 @@ defmodule BarkparkWeb.Layouts.BulldocsMobileControlsTest do
             __DIR__
           )
 
+  # task-b46266af433288e3: a role="group" outside main/aside sat in no landmark
+  # (axe region); the controls are a named region.
   test "paper view controls share one normal-flow utility row" do
     src = File.read!(@layout)
 
     assert src =~
-             ~s|<div class="bp-view-controls" role="group" aria-label={gettext("Paper view controls")}>|
+             ~s|<div class="bp-view-controls" role="region" aria-label={gettext("Paper view controls")}>|
 
     assert src =~ ~r/\.bp-view-controls \{.*?display: flex;.*?flex-wrap: wrap;/s
 

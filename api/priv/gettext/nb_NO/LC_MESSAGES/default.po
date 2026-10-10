@@ -11836,3 +11836,8 @@ msgstr "Ukjent funksjon eller navn"
 #, elixir-autogen, elixir-format
 msgid "Row / column"
 msgstr "Rad/kolonne"
+
+#: lib/barkpark_web/live/bulldocs_live.ex
+#, elixir-autogen, elixir-format
+msgid "Goal path graph"
+msgstr "Målstigraf"
