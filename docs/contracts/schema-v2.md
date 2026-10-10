@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: schema-v2-field-types | budget: 1800tok -->
 # Schema Definition v2 — contract
 
-Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section.
+Source: `api/lib/barkpark/content/schema_definition.ex` (canonical). TUI constraint (D12): `CLAUDE.md` "Plugin schemas" section. Every field type, option and rule: [schema-reference.md](schema-reference.md).
 
 ## Four v2 field types
 
@@ -9,7 +9,7 @@ All four appear only in plugin-authored schemas. The eight legacy seed schemas (
 
 ### `composite` — nested object with named subfields
 
-Composites nest to any depth. `Barkpark.Content.Validation` walks them with paths `/<parent>/<child>`, folded into the v1-shaped error envelope.
+`Barkpark.Content.Validation` walks them with paths `/<parent>/<child>`, folded into the v1-shaped error envelope.
 
 ### `arrayOf` — homogeneous array with `ordered` flag
 
@@ -66,7 +66,7 @@ Write `validation: {required: true}` (ruling #48). Schema apply refuses a bare f
 
 ## The sidebar test — per-field `surface` (pd-doctrine t7, rule 4)
 
-Each field MAY carry `surface: "body" | "sidebar"`. `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies, references, dates, trade metadata, settings. Parsed onto `Field.surface`, recursing into `composite` subfields and `of` descriptors. **Absent ⇒ `nil` (unclassified)**, so a schema without `surface` round-trips unchanged and `surface` never flips `flat?/1`. Any other value ⇒ `{:error, :field_surface_invalid}`. Metadata only; no consumer yet (D1 — sidebar-v2 reads it later).
+Each field MAY carry `surface: "body" | "sidebar"`. `body` = title / rich text / featured image / content blocks; `sidebar` = slug, status, taxonomies, references, dates, trade metadata, settings. Parsed onto `Field.surface`, recursing into `composite` subfields and `of` descriptors. **Absent ⇒ `nil` (unclassified)**, so a schema without `surface` round-trips unchanged and `surface` never flips `flat?/1`. Any other value ⇒ `{:error, :field_surface_invalid}`. Metadata only; no consumer yet.
 
 Only the 8 seed schemas (`seeds/demo.ex`) and `paper.json` are stamped.
 
