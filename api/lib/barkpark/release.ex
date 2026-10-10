@@ -263,6 +263,55 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  The prepared data step for task-fa5ccc714ad4a939: stamp `media_files.dataset_id`
+  on legacy unstamped blobs (`Barkpark.Media.DatasetIdBackfill`). The OWNER runs
+  it; a dry run (the default) writes nothing and prints the census.
+
+      bin/barkpark eval 'Barkpark.Release.backfill_media_dataset_id()'
+      bin/barkpark eval 'Barkpark.Release.backfill_media_dataset_id(apply: true, journal: "/var/tmp/media-ds.json")'
+
+  Undo with `undo_media_dataset_id_backfill/1` and the same journal path.
+  """
+  def backfill_media_dataset_id(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    report = Barkpark.Media.DatasetIdBackfill.run(opts)
+    mode = if opts[:apply], do: "APPLIED (journal #{opts[:journal]})", else: "dry run"
+
+    IO.puts(
+      "media dataset_id backfill, #{mode}: null_rows=#{report.null_rows} " <>
+        "groups=#{length(report.groups)} datasets_to_create=#{length(report.to_create)} " <>
+        "unresolvable=#{length(report.unresolvable)} " <>
+        "split_readers=#{length(report.split_readers)} (rows=#{Enum.sum(Enum.map(report.split_readers, & &1.rows))}, left unstamped) " <>
+        "stamped=#{report.stamped} created=#{report.created}"
+    )
+
+    IO.puts("  positive control (one unstamped row): #{inspect(report.control)}")
+
+    Enum.each(report.groups, fn g ->
+      IO.puts(
+        "  ws=#{g.workspace_id} project=#{g.project_id} dataset=#{inspect(g.dataset)} rows=#{g.rows} " <>
+          "-> project=#{g.target_project_id} dataset_id=#{g.dataset_id || if(g.create?, do: "CREATE", else: "none")}" <>
+          if(g.split_readers?, do: " SPLIT-READERS (left unstamped)", else: "")
+      )
+    end)
+
+    Enum.each(report.skipped, &IO.puts("  skipped: #{inspect(&1)}"))
+    report
+  end
+
+  @doc "Reverse `backfill_media_dataset_id(apply: true, journal: path)` from its journal."
+  def undo_media_dataset_id_backfill(journal, opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    result = Barkpark.Media.DatasetIdBackfill.undo(journal, opts)
+    IO.puts("media dataset_id backfill undone: #{inspect(result)}")
+    result
+  end
+
+  @doc """
   The reviewed data step for pds-bl-stray-keys-on-acceptance-criteria:
   `Barkpark.Tasks.StrayCriterionKeys.run/1` behind the one-shot boot.
 
