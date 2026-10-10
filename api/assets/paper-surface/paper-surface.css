@@ -2096,6 +2096,36 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
 .bp-paper-surface .bp-route__map { display: block; width: 100%; height: auto; }
 .bp-paper-surface .bp-route__meta { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.78rem !important; color: var(--paper-ink-soft) !important; margin-top: 8px !important; }
 .bp-paper-surface .bp-route__caption { font-size: 0.82rem !important; color: var(--paper-ink-soft) !important; font-style: italic; margin-top: 3px !important; }
+/* The track strokes `currentColor`, and the separator dot carries no inline ink:
+   the theme paints both here (task-ef9f386f8cb5e32a). */
+.bp-paper-surface .bp-route__map { color: var(--paper-accent); }
+.bp-paper-surface .bp-route__sep { color: var(--paper-rule); }
+
+/* paper-links theme paint (task-ef9f386f8cb5e32a). The renderer keeps geometry
+   and type inline, borders included (`border-top:3px double` stays in the
+   markup), and leaves every var(--paper-*) colour to these rules, keyed by
+   layout (list = the default card list, chapters, timeline). The Studio editor
+   carries the same classes, so View and Edit paint through one rule. */
+.bp-paper-surface .bp-plinks--list { border-top-color: var(--paper-rule); }
+.bp-paper-surface .bp-plinks--chapters,
+.bp-paper-surface .bp-plinks--timeline { border-top-color: var(--paper-ink); }
+.bp-paper-surface .bp-plinks__title { color: var(--paper-ink); }
+.bp-paper-surface .bp-plinks__desc { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plinks__grid--chapters,
+.bp-paper-surface .bp-plinks__grid--timeline { border-color: var(--paper-rule); }
+.bp-paper-surface .bp-plink--list { border-color: var(--paper-rule); border-left-color: var(--paper-accent); background: var(--paper-accent-soft); }
+.bp-paper-surface .bp-plink--chapters,
+.bp-paper-surface .bp-plink--timeline { border-color: var(--paper-rule); }
+.bp-paper-surface .bp-plink__eyebrow--chapters { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__eyebrow--timeline { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__title--list { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__title--chapters,
+.bp-paper-surface .bp-plink__title--timeline { color: var(--paper-ink); }
+.bp-paper-surface .bp-plink__desc { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__foot--chapters { color: var(--paper-accent); }
+.bp-paper-surface .bp-plink__foot--timeline { color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-plink__reason { color: var(--paper-ink); }
+.bp-paper-surface .bp-plink__meta { color: var(--paper-ink-soft); }
 
 /* THE CLOCK STRIP (pe-bl-clock-strip-block). Lineage is a DATED STRIP: stops
    read left-to-right along ONE continuous spine, the way the four-cell clock

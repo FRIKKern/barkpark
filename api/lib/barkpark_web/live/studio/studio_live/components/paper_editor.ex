@@ -1930,11 +1930,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         <section
           data-paper-links
           data-layout={@presentation.layout}
+          class={@presentation.section_class}
           aria-label={@presentation.title}
           style={@presentation.section_style}
         >
           <.paper_links_header_editor block={@block} presentation={@presentation} />
-          <div style={@presentation.grid_style}>
+          <div class={@presentation.grid_class} style={@presentation.grid_style}>
             <.paper_link_card_editor :for={card <- @cards} block={@block} card={card} />
           </div>
         </section>
@@ -1960,7 +1961,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       data-paper-links-header-empty={@empty && "true"}
     >
       <div
-        class="bp-paper-links-title-owner"
+        class={["bp-paper-links-title-owner", @presentation.title_class]}
         style={paper_links_title_owner_style(@presentation.title_style)}
         data-paper-links-title-default={@presentation.title_default? && "true"}
       >
@@ -2001,7 +2002,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </div>
 
       <div
-        class="bp-paper-links-description-owner"
+        class={["bp-paper-links-description-owner", @presentation.description_class]}
         style={@presentation.description_style}
         data-paper-links-description-empty={is_nil(@presentation.description) && "true"}
       >
@@ -2119,7 +2120,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
 
     ~H"""
     <div
-      class="bp-paper-link-ref-card"
+      class={["bp-paper-link-ref-card", @card.card_class]}
       data-paper-link-card
       data-paper-link-card-editable
       data-paper-link-ref-index={@card.index}
@@ -2155,7 +2156,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       <% end %>
       <div
         :if={@card.kind == :chapters && @card.meta_text && @card.meta_admission}
-        class="bp-paper-link-ref-footer"
+        class={["bp-paper-link-ref-footer", @card.footer_class]}
         style={@card.footer_style}
       >
         <%= @card.footer_label %> · <.paper_link_ref_meta
@@ -2166,6 +2167,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
       </div>
       <span
         :if={@card.footer_text && !(@card.kind == :chapters && @card.meta_text && @card.meta_admission)}
+        class={@card.footer_class}
         style={@card.footer_style}
       >
         <%= @card.footer_text %> &nbsp;→
@@ -2210,7 +2212,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # `reasons` map (not this ref's own) stays plain text.
   defp paper_link_ref_reason(assigns) do
     ~H"""
-    <div class="bp-paper-link-ref-reason-owner" style={@card.reason_style}>
+    <div class={["bp-paper-link-ref-reason-owner", @card.reason_class]} style={@card.reason_style}>
       <strong><%= gettext("Why it matters:") %></strong>
       <span class="bp-paper-link-ref-reason-paint-wrapper"><button
           :if={@card.reason_authored? && @card.reason_admission}
@@ -2241,7 +2243,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_title(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-title-owner"
+      class={["bp-paper-link-ref-title-owner", @card.title_class]}
       data-paper-link-ref-title-empty={!@card.title_authored? && "true"}
       style={paper_link_ref_title_owner_style(@card)}
     >
@@ -2281,7 +2283,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_eyebrow(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-eyebrow-owner"
+      class={["bp-paper-link-ref-eyebrow-owner", @card.eyebrow_class]}
       data-paper-link-ref-eyebrow-default={is_nil(@card.eyebrow) && "true"}
       style={@card.eyebrow_style}
     >
@@ -2317,7 +2319,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   defp paper_link_ref_description(assigns) do
     ~H"""
     <div
-      class="bp-paper-link-ref-description-owner"
+      class={["bp-paper-link-ref-description-owner", @card.description_class]}
       data-paper-link-ref-description-empty={is_nil(@card.description) && "true"}
       style={@card.description_style}
     >

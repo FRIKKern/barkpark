@@ -71,11 +71,27 @@ defmodule Barkpark.PortableDoc.Render.AttrEscapeGuardTest do
     {"compose.ex", "data-level", "rel"} =>
       "the TOC relative level — an integer (it is used as an Enum.slice/2 range bound)",
     {"compose.ex", "data-tab-index", "i"} => "Enum.with_index/1's index — an integer",
+    {"compose.ex", "class", "class"} =>
+      "class_attr/1's argument is a paper_links_classes/2 or paper_link_classes/2 literal; the layout segment is paper_links_layout_key/1 (\"chapters\" | \"timeline\" | \"list\") or a fixed card-kind atom",
+    {"compose.ex", "style", "eyebrow_style"} =>
+      "paper_link_eyebrow_style/1 returns a string literal; theme_free/2 only drops declarations from it",
+    {"compose.ex", "style", "card_style"} =>
+      "a string literal per style, passed through theme_free/2, which only drops declarations",
+    {"compose.ex", "style", "paper_link_description_style(style)"} =>
+      "theme_free/2 of a string literal — it only drops declarations",
+    {"compose.ex", "style", "paper_link_reason_style(style)"} =>
+      "theme_free/2 of a string literal — it only drops declarations",
+    {"compose.ex", "style", "metadata_style"} =>
+      "theme_free/2 of a string literal — it only drops declarations; the author metadata goes to the escaped body",
 
     # ── data_viz.ex (SVG geometry: every coordinate is a formatted float) ──────
     {"data_viz.ex", "class", "cls"} =>
       "tone_class/2 allowlists the tone in its case-clause guard (~w(info ok warn danger)) and otherwise returns the literal base class",
     {"data_viz.ex", "class", "k"} => "Enum.map_join(0..3, …)'s integer bin index",
+    {"data_viz.ex", "style", "meta_ink"} =>
+      "route_html/2: \"\" on :article, else \"color:\" <> email_skin(:evergreen).muted — a theme literal, never author text",
+    {"data_viz.ex", "style", "caption_ink"} =>
+      "route_html/2: \"\" on :article, else \"color:\" <> email_skin(:evergreen).muted — a theme literal, never author text",
     {"data_viz.ex", "class", "class"} =>
       "spark_svg/2's class parameter is a caller literal: the default \"bp-stat__spark\" or compose.ex's \"bp-table__spark\" — no author path reaches it (#17811)",
     {"data_viz.ex", "cx", "sx"} => "route coordinate — a float off the computed coords list",

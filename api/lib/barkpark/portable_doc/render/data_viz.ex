@@ -1902,8 +1902,10 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   @route_w 640
   @route_max_h 400
   @route_pad 16
-  # Track/marker colors: article reads the paper accent token (falling back to
-  # the evergreen brand hex); email carries literal hex — a stylesheet-less
+  # Track/marker colors: article paints the track `currentColor` and the
+  # paper-surface stylesheet sets that colour (`.bp-route__map`) along with the
+  # meta, caption and separator inks, so no theme colour rides the markup
+  # (task-ef9f386f8cb5e32a). Email carries literal hex — a stylesheet-less
   # client must never paint the var() default (black blobs, see the email-skin
   # note above). Start/finish greens/terracotta are SEMANTIC, not authorable.
   @route_start "#2f9e63"
@@ -1920,8 +1922,18 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
 
       track =
         case style do
-          :article -> "var(--paper-accent, #{skin.accent})"
+          :article -> "currentColor"
           _ -> skin.accent
+        end
+
+      {meta_ink, sep, caption_ink} =
+        case style do
+          :article ->
+            {"", ~s| <span class="bp-route__sep">·</span> |, ""}
+
+          _ ->
+            {"color:#{skin.muted};", ~s| <span style="color:#{skin.border};">·</span> |,
+             "color:#{skin.muted};"}
         end
 
       meta =
@@ -1933,12 +1945,8 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         if meta == [] do
           ""
         else
-          ~s|<div class="bp-route__meta" style="font-size:13px;color:#{skin.muted};margin-top:6px;">| <>
-            Enum.map_join(
-              meta,
-              ~s| <span style="color:#{skin.border};">·</span> |,
-              &escape_html/1
-            ) <>
+          ~s|<div class="bp-route__meta" style="font-size:13px;#{meta_ink}margin-top:6px;">| <>
+            Enum.map_join(meta, sep, &escape_html/1) <>
             "</div>"
         end
 
@@ -1948,7 +1956,7 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
         if caption == "",
           do: "",
           else:
-            ~s|<div class="bp-route__caption" style="font-size:13px;color:#{skin.muted};font-style:italic;margin-top:2px;">#{escape_html(caption)}</div>|
+            ~s|<div class="bp-route__caption" style="font-size:13px;#{caption_ink}font-style:italic;margin-top:2px;">#{escape_html(caption)}</div>|
 
       ~s|<div class="bp-route">| <>
         route_svg(points, track) <> meta_html <> caption_html <> "</div>"

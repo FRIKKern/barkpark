@@ -82,7 +82,10 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
 
     assert html =~ "A useful principle for terminal Papers."
     refute html =~ "Why it matters:"
-    assert html =~ "background:var(--paper-accent-soft"
+    # The accent-soft ground is the surface stylesheet's (.bp-plink--list), not
+    # inline paint (task-ef9f386f8cb5e32a).
+    assert html =~ ~s(class="bp-plink bp-plink--list")
+    refute html =~ "var(--paper-"
   end
 
   test "chapter layout keeps authored editorial copy while exposing a live edition" do
@@ -158,8 +161,9 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     assert default.title_source == ""
     assert default.title_default?
 
-    assert default.section_style ==
-             "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid var(--paper-rule, #e2e6e5)"
+    # The rule keeps its geometry inline; its colour is .bp-plinks--list's.
+    assert default.section_style == "margin:2.8rem 0 0;padding-top:1.35rem;border-top:1px solid"
+    assert default.section_class == "bp-plinks bp-plinks--list"
 
     whitespace =
       Compose.paper_links_presentation(
@@ -182,11 +186,26 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     timeline =
       Compose.paper_links_presentation(%{"layout" => "timeline", "refs" => ["next"]}, :article)
 
+    # The double rule keeps its geometry inline; its ink is
+    # .bp-plinks--timeline's, and the description ink is .bp-plinks__desc's.
+    assert timeline.section_class == "bp-plinks bp-plinks--timeline"
     assert timeline.section_style =~ "border-top:3px double"
+    refute timeline.section_style =~ "var(--paper-"
     assert timeline.grid_style =~ "minmax(min(100%,13rem),1fr)"
+    assert timeline.description_style == "margin:0.45rem 0 0;line-height:1.6"
+    assert timeline.description_class == "bp-plinks__desc"
+  end
 
-    assert timeline.description_style ==
-             "margin:0.45rem 0 0;color:var(--paper-ink-soft, #55635e);line-height:1.6"
+  test ":email keeps every inline colour and carries no surface class" do
+    email =
+      Compose.paper_links_presentation(%{"layout" => "timeline", "refs" => ["next"]}, :email)
+
+    assert email.section_style =~ "border-top:3px double var(--paper-ink, #17332d)"
+    assert email.section_class == nil
+    [card] = email.cards
+    assert card.card_style =~ "border-right:1px solid var(--paper-rule, #e2e6e5)"
+    assert card.card_class == nil
+    refute card.html =~ "class="
   end
 
   test "shared card presentation exposes source ownership without changing reader HTML" do
@@ -220,7 +239,9 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
     assert authored.description_authored?
     assert authored.before_title_html =~ "Chapter one"
     assert authored.card_style =~ "min-height:13rem"
-    assert authored.html =~ ~s(<a data-paper-link-card data-chapter)
+
+    assert authored.html =~
+             ~s(<a data-paper-link-card data-chapter class="bp-plink bp-plink--chapters")
 
     assert fallback.index == 1
     assert fallback.title == "Live-only title"
@@ -235,8 +256,8 @@ defmodule Barkpark.PortableDoc.Render.PaperLinksTest do
              style: :article,
              paper_links: block["_paper_links"]
            }) ==
-             "<section data-paper-links data-layout=\"chapters\" aria-label=\"Explore the work\" style=\"#{presentation.section_style}\">" <>
-               "<header style=\"#{presentation.header_style}\"><h2 style=\"#{presentation.title_style}\">Explore the work</h2></header>" <>
-               "<div style=\"#{presentation.grid_style}\">#{presentation.cards_html}</div></section>"
+             "<section data-paper-links data-layout=\"chapters\" class=\"#{presentation.section_class}\" aria-label=\"Explore the work\" style=\"#{presentation.section_style}\">" <>
+               "<header style=\"#{presentation.header_style}\"><h2 class=\"#{presentation.title_class}\" style=\"#{presentation.title_style}\">Explore the work</h2></header>" <>
+               "<div class=\"#{presentation.grid_class}\" style=\"#{presentation.grid_style}\">#{presentation.cards_html}</div></section>"
   end
 end
