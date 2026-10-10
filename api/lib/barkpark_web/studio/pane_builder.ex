@@ -947,7 +947,15 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
         title: row_title(doc, schema),
         is_draft: Content.draft?(doc.doc_id),
         status: doc.status,
-        badge: preview_value(doc, Map.get(preview, "badge")),
+        # The pill shows a stored token by its word (a task's "open" reads
+        # "åpen" in nb); `:badge_value` keeps the token for the tone class.
+        badge:
+          badge_label(
+            schema,
+            Map.get(preview, "badge"),
+            preview_value(doc, Map.get(preview, "badge"))
+          ),
+        badge_value: preview_value(doc, Map.get(preview, "badge")),
         # `:meta` stays the pure preview-contract value (Go TUI rowMeta parity —
         # nil when no declaration/manifest). `:updated` is the Studio-only
         # subtitle fallback so a row is never a bare mono id; the render picks
@@ -1237,6 +1245,11 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
       _ -> %{}
     end
   end
+
+  defp badge_label(%{name: type}, field, value) when is_binary(field),
+    do: BarkparkWeb.Studio.PluginSchemaCopy.option_label(type, field, value)
+
+  defp badge_label(_schema, _spec, value), do: value
 
   defp preview_value(_doc, nil), do: nil
 

@@ -14,7 +14,12 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
   Only an exact marked string is translated, so a title an operator changed
   stays as they wrote it, and a string with no marker renders in English in
   every language. `markers/0` lets a test catch drift between the plugin
-  schemas and this list. Tasks is an operator surface and stays English.
+  schemas and this list.
+
+  The Tasks schema (task-228e90e341223f82) translates its title, group titles
+  and top-level field titles, and shows its lifecycle and disposition values by
+  a word: the stored value stays the English token, only the label changes.
+  Its long field descriptions are operator documentation and stay English.
   """
   use Gettext, backend: BarkparkWeb.Gettext
 
@@ -70,7 +75,124 @@ defmodule BarkparkWeb.Studio.PluginSchemaCopy do
     |> Map.update(:title, nil, &translate/1)
   end
 
+  def localize(%{name: "task", fields: fields} = schema) do
+    schema
+    |> Map.update(:title, nil, &task_word/1)
+    |> Map.update(:groups, [], fn groups -> Enum.map(groups || [], &task_group/1) end)
+    |> Map.put(:fields, Enum.map(fields || [], &task_field/1))
+  end
+
   def localize(schema), do: schema
+
+  # ── Tasks ──────────────────────────────────────────────────────────────────
+
+  @task_markers [
+    pgettext_noop("Task", "task schema"),
+    pgettext_noop("Brief", "task schema"),
+    pgettext_noop("Work", "task schema"),
+    pgettext_noop("Close", "task schema"),
+    pgettext_noop("System", "task schema"),
+    pgettext_noop("Title", "task schema"),
+    pgettext_noop("Portable brief", "task schema"),
+    pgettext_noop("Description", "task schema"),
+    pgettext_noop("Purpose", "task schema"),
+    pgettext_noop("Design notes", "task schema"),
+    pgettext_noop("Design paper", "task schema"),
+    pgettext_noop("Acceptance criteria", "task schema"),
+    pgettext_noop("Estimate", "task schema"),
+    pgettext_noop("Execution policy", "task schema"),
+    pgettext_noop("Execution gate", "task schema"),
+    pgettext_noop("Due", "task schema"),
+    pgettext_noop("Priority", "task schema"),
+    pgettext_noop("Labels", "task schema"),
+    pgettext_noop("Tags", "task schema"),
+    pgettext_noop("Parent task", "task schema"),
+    pgettext_noop("Lifecycle", "task schema"),
+    pgettext_noop("Assignee", "task schema"),
+    pgettext_noop("Disposition", "task schema"),
+    pgettext_noop("Disposition reason", "task schema"),
+    pgettext_noop("Reopen trigger", "task schema"),
+    pgettext_noop("Disposition rerun", "task schema"),
+    pgettext_noop("Disposition owner", "task schema"),
+    pgettext_noop("Worklog", "task schema"),
+    pgettext_noop("Blocked on", "task schema"),
+    pgettext_noop("Attachments", "task schema"),
+    pgettext_noop("Sessions", "task schema"),
+    pgettext_noop("Outcome", "task schema"),
+    pgettext_noop("Close reason", "task schema"),
+    pgettext_noop("Retro", "task schema"),
+    pgettext_noop("Kind", "task schema"),
+    pgettext_noop("Claim (engine)", "task schema"),
+    pgettext_noop("Dependencies", "task schema"),
+    pgettext_noop("Linked papers", "task schema"),
+    pgettext_noop("History (engine)", "task schema"),
+    pgettext_noop("History summary (engine)", "task schema")
+  ]
+
+  # The select fields whose stored tokens are shown by a word. The token stays
+  # what is stored and sent; only the label is translated.
+  @task_option_fields ~w(lifecycle_status disposition)
+
+  @task_option_markers [
+    pgettext_noop("open", "task status"),
+    pgettext_noop("in_progress", "task status"),
+    pgettext_noop("blocked", "task status"),
+    pgettext_noop("done", "task status"),
+    pgettext_noop("cancelled", "task status"),
+    pgettext_noop("considering", "task status"),
+    pgettext_noop("researching", "task status"),
+    pgettext_noop("parked", "task status"),
+    pgettext_noop("closed", "task status")
+  ]
+
+  @doc "Every Tasks schema title this module has a translation marker for."
+  @spec task_markers() :: [String.t()]
+  def task_markers, do: @task_markers
+
+  @doc "Every Tasks lifecycle or disposition token this module shows by a word."
+  @spec task_option_markers() :: [String.t()]
+  def task_option_markers, do: @task_option_markers
+
+  @doc """
+  The word Studio shows for a stored select token: the Tasks lifecycle and
+  disposition tokens in the viewer's Studio language, anything else unchanged.
+  """
+  @spec option_label(String.t() | nil, String.t() | nil, term()) :: term()
+  def option_label("task", field, value)
+      when field in @task_option_fields and value in @task_option_markers,
+      do: Gettext.pgettext(BarkparkWeb.Gettext, "task status", value)
+
+  def option_label(_type, _field, value), do: value
+
+  defp task_word(text) when text in @task_markers,
+    do: Gettext.pgettext(BarkparkWeb.Gettext, "task schema", text)
+
+  defp task_word(text), do: text
+
+  defp task_group(%{"title" => title} = g) when is_binary(title),
+    do: Map.put(g, "title", task_word(title))
+
+  defp task_group(g), do: g
+
+  defp task_field(%{"name" => name, "options" => opts} = f)
+       when name in @task_option_fields and is_list(opts) do
+    f
+    |> Map.put("options", Enum.map(opts, &task_option(name, &1)))
+    |> task_field_title()
+  end
+
+  defp task_field(%{} = f), do: task_field_title(f)
+  defp task_field(other), do: other
+
+  defp task_field_title(%{"title" => title} = f) when is_binary(title),
+    do: Map.put(f, "title", task_word(title))
+
+  defp task_field_title(f), do: f
+
+  defp task_option(field, value) when is_binary(value),
+    do: %{"value" => value, "title" => option_label("task", field, value)}
+
+  defp task_option(_field, other), do: other
 
   defp field(%{} = f) do
     f

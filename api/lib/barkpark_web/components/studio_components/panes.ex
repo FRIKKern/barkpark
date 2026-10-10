@@ -503,6 +503,8 @@ defmodule BarkparkWeb.StudioComponents.Panes do
   attr :is_draft, :boolean, default: false
   attr :selected, :boolean, default: false
   attr :badge, :string, default: nil
+  # The stored token behind a translated badge, for its tone class.
+  attr :badge_value, :string, default: nil
   attr :meta, :string, default: nil
 
   # ── Row media (Gyldendal parity E3.3) ──────────────────────────────────
@@ -587,7 +589,7 @@ defmodule BarkparkWeb.StudioComponents.Panes do
               <%= render_slot(@trailing) %>
             <% end %>
             <%= if @badge do %>
-              <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge)}"}><%= @badge %></span>
+              <span class={"pane-doc-badge pane-doc-badge--#{badge_slug(@badge_value || @badge)}"}><%= @badge %></span>
             <% end %>
           </span>
           <%= if @meta do %>

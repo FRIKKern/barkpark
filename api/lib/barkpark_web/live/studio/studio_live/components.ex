@@ -1724,6 +1724,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     status={item.status || ""}
                     is_draft={item.is_draft}
                     badge={item[:badge]}
+                    badge_value={item[:badge_value]}
                     meta={item[:meta] || item[:updated]}
                     media={item[:media]}
                     media_slot={item[:media_slot] == true}
