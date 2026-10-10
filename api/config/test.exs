@@ -411,3 +411,10 @@ config :barkpark, Barkpark.Quiz.Room, join_burst: 1_000_000, join_rate_per_sec: 
 # suites exercise them; the flag-off behaviour is pinned by synchronous tests
 # that switch it off for their own duration (canonical_shape_writes_flag_test).
 config :barkpark, canonical_shape_writes: true
+
+# The finder's shared graph derivation keeps its result for 0 ms in tests:
+# every test seeds its own corpus in a sandboxed transaction, and a result
+# cached by one test must never be served to the next. Concurrent mounts
+# still share one derivation (Barkpark.SingleFlight); the TTL itself is
+# pinned in finder_graph_single_flight_test.exs.
+config :barkpark, :finder_graph_ttl_ms, 0

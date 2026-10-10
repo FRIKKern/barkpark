@@ -553,6 +553,10 @@ defmodule Barkpark.Application do
         # unguarded" when it is not, which is the correct posture for a
         # contention remedy and the wrong one to rely on at boot.
         Barkpark.Tenancy.WorkspaceBundle.SingleFlight,
+        # Shared derivations (am-w2-s4): concurrent askers of one key share
+        # one computation, and its result for a short TTL. One small ETS
+        # table; no connections, no timers.
+        Barkpark.SingleFlight,
         # Dedicated supervisor for outbound webhook/media deliveries. The
         # generic TaskSupervisor has max_children: :infinity, so a webhook
         # storm or a slow endpoint (each child sleeps in-task on retry
