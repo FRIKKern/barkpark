@@ -327,6 +327,7 @@ defmodule BarkparkWeb.StudioComponents.Nav do
     ~H"""
     <div
       class="studio-footer"
+      role="contentinfo"
       style="flex: none; padding: 4px 16px; font-size: 11px; color: var(--fg-dim); border-top: 1px solid var(--border);"
     >
       <span id="bp-build-version">Barkpark v<%= Barkpark.BuildInfo.version() %> · <%= Barkpark.BuildInfo.commit() %></span><%= render_slot(@vitals) %>

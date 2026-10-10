@@ -47,6 +47,26 @@ defmodule BarkparkWeb.Studio.MediaLiveTest do
     assert html =~ ~s(data-token="#{raw}")
   end
 
+  # task-0374792cb435a2e3: axe on the media page reported page-has-heading-one and
+  # region — no h1, and the visibility notice (and the shared footer) outside any
+  # landmark.
+  test "the media page has one heading and keeps its notice and footer in landmarks", %{
+    conn: conn
+  } do
+    {:ok, _view, html} = live(conn, scoped_studio("/d/production/studio/media"))
+    doc = LazyHTML.from_document(html)
+
+    assert [_one] = doc |> LazyHTML.query("h1") |> Enum.to_list()
+    assert doc |> LazyHTML.query("h1") |> LazyHTML.text() =~ "Media library"
+
+    notice = LazyHTML.query(doc, "section#media-visibility-notice[aria-labelledby]")
+    assert Enum.count(notice) == 1
+    [label_id] = LazyHTML.attribute(notice, "aria-labelledby")
+    assert doc |> LazyHTML.query("##{label_id}") |> LazyHTML.text() != ""
+
+    assert Enum.count(LazyHTML.query(doc, ~s(.studio-footer[role="contentinfo"]))) == 1
+  end
+
   # Crash-class closure (#819): MediaLive defined zero handlers, so any stale or
   # forged client phx event FunctionClauseError-crashed the session. The
   # trailing catch-alls now no-op both dispatch paths.

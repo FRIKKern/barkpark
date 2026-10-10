@@ -205,16 +205,19 @@
       this.className = "bp-ae-root";
       this.innerHTML =
         '<div class="bp-ae-toast" hidden></div>' +
-        '<aside class="bp-ae-sidebar">' +
+        // Each landmark carries the name its visible title gives it, so a screen
+        // reader's landmark list tells the sidebar, its three navigations and the
+        // inspector apart (task-0374792cb435a2e3).
+        '<aside class="bp-ae-sidebar" aria-label="' + this._e("Library") + '">' +
         '<div class="bp-ae-sidebar-title">' + this._e("Library") + "</div>" +
-        '<nav class="bp-ae-filters"></nav>' +
+        '<nav class="bp-ae-filters" aria-label="' + this._e("Library") + '"></nav>' +
         '<div class="bp-ae-sidebar-title bp-ae-facets-title" hidden>' + this._e("Refine") + "</div>" +
-        '<nav class="bp-ae-facets" hidden></nav>' +
+        '<nav class="bp-ae-facets" aria-label="' + this._e("Refine") + '" hidden></nav>' +
         '<div class="bp-ae-sidebar-head">' +
         '<div class="bp-ae-sidebar-title bp-ae-collections-title">' + this._e("Collections") + "</div>" +
         '<button type="button" class="bp-ae-new-collection btn btn-sm" title="' + this._e("New folder") + '" aria-label="' + this._e("New folder") + '">+</button>' +
         "</div>" +
-        '<nav class="bp-ae-collections"></nav>' +
+        '<nav class="bp-ae-collections" aria-label="' + this._e("Collections") + '"></nav>' +
         "</aside>" +
         '<main class="bp-ae-main">' +
         '<header class="bp-ae-toolbar">' +
@@ -257,7 +260,7 @@
         '<div class="bp-ae-filmstrip-track"></div>' +
         "</footer>" +
         "</main>" +
-        '<aside class="bp-ae-inspector">' +
+        '<aside class="bp-ae-inspector" aria-label="' + this._e("Asset details") + '">' +
         '<div class="bp-ae-inspector-empty text-sm text-muted">' + this._e("Select an asset or collection") + "</div>" +
         '<div class="bp-ae-inspector-body" hidden></div>' +
         "</aside>" +
