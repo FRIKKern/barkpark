@@ -263,6 +263,30 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  The reviewed data step for pds-bl-stray-keys-on-acceptance-criteria:
+  `Barkpark.Tasks.StrayCriterionKeys.run/1` behind the one-shot boot.
+
+      bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys()'             # dry run
+      bin/barkpark eval 'Barkpark.Release.clean_stray_criterion_keys(apply: true)'
+
+  Prints the counts and every action (dropped, folded, moved, reported).
+  """
+  def clean_stray_criterion_keys(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    report = Barkpark.Tasks.StrayCriterionKeys.run(opts)
+
+    IO.puts(
+      "stray criterion keys (#{if opts[:apply], do: "APPLIED", else: "dry run"}): " <>
+        "scanned=#{report.scanned} changed=#{report.changed} stale=#{report.stale}"
+    )
+
+    Enum.each(report.actions, &IO.puts("  " <> inspect(&1)))
+    report
+  end
+
+  @doc """
   LOAD `:barkpark` without STARTING it.
 
   `Application.load/1` makes the app's environment (`:ecto_repos`, every
