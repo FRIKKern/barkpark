@@ -81,8 +81,30 @@ defmodule Barkpark.Content.PortableText do
   """
   @spec from_html(String.t(), [map()]) :: [map()]
   def from_html(html, stored \\ []) when is_binary(html) do
-    state = %{blocks: [], cur: nil, marks: [], lists: [], links: [], spans: [], skip: 0}
     stored = if blocks?(stored), do: stored, else: []
+
+    # The inline objects the stored blocks hold, by `_key`. The editor HTML only
+    # NAMES an object (its `_key` in `data-pt-object`); the object itself is
+    # always taken from here, never from the client's attribute, which anyone
+    # editing the HTML could rewrite.
+    stored_objects =
+      for %{"children" => children} <- stored,
+          is_list(children),
+          %{"_type" => t, "_key" => k} = o <- children,
+          t != "span",
+          into: %{},
+          do: {k, o}
+
+    state = %{
+      blocks: [],
+      cur: nil,
+      marks: [],
+      lists: [],
+      links: [],
+      spans: [],
+      skip: 0,
+      objects: stored_objects
+    }
 
     stored_defs =
       for %{"markDefs" => defs} <- stored,
@@ -206,8 +228,8 @@ defmodule Barkpark.Content.PortableText do
         open_mark_span(state, attrs)
 
       json ->
-        case Jason.decode(json) do
-          {:ok, %{"_type" => t} = object} when is_binary(t) ->
+        case stored_object(json, state.objects) do
+          {:ok, object} ->
             state = if state.cur, do: state, else: start_block(state, "normal", nil, 0)
             cur = %{state.cur | spans: [%{object: object} | state.cur.spans]}
             %{state | cur: cur, skip: 1, spans: [:object | state.spans]}
@@ -220,6 +242,18 @@ defmodule Barkpark.Content.PortableText do
 
   defp open_span(state, _attrs),
     do: %{state | skip: state.skip + 1, spans: [:object | state.spans]}
+
+  # Only the `_key` is read from the client's attribute; the object is the
+  # stored one with that key. An unknown or forged key is `:error`, so the span
+  # falls through to a plain one and its label stays as text.
+  defp stored_object(json, objects) do
+    with {:ok, %{"_key" => k}} when is_binary(k) <- Jason.decode(json),
+         %{} = object <- Map.get(objects, k) do
+      {:ok, object}
+    else
+      _ -> :error
+    end
+  end
 
   defp open_mark_span(state, attrs) do
     mark =

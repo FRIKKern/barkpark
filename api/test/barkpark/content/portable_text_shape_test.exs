@@ -216,7 +216,32 @@ defmodule Barkpark.Content.PortableTextShapeTest do
 
     test "a block holding only an object is kept" do
       block = %{@post11 | "children" => [@chip]}
-      assert [%{"children" => [@chip]}] = PortableText.from_html(PortableText.to_html([block]))
+
+      assert [%{"children" => [@chip]}] =
+               PortableText.from_html(PortableText.to_html([block]), [block])
+    end
+
+    # The attribute is client-controlled: only its `_key` is read, and the
+    # object is always the stored one.
+    test "a tampered data-pt-object attribute cannot change the stored object's fields" do
+      html = String.replace(PortableText.to_html([@post11]), "Status", "Status now")
+
+      tampered =
+        String.replace(html, "positive", "danger") |> String.replace("Reviewed", "Rejected")
+
+      assert [%{"children" => [_, @chip, _]}] = PortableText.from_html(tampered, [@post11])
+    end
+
+    test "a forged object whose _key is not stored comes back as text, never an object" do
+      forged = %{"_type" => "script", "_key" => "nope", "text" => "Injected"}
+      attr = Phoenix.HTML.html_escape(Jason.encode!(forged)) |> Phoenix.HTML.safe_to_string()
+
+      html =
+        ~s(<p>Hi <span data-pt-object="#{attr}" contenteditable="false">Injected</span></p>)
+
+      assert [%{"children" => children}] = PortableText.from_html(html, [@post11])
+      assert Enum.all?(children, &(&1["_type"] == "span"))
+      assert Enum.map_join(children, & &1["text"]) == "Hi Injected"
     end
   end
 
