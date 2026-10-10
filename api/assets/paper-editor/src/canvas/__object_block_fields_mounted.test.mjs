@@ -76,7 +76,7 @@ async function check(name, fn) {
     console.log(`      ${e.message.split("\n").slice(0,8).join(" | ")}`);
   }
 }
-const EXPECTED = 8;
+const EXPECTED = 10;
 
 const dialog = () => document.querySelector(".bp-inline-object-dialog");
 const field = (name) => dialog().querySelector(`[data-field="${name}"]`);
@@ -115,9 +115,12 @@ try {
     assert.deepEqual(ops.filter((op) => op.id === "fb1" || (op.block && op.block.id === "fb1")), [], JSON.stringify(ops));
   });
 
-  await check("the block is named '<kind title>: <first field text>'", () => {
+  // task-65fb83593b2d1c29: the at-rest preview — the same text on screen and as
+  // the accessible name, kind title plus the first text field.
+  await check("at rest the block shows and is named 'Faktaboks · Old fact.'", () => {
     const dom = editor.view.nodeDOM(fb().pos);
-    assert.equal(dom.getAttribute("aria-label"), "Faktaboks: Old fact.");
+    assert.equal(dom.getAttribute("aria-label"), "Faktaboks · Old fact.");
+    assert.equal(dom.querySelector(".bp-canvas-readonly-chip").textContent, "Faktaboks · Old fact.");
     assert.equal(dom.getAttribute("role"), "group");
   });
 
@@ -172,6 +175,21 @@ try {
     assert.equal(mine.length, 1, JSON.stringify(ops));
     assert.equal(mine[0].op, "replace-block");
     assert.deepEqual(mine[0].block, { id: "fb1", type: "factBox", body: "Changed fact.", tone: "info", extra: "keep" });
+  });
+
+  await check("two blocks with different values read differently; an edit updates the chip", () => {
+    const chips = blocks().map(({ pos }) => editor.view.nodeDOM(pos).querySelector(".bp-canvas-readonly-chip").textContent);
+    assert.equal(new Set(chips).size, chips.length, JSON.stringify(chips));
+    assert.ok(chips.includes("Faktaboks · Changed fact."), JSON.stringify(chips));
+  });
+
+  await check("a block whose fields are all empty shows its kind title, never a blank chip", () => {
+    const tr = editor.state.tr.insert(editor.state.doc.content.size, editor.state.schema.nodes.bpOpaque.create({ bpId: null, bpType: "factBox", bpBlock: { type: "factBox" } }));
+    editor.view.dispatch(tr);
+    const last = blocks().at(-1);
+    assert.equal(editor.view.nodeDOM(last.pos).querySelector(".bp-canvas-readonly-chip").textContent, "Faktaboks");
+    assert.equal(editor.view.nodeDOM(last.pos).getAttribute("aria-label"), "Faktaboks");
+    editor.commands.undo();
   });
 
   await check("a double-click on the block opens the dialog", () => {
