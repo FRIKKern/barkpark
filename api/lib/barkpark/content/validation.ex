@@ -144,7 +144,7 @@ defmodule Barkpark.Content.Validation do
     rect_shape rect_out_of_range missing_type unknown_type
     block_fields_invalid not_in_list list_too_short list_too_long
     list_not_unique number_too_small number_too_large
-    string_too_short string_too_long custom
+    string_too_short string_too_long portable_text_not_portabledoc custom
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
@@ -379,12 +379,31 @@ defmodule Barkpark.Content.Validation do
       field_name = get_in_field(field, "name")
       rules = rules_at(get_in_field(field, "validation"), level)
       value = if field_name == "title", do: title, else: Map.get(content || %{}, field_name)
+      top_path = "/" <> to_string(field_name)
 
-      value
-      |> validate_field(rules, field)
-      |> Enum.map(fn {msg, code, params} ->
-        %{path: "/" <> to_string(field_name), message: msg, code: code, params: params}
-      end)
+      own =
+        value
+        |> validate_field(rules, field)
+        |> Enum.map(fn {msg, code, params} ->
+          %{path: top_path, message: msg, code: code, params: params}
+        end)
+
+      # task-2d96f71d3fe52ee7 — see `flat_portable_text_messages/3`'s
+      # comment above `validate_flat/4`: same check, this path's finding
+      # shape (`check_findings/3` wants code + params, not just a message).
+      pt =
+        if get_in_field(field, "type") == "richText" do
+          value
+          |> richtext_blocks()
+          |> portable_text_findings(top_path, level)
+          |> Enum.map(fn {path, msg, code, params} ->
+            %{path: path, message: msg, code: code, params: params}
+          end)
+        else
+          []
+        end
+
+      own ++ pt
     end)
   end
 
@@ -511,7 +530,10 @@ defmodule Barkpark.Content.Validation do
         value = if field_name == "title", do: title, else: Map.get(content || %{}, field_name)
 
         field_errors =
-          value |> validate_field(rules, field) |> Enum.map(fn {msg, _code, _params} -> msg end)
+          value
+          |> validate_field(rules, field)
+          |> Enum.map(fn {msg, _code, _params} -> msg end)
+          |> Kernel.++(flat_portable_text_messages(field, value, level))
 
         if field_errors == [] do
           acc
@@ -524,6 +546,30 @@ defmodule Barkpark.Content.Validation do
       {:ok, content}
     else
       {:error, errors}
+    end
+  end
+
+  # task-2d96f71d3fe52ee7 — a PLAIN richText field (no custom `blocks.of`
+  # vocabulary) is classified `flat_mode?` (`SchemaDefinition.v2_shape?/1`
+  # only flags richText when it declares custom object blocks), so
+  # `walk_field/4`'s richText clause — where the SAME Portable Text check
+  # also lives, for a v2-shaped richText field — never runs for it. Checked
+  # here too, independent of the flat/v2 split, rather than widening
+  # `v2_shape?/1` to cover every richText field: that would flip every
+  # SCHEMA holding one (not just the richText field itself — `flat_mode?`
+  # is whole-schema) onto the heavier v2 walker for every OTHER field in it
+  # too, a much wider behavior change than this task asks for.
+  defp flat_portable_text_messages(field, value, level) do
+    if get_in_field(field, "type") == "richText" do
+      value
+      |> richtext_blocks()
+      |> Enum.filter(&portable_text_block?/1)
+      |> Enum.map(fn _ ->
+        "Sanity Portable Text block (_type/children/markDefs), not a PortableDoc block"
+      end)
+      |> then(&shape(level, &1))
+    else
+      []
     end
   end
 
@@ -765,14 +811,24 @@ defmodule Barkpark.Content.Validation do
   # subfield already does (see the "composite" clause above, which passes
   # `level` the same way with no gate at all).
   defp walk_field(%Field{type: "richText", raw: raw} = f, value, path, level) do
+    # task-2d96f71d3fe52ee7 — a Sanity Portable Text array stores silently
+    # and renders broken in Studio (PortableDoc blocks only). Scanned
+    # unconditionally, before the object-block-vocabulary branch below:
+    # a PT block is never a declared custom object block (PT's own `_type`
+    # vocabulary — "block", "image", … — has no relation to this field's
+    # `blocks.of` names), so it would otherwise fall through BOTH arms'
+    # `_ -> []` catch-alls and find nothing, in either case.
+    pt_findings = portable_text_findings(richtext_blocks(value), path, level)
+
     case object_block_types(raw) do
       objects when map_size(objects) == 0 ->
-        walk_leaf(f, value, path, level)
+        walk_leaf(f, value, path, level) ++ pt_findings
 
       objects ->
         blocks = richtext_blocks(value)
 
         walk_leaf(f, value, path, level) ++
+          pt_findings ++
           (blocks
            |> Enum.with_index()
            |> Enum.flat_map(fn
@@ -815,6 +871,41 @@ defmodule Barkpark.Content.Validation do
   defp richtext_blocks(list) when is_list(list), do: list
   defp richtext_blocks(%{"blocks" => list}) when is_list(list), do: list
   defp richtext_blocks(_), do: []
+
+  # task-2d96f71d3fe52ee7 — one finding per Portable Text block, so a field
+  # holding a MIX (a partial migration) names every offending block, not
+  # just the first. `shape/2` is the same error/warning gate every other
+  # structural finding in this walker uses.
+  defp portable_text_findings(blocks, path, level) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn {block, idx} ->
+      if portable_text_block?(block) do
+        shape(level, [
+          {"#{path}/#{idx}",
+           "Sanity Portable Text block (_type/children/markDefs), not a PortableDoc block",
+           :portable_text_not_portabledoc, %{index: idx}}
+        ])
+      else
+        []
+      end
+    end)
+  end
+
+  # Sanity's Portable Text block shape: `_type: "block"` plus at least one of
+  # its other signature keys (`children`, `markDefs`, `listItem`) — never all
+  # three required, since a minimal/empty PT block can lack `markDefs` or
+  # `listItem`. PortableDoc's OWN block convention keys on `"type"` (no
+  # underscore; see `walk_field/4`'s object-block-vocabulary clause above),
+  # so a genuine PortableDoc block never has a `"_type"` key at all — no
+  # overlap, no false positive on an ordinary block this field's own
+  # vocabulary declares.
+  defp portable_text_block?(%{"_type" => "block"} = block) do
+    Map.has_key?(block, "children") or Map.has_key?(block, "markDefs") or
+      Map.has_key?(block, "listItem")
+  end
+
+  defp portable_text_block?(_), do: false
 
   # One item of a several-named-member-types `arrayOf` (task-b3ebbd3ab1575e2a) —
   # the typed branch of the "arrayOf" `walk_field/4` clause above, kept out of

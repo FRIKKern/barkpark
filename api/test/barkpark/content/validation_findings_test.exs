@@ -377,7 +377,7 @@ defmodule Barkpark.Content.ValidationFindingsTest do
                  rect_shape rect_out_of_range missing_type unknown_type
                  block_fields_invalid not_in_list list_too_short list_too_long
                  list_not_unique number_too_small number_too_large
-                 string_too_short string_too_long custom
+                 string_too_short string_too_long portable_text_not_portabledoc custom
                )a)
     end
   end
