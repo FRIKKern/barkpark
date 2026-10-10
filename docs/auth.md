@@ -1,7 +1,7 @@
 <!-- doc-tier: agent | canonical-for: auth-tokens-roles | budget: 1400tok -->
 # Auth & roles
 
-Bearer API tokens (`Authorization: Bearer`) backed by `api_tokens`;
+Bearer API tokens (`Authorization: Bearer <token>`) backed by `api_tokens`;
 LiveViews read `session["api_token_session"]`
 (or `session["api_token"]`) via `on_mount`.
 
@@ -73,8 +73,8 @@ caller has flat `admin` AND an admin seat, gets at most its own set; seated,
 audited `token_minted`. `bp token create --permissions read,write,admin`.
 `bp token rotate` refuses Cloud's credential (label `barkpark cloud admin`)
 without `--force`.
-Self-mint caps a member's PAT at `["read"]`, a MINTING policy: the seat
-writes ([sessions](auth-user-sessions.md#sessions)).
+Self-mint caps a member's PAT at `["read"]`, a MINTING policy; the seat
+writes ([sessions](auth-user-sessions.md)).
 
 ## LiveView `on_mount` hooks
 
