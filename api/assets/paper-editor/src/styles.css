@@ -1791,21 +1791,20 @@ bp-paper-canvas .bp-highlight, bp-paper-canvas mark { background: hsl(var(--warn
  * legible in both themes without a literal of its own. */
 .bp-inline-object-dialog {
   position: fixed; z-index: 210;
-  width: 300px; max-width: calc(100vw - 16px);
+  width: min(300px, calc(100vw - 16px));
   padding: 12px;
   background: var(--paper-chrome-bg, Canvas);
   color: var(--paper-ink, CanvasText);
   border: 1px solid var(--paper-chrome-border, ButtonBorder);
   border-radius: 6px;
   font-family: var(--paper-font-sans, system-ui, sans-serif);
-  font-size: 0.875rem;
 }
-.bp-inline-object-dialog__title { margin: 0 0 8px; font-size: 0.95rem; font-weight: 600; }
+.bp-inline-object-dialog__title { margin: 0 0 8px; font-size: inherit; font-weight: 600; }
 .bp-inline-object-dialog__row { display: flex; flex-direction: column; gap: 2px; margin-bottom: 8px; }
 .bp-inline-object-dialog__row input:not([type="checkbox"]),
 .bp-inline-object-dialog__row select,
 .bp-inline-object-dialog__row textarea { font: inherit; padding: 4px 6px; }
 .bp-inline-object-dialog [aria-invalid="true"] { outline: 2px solid var(--paper-accent, Highlight); }
 .bp-inline-object-dialog__msg,
-.bp-inline-object-dialog__error { color: var(--paper-accent, LinkText); font-size: 0.8rem; margin: 0; }
+.bp-inline-object-dialog__error { color: var(--paper-accent, LinkText); margin: 0; }
 .bp-inline-object-dialog__actions { display: flex; justify-content: flex-end; gap: 8px; }
