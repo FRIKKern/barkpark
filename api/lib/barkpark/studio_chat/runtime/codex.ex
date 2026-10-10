@@ -70,7 +70,9 @@ defmodule Barkpark.StudioChat.Runtime.Codex do
 
   defp open(opts) do
     binary = Map.get(opts, :binary) || configured_binary()
-    timeout = Map.get(opts, :timeout_ms, 15_000)
+    # The version shell-out is part of startup, so it runs on the startup
+    # clock (task-2b9df7d705f9ea7a; see `Codex.Session.start/1`).
+    timeout = Map.get(opts, :startup_timeout_ms, Map.get(opts, :timeout_ms, 15_000))
 
     with {:ok, path} <- Readiness.resolve_binary(binary),
          {:ok, _version} <- Readiness.verify_version(path, timeout) do
