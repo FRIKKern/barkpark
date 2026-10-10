@@ -14,6 +14,9 @@ defmodule Barkpark.Auth.PublicReadRotationTest do
   use Barkpark.DataCase, async: false
 
   import Ecto.Query
+  import ExUnit.CaptureLog
+
+  require Logger
 
   alias Barkpark.Auth
   alias Barkpark.Auth.{ApiToken, PublicRead, PublicReadRotationWorker}
@@ -47,6 +50,18 @@ defmodule Barkpark.Auth.PublicReadRotationTest do
   end
 
   defp switch(on), do: Application.put_env(:barkpark, :public_read_rotation, enabled: on)
+
+  # The test env logs at :warning; the worker's lines are :info.
+  defp info_logs(fun) do
+    prior = Logger.level()
+    Logger.configure(level: :info)
+
+    try do
+      capture_log([level: :info], fun)
+    after
+      Logger.configure(level: prior)
+    end
+  end
 
   defp public_read_labels do
     Repo.all(
@@ -96,6 +111,53 @@ defmodule Barkpark.Auth.PublicReadRotationTest do
     assert {:ok, %{skipped: :disabled}} = PublicReadRotationWorker.perform(%Oban.Job{args: %{}})
     assert public_read_labels() == ["public-read-old"]
     refute File.exists?(file)
+  end
+
+  test "ON: the write is atomic, 0600, replaces an existing file, and leaves no temp behind", %{
+    token_file: file
+  } do
+    switch(true)
+    File.write!(file, "old-token\n")
+    File.chmod!(file, 0o644)
+
+    assert {:ok, _} = PublicReadRotationWorker.perform(%Oban.Job{args: %{}})
+
+    raw = file |> File.read!() |> String.trim()
+    refute raw == "old-token"
+    assert Repo.get_by(ApiToken, token_hash: ApiToken.hash_token(raw))
+    assert File.stat!(file).mode |> Bitwise.band(0o777) == 0o600
+
+    assert file |> Path.dirname() |> File.ls!() |> Enum.filter(&String.contains?(&1, ".tmp-")) ==
+             [],
+           "a temp file was left beside the token file"
+  end
+
+  test "logs at :info: the label and purged count when it rotates, never the token", %{
+    token_file: file
+  } do
+    switch(true)
+    aged_public_read!("public-read-old", 9)
+
+    log =
+      info_logs(fn ->
+        assert {:ok, %{label: label}} = PublicReadRotationWorker.perform(%Oban.Job{args: %{}})
+        send(self(), {:label, label})
+      end)
+
+    assert_received {:label, label}
+    assert log =~ "minted #{label}, purged 1 aged token(s)"
+    raw = file |> File.read!() |> String.trim()
+    refute log =~ raw, "the plaintext token reached the log"
+  end
+
+  test "logs at :info once per tick when disabled" do
+    log =
+      info_logs(fn ->
+        assert {:ok, %{skipped: :disabled}} =
+                 PublicReadRotationWorker.perform(%Oban.Job{args: %{}})
+      end)
+
+    assert length(String.split(log, "public-read rotation: disabled")) - 1 == 1
   end
 
   test "the purge spares a tenant's own token that only borrows the label" do

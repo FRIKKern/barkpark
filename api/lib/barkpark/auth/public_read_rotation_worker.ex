@@ -11,7 +11,7 @@ defmodule Barkpark.Auth.PublicReadRotationWorker do
   SHIPS DISABLED. While `config :barkpark, :public_read_rotation,
   enabled: false` (the default; runtime switch
   `BARKPARK_PUBLIC_READ_ROTATION=on`) a tick writes nothing and returns
-  `{:ok, %{skipped: :disabled}}`. Turning it on is the owner's call: from then
+  `{:ok, %{skipped: :disabled}}`, logging that once at :info. Turning it on is the owner's call: from then
   on the token rotates weekly and the previous one is purged after 8 days.
 
   A failed rotation returns `{:error, _}`: Oban retries it and logs each
@@ -37,6 +37,10 @@ defmodule Barkpark.Auth.PublicReadRotationWorker do
           error
       end
     else
+      Logger.info(
+        "public-read rotation: disabled (BARKPARK_PUBLIC_READ_ROTATION is not on); no token minted"
+      )
+
       {:ok, %{skipped: :disabled}}
     end
   end

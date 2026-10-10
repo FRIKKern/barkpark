@@ -103,15 +103,23 @@ defmodule Barkpark.Auth.PublicRead do
   # PUBLIC_READ_TOKEN_FILE env var or the fixed /opt/barkpark default, and in
   # tests a `:token_file` opt. No request path reaches `rotate/1` (its callers
   # are the cron worker and a mix task), so there is no traversal to steer.
-  # The same File.write/chmod ran unflagged in the mix task this was lifted from.
+  # The same file writes ran unflagged in the mix task this was lifted from.
   # sobelow_skip ["Traversal.FileModule"]
   defp write_token_file(path, raw) do
-    case File.write(path, raw <> "\n") do
-      :ok ->
-        _ = File.chmod(path, 0o600)
-        :ok
+    # ATOMIC: a reader (the deploy) sees the old file or the new one, never a
+    # half-written token. The temp sits beside the target (same filesystem, so
+    # the rename is atomic) and is narrowed to 0600 BEFORE the secret goes in,
+    # so the plaintext is never on disk under a wider mode.
+    tmp = path <> ".tmp-" <> Integer.to_string(System.unique_integer([:positive]))
 
+    with :ok <- File.write(tmp, ""),
+         :ok <- File.chmod(tmp, 0o600),
+         :ok <- File.write(tmp, raw <> "\n"),
+         :ok <- File.rename(tmp, path) do
+      :ok
+    else
       {:error, reason} ->
+        _ = File.rm(tmp)
         {:error, {:token_file, path, reason}}
     end
   end
