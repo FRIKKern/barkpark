@@ -454,6 +454,21 @@ export function buildCommandRegistry(editor, opts) {
     });
   }
 
+  // INLINE — one per declared inline object kind (a field's blocks.inline,
+  // task-85fee859cf3bfef6), inserted at the caret anywhere in prose, so a kind
+  // is keyboard-insertable mid-sentence (the slash menu opens at a line start).
+  if (opts && typeof opts.onInlineInsert === "function" && Array.isArray(opts.inlineObjects)) {
+    for (const o of opts.inlineObjects) {
+      cmds.push({
+        id: `inline-${o.name}`,
+        label: tr("Insert %{block}", { block: o.title }),
+        group: "Inline",
+        hint: "◦",
+        run: () => opts.onInlineInsert(o.name),
+      });
+    }
+  }
+
   // STARTERS — compound inserts: ONE pre-composed subtree per CANVAS_COMPOUND_INSERTS
   // entry (the grid-of-cards starter). A separate group ON PURPOSE: the Insert group
   // stays exactly one-command-per-CANVAS_SLASH_TYPES (the count-parity contract the

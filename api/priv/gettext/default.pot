@@ -11493,3 +11493,23 @@ msgstr ""
 msgctxt "workspace role"
 msgid "owner"
 msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:566
+#, elixir-autogen, elixir-format
+msgid "Inline"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:567
+#, elixir-autogen, elixir-format
+msgid "inside the paragraph"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:568
+#, elixir-autogen, elixir-format
+msgid "Edit %{name}"
+msgstr ""
+
+#: lib/barkpark_web/studio_locale.ex:572
+#, elixir-autogen, elixir-format
+msgid "required"
+msgstr ""

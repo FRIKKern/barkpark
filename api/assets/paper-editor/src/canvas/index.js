@@ -83,6 +83,7 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
+import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, refusalField } from "./inline-object.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -998,6 +999,9 @@ class BpPaperCanvas extends HTMLElement {
         Tag,
         Valueref,
         InlineOpaque,
+        // Declared inline objects (blocks.inline): accessible names on the atoms,
+        // Enter / double-click opens the field dialog. See ./inline-object.js.
+        inlineObjects(this),
         // THE make-or-break: declares bpId/bpType on the block nodes so the run's
         // ids survive the setContent->getJSON round-trip runToOps depends on.
         BpAttrs,
@@ -1979,6 +1983,7 @@ class BpPaperCanvas extends HTMLElement {
     // that wants the other behaviour — drop the refused batch and fold it into the
     // next edit — calls discardInflightOps(seq) instead.
     if (saved !== true) return false;
+    this._inlineSavePending = null;
 
     // Diff against the local snapshot the author still sees. A canonical reply
     // can contain remote sibling changes queued for later display; advancing
@@ -2034,15 +2039,52 @@ class BpPaperCanvas extends HTMLElement {
   // resent on its own; resendPendingOps() is the host's explicit "try again".
   // Without this seam a refused batch pinned the pipeline: every later edit queued
   // behind it, never sent (found by Barkdown's editor-multiblock row: cut all, type).
-  discardInflightOps(seq) {
+  //
+  // `refusal` (optional) is the host's reason for the refusal, `{reason}`. When
+  // the refused batch carried an inline object the field dialog just saved, the
+  // dialog reopens on that object with the reason on the field it names
+  // (task-85fee859cf3bfef6), instead of only the host's generic notice.
+  discardInflightOps(seq, refusal) {
     if (!this._acknowledgedSaves) return false;
     const current = this._inflightOps;
     if (!current || current.seq !== seq) return false;
     this._inflightOps = null;
+    this._reopenRefusedInlineObject(refusal);
     const dirty = this._dirtyWhileInflight;
     this._dirtyWhileInflight = false;
     if (dirty) this._emitOps();
     return true;
+  }
+
+  // ── inline objects (./inline-object.js) ───────────────────────────────────
+  inlineObjectVocabulary() {
+    return parseVocabulary(this.getAttribute("data-vocabulary"));
+  }
+
+  inlineObjectDialog() {
+    if (!this._inlineDialog) this._inlineDialog = new InlineObjectDialog();
+    return this._inlineDialog;
+  }
+
+  // The value the dialog just saved: the batch that carries it is the one a
+  // refusal would name.
+  noteInlineObjectSave(values) {
+    this._inlineSavePending = values;
+  }
+
+  _reopenRefusedInlineObject(refusal) {
+    const values = this._inlineSavePending;
+    this._inlineSavePending = null;
+    const reason = refusal && typeof refusal.reason === "string" ? refusal.reason : "";
+    if (!values || reason === "" || !this._editor) return false;
+    let at = null;
+    this._editor.state.doc.descendants((node, pos) => {
+      if (at == null && node.type.name === "bpInlineOpaque" && JSON.stringify(node.attrs.node) === JSON.stringify(values)) at = pos;
+    });
+    if (at == null) return false;
+    const kind = (this.inlineObjectVocabulary()?.inlineObjects || []).find((o) => o.name === values.type);
+    const message = reason.replace(/^[^\s:]+: /, "");
+    return editInlineObjectAt(this, this._editor, at, { field: refusalField(reason, kind ? kind.fields : []), message });
   }
 
   // Re-diff the live document against the saved baseline and emit the batch, if any
@@ -3317,6 +3359,13 @@ class BpPaperCanvas extends HTMLElement {
 
   _chooseSlash(item) {
     this._closeSlash();
+    // An INLINE row (a declared blocks.inline kind): the object goes inside this
+    // paragraph, in place of the "/query" text, once its dialog is saved.
+    if (item && item.inline) {
+      const { $from } = this._editor.state.selection;
+      insertInlineObject(this, this._editor, item.inline, { replaceRange: { from: $from.start(), to: $from.end() } });
+      return;
+    }
     // A slash pick inside a list item first lifts the item out of the list, so the chosen block
     // lands at the top level where insertSlashTypeAtSelection replaces the paragraph.
     let guard = 0;
@@ -3539,6 +3588,9 @@ class BpPaperCanvas extends HTMLElement {
       // Insert Terminal / Insert Stage: the server builds these (see _insertViaServer).
       onServerInsert: (type) => this._insertViaServer(type, { replaceSlashLine: false }),
       serverBuilds: (type) => serverBuildsInsert(type, this._hostBuildsInserts()),
+      // Declared inline objects: inserted at the caret, anywhere in prose.
+      inlineObjects: this.inlineObjectVocabulary()?.inlineObjects || [],
+      onInlineInsert: (name) => insertInlineObject(this, this._editor, name),
     };
     if (!this._palette) {
       this._palette = new CommandPalette({
