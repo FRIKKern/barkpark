@@ -17,14 +17,27 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   # `:codex_app_server` app-env keyword (tests shrink it to force the breach).
   @default_max_buffer_bytes 8 * 1024 * 1024
 
+  # Two clocks (task-2b9df7d705f9ea7a). `:timeout_ms` is the per-request clock
+  # for a READY session (turns, steer, interrupt, approvals). The handshake
+  # that makes it ready (initialize -> account/read -> thread open) has its own,
+  # `:startup_timeout_ms`, defaulting to `:timeout_ms`, so every existing caller
+  # behaves exactly as before. Separating them lets a caller keep a short clock
+  # on a stalled TURN without the same clock also timing interpreter startup.
+  #
+  # Either may be `:infinity`: no timer is armed, and a request ends only when
+  # the app-server answers it or exits (`{:exit_status, _}` replies to every
+  # pending request), never on elapsed time.
   def start(opts) do
-    timeout = Map.get(opts, :timeout_ms, @default_timeout)
-
     with {:ok, pid} <- GenServer.start(__MODULE__, opts),
-         result <- GenServer.call(pid, {:open, opts}, timeout + 1_000) do
+         result <- GenServer.call(pid, {:open, opts}, call_timeout(startup_timeout(opts))) do
       case result do
         {:ok, opened} ->
-          {:ok, Map.put(opened, :runtime, pid)}
+          # `request/3` and `answer_approval/3` size their GenServer.call off
+          # this, so a ready session's caller-side timeout tracks its own clock.
+          {:ok,
+           opened
+           |> Map.put(:runtime, pid)
+           |> Map.put(:timeout_ms, Map.get(opts, :timeout_ms, @default_timeout))}
 
         {:error, _reason} = error ->
           GenServer.stop(pid, :normal)
@@ -74,8 +87,16 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp unwrap(%{runtime: pid}) when is_pid(pid), do: pid
   defp unwrap(pid) when is_pid(pid), do: pid
 
-  defp request_timeout(%{timeout_ms: timeout}), do: timeout + 1_000
-  defp request_timeout(_runtime), do: @default_timeout + 1_000
+  defp request_timeout(%{timeout_ms: timeout}), do: call_timeout(timeout)
+  defp request_timeout(_runtime), do: call_timeout(@default_timeout)
+
+  defp startup_timeout(opts),
+    do: Map.get(opts, :startup_timeout_ms, Map.get(opts, :timeout_ms, @default_timeout))
+
+  # The caller's GenServer.call outlives the Session's own request clock by a
+  # second, so the Session's `{:error, :timeout}` reply wins the race.
+  defp call_timeout(:infinity), do: :infinity
+  defp call_timeout(ms) when is_integer(ms), do: ms + 1_000
 
   @impl true
   def init(opts) do
@@ -99,6 +120,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
          approvals: %{},
          failure: nil,
          timeout_ms: Map.get(opts, :timeout_ms, @default_timeout),
+         startup_timeout_ms: startup_timeout(opts),
          session_id: Map.get(opts, :session_id),
          thread_id: Map.get(opts, :provider_session_id),
          turn_id: nil,
@@ -307,7 +329,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
         state
 
       {pending, rest} ->
-        Process.cancel_timer(pending.timer)
+        cancel_request_timer(pending.timer)
         state = %{state | pending: rest}
         complete_pending(state, pending.kind, result)
     end
@@ -362,10 +384,24 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   defp send_request(state, method, params, kind) do
     id = state.next_id
     send_json(state.port, %{"id" => id, "method" => method, "params" => params})
-    timer = Process.send_after(self(), {:request_timeout, id}, state.timeout_ms)
+    timer = arm_request_timer(id, request_clock(state, kind))
     pending = Map.put(state.pending, id, %{kind: kind, timer: timer})
     %{state | next_id: id + 1, pending: pending}
   end
+
+  # The handshake's three requests run on the startup clock; everything a
+  # ready session sends runs on `:timeout_ms`.
+  defp request_clock(state, {stage, _from, _})
+       when stage in [:initialize, :account_read, :thread_open],
+       do: state.startup_timeout_ms
+
+  defp request_clock(state, _kind), do: state.timeout_ms
+
+  defp arm_request_timer(_id, :infinity), do: nil
+  defp arm_request_timer(id, ms), do: Process.send_after(self(), {:request_timeout, id}, ms)
+
+  defp cancel_request_timer(nil), do: :ok
+  defp cancel_request_timer(timer), do: Process.cancel_timer(timer)
 
   defp send_notification(port, method, nil), do: send_json(port, %{"method" => method})
 
@@ -488,7 +524,7 @@ defmodule Barkpark.StudioChat.Runtime.Codex.Session do
   end
 
   defp fail_pending(%{pending: pending} = state, reason) do
-    Enum.each(pending, fn {_id, %{timer: timer}} -> Process.cancel_timer(timer) end)
+    Enum.each(pending, fn {_id, %{timer: timer}} -> cancel_request_timer(timer) end)
     reply_all_pending(pending, {:error, reason})
     %{state | pending: %{}, failure: reason}
   end
