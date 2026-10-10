@@ -5,8 +5,9 @@ defmodule BarkparkWeb.LiveMeterTest do
   budget, shadow-only.
 
     * WIRING — every `:public_root` LiveView's live_session carries the hook
-      FIRST (one emission in `Router.Plugins` covers papers, sheets and quiz).
-      Drop the hook and the census reds by route.
+      FIRST (one emission in `Router.Plugins` covers papers, sheets and quiz),
+      and FinderLive's `:finder` session carries it too. Drop the hook from
+      either and the census reds by route.
     * SHADOW — past the budget the socket keeps working (the event is still
       handled) and a `would_429` lands with `surface: :live`; never a refusal.
     * TRUST WALK — the key is the canonical client address: a forwarded hop
@@ -79,6 +80,13 @@ defmodule BarkparkWeb.LiveMeterTest do
     # The plugin's own hook still rides behind it.
     {_, paper_hooks} = Enum.find(roots, fn {p, _} -> p == "/papers/:slug" end)
     assert BarkparkWeb.PaperViewer in paper_hooks
+  end
+
+  test "FinderLive's session carries the meter" do
+    assert [{"/finder", BarkparkWeb.FinderLive, :finder, hooks}] =
+             Enum.filter(live_routes(), fn {path, _, _, _} -> path == "/finder" end)
+
+    assert BarkparkWeb.LiveMeter in hooks
   end
 
   # ── behaviour ──
