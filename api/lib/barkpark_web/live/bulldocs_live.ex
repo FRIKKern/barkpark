@@ -1990,7 +1990,9 @@ defmodule BarkparkWeb.BulldocsLive do
               click, so clicks inside the panel never bubble to a close. --%>
         <div class="bp-diff-backdrop" phx-click={close_diff()} aria-hidden="true"></div>
         <div
+          id="bp-diff-panel"
           class="bp-diff-panel"
+          phx-hook="ModalFocus"
           role="dialog"
           aria-modal="true"
           aria-labelledby="bp-diff-title"
