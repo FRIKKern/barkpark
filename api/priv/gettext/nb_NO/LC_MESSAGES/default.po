@@ -11440,6 +11440,21 @@ msgstr "Noen har invitert denne kontoen til å bli med som %{role}. Godta for å
 msgid "Studio · Invitations"
 msgstr "Studio · Invitasjoner"
 
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "Studio · Invitation"
+msgstr "Studio · Invitasjon"
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "You declined the invitation to %{workspace}."
+msgstr "Du avslo invitasjonen til %{workspace}."
+
+#: lib/barkpark_web/plugs/studio_refusal_html.ex
+#, elixir-autogen, elixir-format
+msgid "Invitation declined"
+msgstr "Invitasjonen er avslått"
+
 #: lib/barkpark_web/plugs/studio_refusal_html.ex:116
 #, elixir-autogen, elixir-format
 msgid "That invitation is no longer open."
