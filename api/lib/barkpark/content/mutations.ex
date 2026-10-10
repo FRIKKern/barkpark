@@ -144,6 +144,32 @@ defmodule Barkpark.Content.Mutations do
   # so they are not reported twice. A second loss answers a typed
   # `rev_mismatch` (409, "document was modified by another writer"), never
   # `internal_error`.
+  # The caller-facing sentence for a batch-level connection fault. A refused
+  # checkout means the transaction never ran, so nothing was written; a
+  # connection lost at COMMIT is the one case the server cannot know, so the
+  # message says to re-read before resending rather than promising either.
+  defp batch_fault_message(%DBConnection.ConnectionError{} = e) do
+    "the database connection was refused or lost on this batch " <>
+      "(#{Exception.message(e)}). Nothing was refused on its merits — this is " <>
+      "transient. The batch is one transaction: a refused connection applied " <>
+      "nothing, and only a connection lost at commit leaves the outcome unknown. " <>
+      "Re-read the ids you sent before resending the identical batch."
+  end
+
+  # Test-only fault seam, the same `:writer_fault` config `Content.Writer`
+  # reads (site `:batch_transaction`): the SQL sandbox cannot produce a real
+  # pool shed, so the test raises the exception the live run carried, inside
+  # the batch transaction. `nil` outside tests.
+  defp inject_batch_fault! do
+    case Application.get_env(:barkpark, :writer_fault) do
+      {:batch_transaction, module, message} when is_atom(module) and is_binary(message) ->
+        raise module, message
+
+      _ ->
+        :ok
+    end
+  end
+
   defp apply_with_stale_retry(mutations, dataset, opts) do
     warnings = Barkpark.Content.Warnings.snapshot()
 
@@ -184,6 +210,7 @@ defmodule Barkpark.Content.Mutations do
     try do
       result =
         Repo.transaction(fn ->
+          inject_batch_fault!()
           :ok = serialize_unscoped_batch(opts)
           tx_id = Writer.generate_rev()
 
@@ -226,6 +253,28 @@ defmodule Barkpark.Content.Mutations do
           compensating_discard(result, mutations, dataset, opts)
       end
     rescue
+      # task-f8233616de3513d4 — a refused or lost DB checkout on the BATCH'S own
+      # transaction (the pool shed it: "request was dropped from queue").
+      # `Content.Writer.create_document/4` already types this fault for its own
+      # Repo calls (#15489), but the batch transaction's checkout is above it,
+      # so under a pool shed 8,011 batches answered 503 `internal_error`
+      # "unknown error (DBConnection.ConnectionError)" (run8-sweep2 probe).
+      # Same typed tuple as the write twin, so the caller gets 503
+      # `storage_unavailable` / reason `connection_unavailable`. Narrow on
+      # purpose: only this struct; every other exception keeps propagating.
+      e in DBConnection.ConnectionError ->
+        Broadcast.clear_deferred_broadcasts()
+        require Logger
+
+        Logger.error(
+          "Barkpark.Content.Mutations.apply_mutations/3: the database connection was " <>
+            "refused or lost on the batch transaction (dataset=#{inspect(dataset)}, " <>
+            "#{length(mutations)} mutation(s)) — answering 503 storage_unavailable/" <>
+            "connection_unavailable. exception=#{Exception.message(e)}"
+        )
+
+        {:error, {:connection_unavailable, batch_fault_message(e)}}
+
       e ->
         Broadcast.clear_deferred_broadcasts()
 

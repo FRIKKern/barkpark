@@ -129,7 +129,11 @@ defmodule BarkparkWeb.PoolOverloadTest do
   end
 
   describe "the body contract survives the new status" do
-    test "a 503 still renders code=internal_error with the fault family" do
+    # task-f8233616de3513d4: a SHED is typed. It used to render
+    # `internal_error` so the cloud deploy poller's retry grace (keyed on the
+    # code) held; the poller now lists `storage_unavailable` as transient too,
+    # in the same change, so the grace survives the better code.
+    test "a 503 shed renders the typed storage_unavailable / connection_unavailable" do
       error =
         DBConnection.ConnectionError.exception(
           "connection not available and request was dropped from queue after 2500ms",
@@ -139,9 +143,17 @@ defmodule BarkparkWeb.PoolOverloadTest do
       %{error: rendered} =
         BarkparkWeb.ErrorJSON.render("503.json", %{kind: :error, reason: error})
 
-      assert rendered.code == "internal_error",
-             "the cloud deploy poller's retry grace keys on this code — it must not move"
+      assert rendered.code == "storage_unavailable"
+      assert rendered.reason == "connection_unavailable"
+    end
 
+    test "CONTROL — a 500 connection fault still renders internal_error with the family" do
+      error = DBConnection.ConnectionError.exception("tcp recv: closed")
+
+      %{error: rendered} =
+        BarkparkWeb.ErrorJSON.render("500.json", %{kind: :error, reason: error})
+
+      assert rendered.code == "internal_error"
       assert rendered.message =~ "DBConnection.ConnectionError"
     end
   end
