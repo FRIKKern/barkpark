@@ -1203,14 +1203,13 @@ defmodule Barkpark.Content.Schema do
     type = f["type"] || f[:type]
 
     cond do
-      type == "composite" ->
-        walk_named_types(f["fields"] || [], dataset, opts, visited)
-
-      type == "arrayOf" ->
-        walk_named_type(f["of"] || %{}, dataset, opts, visited)
-
+      # Every position parse/2 walks (task-fecf7cc2ae7b04d5): a composite's or
+      # an image/file's `fields`, an arrayOf `of` (one shape or a list of
+      # member types), a v1 `array.of` list, and a richText `blocks.of` object
+      # block's `fields`. Before, only composite and a single arrayOf.of map
+      # were walked, so `strng` inside the others landed with a 201.
       builtin_type?(type) ->
-        :ok
+        walk_named_types(nested_fields(f), dataset, opts, visited)
 
       MapSet.member?(visited, type) ->
         {:cycle, type}
@@ -1227,4 +1226,26 @@ defmodule Barkpark.Content.Schema do
   end
 
   defp walk_named_type(_f, _dataset, _opts, _visited), do: :ok
+
+  defp nested_fields(f) do
+    of =
+      case f["of"] || f[:of] do
+        %{} = one -> [one]
+        list when is_list(list) -> Enum.filter(list, &is_map/1)
+        _ -> []
+      end
+
+    blocks =
+      case f["blocks"] || f[:blocks] do
+        %{} = b ->
+          for %{} = entry <- List.wrap(b["of"] || b[:of]),
+              %{} = field <- List.wrap(entry["fields"] || entry[:fields]),
+              do: field
+
+        _ ->
+          []
+      end
+
+    Enum.filter(List.wrap(f["fields"] || f[:fields]), &is_map/1) ++ of ++ blocks
+  end
 end
