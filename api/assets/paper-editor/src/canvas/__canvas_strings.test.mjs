@@ -45,6 +45,8 @@ const NB = {
   Text: "Tekst",
   Paragraph: "Avsnitt",
   Heading: "Overskrift",
+  Number: "Tall",
+  "numeric value": "tallverdi",
   "Paper text": "Artikkeltekst",
 };
 const BLOCKS = [
@@ -135,6 +137,25 @@ try {
     assert.equal(root.getAttribute("aria-multiline"), "true");
   });
 
+  // task-347897df84f96882: the number field's row read English, the Visual
+  // group split in two around the canvas-only Sheet row, and a no-match query
+  // left a listbox with no option.
+  check("the slash menu: Number reads in the stamped word, every group heads once", () => {
+    const s = slashTexts(nb);
+    assert.ok(s.labels.includes("Tall"), s.labels.join(","));
+    assert.ok(!s.labels.includes("Number"));
+    assert.deepEqual(s.groups, [...new Set(s.groups)], `a group heading repeats: ${s.groups.join(",")}`);
+  });
+
+  check("a slash query that matches nothing still offers one disabled option", () => {
+    nb._openSlash("zzzz-no-such-block");
+    const menu = nb._slash._el;
+    const opts = [...menu.querySelectorAll("[role='option']")];
+    assert.equal(opts.length, 1);
+    assert.equal(opts[0].getAttribute("aria-disabled"), "true");
+    nb._closeSlash();
+  });
+
   check("the slash filter finds a block by its shown name", () => {
     const s = slashTexts(nb, "avsnitt");
     assert.equal(s.labels[0], "Avsnitt");
@@ -156,9 +177,9 @@ try {
   failures += 1;
   console.log(`FAIL  setup threw: ${e.message}`);
 } finally {
-  if (ran !== 8) {
+  if (ran !== 10) {
     failures += 1;
-    console.log(`FAIL  ran ${ran} of 8 checks`);
+    console.log(`FAIL  ran ${ran} of 10 checks`);
   }
   if (failures > 0) { console.log(`\n${failures} failing check(s)`); process.exit(1); }
   console.log("\ncanvas strings: all checks passed");

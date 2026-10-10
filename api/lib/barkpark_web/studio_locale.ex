@@ -597,6 +597,8 @@ defmodule BarkparkWeb.StudioLocale do
       "outline of entries" => gettext("outline of entries"),
       "page title size" => gettext("page title size"),
       "Paragraph" => gettext("Paragraph"),
+      "Number" => gettext("Number"),
+      "numeric value" => gettext("numeric value"),
       "Paper text" => gettext("Paper text"),
       "Part of the document template" => gettext("Part of the document template"),
       "Paste link, ↵ to apply" => gettext("Paste link, ↵ to apply"),

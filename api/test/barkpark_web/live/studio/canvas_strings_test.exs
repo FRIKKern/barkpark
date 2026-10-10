@@ -85,6 +85,10 @@ defmodule BarkparkWeb.Studio.CanvasStringsTest do
     assert nb["%{label} (first of %{count} hidden blocks)"] ==
              "%{label} (første av %{count} skjulte blokker)"
 
+    # task-347897df84f96882: the slash menu's number field row.
+    assert nb["Number"] == "Tall"
+    assert nb["numeric value"] == "tallverdi"
+
     Gettext.put_locale(BarkparkWeb.Gettext, "en")
     en = Jason.decode!(StudioLocale.component_strings(:paper_canvas))
     assert en["Add a block below"] == "Add a block below"

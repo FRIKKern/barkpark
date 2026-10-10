@@ -587,8 +587,21 @@ function hasOnlyBpKeys(attrs) {
 // pre-composed subtree client-side (insertCompoundAtSelection). `type` mirrors the
 // kind only for the row's dataset/filter haystack — it is NOT a portable-doc type,
 // and _chooseSlash's CANVAS_SLASH_TYPES guard would no-op it defensively anyway.
+// Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
+// whose server default_block/2 has no sheet clause. It rides WITH the other Visual
+// rows: appended after the field rows it opened a second "Visual" heading
+// (task-347897df84f96882).
+const SHEET_SLASH_ITEM = { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" };
+
+function withSheetAfterVisual(items) {
+  let last = -1;
+  items.forEach((it, i) => { if (it.group === "Visual") last = i; });
+  if (last < 0) return [...items, SHEET_SLASH_ITEM];
+  return [...items.slice(0, last + 1), SHEET_SLASH_ITEM, ...items.slice(last + 1)];
+}
+
 const CANVAS_SLASH_ITEMS = [
-  ...SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
+  ...withSheetAfterVisual(SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
     if (it.type === "list") return [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }];
     // One row per heading level, H1–H6 (owner ruling 2026-10-03 #63). Canvas-only:
     // the per-block menu's server default_block/2 inserts one default heading.
@@ -602,10 +615,7 @@ const CANVAS_SLASH_ITEMS = [
       }));
     }
     return [it];
-  }),
-  // Canvas-only, like the checklist row: SLASH_ITEMS also feeds the per-block menu,
-  // whose server default_block/2 has no sheet clause.
-  { group: "Visual", type: "sheet", label: "Sheet", hint: "▦", desc: "embed a spreadsheet" },
+  })),
   ...CANVAS_COMPOUND_INSERTS.map((c) => ({
     group: "Starters",
     type: c.kind,
