@@ -86,7 +86,7 @@ export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
     node.attrs.value = opts.value;
   }
 
-  return insertNodeAtSelection(editor, node);
+  return insertNodesAtSelection(editor, [node], null, opts);
 }
 
 // insertCompoundAtSelection(editor, kind) → insert a COMPOUND starter (a pre-composed
@@ -95,11 +95,11 @@ export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
 // honors the top-level-prose guard and lands exactly where a /section would. The whole
 // subtree is ONE node (runToOps emits ONE insert-after carrying the section + its
 // seeded children, minting every id). Returns true iff inserted (unknown kind → false).
-export function insertCompoundAtSelection(editor, kind) {
+export function insertCompoundAtSelection(editor, kind, opts) {
   if (!editor) return false;
   const node = compoundKindToNode(kind);
   if (!node) return false;
-  return insertNodeAtSelection(editor, node);
+  return insertNodesAtSelection(editor, [node], null, opts);
 }
 
 // insertSectionPresetAtSelection(editor, kind) → insert a SECTION PRESET (an ORDERED
@@ -127,23 +127,18 @@ const PRESET_OVERTYPE_NODES = new Set([
   "blockquote",
 ]);
 
-export function insertSectionPresetAtSelection(editor, kind) {
+export function insertSectionPresetAtSelection(editor, kind, opts) {
   if (!editor) return false;
   const nodes = sectionPresetNodes(kind);
   if (!nodes || nodes.length === 0) return false;
-  return insertNodesAtSelection(editor, nodes, sectionPresetCaretTarget(kind));
-}
-
-// The single-node entry point, kept as the thin wrapper the slash pick and the
-// per-type Insert commands call — behavior byte-identical to before the multi-node
-// generalization (one node in, caret target defaulted to that node).
-function insertNodeAtSelection(editor, node) {
-  return insertNodesAtSelection(editor, [node], null);
+  return insertNodesAtSelection(editor, nodes, sectionPresetCaretTarget(kind), opts);
 }
 
 // The SHARED node-landing seam: replace the enclosing top-level-prose block with
 // `nodes`, or degrade to an insert-after when the caret sits somewhere a replace would
-// corrupt. Factored from insertSlashTypeAtSelection (byte-identical behavior for a
+// corrupt. A block that holds text is replaced only when the caller says that text is
+// its own (`opts.replaceText`: the slash pick's "/query" line). Anything else lands
+// AFTER it, so an insert never destroys the author's text (task-089f8a89b1f274ce). Factored from insertSlashTypeAtSelection (byte-identical behavior for a
 // single node) so the single-node, compound AND preset insert paths land nodes
 // through ONE code path.
 //
@@ -151,7 +146,7 @@ function insertNodeAtSelection(editor, node) {
 // body for a textable node, NodeSelection on an atom). A preset passes
 // { block, placeholder }: the caret lands on that block, SELECTING `placeholder` when
 // the node exposes an inline text hole.
-function insertNodesAtSelection(editor, nodes, caretTarget) {
+function insertNodesAtSelection(editor, nodes, caretTarget, opts) {
   const { state, view } = editor;
   const $pos = state.selection.$from;
   const newNodes = nodes.map((n) => state.schema.nodeFromJSON(n));
@@ -161,7 +156,17 @@ function insertNodesAtSelection(editor, nodes, caretTarget) {
   let tr;
   let caretAnchor; // doc position the FIRST new node starts at (for caret placement)
 
-  if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name)) {
+  // `opts.value` is text the caller already moved into the new block (the Mod-Alt-c
+  // chord turns a paragraph into code, task-2a659a853f02c2cc), so the block may go too.
+  const replaceable = $pos.parent.content.size === 0 ||
+    (opts && (opts.replaceText === true || typeof opts.value === "string"));
+  if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name) && !replaceable) {
+    // TOP-LEVEL PROSE WITH THE AUTHOR'S TEXT (a palette Insert): keep the block and
+    // land the new nodes right after it.
+    const insertAt = $pos.after($pos.depth);
+    tr = state.tr.insert(insertAt, newNodes);
+    caretAnchor = insertAt;
+  } else if (slashTriggerAllowsParent($pos.depth, $pos.parent.type.name)) {
     // TOP-LEVEL PROSE: replace the whole enclosing block (identical to the slash
     // pick — start=$pos.before(depth), end=$pos.after(depth)).
     const start = $pos.before($pos.depth);

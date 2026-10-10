@@ -1684,7 +1684,9 @@ try {
     slashSection.canvas._editor.state.doc.content.size - 1,
   );
   const { insertSlashTypeAtSelection } = await import("./command-palette.js");
-  assert.equal(insertSlashTypeAtSelection(slashSection.canvas._editor, "section"), true);
+  // The block stands in for a slash line, so the pick replaces it.
+  const SLASH_PICK = { replaceText: true };
+  assert.equal(insertSlashTypeAtSelection(slashSection.canvas._editor, "section", undefined, SLASH_PICK), true);
   slashSection.canvas.flushPendingChanges();
   const slashSectionSave = slashSection.requests[0];
   const slashSectionBlock = inserted(slashSectionSave);
@@ -1730,7 +1732,7 @@ try {
   tableRedo.canvas._editor.commands.setTextSelection(
     tableRedo.canvas._editor.state.doc.content.size - 1,
   );
-  assert.equal(insertSlashTypeAtSelection(tableRedo.canvas._editor, "table"), true);
+  assert.equal(insertSlashTypeAtSelection(tableRedo.canvas._editor, "table", undefined, SLASH_PICK), true);
   tableRedo.canvas.flushPendingChanges();
   const tableInsertSave = tableRedo.requests[0];
   const insertedTable = inserted(tableInsertSave);

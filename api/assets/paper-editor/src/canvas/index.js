@@ -3291,7 +3291,7 @@ class BpPaperCanvas extends HTMLElement {
     // subtree through the shared landing seam — same guard, same caret rules as a
     // single-node pick, but the carried node is a container + seeded children.
     if (item && item.compound) {
-      insertCompoundAtSelection(this._editor, item.compound);
+      insertCompoundAtSelection(this._editor, item.compound, { replaceText: true });
       return;
     }
     // A MASTER row (the Masters group): the SERVER inserts the detached copy.
@@ -3304,7 +3304,7 @@ class BpPaperCanvas extends HTMLElement {
     // top-level blocks through the same landing seam — same guard, same degrade, and
     // the preset's declared placeholder is selected so the next keystroke overtypes it.
     if (item && item.preset) {
-      insertSectionPresetAtSelection(this._editor, item.preset);
+      insertSectionPresetAtSelection(this._editor, item.preset, { replaceText: true });
       return;
     }
     // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
@@ -3338,7 +3338,8 @@ class BpPaperCanvas extends HTMLElement {
     // identical behavior to the pre-refactor in-place replaceWith. EXPECTED-group
     // items carry a `fieldName` binding (threaded through so a bound-field insert
     // round-trips). Caret placement (into-body vs atom-select) is handled by the seam.
-    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level });
+    // `replaceText`: the block's text is the slash's own "/query", so it is replaced.
+    insertSlashTypeAtSelection(this._editor, item.type, item.fieldName, { level: item.level, replaceText: true });
   }
 
   // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
