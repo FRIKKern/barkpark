@@ -35,6 +35,11 @@ defmodule BarkparkWeb.Components.ConfirmModal do
                               controlled by the parent — set `stage="dryrun"`
                               and render preview content in this slot.
 
+  ## Focus
+  The dialog is aria-modal, so it carries the shared `ModalFocus` hook (focus
+  in, Tab kept inside, focus back to the trigger on close) and Escape anywhere
+  fires `on_cancel`, like every other Studio dialog (modal_focus_guard_test).
+
   ## Styling
 
   The scrim and the card are `root.html.heex` rules — `.bp-modal-overlay`
@@ -72,6 +77,9 @@ defmodule BarkparkWeb.Components.ConfirmModal do
       aria-modal="true"
       aria-labelledby={"#{@id}-title"}
       data-test-id="confirm-modal"
+      phx-hook="ModalFocus"
+      phx-window-keydown={@on_cancel}
+      phx-key="escape"
     >
       <div class="bp-modal card">
         <h2 id={"#{@id}-title"} class="h3" style="margin: 0;"><%= @title %></h2>

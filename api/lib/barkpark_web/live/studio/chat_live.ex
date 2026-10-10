@@ -3034,8 +3034,12 @@ defmodule BarkparkWeb.Studio.ChatLive do
         <%!-- click-away sits on the CARD, never the full-screen overlay:
               nothing is ever outside a full-screen element, so a backdrop click
               would never fire there. --%>
+        <%!-- ModalFocus (the shared dialog focus manager) keeps Tab inside the
+              aria-modal palette and gives focus back to where Cmd/Ctrl+K was
+              pressed; ChatPalette on the overlay owns Escape and the list. --%>
         <div
           id="chat-palette-card"
+          phx-hook="ModalFocus"
           phx-click-away="chat-palette-close"
           style="width: min(560px, 94vw); max-height: 64vh; display: flex; flex-direction: column; background: var(--bg-popover); border: 1px solid var(--border); border-radius: 10px; box-shadow: var(--shadow-lg); overflow: hidden;"
         >

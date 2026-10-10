@@ -2800,6 +2800,9 @@
         LiveSocket below registers hooks. Only the /finder page mounts it —
         every other reader page pays one cached script fetch, no execution. --%>
   <script src="/assets/bp-graph.js"></script>
+  <%!-- The shared modal-dialog focus manager (also root.html.heex's): the
+        goal-path diff dialog uses it. NON-DEFER, before PaperHooks is built. --%>
+  <script src="/assets/bp-modal-focus.js"></script>
   <%!-- THE shared Mermaid hook + evergreen palette — the SAME asset
         root.html.heex loads for the Studio chat transcript
         (task-e96ac3b80506cf32: the reader used to carry a byte-identical
@@ -3145,6 +3148,7 @@
     // hook itself (window.BarkparkGraph, the same object Studio registers as
     // GraphPane); guarded so a missing asset never breaks the reader's hooks.
     if (window.BarkparkGraph) PaperHooks.FinderGraph = window.BarkparkGraph;
+    if (window.BarkparkModalFocus) PaperHooks.ModalFocus = window.BarkparkModalFocus;
 
     const publicBootNonce = document.currentScript && document.currentScript.nonce;
     const paperEditorHookNames = [
