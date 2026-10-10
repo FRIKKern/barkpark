@@ -41,6 +41,7 @@ on:
       - "api/test/support/fixtures/inline-block-wrapper.json"
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
+      - "api/test/support/fixtures/inline-object-text.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
       # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
       # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
@@ -94,6 +95,7 @@ on:
       - "api/test/support/fixtures/inline-block-wrapper.json"
       - "api/test/support/fixtures/section-boundary-rules.json"
       - "api/test/support/fixtures/inline-code-source.json"
+      - "api/test/support/fixtures/inline-object-text.json"
       - "api/test/support/fixtures/sdk-capabilities-parity.json"
       # The Elixir filter-op vocabulary. @barkpark/core's query-builder parity
       # suite (packages/core/tests/filter-op-parity.test.ts) reads this fixture
