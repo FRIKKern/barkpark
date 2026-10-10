@@ -426,7 +426,7 @@ defmodule BarkparkWeb.PresenceController do
         {:error, 413, "payload_too_large",
          "selection must be at most #{@selection_max_bytes} bytes of JSON"}
 
-      selection_shape?(sel) ->
+      BarkparkWeb.Studio.PresenceState.selection_shape?(sel) ->
         {:ok, sel}
 
       true ->
@@ -434,22 +434,6 @@ defmodule BarkparkWeb.PresenceController do
          "selection must be null or {anchor, head}, each {blockId, path?, offset}"}
     end
   end
-
-  defp selection_shape?(%{"anchor" => a, "head" => h} = sel) when map_size(sel) == 2,
-    do: point?(a) and point?(h)
-
-  defp selection_shape?(_), do: false
-
-  defp point?(%{"blockId" => id, "offset" => off} = p)
-       when is_binary(id) and id != "" and is_integer(off) and off >= 0 do
-    case Map.drop(p, ["blockId", "offset"]) do
-      empty when empty == %{} -> true
-      %{"path" => path} when is_binary(path) and path != "" -> true
-      _ -> false
-    end
-  end
-
-  defp point?(_), do: false
 
   defp owns_live_session(topic, sid, token) do
     case Presence.get_by_key(topic, presence_key(sid)) do

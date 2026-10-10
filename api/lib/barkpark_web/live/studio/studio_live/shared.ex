@@ -209,7 +209,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         project_id: socket.assigns[:current_project] && socket.assigns.current_project.id,
         name: socket.assigns.user_name,
         color: socket.assigns.user_color,
-        joined_at: System.system_time(:second)
+        joined_at: System.system_time(:second),
+        # This socket's own id: two tabs of one browser share a user_id, and a
+        # tab must not draw its own caret (task-c522237b9f37de21).
+        session_id: socket.id
       }
 
       topic = socket.assigns[:presence_topic] || presence_topic(socket)
@@ -219,9 +222,63 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared do
         _ -> Presence.update(self(), topic, socket.assigns.user_id, meta)
       end
 
-      assign(socket, presences: PresenceState.list(topic))
+      socket
+      |> assign(presences: PresenceState.list(topic))
+      |> push_remote_selections()
     else
       socket
+    end
+  end
+
+  @selection_max_bytes 512
+
+  @doc false
+  # The paper canvas's caret (task-c522237b9f37de21): `bp-canvas-selection`
+  # from the canvas, `{anchor, head}` or nil on blur, carried in this socket's
+  # presence meta so the other sessions on the paper draw it. A malformed or
+  # oversized selection is ignored, never stored.
+  def put_paper_selection(socket, selection) do
+    topic = socket.assigns[:presence_topic] || presence_topic(socket)
+
+    valid? =
+      is_nil(selection) or
+        (PresenceState.selection_shape?(selection) and
+           byte_size(Jason.encode!(selection)) <= @selection_max_bytes)
+
+    if connected?(socket) and is_binary(topic) and valid? do
+      Presence.update(self(), topic, socket.assigns.user_id, &Map.put(&1, :selection, selection))
+    end
+
+    socket
+  end
+
+  @doc false
+  # Push the other sessions' carets on the open paper to its canvases
+  # (`bp:remote-selections`, `setRemoteSelections`), only when the list changed.
+  # A departed session drops out of the next presence diff, so its caret clears.
+  def push_remote_selections(socket) do
+    with true <- connected?(socket),
+         "paper" <- socket.assigns[:editor_type],
+         %{doc_id: did} <- socket.assigns[:editor_doc] do
+      doc_id = Content.published_id(did)
+
+      list =
+        PresenceState.remote_selections(
+          socket.assigns[:presences] || [],
+          doc_id,
+          socket.assigns[:dataset],
+          socket.id
+        )
+
+      if socket.assigns[:remote_selections_pushed] == {doc_id, list} do
+        socket
+      else
+        socket
+        |> assign(:remote_selections_pushed, {doc_id, list})
+        |> push_event("bp:remote-selections", %{list: list})
+      end
+    else
+      _ -> socket
     end
   end
 
