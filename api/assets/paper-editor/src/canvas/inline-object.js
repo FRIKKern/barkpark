@@ -21,6 +21,12 @@
 //
 // An undeclared or unknown kind stays an inert atom: shown, selectable,
 // deletable as one unit, never editable, never dropped.
+//
+// The same dialog edits a declared custom OBJECT BLOCK (blocks.of `{name, title,
+// fields}`, task-aebfe6c1b3c3f881): the canvas carries it as a bpOpaque block with
+// the whole block on `bpBlock`. Inserting one opens the dialog first; Enter or a
+// double-click on a selected one edits it; run-convert.js emits a replace-block
+// when the carried block changed.
 
 import { Extension } from "@tiptap/core";
 import { NodeSelection, Plugin, PluginKey, TextSelection } from "@tiptap/pm/state";
@@ -30,6 +36,7 @@ import { inlineOpaqueLabel } from "../marks.js";
 import { inlineObjectFor } from "./vocabulary.js";
 
 const ATOM = "bpInlineOpaque";
+const BLOCK = "bpOpaque";
 const CLASS = "bp-inline-object-dialog";
 const decorationsKey = new PluginKey("bpInlineObjectNames");
 
@@ -39,6 +46,27 @@ export function inlineObjectAccessibleName(stored, vocab) {
   const kind = inlineObjectFor(vocab, type);
   const title = kind ? kind.title : type || t("Inline");
   return `${title}: ${inlineOpaqueLabel(stored)}`;
+}
+
+// The declared custom object block `name` (blocks.of `{name, title, fields}`), or null.
+export function objectBlockFor(vocab, name) {
+  if (!vocab || !Array.isArray(vocab.objects)) return null;
+  return vocab.objects.find((o) => o.name === name) || null;
+}
+
+// An object block's label: its first declared string field that holds text, else
+// the readers' inline object rule (text, title, label, name, value, `[type]`).
+export function objectBlockLabel(kind, block) {
+  for (const f of (kind && kind.fields) || []) {
+    const v = f && block ? block[f.name] : undefined;
+    if (typeof v === "string" && v.trim() !== "") return v;
+  }
+  return inlineOpaqueLabel({ type: kind ? kind.name : "", ...block });
+}
+
+// A dialog only edits fields it can name.
+function editableKind(kind) {
+  return kind ? { ...kind, fields: (kind.fields || []).filter((f) => f && typeof f.name === "string" && f.name !== "") } : null;
 }
 
 // True when a field declaration requires a value (`validation: {required:true}`,
@@ -91,14 +119,16 @@ export function refusalField(reason, fields) {
   return (fields || []).some((f) => f.name === name) ? name : null;
 }
 
-// Every atom's position and stored node.
-function atomsIn(doc) {
+// Every node of `typeName` with its position.
+function nodesIn(doc, typeName = ATOM) {
   const out = [];
   doc.descendants((node, pos) => {
-    if (node.type.name === ATOM) out.push({ node, pos });
+    if (node.type.name === typeName) out.push({ node, pos });
   });
   return out;
 }
+
+const atomsIn = (doc) => nodesIn(doc, ATOM);
 
 function sameJson(a, b) {
   return JSON.stringify(a) === JSON.stringify(b);
@@ -121,7 +151,7 @@ export class InlineObjectDialog {
   // `onClose()` runs on Save and Cancel alike. `error` = {field?, message}.
   open({ kind, stored, anchorRect, onSave, onClose, error }) {
     this.close(false);
-    this._kind = kind;
+    this._kind = editableKind(kind);
     this._stored = stored && typeof stored === "object" ? stored : { type: kind.name };
     this._onSave = onSave;
     this._onClose = onClose;
@@ -381,11 +411,66 @@ export function editInlineObjectAt(host, editor, pos, error) {
 
 // The atom near `pos` (holding `stored`, when given) — the doc may have moved
 // while the dialog was open.
-function findAtom(doc, pos, stored) {
+function findAtom(doc, pos, stored, typeName = ATOM, attr = "node") {
   const here = pos >= 0 && pos < doc.content.size ? doc.nodeAt(pos) : null;
-  if (here && here.type.name === ATOM && (!stored || sameJson(here.attrs.node, stored))) return pos;
-  const hit = atomsIn(doc).find((a) => !stored || sameJson(a.node.attrs.node, stored));
+  if (here && here.type.name === typeName && (!stored || sameJson(here.attrs[attr], stored))) return pos;
+  const hit = nodesIn(doc, typeName).find((a) => !stored || sameJson(a.node.attrs[attr], stored));
   return hit ? hit.pos : null;
+}
+
+// Open the dialog for the declared object block at `pos`. Save rewrites its
+// carried block in one transaction; keys the dialog does not own (its id) ride along.
+export function editObjectBlockAt(host, editor, pos, error) {
+  const node = editor.state.doc.nodeAt(pos);
+  if (!node || node.type.name !== BLOCK) return false;
+  const kind = objectBlockFor(host.inlineObjectVocabulary(), node.attrs.bpType);
+  if (!kind || !editableKind(kind).fields.length) return false;
+  const stored = node.attrs.bpBlock || { type: node.attrs.bpType };
+  const dom = editor.view.nodeDOM(pos);
+  const rect = dom && typeof dom.getBoundingClientRect === "function" ? dom.getBoundingClientRect() : null;
+  host.inlineObjectDialog().open({
+    kind,
+    stored,
+    anchorRect: rect,
+    error,
+    onSave: (values) => {
+      const at = findAtom(editor.state.doc, pos, stored, BLOCK, "bpBlock");
+      if (at == null) return;
+      const live = editor.state.doc.nodeAt(at);
+      host.noteInlineObjectSave(values);
+      editor.view.dispatch(editor.state.tr.setNodeMarkup(at, undefined, { ...live.attrs, bpBlock: values }));
+    },
+    onClose: () => {
+      const at = findAtom(editor.state.doc, pos, null, BLOCK, "bpBlock");
+      editor.view.focus();
+      if (at != null) editor.view.dispatch(editor.state.tr.setSelection(NodeSelection.create(editor.state.doc, at)));
+    },
+  });
+  return true;
+}
+
+// Inserting a declared object block that has fields: the dialog opens over an
+// empty value and Save calls `insert(values)`. False when the kind has no fields
+// to ask for (the caller inserts it at once, as before).
+export function openObjectBlockInsert(host, editor, name, insert) {
+  const kind = objectBlockFor(host.inlineObjectVocabulary(), name);
+  if (!kind || !editableKind(kind).fields.length) return false;
+  // The caret the pick was made at: focus moving through the dialog must not
+  // move where the block lands.
+  const at = editor.state.selection.from;
+  host.inlineObjectDialog().open({
+    kind,
+    stored: { type: name },
+    anchorRect: safeCoords(editor.view, at),
+    onSave: (values) => {
+      host.noteInlineObjectSave(values);
+      const doc = editor.state.doc;
+      editor.view.dispatch(editor.state.tr.setSelection(TextSelection.near(doc.resolve(Math.min(at, doc.content.size)))));
+      insert(values);
+    },
+    onClose: () => editor.view.focus(),
+  });
+  return true;
 }
 
 // Pick a declared kind: the dialog opens over an empty value; Save puts the atom
@@ -435,9 +520,10 @@ export function inlineObjects(host) {
       return {
         Enter: ({ editor }) => {
           const sel = editor.state.selection;
-          if (!(sel instanceof NodeSelection) || sel.node.type.name !== ATOM) return false;
-          if (!host._editable) return false;
-          return editInlineObjectAt(host, editor, sel.from);
+          if (!(sel instanceof NodeSelection) || !host._editable) return false;
+          if (sel.node.type.name === ATOM) return editInlineObjectAt(host, editor, sel.from);
+          if (sel.node.type.name === BLOCK) return editObjectBlockAt(host, editor, sel.from);
+          return false;
         },
       };
     },
@@ -458,12 +544,35 @@ export function inlineObjects(host) {
                   "data-inline-editable": editable ? "true" : "false",
                 });
               });
+              // A declared object block with fields is named "<kind title>: <label>"
+              // and marked editable (Enter / double-click opens its dialog).
+              for (const { node, pos } of nodesIn(state.doc, BLOCK)) {
+                const kind = objectBlockFor(vocab, node.attrs.bpType);
+                if (!kind || !editableKind(kind).fields.length) continue;
+                decos.push(Decoration.node(pos, pos + node.nodeSize, {
+                  role: "group",
+                  "aria-label": `${kind.title}: ${objectBlockLabel(kind, node.attrs.bpBlock || {})}`,
+                  "data-object-editable": "true",
+                }));
+              }
               return DecorationSet.create(state.doc, decos);
             },
             handleDoubleClickOn(view, pos, node, nodePos) {
               if (node.type.name !== ATOM || !host._editable) return false;
               return editInlineObjectAt(host, editor, nodePos);
             },
+          },
+          // The opaque block's node view stops every event before ProseMirror sees
+          // it, so its double-click is read off the editor DOM directly.
+          view(view) {
+            const onDblClick = (e) => {
+              const el = e.target && typeof e.target.closest === "function" ? e.target.closest("[data-bp-opaque]") : null;
+              if (!el || !host._editable) return;
+              const hit = nodesIn(view.state.doc, BLOCK).find(({ pos }) => view.nodeDOM(pos) === el);
+              if (hit && editObjectBlockAt(host, editor, hit.pos)) e.preventDefault();
+            };
+            view.dom.addEventListener("dblclick", onDblClick);
+            return { destroy: () => view.dom.removeEventListener("dblclick", onDblClick) };
           },
         }),
       ];

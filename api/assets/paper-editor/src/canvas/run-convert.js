@@ -4435,6 +4435,20 @@ export function runToOps(prevBlocks, nextDoc, options = {}) {
   // their compare below could only find nothing to patch, so it is skipped.
   const unchangedIds = options.unchangedIds instanceof Set ? options.unchangedIds : null;
   for (const entry of nextSeq) {
+    // A surviving opaque block whose CARRIED block changed → ONE replace-block with
+    // the edited block. Only a declared custom object block's field dialog
+    // (inline-object.js, task-aebfe6c1b3c3f881) rewrites a carried block, so an
+    // untouched carry compares equal (id excluded, key order ignored) and emits
+    // nothing, exactly as before.
+    if (entry.isOpaque && !entry.isNew) {
+      if (unchangedIds && unchangedIds.has(entry.id)) continue;
+      const carried = entry.node.attrs && entry.node.attrs.bpBlock;
+      const before = prevById.get(entry.id);
+      if (before && carried && canonicalJSON(stripId(before)) !== canonicalJSON(stripId(carried))) {
+        ops.push({ op: "replace-block", id: entry.id, block: { ...deepClone(carried), id: entry.id } });
+      }
+      continue;
+    }
     if (entry.isNew || entry.isOpaque || entry.isAtom) continue;
     if (unchangedIds && unchangedIds.has(entry.id)) continue;
     // A read-only atom with no retargetable reference keeps the original

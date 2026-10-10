@@ -83,7 +83,7 @@ import {
 // The attr-preservation extension — the make-or-break of S1 (see ./bp-attrs.js).
 import { BpAttrs } from "./bp-attrs.js";
 import { restingScaffolds } from "./resting-scaffolds.js";
-import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, refusalField } from "./inline-object.js";
+import { inlineObjects, InlineObjectDialog, insertInlineObject, editInlineObjectAt, editObjectBlockAt, openObjectBlockInsert, refusalField } from "./inline-object.js";
 import { RestingSelection } from "./resting-selection.js";
 // S3: the divider as a canvas ATOM node — the first non-prose block to live
 // INSIDE the canvas document (so a prose run can CONTAIN dividers). A leaf with
@@ -2078,13 +2078,21 @@ class BpPaperCanvas extends HTMLElement {
     const reason = refusal && typeof refusal.reason === "string" ? refusal.reason : "";
     if (!values || reason === "" || !this._editor) return false;
     let at = null;
+    let block = false;
     this._editor.state.doc.descendants((node, pos) => {
-      if (at == null && node.type.name === "bpInlineOpaque" && JSON.stringify(node.attrs.node) === JSON.stringify(values)) at = pos;
+      if (at != null) return;
+      if (node.type.name === "bpInlineOpaque" && JSON.stringify(node.attrs.node) === JSON.stringify(values)) at = pos;
+      if (node.type.name === "bpOpaque" && JSON.stringify(node.attrs.bpBlock) === JSON.stringify(values)) {
+        at = pos;
+        block = true;
+      }
     });
     if (at == null) return false;
-    const kind = (this.inlineObjectVocabulary()?.inlineObjects || []).find((o) => o.name === values.type);
+    const vocab = this.inlineObjectVocabulary();
+    const kind = ((block ? vocab?.objects : vocab?.inlineObjects) || []).find((o) => o.name === values.type);
     const message = reason.replace(/^[^\s:]+: /, "");
-    return editInlineObjectAt(this, this._editor, at, { field: refusalField(reason, kind ? kind.fields : []), message });
+    const error = { field: refusalField(reason, kind ? kind.fields : []), message };
+    return block ? editObjectBlockAt(this, this._editor, at, error) : editInlineObjectAt(this, this._editor, at, error);
   }
 
   // Re-diff the live document against the saved baseline and emit the batch, if any
@@ -3395,7 +3403,11 @@ class BpPaperCanvas extends HTMLElement {
     // Terminal / Stage: the SERVER builds the block, like "+ Add block" (the canvas
     // fence refuses a canvas batch that introduces one — task-f3c8acd1e09a0eda).
     if (item && item.object) {
-      this._insertObjectBlock(item.type);
+      // A declared object block with fields asks for them first (inline-object.js);
+      // one with none inserts at once.
+      if (!openObjectBlockInsert(this, this._editor, item.type, (values) => this._insertObjectBlock(item.type, values))) {
+        this._insertObjectBlock(item.type);
+      }
       return;
     }
     // A field's Quote row makes the block the field admits (vocabulary.js quoteTypeFor).
@@ -3430,7 +3442,7 @@ class BpPaperCanvas extends HTMLElement {
   // A declared custom object block (task-96fce87b7b71c288): REPLACE the "/query"
   // line with a verbatim bpOpaque carry of `{type}`. runToOps inserts it as a new
   // block (the opaque insert path), the server checks its declared fields.
-  _insertObjectBlock(type) {
+  _insertObjectBlock(type, bpBlock) {
     const editor = this._editor;
     if (!editor || !this._editable || typeof type !== "string" || type === "") return false;
     const { state } = editor;
@@ -3440,7 +3452,7 @@ class BpPaperCanvas extends HTMLElement {
     let offset = 0;
     for (let i = 0; i < index; i++) offset += state.doc.child(i).nodeSize;
     const line = state.doc.child(index);
-    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: { type } });
+    const node = nodeType.create({ bpId: null, bpType: type, bpBlock: bpBlock || { type } });
     editor.view.dispatch(state.tr.replaceWith(offset, offset + line.nodeSize, node));
     return true;
   }
