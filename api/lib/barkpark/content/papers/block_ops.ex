@@ -2531,7 +2531,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_document_block_op(doc_id, type, op, dataset, opts \\ []),
     do:
       Door.admit(fn ->
-        document_revless(opts, &admitted_apply_document_block_op(doc_id, type, op, dataset, &1))
+        document_revless(
+          opts,
+          &with_document_ops_lock(doc_id, type, dataset, &1, fn opts ->
+            admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
+          end)
+        )
       end)
 
   # [document-revless-cas] (Run-4 concurrent-writer matrix) — the document twin
@@ -2560,6 +2565,82 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {:error, {:rev_mismatch, _}} -> document_revless_attempt(opts, fun, attempts - 1)
       other -> other
     end
+  end
+
+  # [document-ops-lock] task-6dd00e5b6b33c3c3 — the three document op paths
+  # (single, batch, field) read the row, compare `ifRev`, fold the ops and only
+  # then write. Nothing held the document between the compare and the write, so
+  # two batches fenced on the same rev of a PUBLISHED document both passed the
+  # compare and both inserted `drafts.<id>`: the second hit the unique index
+  # and surfaced as a 422 `invalid_op` instead of a 412 with `actual`. The
+  # writer's rev-fenced UPDATE only covers a draft that already exists.
+  #
+  # Each op now runs in one transaction that first takes a transaction-scoped
+  # advisory lock keyed on the document leaf (draft and published share it), so
+  # the read and the `ifRev` compare happen after any earlier op on the same
+  # document has committed. The loser reads the winner's row and is refused
+  # with `{:rev_mismatch, %{actual: <winner's rev>}}`.
+  #
+  # The lock is the transaction's FIRST lock and no other path takes this key,
+  # so a waiter never holds a lock someone else needs. A caller that already
+  # owns a transaction (`apply_document_block_op_once/7` row-locks the base
+  # first) keeps its own atomicity and is not re-locked here.
+  #
+  # Broadcasts and `:after_save` hooks are deferred to after the commit, as in
+  # `apply_document_block_op_once/7`.
+  @document_ops_lock_class 0x626F
+
+  defp with_document_ops_lock(doc_id, type, dataset, opts, fun) do
+    if Repo.in_transaction?() do
+      fun.(opts)
+    else
+      Broadcast.claim_deferred_queue()
+      Writer.clear_deferred_after_save()
+
+      try do
+        Repo.transaction(fn ->
+          lock_document_ops!(doc_id, type, dataset)
+
+          case fun.(Keyword.put(opts, :defer_after_save, true)) do
+            {:ok, result} -> {result, Writer.take_deferred_after_save()}
+            {:error, reason} -> Repo.rollback(reason)
+          end
+        end)
+      rescue
+        exception ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          reraise exception, __STACKTRACE__
+      catch
+        kind, reason ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          :erlang.raise(kind, reason, __STACKTRACE__)
+      else
+        {:ok, {result, deferred}} ->
+          Broadcast.flush_deferred_broadcasts()
+          finish_document_ops_after_save(deferred)
+          {:ok, result}
+
+        {:error, reason} ->
+          Broadcast.clear_deferred_broadcasts()
+          Writer.clear_deferred_after_save()
+          {:error, reason}
+      end
+    end
+  end
+
+  defp finish_document_ops_after_save(nil), do: :ok
+
+  defp finish_document_ops_after_save({saved, payload}) do
+    _ = Writer.finish_deferred_after_save(saved, payload)
+    :ok
+  end
+
+  defp lock_document_ops!(doc_id, type, dataset) do
+    key = :erlang.crc32("#{dataset}:#{type}:#{DraftId.published_id(doc_id)}") - 2_147_483_648
+    Repo.query!("SELECT pg_advisory_xact_lock($1::int, $2::int)", [@document_ops_lock_class, key])
+    :ok
   end
 
   defp admitted_apply_document_block_op(doc_id, type, op, dataset, opts)
@@ -2701,7 +2782,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_document_block_ops(doc_id, type, ops, dataset, opts \\ []),
     do:
       Door.admit(fn ->
-        document_revless(opts, &admitted_apply_document_block_ops(doc_id, type, ops, dataset, &1))
+        document_revless(
+          opts,
+          &with_document_ops_lock(doc_id, type, dataset, &1, fn opts ->
+            admitted_apply_document_block_ops(doc_id, type, ops, dataset, opts)
+          end)
+        )
       end)
 
   defp admitted_apply_document_block_ops(doc_id, type, ops, dataset, opts)
@@ -3195,7 +3281,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_field_block_ops(doc_id, type, field, ops, dataset, opts \\ []),
     do:
       Door.admit(fn ->
-        admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+        with_document_ops_lock(doc_id, type, dataset, opts, fn opts ->
+          admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)
+        end)
       end)
 
   defp admitted_apply_field_block_ops(doc_id, type, field, ops, dataset, opts)

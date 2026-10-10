@@ -231,7 +231,9 @@ unchanged. The canvas emits ops in the server's DocPatchOp shape (`{ op:
 
 Both need a write token and `ifRev` (the document's `_rev`). Both apply the batch
 whole or not at all. A stale `ifRev` answers `412 precondition_failed` with
-`error.details.actual`, the current rev. Read the starting `blocks` and `_rev`
+`error.details.actual`, the current rev. The server compares `ifRev` under a
+per-document lock held until the batch commits, so of two batches fenced on the
+same rev one lands and the other gets that 412, never a 422. Read the starting `blocks` and `_rev`
 with `GET <scope>/v1/data/doc/:ds/:type/:id?perspective=raw`; a document's blocks
 are `result.blocks`, a field's are `result[field]`. Seed `canvas.blocks` from
 that read and nothing else: a non-paper document's blocks are projected from its
