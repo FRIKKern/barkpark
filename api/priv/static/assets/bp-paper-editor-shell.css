@@ -2295,6 +2295,9 @@ textarea.bp-paper-inline-text.bp-paper-link-ref-eyebrow-input { text-transform: 
   margin: 0; padding: 0; border: 0; border-radius: 0; box-shadow: none;
   background: transparent; color: inherit; font: inherit; letter-spacing: inherit;
   word-spacing: inherit; text-transform: inherit; text-align: inherit;
+  /* Not part of the `font` shorthand, so inherited by name: the reader chrome
+     paints optimizeLegibility (task-af13ef790ba381d3). */
+  text-rendering: inherit;
   resize: none; overflow: hidden; overflow-wrap: anywhere; outline-offset: 3px;
 }
 .bp-paper-contextual-editor textarea.bp-paper-inline-text.bp-paper-inline-copy--inline {
