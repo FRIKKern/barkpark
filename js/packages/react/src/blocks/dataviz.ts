@@ -152,31 +152,23 @@ function statHtml(block: unknown, ctx: RenderCtx): string {
 const MAX_DOTS = 50
 
 function whole(v: unknown): number | null {
-  if (typeof v === 'number') return Number.isInteger(v) ? v : null
-  if (typeof v === 'string' && /^[+-]?\d+$/.test(v.trim())) return parseInt(v.trim(), 10)
-  return null
-}
-
-function statDots(block: unknown): [number, number] | null {
-  const d = get(block, 'dots')
-  if (!isMap(d)) return null
-  const of = whole(get(d, 'of'))
-  const on = whole(get(d, 'on'))
-  if (of === null || of < 1 || of > MAX_DOTS || on === null) return null
-  return [Math.min(Math.max(on, 0), of), of]
+  const t = typeof v === 'string' ? v.trim() : v
+  return Number.isInteger(t)
+    ? (t as number)
+    : typeof t === 'string' && /^[+-]?\d+$/.test(t)
+      ? +t
+      : null
 }
 
 function dotsHtml(block: unknown, ctx: RenderCtx): string {
-  const d = statDots(block)
-  if (d === null) return ''
-  const [on, of] = d
-  const label = ctx.t('%{on} of %{total}', { on, total: of })
-  return (
-    `<div class="bp-stat__dots" role="img" aria-label="${escapeAttr(label)}">` +
-    '<i class="bp-stat__dot bp-stat__dot--on" aria-hidden="true"></i>'.repeat(on) +
-    '<i class="bp-stat__dot" aria-hidden="true"></i>'.repeat(of - on) +
-    '</div>'
-  )
+  const d = get(block, 'dots')
+  const of = whole(get(d, 'of'))
+  let on = whole(get(d, 'on'))
+  if (of === null || of < 1 || of > MAX_DOTS || on === null) return ''
+  on = Math.min(Math.max(on, 0), of)
+  const dot = (cls: string, n: number) =>
+    `<i class="bp-stat__dot${cls}" aria-hidden="true"></i>`.repeat(n)
+  return `<div class="bp-stat__dots" role="img" aria-label="${escapeAttr(ctx.t('%{on} of %{total}', { on, total: of }))}">${dot(' bp-stat__dot--on', on)}${dot('', of - on)}</div>`
 }
 
 const stats: Emit = (block, ctx) => {
@@ -328,7 +320,9 @@ const duel: Emit = (block, ctx) => {
 // base class, so every lineage authored before the clock strip is unchanged.
 function toneClass(base: string, tone: unknown): string {
   const t = displayString(tone)
-  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger' ? `${base} ${base}--${t}` : base
+  return t === 'info' || t === 'ok' || t === 'warn' || t === 'danger'
+    ? `${base} ${base}--${t}`
+    : base
 }
 
 function lineageNodeHtml(n: unknown): string {
@@ -753,7 +747,12 @@ function countGauges(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {
   const entries = [...counts.entries()].sort((a, b) =>
     a[1] !== b[1] ? b[1] - a[1] : a[0] < b[0] ? -1 : a[0] > b[0] ? 1 : 0,
   )
-  return entries.map(([label, count]) => ({ label, prop: count / maxCount, digit: String(count), note: '' }))
+  return entries.map(([label, count]) => ({
+    label,
+    prop: count / maxCount,
+    digit: String(count),
+    note: '',
+  }))
 }
 
 function gaugeRows(block: unknown, ctx: RenderCtx): 'epic' | Gauge[] {

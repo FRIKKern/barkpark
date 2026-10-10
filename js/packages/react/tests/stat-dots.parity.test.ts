@@ -6,7 +6,7 @@
 //
 //   Elixir  api/lib/barkpark/portable_doc/render/data_viz.ex  dots/1, dots_html/1
 //           tested by api/test/barkpark/portable_doc/render/stat_dots_test.exs
-//   JS      js/packages/react/src/blocks/dataviz.ts           statDots, dotsHtml
+//   JS      js/packages/react/src/blocks/dataviz.ts           whole, dotsHtml
 //           tested HERE; the stat/stats/nb-NO goldens hold the two halves equal.
 import { describe, expect, it } from 'vitest'
 import { datavizEmitters } from '../src/blocks/dataviz'
@@ -40,12 +40,23 @@ describe('stat dots', () => {
   it('clamps on into 0..of and takes whole-number strings', () => {
     expect(count(emit({ type: 'stat', value: '1', dots: { on: 99, of: 3 } }), ON)).toBe(3)
     expect(count(emit({ type: 'stat', value: '1', dots: { on: -4, of: 3 } }), OFF)).toBe(3)
-    expect(emit({ type: 'stat', value: '1', dots: { on: '1', of: ' 4 ' } })).toContain('aria-label="1 of 4"')
+    expect(emit({ type: 'stat', value: '1', dots: { on: '1', of: ' 4 ' } })).toContain(
+      'aria-label="1 of 4"',
+    )
   })
 
   it('renders nothing for a missing or malformed field', () => {
     const bare = emit({ type: 'stat', value: '1' })
-    for (const dots of [null, 'x', [], { on: 1 }, { on: 1, of: 0 }, { on: 1, of: 51 }, { on: 1, of: 2.5 }, { on: 'a', of: 3 }]) {
+    for (const dots of [
+      null,
+      'x',
+      [],
+      { on: 1 },
+      { on: 1, of: 0 },
+      { on: 1, of: 51 },
+      { on: 1, of: 2.5 },
+      { on: 'a', of: 3 },
+    ]) {
       expect(emit({ type: 'stat', value: '1', dots })).toBe(bare)
     }
   })
