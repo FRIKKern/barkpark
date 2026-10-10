@@ -110,6 +110,38 @@ defmodule Barkpark.Tasks.Queue do
   # literal. The base `WHERE` below binds this same list via `IN ^…`.
   @ready_lifecycle_statuses Validation.claimable_statuses()
 
+  # task-80da62a024b935f9 — the ready walk is served by the PARTIAL index
+  # `documents_task_ready_priority_idx` (migration 20261010100000):
+  #   (workspace_id, <@ready_priority_sql>, inserted_at, id)
+  #   WHERE type = 'task' AND content->>'lifecycle_status' IN ('open', 'blocked')
+  # Postgres uses it only when the query's ORDER BY key is the index expression
+  # character for character, and only when it can PROVE the partial predicate
+  # from the bound status list — which it can with the values in hand (a custom
+  # plan), and cannot in a GENERIC plan. Hence:
+  #   * the ORDER BY key is the GUARDED cast below, the index expression: a
+  #     non-integer priority sorts last instead of erroring, so the index can
+  #     never make a task write fail (lead ruling on the row);
+  #   * every executor runs the query with `prepare: :unnamed`
+  #     (`@ready_repo_opts`), so Postgres plans it at Bind with the real
+  #     parameters every time and never falls into a cached generic plan that
+  #     cannot see the partial index. A literal `IN (…)` would also make the
+  #     predicate provable, but measured WORSE: it flipped the cross-dataset
+  #     twin probe to a 10,000-row seq scan per candidate (105 ms at limit=40).
+  # `ready_priority_index_test.exs` pins the expression against the live index.
+  @ready_priority_sql "(CASE WHEN ?->>'priority' ~ '^-{0,1}[0-9]+$' THEN (?->>'priority')::int END)"
+  @ready_repo_opts [prepare: :unnamed]
+
+  @doc false
+  def ready_priority_sql, do: @ready_priority_sql
+
+  @doc false
+  # The Repo options every ready-queue executor passes (see above).
+  def ready_repo_opts, do: @ready_repo_opts
+
+  defmacrop guarded_priority(content) do
+    quote do: fragment(unquote(@ready_priority_sql), unquote(content), unquote(content))
+  end
+
   @doc """
   The page size `ready/1` applies when the caller names no `:limit`.
 
@@ -124,7 +156,7 @@ defmodule Barkpark.Tasks.Queue do
   def ready(opts \\ []) do
     opts
     |> ready_query()
-    |> Repo.all()
+    |> Repo.all(@ready_repo_opts)
   end
 
   def ready_query(opts) do
@@ -598,7 +630,7 @@ defmodule Barkpark.Tasks.Queue do
   defp apply_order(query, order) when order in [nil, :compatibility] do
     from([doc: d] in query,
       order_by: [
-        asc_nulls_last: fragment("(?->>'priority')::int", d.content),
+        asc_nulls_last: guarded_priority(d.content),
         asc: d.inserted_at,
         asc: d.id
       ]

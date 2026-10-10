@@ -43,7 +43,7 @@ defmodule Barkpark.Tasks.Claim do
         case opts
              |> Queue.ready_query()
              |> from(limit: 1, lock: "FOR UPDATE SKIP LOCKED")
-             |> Repo.one() do
+             |> Repo.one(Queue.ready_repo_opts()) do
           nil ->
             {:ok, nil}
 
