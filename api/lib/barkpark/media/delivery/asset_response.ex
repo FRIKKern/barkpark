@@ -102,6 +102,9 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       cdnUrls: Cdn.url_map(file, cdn_opts),
       mimeType: file.mime_type,
       size: file.size,
+      # Hex SHA-1 of the bytes (task-b6e57c37f6928344); null on a row born
+      # before the column until `mix barkpark.media.backfill_sha1` runs.
+      sha1: file.sha1,
       createdAt: file.inserted_at,
       updatedAt: file.updated_at,
       visibility: Access.visibility(asset_doc),

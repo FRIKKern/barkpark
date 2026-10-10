@@ -317,7 +317,10 @@ defmodule BarkparkWeb.V1.MediaController do
         offset: MediaSearchParams.clamp_offset(parse_int(params["offset"], 0)),
         mime_type: blank_to_nil(params["type"] || params["mimeType"]),
         kind: blank_to_nil(params["kind"]),
-        q: blank_to_nil(params["q"])
+        q: blank_to_nil(params["q"]),
+        # task-b6e57c37f6928344 — exact content-hash lookup, so a client can
+        # skip the transfer. Same scope as every other filter on this list.
+        sha1: sha1_param(params["sha1"])
       ] ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
 
     {files, total} = Media.query_files(dataset, opts)
@@ -460,7 +463,25 @@ defmodule BarkparkWeb.V1.MediaController do
 
   def upload(conn, %{"dataset" => dataset, "file" => upload} = params) do
     with :ok <- require_write(conn) do
-      case Media.upload(upload, dataset, scope_opts(conn)) do
+      case Media.upload(upload, dataset, [dedupe: true] ++ scope_opts(conn)) do
+        # task-b6e57c37f6928344 — the same bytes already live in this dataset
+        # and workspace: answer with that asset, 200 not 201, `existing: true`,
+        # and store nothing. The upload's inline metadata is NOT applied: it
+        # would overwrite an asset other documents already show.
+        {:existing, file} ->
+          conn
+          |> put_status(:ok)
+          |> json(%{
+            result:
+              AssetResponse.render(
+                file,
+                asset_doc(file, dataset),
+                render_opts(conn, params, dataset: dataset)
+              ),
+            existing: true,
+            syncTags: sync_tags(dataset, file.id)
+          })
+
         {:ok, file} ->
           # INLINE METADATA (task-57ee9fff4aae9217 #13). altText / caption /
           # tags / title / description used to cost one extra PATCH per FIELD
@@ -865,6 +886,12 @@ defmodule BarkparkWeb.V1.MediaController do
   # MediaSearchParams / BulldocsIngestController.
   defp blank_to_nil(v) when is_binary(v) and v != "", do: v
   defp blank_to_nil(_), do: nil
+
+  # Lower-cased, so an upper-case hex digest still matches. A present but
+  # malformed value is kept, never dropped: it matches nothing, so a typo
+  # answers an empty list instead of the whole unfiltered dataset.
+  defp sha1_param(v) when is_binary(v) and v != "", do: v |> String.trim() |> String.downcase()
+  defp sha1_param(_), do: nil
 
   defp metadata_params(%{"metadata" => metadata}) when is_map(metadata), do: metadata
 

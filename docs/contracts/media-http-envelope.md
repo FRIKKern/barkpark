@@ -7,6 +7,8 @@ What a media asset record and a media list `result` actually carry. Split out of
 
 Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
 
+Assets carry **`sha1`** (null on old rows until `mix barkpark.media.backfill_sha1`). Re-uploading bytes already in the dataset+workspace answers **`200`**, `existing: true`, with that asset (inline metadata ignored). `?sha1=<hex>` filters the list.
+
 ## List envelope
 
 Every list `result` carries `total` (grand total, stable across pages), `hasMore` (exact, always present — **never infer truncation from `rows == limit`**: an exactly-full last page has it too), `limit`, `offset`, and `nextOffset` = `offset + rows`, present **only** when `hasMore`. `search` uses `nextCursor` instead (always present, `null` unless `hasMore`), no `nextOffset`.
