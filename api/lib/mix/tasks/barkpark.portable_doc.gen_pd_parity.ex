@@ -271,7 +271,21 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         # A string mark hits the unknown-mark passthrough and emits no <span>, so
         # this fixture would silently NOT exercise D4 inline marks.
         %{"type" => "text", "value" => "bold emphasis", "marks" => [%{"type" => "bold"}]},
-        %{"type" => "text", "value" => " inside it."}
+        %{"type" => "text", "value" => " inside it, "},
+        # Both link shapes (a link MARK and an inline link NODE): pins that the
+        # Elixir and JS link output stay byte-equal (task-10ca9c3597695db7).
+        %{
+          "type" => "text",
+          "value" => "a marked link",
+          "marks" => [%{"type" => "link", "href" => "https://example.com/mark"}]
+        },
+        %{"type" => "text", "value" => " and "},
+        %{
+          "type" => "link",
+          "href" => "https://example.com/node",
+          "children" => [%{"type" => "text", "value" => "a link node"}]
+        },
+        %{"type" => "text", "value" => "."}
       ]
     },
     "pullquote" => %{

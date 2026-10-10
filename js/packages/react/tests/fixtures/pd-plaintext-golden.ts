@@ -30,7 +30,7 @@ export const PROSE_GOLDEN: Record<string, string> = {
   eyebrow: 'Dispatches',
   byline: 'Jane Rae · 2026-07-16',
   // prose runs (marks contribute no text)
-  paragraph: 'A body paragraph with bold emphasis inside it.',
+  paragraph: 'A body paragraph with bold emphasis inside it, a marked link and a link node.',
   ingress: 'A lead paragraph that opens the article.',
   pullquote: 'The best interface is no interface.',
   blockquote: 'The best way to predict the future is to invent it.\n\nAlan Kay',
