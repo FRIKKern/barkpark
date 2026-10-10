@@ -117,6 +117,46 @@ defmodule Barkpark.Content.EventLog do
 
   def replay_since(_dataset, _since, _workspace_id, _opts), do: []
 
+  @doc """
+  The newest `mutation_events.id` visible to a stream with this exact scope
+  right now, or `nil` when none exists — task-399143cf7ac6b952: the id a
+  fresh listener's welcome frame carries, so a client that disconnects before
+  any live event arrives still has a Last-Event-ID to resume from on
+  reconnect, instead of nothing (and therefore no replay at all).
+
+  Scoped IDENTICALLY to `replay_since/4`'s own three REQUEST-reachable arms —
+  same three `workspace_id` shapes, same `type != "listener"` egress
+  exclusion (PDF-D18), same `opts[:project_id]` narrowing — on purpose: the
+  value this returns is only correct as a resume point if a FUTURE
+  `replay_since(dataset, this_id, workspace_id, opts)` call, from the exact
+  same stream, would see precisely the events written after it. A scope
+  mismatch between the two would make a client think it is caught up on
+  events it was never entitled to see, or vice versa.
+  """
+  def head_event_id(dataset, workspace_id \\ nil, opts \\ [])
+
+  def head_event_id(dataset, nil, _opts) do
+    from(e in MutationEvent, where: e.dataset == ^dataset and e.type != "listener")
+    |> Repo.aggregate(:max, :id)
+  end
+
+  def head_event_id(dataset, :shared_only, _opts) do
+    from(e in MutationEvent,
+      where: e.dataset == ^dataset and is_nil(e.workspace_id) and e.type != "listener"
+    )
+    |> Repo.aggregate(:max, :id)
+  end
+
+  def head_event_id(dataset, workspace_id, opts) when is_binary(workspace_id) do
+    from(e in MutationEvent,
+      where: e.dataset == ^dataset and e.workspace_id == ^workspace_id and e.type != "listener"
+    )
+    |> narrow_project(Keyword.get(opts, :project_id))
+    |> Repo.aggregate(:max, :id)
+  end
+
+  def head_event_id(_dataset, _workspace_id, _opts), do: nil
+
   # `opts[:project_id]` narrows the replay to one project (owner ruling #50:
   # a listen stream opened on a project URL). Absent keeps the workspace-wide
   # replay.
