@@ -55,6 +55,26 @@ twice. A stretch of merges touching no listed tree still resolves to a no-op.
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
 
+**Ordinary HTTP requests drain too, separately from the SSE retire signal**
+(task-234799142dfd8559). The SSE retire signal above only covers long-lived
+listen/chat/presence streams, which must be told explicitly because they
+would otherwise sit alive-but-deaf for tens of seconds. A short-lived ordinary
+request (the vast majority of traffic) needs no such signal: `systemctl
+disable --now` sends SIGTERM, which is a graceful OTP application stop by
+default — Bandit's transport (ThousandIsland) stops ACCEPTING new connections
+immediately but keeps serving a connection it already holds, up to
+`thousand_island_options: [shutdown_timeout: 20_000]` (`api/config/runtime.exs`),
+so an in-flight request completes (2xx) instead of a reset/502 as long as it
+finishes within that 20s bound. `systemctl disable --now` BLOCKS on the stop
+(no `--no-block`), so the script only moves on once the slot is actually down
+— either it exited on its own (drained) or systemd's own deadline fired. That
+deadline is `TimeoutStopSec=35` on `barkpark-slot@.service`, an EXPLICIT 15s
+margin above the 20s drain bound (room for the rest of the BEAM's supervision
+tree to unwind beyond just the HTTP listener) rather than systemd's 90s
+default quietly agreeing with Bandit's internal default by accident. Change
+one number without the other and this invariant silently breaks — grep both
+files for task-234799142dfd8559 before touching either.
+
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
 `Retry-After` while the upstream is unreachable — blue/green keeps deploys
