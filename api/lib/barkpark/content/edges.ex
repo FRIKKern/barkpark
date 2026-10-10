@@ -209,9 +209,28 @@ defmodule Barkpark.Content.Edges do
     # documents a disconnect rewrites. Refuse as a whole BEFORE any write when a
     # referencer is outside it — a partial strip would leave the caller's delete
     # with dangling references it cannot see.
-    case denied_sources(source_guard, doc_id, pub_id, dataset, opts) do
-      [] -> strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard)
-      denied -> {:error, {:outside_write_grant, denied}}
+    with :ok <- live_referencers_allowed(doc_id, pub_id, dataset, opts) do
+      case denied_sources(source_guard, doc_id, pub_id, dataset, opts) do
+        [] -> strip_all_referencers(doc_id, pub_id, dataset, opts, source_guard)
+        denied -> {:error, {:outside_write_grant, denied}}
+      end
+    end
+  end
+
+  # A disconnect rewrites OTHER documents in place, published ones included.
+  # A draft-only seat (`contributor`) may not change a live row, so the whole
+  # disconnect is refused before any write when one referencer is live
+  # (task-348a4fbe24feede6). Anyone else skips the probe entirely.
+  defp live_referencers_allowed(doc_id, pub_id, dataset, opts) do
+    case Barkpark.Content.LiveWriteGate.check_seat(opts) do
+      :ok ->
+        :ok
+
+      refused ->
+        doc_id
+        |> referencing_sources(pub_id, dataset, opts)
+        |> Enum.any?(fn {id, _type} -> Barkpark.Content.LiveWriteGate.live_row?(id) end)
+        |> if(do: refused, else: :ok)
     end
   end
 

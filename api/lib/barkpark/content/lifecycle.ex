@@ -95,14 +95,7 @@ defmodule Barkpark.Content.Lifecycle do
   # published-first patch, a scheduled publish) reaches these functions with
   # the caller's context in `opts`, so the refusal holds for each of them. A
   # call with no caller context (an internal job) is unchanged.
-  defp ensure_may_publish(opts) do
-    if Barkpark.Tenancy.Auth.publish_refused?(
-         Keyword.get(opts, :caller_context),
-         Keyword.get(opts, :workspace_id)
-       ),
-       do: {:error, :publish_not_permitted},
-       else: :ok
-  end
+  defp ensure_may_publish(opts), do: Barkpark.Content.LiveWriteGate.check_seat(opts)
 
   defp do_publish_document(published_doc_id, type, dataset, opts) do
     did = DraftId.draft_id(published_doc_id)

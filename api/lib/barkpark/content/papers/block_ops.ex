@@ -711,7 +711,10 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # (the non-paper leg's per-slug lock) it runs the function as is.
     written =
       Broadcast.write_atomically(fn ->
-        with :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
+        # A blocks-doc row is born and rewritten PUBLISHED (no draft layer),
+        # so this is a live write: a draft-only seat is refused before it.
+        with :ok <- Barkpark.Content.LiveWriteGate.check(slug, opts),
+             :ok <- recheck_dedup(ref, type, slug, dataset, lock_opts, opts),
              :ok <- require_new_paper(type, slug, dataset, attrs, opts) do
           row = if Keyword.get(opts, :create_only, false), do: nil, else: existing
 
@@ -2391,7 +2394,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # would. With NO `ifRev` the write is compare-and-set too (inside
   # `serialize_revless/2`, which retries the op on a lost race) and only the
   # last bounded attempt falls back to the plain `Repo.update`.
-  defp fenced_or_plain_paper_update(changeset, %Document{rev: rev} = doc, opts) do
+  # Every paper block-op write lands on the live row (papers have no draft
+  # layer), so a draft-only seat is refused here, before any write
+  # (task-348a4fbe24feede6). Both op spines (single op and batch/history/form)
+  # write through this function.
+  defp fenced_or_plain_paper_update(changeset, %Document{} = doc, opts) do
+    with :ok <- Barkpark.Content.LiveWriteGate.check(doc.doc_id, opts),
+         do: fenced_or_plain_paper_update_admitted(changeset, doc, opts)
+  end
+
+  defp fenced_or_plain_paper_update_admitted(changeset, %Document{rev: rev} = doc, opts) do
     case Keyword.get(opts, :if_rev) do
       # A rev-LESS write inside `serialize_revless/2`: compare-and-set on the rev
       # this op read, so a concurrent writer that committed in between makes this
