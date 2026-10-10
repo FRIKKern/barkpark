@@ -2084,11 +2084,15 @@ systemctl enable "barkpark-slot@$TARGET" >/dev/null 2>&1 || true
 # either the BEAM drained an in-flight ordinary HTTP request on its own
 # (Bandit's thousand_island_options: [shutdown_timeout: 20_000], a graceful
 # OTP application stop under SIGTERM; api/config/runtime.exs) or
-# barkpark-slot@.service's TimeoutStopSec=35 fired and systemd SIGKILLed it.
-# `|| true` only swallows a non-zero EXIT from systemctl itself (e.g. the
-# unit was already down) — it does not skip the wait. Long-lived SSE
-# streams are a SEPARATE concern already handled above by
-# signal_sse_retire: this 20s/35s pair covers everything else.
+# barkpark-slot@.service's TimeoutStopSec=60 fired and systemd SIGKILLed it.
+# 60s, not 20s + Oban's own 15s shutdown_grace_period summed exactly: the
+# Endpoint stops FIRST (reverse of Application's start order, and it is
+# "typically the last entry" there), Oban stops LATER, and a dozen smaller
+# children stop in between — see the unit file's own comment for the full
+# chain. `|| true` only swallows a non-zero EXIT from systemctl itself (e.g.
+# the unit was already down) — it does not skip the wait. Long-lived SSE
+# streams are a SEPARATE concern already handled above by signal_sse_retire:
+# this pair covers everything else.
 systemctl disable --now "barkpark-slot@$OTHER" >/dev/null 2>&1 || true
 systemctl disable --now barkpark >/dev/null 2>&1 || true
 

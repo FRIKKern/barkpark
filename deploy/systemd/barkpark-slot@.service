@@ -33,16 +33,34 @@ Restart=on-failure
 RestartSec=5
 # task-234799142dfd8559: `systemctl disable --now` (instance-deploy.sh's old-
 # slot retirement) sends SIGTERM and BLOCKS until the unit reports inactive —
-# either the BEAM exits on its own (a graceful OTP application stop, which
-# drains any in-flight HTTP request through Bandit's own
-# thousand_island_options: [shutdown_timeout: 20_000], see config/runtime.exs)
-# or this deadline elapses and systemd SIGKILLs it. 35s, not systemd's 90s
-# default: still generous margin ABOVE the 20s drain bound (for the BEAM's
-# own supervision-tree teardown beyond just the HTTP listener — Oban,
-# Ecto pools, etc.), but an explicit, read invariant instead of two unrelated
-# defaults (systemd's 90s, Bandit's internal 15s) that happen to agree today
-# and could silently stop agreeing on either project's next version bump.
-TimeoutStopSec=35
+# either the BEAM exits on its own (a graceful OTP application stop) or this
+# deadline elapses and systemd SIGKILLs it, which would abort whatever is
+# mid-drain rather than let it finish.
+#
+# THE ARITHMETIC (read before changing either side of it).
+# Barkpark.Application's children stop in REVERSE start order (plain OTP), and
+# `BarkparkWeb.Endpoint` is explicitly "typically the last entry" in that list
+# (api/lib/barkpark/application.ex) — so it is the FIRST child this VM stops,
+# not the last. It drains an in-flight HTTP request for up to
+# thousand_island_options: [shutdown_timeout: 20_000] (api/config/runtime.exs).
+# AFTER that, stopping continues back through everything started later than
+# Oban (DeployRunner, SelfUpdate.Runner, the sync/self-update children,
+# WebhookDeliverySupervisor, the two WorkspaceBundle guards, TaskSupervisor,
+# Presence, Capability.Supervisor, Sheets.Supervisor, PubSub, DNSCluster) and
+# only THEN reaches `Oban`, whose queue supervisor's own childspec `:shutdown`
+# is `conf.shutdown_grace_period` (deps/oban/lib/oban/queue/supervisor.ex) —
+# `:timer.seconds(15)` by Oban's own default, confirmed in
+# deps/oban/lib/oban/config.ex, and Barkpark sets no override
+# (config/config.exs's `config :barkpark, Oban` + config/runtime.exs both
+# leave it unset). So a SERIAL worst case is 20s (Endpoint) + 15s (Oban) =
+# 35s, BEFORE a single one of those other children's own (normally
+# near-instant, but unmeasured here) teardown time. 35s would leave that sum
+# NO margin — exactly the failure mode of SIGKILLing an in-flight Oban job
+# mid-run. 60s instead: comfortable slack above the 20+15 floor for
+# everything else in the list, still far short of systemd's 90s default
+# agreeing with Bandit's 15s default by COINCIDENCE rather than by a
+# maintained invariant.
+TimeoutStopSec=60
 
 [Install]
 WantedBy=multi-user.target

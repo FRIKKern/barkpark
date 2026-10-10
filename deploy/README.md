@@ -68,12 +68,23 @@ so an in-flight request completes (2xx) instead of a reset/502 as long as it
 finishes within that 20s bound. `systemctl disable --now` BLOCKS on the stop
 (no `--no-block`), so the script only moves on once the slot is actually down
 — either it exited on its own (drained) or systemd's own deadline fired. That
-deadline is `TimeoutStopSec=35` on `barkpark-slot@.service`, an EXPLICIT 15s
-margin above the 20s drain bound (room for the rest of the BEAM's supervision
-tree to unwind beyond just the HTTP listener) rather than systemd's 90s
-default quietly agreeing with Bandit's internal default by accident. Change
-one number without the other and this invariant silently breaks — grep both
+deadline is `TimeoutStopSec=60` on `barkpark-slot@.service`: `Barkpark.Application`
+stops children in reverse start order, and the Endpoint is explicitly
+"typically the last entry" there — so it stops FIRST (the 20s above), and
+`Oban` (its queue supervisor's own `:shutdown` childspec value, Oban's
+`shutdown_grace_period`, 15s by Oban's own unoverridden default) stops LATER,
+with a dozen smaller children in between. 60s is comfortable slack above that
+20+15 floor, not a number chosen to match it exactly — see the unit file's
+own comment for the full chain and where each figure comes from. Change one
+number without the other and this invariant silently breaks — grep both
 files for task-234799142dfd8559 before touching either.
+
+A changed `barkpark-slot@.service` reaches a box on its NEXT deploy, no
+manual step: `instance-deploy.sh` re-installs it unconditionally every run
+(`install -m 0644 ... /etc/systemd/system/barkpark-slot@.service`) and calls
+`systemctl daemon-reload` before building or flipping anything, so the slot
+that deploy starts already boots under the new unit — including a changed
+`TimeoutStopSec` the FIRST time that slot is later retired.
 
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
