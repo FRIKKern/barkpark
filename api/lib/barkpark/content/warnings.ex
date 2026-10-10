@@ -83,6 +83,26 @@ defmodule Barkpark.Content.Warnings do
   @spec listening?() :: boolean()
   def listening?, do: is_list(Process.get(@key))
 
+  @doc """
+  The queue as it is now, for `restore/1`. A caller that may REPLAY a batch
+  (`Content.Mutations`' one stale-entry retry) restores it before the replay,
+  so the failed attempt's advisories are not reported twice.
+  """
+  @spec snapshot() :: term()
+  def snapshot, do: Process.get(@key)
+
+  @doc "Put back a queue taken with `snapshot/0`."
+  @spec restore(term()) :: :ok
+  def restore(nil) do
+    Process.delete(@key)
+    :ok
+  end
+
+  def restore(entries) when is_list(entries) do
+    Process.put(@key, entries)
+    :ok
+  end
+
   @doc "Drain the queued entries in emission order and clear the accumulator."
   @spec drain() :: [entry()]
   def drain do
