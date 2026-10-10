@@ -372,9 +372,36 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
   # the workspace or the refusal reason — only the API envelope still
   # carries that detail, for a caller who already knows to parse it.
   defp refuse(conn, opts, reason) do
-    if studio_html_refusal?(conn, opts),
-      do: halt_studio_refusal_page(conn),
-      else: halt_envelope(conn, reason)
+    cond do
+      studio_html_refusal?(conn, opts) -> halt_studio_refusal_page(conn)
+      signed_out_studio_browser?(conn, opts) -> halt_to_login(conn)
+      true -> halt_envelope(conn, reason)
+    end
+  end
+
+  # task-c1ccdbfaa26876cb — a signed-out BROWSER opening a Studio URL got the
+  # raw JSON envelope; it is not refused, it is just not signed in yet. It goes
+  # to sign-in with the URL it asked for as `return_to`, and lands back there
+  # after signing in (SessionController's `sanitize_return_to/1` keeps only a
+  # same-origin relative path). Real and unknown workspaces redirect alike, so
+  # the redirect says nothing about which slugs exist. A JSON or token caller
+  # keeps its envelope.
+  defp signed_out_studio_browser?(conn, opts) do
+    Keyword.get(opts, :allow_anonymous_default) == :studio_demo and
+      Phoenix.Controller.get_format(conn) == "html" and
+      is_nil(conn.assigns[:current_user]) and is_nil(conn.assigns[:api_token])
+  end
+
+  defp halt_to_login(conn) do
+    path =
+      case conn.query_string do
+        "" -> conn.request_path
+        qs -> conn.request_path <> "?" <> qs
+      end
+
+    conn
+    |> Phoenix.Controller.redirect(to: "/login?return_to=#{URI.encode_www_form(path)}")
+    |> halt()
   end
 
   defp studio_html_refusal?(conn, opts) do
