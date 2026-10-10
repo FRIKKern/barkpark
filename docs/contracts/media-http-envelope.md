@@ -7,7 +7,7 @@ What a media asset and list `result` carry. Split out of [api-v1.md](../api-v1.m
 
 Asset urls (`url`/`originalUrl`/`previewUrl`/`thumbnailUrl`/`renditions.*`/`cdnUrls.*`) are RELATIVE paths and stay so. The upload `201` and `GET /v1/media/:dataset/:id` also carry **`absoluteUrl`** — same binary, host from `:media_cdn, :base_url` else the API's origin (`PHX_SCHEME`/`PHX_HOST`), `/w/:ws/p/:proj` prefix applied.
 
-Assets carry **`sha1`** (null on old rows until `mix barkpark.media.backfill_sha1`); known bytes re-uploaded in one dataset+workspace answer **`200`** `existing: true`, that asset. List filters: `?sha1=`, `?mime=a/b,c/*`, `?exclude_type=image`; ≤20 entries, bad one → 400.
+Assets carry **`sha1`**; old rows null until `bin/barkpark eval 'Barkpark.Release.backfill_media_sha1()'`. Re-uploaded bytes (same dataset+workspace) answer **`200`** `existing: true`. List filters: `?sha1=`, `?mime=a/b,c/*`, `?exclude_type=image`; ≤20 entries, bad → 400.
 
 ## List envelope
 
