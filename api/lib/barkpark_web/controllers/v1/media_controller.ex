@@ -32,8 +32,16 @@ defmodule BarkparkWeb.V1.MediaController do
     t0 = System.monotonic_time(:microsecond)
     opts = MediaSearchParams.parse(params) ++ scope_opts(conn) ++ visibility_clamp_opts(conn)
     {files, total, facets, meta} = Media.search_files(dataset, opts)
-    docs = Media.asset_docs_for_files(files, dataset, scope_opts(conn))
-    render_opts = render_opts(conn, params)
+    # Batched: one asset-doc pass and one schema per tenant, so the cost of a
+    # page does not grow with its size (task-55a32a11405d5e9b).
+    docs = Media.resolve_asset_docs(files, dataset, scope_opts(conn))
+
+    render_opts =
+      render_opts(conn, params) ++
+        [
+          asset_doc_resolved: true,
+          asset_schemas: AssetResponse.asset_schemas(Map.values(docs), dataset)
+        ]
 
     hits =
       Enum.map(files, fn file ->

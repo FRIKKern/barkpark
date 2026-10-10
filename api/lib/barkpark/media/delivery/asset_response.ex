@@ -20,11 +20,18 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
     dataset = Keyword.get(opts, :dataset, file.dataset)
     conn = Keyword.get(opts, :conn)
     sign_urls? = Keyword.get(opts, :sign_urls, false)
+    resolved? = Keyword.get(opts, :asset_doc_resolved, false)
 
     asset_doc =
       case asset_doc do
         %Document{} = doc ->
           doc
+
+        # The caller already resolved every hit's asset doc in one batch
+        # (`Media.resolve_asset_docs/3`), so an absent one is final: no
+        # per-hit lookup (task-55a32a11405d5e9b).
+        nil when resolved? ->
+          nil
 
         nil ->
           case Registry.asset_doc_id_for_media_file(file.id, dataset) do
@@ -110,7 +117,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
       visibility: Access.visibility(asset_doc),
       permissions: permissions_for(conn, file, asset_doc),
       assetDocId: asset_doc && asset_doc.doc_id,
-      asset: asset_payload(asset_doc, dataset, conn)
+      asset: asset_payload(asset_doc, dataset, conn, Keyword.get(opts, :asset_schemas))
     }
 
     # Legacy flat field kept for /media/* backward compatibility.
@@ -129,7 +136,7 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
     Access.permissions(conn, file, doc)
   end
 
-  defp asset_payload(nil, _dataset, _conn), do: nil
+  defp asset_payload(nil, _dataset, _conn, _schemas), do: nil
 
   # WS-B HIGH-2: the embedded `mediaAsset` document formerly rendered with a nil
   # caller (full content). Thread the request's CallerContext + the mediaAsset
@@ -138,8 +145,33 @@ defmodule Barkpark.Media.Delivery.AssetResponse do
   # A conn-less internal call (relations.ex, processing without a conn) resolves
   # to the anonymous baseline, which — with the fail-closed nil/anonymous default
   # — redacts rather than leaks.
-  defp asset_payload(%Document{} = doc, dataset, conn) do
-    Envelope.render(doc, asset_schema(doc, dataset), caller_context(conn))
+  defp asset_payload(%Document{} = doc, dataset, conn, schemas) do
+    Envelope.render(doc, schema_for(doc, dataset, schemas), caller_context(conn))
+  end
+
+  # A listing resolves the mediaAsset schema once per tenant
+  # (`asset_schemas/2`) and hands the map in; a single render looks it up.
+  defp schema_for(doc, dataset, schemas) when is_map(schemas) do
+    case Map.fetch(schemas, schema_key(doc)) do
+      {:ok, schema} -> schema
+      :error -> asset_schema(doc, dataset)
+    end
+  end
+
+  defp schema_for(doc, dataset, _schemas), do: asset_schema(doc, dataset)
+
+  defp schema_key(doc), do: {Map.get(doc, :workspace_id), Map.get(doc, :project_id)}
+
+  @doc """
+  The `mediaAsset` redaction schema for each tenant the given asset docs live
+  in, keyed `{workspace_id, project_id}`: ONE lookup per tenant instead of one
+  per rendered hit. Pass it to `render/3` as `asset_schemas:`.
+  """
+  @spec asset_schemas([Document.t()], String.t()) :: map()
+  def asset_schemas(docs, dataset) when is_list(docs) do
+    docs
+    |> Enum.uniq_by(&schema_key/1)
+    |> Map.new(fn doc -> {schema_key(doc), asset_schema(doc, dataset)} end)
   end
 
   defp caller_context(%Plug.Conn{} = conn), do: CallerContext.from_conn(conn)
