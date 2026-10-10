@@ -353,27 +353,78 @@ defmodule Barkpark.Content.Schema do
       case name && do_get_schema_raw(name, dataset, opts) do
         {:ok, existing} ->
           if owned_by_other_workspace?(existing, attrs) do
-            insert_schema(attrs, dataset, opts)
+            insert_or_converge(attrs, dataset, opts)
           else
-            existing
-            |> SchemaDefinition.changeset(attrs)
-            |> check_named_types(dataset, opts)
-            |> Repo.update()
-            |> reset_read_memo()
+            update_schema(existing, attrs, dataset, opts)
           end
 
         _ ->
-          insert_schema(attrs, dataset, opts)
+          insert_or_converge(attrs, dataset, opts)
       end
     end
   end
 
-  defp insert_schema(attrs, dataset, opts) do
-    %SchemaDefinition{}
+  defp update_schema(existing, attrs, dataset, opts) do
+    existing
     |> SchemaDefinition.changeset(attrs)
     |> check_named_types(dataset, opts)
-    |> Repo.insert()
+    |> Repo.update()
     |> reset_read_memo()
+  end
+
+  # task-3748d052b83a9a2e — two first upserts of one name raced the read above:
+  # both saw no row, both inserted, and the loser answered 422 "name has already
+  # been taken" (58 of 60 in a real two-process race). `on_conflict: :nothing`
+  # with no target skips ANY unique violation — the schema has three unique
+  # indexes, two of them partial on a NULL dataset_id, so no single conflict
+  # target covers them — and, unlike a raised violation, it never aborts a
+  # surrounding transaction. A skipped insert still returns `{:ok, struct}`
+  # carrying the id Ecto generated, so the row is re-read (the reload rule
+  # `Tenancy.create_dataset/2` uses): another id means the concurrent writer's
+  # row won, and this write lands on it as an update, so both writers converge
+  # on one row and the later write's fields. Never onto a row another
+  # workspace owns: that case keeps today's insert verdict.
+  defp taken(changeset) do
+    reset_read_memo(
+      {:error,
+       Ecto.Changeset.add_error(changeset, :name, "has already been taken",
+         constraint: :unique,
+         constraint_name: "schema_definitions_name_dataset_id_index"
+       )}
+    )
+  end
+
+  @doc false
+  # Public only so a test can drive the losing racer's path (the row exists,
+  # the read before it did not see it) without a real second process.
+  def insert_or_converge(attrs, dataset, opts) do
+    changeset =
+      %SchemaDefinition{}
+      |> SchemaDefinition.changeset(attrs)
+      |> check_named_types(dataset, opts)
+
+    with {:ok, %SchemaDefinition{id: id} = inserted} <-
+           Repo.insert(changeset, on_conflict: :nothing) do
+      name = Ecto.Changeset.get_field(changeset, :name)
+
+      case do_get_schema_raw(name, dataset, opts) do
+        {:ok, %SchemaDefinition{id: ^id}} ->
+          reset_read_memo({:ok, inserted})
+
+        {:ok, %SchemaDefinition{} = winner} ->
+          if owned_by_other_workspace?(winner, attrs),
+            do: taken(changeset),
+            else: update_schema(winner, attrs, dataset, opts)
+
+        # Skipped, and the row it collided with is not readable here: the same
+        # 422 the raised violation used to give, never an `{:ok, _}` for a row
+        # that was not written.
+        _ ->
+          taken(changeset)
+      end
+    else
+      error -> reset_read_memo(error)
+    end
   end
 
   # A schema write drops the calling process's request memo, so the same
