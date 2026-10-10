@@ -150,6 +150,16 @@ try {
     assert.equal(b.getAttribute("aria-selected"), "true");
     assert.equal(host.getAttribute("aria-activedescendant"), b.id);
   });
+  // task-f1b5f9e279951791: the badge printed the type id ("paper") in a
+  // Norwegian Studio. A host-sent word wins; the id is the fallback.
+  wiki.setResults([
+    { title: "Kunngjøring", id: "p1", type: "paper", type_label: "artikkel" },
+    { title: "Plain", id: "p2", type: "paper" },
+  ]);
+  check("wikilink menu: the badge reads the host's type word, else the id", () => {
+    const badges = [...wikiEl.querySelectorAll(".bp-wikilink-type-badge")].map((b) => b.textContent);
+    assert.deepEqual(badges, ["artikkel", "paper"]);
+  });
   wiki.close();
   check("wikilink menu: closing clears the editor's pointers", () => {
     assert.equal(host.getAttribute("aria-activedescendant"), null);
