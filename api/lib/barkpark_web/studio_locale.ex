@@ -605,6 +605,10 @@ defmodule BarkparkWeb.StudioLocale do
       "Mermaid source" => gettext("Mermaid source"),
       "Minimum" => gettext("Minimum"),
       "monospace block" => gettext("monospace block"),
+      # Modifier key names in a slash or palette row's chord (Ctrl+Shift+8) off a Mac.
+      "Ctrl" => pgettext("keyboard key", "Ctrl"),
+      "Alt" => pgettext("keyboard key", "Alt"),
+      "Shift" => pgettext("keyboard key", "Shift"),
       "Move down" => gettext("Move down"),
       "Move up" => gettext("Move up"),
       "multi-column layout" => gettext("multi-column layout"),

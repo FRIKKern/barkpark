@@ -107,6 +107,31 @@ function fieldAtCapLive(f) {
   return countBoundFieldBlocks(f.name) >= max;
 }
 
+// A row's `keys` ("Mod-Shift-8", Tiptap's spelling) shown in the viewer's keyboard words:
+// ⌘⇧8 on a Mac, Ctrl+Shift+8 elsewhere, the modifier names translated. Only the canvas
+// sets `keys`, on the rows whose chord it answers.
+export function isMacPlatform(nav = globalThis.navigator) {
+  const platform = nav?.userAgentData?.platform || nav?.platform || "";
+  return /mac|iphone|ipad/i.test(platform);
+}
+
+const MAC_GLYPH = { Mod: "⌘", Alt: "⌥", Shift: "⇧" };
+const PC_WORD = { Mod: "Ctrl", Alt: "Alt", Shift: "Shift" };
+
+export function chordLabel(spec, mac = isMacPlatform()) {
+  const parts = String(spec).split("-");
+  const key = parts.pop().toUpperCase();
+  if (mac) return parts.map((m) => MAC_GLYPH[m] || m).join("") + key;
+  return [...parts.map((m) => t(PC_WORD[m] || m)), key].join("+");
+}
+
+// The same chord for aria-keyshortcuts ("Control+Shift+8", "Meta+Alt+C").
+export function chordAria(spec, mac = isMacPlatform()) {
+  const parts = String(spec).split("-");
+  const key = parts.pop().toUpperCase();
+  return [...parts.map((m) => (m === "Mod" ? (mac ? "Meta" : "Control") : m)), key].join("+");
+}
+
 export function readExpectedItems(doc = document) {
   const el = doc.querySelector("[data-expected-fields]");
   if (!el) return [];
@@ -472,7 +497,10 @@ export class SlashMenu {
       // Right-aligned muted description.
       const desc = document.createElement("span");
       desc.className = "bp-slash-desc";
-      desc.textContent = item.desc ? t(item.desc) : "";
+      desc.textContent = [item.desc ? t(item.desc) : "", item.keys ? chordLabel(item.keys) : ""]
+        .filter(Boolean)
+        .join(" · ");
+      if (item.keys) row.setAttribute("aria-keyshortcuts", chordAria(item.keys));
 
       row.appendChild(hint);
       row.appendChild(label);
