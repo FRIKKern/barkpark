@@ -59,6 +59,10 @@
       font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink);
     }
     .bp-paper-unrenderable-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+    /* Studio's unresolved-document notice: the main-region wrapper is a flex
+       box so the card inside stretches exactly as it did as a direct
+       .pane-layout child. */
+    .bp-unresolved-main { display: flex; }
     /* No uniform inter-block gap — prose rhythm rides on the element margins
        inside `.bp-paper-editor-body` (type-aware) so we don't double-space.
        Bound-FIELD blocks have no such element rhythm, so they get a wrapper
