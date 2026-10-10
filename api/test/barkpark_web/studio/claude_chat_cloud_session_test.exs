@@ -160,7 +160,16 @@ defmodule BarkparkWeb.Studio.ClaudeChatCloudSessionTest do
       ref = Process.monitor(session)
       # The one-shot shim emits its result and EXITS → the Port closes →
       # the Session GenServer {:stop, :normal}s (claude_chat.ex:1319-1324).
-      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 2_000
+      #
+      # Wait on the EVENT, then on the stop it commits to (task-dad9a71f6dcd2f08).
+      # The exit message is sent in the same callback that returns
+      # {:stop, :normal}, so once it arrives the :DOWN is certain; what remains
+      # is `terminate/2`'s teardown (child reap wait, stderr rm, MCP token revoke
+      # — a Repo round trip). Under CI load that teardown outran the old 2 s
+      # budget on the :DOWN alone (run 36 of 50 under 8 CPU burners). The long
+      # ceiling below is a backstop for a wedged teardown, not a timing guess.
+      assert_receive {:claude_chat_exit, 0, _stderr_tail}, 30_000
+      assert_receive {:DOWN, ^ref, :process, ^session, :normal}, 30_000
       refute Process.alive?(session)
 
       # The regression pin (zero production code — claude_chat.ex:922 already
