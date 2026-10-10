@@ -95,7 +95,7 @@ Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type
 | Misspelled field key (`requred: true`) | 201, stored and echoed; never read; warning at `/fields/0/requred` |
 | Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs; warning at `/fields/0/validation/requird` |
 | Misspelled schema key (`singelton: true`) | 201, dropped; not echoed; warning at `/singelton` |
-| Bare `required` on a field, bad `surface`, `visibleWhen.scope` | 422 `validation_failed` |
+| Bare `required` on a field, bad `surface`, `visibleWhen.scope`, a reserved `blocks.inline` field name | 422 `validation_failed` |
 
 Check the echo: `required?` on each field says whether an error-level `required` rule is in force.
 

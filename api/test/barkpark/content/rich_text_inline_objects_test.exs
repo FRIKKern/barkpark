@@ -77,6 +77,89 @@ defmodule Barkpark.Content.RichTextInlineObjectsTest do
     end
   end
 
+  describe "reserved inline field names (schema declaration)" do
+    defp declare(inline_fields, wrap \\ & &1) do
+      field = %{
+        "name" => "body",
+        "type" => "richText",
+        "blocks" => %{"inline" => [%{"name" => "chip", "fields" => inline_fields}]}
+      }
+
+      SchemaDefinition.changeset(%SchemaDefinition{}, %{
+        "name" => "post",
+        "title" => "Post",
+        "fields" => [wrap.(field)]
+      })
+    end
+
+    defp reserved_errors(cs) do
+      for {:fields, {msg, opts}} <- cs.errors,
+          opts[:validation] == :inline_field_reserved,
+          do: msg
+    end
+
+    test "each reserved name is refused with the named finding and its path" do
+      for name <- SchemaDefinition.inline_reserved_field_names() do
+        cs =
+          declare([
+            %{"name" => "tone", "type" => "string"},
+            %{"name" => name, "type" => "string"}
+          ])
+
+        refute cs.valid?, "#{name} was accepted"
+
+        assert [msg] = reserved_errors(cs)
+        assert msg =~ "/fields/0/blocks/inline/0/fields/1"
+        assert msg =~ "`#{name}` is reserved"
+      end
+    end
+
+    test "the reserved set is type, _type, _key, marks, children, content" do
+      assert Enum.sort(SchemaDefinition.inline_reserved_field_names()) ==
+               Enum.sort(~w(type _type _key marks children content))
+    end
+
+    test "post-11's chip (text, tone) is accepted" do
+      cs =
+        declare([
+          %{"name" => "text", "type" => "string"},
+          %{"name" => "tone", "type" => "string"}
+        ])
+
+      assert reserved_errors(cs) == []
+      assert cs.valid?
+    end
+
+    test "a richText nested in a composite is checked too" do
+      cs =
+        declare([%{"name" => "_key", "type" => "string"}], fn f ->
+          %{"name" => "seo", "type" => "composite", "fields" => [f]}
+        end)
+
+      assert [msg] = reserved_errors(cs)
+      assert msg =~ "/fields/0/fields/0/blocks/inline/0/fields/0"
+    end
+
+    test "a blocks.of object block may still declare a field named type-like names" do
+      field = %{
+        "name" => "body",
+        "type" => "richText",
+        "blocks" => %{
+          "of" => [%{"name" => "callout", "fields" => [%{"name" => "marks", "type" => "string"}]}]
+        }
+      }
+
+      cs =
+        SchemaDefinition.changeset(%SchemaDefinition{}, %{
+          "name" => "post",
+          "title" => "Post",
+          "fields" => [field]
+        })
+
+      assert reserved_errors(cs) == []
+    end
+  end
+
   describe "block-op vocabulary check (FieldVocabulary.validate/2)" do
     setup do: %{vocab: FieldVocabulary.from_field(@field)}
 

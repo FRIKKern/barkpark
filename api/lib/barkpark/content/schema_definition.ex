@@ -112,6 +112,7 @@ defmodule Barkpark.Content.SchemaDefinition do
     |> validate_inclusion(:visibility, ~w(public private))
     |> validate_inclusion(:kind, ~w(document object))
     |> validate_no_bare_required()
+    |> validate_inline_field_names()
     |> validate_visible_when_scopes()
     |> validate_desk_group_filters()
     |> validate_desk_block()
@@ -178,6 +179,81 @@ defmodule Barkpark.Content.SchemaDefinition do
         changeset
     end
   end
+
+  # Inline object field names that collide with the node's own keys
+  # (task-85fee859cf3bfef6). An inline object is stored flat inside prose,
+  # `{type: name, ...fields}`, so a declared field named `type` would overwrite
+  # the discriminator, and `_type`/`_key` are the Sanity spellings an import
+  # maps or drops. Every renderer reads `children` as a wrapper's inline run,
+  # `content` as a block wrapper, and `marks` as a text leaf's marks, so a field
+  # with one of those names would be rendered as something else. `text` is NOT
+  # reserved: an inline object is never a text leaf (its `type` is its declared
+  # name), the built-in verdict chip already carries `text`, and so does the
+  # Sanity chip this feature exists for.
+  @inline_reserved_field_names ~w(type _type _key marks children content)
+
+  @doc "Field names an inline object (`blocks.inline`) may not declare."
+  def inline_reserved_field_names, do: @inline_reserved_field_names
+
+  defp validate_inline_field_names(changeset) do
+    case get_change(changeset, :fields) do
+      fields when is_list(fields) ->
+        Enum.reduce(inline_reserved_field_paths(fields, "/fields"), changeset, fn {path, name},
+                                                                                  cs ->
+          add_error(
+            cs,
+            :fields,
+            "#{path}: inline object field name `#{name}` is reserved; it collides with " <>
+              "the inline node's own keys (#{Enum.join(@inline_reserved_field_names, ", ")})",
+            validation: :inline_field_reserved
+          )
+        end)
+
+      _ ->
+        changeset
+    end
+  end
+
+  @doc false
+  # `{path, name}` for every reserved field name a `blocks.inline` entry declares,
+  # in any richText field, including one nested in a composite or arrayOf.
+  def inline_reserved_field_paths(fields, prefix) when is_list(fields) do
+    fields
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {%{} = f, i} ->
+        f = Map.new(f, fn {k, v} -> {to_string(k), v} end)
+        path = "#{prefix}/#{i}"
+
+        own =
+          case f["blocks"] do
+            %{} = b ->
+              for {%{} = entry, j} <- Enum.with_index(List.wrap(b["inline"] || b[:inline])),
+                  {%{} = field, k} <-
+                    Enum.with_index(List.wrap(entry["fields"] || entry[:fields])),
+                  name = field["name"] || field[:name],
+                  name in @inline_reserved_field_names,
+                  do: {"#{path}/blocks/inline/#{j}/fields/#{k}", name}
+
+            _ ->
+              []
+          end
+
+        nested_of =
+          case f["of"] do
+            %{} = one -> inline_reserved_field_paths([one], "#{path}/of")
+            list when is_list(list) -> inline_reserved_field_paths(list, "#{path}/of")
+            _ -> []
+          end
+
+        own ++ inline_reserved_field_paths(List.wrap(f["fields"]), "#{path}/fields") ++ nested_of
+
+      _ ->
+        []
+    end)
+  end
+
+  def inline_reserved_field_paths(_fields, _prefix), do: []
 
   # `visibleWhen.scope` (task-9905a69475b1ff3b): "document" (default) or
   # "parent". A top-level field has no parent, so "parent" there is refused with
