@@ -41,8 +41,9 @@ defmodule BarkparkWeb.Plugs.RateLimit do
   never a sixth class (charter D9). It refuses nobody unless a human sets
   `BARKPARK_RATE_LIMIT_BROWSER_ENFORCE=true` against observed shadow data.
   `BARKPARK_RATE_LIMIT_BROWSER_ENABLED=false` is the kill switch and skips the
-  bucket entirely. NOTHING mounts this class yet — the router edit is charter
-  D7 / slice 8 — so on this commit the class is reachable only from tests.
+  bucket entirely. The five HTML browser pipelines mount it (`:browser`,
+  `:scoped_browser`, `:shared_studio_browser`, `:shared_paper_browser`,
+  `:workspace_browser` — charter D7, slice 8).
   """
 
   import Plug.Conn
@@ -72,12 +73,12 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause below — byte-identical keys, budgets and refusals to what those
   # pipelines got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7/slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   def call(conn, opts) do
     # ONE `RateLimiter.check/2` CALL SITE, DELIBERATELY.
     # `rate_limiter_scoped_key_coverage_test.exs` walks the AST of every module
@@ -102,12 +103,12 @@ defmodule BarkparkWeb.Plugs.RateLimit do
 
   # THE MOUNT DECIDES THE CLASS, AND SILENCE MEANS "AS BEFORE".
   #
-  # Every `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
-  # passes NO options, so `opts` is `[]` here and this falls to the method
+  # Every option-less `plug(BarkparkWeb.Plugs.RateLimit)` line in router.ex
+  # has `opts` `[]` here and falls to the method
   # clause — byte-identical keys, budgets and refusals to what those pipelines
   # got before `:browser` existed. A browser pipeline opts IN with
-  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`; that router edit is
-  # charter D7 / slice 8 work and is deliberately NOT part of this change.
+  # `plug(BarkparkWeb.Plugs.RateLimit, class: :browser)`, as the five HTML
+  # browser pipelines in router.ex do (charter D7, slice 8).
   defp plan(conn, opts) do
     case class_opt(opts) do
       :browser -> browser_plan(conn)
