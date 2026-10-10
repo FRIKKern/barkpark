@@ -11478,3 +11478,23 @@ msgstr "medlem"
 msgctxt "workspace role"
 msgid "owner"
 msgstr "eier"
+
+#: lib/barkpark_web/studio_locale.ex:566
+#, elixir-autogen, elixir-format
+msgid "Inline"
+msgstr "Innebygd"
+
+#: lib/barkpark_web/studio_locale.ex:567
+#, elixir-autogen, elixir-format
+msgid "inside the paragraph"
+msgstr "inni avsnittet"
+
+#: lib/barkpark_web/studio_locale.ex:568
+#, elixir-autogen, elixir-format
+msgid "Edit %{name}"
+msgstr "Rediger %{name}"
+
+#: lib/barkpark_web/studio_locale.ex:572
+#, elixir-autogen, elixir-format
+msgid "required"
+msgstr "påkrevd"

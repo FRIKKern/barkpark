@@ -84,9 +84,16 @@ export const Valueref = internalLinkMark("valueref", {
 // byte-exact; the author can select or delete it as one unit but cannot type
 // into it, so no edit can silently vanish on save. The attr is JSON-encoded
 // through its DOM attribute so a DOM serialize -> parse (copy/paste) keeps it.
+//
+// The label follows the readers' inline object rule (task-85fee859cf3bfef6:
+// inline.ex inline_object_text/1, inline-object-text.json): the first
+// non-empty string of text, title, label, name, value; then children's text;
+// then `[type]`, so View and Edit show the same words.
 export function inlineOpaqueLabel(node) {
   if (!node || typeof node !== "object") return "";
-  if (typeof node.text === "string" && node.text !== "") return node.text;
+  for (const key of ["text", "title", "label", "name", "value"]) {
+    if (typeof node[key] === "string" && node[key] !== "") return node[key];
+  }
   const plain = (n) => {
     if (!n || typeof n !== "object") return "";
     if (typeof n.value === "string") return n.value;
