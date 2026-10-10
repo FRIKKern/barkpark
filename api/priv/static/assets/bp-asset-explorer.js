@@ -300,7 +300,7 @@
         '<div class="bp-ae-modal" hidden role="dialog" aria-modal="true" aria-labelledby="bp-ae-modal-title">' +
         '<div class="bp-ae-modal-backdrop"></div>' +
         '<div class="bp-ae-modal-card">' +
-        '<h3 id="bp-ae-modal-title" class="bp-ae-modal-title">' + this._e("New folder") + "</h3>" +
+        '<h2 id="bp-ae-modal-title" class="bp-ae-modal-title">' + this._e("New folder") + "</h2>" +
         '<p class="bp-ae-modal-hint text-sm text-muted">' + this._e("Folder collections hold curated sets of assets.") + "</p>" +
         '<input type="text" class="form-input bp-ae-modal-input" placeholder="' + this._e("Collection name") + '" maxlength="120" />' +
         '<div class="bp-ae-modal-actions">' +
@@ -414,7 +414,30 @@
       if (this._modalInput) {
         this._modalInput.addEventListener("keydown", (e) => {
           if (e.key === "Enter") this._submitCollectionModal();
-          if (e.key === "Escape") this._closeCollectionModal();
+        });
+      }
+      // The dialog is aria-modal: Escape closes it from any of its controls,
+      // and Tab / Shift+Tab cycle inside it (task-3713c75065d471d4).
+      if (this._modalEl) {
+        this._modalEl.addEventListener("keydown", (e) => {
+          if (e.key === "Escape") {
+            e.preventDefault();
+            this._closeCollectionModal();
+            return;
+          }
+          if (e.key !== "Tab") return;
+          const stops = [...this._modalEl.querySelectorAll("input, button")].filter((el) => !el.disabled);
+          if (!stops.length) return;
+          const first = stops[0];
+          const last = stops[stops.length - 1];
+          const active = this._modalEl.ownerDocument.activeElement;
+          if (e.shiftKey && active === first) {
+            e.preventDefault();
+            last.focus();
+          } else if (!e.shiftKey && active === last) {
+            e.preventDefault();
+            first.focus();
+          }
         });
       }
 
@@ -1963,6 +1986,8 @@
 
     _openCollectionModal() {
       if (!this._modalEl || !this._modalInput) return;
+      // Focus goes back where it came from when the dialog closes.
+      this._modalOpener = this.ownerDocument.activeElement;
       this._modalInput.value = this._t("New folder");
       this._modalEl.hidden = false;
       requestAnimationFrame(() => {
@@ -1972,7 +1997,14 @@
     }
 
     _closeCollectionModal() {
-      if (this._modalEl) this._modalEl.hidden = true;
+      if (!this._modalEl || this._modalEl.hidden) return;
+      this._modalEl.hidden = true;
+      const back =
+        this._modalOpener && this._modalOpener.isConnected
+          ? this._modalOpener
+          : this.querySelector(".bp-ae-new-collection");
+      this._modalOpener = null;
+      if (back && typeof back.focus === "function") back.focus();
     }
 
     _submitCollectionModal() {
