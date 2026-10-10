@@ -83,7 +83,7 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Cross-field rules
 
-`cross_validations` entries: `{name, title, rule, level, fields}`. `rule` is a `visibleWhen` predicate, or `{all: [...]}` / `{any: [...]}` of them. Studio shows unsatisfied rules as a banner.
+`cross_validations` entries: `{name, title, rule, level, fields}`. `rule` is a `visibleWhen` predicate, or `{all: [...]}` / `{any: [...]}` of them. Studio shows unsatisfied rules as a banner; API writes get the same rules as findings (code `cross_validation`, path `/<first of fields>`) through the warnings/422 door above, by `level`. A rule naming an undeclared field or an unknown operator, or with no `rule`, is skipped and logged.
 
 ## Unknown keys
 

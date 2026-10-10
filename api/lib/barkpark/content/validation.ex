@@ -145,6 +145,7 @@ defmodule Barkpark.Content.Validation do
     block_fields_invalid not_in_list list_too_short list_too_long
     list_not_unique number_too_small number_too_large
     string_too_short string_too_long portable_text_not_portabledoc custom
+    cross_validation
   )a
 
   @doc "The fixed set of codes `check_findings/3` can ever emit. See the moduledoc."
@@ -247,6 +248,47 @@ defmodule Barkpark.Content.Validation do
       warnings: run_findings(content, title, schema, :warning)
     }
   end
+
+  @doc """
+  The schema's `cross_validations` (task-9754deb160e95a80), as findings split
+  by level: `%{errors: [finding()], warnings: [finding()]}` with code
+  `:cross_validation`. They are built from `CrossValidator.violations/2`, the
+  list the Studio banner renders, so the write door and the banner always
+  agree. A rule that cannot be evaluated (malformed, unknown operator, a
+  field the schema does not declare) yields no finding and a log line: it
+  never fails a write. Warning-level rules are warnings, so they never
+  refuse, even on an enforcing dataset.
+
+  Kept out of `check/3` and `check_findings/3`: the Studio shows these rules
+  in its banner, not under a field, so folding them in would show each twice.
+  """
+  @spec cross_findings(map() | nil, String.t() | nil, map() | nil) :: %{
+          errors: [finding()],
+          warnings: [finding()]
+        }
+  def cross_findings(content, title, schema) do
+    case Barkpark.Content.CrossValidator.partition(schema) do
+      {[], []} ->
+        %{errors: [], warnings: []}
+
+      {_ok, bad} ->
+        Enum.each(bad, fn {rule, reason} ->
+          name = if is_map(rule), do: rule["name"] || rule[:name], else: nil
+
+          Logger.warning(
+            "[Validation] cross_validation #{inspect(name)} on schema " <>
+              "#{inspect(schema_name(schema))} cannot be evaluated (#{reason}); no finding"
+          )
+        end)
+
+        doc = Map.put_new(content || %{}, "title", title)
+        Barkpark.Content.CrossValidator.findings(schema, doc)
+    end
+  end
+
+  defp schema_name(%{name: n}), do: n
+  defp schema_name(%{"name" => n}), do: n
+  defp schema_name(_), do: nil
 
   @doc """
   Every finding in a `check_tree/3` half (or a flat `check/3` half), counted —
