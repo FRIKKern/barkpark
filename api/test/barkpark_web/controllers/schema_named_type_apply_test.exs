@@ -76,4 +76,94 @@ defmodule BarkparkWeb.SchemaNamedTypeApplyTest do
     assert seo["namedType"] == ctx.obj
     assert Enum.map(seo["fields"], & &1["name"]) == ["title", "noindex"]
   end
+
+  # task-fecf7cc2ae7b04d5 — the unknown-type check walked top-level fields,
+  # composite subfields and a single arrayOf.of map only. Each position below
+  # answered 201 with `strng` stored; it is now the same 422 naming the type.
+  @nested_positions %{
+    "arrayOf of-list member" => %{
+      "name" => "items",
+      "type" => "arrayOf",
+      "of" => [%{"name" => "card", "type" => "strng"}]
+    },
+    "arrayOf of-list member subfield" => %{
+      "name" => "items",
+      "type" => "arrayOf",
+      "of" => [
+        %{
+          "name" => "card",
+          "type" => "composite",
+          "fields" => [%{"name" => "t", "type" => "strng"}]
+        }
+      ]
+    },
+    "image fields" => %{
+      "name" => "hero",
+      "type" => "image",
+      "fields" => [%{"name" => "alt", "type" => "strng"}]
+    },
+    "file fields" => %{
+      "name" => "doc",
+      "type" => "file",
+      "fields" => [%{"name" => "label", "type" => "strng"}]
+    },
+    "v1 array.of" => %{"name" => "tags", "type" => "array", "of" => [%{"type" => "strng"}]},
+    "richText blocks.of object field" => %{
+      "name" => "body",
+      "type" => "richText",
+      "blocks" => %{
+        "of" => ["image", %{"name" => "cta", "fields" => [%{"name" => "u", "type" => "strng"}]}]
+      }
+    }
+  }
+
+  for {position, field} <- @nested_positions do
+    @field field
+    test "an unknown type in a #{position} is a 422 naming the type", ctx do
+      conn =
+        post_schema(ctx, %{
+          "name" => ctx.doc,
+          "title" => "Nested",
+          "visibility" => "public",
+          "fields" => [@field]
+        })
+
+      assert conn.status == 422, "expected 422, got #{conn.status}: #{conn.resp_body}"
+      assert conn.resp_body =~ "strng"
+      assert conn.resp_body =~ "unknown field type"
+    end
+  end
+
+  test "a registered object type as an arrayOf member type is accepted", ctx do
+    obj =
+      post_schema(ctx, %{
+        "name" => ctx.obj,
+        "kind" => "object",
+        "title" => "Card",
+        "fields" => [%{"name" => "title", "type" => "string"}]
+      })
+
+    assert obj.status in 200..201, obj.resp_body
+
+    conn =
+      post_schema(ctx, %{
+        "name" => ctx.doc,
+        "title" => "Nested",
+        "visibility" => "public",
+        "fields" => [
+          %{
+            "name" => "items",
+            "type" => "arrayOf",
+            "of" => [%{"name" => "card", "type" => ctx.obj}]
+          },
+          %{
+            "name" => "hero",
+            "type" => "image",
+            "fields" => [%{"name" => "alt", "type" => "string"}]
+          }
+        ]
+      })
+
+    assert conn.status in 200..201, conn.resp_body
+  end
 end

@@ -68,7 +68,7 @@ The `builtin_field_types/0` list in `Barkpark.Content.Schema`. "No value check" 
 
 | Key | Effect |
 |---|---|
-| `required` | `true` fails on `null` or `""` only. An empty list or map passes; use `min: 1` on an `arrayOf`. A bare `required` on the field (outside `validation`) is refused 422. |
+| `required` | `true` fails on `null` or `""` only. An empty list or map passes; use `min: 1` on an `arrayOf`. A `localizedText` needs text in at least one language; its `pattern`/`min`/`max` apply to each language at `/field/<lang>`. A bare `required` on the field (outside `validation`) is refused 422. |
 | `min`, `max` | String: character count (an empty string skips `min`). Number: the value, v2 schemas only. `arrayOf`: item count. Non-number bounds are ignored. |
 | `pattern` | Regex the string must match. Skipped for empty or non-string values; an invalid regex is ignored. |
 | `unique` | `true` on an `arrayOf`: no two items with the same `_ref` or value. |
@@ -87,12 +87,11 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Unknown keys
 
-Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type` is checked against a vocabulary. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
+Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type` is refused when unknown. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
 
 | You send | Result |
 |---|---|
-| Unknown `type` on a top-level field, a `composite` subfield or a single `arrayOf.of` | 422 `validation_failed`, `details.fields`: `unknown field type "strng": …` |
-| Unknown `type` inside an `arrayOf.of` list member, an `image`/`file` `fields` entry or an `array.of` | 201, stored |
+| Unknown `type` anywhere: a top-level field, a `composite`/`image`/`file` subfield, an `arrayOf.of` (one shape or list member), an `array.of` entry, a `richText` `blocks.of` object field | 422 `validation_failed`, `details.fields`: `unknown field type "strng": …` |
 | Misspelled field key (`requred: true`) | 201, stored and echoed; never read; warning at `/fields/0/requred` |
 | Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs; warning at `/fields/0/validation/requird` |
 | Misspelled schema key (`singelton: true`) | 201, dropped; not echoed; warning at `/singelton` |
