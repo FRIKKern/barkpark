@@ -90,6 +90,16 @@ defmodule Barkpark.PortableDoc.Render.ArticleThemeColourTest do
     assert theme_paint?(GenPdParity.input("paper-links"), :email)
   end
 
+  # The guard is about COLOUR. A `--paper-font-*` face is a theme FONT, and fonts
+  # are deliberately out of scope: a font token must never trip it by accident.
+  test "control: the detector sees colour tokens and ignores font tokens" do
+    style =
+      ~s|<p style="font-family:var(--paper-font-mono);color:var(--paper-ink-soft, #55635e)">|
+
+    assert inline_colours(style) == MapSet.new(["var(--paper-ink-soft", "#55635e"])
+    assert inline_colours(~s|<p style="font-family:var(--paper-font-serif)">|) == MapSet.new()
+  end
+
   # True when `block`, rendered in `style` in ANY theme, carries an inline
   # `var(--paper-*)` or a palette colour the block itself did not author.
   defp theme_paint?(block, style \\ :article) do
