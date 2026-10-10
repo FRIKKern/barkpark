@@ -192,7 +192,10 @@ async function mount({ revision, blocks = [paragraph("original", "Original")] } 
       if (name === "paper-ops") {
         return new Promise((resolve, reject) => requests.push({payload, resolve, reject}));
       }
-      if (name.startsWith("paper-") || name === "inner-array-op") actions.push(name);
+      // The caret (paper-selection) is presence, not a document action.
+      if ((name.startsWith("paper-") && name !== "paper-selection") || name === "inner-array-op") {
+        actions.push(name);
+      }
       return Promise.resolve({saved:true, request_id:payload.request_id});
     },
   };

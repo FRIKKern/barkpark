@@ -4405,6 +4405,29 @@
         };
         this.handleEvent("bp:canvas-update", this._onCanvasUpdate);
 
+        // Shared carets (task-c522237b9f37de21). This run's caret goes to the
+        // server as presence (`paper-selection`, trailing-throttled); every
+        // run draws the other sessions' carets from `bp:remote-selections`.
+        // A blur's null is not sent while another run of the paper has focus,
+        // so moving between runs never clears the caret it just moved to.
+        this._onCanvasSelection = (e) => {
+          const selection = e.detail || null;
+          if (selection === null &&
+              this.el.ownerDocument?.activeElement?.closest?.("bp-paper-canvas")) return;
+          this._pendingSelection = selection;
+          if (this._selectionTimer) return;
+          this._selectionTimer = setTimeout(() => {
+            this._selectionTimer = null;
+            this.pushEvent("paper-selection", { selection: this._pendingSelection });
+          }, 80);
+        };
+        this.el.addEventListener("bp-canvas-selection", this._onCanvasSelection);
+        this.handleEvent("bp:remote-selections", (payload) => {
+          const wc = this.el.querySelector("bp-paper-canvas");
+          if (typeof wc?.setRemoteSelections !== "function") return;
+          wc.setRemoteSelections(Array.isArray(payload?.list) ? payload.list : []);
+        });
+
         // After an Add-block / Ingress-ghost write the server names the new
         // block: an empty paragraph is collapsed at rest, so the caret must land
         // in it or the author sees nothing and types into the void. Every run's
@@ -4549,6 +4572,10 @@
         }
       },
       destroyed() {
+        if (this._onCanvasSelection) {
+          this.el.removeEventListener("bp-canvas-selection", this._onCanvasSelection);
+        }
+        clearTimeout(this._selectionTimer);
         this._saveBridgeDestroyed = true;
         this._opsReconnectRetryRequested = false;
         this._retryQueuedOpsAfterReconnect = null;
