@@ -298,6 +298,11 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
   # an Oslo editor saw their own edit as two hours old. The server render now
   # says UTC and carries the instant, for Hooks.LocalTime to show the viewer's
   # own clock (its jsdom test covers that side).
+  #
+  # task-79119da840602833: this test paired the FIRST <time> with the Opprettet
+  # button, but the first row is the newest revision, so main went red whenever
+  # the seed's revisions landed in different seconds. Each button is now read
+  # against the time in its OWN row; the test below pins that straddle.
   test "nb-NO history times say UTC and carry the instant for the viewer's clock", %{
     conn: conn,
     ws: ws,
@@ -308,18 +313,62 @@ defmodule BarkparkWeb.Studio.StudioLocaleTest do
 
     assert has_element?(view, ~s(#history-list[phx-hook="LocalTime"]))
 
-    assert [_, iso, hms, text] =
-             Regex.run(
-               ~r|<time[^>]*datetime="(\d{4}-\d\d-\d\dT(\d\d:\d\d:\d\d)Z)"[^>]*data-local-time[^>]*>\s*([^<]*?)\s*</time>|,
-               html
-             )
+    rows = history_rows(html)
+    assert length(rows) >= 2
+    assert_rows_pair_their_own_time(rows)
 
-    assert {:ok, _, 0} = DateTime.from_iso8601(iso)
-    assert text =~ ~r/kl\. #{hms} UTC$/
+    assert Enum.any?(
+             rows,
+             &(&1.local_label == "Gjenopprett versjonen fra {time} (Opprettet)")
+           )
+  end
 
-    assert html =~ ~s|data-local-label="Gjenopprett versjonen fra {time} (Opprettet)"|
-    assert html =~ ~s(data-datetime="#{iso}")
-    assert html =~ ~r/aria-label="Gjenopprett versjonen fra [^"]*kl\. #{hms} UTC \(Opprettet\)"/
+  test "each history row's restore button names its own row's time, a second apart" do
+    revisions = [
+      %{id: "rev-2", action: "update", title: "Ny tittel", inserted_at: ~U[2026-10-06 07:25:46Z]},
+      %{id: "rev-1", action: "create", title: "Utkast", inserted_at: ~U[2026-10-06 07:25:45Z]}
+    ]
+
+    html =
+      Gettext.with_locale(BarkparkWeb.Gettext, "nb_NO", fn ->
+        render_component(&BarkparkWeb.StudioComponents.Modals.history_modal/1,
+          show_history: true,
+          revisions: revisions
+        )
+      end)
+
+    rows = history_rows(html)
+    assert Enum.map(rows, & &1.iso) == ["2026-10-06T07:25:46Z", "2026-10-06T07:25:45Z"]
+    assert_rows_pair_their_own_time(rows)
+    assert Enum.at(rows, 1).label =~ "kl. 07:25:45 UTC (Opprettet)"
+  end
+
+  defp history_rows(html) do
+    html
+    |> LazyHTML.from_document()
+    |> LazyHTML.query("#history-list .history-item")
+    |> Enum.map(fn row ->
+      time = LazyHTML.query(row, "time[data-local-time]")
+      button = LazyHTML.query(row, "button[phx-click=restore-revision]")
+
+      %{
+        iso: time |> LazyHTML.attribute("datetime") |> hd(),
+        text: time |> LazyHTML.text() |> String.trim(),
+        label: button |> LazyHTML.attribute("aria-label") |> hd(),
+        local_label: button |> LazyHTML.attribute("data-local-label") |> hd(),
+        datetime: button |> LazyHTML.attribute("data-datetime") |> hd()
+      }
+    end)
+  end
+
+  defp assert_rows_pair_their_own_time(rows) do
+    for row <- rows do
+      assert {:ok, instant, 0} = DateTime.from_iso8601(row.iso)
+      hms = instant |> DateTime.to_time() |> Time.truncate(:second) |> Time.to_string()
+      assert row.text =~ ~r/kl\. #{hms} UTC$/
+      assert row.label =~ ~r/^Gjenopprett versjonen fra .*kl\. #{hms} UTC \(\w+\)$/
+      assert row.datetime == row.iso
+    end
   end
 
   # task-d4c382b7aa8ad9ef: the document panel beside a paper stayed English in
