@@ -21,9 +21,9 @@ defmodule BarkparkWeb.Admin.PluginAdminA11yTest do
   @token "plugin-admin-a11y-token"
   @opacity_floor 0.56
 
-  setup do
+  setup %{conn: conn} do
     {:ok, _} = Auth.create_token(@token, "a11y admin", "production", ["read", "write", "admin"])
-    %{conn: build_conn() |> init_test_session(%{"api_token" => @token})}
+    %{conn: init_test_session(conn, %{"api_token" => @token})}
   end
 
   @pages [
