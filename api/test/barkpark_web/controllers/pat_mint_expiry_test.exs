@@ -145,7 +145,7 @@ defmodule BarkparkWeb.PatMintExpiryTest do
 
   describe "an expired PAT answers the same 401 a revoked one does" do
     test "a PAT minted with a short ttl_seconds, once past its expiry, is rejected exactly like a revoked token" do
-      conn = mint(session_raw!(), %{"ttl_seconds" => 1})
+      conn = mint(session_raw!(), %{"ttl_seconds" => 60})
       raw = json_response(conn, 201)["token"]
 
       assert {:ok, _} = Auth.verify_token(raw)
