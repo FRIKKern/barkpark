@@ -1448,7 +1448,33 @@ if config_env() == :prod do
     check_origin: check_origin,
     http: [
       # See https://hexdocs.pm/bandit/Bandit.html#t:options/0 for the options.
-      ip: http_ip
+      ip: http_ip,
+      # task-234799142dfd8559: a blue/green deploy's SIGTERM to the retiring
+      # slot (deploy/instance-deploy.sh's `systemctl disable --now`) is a
+      # GRACEFUL OTP application stop by default — ThousandIsland (Bandit's
+      # transport) stops ACCEPTING new connections immediately but waits up
+      # to this bound for connections it already holds to finish naturally,
+      # so an ordinary in-flight request completes (2xx) instead of a
+      # reset/502. Measured directly (Supervisor.stop/3 on a real,
+      # OTP-application-registered Bandit child, not a synthetic signal
+      # trap): a 3s-sleeping request survived a graceful stop with this
+      # option unset (ThousandIsland's own undocumented-in-our-config
+      # default, 15_000ms) and was cut (curl exit 52, empty reply) the
+      # instant the bound was set below the request's own duration — the
+      # bound is real, not a theory. Pinned here EXPLICITLY, rather than
+      # left to ThousandIsland's default, so a future thousand_island bump
+      # cannot silently change it out from under us, and so it is one
+      # number this config and the slot unit's TimeoutStopSec (see
+      # deploy/systemd/barkpark-slot@.service) can both cite. 20s, not
+      # ThousandIsland's 15s default: config.exs's :export_pool_size
+      # comment documents a 9s COPY hold against its own 15s budget
+      # elsewhere in this app, so 15s is already close to a real response
+      # duration this app serves; 20s gives that headroom rather than
+      # matching it exactly. Long-lived listen/chat/presence SSE streams
+      # are NOT covered by this bound at all — they get the explicit,
+      # proactive `DrainSignal`/`POST /v1/internal/retire-sse` signal
+      # instead (task-2bcada0faa01ebb2), sent well before this slot stops.
+      thousand_island_options: [shutdown_timeout: 20_000]
     ],
     secret_key_base: secret_key_base
 

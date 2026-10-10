@@ -55,6 +55,37 @@ twice. A stretch of merges touching no listed tree still resolves to a no-op.
 Both hosts overlap old+new code on the new schema for the swap window, so
 migrations must be expand/contract (backward-compatible).
 
+**Ordinary HTTP requests drain too, separately from the SSE retire signal**
+(task-234799142dfd8559). The SSE retire signal above only covers long-lived
+listen/chat/presence streams, which must be told explicitly because they
+would otherwise sit alive-but-deaf for tens of seconds. A short-lived ordinary
+request (the vast majority of traffic) needs no such signal: `systemctl
+disable --now` sends SIGTERM, which is a graceful OTP application stop by
+default — Bandit's transport (ThousandIsland) stops ACCEPTING new connections
+immediately but keeps serving a connection it already holds, up to
+`thousand_island_options: [shutdown_timeout: 20_000]` (`api/config/runtime.exs`),
+so an in-flight request completes (2xx) instead of a reset/502 as long as it
+finishes within that 20s bound. `systemctl disable --now` BLOCKS on the stop
+(no `--no-block`), so the script only moves on once the slot is actually down
+— either it exited on its own (drained) or systemd's own deadline fired. That
+deadline is `TimeoutStopSec=60` on `barkpark-slot@.service`: `Barkpark.Application`
+stops children in reverse start order, and the Endpoint is explicitly
+"typically the last entry" there — so it stops FIRST (the 20s above), and
+`Oban` (its queue supervisor's own `:shutdown` childspec value, Oban's
+`shutdown_grace_period`, 15s by Oban's own unoverridden default) stops LATER,
+with a dozen smaller children in between. 60s is comfortable slack above that
+20+15 floor, not a number chosen to match it exactly — see the unit file's
+own comment for the full chain and where each figure comes from. Change one
+number without the other and this invariant silently breaks — grep both
+files for task-234799142dfd8559 before touching either.
+
+A changed `barkpark-slot@.service` reaches a box on its NEXT deploy, no
+manual step: `instance-deploy.sh` re-installs it unconditionally every run
+(`install -m 0644 ... /etc/systemd/system/barkpark-slot@.service`) and calls
+`systemctl daemon-reload` before building or flipping anything, so the slot
+that deploy starts already boots under the new unit — including a changed
+`TimeoutStopSec` the FIRST time that slot is later retired.
+
 **Maintenance page (no raw 502 when the app is down).** Every Caddy site block
 carries a `handle_errors` handler serving a branded 503 "Back in a moment" +
 `Retry-After` while the upstream is unreachable — blue/green keeps deploys
