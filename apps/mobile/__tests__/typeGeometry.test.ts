@@ -498,9 +498,12 @@ const CENSUS: Record<string, Record<string, number>> = {
     // read at body measure — it is the answer affordance, not apparatus);
     // sm ×4 = the two dim context lines (rationale and recommendation) plus
     // the field-number definition row's label and value
-    // (pbw-fix-field-number-react — label chrome, no prose measure).
+    // (pbw-fix-field-number-react — label chrome, no prose measure);
+    // + 5 for the schema field rows (task-7375ba22758155fa): the shared row's
+    // label and value, the colour row's mono hex, and the sub-row block's label
+    // and each sub-row.
     'scale.base': 2,
-    'scale.sm': 4,
+    'scale.sm': 9,
   },
   'papers/portabledoc/blocks/math.tsx': {
     // The equation's THREE steps, declared once each in the STEPS table: lg is
