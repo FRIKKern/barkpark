@@ -236,6 +236,33 @@ defmodule Barkpark.Release do
   end
 
   @doc """
+  Hash the media files born before `media_files.sha1` (task-b6e57c37f6928344),
+  so upload dedupe and `GET /v1/media/:ds?sha1=` cover them too:
+
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1(dry_run: true)'
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1()'
+
+  The release twin of `mix barkpark.media.backfill_sha1` (mix tasks are not in
+  a release). Boots the narrowed one-shot tree like `confirm_email/2`, then
+  delegates to `Barkpark.Media.backfill_sha1/1`: re-runnable, writes only
+  `sha1`, counts an unreadable blob instead of failing. Options: `:dry_run`,
+  `:batch`. Prints and returns `%{hashed:, missing:, remaining:}`.
+  """
+  @spec backfill_media_sha1(keyword()) :: %{
+          hashed: non_neg_integer(),
+          missing: non_neg_integer(),
+          remaining: non_neg_integer()
+        }
+  def backfill_media_sha1(opts \\ []) do
+    {boot, opts} = Keyword.pop(opts, :boot, &Barkpark.OneShot.boot!/0)
+    boot.()
+
+    stats = Barkpark.Media.backfill_sha1(opts)
+    IO.puts("media sha1 backfill: #{inspect(stats)}")
+    stats
+  end
+
+  @doc """
   LOAD `:barkpark` without STARTING it.
 
   `Application.load/1` makes the app's environment (`:ecto_repos`, every

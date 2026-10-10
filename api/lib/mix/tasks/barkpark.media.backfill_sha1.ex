@@ -10,6 +10,11 @@ defmodule Mix.Tasks.Barkpark.Media.BackfillSha1 do
       mix barkpark.media.backfill_sha1 --batch 500
 
   Re-runnable: it only reads rows whose `sha1` is still NULL.
+
+  On a box (a release has no mix tasks), the same function:
+
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1(dry_run: true)'
+      bin/barkpark eval 'Barkpark.Release.backfill_media_sha1()'
   """
   @shortdoc "Backfill media_files.sha1 for existing uploads"
 
