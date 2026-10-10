@@ -1363,6 +1363,17 @@ defmodule BarkparkWeb.Router do
     # (return_to resumes the claim); every other failure is one no-oracle
     # response. See BarkparkWeb.GrantController.
     get("/grant/:token", GrantController, :claim)
+
+    # The invited user's browser door (task-5306379c9be40c89): list, accept
+    # and decline the signed-in account's pending workspace invitations.
+    get("/invitations", InvitationPageController, :index)
+  end
+
+  scope "/", BarkparkWeb do
+    pipe_through([:browser, :soft_token, :browser_auth_write_meter])
+
+    post("/invitations/:id/accept", InvitationPageController, :accept)
+    post("/invitations/:id/decline", InvitationPageController, :decline)
   end
 
   # ── Session login (paste API token) ─────────────────────────────────

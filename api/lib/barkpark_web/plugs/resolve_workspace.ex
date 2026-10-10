@@ -430,8 +430,26 @@ defmodule BarkparkWeb.Plugs.ResolveWorkspace do
     |> Phoenix.Controller.put_root_layout(false)
     |> Phoenix.Controller.put_layout(false)
     |> Phoenix.Controller.put_view(BarkparkWeb.StudioRefusalHTML)
-    |> Phoenix.Controller.render("refusal.html", [])
+    |> Phoenix.Controller.render("refusal.html",
+      invitation: pending_invitation(conn),
+      csrf_token: Plug.CSRFProtection.get_csrf_token()
+    )
     |> halt()
+  end
+
+  # The signed-in user's own pending invitation to the workspace in the URL
+  # (task-5306379c9be40c89). Keyed by the CALLER's invitations, never by a
+  # workspace lookup: a caller with none gets nil whether or not the slug
+  # names a real workspace, so the page they see is the same for both.
+  defp pending_invitation(conn) do
+    with %{id: user_id} <- conn.assigns[:current_user],
+         slug when is_binary(slug) <- conn.path_params["workspace_slug"] do
+      user_id
+      |> Barkpark.Tenancy.Members.list_invitations_for_user()
+      |> Enum.find(&(&1.workspace == slug))
+    else
+      _ -> nil
+    end
   end
 
   # The refusal page's locale comes from the VIEWER, never the target

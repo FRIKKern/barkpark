@@ -944,6 +944,12 @@ defmodule PDS.Census do
     {:delete, "/v1/auth/invitations/:id", "BarkparkWeb.InvitationController", :decline, :status_only_receipt},
     {:delete, "/w/:workspace_slug/p/:project_slug/v1/invitations/:id", "BarkparkWeb.MemberController", :cancel_invitation, :status_only_receipt},
     {:post, "/v1/auth/invitations/:id/accept", "BarkparkWeb.InvitationController", :accept, :status_only_receipt},
+    # The browser door to the same seat consent (task-5306379c9be40c89): rows
+    # proposed by `--routed-rows` and pasted verbatim. Accept redirects into the
+    # joined workspace behind the context function's `{:ok, _}`; decline
+    # redirects to the list behind its `:ok` — a status receipt, never `ok: true`.
+    {:post, "/invitations/:id/accept", "BarkparkWeb.InvitationPageController", :accept, :status_only_receipt},
+    {:post, "/invitations/:id/decline", "BarkparkWeb.InvitationPageController", :decline, :status_only_receipt},
     # Token rotate (task-e78edcc2145ed3df): its 201 carries the inserted row's
     # `id`/`inserted_at`, but no `ok: true` literal — same class as its revoke twin.
     {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens/:id/rotate", "BarkparkWeb.MemberController", :rotate_token, :status_only_receipt},

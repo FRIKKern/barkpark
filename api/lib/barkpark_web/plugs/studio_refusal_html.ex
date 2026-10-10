@@ -40,20 +40,140 @@ defmodule BarkparkWeb.StudioRefusalHTML do
 
   alias BarkparkWeb.StudioLocale
 
+  # A pending invitation to the workspace the caller tried to open
+  # (task-5306379c9be40c89). Only the INVITED user is shown it; a caller with
+  # no invitation there gets the exact page below either way, so the page still
+  # says nothing about whether that workspace exists.
   def render("refusal.html", assigns) do
+    invitation = assigns[:invitation]
+
     assigns =
       Map.merge(assigns, %{
         lang: StudioLocale.html_lang(),
         title: gettext("Studio · Not a member"),
-        heading: gettext("You're not a member of this workspace"),
-        body:
-          gettext(
-            "You're signed in, but this account doesn't have access here. Go to one of your own workspaces, or sign in as someone else."
+        heading:
+          if(invitation,
+            do: gettext("You're invited to %{workspace}", workspace: invitation_name(invitation)),
+            else: gettext("You're not a member of this workspace")
           ),
+        body:
+          if(invitation,
+            do:
+              gettext(
+                "Someone invited this account to join as %{role}. Accept to open the workspace, or decline the invitation.",
+                role: role_word(invitation.role)
+              ),
+            else:
+              gettext(
+                "You're signed in, but this account doesn't have access here. Go to one of your own workspaces, or sign in as someone else."
+              )
+          ),
+        invitation: invitation,
+        csrf_token: assigns[:csrf_token],
         go_home: gettext("Go to your workspace"),
-        sign_in_other: gettext("Sign in as someone else")
+        sign_in_other: gettext("Sign in as someone else"),
+        see_invitations: gettext("Your invitations"),
+        accept: gettext("Accept invitation"),
+        decline: gettext("Decline")
       })
 
+    ~H"""
+    <.page lang={@lang} title={@title}>
+      <h1>{@heading}</h1>
+      <p>
+        {@body}
+      </p>
+      <div :if={@invitation} class="actions">
+        <form method="post" action={"/invitations/#{@invitation.id}/accept"}>
+          <input type="hidden" name="_csrf_token" value={@csrf_token} />
+          <button type="submit" class="btn btn-primary">{@accept}</button>
+        </form>
+        <form method="post" action={"/invitations/#{@invitation.id}/decline"}>
+          <input type="hidden" name="_csrf_token" value={@csrf_token} />
+          <button type="submit" class="btn btn-secondary">{@decline}</button>
+        </form>
+      </div>
+      <div class="actions">
+        <a class={["btn", if(@invitation, do: "btn-secondary", else: "btn-primary")]} href="/">
+          {@go_home}
+        </a>
+        <a class="btn btn-secondary" href="/login">{@sign_in_other}</a>
+      </div>
+      <p class="more"><a href="/invitations">{@see_invitations}</a></p>
+    </.page>
+    """
+  end
+
+  # The signed-in user's pending invitations, one row each with Accept and
+  # Decline (`BarkparkWeb.InvitationPageController`).
+  def render("invitations.html", assigns) do
+    assigns =
+      Map.merge(assigns, %{
+        lang: StudioLocale.html_lang(),
+        title: gettext("Studio · Invitations"),
+        heading: gettext("Your invitations"),
+        none: gettext("You have no pending invitations."),
+        error: assigns[:error] && gettext("That invitation is no longer open."),
+        go_home: gettext("Go to your workspace"),
+        accept: gettext("Accept invitation"),
+        decline: gettext("Decline")
+      })
+
+    ~H"""
+    <.page lang={@lang} title={@title}>
+      <h1>{@heading}</h1>
+      <p :if={@error} role="alert">{@error}</p>
+      <p :if={@invitations == []}>{@none}</p>
+      <ul :if={@invitations != []} class="invites">
+        <li :for={i <- @invitations}>
+          <span class="invite-name">{invitation_name(i)}</span>
+          <span class="invite-role">{role_word(i.role)}</span>
+          <span class="actions">
+            <form method="post" action={"/invitations/#{i.id}/accept"}>
+              <input type="hidden" name="_csrf_token" value={@csrf_token} />
+              <button
+                type="submit"
+                class="btn btn-primary"
+                aria-label={gettext("Accept the invitation to %{workspace}", workspace: invitation_name(i))}
+              >
+                {@accept}
+              </button>
+            </form>
+            <form method="post" action={"/invitations/#{i.id}/decline"}>
+              <input type="hidden" name="_csrf_token" value={@csrf_token} />
+              <button
+                type="submit"
+                class="btn btn-secondary"
+                aria-label={gettext("Decline the invitation to %{workspace}", workspace: invitation_name(i))}
+              >
+                {@decline}
+              </button>
+            </form>
+          </span>
+        </li>
+      </ul>
+      <div class="actions">
+        <a class="btn btn-secondary" href="/">{@go_home}</a>
+      </div>
+    </.page>
+    """
+  end
+
+  # The built-in seat roles by a word; a workspace's own custom role name is
+  # its data and is shown as written.
+  defp role_word("owner"), do: pgettext("workspace role", "owner")
+  defp role_word("admin"), do: pgettext("workspace role", "admin")
+  defp role_word("member"), do: pgettext("workspace role", "member")
+  defp role_word(role), do: role
+
+  defp invitation_name(%{workspace_name: name}) when is_binary(name) and name != "", do: name
+  defp invitation_name(%{workspace: slug}), do: slug
+
+  attr(:lang, :string, required: true)
+  attr(:title, :string, required: true)
+  slot(:inner_block, required: true)
+
+  defp page(assigns) do
     ~H"""
     <!DOCTYPE html>
     <html lang={@lang}>
@@ -87,29 +207,31 @@ defmodule BarkparkWeb.StudioRefusalHTML do
           main { text-align: center; padding: 2rem; max-width: 28rem; }
           h1 { font-size: 1.75rem; margin: 0 0 0.75rem; font-weight: 700; letter-spacing: -0.01em; }
           p { color: var(--err-muted); margin: 0 0 1.5rem; line-height: 1.5; }
-          .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
-          a.btn {
+          p.more a { color: var(--err-fg); }
+          .actions { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem; }
+          .actions form { margin: 0; }
+          a.btn, button.btn {
             display: inline-block;
             padding: 0.5rem 1rem;
             border-radius: 0.375rem;
             text-decoration: none;
+            font: inherit;
             font-weight: 600;
             border: 1px solid var(--err-muted);
+            cursor: pointer;
           }
-          a.btn-primary { background: var(--err-fg); color: var(--err-bg); border-color: var(--err-fg); }
-          a.btn-secondary { background: transparent; color: var(--err-fg); }
+          .btn-primary { background: var(--err-fg); color: var(--err-bg); border-color: var(--err-fg); }
+          .btn-secondary { background: transparent; color: var(--err-fg); }
+          ul.invites { list-style: none; padding: 0; margin: 0 0 1.5rem; text-align: left; }
+          ul.invites li { display: flex; flex-wrap: wrap; align-items: center; gap: 0.5rem 0.75rem; padding: 0.75rem 0; border-bottom: 1px solid var(--err-muted); }
+          .invite-name { font-weight: 600; flex: 1 1 10rem; }
+          .invite-role { color: var(--err-muted); }
+          ul.invites .actions { margin: 0; }
         </style>
       </head>
       <body>
         <main>
-          <h1>{@heading}</h1>
-          <p>
-            {@body}
-          </p>
-          <div class="actions">
-            <a class="btn btn-primary" href="/">{@go_home}</a>
-            <a class="btn btn-secondary" href="/login">{@sign_in_other}</a>
-          </div>
+          {render_slot(@inner_block)}
         </main>
       </body>
     </html>
