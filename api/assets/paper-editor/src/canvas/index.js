@@ -615,6 +615,9 @@ function withSheetAfterVisual(items) {
   return [...items.slice(0, last + 1), SHEET_SLASH_ITEM, ...items.slice(last + 1)];
 }
 
+// The chords _onKeyDown answers, named on the slash rows they match (task-2a659a853f02c2cc).
+const CANVAS_SLASH_CHORDS = { list: "Mod-Shift-8", checklist: "Mod-Shift-4", code: "Mod-Alt-c" };
+
 const CANVAS_SLASH_ITEMS = [
   ...withSheetAfterVisual(SLASH_ITEMS.filter((it) => CANVAS_SLASH_TYPES.has(it.type)).flatMap((it) => {
     if (it.type === "list") return [it, { group: "Text", type: "checklist", label: "Checklist", hint: "☑", desc: "to-do items" }];
@@ -2026,6 +2029,20 @@ class BpPaperCanvas extends HTMLElement {
   // (wikilink / tag / slash) are mutually exclusive — at most one branch ever owns
   // the keystroke. Ported from ../index.js:_onKeyDown (all three branches).
   _onKeyDown(event) {
+    // Mod-Alt-c makes a code block (Tiptap's chord for it; StarterKit's codeBlock node is
+    // off, so the canvas's own code node answers). event.code, because Alt+C types "ç" on a Mac.
+    if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && event.altKey && !event.shiftKey &&
+        event.code === "KeyC" && !this._slash?.isOpen?.()) {
+      event.preventDefault();
+      // A top-level paragraph or heading is REPLACED by the code block, so its text moves
+      // in; anywhere else the block lands after and the text stays where it was.
+      const { $from } = this._editor.state.selection;
+      const value = slashTriggerAllowsParent($from.depth, $from.parent.type.name)
+        ? $from.parent.textBetween(0, $from.parent.content.size, "\n", "\n")
+        : undefined;
+      insertSlashTypeAtSelection(this._editor, "code", undefined, { value });
+      return true;
+    }
     if (this._editable && this._editor && (event.metaKey || event.ctrlKey) && !event.altKey) {
       const key = event.key;
       if (event.shiftKey && (key === "ArrowUp" || key === "ArrowDown")) {
@@ -2040,21 +2057,18 @@ class BpPaperCanvas extends HTMLElement {
         return true;
       }
       // (Backspace handling sits below, outside the modifier branch.)
-      // Notion's turn-into chords: Mod-Shift-0 text, 1..3 headings, 5 bulleted, 6 numbered,
-      // 8 code block. event.code keeps them working on layouts where Shift+digit yields a symbol.
+      // Turn-into chords: Mod-Shift-0 text, 1..3 headings, 4 checklist, 5 and 8 bulleted
+      // (Notion's 5; Google Docs' and Tiptap's 8), 6 numbered. 7 is left to Tiptap's
+      // ordered-list keymap. Code is Mod-Alt-c, above. event.code keeps them working on
+      // layouts where Shift+digit yields a symbol.
       // Mod-Shift-4..6 are taken, so H1–H6 are ALSO on Mod-Alt-1..6 (StarterKit's heading
       // keymap for the six configured levels; Alt chords skip this branch).
       const digit = /^Digit([0-9])$/.exec(event.code || "")?.[1] ?? (/^[0-9]$/.test(key) ? key : null);
       if (event.shiftKey && digit != null && !this._slash?.isOpen?.()) {
-        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered" }[digit];
+        const kind = { 0: "paragraph", 1: "h1", 2: "h2", 3: "h3", 4: "task", 5: "bullet", 6: "ordered", 8: "bullet" }[digit];
         if (kind) {
           event.preventDefault();
           turnTopLevelInto(this._editor, topLevelIndexAtSelection(this._editor), kind);
-          return true;
-        }
-        if (digit === "8") {
-          event.preventDefault();
-          insertSlashTypeAtSelection(this._editor, "code");
           return true;
         }
       }
@@ -3222,7 +3236,7 @@ class BpPaperCanvas extends HTMLElement {
         // vocabulary (data-vocabulary); a paper canvas (no attribute) keeps the
         // full insertable set.
         items: slashItemsForVocabulary(
-          CANVAS_SLASH_ITEMS,
+          CANVAS_SLASH_ITEMS.map((it) => (CANVAS_SLASH_CHORDS[it.type] ? { ...it, keys: CANVAS_SLASH_CHORDS[it.type] } : it)),
           parseVocabulary(this.getAttribute("data-vocabulary")),
         ),
         onChoose: (item) => this._chooseSlash(item),

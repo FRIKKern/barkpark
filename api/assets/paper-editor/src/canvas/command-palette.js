@@ -81,6 +81,10 @@ export function insertSlashTypeAtSelection(editor, type, fieldName, opts) {
   if (fieldName && node && node.attrs) {
     node.attrs.fieldName = fieldName;
   }
+  // A code block can start from text (the Mod-Alt-c chord turns a paragraph into code).
+  if (type === "code" && node && node.attrs && typeof opts?.value === "string") {
+    node.attrs.value = opts.value;
+  }
 
   return insertNodeAtSelection(editor, node);
 }
@@ -433,6 +437,7 @@ export function buildCommandRegistry(editor, opts) {
       label: tr("Insert %{block}", { block: tr(meta.label) }),
       group: "Insert",
       hint: meta.hint,
+      keys: type === "code" ? "Mod-Alt-c" : undefined,
       // Insert the default node EXACTLY like the slash pick. Honors the same top-
       // level-prose guard (degrades safely inside a callout body / list item).
       // Terminal and Stage are built by the SERVER (CANVAS_SERVER_INSERT_TYPES): the
@@ -524,8 +529,8 @@ export function buildCommandRegistry(editor, opts) {
     { id: "turn-h4", label: "Heading 4", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 4 }).run(), need: "toggleHeading" },
     { id: "turn-h5", label: "Heading 5", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 5 }).run(), need: "toggleHeading" },
     { id: "turn-h6", label: "Heading 6", hint: "H", run: (ed) => ed.chain().focus().toggleHeading({ level: 6 }).run(), need: "toggleHeading" },
-    { id: "turn-bullet", label: "Bullet list", hint: "•", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
-    { id: "turn-ordered", label: "Ordered list", hint: "1.", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
+    { id: "turn-bullet", label: "Bullet list", hint: "•", keys: "Mod-Shift-8", run: (ed) => ed.chain().focus().toggleBulletList().run(), need: "toggleBulletList" },
+    { id: "turn-ordered", label: "Ordered list", hint: "1.", keys: "Mod-Shift-7", run: (ed) => ed.chain().focus().toggleOrderedList().run(), need: "toggleOrderedList" },
     // Paragraph -> quote keeps the block id (turnTopLevelInto's same-id swap).
     { id: "turn-quote", label: "Quote", hint: "❝", run: (ed) => turnTopLevelInto(ed, topLevelIndexAtSelection(ed), "quote"), need: "setParagraph" },
   ];
@@ -536,6 +541,7 @@ export function buildCommandRegistry(editor, opts) {
       label: tr("Turn into %{block}", { block: tr(t.label) }),
       group: "Turn into",
       hint: t.hint,
+      keys: t.keys,
       run: t.run,
     });
   }
