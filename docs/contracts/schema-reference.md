@@ -87,15 +87,15 @@ A flat schema (no `composite`, `arrayOf`, `codelist`, `localizedText`, structure
 
 ## Unknown keys
 
-Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type` is checked against a vocabulary:
+Measured against `POST /v1/schemas/:dataset` on 2026-10-10. Only the field `type` is checked against a vocabulary. Any other key Barkpark does not read still answers 201 (or 200 with `validate_only`), with one `warnings` entry per key: `{code: "schema_unknown_key", severity: "advisory", path, message}`. A body with no unknown key has no `warnings`. The vocabularies live in `SchemaUnknownKeys`:
 
 | You send | Result |
 |---|---|
 | Unknown `type` on a top-level field, a `composite` subfield or a single `arrayOf.of` | 422 `validation_failed`, `details.fields`: `unknown field type "strng": …` |
 | Unknown `type` inside an `arrayOf.of` list member, an `image`/`file` `fields` entry or an `array.of` | 201, stored |
-| Misspelled field key (`requred: true`) | 201, stored and echoed; never read |
-| Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs |
-| Misspelled schema key (`singelton: true`) | 201, dropped; not echoed |
+| Misspelled field key (`requred: true`) | 201, stored and echoed; never read; warning at `/fields/0/requred` |
+| Misspelled rule key (`validation: {requird: true}`) | 201, stored; the rule never runs; warning at `/fields/0/validation/requird` |
+| Misspelled schema key (`singelton: true`) | 201, dropped; not echoed; warning at `/singelton` |
 | Bare `required` on a field, bad `surface`, `visibleWhen.scope` | 422 `validation_failed` |
 
 Check the echo: `required?` on each field says whether an error-level `required` rule is in force.
@@ -105,5 +105,6 @@ Check the echo: `required?` on each field says whether an error-level `required`
 - `api/lib/barkpark/content/schema_definition.ex` — `changeset/2`, `parse/2`
 - `api/lib/barkpark/content/schema.ex` — `builtin_field_types/0`, `upsert_schema/3`
 - `api/lib/barkpark/content/validation.ex` — `check/3`, `rules_at/2`
+- `api/lib/barkpark/content/schema_unknown_keys.ex` — `unknown/1`
 - `api/lib/barkpark/content/field_visibility.ex`, `api/lib/barkpark/content/cross_validator.ex`, `api/lib/barkpark/content/read_only_fields.ex`
 - `api/lib/barkpark/portable_doc/field_vocabulary.ex` — `from_field/1`
