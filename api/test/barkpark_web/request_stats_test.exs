@@ -97,6 +97,7 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert classes[:api] == %{
                count: 117,
                req_per_s: 1.95,
+               p95_ms: 5,
                authed: 90,
                anon: 27,
                auth_unknown: 0
@@ -105,6 +106,7 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert classes[:lv_dead] == %{
                count: 6,
                req_per_s: 0.1,
+               p95_ms: 5,
                authed: 0,
                anon: 0,
                auth_unknown: 6
@@ -113,6 +115,7 @@ defmodule BarkparkWeb.RequestStatsTest do
       assert classes[:unrouted] == %{
                count: 1,
                req_per_s: 0.02,
+               p95_ms: 5,
                authed: 0,
                anon: 0,
                auth_unknown: 1
@@ -121,6 +124,33 @@ defmodule BarkparkWeb.RequestStatsTest do
       # No fabricated zero-rows: classes nobody observed are ABSENT, not 0.
       refute Map.has_key?(classes, :browser)
       refute Map.has_key?(classes, :pre_router)
+    end
+
+    test "per-class p95 names the class that carries the tail (am-bl-idle-p95-anomaly)" do
+      now = 1_000_000
+      started = now - 300_000
+
+      # 95 fast api reads and 5 slow ones, plus a browser class whose every
+      # request is slow. The flat p95 lands on a browser sample (rank 98 of
+      # 103) but cannot say so; the per-class one must.
+      samples =
+        List.duplicate(sample(now - 1000, 4.0, 200, :api, :authed), 95) ++
+          List.duplicate(sample(now - 1000, 2900.0, 200, :api, :authed), 5) ++
+          List.duplicate(sample(now - 1000, 1800.0, 200, :browser, :auth_unknown), 3)
+
+      %{p95_ms: flat, classes: classes} = RequestStats.compute(samples, now, started, 60_000)
+
+      assert classes[:api].p95_ms == 4
+      assert classes[:browser].p95_ms == 1800
+      assert flat == 1800
+
+      # Nearest-rank on the class's OWN samples: with 6 slow of 100 the api
+      # tail crosses into the 95th rank.
+      six_slow =
+        List.duplicate(sample(now - 1000, 4.0, 200, :api, :authed), 94) ++
+          List.duplicate(sample(now - 1000, 2900.0, 200, :api, :authed), 6)
+
+      assert RequestStats.compute(six_slow, now, started, 60_000).classes[:api].p95_ms == 2900
     end
   end
 
