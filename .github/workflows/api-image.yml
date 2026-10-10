@@ -131,7 +131,7 @@ jobs:
           case "$DIGEST" in sha256:*) ;; *) echo "::error::build produced no digest ('$DIGEST')"; exit 1 ;; esac
           mkdir -p /tmp/digests
           touch "/tmp/digests/${DIGEST#sha256:}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: api-image-digest-amd64
           path: /tmp/digests/*
@@ -174,7 +174,7 @@ jobs:
           case "$DIGEST" in sha256:*) ;; *) echo "::error::build produced no digest ('$DIGEST')"; exit 1 ;; esac
           mkdir -p /tmp/digests
           touch "/tmp/digests/${DIGEST#sha256:}"
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v6
         with:
           name: api-image-digest-arm64
           path: /tmp/digests/*
