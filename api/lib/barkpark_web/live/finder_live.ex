@@ -131,7 +131,7 @@ defmodule BarkparkWeb.FinderLive do
     socket =
       if connected?(socket) do
         start_async(socket, :graph_corpus, fn ->
-          graph_payload(dataset, caller_context, workspace_id)
+          shared_graph_payload(dataset, caller_context, workspace_id)
         end)
       else
         socket
@@ -441,6 +441,33 @@ defmodule BarkparkWeb.FinderLive do
   # renders, so the page degrades to "no corpus" rather than to an unscoped
   # walk of every workspace on the box. Same posture as `run_search/2` above and
   # as `Content.get_public_document/3`.
+  # SINGLE-FLIGHT (am-w2-s4). The corpus walk costs seconds, and every finder
+  # visitor used to pay it: N concurrent mounts ran N derivations of the same
+  # graph (the flat twin's pile-up was prod incident #10016). Now concurrent
+  # mounts of the same graph share ONE derivation, and its result serves later
+  # mounts for `@graph_ttl_ms`. The key names everything the payload depends
+  # on: the dataset, the tenant, and WHO asks — the visibility clamp keys on
+  # the caller, so an anonymous visitor shares with anonymous visitors only.
+  @graph_ttl_ms 30_000
+
+  defp shared_graph_payload(dataset, caller_context, workspace_id) do
+    Barkpark.SingleFlight.run(
+      {:finder_graph, dataset, workspace_id, viewer_key(caller_context)},
+      Application.get_env(:barkpark, :finder_graph_ttl_ms, @graph_ttl_ms),
+      fn ->
+        :telemetry.execute([:barkpark, :finder, :graph_derived], %{count: 1}, %{dataset: dataset})
+        graph_payload(dataset, caller_context, workspace_id)
+      end
+    )
+  end
+
+  defp viewer_key(%CallerContext{principal_type: :anonymous, grants: []}), do: :anonymous
+
+  defp viewer_key(%CallerContext{} = ctx),
+    do: {ctx.principal_type, ctx.token_id, ctx.user_id, ctx.is_admin, ctx.roles, ctx.grants}
+
+  defp viewer_key(other), do: {:other, other}
+
   defp graph_payload(_dataset, _caller_context, nil), do: {"[]", "[]", "", 0, 0, false, nil}
 
   defp graph_payload(dataset, caller_context, workspace_id) do
